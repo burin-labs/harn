@@ -9,9 +9,9 @@ homepage.workspace = true
 description = "Parser, AST, and type checker for the Harn programming language"
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.13" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.13" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.13" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.14" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.14" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.14" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 yansi = "1"

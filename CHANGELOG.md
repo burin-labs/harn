@@ -9,6 +9,47 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.14
+
+### Added
+
+- Added `std/collections` aggregation helpers `sum_by` and `count_where`
+  for common projected sums and predicate counts without map/reduce or filter
+  materialization boilerplate.
+- Add table-driven `@test(cases: [...])` support to `harn test`.
+- The `std/git` receipt commands (`git.diff`, `git.status`, and friends) now emit a one-line `[harn] warning:`
+  diagnostic when a git subprocess fails, naming the operation, exit code, and first line of stderr. These
+  commands still never throw and return a `success=false` receipt, but the failure is no longer silent — a broken
+  environment (e.g. running in a non-repo directory) is now visible at the source instead of only surfacing as an
+  empty diff or status downstream. Warnings deduplicate per `(operation, exit_code, first-stderr-line)` so probe
+  loops cannot spam, and the `git.repo.discover` probe stays silent because a failed discovery is expected control
+  flow.
+
+### Fixed
+
+- The process sandbox now extends its filesystem scope with each workspace root's git topology: a linked
+  worktree's real git dir and shared common dir gain read-write scope, and object stores borrowed through
+  `objects/info/alternates` gain read-only scope. Previously, running `harn` inside a git worktree (or a
+  `--shared` clone) of a repository outside the sandbox roots made every git subprocess fail
+  (`fatal: not a git repository` / `Operation not permitted`), so `std/git` builtins silently returned
+  empty diffs and statuses in a perfectly ordinary checkout.
+- Unified native provider availability, health checks, routing, and the
+  `llm_provider_status` projection behind one typed dispatch credential resolver,
+  including platform-managed and `harn-secret://` authentication.
+- `a ?? b` now stays `unknown` when the checker cannot name `a`'s type, instead of
+  adopting the fallback `b`'s type. A field or index read from an opaque `dict` is
+  unknown-typed, so `config?.timing ?? nil` used to infer as `nil` — which then
+  refused the sound `type_of(x) == "dict"` narrowing a caller relies on and
+  rejected correct code with `HARN-TYP-004`. The coalesce is `non_nil(a) | b`;
+  when `a` is unknown so is `non_nil(a)`, and unknown absorbs `b`, so the result
+  stays unknown and narrows normally. Typed operands are unchanged: `x ?? nil` on
+  a `string?` still yields `string?`, and a concrete fallback such as `x ?? "d"`
+  still drops nil. (#4552)
+- Make mock-clock leak audits session-scoped so parallel test resets cannot erase another session's observations.
+- **Project-declared host mocks no longer make unavailable operations appear callable.**
+  `harn test` accepts mocks for manifest-declared operations without changing
+  `host_has`, while undeclared operation typos still fail closed.
+
 ## v0.10.13
 
 ### Added

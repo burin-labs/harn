@@ -9,14 +9,14 @@ homepage.workspace = true
 description = "Linter for the Harn programming language"
 
 [dependencies]
-harn-fmt = { path = "../harn-fmt", version = "=0.10.13" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.13" }
-harn-parser = { path = "../harn-parser", version = "=0.10.13" }
-harn-vm = { path = "../harn-vm", version = "=0.10.13" }
-harn-modules = { path = "../harn-modules", version = "=0.10.13" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.14" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.14" }
+harn-parser = { path = "../harn-parser", version = "=0.10.14" }
+harn-vm = { path = "../harn-vm", version = "=0.10.14" }
+harn-modules = { path = "../harn-modules", version = "=0.10.14" }
 # The rule engine, run as lint rules through the registry (#2849). Default
 # features off keeps the build lean — only the `ast` matching surface is needed.
-harn-rules = { path = "../harn-rules", version = "=0.10.13" }
+harn-rules = { path = "../harn-rules", version = "=0.10.14" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libloading = "0.8"
