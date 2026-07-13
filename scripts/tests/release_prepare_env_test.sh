@@ -289,6 +289,9 @@ BIN
     ;;
   prepare)
     printf 'prepare HARN_BIN=%s\n' "${HARN_BIN-__unset__}" >> "$SHIP_GATE_RECORD"
+    if [[ "${INJECT_HIDDEN_INDEX_CHANGE:-0}" == "1" ]]; then
+      git update-index --assume-unchanged Cargo.toml
+    fi
     python3 - <<'PY'
 from pathlib import Path
 p = Path("Cargo.toml")
@@ -429,6 +432,7 @@ if HARN_RELEASE_ROOT="$release_root" \
   SHIP_GATE_RECORD="$record_ship" \
   FAKE_MAKE_RECORD="$record_make" \
   FAIL_RELEASE_AUDIT=1 \
+  INJECT_HIDDEN_INDEX_CHANGE=1 \
   PATH="$fake_bin:$PATH" \
     "$repo_root/scripts/release_ship.sh" \
       --prepare --bump patch --skip-dry-run \
