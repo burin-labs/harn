@@ -536,7 +536,13 @@ impl HostLeaseStore {
         let waited_ms = started_at
             .map(|started| duration_ms_u64(started.elapsed()))
             .unwrap_or(0);
-        self.acquire_in_transaction(tx, request, now, deadline_at_ms, waited_ms)
+        let host = request.host.clone();
+        match self.acquire_in_transaction(tx, request, now, deadline_at_ms, waited_ms) {
+            Err(HostLeaseError::Database(error)) if sqlite_is_busy(&error) => Ok(
+                registry_busy_receipt(host, now, Some(waited_ms), deadline_at_ms),
+            ),
+            result => result,
+        }
     }
 
     #[cfg(test)]
