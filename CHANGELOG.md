@@ -9,6 +9,77 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.15
+
+### Breaking
+
+- **Filesystem and JSON reads now fail through typed, categorized boundaries
+  (#4573).** `std/fs` no longer collapses absent, unreadable, sandbox-denied,
+  malformed, or over-depth inputs into interchangeable strings or defaults;
+  callers receive closed failure shapes, and `json_parse` throws structured
+  diagnostics with stable kinds and source locations.
+
+### Added
+
+- Add atomic host leases with typed priority and defer receipts, crash recovery,
+  event-driven waiting, and `harn host lease` commands.
+- **`std/testing` gains value assertion matchers (#4571).** `assert_nil`,
+  `assert_not_nil`, `assert_true`, `assert_false`, and `assert_contains`
+  (substring for strings, membership for lists) join the existing
+  `assert_eq`/`assert_ne`/`assert_throws`/`assert_error_contains` matchers,
+  each with a precise default failure message naming the offending value(s).
+- Added keyed checkpoint stages that invalidate durable completion when their
+  canonical structured identity changes, without persisting raw identity inputs.
+- Added typed Git tag, describe, remote-ref, pull-request view, check, edit, and
+  release lookup helpers so automation no longer needs to parse Git or GitHub CLI
+  output. Git status receipts now preserve unquoted paths and rename sources from
+  NUL-delimited porcelain output and fail closed when structured Git output cannot
+  be represented as UTF-8 without changing path identity.
+- **Repository source now has a down-only 1,500-line ceiling (#4591).** Rust
+  and stdlib Harn files above the ceiling are grandfathered at exact counts;
+  new growth, stale baselines, and newly oversized files fail the audit gate.
+- Add the embedded `harn-de-slop` skill for evidence-driven maintainability,
+  typed-contract, and test-harness refactors.
+
+### Changed
+
+- Treat no-op nil coalescing as a Harn lint error and flag identity fallbacks like `value ?? value`.
+- Allow protocol artifact generation to target an explicit release version without rebuilding Harn.
+- Make release runner capacity an explicit per-target policy, with separate warm,
+  primary, recovery, and non-publishing benchmark modes.
+- **The embedded stdlib catalog is compact and easier to extend (#4602).**
+  Source, prompt, and CLI assets now share one compile-time literal registry,
+  eliminating hundreds of repeated Rust struct initializers.
+
+### Fixed
+
+- Recover empty provider generations through the canonical routing chain, quarantine repeatedly empty routes, and
+  return typed `provider_exhausted` attempt receipts only after every available route is exhausted.
+- Serialize immediate-mode safe text patch compare-and-swap transactions across Harn processes.
+- Avoid rebuilding the full Harn CLI in fresh worktrees when non-Rust hook changes
+  only need the generated-artifact registry checker.
+- Release preparation now reuses the audited Harn CLI to regenerate protocol
+  artifacts with an explicit target version instead of rebuilding after the bump.
+- MCP tool parameters typed as a user-defined `type` alias now project their real
+  JSON Schema instead of erasing to an empty `{}`. The exported-`pub fn` schema
+  projection previously only recognized built-in type names, so a parameter typed
+  `p: EvalSource` (a shape alias) or `p: Mode` (a string-literal-union alias) served
+  an unconstrained `{}` — dropping every property and enum. A new
+  `SchemaAliasResolver`, built from the module's `type` declarations, expands named
+  aliases (cycle-safe, reusing the compiler's `expand_alias`) before lowering, so a
+  shape alias projects the same schema as its inline form and a literal-union alias
+  projects a JSON `enum`. Unknown named types still lower to `{}` unchanged.
+- Make process-global LLM rate-limit configuration initialize atomically so
+  concurrent first calls cannot erase live usage, cooldown, or circuit-breaker
+  state.
+- Release preparation now regenerates language-spec and highlight artifacts before
+  the metadata version bump, while the fully audited CLI is still fresh, instead
+  of failing the stale-binary guard after rewriting `Cargo.toml`.
+- Release preparation now asks Cargo to reconcile and then verify `Cargo.lock`
+  after workspace version metadata changes, preventing stale local package
+  versions from reaching a signed release commit.
+- Normalize unambiguous schema-declared tagged tool arguments before dispatch.
+
 ## v0.10.14
 
 ### Added
