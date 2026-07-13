@@ -40,6 +40,13 @@ pipeline default() {
   __io_println(log_result.success && contains(log_result.stdout, "initial"))
   const tags = git_tag_list(root, {pattern: "v*", sort: "-v:refname"})
   __io_println(tags.success && tags.data.tags == ["v1.0.0"])
+  const invalid_sort = try {
+    git_tag_list(root, {sort: "version:refname\n--format=unsafe"})
+  }
+  __io_println(
+    is_err(invalid_sort)
+      && contains(to_string(unwrap_err(invalid_sort)), "sort must not contain newlines"),
+  )
   const described = git_describe(root, {tags: true, match: "v*"})
   __io_println(
     described.success

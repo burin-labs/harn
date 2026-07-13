@@ -313,6 +313,14 @@ fn __git_ref_arg(value, label) -> string {
   return text
 }
 
+fn __git_sort_arg(value) -> string {
+  const text = __git_non_empty_string(value, "sort")
+  if contains(text, "\n") || contains(text, "\r") {
+    throw "std/git: sort must not contain newlines"
+  }
+  return text
+}
+
 fn __git_string_list(value, label) -> list<string> {
   if value == nil {
     return []
@@ -510,7 +518,7 @@ pub fn git_tag_list(repo = ".", options: GitTagListOptions = {}) -> GitReceipt {
   const sort = if options.sort == nil {
     nil
   } else {
-    __git_ref_arg(options.sort, "sort")
+    __git_sort_arg(options.sort)
   }
   return git.tag_list(repo, {pattern: pattern, sort: sort})
 }
