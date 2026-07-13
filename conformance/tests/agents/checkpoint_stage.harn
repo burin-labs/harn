@@ -1,4 +1,9 @@
-import { checkpoint_stage, checkpoint_stage_retry } from "std/checkpoint"
+import {
+  checkpoint_stage,
+  checkpoint_stage_keyed,
+  checkpoint_stage_keyed_retry,
+  checkpoint_stage_retry,
+} from "std/checkpoint"
 
 pipeline test(task) {
   // Start clean
@@ -38,6 +43,58 @@ pipeline test(task) {
   // Cached: returns stored value, doesn't re-run
   const r2 = checkpoint_stage_retry("retry_step", 3, fn() { "different" })
   assert(r2 == "success", "cached retry result returned")
+  // Keyed stages reuse equivalent structured identities even when dict key
+  // insertion order differs, then invalidate when any identity input changes.
+  const keyed1 = checkpoint_stage_keyed(
+    "keyed_step",
+    {pin: "abc", inputs: {toolchain: "1.2", lock: "def"}},
+    fn() { 10 },
+  )
+  assert(keyed1 == 10, "first keyed stage should run")
+  const keyed_record = checkpoint_get("keyed_step")
+  assert(keyed_record.schema == "harn.checkpoint_stage.keyed.v1", "keyed stage should store envelope")
+  assert(keyed_record.fingerprint.starts_with("sha256:"), "keyed stage should store digest")
+  assert(!json_stringify(keyed_record).contains("abc"), "raw keyed identity must not be persisted")
+  const keyed2 = checkpoint_stage_keyed(
+    "keyed_step",
+    {inputs: {lock: "def", toolchain: "1.2"}, pin: "abc"},
+    fn() { 20 },
+  )
+  assert(keyed2 == 10, "equivalent keyed identity should reuse cached success")
+  const keyed3 = checkpoint_stage_keyed(
+    "keyed_step",
+    {pin: "advanced", inputs: {toolchain: "1.2", lock: "def"}},
+    fn() { 30 },
+  )
+  assert(keyed3 == 30, "changed keyed identity should execute and replace stale success")
+  checkpoint("legacy_keyed_step", 7)
+  const replaced_legacy = checkpoint_stage_keyed("legacy_keyed_step", {pin: "abc"}, fn() { 8 })
+  assert(replaced_legacy == 8, "legacy raw checkpoints must not satisfy keyed stages")
+  const malformed_fingerprint = "sha256:" + sha256(json_stringify({pin: "abc"}))
+  checkpoint(
+    "malformed_keyed_step",
+    {schema: "harn.checkpoint_stage.keyed.v1", fingerprint: malformed_fingerprint},
+  )
+  const replaced_malformed = checkpoint_stage_keyed("malformed_keyed_step", {pin: "abc"}, fn() { 9 })
+  assert(replaced_malformed == 9, "keyed envelope without a value must be invalidated")
+  const cached_nil = checkpoint_stage_keyed("nil_keyed_step", {pin: "abc"}, fn() { nil })
+  assert(cached_nil == nil, "keyed stage should cache nil results")
+  const reused_nil = checkpoint_stage_keyed("nil_keyed_step", {pin: "abc"}, fn() { "unexpected" })
+  assert(reused_nil == nil, "cached nil must be distinguishable from a cache miss")
+  const failed_keyed_retry = try {
+    checkpoint_stage_keyed_retry(
+      "keyed_retry",
+      {pin: "abc"},
+      1,
+      fn() {
+        throw "boom"
+      },
+    )
+  }
+  assert(is_err(failed_keyed_retry), "exhausted keyed retry should fail")
+  assert(!checkpoint_exists("keyed_retry"), "failed keyed retry must not cache completion")
+  const recovered_keyed_retry = checkpoint_stage_keyed_retry("keyed_retry", {pin: "abc"}, 1, fn() { "recovered" })
+  assert(recovered_keyed_retry == "recovered", "later keyed retry should execute after failure")
   checkpoint_clear()
   log("checkpoint_stage tests passed")
 }

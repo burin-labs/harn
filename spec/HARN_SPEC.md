@@ -5786,7 +5786,12 @@ is a valid checkpoint value.
 ### std/checkpoint module
 
 ```harn
-import { checkpoint_stage, checkpoint_stage_retry } from "std/checkpoint"
+import {
+  checkpoint_stage,
+  checkpoint_stage_keyed,
+  checkpoint_stage_keyed_retry,
+  checkpoint_stage_retry,
+} from "std/checkpoint"
 ```
 
 #### checkpoint_stage(name, fn) -> value
@@ -5814,6 +5819,31 @@ pipeline process(task) {
 
 On first run all three stages execute. On a resumed run (pipeline restarted
 after a crash), completed stages are skipped automatically.
+
+#### checkpoint_stage_keyed(name, identity, fn) -> value
+
+Use `checkpoint_stage_keyed` when completion is valid only for specific inputs.
+Harn canonicalizes the structured `identity`, persists only its SHA-256 digest,
+and reuses the cached result only when the digest matches. Missing, legacy,
+malformed, or mismatched records execute the stage and replace completion after
+success.
+
+```harn
+import { checkpoint_stage_keyed } from "std/checkpoint"
+
+const prepared = checkpoint_stage_keyed(
+  "prepare",
+  {source_sha: "abc123", lock_sha: "def456", toolchain: "rust-1.90"},
+  fn() { return {ready: true} },
+)
+```
+
+`checkpoint_stage_keyed_retry(name, identity, max_retries, fn)` adds the same
+identity binding to retrying stages and never caches failed attempts.
+
+Checkpointed stages have at-least-once crash semantics. Keep stage effects
+idempotent: a process can stop after the effect succeeds but before its result is
+persisted, so the resumed run may execute that stage again.
 
 #### checkpoint_stage_retry(name, max_retries, fn) -> value
 
