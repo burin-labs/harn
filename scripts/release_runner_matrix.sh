@@ -56,13 +56,17 @@ case "$MODE:$PROFILE" in
 esac
 
 jq -e '
+  (keys == ["pricing", "schema_version", "targets"]) and
   .schema_version == 1 and
+  (.pricing | keys == ["as_of", "macos_large_usd_per_minute", "source"]) and
   (.pricing.as_of | type == "string" and length > 0) and
   (.pricing.source | type == "string" and startswith("https://docs.github.com/")) and
   (.pricing.macos_large_usd_per_minute | type == "number" and . > 0) and
   (.targets | type == "array" and length > 0) and
   ([.targets[].target] | length == (unique | length)) and
   all(.targets[];
+    (keys == ["release_codegen_units", "runners", "target", "use_sccache"]) and
+    (.runners | keys == ["fast", "primary", "recovery", "standard", "warm"]) and
     (.target | type == "string" and length > 0) and
     (.release_codegen_units | type == "number") and
     (.use_sccache == "true" or .use_sccache == "false"))

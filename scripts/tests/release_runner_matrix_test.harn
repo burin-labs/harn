@@ -3,6 +3,16 @@ fn run_matrix(args) {
   return shell_at(root, "bash scripts/release_runner_matrix.sh " + args)
 }
 
+fn run_matrix_with_policy(policy, args) {
+  const root = dirname(dirname(runtime_paths().asset_root))
+  const path = path_join(harness.fs.temp_dir(), "release-runner-policy-" + uuid_v7() + ".json")
+  harness.fs.write_text(path, json_stringify(policy))
+  return shell_at(
+    root,
+    "HARN_RELEASE_RUNNER_POLICY=" + path + " bash scripts/release_runner_matrix.sh " + args,
+  )
+}
+
 fn matrix(args) {
   const result = run_matrix(args)
   if !result.success {
@@ -51,4 +61,17 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(task) {
   assert_eq(run_matrix("--mode benchmark --profile fast").success, false)
   assert_eq(run_matrix("--mode warm --profile fast").success, false)
   assert_eq(run_matrix("--mode recovery --targets unknown-target").success, false)
+  const root = dirname(dirname(runtime_paths().asset_root))
+  const policy = json_parse(harness.fs.read_text(path_join(root, ".github", "release-runner-policy.json")))
+  assert_eq(run_matrix_with_policy({...policy, typo: true}, "--mode primary").success, false)
+  assert_eq(
+    run_matrix_with_policy(
+      {
+        ...policy,
+        targets: [{...policy.targets[0], runners: {...policy.targets[0].runners, typo: "runner"}}],
+      },
+      "--mode primary",
+    ).success,
+    false,
+  )
 }
