@@ -11,13 +11,8 @@
 // defaults remain caller-overridable.
 import { agent_tool_format_resolution } from "std/agent/options"
 import { pin_kinds } from "std/agent/pins"
-import {
-  compose,
-  default_llm_caller,
-  with_logging,
-  with_retry,
-  with_routing,
-} from "std/llm/handlers"
+import { agent_apply_default_retry } from "std/agent/retry"
+import { compose, default_llm_caller, with_logging, with_routing } from "std/llm/handlers"
 import {
   compose_tool_callers,
   with_audit_log,
@@ -732,8 +727,8 @@ fn __apply_captain_llm_caller(opts, kind) {
 
 // -------------------------------------------------------------------------------------------------
 
-// Fill-nil pack + default transport retry: the two lower-priority seams that
-// sit under the caller's explicit input.
+// Fill-nil pack: the lower-priority seam that sits under the caller's explicit
+// input.
 
 // -------------------------------------------------------------------------------------------------
 
@@ -837,34 +832,6 @@ fn __apply_preset_pack(opts, kind) {
 }
 
 /**
- * Bake a bounded default transport retry onto the `llm_caller:` seam. Since
- * v0.10 removed the per-call `llm_retries` budget (agent_loop is now fail-fast
- * on transient transport errors), presets re-introduce resilience here by
- * wrapping whatever caller is in effect — a caller-supplied `llm_caller`, a
- * captain-composed routing caller, or the stdlib default caller — with
- * `with_retry`. Its default predicate retries only transport-class failures
- * (transient / rate_limited / timeout / network / provider_5xx /
- * stream_interrupt / exception) and NEVER schema_validation, auth, budget,
- * context-window, or policy failures. Pass `retry: false` to opt out (stay
- * fail-fast) or `retry: {max_attempts, base_ms, ...}` to tune it.
- */
-fn __apply_default_retry(opts) {
-  const requested = opts?.retry
-  if type_of(requested) == "bool" && !requested {
-    return opts
-  }
-  const retry_cfg = if type_of(requested) == "dict" {
-    requested
-  } else {
-    {max_attempts: 3}
-  }
-  const base = opts?.llm_caller ?? default_llm_caller()
-  return opts + {llm_caller: with_retry(base, retry_cfg)}
-}
-
-// Twin of the removed profile default `llm_retries: 2` (2 retries after
-// the first attempt == max_attempts 3).
-/**
  * agent_preset is THE way to build `agent_loop` options: it returns a
  * normalized `agent_loop` options dict for a generic role or a captain-shaped
  * persona template. Pass the result straight to `agent_loop(...)`, or merge
@@ -888,9 +855,9 @@ fn __apply_default_retry(opts) {
  * spread it into `agent_loop(...)` directly, or merge further overrides
  * on top. Every kind additionally fills its pack rows (provider, transport
  * timeout, cost budget, model ladder, completion_gate, lane_policy,
- * overlay_policy, pin policy) into nil/absent keys, and bakes a
- * bounded default transport retry onto the `llm_caller:` seam (opt out with
- * `retry: false`). Captain presets additionally compose:
+ * overlay_policy, pin policy) into nil/absent keys, and runs the shared
+ * agent-loop default transport retry normalizer (opt out with `retry: false`
+ * or `llm_retry: nil`). Captain presets additionally compose:
  *   - a `tool_caller` middleware stack from any of `audit_sink`,
  *     `telemetry`, `consent`, `rate_limit`, `dry_run`,
  *     `handoff_sink` the caller supplied;
@@ -913,6 +880,7 @@ fn __apply_default_retry(opts) {
 pub fn agent_preset(kind, options = nil) {
   const resolved_kind = __preset_kind(kind)
   let opts = __dict_or_empty(options)
+  const caller_supplied_llm_caller = __has_key(opts, "llm_caller")
   opts = __apply_kind_defaults(resolved_kind, opts)
   opts = __apply_iteration_budget(opts, resolved_kind)
   opts = __apply_turn_policy(opts, resolved_kind)
@@ -920,7 +888,7 @@ pub fn agent_preset(kind, options = nil) {
   opts = __apply_captain_tool_caller(opts, resolved_kind)
   opts = __apply_captain_llm_caller(opts, resolved_kind)
   opts = __apply_preset_pack(opts, resolved_kind)
-  opts = __apply_default_retry(opts)
+  opts = agent_apply_default_retry(opts, {wrap_existing: !caller_supplied_llm_caller})
   opts = __apply_tool_format(opts, resolved_kind)
   return opts + {_preset_kind: resolved_kind}
 }

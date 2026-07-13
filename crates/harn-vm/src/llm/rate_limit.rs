@@ -57,10 +57,13 @@ const RATE_LIMIT_ENV_FIELD_SUFFIXES: [&str; 5] =
 /// which uses `cooldown_until_ms` + provider Retry-After and never feeds the
 /// breaker.
 const NETWORK_BREAKER_FAILURE_THRESHOLD: u32 = 4;
-/// How long the breaker stays open (fail-fast) before allowing a half-open probe.
-/// Short on purpose: a laptop reconnect or DNS recovery should be retried soon,
-/// we only want to stop burning the per-call retry budget while the link is down.
+/// Base network breaker open window before allowing a half-open probe.
+/// The first trip stays short so a laptop reconnect or DNS recovery is probed
+/// soon; repeated trips grow through [`NETWORK_BREAKER_OPEN_MS_MAX`] so a
+/// sustained provider/network storm does not burn one serialized run per 5s.
 const NETWORK_BREAKER_OPEN_MS: u64 = 5_000;
+const NETWORK_BREAKER_OPEN_MS_SECOND: u64 = 30_000;
+const NETWORK_BREAKER_OPEN_MS_MAX: u64 = 120_000;
 /// Consecutive terminal *unproductive completions* (a zero-token empty
 /// completion, or a billed-noncommittal turn — the provider served but
 /// committed no content, reasoning, or tool call) on one route that trip the
@@ -305,6 +308,9 @@ enum BreakerOpenReason {
 struct NetworkBreaker {
     state: BreakerState,
     consecutive_network_failures: u32,
+    /// How many times the breaker has opened for network failures without an
+    /// intervening successful serve. Drives storm-scale open windows.
+    network_opens: u32,
     /// Consecutive terminal unproductive completions on this route. Reset by
     /// any productive serve; independent of the network-failure streak.
     consecutive_unproductive_completions: u32,
@@ -350,9 +356,15 @@ impl NetworkBreaker {
         if matches!(self.state, BreakerState::HalfOpen)
             || self.consecutive_network_failures >= NETWORK_BREAKER_FAILURE_THRESHOLD
         {
+            self.network_opens = self.network_opens.saturating_add(1);
+            let window = match self.network_opens {
+                0 | 1 => NETWORK_BREAKER_OPEN_MS,
+                2 => NETWORK_BREAKER_OPEN_MS_SECOND,
+                _ => NETWORK_BREAKER_OPEN_MS_MAX,
+            };
             self.open_reason = BreakerOpenReason::Network;
             self.state = BreakerState::Open {
-                until_ms: now_ms.saturating_add(u128::from(NETWORK_BREAKER_OPEN_MS)),
+                until_ms: now_ms.saturating_add(u128::from(window)),
             };
         }
     }
@@ -387,6 +399,7 @@ impl NetworkBreaker {
 
     fn record_success(&mut self) {
         self.consecutive_network_failures = 0;
+        self.network_opens = 0;
         self.consecutive_unproductive_completions = 0;
         self.unproductive_opens = 0;
         self.open_reason = BreakerOpenReason::Network;
@@ -2241,12 +2254,49 @@ mod tests {
     }
 
     #[test]
+    fn network_breaker_open_window_grows_per_reopen() {
+        let mut b = NetworkBreaker::default();
+        for _ in 0..NETWORK_BREAKER_FAILURE_THRESHOLD {
+            b.record_network_failure(0);
+        }
+        let (first, reason) = b.admit(0).expect("first trip opens breaker");
+        assert_eq!(reason, BreakerOpenReason::Network);
+        assert_eq!(first.as_millis(), u128::from(NETWORK_BREAKER_OPEN_MS));
+
+        let after_first = u128::from(NETWORK_BREAKER_OPEN_MS) + 1;
+        assert!(
+            b.admit(after_first).is_none(),
+            "first half-open probe admitted"
+        );
+        b.record_network_failure(after_first);
+        let (second, _) = b
+            .admit(after_first)
+            .expect("second failed probe reopens breaker");
+        assert_eq!(
+            second.as_millis(),
+            u128::from(NETWORK_BREAKER_OPEN_MS_SECOND)
+        );
+
+        let after_second = after_first + u128::from(NETWORK_BREAKER_OPEN_MS_SECOND) + 1;
+        assert!(
+            b.admit(after_second).is_none(),
+            "second half-open probe admitted"
+        );
+        b.record_network_failure(after_second);
+        let (third, _) = b
+            .admit(after_second)
+            .expect("third failed probe reopens breaker");
+        assert_eq!(third.as_millis(), u128::from(NETWORK_BREAKER_OPEN_MS_MAX));
+    }
+
+    #[test]
     fn breaker_success_resets_failure_streak() {
         let mut b = NetworkBreaker::default();
         b.record_network_failure(0);
         b.record_network_failure(0);
         b.record_success();
         assert_eq!(b.consecutive_network_failures, 0);
+        assert_eq!(b.network_opens, 0);
         // One post-success failure must not be enough to re-open (streak reset).
         b.record_network_failure(0);
         assert!(

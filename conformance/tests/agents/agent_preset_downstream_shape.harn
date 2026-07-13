@@ -22,5 +22,5 @@ pipeline default() {
   __io_println(opts._preset_kind)
   __io_println(opts.profile)
   __io_println(opts.iteration_budget.max)
-  __io_println(opts?.llm_caller != nil)
+  __io_println(opts?._llm_retry != nil)
 }
