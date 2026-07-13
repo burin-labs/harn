@@ -19,7 +19,7 @@ harn-modules = { path = "../harn-modules", version = "=0.10.15" }
 harn-rules = { path = "../harn-rules", version = "=0.10.15" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-libloading = "0.8"
+libloading = "0.9"
 
 [lints]
 workspace = true
