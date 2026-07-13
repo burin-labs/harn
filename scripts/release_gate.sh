@@ -184,6 +184,14 @@ if agent_manifest.exists():
 PY
 }
 
+reconcile_cargo_lock() {
+  # Cargo owns Cargo.lock's format and package graph. Let it make the minimal
+  # reconciliation required by the release metadata rewrite, then prove a
+  # second locked resolution is a no-op before any release content is staged.
+  cargo metadata --format-version=1 >/dev/null
+  cargo metadata --format-version=1 --locked >/dev/null
+}
+
 # Wrap a command with a banner + duration. Used by the per-audit
 # substep helpers so the parallel audit log shows which sub-phase in
 # `rust-audit` / `harn-audit` / etc is the long pole.
@@ -488,6 +496,8 @@ cmd_prepare() {
   export RUSTC_WRAPPER=
   export CARGO_BUILD_RUSTC_WRAPPER=
   export SCCACHE_DISABLE=1
+
+  reconcile_cargo_lock
 
   harn_cmd run scripts/sync_protocol_fixture_runtime_versions.harn -- --from "$current" --to "$next"
   # Keep the embedding guide's `tag = "vX.Y.Z"` pins on the released version
