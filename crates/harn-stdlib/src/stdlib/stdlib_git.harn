@@ -16,15 +16,27 @@ type GitRepo = {
   input: string,
 }
 
-type GitStatusEntry = {
+/** One path-level row returned by `git_status`. */
+pub type GitStatusEntry = {
   xy: string,
   index: string,
   worktree: string,
   path: string,
+  original_path: string?,
   conflict_kind: string?,
 }
 
 type GitConflict = {path: string, xy: string, kind: string}
+
+type GitDiscoverData = {repo: GitRepo}
+
+type GitStatusData = {branch: string?, entries: list<GitStatusEntry>, dirty: bool}
+
+type GitConflictsData = {conflicts: list<GitConflict>, has_conflicts: bool}
+
+type GitDiffData = {diff: string}
+
+type GitMergeBaseData = {oid: string}
 
 type GitReceipt = {
   schema: string,
@@ -47,6 +59,7 @@ type GitReceipt = {
   stderr: GitOutputRef,
   command_policy: dict?,
   approval: dict?,
+  encoding_error: string?,
   data: dict?,
   repo: GitRepo?,
 }
@@ -134,6 +147,42 @@ type GitShowOptions = {
   max_inline_bytes?: int,
   stat?: bool,
   patch?: bool,
+}
+
+type GitTagListOptions = {pattern?: string, sort?: string}
+
+type GitDescribeOptions = {tags?: bool, match?: string, rev?: string}
+
+type GitTagListData = {tags: list<string>}
+
+type GitDescribeData = {describe: string, tag: string?, distance: int?, sha: string, dirty: bool}
+
+/** One remote ref returned by `git_ls_remote`. */
+pub type GitRemoteRef = {oid: string, ref: string, name: string, peeled: bool}
+
+type GitLsRemoteData = {remote: string, refs: list<GitRemoteRef>}
+
+type GitDiscoverReceipt = GitReceipt & {data: GitDiscoverData}
+
+type GitStatusReceipt = GitReceipt & {data: GitStatusData}
+
+type GitConflictsReceipt = GitReceipt & {data: GitConflictsData}
+
+type GitDiffReceipt = GitReceipt & {data: GitDiffData}
+
+type GitMergeBaseReceipt = GitReceipt & {data: GitMergeBaseData}
+
+type GitTagListReceipt = GitReceipt & {data: GitTagListData}
+
+type GitDescribeReceipt = GitReceipt & {data: GitDescribeData}
+
+type GitLsRemoteReceipt = GitReceipt & {data: GitLsRemoteData}
+
+type GitLsRemoteOptions = {
+  repo?: string | GitRepo | GitReceipt,
+  refs?: list<string>,
+  tags?: bool,
+  heads?: bool,
 }
 
 type GitSwitchOptions = {
@@ -302,6 +351,14 @@ fn __git_ref_arg(value, label) -> string {
   return text
 }
 
+fn __git_sort_arg(value) -> string {
+  const text = __git_non_empty_string(value, "sort")
+  if contains(text, "\n") || contains(text, "\r") {
+    throw "std/git: sort must not contain newlines"
+  }
+  return text
+}
+
 fn __git_string_list(value, label) -> list<string> {
   if value == nil {
     return []
@@ -445,7 +502,7 @@ pub fn git_run(args: list<string>, options: GitRunOptions = {}) -> GitCommandRes
  * @effects: []
  * @errors: []
  */
-pub fn git_discover(path = ".") -> GitReceipt {
+pub fn git_discover(path = ".") -> GitDiscoverReceipt {
   return git.repo_discover(path)
 }
 
@@ -455,7 +512,7 @@ pub fn git_discover(path = ".") -> GitReceipt {
  * @effects: []
  * @errors: []
  */
-pub fn git_status(repo = ".") -> GitReceipt {
+pub fn git_status(repo = ".") -> GitStatusReceipt {
   return git.status(repo)
 }
 
@@ -465,7 +522,7 @@ pub fn git_status(repo = ".") -> GitReceipt {
  * @effects: []
  * @errors: []
  */
-pub fn git_conflicts(repo = ".") -> GitReceipt {
+pub fn git_conflicts(repo = ".") -> GitConflictsReceipt {
   return git.conflicts(repo)
 }
 
@@ -475,7 +532,7 @@ pub fn git_conflicts(repo = ".") -> GitReceipt {
  * @effects: []
  * @errors: []
  */
-pub fn git_diff(repo = ".", selector = nil) -> GitReceipt {
+pub fn git_diff(repo = ".", selector = nil) -> GitDiffReceipt {
   return git.diff(repo, selector)
 }
 
@@ -485,8 +542,64 @@ pub fn git_diff(repo = ".", selector = nil) -> GitReceipt {
  * @effects: []
  * @errors: []
  */
-pub fn git_merge_base(left: string, right: string, repo = ".") -> GitReceipt {
+pub fn git_merge_base(left: string, right: string, repo = ".") -> GitMergeBaseReceipt {
   return git.merge_base(repo, __git_ref_arg(left, "left"), __git_ref_arg(right, "right"))
+}
+
+/**
+ * Return local tags as structured `data.tags` in an audited receipt.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_tag_list(repo = ".", options: GitTagListOptions = {}) -> GitTagListReceipt {
+  const pattern = if options.pattern == nil {
+    nil
+  } else {
+    __git_ref_arg(options.pattern, "pattern")
+  }
+  const sort = if options.sort == nil {
+    nil
+  } else {
+    __git_sort_arg(options.sort)
+  }
+  return git.tag_list(repo, {pattern: pattern, sort: sort})
+}
+
+/**
+ * Return a parsed `git describe` result in an audited receipt.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_describe(repo = ".", options: GitDescribeOptions = {}) -> GitDescribeReceipt {
+  const pattern = if options.match == nil {
+    nil
+  } else {
+    __git_ref_arg(options.match, "match")
+  }
+  const rev = if options.rev == nil {
+    nil
+  } else {
+    __git_ref_arg(options.rev, "rev")
+  }
+  return git.describe(repo, {tags: options.tags ?? false, match: pattern, rev: rev})
+}
+
+/**
+ * Return remote refs as structured `data.refs` in an audited receipt.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_ls_remote(remote: string, options: GitLsRemoteOptions = {}) -> GitLsRemoteReceipt {
+  const refs = __git_string_list(options.refs, "refs").map({ name -> __git_ref_arg(name, "refs") })
+  return git
+    .ls_remote(
+    git_repo_path(options.repo ?? "."),
+    __git_ref_arg(remote, "remote"),
+    {refs: refs, tags: options.tags ?? false, heads: options.heads ?? false},
+  )
 }
 
 /**

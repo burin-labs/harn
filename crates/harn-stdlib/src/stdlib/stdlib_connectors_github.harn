@@ -7,45 +7,46 @@ import {
 import { merge } from "std/json"
 import { wait_for } from "std/monitors"
 
-/**
- * Per-connector configuration applied to every GitHub call. Open shape — any
- * provider-specific knob may live here without breaking back-compat.
- */
-type GitHubConnectorConfig = {
+/** Canonical connector and monitor options shared by every GitHub helper. */
+type GitHubOptions = {
   token?: string,
-  base_url?: string,
-  user_agent?: string,
-  retry_attempts?: int,
-  retry_backoff_ms?: int,
-  rate_limit_delay_ms?: int,
-}
-
-/**
- * Common per-call options accepted by every GitHub helper. Open shape so
- * callers can supply provider-specific extras without breaking the contract.
- */
-type GitHubCallOptions = {
-  token?: string,
-  base_url?: string,
-  user_agent?: string,
-  headers?: dict<string, string>,
+  installation_token?: string,
+  api_base_url?: string,
+  app_id?: int | string,
+  installation_id?: int | string,
+  private_key_pem?: string,
+  private_key_secret?: string,
+  secrets?: dict,
+  allow_gh_auth_fallback?: bool,
+  gh_auth_fallback?: bool,
+  gh_token?: string,
+  now?: int,
   timeout_ms?: int,
-  retry_attempts?: int,
+  rate_limit_max_sleep_seconds?: int,
+  retry?: dict,
+  retry_policy?: dict,
+  retry_on?: list<string>,
+  retry_unsafe?: bool,
+  idempotency_key?: string,
+  max_attempts?: int,
+  base_ms?: int,
+  backoff_ms?: int,
+  cap_ms?: int,
+  respect_retry_after?: bool,
+  github_author_choice?: dict,
+  author_choice?: dict,
+  author_mode?: string,
   method?: string,
   merge_method?: string,
-}
-
-/** Options for `wait_until_*` helpers — adds a polling cadence to the call options. */
-type GitHubWaitOptions = {
-  token?: string,
-  base_url?: string,
-  user_agent?: string,
-  headers?: dict<string, string>,
-  timeout_ms?: int,
-  retry_attempts?: int,
   poll_interval_ms?: int,
   max_wait_ms?: int,
 }
+
+type GitHubConnectorConfig = GitHubOptions
+
+type GitHubCallOptions = GitHubOptions
+
+type GitHubWaitOptions = GitHubOptions
 
 type GitHubRepoRef = {owner: string, name: string, full_name: string}
 
@@ -68,6 +69,110 @@ type GitHubClosePrResult = {
   comment_posted: bool,
   pull_request: any,
   error: any,
+}
+
+type GitHubPullRequestRef = {ref: string, sha: string, repo: string, owner: string}
+
+type GitHubPullRequestUser = {id: int?, login: string, type: string}
+
+type GitHubBranchProtection = {
+  branch: string?,
+  protected: bool,
+  required_checks: list<string>,
+  strict: bool,
+  required_review_count?: int,
+  require_code_owner_reviews?: bool,
+  require_conversation_resolution?: bool,
+}
+
+type GitHubPullRequest = {
+  ok?: bool,
+  updated?: bool,
+  repo: string,
+  number: int,
+  title: string,
+  url: string,
+  state: string,
+  github_state: string,
+  draft: bool,
+  merged: bool,
+  mergeable: bool?,
+  mergeable_state: string,
+  base: GitHubPullRequestRef,
+  head: GitHubPullRequestRef,
+  labels: list<string>,
+  in_merge_queue: bool,
+  body: string,
+  user: GitHubPullRequestUser?,
+  created_at: string?,
+  updated_at: string?,
+  closed_at: string?,
+  merged_at: string?,
+  branch_protection?: GitHubBranchProtection,
+  raw: any,
+}
+
+type GitHubPullRequestResponse = GitHubPullRequest | Result<GitHubPullRequest, any>
+
+type GitHubCheckRun = {
+  id: int,
+  name: string,
+  status: string,
+  conclusion: string?,
+  head_sha: string,
+  started_at: string?,
+  completed_at: string?,
+  details_url: string?,
+  duration_seconds: int?,
+  html_url?: string,
+  external_id?: string,
+  raw?: any,
+}
+
+type GitHubCheckRollup = {
+  state: string,
+  total: int,
+  pending: int,
+  failed: int,
+  successful: int,
+  skipped: int,
+  conclusion: string?,
+}
+
+type GitHubPullRequestChecks = {
+  repo: string,
+  pull_number: int,
+  head_sha: string,
+  state: string,
+  rollup: GitHubCheckRollup,
+  checks: list<GitHubCheckRun>,
+}
+
+type GitHubPullRequestChecksResponse = GitHubPullRequestChecks | Result<GitHubPullRequestChecks, any>
+
+type GitHubRelease = {
+  ok: bool,
+  repo: string?,
+  release_id: int?,
+  tag_name: string?,
+  name: string?,
+  draft: bool,
+  prerelease: bool,
+  url: string?,
+  html_url: string?,
+  published_at: string?,
+  assets: list<dict>,
+  asset_names: list<string>,
+  raw: any,
+  error: any,
+}
+
+type GitHubPullRequestEdit = {
+  title?: string,
+  body?: string,
+  base?: string,
+  state?: "open" | "closed",
+  maintainer_can_modify?: bool,
 }
 
 let github_connector_config: GitHubConnectorConfig = {}
@@ -105,6 +210,51 @@ fn __call(method: string, params: dict = {}) {
  */
 pub fn call(method: string, args: dict = {}, options: GitHubCallOptions = {}) {
   return __call(method, merge(options, args ?? {}))
+}
+
+/**
+ * Read one pull request through the canonical typed connector method.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
+pub fn pr_view(repo: string, number: int, options: GitHubCallOptions = {}) -> GitHubPullRequestResponse {
+  return __call("github.pr.view", merge(options, {repo: repo, number: number}))
+}
+
+/**
+ * Read the normalized check rollup for one pull request.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
+pub fn pr_checks(repo: string, number: int, options: GitHubCallOptions = {}) -> GitHubPullRequestChecksResponse {
+  return __call("github.pr.checks", merge(options, {repo: repo, number: number}))
+}
+
+/**
+ * Update one pull request using the connector-owned closed edit contract.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
+pub fn pr_edit(
+  repo: string,
+  number: int,
+  edits: GitHubPullRequestEdit,
+  options: GitHubCallOptions = {},
+) -> GitHubPullRequestResponse {
+  return __call("github.pr.edit", merge(merge(options, edits), {repo: repo, number: number}))
+}
+
+/**
+ * Read one release by exact tag, or the latest release when tag is nil.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
+pub fn release_view(repo: string, tag: string? = nil, options: GitHubCallOptions = {}) -> GitHubRelease {
+  return __call("github.release.view", merge(options, {repo: repo, tag: tag}))
 }
 
 fn __github_strip_git_suffix(value) {

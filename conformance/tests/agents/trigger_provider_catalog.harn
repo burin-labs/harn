@@ -116,8 +116,16 @@ pipeline test(task) {
     "github should publish latest release",
   )
   assert(
+    github_methods.any({ method -> method.name == "github.release.view" }),
+    "github should publish exact-tag release lookup",
+  )
+  assert(
     github_methods.any({ method -> method.name == "github.pr.enable_auto_merge" }),
     "github should publish auto-merge",
+  )
+  assert(
+    github_methods.any({ method -> method.name == "github.pr.edit" }),
+    "github should publish typed PR editing",
   )
   assert(
     github_methods.any({ method -> method.name == "api_call" }),

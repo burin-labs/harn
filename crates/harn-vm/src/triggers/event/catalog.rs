@@ -371,6 +371,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                 &[
                     "github.pr.list",
                     "github.pr.view",
+                    "github.pr.edit",
                     "github.pr.checks",
                     "github.pr.merge",
                     "github.pr.enable_auto_merge",
@@ -379,6 +380,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                     "github.actions.runs",
                     "github.actions.run",
                     "github.actions.logs",
+                    "github.release.view",
                     "github.release.latest",
                     "github.release.assets",
                     "github.merge_queue.entries",
@@ -395,6 +397,7 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                     "pulls.list",
                     "pulls.list_with_checks",
                     "pulls.get",
+                    "pulls.update",
                     "pulls.merge",
                     "pulls.merge_safe",
                     "pulls.create_review_comment",

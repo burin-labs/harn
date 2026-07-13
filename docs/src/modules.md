@@ -1270,6 +1270,9 @@ operations that should not require a generic shell or `run_command` tool.
 | `git_status(repo?)` | Return structured porcelain status using the receipt-producing `git.status` builtin |
 | `git_discover(path?)` | Return repository root/git-dir metadata using the receipt-producing discover builtin |
 | `git_diff(repo?, selector?)` | Return diff text using the receipt-producing `git.diff` builtin |
+| `git_tag_list(repo?, options?)` | Return filtered local tags in structured `data.tags` |
+| `git_describe(repo?, options?)` | Return parsed tag, distance, SHA, and dirty state |
+| `git_ls_remote(remote, options?)` | Return structured remote ref/OID entries without caller-side stdout parsing |
 | `git_current_branch(repo?, options?)` | Return `{success, branch, detached, ...}` for the current checkout |
 | `git_log(repo?, options?)` | Return recent commit log output with optional `rev`, `rev_range`, `max_count`, `oneline`, and `paths` |
 | `git_switch(branch, repo?, options?)` | Switch to a branch/ref, with optional `create`, `force_create`, `detach`, or `discard_changes` |
@@ -1320,6 +1323,10 @@ names and normalized result envelopes.
 |---|---|
 | `github_slug_from_remote(url)` | Parse common GitHub SSH/HTTPS remote URLs into `owner/repo`, or `nil` when the URL is not GitHub |
 | `github_repo(repo, name?)` | Normalize an `owner/repo` slug, GitHub remote URL, repo dict, or owner+repo pair |
+| `pr_view(repo, pull_number, options?)` | Return the connector's canonical typed PR view |
+| `pr_checks(repo, pull_number, options?)` | Return normalized check runs and aggregate state |
+| `pr_edit(repo, pull_number, edits, options?)` | Update the closed PR edit field set through the typed connector method |
+| `release_view(repo, tag?, options?)` | Return a typed release envelope by exact tag, or the latest release |
 | `workflow_dispatch(repo, workflow_id, ref?, inputs?, options?)` | Dispatch a `workflow_dispatch` workflow without shelling out |
 | `workflow_runs(repo, options?)` | List repository or workflow-scoped Actions runs |
 | `workflow_run(repo, run_id, options?)` | Fetch one Actions run |
