@@ -46,6 +46,7 @@ exempt_checks = [
   "check-source-file-lengths",      # exact repo source LOC ratchet, not a generated mirror
   "check-python-boundary",          # repo-language boundary ratchet, not a sync guard
   "check-harn-syntax-sensitive-scans", # source-pattern guard, not a generated artifact mirror
+  "check-ci-cache-policy",           # validates workflow cache ownership, not a generated mirror
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
   "check-docs-snippets",            # validates ```harn blocks parse, not a mirror

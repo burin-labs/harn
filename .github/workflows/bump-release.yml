@@ -48,7 +48,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   open-bump-pr:
@@ -116,7 +115,7 @@ jobs:
         if: steps.bump.outputs.skip != 'true' && env.SCCACHE_PATH != ''
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
 
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: ./.github/actions/rust-cache
         if: steps.bump.outputs.skip != 'true'
         with:
           shared-key: workspace
@@ -129,11 +128,10 @@ jobs:
         with:
           tool: nextest@0.9.133
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: ./.github/actions/node-cache
         if: steps.bump.outputs.skip != 'true'
         with:
           node-version: "22"
-          cache: npm
           cache-dependency-path: crates/harn-cli/portal/package-lock.json
 
       - name: Install portal dependencies

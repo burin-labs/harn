@@ -1,0 +1,259 @@
+import { read_json_result, read_yaml } from "std/fs"
+import {
+  schema_closed_object,
+  schema_int,
+  schema_list,
+  schema_literal,
+  schema_string,
+  schema_validator,
+} from "std/schema"
+
+pub type CiCacheWriter = {workflow: string, job: string}
+
+pub type CiCachePolicy = {
+  schema_version: 2,
+  rust_cache_action: "./.github/actions/rust-cache",
+  node_cache_action: "./.github/actions/node-cache",
+  persistent_ref: "refs/heads/main",
+  storage_limit_bytes: int,
+  remote_sccache: bool,
+  writers: list<CiCacheWriter>,
+}
+
+const POLICY_PATH = ".github/cache-policy.json"
+
+const ACTION_PATH = ".github/actions/rust-cache/action.yml"
+
+const NODE_ACTION_PATH = ".github/actions/node-cache/action.yml"
+
+const WORKFLOW_GLOB = ".github/workflows/*.yml"
+
+const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
+
+const UPSTREAM_NODE_PREFIX = "actions/setup-node@"
+
+const UPSTREAM_GENERIC_CACHE_PREFIX = "actions/cache@"
+
+const UPSTREAM_CACHE_SAVE_PREFIX = "actions/cache/save@"
+
+const DOCKER_BUILD_PREFIX = "docker/build-push-action@"
+
+fn policy_schema() {
+  return schema_closed_object(
+    {
+      schema_version: schema_literal(2),
+      rust_cache_action: schema_literal("./.github/actions/rust-cache"),
+      node_cache_action: schema_literal("./.github/actions/node-cache"),
+      persistent_ref: schema_literal("refs/heads/main"),
+      storage_limit_bytes: schema_int() + {minimum: 1073741824},
+      remote_sccache: schema_literal(false),
+      writers: schema_list(
+        schema_closed_object(
+          {
+            workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
+            job: schema_string() + {pattern: "^[a-z0-9-]+$"},
+          },
+        ),
+      ),
+    },
+  )
+}
+
+fn policy_from_validated(value) -> CiCachePolicy {
+  return {
+    schema_version: 2,
+    rust_cache_action: "./.github/actions/rust-cache",
+    node_cache_action: "./.github/actions/node-cache",
+    persistent_ref: "refs/heads/main",
+    storage_limit_bytes: value.storage_limit_bytes,
+    remote_sccache: false,
+    writers: value.writers.map({ writer -> return {workflow: writer.workflow, job: writer.job} }).to_list(),
+  }
+}
+
+/** Validate the closed cache-policy document at its owning boundary. */
+pub fn ci_cache_policy_parse(value) -> CiCachePolicy? {
+  const report = schema_validator(policy_schema()).report(value)
+  if !report.ok {
+    return nil
+  }
+  const policy = policy_from_validated(report.value)
+  const writer_keys = policy.writers.map({ writer -> writer.workflow + ":" + writer.job }).to_list()
+  if len(writer_keys) == 0 || len(writer_keys) != len(writer_keys.unique()) {
+    return nil
+  }
+  return policy
+}
+
+fn workflow_name(path: string) -> string {
+  return basename(path)
+}
+
+fn step_uses(step) -> string {
+  return trim(step?.uses ?? "")
+}
+
+fn save_requested(step) -> bool {
+  const value = step?.with?.save
+  return value != nil && lowercase(trim(to_string(value))) != "false"
+}
+
+fn writer_allowed(policy: CiCachePolicy, workflow: string, job: string) -> bool {
+  return policy.writers.any({ writer -> writer.workflow == workflow && writer.job == job })
+}
+
+fn remote_sccache_errors(value, path: string = "") -> list<string> {
+  if type_of(value) == "list" {
+    let errors: list<string> = []
+    for {index, value: item} in value.enumerate() {
+      errors = errors + remote_sccache_errors(item, path + "[${index}]")
+    }
+    return errors
+  }
+  if type_of(value) != "dict" {
+    return []
+  }
+  let errors: list<string> = []
+  for key in value.keys().sort() {
+    const child_path = if path == "" {
+      key
+    } else {
+      path + "." + key
+    }
+    if key == "SCCACHE_GHA_ENABLED" && lowercase(trim(to_string(value[key]))) != "false" {
+      errors = errors + [child_path + " enables the per-object GHA sccache backend"]
+    }
+    errors = errors + remote_sccache_errors(value[key], child_path)
+  }
+  return errors
+}
+
+fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
+  let errors: list<string> = []
+  const steps = action?.runs?.steps ?? []
+  const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) }).to_list()
+  if len(upstream) != 1 {
+    return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
+  }
+  const step = upstream[0]
+  const save_if = trim(step?.with?.["save-if"] ?? "")
+  if !contains(save_if, "inputs.save == 'true'")
+    || !contains(save_if, "github.ref == 'refs/heads/main'") {
+    errors = errors + ["${ACTION_PATH} must hard-gate saves on explicit authorization and refs/heads/main"]
+  }
+  if !(step?.["continue-on-error"] ?? false) {
+    errors = errors + ["${ACTION_PATH} must keep cache-service failures non-fatal"]
+  }
+  return errors
+}
+
+fn node_cache_action_errors(action) -> list<string> {
+  const steps = action?.runs?.steps ?? []
+  const setup = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_NODE_PREFIX) }).to_list()
+  const restores = steps.filter({ step -> step_uses(step).starts_with("actions/cache/restore@") }).to_list()
+  const caches = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_GENERIC_CACHE_PREFIX) }).to_list()
+  if len(setup) != 1 || len(restores) != 1 || len(caches) != 1 {
+    return ["${NODE_ACTION_PATH} must contain one pinned setup, restore-only cache, and main cache step"]
+  }
+  let errors: list<string> = []
+  if trim(setup[0]?.with?.cache ?? "") != "" {
+    errors = errors + ["${NODE_ACTION_PATH} setup-node step must not register its own cache writer"]
+  }
+  const restore_if = trim(restores[0]?.if ?? "")
+  const save_if = trim(caches[0]?.if ?? "")
+  if !contains(restore_if, "github.ref != 'refs/heads/main'") {
+    errors = errors + ["${NODE_ACTION_PATH} must use restore-only caching away from refs/heads/main"]
+  }
+  if !contains(save_if, "github.ref == 'refs/heads/main'") {
+    errors = errors + ["${NODE_ACTION_PATH} must hard-gate npm cache saves on refs/heads/main"]
+  }
+  if !(restores[0]?.["continue-on-error"] ?? false) || !(caches[0]?.["continue-on-error"] ?? false) {
+    errors = errors + ["${NODE_ACTION_PATH} must keep cache-service failures non-fatal"]
+  }
+  return errors
+}
+
+fn ephemeral_cache_writer_error(workflow: string, job: string, step, policy: CiCachePolicy) -> string? {
+  const uses = step_uses(step)
+  if uses.starts_with(UPSTREAM_NODE_PREFIX) && trim(step?.with?.cache ?? "") != "" {
+    return "${workflow}:${job} bypasses ${policy.node_cache_action} with setup-node caching"
+  }
+  if uses.starts_with(UPSTREAM_GENERIC_CACHE_PREFIX) || uses.starts_with(UPSTREAM_CACHE_SAVE_PREFIX) {
+    return "${workflow}:${job} bypasses Harn-owned cache actions with ${uses}"
+  }
+  if uses.starts_with(DOCKER_BUILD_PREFIX) {
+    const cache_to = trim(step?.with?.["cache-to"] ?? "")
+    if cache_to != "" && !contains(cache_to, "github.ref == 'refs/heads/main'") {
+      return "${workflow}:${job} enables an ungated BuildKit cache writer"
+    }
+  }
+  return nil
+}
+
+/** Return every policy violation without stopping at the first workflow. */
+pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workflows: dict) -> list<string> {
+  let errors = cache_action_errors(policy, action) + node_cache_action_errors(node_action)
+  let observed_writers: list<string> = []
+  for workflow in workflows.keys().sort() {
+    const document = workflows[workflow]
+    errors = errors + remote_sccache_errors(document, workflow)
+    const jobs = document?.jobs ?? {}
+    for job in jobs.keys().sort() {
+      for step in jobs[job]?.steps ?? [] {
+        const uses = step_uses(step)
+        if uses.starts_with(UPSTREAM_CACHE_PREFIX) {
+          errors = errors + ["${workflow}:${job} bypasses ${policy.rust_cache_action}"]
+        }
+        const ephemeral_error = ephemeral_cache_writer_error(workflow, job, step, policy)
+        if ephemeral_error != nil {
+          errors = errors + [ephemeral_error]
+        }
+        if uses == policy.rust_cache_action && save_requested(step) {
+          const writer = workflow + ":" + job
+          observed_writers = observed_writers + [writer]
+          if !writer_allowed(policy, workflow, job) {
+            errors = errors + ["${writer} is not an authorized persistent cache writer"]
+          }
+        }
+      }
+    }
+  }
+  for writer in policy.writers {
+    const key = writer.workflow + ":" + writer.job
+    if !observed_writers.contains(key) {
+      errors = errors + ["authorized persistent cache writer is not active: " + key]
+    }
+  }
+  return errors
+}
+
+fn main(harness: Harness) {
+  const loaded = read_json_result(POLICY_PATH)
+  guard is_ok(loaded) else {
+    harness.stdio.eprintln(json_stringify(unwrap_err(loaded)))
+    exit(1)
+  }
+  const policy = ci_cache_policy_parse(unwrap(loaded))
+  guard policy != nil else {
+    harness.stdio.eprintln("invalid CI cache policy: " + POLICY_PATH)
+    exit(1)
+  }
+  const action = read_yaml(ACTION_PATH, nil)
+  const node_action = read_yaml(NODE_ACTION_PATH, nil)
+  let workflows = {}
+  for path in harness.fs.glob(WORKFLOW_GLOB).sort() {
+    workflows[workflow_name(path)] = read_yaml(path, nil)
+  }
+  const errors = ci_cache_policy_errors(policy, action, node_action, workflows)
+  if len(errors) > 0 {
+    harness.stdio.eprintln("CI cache policy violations:")
+    for error in errors {
+      harness.stdio.eprintln("  - " + error)
+    }
+    exit(1)
+  }
+  harness.stdio
+    .println(
+    "CI cache policy: OK (${len(workflows.keys())} workflows, ${len(policy.writers)} Rust writer)",
+  )
+}

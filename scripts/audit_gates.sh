@@ -57,6 +57,7 @@ GATES=(
   check-source-file-lengths
   check-python-boundary
   check-harn-syntax-sensitive-scans
+  check-ci-cache-policy
   check-crate-sibling-versions
   check-docs-workflow-quickstart
   check-release-audit-contract

@@ -30,7 +30,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  SCCACHE_GHA_ENABLED: "true"
   RUSTFLAGS: "-D warnings"
 
 jobs:
@@ -54,7 +53,7 @@ jobs:
         if: env.SCCACHE_PATH != ''
         shell: bash
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
           shared-key: workspace-macos
