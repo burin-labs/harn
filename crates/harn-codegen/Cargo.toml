@@ -34,7 +34,7 @@ cranelift-frontend = "0.132"
 cranelift-module = "0.132"
 cranelift-jit = "0.132"
 cranelift-native = "0.132"
-cranelift-object = "0.132"
+cranelift-object = "0.133"
 
 [dev-dependencies]
 # Dev-only: the VM-fidelity differential test drives the real `harn-vm`

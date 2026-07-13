@@ -1720,7 +1720,7 @@ dependencies = [
  "cranelift-codegen 0.132.3",
  "cranelift-control 0.132.3",
  "cranelift-entity 0.132.3",
- "cranelift-module",
+ "cranelift-module 0.132.3",
  "cranelift-native 0.132.3",
  "libc",
  "log",
@@ -1740,6 +1740,17 @@ dependencies = [
  "anyhow",
  "cranelift-codegen 0.132.3",
  "cranelift-control 0.132.3",
+]
+
+[[package]]
+name = "cranelift-module"
+version = "0.133.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcbbdbe0c3c6cd97359ac2f6744187e89a48e202674e24200afc653f6aa9b7c2"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen 0.133.1",
+ "cranelift-control 0.133.1",
 ]
 
 [[package]]
@@ -1766,14 +1777,15 @@ dependencies = [
 
 [[package]]
 name = "cranelift-object"
-version = "0.132.3"
+version = "0.133.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a476f25c5740a43ad0ba7ac398fb5484f1e9dfd662bba127a111d591e90350d"
+checksum = "016cb9ab44af02e47766ec214338e21f682660e4f643a8ef8b032bc7c7211f0a"
 dependencies = [
  "anyhow",
- "cranelift-codegen 0.132.3",
- "cranelift-control 0.132.3",
- "cranelift-module",
+ "cranelift-codegen 0.133.1",
+ "cranelift-control 0.133.1",
+ "cranelift-module 0.133.1",
+ "gimli",
  "log",
  "object 0.39.1",
  "target-lexicon",
@@ -3244,7 +3256,7 @@ dependencies = [
  "cranelift-codegen 0.132.3",
  "cranelift-frontend 0.132.3",
  "cranelift-jit",
- "cranelift-module",
+ "cranelift-module 0.132.3",
  "cranelift-native 0.132.3",
  "cranelift-object",
  "harn-parser",
