@@ -138,7 +138,7 @@ fn __convert_jsonl(content: string, trace_id: string) -> list<string> {
     const value = try {
       json_parse(line)
     } catch (e) {
-      throw "invalid JSON in trace line " + to_string(line_no) + ": " + to_string(e)
+      throw "invalid JSON in trace line " + to_string(line_no) + ": " + e.message
     }
     if trace_id != "" {
       const actual = if type_of(value) == "dict" {

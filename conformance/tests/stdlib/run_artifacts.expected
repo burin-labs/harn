@@ -5,7 +5,7 @@ true
 facts.json
 ok
 2
-missing
+absent
 malformed
 true
 agent-llm

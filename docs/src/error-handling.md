@@ -27,7 +27,7 @@ Catch errors with an optional error binding:
 try {
   const data = json_parse(raw_input)
 } catch (e) {
-  log("Parse failed: ${e}")
+  log("Parse failed at ${e.line}:${e.column}: ${e.message}")
 }
 ```
 
@@ -346,7 +346,7 @@ fn safe_parse(input) {
     const data = json_parse(input)
     return Ok(data)
   } catch (e) {
-    return Err("parse error: ${e}")
+    return Err("parse error: ${e.message}")
   }
 }
 

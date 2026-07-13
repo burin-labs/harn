@@ -153,7 +153,7 @@ fn main(harness: Harness) -> int {
   const aliases = try {
     json_parse(aliases_json)
   } catch (e) {
-    harness.stdio.eprintln("internal error: failed to parse aliases JSON: " + to_string(e))
+    harness.stdio.eprintln("internal error: failed to parse aliases JSON: " + e.message)
     return 70
   }
   const resolved = resolve_selector(raw, aliases)

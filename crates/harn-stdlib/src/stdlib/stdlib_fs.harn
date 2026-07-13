@@ -1,8 +1,25 @@
 // std/fs - file-system convenience helpers built on the host fs primitives.
-import { pretty, safe_parse } from "std/json"
-import { parse_json_typed_report } from "std/schema"
+import { pretty } from "std/json"
+import { get_typed_result } from "std/schema"
 
 type WriteDataOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
+
+pub type JsonReadFailureKind = "absent" | "unreadable" | "malformed" | "recursion_limit"
+
+pub type JsonReadFailure = {
+  kind: JsonReadFailureKind,
+  path: string,
+  detail: string,
+  line?: int,
+  column?: int,
+}
+
+pub type SchemaValidationFailure = {
+  kind: "schema_invalid",
+  path: string,
+  detail: string,
+  issues: list<unknown>,
+}
 
 fn __fs_norm(path) -> string {
   return replace(path ?? "", "\\", "/")
@@ -22,7 +39,7 @@ fn __fs_with_newline(text, trailing_newline) {
 /**
  * Create the parent directory for `path` when it is not `.` or empty.
  *
- * @effects: []
+ * @effects: [fs.read, fs.write]
  * @errors: []
  */
 pub fn ensure_parent_dir(path: string) {
@@ -36,87 +53,105 @@ pub fn ensure_parent_dir(path: string) {
 }
 
 /**
- * Read and parse a JSON file, returning `fallback` for missing or invalid files.
+ * Read and parse a required JSON file, throwing a typed `JsonReadFailure`.
  *
- * @effects: []
- * @errors: []
+ * @effects: [fs.read]
+ * @errors: [JsonReadFailure]
  */
-pub fn read_json(path: string, fallback = nil) {
-  if !harness.fs.exists(path) {
-    return fallback
+pub fn read_json(path: string) -> unknown {
+  const result = read_json_result(path)
+  if is_ok(result) {
+    return unwrap(result)
   }
-  const parsed = safe_parse(harness.fs.read_text(path))
-  if parsed == nil {
-    return fallback
-  }
-  return parsed
+  throw unwrap_err(result)
 }
 
 /**
- * Read and parse a JSON file, returning `{ok, value?, error?}`.
+ * Read and parse JSON without erasing the owning failure stage.
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_json_result(path: string) -> dict {
-  if !harness.fs.exists(path) {
-    return {ok: false, error: "file not found: " + path}
+pub fn read_json_result(path: string) -> Result<unknown, JsonReadFailure> {
+  const read = harness.fs.read_text_result(path)
+  if !is_ok(read) {
+    const failure = unwrap_err(read)
+    return try {
+      throw {
+        kind: if failure.kind == "not_found" {
+          "absent"
+        } else {
+          "unreadable"
+        },
+        path: path,
+        detail: failure.message,
+      }
+    }
   }
+  const raw = unwrap(read)
   const parsed = try {
-    json_parse(harness.fs.read_text(path))
+    json_parse(raw)
   }
   if is_ok(parsed) {
-    return {ok: true, value: unwrap(parsed)}
+    return try {
+      unwrap(parsed)
+    }
   }
-  return {ok: false, error: to_string(parsed)}
+  const failure = unwrap_err(parsed)
+  return try {
+    throw {
+      kind: failure.kind,
+      path: path,
+      detail: failure.message,
+      line: failure.line,
+      column: failure.column,
+    }
+  }
 }
 
 /**
- * Read, parse, and validate a JSON file in one step.
- * Returns `{ok, message, errors, issues, value?, stage, path}`.
+ * Read, parse, and validate JSON with one closed Result contract.
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_json_typed_report<T>(path: string, schema: Schema<T>, apply_defaults = false) -> dict {
-  if !harness.fs.exists(path) {
-    const message = "file not found: " + path
-    return {ok: false, message: message, errors: [message], issues: [], stage: "read", path: path}
+pub fn read_json_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> Result<T, JsonReadFailure | SchemaValidationFailure> {
+  const parsed = read_json_result(path)
+  if !is_ok(parsed) {
+    return try {
+      throw unwrap_err(parsed)
+    }
   }
-  const raw = try {
-    harness.fs.read_text(path)
+  const validated = get_typed_result(unwrap(parsed), schema, apply_defaults)
+  if is_ok(validated) {
+    return try {
+      unwrap(validated)
+    }
   }
-  if !is_ok(raw) {
-    const message = to_string(unwrap_err(raw))
-    return {ok: false, message: message, errors: [message], issues: [], stage: "read", path: path}
+  const failure = unwrap_err(validated)
+  return try {
+    throw {kind: "schema_invalid", path: path, detail: failure.message, issues: failure.issues}
   }
-  return parse_json_typed_report(unwrap(raw), schema, apply_defaults) + {path: path}
 }
 
 /**
- * Read, parse, and validate a JSON file, returning `fallback` when missing,
- * malformed, or schema-invalid.
+ * Read, parse, and validate required JSON, throwing the typed failure.
  *
- * @effects: []
- * @errors: []
+ * @effects: [fs.read]
+ * @errors: [JsonReadFailure, SchemaValidationFailure]
  */
-pub fn read_json_typed<T>(
-  path: string,
-  schema: Schema<T>,
-  fallback: T = nil,
-  apply_defaults = false,
-) -> T {
-  const report = read_json_typed_report(path, schema, apply_defaults)
-  if report.ok {
-    return report.value
+pub fn read_json_typed<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> T {
+  const result = read_json_typed_result(path, schema, apply_defaults)
+  if is_ok(result) {
+    return unwrap(result)
   }
-  return fallback
+  throw unwrap_err(result)
 }
 
 /**
  * Write a JSON file with optional pretty formatting and parent-dir creation.
  *
- * @effects: []
+ * @effects: [fs.read, fs.write]
  * @errors: []
  */
 pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
@@ -135,7 +170,7 @@ pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
 /**
  * Read and parse a YAML file, returning `fallback` for missing or invalid files.
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
 pub fn read_yaml(path: string, fallback = nil) {
@@ -154,7 +189,7 @@ pub fn read_yaml(path: string, fallback = nil) {
 /**
  * Write a YAML file.
  *
- * @effects: []
+ * @effects: [fs.read, fs.write]
  * @errors: []
  */
 pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
@@ -169,7 +204,7 @@ pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
 /**
  * Read and parse a TOML file, returning `fallback` for missing or invalid files.
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
 pub fn read_toml(path: string, fallback = nil) {
@@ -188,7 +223,7 @@ pub fn read_toml(path: string, fallback = nil) {
 /**
  * Write a TOML file.
  *
- * @effects: []
+ * @effects: [fs.read, fs.write]
  * @errors: []
  */
 pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
@@ -203,7 +238,7 @@ pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
 /**
  * Write a list of lines as a text file.
  *
- * @effects: []
+ * @effects: [fs.read, fs.write]
  * @errors: []
  */
 pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions = {}) {
@@ -218,7 +253,7 @@ pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions 
 /**
  * Append one line to a text file.
  *
- * @effects: []
+ * @effects: [fs.write]
  * @errors: []
  */
 pub fn append_line(path: string, line: string) {
@@ -229,7 +264,7 @@ pub fn append_line(path: string, line: string) {
 /**
  * Create a file if missing and update it to empty content only on first creation.
  *
- * @effects: []
+ * @effects: [fs.read, fs.write]
  * @errors: []
  */
 pub fn touch(path: string) {
@@ -242,7 +277,7 @@ pub fn touch(path: string) {
 /**
  * Return files matching `pattern` below `root`, using the host glob implementation.
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
 pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
@@ -276,7 +311,7 @@ pub fn relative_path(root: string, path: string) -> string {
 /**
  * Return whether `path` exists and is a regular file.
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
 pub fn is_file(path: string) -> bool {
@@ -292,7 +327,7 @@ pub fn is_file(path: string) -> bool {
 /**
  * Return whether `path` exists and is a directory.
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
 pub fn is_dir(path: string) -> bool {
@@ -308,7 +343,7 @@ pub fn is_dir(path: string) -> bool {
 /**
  * Return a file size in bytes, or nil when the path cannot be statted.
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
 pub fn file_size(path: string) {

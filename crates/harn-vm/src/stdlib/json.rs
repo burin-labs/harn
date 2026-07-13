@@ -1,10 +1,12 @@
 use std::{cell::RefCell, thread_local};
 
+use serde::Deserialize;
+
 use crate::runtime_limits::RuntimeLimits;
 use crate::schema;
 use crate::stdlib::json_query;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
 /// Cap on memoized parses. Each entry holds the original source string as
@@ -12,6 +14,10 @@ use crate::vm::Vm;
 /// when a script feeds varied JSON. Mirror the regex-cache bound so the
 /// VM's per-thread parse caches share a predictable ceiling.
 const JSON_PARSE_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_json_parse_cache_entries;
+
+/// Serde JSON's default container recursion boundary. Detect it before serde
+/// so callers receive a stable structural kind instead of parser prose.
+const JSON_PARSE_MAX_CONTAINER_DEPTH: usize = 127;
 
 /// Deepest `VmValue` nesting we will hand to a third-party recursive encoder
 /// (pretty JSON via `serde_json`, YAML via `serde_yaml_ng`). Our own JSON writer
@@ -66,6 +72,99 @@ fn schema_key_list(value: &VmValue, builtin_name: &str) -> Result<Vec<String>, V
     Ok(list.iter().map(VmValue::display).collect())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct JsonDepthViolation {
+    line: usize,
+    column: usize,
+}
+
+/// Find the first container that exceeds the supported JSON nesting depth.
+/// Quotes and escapes are tracked so braces inside strings never affect the
+/// structural count. This scanner classifies no errors by itself: over-depth
+/// input is subsequently validated by serde's iterative ignored-value path.
+fn json_depth_violation(text: &str) -> Option<JsonDepthViolation> {
+    let mut stack = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut line = 1;
+    let mut column = 0;
+
+    for character in text.chars() {
+        if character == '\n' {
+            line += 1;
+            column = 0;
+        } else {
+            // serde_json reports byte-oriented columns for string/slice input.
+            // Keep recursion failures in that same coordinate system.
+            column += character.len_utf8();
+        }
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' | '[' => {
+                stack.push(character);
+                if stack.len() > JSON_PARSE_MAX_CONTAINER_DEPTH {
+                    return Some(JsonDepthViolation { line, column });
+                }
+            }
+            '}' => match stack.pop() {
+                Some('{') => {}
+                _ => return None,
+            },
+            ']' => match stack.pop() {
+                Some('[') => {}
+                _ => return None,
+            },
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Validate over-depth input without materializing its value tree. Serde's
+/// ignored-value path uses an explicit stack, so disabling its recursive depth
+/// guard here is safe and lets syntax errors keep their authoritative parser
+/// location instead of being mislabeled as recursion failures.
+fn validate_deep_json(text: &str) -> Result<(), serde_json::Error> {
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    deserializer.disable_recursion_limit();
+    serde::de::IgnoredAny::deserialize(&mut deserializer)?;
+    deserializer.end()
+}
+
+fn json_parse_error_value(
+    kind: &'static str,
+    message: impl AsRef<str>,
+    line: usize,
+    column: usize,
+) -> VmValue {
+    let mut fields = crate::value::DictMap::new();
+    fields.put_str("error", "json_parse_error");
+    fields.put_str("kind", kind);
+    fields.put_str("message", message);
+    fields.put_int("line", line as i64);
+    fields.put_int("column", column as i64);
+    VmValue::dict(fields)
+}
+
+fn malformed_json_error(error: serde_json::Error) -> VmError {
+    VmError::Thrown(json_parse_error_value(
+        "malformed",
+        format!("JSON parse error: {error}"),
+        error.line(),
+        error.column(),
+    ))
+}
+
 pub(crate) fn register_json_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
@@ -109,9 +208,22 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             });
             Ok(parsed)
         }
-        Err(e) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("JSON parse error: {e}"),
-        )))),
+        Err(error) => {
+            if let Some(violation) = json_depth_violation(&text) {
+                return match validate_deep_json(&text) {
+                    Ok(()) => Err(VmError::Thrown(json_parse_error_value(
+                        "recursion_limit",
+                        format!(
+                            "JSON nesting exceeds the maximum container depth ({JSON_PARSE_MAX_CONTAINER_DEPTH})"
+                        ),
+                        violation.line,
+                        violation.column,
+                    ))),
+                    Err(syntax_error) => Err(malformed_json_error(syntax_error)),
+                };
+            }
+            Err(malformed_json_error(error))
+        }
     }
 }
 
@@ -886,6 +998,104 @@ mod tests {
             v = VmValue::List(std::sync::Arc::new(vec![v]));
         }
         v
+    }
+
+    fn nested_json(depth: usize, leaf: &str) -> String {
+        format!("{}{}{}", "[".repeat(depth), leaf, "]".repeat(depth))
+    }
+
+    fn json_parse_failure(text: &str) -> VmValue {
+        let mut output = String::new();
+        match json_parse_impl(&[VmValue::String(arcstr::ArcStr::from(text))], &mut output)
+            .expect_err("invalid JSON must throw")
+        {
+            VmError::Thrown(failure) => failure,
+            other => panic!("expected thrown JSON failure, got {other:?}"),
+        }
+    }
+
+    fn failure_field<'a>(failure: &'a VmValue, key: &str) -> &'a VmValue {
+        match failure {
+            VmValue::Dict(fields) => fields
+                .get(key)
+                .unwrap_or_else(|| panic!("missing JSON failure field {key}")),
+            other => panic!("expected JSON failure dict, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn depth_boundary_distinguishes_supported_and_over_limit_json() {
+        let supported = nested_json(JSON_PARSE_MAX_CONTAINER_DEPTH, "null");
+        assert_eq!(json_depth_violation(&supported), None);
+        assert!(serde_json::from_str::<serde_json::Value>(&supported).is_ok());
+
+        let over_limit = nested_json(JSON_PARSE_MAX_CONTAINER_DEPTH + 1, "null");
+        assert_eq!(
+            json_depth_violation(&over_limit),
+            Some(JsonDepthViolation {
+                line: 1,
+                column: JSON_PARSE_MAX_CONTAINER_DEPTH + 1,
+            })
+        );
+        assert!(validate_deep_json(&over_limit).is_ok());
+    }
+
+    #[test]
+    fn deep_malformed_json_is_not_a_recursion_failure() {
+        let malformed = nested_json(JSON_PARSE_MAX_CONTAINER_DEPTH + 1, "x");
+        assert!(json_depth_violation(&malformed).is_some());
+        let error = validate_deep_json(&malformed).expect_err("bare x is invalid JSON");
+        assert_eq!(error.line(), 1);
+        assert_eq!(error.column(), JSON_PARSE_MAX_CONTAINER_DEPTH + 2);
+    }
+
+    #[test]
+    fn json_parse_throws_closed_malformed_failure() {
+        let failure = json_parse_failure("{\n  bad");
+        assert_eq!(
+            failure_field(&failure, "error").display(),
+            "json_parse_error"
+        );
+        assert_eq!(failure_field(&failure, "kind").display(), "malformed");
+        assert_eq!(failure_field(&failure, "line").as_int(), Some(2));
+        assert!(failure_field(&failure, "column")
+            .as_int()
+            .is_some_and(|column| column > 0));
+        assert!(!failure_field(&failure, "message").as_str_cow().is_empty());
+    }
+
+    #[test]
+    fn json_parse_throws_closed_recursion_failure() {
+        let over_limit = nested_json(JSON_PARSE_MAX_CONTAINER_DEPTH + 1, "null");
+        let failure = json_parse_failure(&over_limit);
+        assert_eq!(
+            failure_field(&failure, "error").display(),
+            "json_parse_error"
+        );
+        assert_eq!(failure_field(&failure, "kind").display(), "recursion_limit");
+        assert_eq!(failure_field(&failure, "line").as_int(), Some(1));
+        assert_eq!(
+            failure_field(&failure, "column").as_int(),
+            Some((JSON_PARSE_MAX_CONTAINER_DEPTH + 1) as i64)
+        );
+    }
+
+    #[test]
+    fn depth_scanner_ignores_brackets_in_strings_and_counts_utf8_bytes() {
+        let prefix = "[\"é\\\"{}[]\",";
+        let text = format!("{prefix}{}{}", "[".repeat(126), "]".repeat(127));
+        assert_eq!(json_depth_violation(&text), None);
+        assert!(validate_deep_json(&text).is_ok());
+
+        let over_limit = format!("{prefix}{}null{}", "[".repeat(127), "]".repeat(128));
+        assert_eq!(
+            json_depth_violation(&over_limit),
+            Some(JsonDepthViolation {
+                line: 1,
+                column: prefix.len() + 127,
+            })
+        );
+        assert!(validate_deep_json(&over_limit).is_ok());
     }
 
     #[test]

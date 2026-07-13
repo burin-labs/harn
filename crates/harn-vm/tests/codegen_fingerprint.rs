@@ -39,6 +39,27 @@ fn codegen_fingerprint_changes_when_input_content_changes() {
     );
 }
 
+#[test]
+fn codegen_fingerprint_tracks_module_artifact_compilation() {
+    let left = tempfile::tempdir().unwrap();
+    let right = tempfile::tempdir().unwrap();
+    seed_compiler_sources(left.path(), "return 1;");
+    seed_compiler_sources(right.path(), "return 1;");
+    fs::write(
+        right.path().join("harn-vm/src/module_artifact.rs"),
+        "pub fn changed_artifact_compiler() {}",
+    )
+    .unwrap();
+
+    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm")));
+    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm")));
+
+    assert_ne!(
+        left_hash, right_hash,
+        "module artifact compiler edits must invalidate bytecode cache keys"
+    );
+}
+
 fn seed_compiler_sources(root: &Path, compiler_body: &str) {
     let files = [
         ("harn-lexer/src/lib.rs", "pub fn lex() {}"),
@@ -46,6 +67,10 @@ fn seed_compiler_sources(root: &Path, compiler_body: &str) {
         ("harn-ir/src/lib.rs", "pub fn lower() {}"),
         ("harn-vm/src/compiler/state.rs", compiler_body),
         ("harn-vm/src/chunk.rs", "pub struct Chunk;"),
+        (
+            "harn-vm/src/module_artifact.rs",
+            "pub fn compile_artifact() {}",
+        ),
     ];
     for (relative, contents) in files {
         let path = root.join(relative);

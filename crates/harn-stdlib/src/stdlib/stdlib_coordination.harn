@@ -4,7 +4,7 @@
 // normalizes coordination envelopes so agents can coordinate without inventing
 // host-local mailboxes or user-visible prose protocols.
 import { filter_nil } from "std/collections"
-import { ensure_parent_dir, read_json, write_json } from "std/fs"
+import { ensure_parent_dir, read_json_result, write_json } from "std/fs"
 import { memory_store } from "std/memory"
 import "std/schema"
 
@@ -740,10 +740,15 @@ fn __coord_dir_lock_existing(lock_path, now_ms) {
   if !harness.fs.exists(lock_path) {
     return {status: "absent", lock_path: lock_path, record_path: record_path}
   }
-  if !harness.fs.exists(record_path) {
-    return {status: "unrecorded", lock_path: lock_path, record_path: record_path}
+  const loaded = read_json_result(record_path)
+  if !is_ok(loaded) {
+    const failure = unwrap_err(loaded)
+    if failure.kind == "absent" {
+      return {status: "unrecorded", lock_path: lock_path, record_path: record_path}
+    }
+    return {status: "malformed", lock_path: lock_path, record_path: record_path, failure: failure}
   }
-  const record = read_json(record_path, nil)
+  const record = unwrap(loaded)
   if type_of(record) != "dict" || record?.schema != __COORD_DIR_LOCK_SCHEMA {
     return {status: "malformed", lock_path: lock_path, record_path: record_path, record: record}
   }
@@ -788,6 +793,7 @@ fn __coord_dir_lock_conflict(resource_path, lock_path, existing, options) {
       lock_path: lock_path,
       record_path: existing.record_path,
       holder: existing.record,
+      failure: existing.failure,
       message: coord_dir_lock_conflict_message(existing),
     },
   )
@@ -1064,7 +1070,7 @@ pub fn coord_dir_lock_conflict_message(conflict) -> string {
  * - `reaper_ttl_ms`: stale-cleanup guard duration, default 1 minute.
  * - `ensure_parent`: default true; create the lock parent when missing.
  *
- * @effects: [fs.write]
+ * @effects: [fs.read, fs.write]
  * @errors: [runtime]
  */
 pub fn coord_acquire_dir_lock(resource_path: string, owner = nil, options = nil) {
@@ -1093,7 +1099,7 @@ pub fn coord_acquire_dir_lock(resource_path: string, owner = nil, options = nil)
  * By default the token in the live owner record must match the supplied lock
  * record. Pass `{strict:false}` to best-effort delete by path.
  *
- * @effects: [fs.write]
+ * @effects: [fs.read, fs.write]
  * @errors: [runtime]
  */
 pub fn coord_release_dir_lock(lock, options = nil) {
@@ -1131,7 +1137,7 @@ pub fn coord_release_dir_lock(lock, options = nil) {
  * do not need to duplicate release-on-error scaffolding around
  * `coord_acquire_dir_lock` / `coord_release_dir_lock`.
  *
- * @effects: [fs.write]
+ * @effects: [fs.read, fs.write]
  * @errors: [runtime]
  * @example: coord_with_dir_lock(path, { lock -> update_manifest(lock) }, {id: "release"})
  */

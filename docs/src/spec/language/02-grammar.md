@@ -101,7 +101,8 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/slug"` — memorable non-secret names and slug helpers
   (random_slug, slug_from, deterministic_slug, slug, slugify)
 - `import "std/fs"` — file-system convenience helpers built on host
-  primitives (ensure_parent_dir, read_json, write_json, read_yaml,
+  primitives (ensure_parent_dir, read_json, read_json_result,
+  read_json_typed, read_json_typed_result, write_json, read_yaml,
   write_yaml, read_toml, write_toml, write_lines, append_line, touch,
   find_files, relative_path, is_file, is_dir, file_size)
 - `import "std/os"` — environment and host diagnostic helpers (os_info,

@@ -1,3 +1,4 @@
+import { __batch_artifact_read, __batch_request_rows_read } from "std/cli/models/batch_artifacts"
 /**
  * `harn models batch` renderer.
  *
@@ -562,199 +563,6 @@ fn __group_summary(group: dict) -> BatchGroupSummary {
   }
 }
 
-fn __read_request_rows(harness: Harness, requests_path: string) -> dict {
-  let rows = []
-  let errors = []
-  if requests_path == "" {
-    return {rows: rows, errors: ["--requests is required"]}
-  }
-  if !harness.fs.exists(requests_path) {
-    return {rows: rows, errors: ["request JSONL not found: " + requests_path]}
-  }
-  const source = harness.fs.read_text(requests_path)
-  let line_no = 0
-  for line in source.split("\n") {
-    line_no = line_no + 1
-    const trimmed = trim(line)
-    if trimmed == "" {
-      continue
-    }
-    const parsed = try {
-      json_parse(trimmed)
-    } catch (e) {
-      errors = errors.push("line " + to_string(line_no) + ": invalid JSON: " + to_string(e))
-      continue
-    }
-    if type_of(parsed) != "dict" {
-      errors = errors.push("line " + to_string(line_no) + ": expected a JSON object")
-      continue
-    }
-    rows = rows.push({line_no: line_no, row: parsed})
-  }
-  return {rows: rows, errors: errors, source_sha256: sha256(source)}
-}
-
-fn __read_manifest(harness: Harness, manifest_path: string) -> dict {
-  let errors = []
-  if manifest_path == "" {
-    return {manifest: {}, source_sha256: "", errors: ["--manifest is required"]}
-  }
-  if !harness.fs.exists(manifest_path) {
-    return {manifest: {}, source_sha256: "", errors: ["batch manifest not found: " + manifest_path]}
-  }
-  const source = harness.fs.read_text(manifest_path)
-  const parsed = try {
-    json_parse(source)
-  } catch (e) {
-    return {
-      manifest: {},
-      source_sha256: sha256(source),
-      errors: ["invalid batch manifest JSON: " + to_string(e)],
-    }
-  }
-  if type_of(parsed) != "dict" {
-    errors = errors.push("batch manifest must be a JSON object")
-    return {manifest: {}, source_sha256: sha256(source), errors: errors}
-  }
-  const manifest = safe_dict(parsed)
-  if safe_string(manifest["kind"], "") != "harn.model_batch_manifest" {
-    errors = errors.push("unsupported batch manifest kind: " + safe_string(manifest["kind"], ""))
-  }
-  if len(safe_list(manifest["groups"])) == 0 {
-    errors = errors.push("batch manifest contains no groups")
-  }
-  return {manifest: manifest, source_sha256: sha256(source), errors: errors}
-}
-
-fn __read_prepare_receipt(harness: Harness, receipt_path: string) -> dict {
-  let errors = []
-  if receipt_path == "" {
-    return {receipt: {}, source_sha256: "", errors: ["--receipt is required"]}
-  }
-  if !harness.fs.exists(receipt_path) {
-    return {receipt: {}, source_sha256: "", errors: ["batch prepare receipt not found: " + receipt_path]}
-  }
-  const source = harness.fs.read_text(receipt_path)
-  const parsed = try {
-    json_parse(source)
-  } catch (e) {
-    return {
-      receipt: {},
-      source_sha256: sha256(source),
-      errors: ["invalid batch prepare receipt JSON: " + to_string(e)],
-    }
-  }
-  if type_of(parsed) != "dict" {
-    errors = errors.push("batch prepare receipt must be a JSON object")
-    return {receipt: {}, source_sha256: sha256(source), errors: errors}
-  }
-  const receipt = safe_dict(parsed)
-  if safe_string(receipt["kind"], "") != "harn.model_batch_prepare_receipt" {
-    errors = errors.push("unsupported batch prepare receipt kind: " + safe_string(receipt["kind"], ""))
-  }
-  if len(safe_list(receipt["jobs"])) == 0 {
-    errors = errors.push("batch prepare receipt contains no jobs")
-  }
-  return {receipt: receipt, source_sha256: sha256(source), errors: errors}
-}
-
-fn __read_submission_receipt(harness: Harness, receipt_path: string) -> dict {
-  let errors = []
-  if receipt_path == "" {
-    return {receipt: {}, source_sha256: "", errors: ["--submission is required"]}
-  }
-  if !harness.fs.exists(receipt_path) {
-    return {receipt: {}, source_sha256: "", errors: ["batch submission receipt not found: " + receipt_path]}
-  }
-  const source = harness.fs.read_text(receipt_path)
-  const parsed = try {
-    json_parse(source)
-  } catch (e) {
-    return {
-      receipt: {},
-      source_sha256: sha256(source),
-      errors: ["invalid batch submission receipt JSON: " + to_string(e)],
-    }
-  }
-  if type_of(parsed) != "dict" {
-    errors = errors.push("batch submission receipt must be a JSON object")
-    return {receipt: {}, source_sha256: sha256(source), errors: errors}
-  }
-  const receipt = safe_dict(parsed)
-  if safe_string(receipt["kind"], "") != "harn.model_batch_submission_receipt" {
-    errors = errors.push("unsupported batch submission receipt kind: " + safe_string(receipt["kind"], ""))
-  }
-  if len(safe_list(receipt["jobs"])) == 0 {
-    errors = errors.push("batch submission receipt contains no jobs")
-  }
-  return {receipt: receipt, source_sha256: sha256(source), errors: errors}
-}
-
-fn __read_status_receipt(harness: Harness, receipt_path: string) -> dict {
-  let errors = []
-  if receipt_path == "" {
-    return {receipt: {}, source_sha256: "", errors: ["--status is required"]}
-  }
-  if !harness.fs.exists(receipt_path) {
-    return {receipt: {}, source_sha256: "", errors: ["batch status receipt not found: " + receipt_path]}
-  }
-  const source = harness.fs.read_text(receipt_path)
-  const parsed = try {
-    json_parse(source)
-  } catch (e) {
-    return {
-      receipt: {},
-      source_sha256: sha256(source),
-      errors: ["invalid batch status receipt JSON: " + to_string(e)],
-    }
-  }
-  if type_of(parsed) != "dict" {
-    errors = errors.push("batch status receipt must be a JSON object")
-    return {receipt: {}, source_sha256: sha256(source), errors: errors}
-  }
-  const receipt = safe_dict(parsed)
-  if safe_string(receipt["kind"], "") != "harn.model_batch_status_receipt" {
-    errors = errors.push("unsupported batch status receipt kind: " + safe_string(receipt["kind"], ""))
-  }
-  if len(safe_list(receipt["jobs"])) == 0 {
-    errors = errors.push("batch status receipt contains no jobs")
-  }
-  return {receipt: receipt, source_sha256: sha256(source), errors: errors}
-}
-
-fn __read_cancel_receipt(harness: Harness, receipt_path: string) -> dict {
-  let errors = []
-  if receipt_path == "" {
-    return {receipt: {}, source_sha256: "", errors: ["--receipt is required"]}
-  }
-  if !harness.fs.exists(receipt_path) {
-    return {receipt: {}, source_sha256: "", errors: ["batch receipt not found: " + receipt_path]}
-  }
-  const source = harness.fs.read_text(receipt_path)
-  const parsed = try {
-    json_parse(source)
-  } catch (e) {
-    return {
-      receipt: {},
-      source_sha256: sha256(source),
-      errors: ["invalid batch receipt JSON: " + to_string(e)],
-    }
-  }
-  if type_of(parsed) != "dict" {
-    errors = errors.push("batch receipt must be a JSON object")
-    return {receipt: {}, source_sha256: sha256(source), errors: errors}
-  }
-  const receipt = safe_dict(parsed)
-  const kind = safe_string(receipt["kind"], "")
-  if kind != "harn.model_batch_submission_receipt" && kind != "harn.model_batch_status_receipt" {
-    errors = errors.push("unsupported batch cancel receipt kind: " + kind)
-  }
-  if len(safe_list(receipt["jobs"])) == 0 {
-    errors = errors.push("batch cancel receipt contains no jobs")
-  }
-  return {receipt: receipt, source_sha256: sha256(source), errors: errors}
-}
-
 fn __mkdirp(harness: Harness, path: string) {
   if trim(path) == "" {
     return
@@ -1242,12 +1050,12 @@ fn __run_manifest(
   } else {
     id_prefix_raw
   }
-  const loaded = __read_request_rows(harness, requests_path)
+  const loaded = __batch_request_rows_read(harness, requests_path)
   const built = __build_manifest(
     catalog,
-    safe_list(loaded["rows"]),
+    loaded.rows,
     requests_path,
-    safe_string(loaded["source_sha256"], ""),
+    loaded.source_sha256,
     out_path,
     provider_filter,
     model_filter,
@@ -1257,7 +1065,7 @@ fn __run_manifest(
     min_discount,
     max_turnaround,
   )
-  const errors = safe_list(loaded["errors"]) + safe_list(built["errors"])
+  const errors = loaded.errors + safe_list(built["errors"])
   const warnings = safe_list(planner_warnings) + safe_list(built["warnings"])
   const manifest = safe_dict(built["manifest"]) + {warnings: warnings}
   let report = {
@@ -1343,13 +1151,13 @@ fn __render_prepare_json(report: dict) -> string {
 fn __run_prepare(harness: Harness) -> int {
   const manifest_path = trim(harness.env.get_or("HARN_MODELS_BATCH_MANIFEST", ""))
   const out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_OUT_DIR", ""))
-  const loaded = __read_manifest(harness, manifest_path)
-  let errors = safe_list(loaded["errors"])
+  const loaded = __batch_artifact_read(harness, manifest_path, "manifest")
+  let errors = loaded.errors
   let warnings = []
   if out_dir == "" {
     errors = errors.push("--out-dir is required")
   }
-  const manifest = safe_dict(loaded["manifest"])
+  const manifest = loaded.artifact
   let artifacts = []
   let jobs = []
   let request_count = 0
@@ -1381,7 +1189,7 @@ fn __run_prepare(harness: Harness) -> int {
     producer: "harn models batch prepare",
     manifest: {
       path: manifest_path,
-      sha256: safe_string(loaded["source_sha256"], ""),
+      sha256: loaded.source_sha256,
       source: safe_dict(manifest["source"]),
       request_count: __safe_int(manifest["requestCount"]) ?? 0,
       group_count: __safe_int(manifest["groupCount"]) ?? 0,
@@ -2528,13 +2336,13 @@ fn __run_submit(harness: Harness) -> int {
   const receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_RECEIPT", ""))
   const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMIT_OUT", ""))
   const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
-  const loaded = __read_prepare_receipt(harness, receipt_path)
-  let errors = safe_list(loaded["errors"])
+  const loaded = __batch_artifact_read(harness, receipt_path, "prepare_receipt")
+  let errors = loaded.errors
   let warnings = []
   if out_path == "" {
     errors = errors.push("--out is required")
   }
-  const prepare = safe_dict(loaded["receipt"])
+  const prepare = loaded.artifact
   let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(prepare["jobs"]) {
@@ -2551,7 +2359,7 @@ fn __run_submit(harness: Harness) -> int {
     dryRun: dry_run,
     source: {
       path: receipt_path,
-      sha256: safe_string(loaded["source_sha256"], ""),
+      sha256: loaded.source_sha256,
       prepare_status: safe_string(prepare["status"], ""),
       manifest: safe_dict(prepare["manifest"]),
     },
@@ -3228,13 +3036,13 @@ fn __run_status(harness: Harness) -> int {
   const submission_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMISSION", ""))
   const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS_OUT", ""))
   const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
-  const loaded = __read_submission_receipt(harness, submission_path)
-  let errors = safe_list(loaded["errors"])
+  const loaded = __batch_artifact_read(harness, submission_path, "submission_receipt")
+  let errors = loaded.errors
   let warnings = []
   if out_path == "" {
     errors = errors.push("--out is required")
   }
-  const submission = safe_dict(loaded["receipt"])
+  const submission = loaded.artifact
   let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(submission["jobs"]) {
@@ -3251,7 +3059,7 @@ fn __run_status(harness: Harness) -> int {
     dryRun: dry_run,
     source: {
       path: submission_path,
-      sha256: safe_string(loaded["source_sha256"], ""),
+      sha256: loaded.source_sha256,
       submission_status: safe_string(submission["status"], ""),
       prepare_source: safe_dict(safe_dict(submission["source"])["manifest"]),
     },
@@ -3667,13 +3475,13 @@ fn __run_cancel(harness: Harness) -> int {
   const receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_RECEIPT", ""))
   const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_OUT", ""))
   const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
-  const loaded = __read_cancel_receipt(harness, receipt_path)
-  let errors = safe_list(loaded["errors"])
+  const loaded = __batch_artifact_read(harness, receipt_path, "cancel_source_receipt")
+  let errors = loaded.errors
   let warnings = []
   if out_path == "" {
     errors = errors.push("--out is required")
   }
-  const source_receipt = safe_dict(loaded["receipt"])
+  const source_receipt = loaded.artifact
   let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(source_receipt["jobs"]) {
@@ -3690,7 +3498,7 @@ fn __run_cancel(harness: Harness) -> int {
     dryRun: dry_run,
     source: {
       path: receipt_path,
-      sha256: safe_string(loaded["source_sha256"], ""),
+      sha256: loaded.source_sha256,
       kind: safe_string(source_receipt["kind"], ""),
       status: safe_string(source_receipt["status"], ""),
       upstream_source: safe_dict(source_receipt["source"]),
@@ -4405,13 +4213,13 @@ fn __run_download(harness: Harness) -> int {
   const out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_RESULTS_OUT_DIR", ""))
   const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
   const max_bytes = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MAX_DOWNLOAD_BYTES", "268435456")) ?? 268435456
-  const loaded = __read_status_receipt(harness, status_path)
-  let errors = safe_list(loaded["errors"])
+  const loaded = __batch_artifact_read(harness, status_path, "status_receipt")
+  let errors = loaded.errors
   let warnings = []
   if out_dir == "" {
     errors = errors.push("--out-dir is required")
   }
-  const status_receipt = safe_dict(loaded["receipt"])
+  const status_receipt = loaded.artifact
   let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(status_receipt["jobs"]) {
@@ -4433,7 +4241,7 @@ fn __run_download(harness: Harness) -> int {
     dryRun: dry_run,
     source: {
       path: status_path,
-      sha256: safe_string(loaded["source_sha256"], ""),
+      sha256: loaded.source_sha256,
       status: safe_string(status_receipt["status"], ""),
       submission_source: safe_dict(status_receipt["source"]),
     },

@@ -269,7 +269,7 @@ fn main(harness: Harness) -> int {
   const report = try {
     json_parse(raw)
   } catch (e) {
-    harness.stdio.eprintln("internal error: failed to parse doctor report: " + to_string(e))
+    harness.stdio.eprintln("internal error: failed to parse doctor report: " + e.message)
     return 70
   }
   if type_of(report) != "dict" {

@@ -1,4 +1,4 @@
-import { read_json_typed, read_json_typed_report, write_json } from "std/fs"
+import { read_json_typed, read_json_typed_result, write_json } from "std/fs"
 import "std/schema"
 
 type AliasReportUser = {name: string}
@@ -57,7 +57,7 @@ pipeline test(task) {
   const json_path = path_join(root, "user.json")
   write_json(json_path, {name: "Mira"})
   __io_println(read_json_typed(json_path, AliasReportUser).name)
-  const missing_report = read_json_typed_report(path_join(root, "missing.json"), AliasReportUser)
-  __io_println(!missing_report.ok)
-  __io_println(missing_report.stage)
+  const missing_result = read_json_typed_result(path_join(root, "missing.json"), AliasReportUser)
+  __io_println(is_err(missing_result))
+  __io_println(unwrap_err(missing_result).kind)
 }

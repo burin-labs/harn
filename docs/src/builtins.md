@@ -80,7 +80,7 @@ log(unwrap_err(bad))         // something went wrong
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `json_parse(str)` | str: string | value | Parse JSON string into Harn values. Throws on invalid JSON |
+| `json_parse(str)` | str: string | value | Parse JSON into Harn values. Throws `{error: "json_parse_error", kind, message, line, column}` for malformed or over-depth input |
 | `json_stringify(value)` | value: any | string | Serialize Harn value to JSON. Closures and handles become `null` |
 | `json_stringify_pretty(value)` | value: any | string | Serialize Harn value to pretty-printed JSON with stable two-space indentation |
 | `yaml_parse(str)` | str: string | value | Parse YAML string into Harn values. Throws on invalid YAML |
@@ -606,8 +606,8 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `read_file(path)` | path: string | string | Read entire file as UTF-8 string, or return raw source for embedded `std/...harn.prompt` assets. Throws on failure. **Deprecated in favor of `read_file_result` for new code; the throwing form remains supported.** |
-| `read_file_result(path)` | path: string | `Result<string, string>` | Non-throwing read: returns `Result.Ok(content)` on success or `Result.Err(message)` on failure. Shares `read_file`'s content cache for filesystem files and also supports embedded `std/...harn.prompt` assets |
+| `read_file(path)` | path: string | string | Read entire file as UTF-8 string, or return raw source for embedded `std/...harn.prompt` assets. Filesystem I/O failures throw structured `{error: "io_error", kind, message}`; policy denials remain categorized runtime errors. **Deprecated in favor of `read_file_result` for new code; the throwing form remains supported.** |
+| `read_file_result(path)` | path: string | `Result<string, {error, kind, message}>` | Non-throwing read: returns content or a structured `{error: "io_error", kind, message}` failure. Shares `read_file`'s cache and supports embedded `std/...harn.prompt` assets |
 | `write_file(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
 | `append_file(path, content)` | path: string, content: string | nil | Append string to file, creating it if it doesn't exist. Throws on failure |
 | `copy_file(src, dst)` | src: string, dst: string | nil | Copy a file. Throws on failure |

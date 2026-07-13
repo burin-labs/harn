@@ -78,7 +78,7 @@ pub fn load_policy(json_text) {
     json_parse(json_text)
   }
   if !is_ok(parsed_result) {
-    return {ok: false, error: "policy json parse failed: ${unwrap_err(parsed_result)}"}
+    return {ok: false, error: "policy json parse failed: " + unwrap_err(parsed_result).message}
   }
   const parsed = unwrap(parsed_result)
   const policy = with_defaults(parsed)

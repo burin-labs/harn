@@ -957,10 +957,10 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | Function | Description |
 |---|---|
 | `ensure_parent_dir(path)` | Create the parent directory for a file path when needed |
-| `read_json(path, fallback?)` | Read and parse JSON, returning `fallback` for missing or invalid files |
-| `read_json_result(path)` | Read and parse JSON as `{ok, value?, error?}` |
-| `read_json_typed<T>(path, schema: Schema<T>, fallback?: T, apply_defaults?) -> T` | Read, parse, and schema-validate JSON, returning `fallback` on read/parse/schema failure |
-| `read_json_typed_report<T>(path, schema: Schema<T>, apply_defaults?)` | Read, parse, and schema-validate JSON as `{ok, message, errors, issues, value?: T, stage, path}` |
+| `read_json(path)` | Read required JSON, throwing `JsonReadFailure` for absent, unreadable, malformed, or over-depth input |
+| `read_json_result(path)` | Read JSON as `Result<unknown, JsonReadFailure>` without erasing failure kind, path, or parser location |
+| `read_json_typed<T>(path, schema: Schema<T>, apply_defaults?) -> T` | Read required JSON and validate it against a schema, throwing the typed read or schema failure |
+| `read_json_typed_result<T>(path, schema: Schema<T>, apply_defaults?)` | Read and schema-validate JSON as `Result<T, JsonReadFailure \| SchemaValidationFailure>` |
 | `write_json(path, value, options?)` | Write JSON with optional `{pretty, trailing_newline, ensure_parent}` |
 | `read_yaml(path, fallback?)` / `write_yaml(path, value, options?)` | YAML file helpers |
 | `read_toml(path, fallback?)` / `write_toml(path, value, options?)` | TOML file helpers |
@@ -971,6 +971,13 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | `relative_path(root, path)` | Return a slash-normalized path relative to `root` when possible |
 | `is_file(path)` / `is_dir(path)` | Return type-aware existence checks |
 | `file_size(path)` | Return file size in bytes, or `nil` when unavailable |
+
+`JsonReadFailure` contains `{kind, path, detail, line?, column?}`. Its closed
+`kind` union is
+`"absent" | "unreadable" | "malformed" | "recursion_limit"`; only callers that
+explicitly treat absence as optional should default that case.
+`SchemaValidationFailure` contains `{kind: "schema_invalid", path, detail,
+issues}`.
 
 ```harn
 import { read_json, relative_path, write_json } from "std/fs"
@@ -1002,7 +1009,9 @@ support boundary.
 | `run_artifacts_list(kind, options?)` | List recent run directories newest-first with `{root?, namespace?, limit?}` |
 | `run_artifact_path(run, name)` | Resolve a relative artifact path inside `run.dir`, rejecting absolute paths and `..` traversal |
 | `run_artifact_write_json(run, name, value, options?)` | Write JSON through `std/fs.write_json` conventions |
-| `run_artifact_read_json(run, name, fallback?)` | Read JSON through `std/fs.read_json` fallback semantics |
+| `run_artifact_read_json(run, name)` | Read a required JSON artifact through `std/fs.read_json` |
+| `run_artifact_read_json_typed<T>(run, name, schema)` | Read required JSON and validate the consumer-owned artifact shape |
+| `run_artifact_read_json_result(run, name)` | Read an optional JSON artifact while preserving typed failure detail |
 | `run_artifact_write_text(run, name, text, options?)` | Write text with parent-directory and trailing-newline behavior |
 | `run_artifact_read_text(run, name, fallback?)` | Read text with a fallback for missing or unreadable files |
 | `run_artifact_transcript_dir(run, name?)` | Return a transcript sidecar directory such as `agent-llm` or `chat-llm` |

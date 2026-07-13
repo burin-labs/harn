@@ -194,7 +194,7 @@ fn main(harness: Harness) -> int {
   const report = try {
     json_parse(raw)
   } catch (e) {
-    harness.stdio.eprintln("internal error: failed to parse LoRA preflight payload: " + to_string(e))
+    harness.stdio.eprintln("internal error: failed to parse LoRA preflight payload: " + e.message)
     return 70
   }
   const ok = safe_bool(report["ok"], false)

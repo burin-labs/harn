@@ -1,6 +1,6 @@
 /**
  * read_file_result returns Result.Ok(content) on success and
- * Result.Err(message) on failure (instead of throwing like read_file).
+ * Result.Err({error, kind, message}) on failure (instead of throwing).
  */
 pipeline default(task) {
   // Write a known file, then read it back via read_file_result.
@@ -9,11 +9,11 @@ pipeline default(task) {
   __io_println(is_ok(ok))
   __io_println(unwrap(ok))
   harness.fs.delete("rfr_fixture.txt")
-  // Missing path returns Result.Err with a descriptive message.
+  // Missing path returns a structured, stable Result.Err.
   const bad = harness.fs.read_text_result("does_not_exist_7f3a.txt")
   __io_println(is_err(bad))
-  match bad {
-    Result.Err(msg) -> { __io_println(msg.contains("Failed to read")) }
-    Result.Ok(_) -> { __io_println("unexpected") }
-  }
+  const failure = unwrap_err(bad)
+  __io_println(failure.error)
+  __io_println(failure.kind)
+  __io_println(failure.message.contains("Failed to read"))
 }

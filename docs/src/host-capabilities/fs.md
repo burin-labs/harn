@@ -31,6 +31,11 @@ surface.
 | `harness.fs.glob(pattern, base_or_options?, options?)` | `glob(pattern, base_or_options?, options?)` | `workspace.list` |
 | `harness.fs.find_text(root, pattern, options?)` | `find_text(root, pattern, options?)` | `workspace.list` + `workspace.read_text` |
 
+`harness.fs.read_text_result(path)` returns a closed structured I/O failure
+with stable `kind` values such as `not_found`, `permission_denied`,
+`invalid_data`, and `sandbox_denied`. Branch on `kind`; keep `message` for
+diagnostics rather than parsing its prose.
+
 `harness.fs.workspace_temp_dir()` returns a workspace-local scratch directory,
 creating it lazily. Sandboxed runs place the directory inside the active
 workspace root; unsandboxed runs use `.harn-tmp` relative to the script source

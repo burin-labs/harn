@@ -463,7 +463,7 @@ fn main(harness: Harness) {
   const report = try {
     json_parse(raw)
   } catch (e) {
-    harness.stdio.eprintln("internal error: failed to parse PromptReport: " + to_string(e))
+    harness.stdio.eprintln("internal error: failed to parse PromptReport: " + e.message)
     exit(70)
   }
   const output = harness.env.get_or("HARN_EVAL_PROMPT_OUTPUT", "terminal")
