@@ -101,15 +101,6 @@ pub(crate) fn extract_llm_options(
             }
         }
     }
-    // A routing_policy chain owns provider/model selection: snap the
-    // base options to the first link so transcript-only consumers see
-    // a sensible placeholder. The executor swaps these per attempt.
-    if let Some(policy) = routing_policy.as_ref() {
-        if let Some(first) = policy.chain.first() {
-            provider = first.provider.clone();
-            model = first.model.clone();
-        }
-    }
     let route_fallbacks = match &route_policy {
         crate::llm::api::LlmRoutePolicy::PreferenceList { .. } => routing_decision
             .as_ref()
@@ -128,6 +119,15 @@ pub(crate) fn extract_llm_options(
         _ => Vec::new(),
     };
     let fallback_chain = parse_fallback_chain_option(options.as_ref());
+    // A routing_policy chain owns provider/model selection: snap the
+    // base options to the first link so transcript-only consumers see
+    // a sensible placeholder. The executor swaps these per attempt.
+    if let Some(policy) = routing_policy.as_ref() {
+        if let Some(first) = policy.chain.first() {
+            provider = first.provider.clone();
+            model = first.model.clone();
+        }
+    }
     let api_key = resolve_api_key(&provider)?;
     let caps = crate::llm::capabilities::lookup(&provider, &model);
     let mut api_mode = parse_api_mode_option(options.as_ref())?;
@@ -808,7 +808,14 @@ pub(crate) fn extract_llm_options(
         equivalent_failover_requirements_for_options(&opts),
     )?;
     if opts.routing_policy.is_none() {
-        opts.routing_policy = equivalent_failover_policy;
+        opts.routing_policy = equivalent_failover_policy.or_else(|| {
+            crate::llm::routing::build_transport_failover_policy(
+                &opts.provider,
+                &opts.model,
+                &opts.route_fallbacks,
+                &opts.fallback_chain,
+            )
+        });
     }
 
     validate_options(&opts);

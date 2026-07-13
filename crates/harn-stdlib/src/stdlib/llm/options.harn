@@ -47,7 +47,8 @@ pub type ModelLadderStep = {
 
 /**
  * Ordered fallback ladder for `llm_call` model routing. Advance happens on
- * transport-class failures only, never on schema-validation failures.
+ * route failures (transport classes or an empty generation after its bounded
+ * same-route retry), never on schema-validation failures.
  */
 pub type ModelLadder = list<string | ModelLadderStep>
 

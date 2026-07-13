@@ -643,8 +643,6 @@ fn probe_request_payload(
         region: None,
         api_key: String::new(),
         api_mode: LlmApiMode::ChatCompletions,
-        fallback_chain: Vec::new(),
-        route_fallbacks: Vec::new(),
         messages: vec![json!({"role": "user", "content": prompt})],
         system: None,
         max_tokens: default_int("max_tokens").unwrap_or(256),

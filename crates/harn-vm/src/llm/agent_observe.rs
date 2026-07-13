@@ -66,9 +66,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::event_log::EventLog;
-use crate::value::VmError;
+use crate::value::{VmError, VmValue};
 
-use super::api::{vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender};
+use super::api::{
+    vm_call_llm_full_single_route, vm_call_llm_full_streaming_offthread_single_route,
+    vm_call_llm_full_streaming_single_route, DeltaSender,
+};
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
 use super::agent_tools::next_call_id;
@@ -622,21 +625,60 @@ pub(super) fn shared_cooldown_ms_for_llm_error(err: &VmError) -> u64 {
 /// Matches the message regardless of the `VmError` carrier (`Thrown(String)`
 /// from the parsers, or `CategorizedError`/`Runtime` should a future caller
 /// re-wrap it).
+#[cfg(test)]
 fn is_empty_completion_retry_error(err: &VmError) -> bool {
+    empty_completion_retry_reason(err).is_some()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UnproductiveCompletionReason {
+    EmptyGeneration,
+    UnproductiveCompletion,
+}
+
+impl UnproductiveCompletionReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::EmptyGeneration => "empty_generation",
+            Self::UnproductiveCompletion => "unproductive_completion",
+        }
+    }
+}
+
+fn empty_completion_retry_reason(err: &VmError) -> Option<UnproductiveCompletionReason> {
+    if let VmError::Thrown(crate::value::VmValue::Dict(fields)) = err {
+        return match fields
+            .get("code")
+            .map(crate::value::VmValue::display)
+            .as_deref()
+        {
+            Some("empty_generation") => Some(UnproductiveCompletionReason::EmptyGeneration),
+            Some("unproductive_completion") => {
+                Some(UnproductiveCompletionReason::UnproductiveCompletion)
+            }
+            _ => None,
+        };
+    }
     let msg = match err {
         VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
         VmError::CategorizedError { message, .. } => message.as_str(),
         VmError::Runtime(s) => s.as_str(),
-        _ => return false,
+        _ => return None,
     };
     let lower = msg.to_lowercase();
     if !lower.contains("completion_tokens=") {
-        return false;
+        return None;
     }
     // (1) zero-token empty completion, or (2) billed-noncommittal completion.
-    lower.contains("delivered no content")
-        || (lower.contains("no dispatchable tool call or answer")
-            && lower.contains("upstream contract violation"))
+    if lower.contains("delivered no content") {
+        return Some(UnproductiveCompletionReason::EmptyGeneration);
+    }
+    if lower.contains("no dispatchable tool call or answer")
+        && lower.contains("upstream contract violation")
+    {
+        return Some(UnproductiveCompletionReason::UnproductiveCompletion);
+    }
+    None
 }
 
 /// A *thrown* failure whose signature says the provider's **native tool-call
@@ -895,6 +937,7 @@ fn terminal_unproductive_completion_failover_error(
     result: &super::api::LlmResult,
     provider_under_throttle: bool,
     attempt_count: usize,
+    duration_ms: Option<u64>,
 ) -> Option<VmError> {
     if crate::llm::providers::is_internal_simulator(&opts.provider)
         || !is_retryable_unproductive_completion(result)
@@ -907,13 +950,16 @@ fn terminal_unproductive_completion_failover_error(
             "returned completion_tokens={} and delivered no content, thinking, or tool calls",
             result.output_tokens
         );
-        return Some(VmError::CategorizedError {
-            category: crate::value::ErrorCategory::CircuitOpen,
-            message: format!(
+        return Some(provider_exhausted_error(
+            opts,
+            UnproductiveCompletionReason::EmptyGeneration,
+            attempt_count,
+            duration_ms,
+            format!(
                 "provider {} model {} exhausted empty-completion retry budget: reason=empty_generation attempt_count={attempt_count}; {detail}",
-                opts.provider, opts.model,
+                opts.provider, opts.model
             ),
-        });
+        ));
     }
     if !provider_under_throttle {
         return None;
@@ -924,13 +970,115 @@ fn terminal_unproductive_completion_failover_error(
         result.stop_reason.as_deref().unwrap_or("unknown"),
         result.output_tokens
     );
-    Some(VmError::CategorizedError {
-        category: crate::value::ErrorCategory::CircuitOpen,
-        message: format!(
-            "provider {} model {} exhausted unproductive-completion retry budget while rate governor circuit_open/under throttle: {detail}",
-            opts.provider, opts.model
+    Some(provider_exhausted_error(
+        opts,
+        UnproductiveCompletionReason::UnproductiveCompletion,
+        attempt_count,
+        duration_ms,
+        format!(
+            "provider {} model {} exhausted unproductive-completion retry budget while rate governor circuit_open/under throttle: reason=unproductive_completion attempt_count={attempt_count}; {detail}",
+            opts.provider, opts.model,
         ),
-    })
+    ))
+}
+
+fn terminal_unproductive_completion_failure(
+    opts: &super::api::LlmCallOptions,
+    result: &super::api::LlmResult,
+    provider_under_throttle: bool,
+    attempt_count: usize,
+    duration_ms: u64,
+) -> Option<VmError> {
+    let error = terminal_unproductive_completion_failover_error(
+        opts,
+        result,
+        provider_under_throttle,
+        attempt_count,
+        Some(duration_ms),
+    )?;
+    let reason = if is_zero_token_empty_completion(result) {
+        UnproductiveCompletionReason::EmptyGeneration
+    } else {
+        UnproductiveCompletionReason::UnproductiveCompletion
+    };
+    super::rate_limit::observe_unproductive_completion_for_llm_call(opts, reason.as_str());
+    Some(error)
+}
+
+fn provider_exhausted_error(
+    opts: &super::api::LlmCallOptions,
+    reason: UnproductiveCompletionReason,
+    attempt_count: usize,
+    duration_ms: Option<u64>,
+    message: String,
+) -> VmError {
+    let mut attempt = std::collections::BTreeMap::from([
+        (
+            "provider".to_string(),
+            VmValue::String(arcstr::ArcStr::from(opts.provider.clone())),
+        ),
+        (
+            "model".to_string(),
+            VmValue::String(arcstr::ArcStr::from(opts.model.clone())),
+        ),
+        (
+            "attempt_count".to_string(),
+            VmValue::Int(attempt_count as i64),
+        ),
+        (
+            "reason".to_string(),
+            VmValue::String(arcstr::ArcStr::from(reason.as_str())),
+        ),
+    ]);
+    if let Some(duration_ms) = duration_ms {
+        attempt.insert("duration_ms".to_string(), VmValue::Int(duration_ms as i64));
+    }
+    super::routing::provider_exhausted_error(
+        "circuit_open",
+        reason.as_str(),
+        attempt_count,
+        message,
+        VmValue::List(std::sync::Arc::new(vec![VmValue::dict(attempt)])),
+    )
+}
+
+fn emit_empty_completion_retry(
+    iteration: usize,
+    attempt: usize,
+    opts: &super::api::LlmCallOptions,
+    reason: UnproductiveCompletionReason,
+    duration_ms: u64,
+    error: &str,
+) {
+    append_llm_observability_entry(
+        "empty_completion_retry",
+        serde_json::Map::from_iter([
+            (
+                "schema".to_string(),
+                serde_json::json!("harn.llm.empty_completion_retry.v1"),
+            ),
+            (
+                "receipt_kind".to_string(),
+                serde_json::json!("empty_completion_retry"),
+            ),
+            ("iteration".to_string(), serde_json::json!(iteration)),
+            ("attempt".to_string(), serde_json::json!(attempt)),
+            ("provider".to_string(), serde_json::json!(opts.provider)),
+            ("model".to_string(), serde_json::json!(opts.model)),
+            ("reason".to_string(), serde_json::json!(reason.as_str())),
+            ("duration_ms".to_string(), serde_json::json!(duration_ms)),
+            ("error".to_string(), serde_json::json!(error)),
+        ]),
+    );
+    super::trace::emit_agent_event(super::trace::AgentTraceEvent::EmptyCompletionRetry {
+        iteration,
+        attempt,
+        provider: opts.provider.clone(),
+        model: opts.model.clone(),
+        reason: reason.as_str().to_string(),
+        duration_ms,
+        error: error.to_string(),
+    });
 }
 
 struct ProviderCallErrorObservation<'a> {
@@ -2058,9 +2206,9 @@ pub(crate) async fn observed_llm_call(
                     None => delta_tx,
                 };
                 if offthread {
-                    vm_call_llm_full_streaming_offthread(opts, delta_tx).await
+                    vm_call_llm_full_streaming_offthread_single_route(opts, delta_tx).await
                 } else {
-                    vm_call_llm_full_streaming(opts, delta_tx).await
+                    vm_call_llm_full_streaming_single_route(opts, delta_tx).await
                 }
             } else if offthread {
                 let delta_tx = match detector_ctx {
@@ -2077,7 +2225,7 @@ pub(crate) async fn observed_llm_call(
                         tx
                     }
                 };
-                vm_call_llm_full_streaming_offthread(opts, delta_tx).await
+                vm_call_llm_full_streaming_offthread_single_route(opts, delta_tx).await
             } else if let Some(sink) = delta_sink.clone() {
                 let delta_tx = match detector_ctx {
                     Some(ctx) => tee_delta_sender(vec![
@@ -2086,12 +2234,12 @@ pub(crate) async fn observed_llm_call(
                     ]),
                     None => sink,
                 };
-                vm_call_llm_full_streaming(opts, delta_tx).await
+                vm_call_llm_full_streaming_single_route(opts, delta_tx).await
             } else if let Some(ctx) = detector_ctx {
                 let delta_tx = spawn_detector_only_forwarder(ctx, first_token);
-                vm_call_llm_full_streaming(opts, delta_tx).await
+                vm_call_llm_full_streaming_single_route(opts, delta_tx).await
             } else {
-                super::api::vm_call_llm_full(opts).await
+                vm_call_llm_full_single_route(opts).await
             }
         })
         .await;
@@ -2120,12 +2268,11 @@ pub(crate) async fn observed_llm_call(
                 // provider hiccups, not answers: retry within the
                 // empty-completion budget rather than advancing the loop on a
                 // broken turn (which would only reply with a generic
-                // no-progress nag). Once the budget is exhausted, a healthy
-                // provider still falls through and returns the result unchanged
-                // so callers see today's shape. If the rate governor says this
-                // route was already throttled/open, surface a failover-eligible
-                // `circuit_open` error instead; routing can then move to the next
-                // provider rather than retry-storming the dead lane.
+                // no-progress nag). Once the budget is exhausted, surface a
+                // failover-eligible `provider_exhausted` error so routing can
+                // move to the next route. Actionless non-empty errors retain
+                // their throttle gate because they can be model behavior rather
+                // than a dead serving route.
                 if is_retryable_unproductive_completion(&result)
                     && attempt < empty_completion_retry_budget(&opts.provider)
                 {
@@ -2146,25 +2293,18 @@ pub(crate) async fn observed_llm_call(
                             opts.provider, opts.model
                         )
                     };
-                    append_llm_observability_entry(
-                        "empty_completion_retry",
-                        serde_json::Map::from_iter([
-                            (
-                                "iteration".to_string(),
-                                serde_json::json!(iteration.unwrap_or(0)),
-                            ),
-                            ("attempt".to_string(), serde_json::json!(attempt + 1)),
-                            ("provider".to_string(), serde_json::json!(opts.provider)),
-                            ("model".to_string(), serde_json::json!(opts.model)),
-                            ("error".to_string(), serde_json::json!(detail.clone())),
-                        ]),
-                    );
-                    super::trace::emit_agent_event(
-                        super::trace::AgentTraceEvent::EmptyCompletionRetry {
-                            iteration: iteration.unwrap_or(0),
-                            attempt: attempt + 1,
-                            error: detail.clone(),
-                        },
+                    let retry_reason = if errored_actionless {
+                        UnproductiveCompletionReason::UnproductiveCompletion
+                    } else {
+                        UnproductiveCompletionReason::EmptyGeneration
+                    };
+                    emit_empty_completion_retry(
+                        iteration.unwrap_or(0),
+                        attempt + 1,
+                        opts,
+                        retry_reason,
+                        duration_ms,
+                        &detail,
                     );
                     if let Some(b) = bridge {
                         b.send_call_end(
@@ -2204,11 +2344,12 @@ pub(crate) async fn observed_llm_call(
                         &opts.provider,
                         &governor_org_key,
                     );
-                if let Some(error) = terminal_unproductive_completion_failover_error(
+                if let Some(error) = terminal_unproductive_completion_failure(
                     opts,
                     &result,
                     provider_under_throttle,
                     attempt_count,
+                    duration_ms,
                 ) {
                     let category = crate::value::error_to_category(&error);
                     let message = error.to_string();
@@ -2383,7 +2524,15 @@ pub(crate) async fn observed_llm_call(
                 if is_retryable_unproductive_completion(&result)
                     && !crate::llm::providers::is_internal_simulator(&opts.provider)
                 {
-                    super::rate_limit::observe_unproductive_completion_for_llm_call(opts);
+                    let reason = if is_zero_token_empty_completion(&result) {
+                        UnproductiveCompletionReason::EmptyGeneration
+                    } else {
+                        UnproductiveCompletionReason::UnproductiveCompletion
+                    };
+                    super::rate_limit::observe_unproductive_completion_for_llm_call(
+                        opts,
+                        reason.as_str(),
+                    );
                 } else {
                     super::rate_limit::observe_network_outcome_for_llm_call(opts, false);
                 }
@@ -2409,7 +2558,8 @@ pub(crate) async fn observed_llm_call(
                 // (connection/DNS/timeout) AND provider overload (529/503) —
                 // never 429 (rate limit) or generic 5xx (single-request server
                 // fault on a reachable, healthy link).
-                let empty_completion_error = is_empty_completion_retry_error(&error);
+                let empty_completion_reason = empty_completion_retry_reason(&error);
+                let empty_completion_error = empty_completion_reason.is_some();
                 if !empty_completion_error {
                     super::rate_limit::observe_network_outcome_for_llm_call(
                         opts,
@@ -2521,6 +2671,19 @@ pub(crate) async fn observed_llm_call(
                     );
                 }
                 if !can_retry {
+                    let surfaced_error = if empty_completion_error
+                        && !crate::llm::providers::is_internal_simulator(&opts.provider)
+                    {
+                        Some(provider_exhausted_error(
+                            opts,
+                            empty_completion_reason.expect("empty reason accompanies empty error"),
+                            attempt + 1,
+                            Some(duration_ms),
+                            message.clone(),
+                        ))
+                    } else {
+                        None
+                    };
                     if empty_completion_error
                         && !crate::llm::providers::is_internal_simulator(&opts.provider)
                     {
@@ -2532,7 +2695,12 @@ pub(crate) async fn observed_llm_call(
                         // cannot stop for a single-provider model). Mirrors the
                         // `Ok`-arm terminal-empty feed so both empty shapes bound
                         // identically.
-                        super::rate_limit::observe_unproductive_completion_for_llm_call(opts);
+                        super::rate_limit::observe_unproductive_completion_for_llm_call(
+                            opts,
+                            empty_completion_reason
+                                .expect("terminal empty has a classified reason")
+                                .as_str(),
+                        );
                     }
                     if let Some(metrics) = crate::active_metrics_registry() {
                         metrics.record_llm_call(&opts.provider, &opts.model, status, 0.0);
@@ -2550,32 +2718,20 @@ pub(crate) async fn observed_llm_call(
                         &effective_tool_format,
                         &super::resolved_dispatch::DispatchOutcome::from_error_message(&message),
                     );
-                    return Err(error);
+                    return Err(surfaced_error.unwrap_or(error));
                 }
                 if empty_completion_error {
                     // This thrown empty completion is being retried (we passed
                     // the `!can_retry` gate). Count it so a subsequent serve is
                     // recorded as transient-recovered, not a clean serve.
                     empty_completion_retries += 1;
-                    append_llm_observability_entry(
-                        "empty_completion_retry",
-                        serde_json::Map::from_iter([
-                            (
-                                "iteration".to_string(),
-                                serde_json::json!(iteration.unwrap_or(0)),
-                            ),
-                            ("attempt".to_string(), serde_json::json!(attempt + 1)),
-                            ("provider".to_string(), serde_json::json!(opts.provider)),
-                            ("model".to_string(), serde_json::json!(opts.model)),
-                            ("error".to_string(), serde_json::json!(error.to_string())),
-                        ]),
-                    );
-                    super::trace::emit_agent_event(
-                        super::trace::AgentTraceEvent::EmptyCompletionRetry {
-                            iteration: iteration.unwrap_or(0),
-                            attempt: attempt + 1,
-                            error: error.to_string(),
-                        },
+                    emit_empty_completion_retry(
+                        iteration.unwrap_or(0),
+                        attempt + 1,
+                        opts,
+                        empty_completion_reason.expect("empty retry has a classified reason"),
+                        duration_ms,
+                        &error.to_string(),
                     );
                 }
                 // Apply the runtime tool_format degrade for the next attempt:
@@ -3703,11 +3859,11 @@ mod empty_completion_retry_tests {
     //! Zero-token empty-completion retry coverage. A provider stall can end
     //! with an empty HTTP 200 (observed live on OpenRouter: 133s hang,
     //! `output_tokens=0`), which is not an error at the wire level —
-    //! `observed_llm_call` must treat it as a transient hiccup and retry,
-    //! and must return the empty result unchanged once the budget is spent.
+    //! `observed_llm_call` must treat it as a transient hiccup and retry.
     //! Driven through `FakeLlmProvider` (an empty scripted stream produces
     //! exactly the zero-token empty shape) so the full retry loop runs
-    //! without network I/O.
+    //! without network I/O. Simulators intentionally preserve their scripted
+    //! terminal empty result; live routes convert it to typed exhaustion.
 
     use super::*;
     use crate::llm::fake::{
@@ -3769,6 +3925,8 @@ mod empty_completion_retry_tests {
     fn empty_completion_retries_then_succeeds_on_second_attempt() {
         current_thread_runtime().block_on(async {
             reset_agent_trace_state();
+            let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+            push_llm_transcript_dir(transcript_dir.path().to_str().expect("utf8 tempdir"));
             let _guard = install_fake_llm_script(FakeLlmScript::new().push(empty_turn()).push(
                 FakeLlmTurn::stream(vec![
                     FakeLlmEvent::Token("recovered".into()),
@@ -3779,20 +3937,46 @@ mod empty_completion_retry_tests {
                 observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
                     .await
                     .expect("empty completion retry should recover");
+            pop_llm_transcript_dir();
             assert_eq!(result.text, "recovered");
 
-            let retries: Vec<usize> = peek_agent_trace()
+            let retries: Vec<(usize, String, String, String)> = peek_agent_trace()
                 .iter()
                 .filter_map(|event| match event {
-                    AgentTraceEvent::EmptyCompletionRetry { attempt, .. } => Some(*attempt),
+                    AgentTraceEvent::EmptyCompletionRetry {
+                        attempt,
+                        provider,
+                        model,
+                        reason,
+                        ..
+                    } => Some((*attempt, provider.clone(), model.clone(), reason.clone())),
                     _ => None,
                 })
                 .collect();
             assert_eq!(
                 retries,
-                vec![1],
-                "expected exactly one EmptyCompletionRetry trace event"
+                vec![(
+                    1,
+                    "fake".to_string(),
+                    "fake-stream".to_string(),
+                    "empty_generation".to_string(),
+                )],
+                "retry receipt must identify the exact route and failure class"
             );
+            let transcript =
+                std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+                    .expect("retry receipt");
+            let receipts: Vec<serde_json::Value> = transcript
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("valid receipt JSON"))
+                .filter(|event: &serde_json::Value| event["type"] == "empty_completion_retry")
+                .collect();
+            assert_eq!(receipts.len(), 1);
+            assert_eq!(receipts[0]["schema"], "harn.llm.empty_completion_retry.v1");
+            assert_eq!(receipts[0]["provider"], "fake");
+            assert_eq!(receipts[0]["model"], "fake-stream");
+            assert_eq!(receipts[0]["reason"], "empty_generation");
+            assert!(receipts[0]["duration_ms"].is_u64());
             reset_agent_trace_state();
             // _guard drop asserts both scripted turns were consumed.
         });
@@ -4251,31 +4435,72 @@ mod empty_completion_retry_tests {
         opts.provider = "openrouter".to_string();
         let result = empty_result();
 
-        let err = terminal_unproductive_completion_failover_error(&opts, &result, false, 2)
+        let err = terminal_unproductive_completion_failover_error(&opts, &result, false, 2, None)
             .expect("live-provider exhausted empty should become failover-eligible");
-        match &err {
-            VmError::CategorizedError { category, message } => {
-                assert_eq!(*category, crate::value::ErrorCategory::CircuitOpen);
-                assert!(
-                    message.contains("completion_tokens=0"),
-                    "message keeps the empty-completion token marker: {message}"
-                );
-                assert!(
-                    message.contains("delivered no content"),
-                    "message keeps the resolved-dispatch empty marker: {message}"
-                );
-                assert!(
-                    message.contains("reason=empty_generation"),
-                    "message names the canonical provider failure: {message}"
-                );
-                assert!(message.contains("attempt_count=2"));
-            }
-            other => panic!("expected categorized circuit-open error, got {other:?}"),
-        }
+        assert_eq!(
+            crate::value::error_to_category(&err),
+            crate::value::ErrorCategory::CircuitOpen
+        );
+        let VmError::Thrown(VmValue::Dict(fields)) = &err else {
+            panic!("expected structured provider exhaustion, got {err:?}");
+        };
+        assert_eq!(
+            fields.get("code").map(VmValue::display).as_deref(),
+            Some("provider_exhausted")
+        );
+        assert_eq!(
+            fields.get("reason").map(VmValue::display).as_deref(),
+            Some("empty_generation")
+        );
+        let message = fields
+            .get("message")
+            .map(VmValue::display)
+            .unwrap_or_default();
+        assert!(message.contains("completion_tokens=0"));
+        assert!(message.contains("delivered no content"));
+        let Some(VmValue::List(attempts)) = fields.get("attempts") else {
+            panic!("expected typed attempt chain");
+        };
+        assert_eq!(attempts.len(), 1);
+        let attempt = attempts[0].as_dict().expect("attempt object");
+        assert_eq!(
+            attempt.get("provider").map(VmValue::display).as_deref(),
+            Some("openrouter")
+        );
+        assert_eq!(
+            attempt.get("attempt_count").and_then(VmValue::as_int),
+            Some(2)
+        );
+        assert!(
+            attempt.get("duration_ms").is_none(),
+            "the pure classifier has no transport timer to invent"
+        );
 
         opts.provider = "fake".to_string();
         assert!(
-            terminal_unproductive_completion_failover_error(&opts, &result, false, 2).is_none()
+            terminal_unproductive_completion_failover_error(&opts, &result, false, 2, None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn live_terminal_empty_path_quarantines_the_route() {
+        let _guard = crate::llm::env_guard();
+        let mut opts = fake_opts();
+        opts.provider = "empty-quarantine-live-path".to_string();
+        opts.model = "empty-quarantine-model".to_string();
+        let result = empty_result();
+
+        for _ in 0..crate::llm::rate_limit::UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD {
+            terminal_unproductive_completion_failure(&opts, &result, false, 2, 17)
+                .expect("terminal empty must be provider exhaustion");
+        }
+
+        let error = crate::llm::rate_limit::check_network_breaker_for_llm_call(&opts)
+            .expect_err("the production terminal-empty path must quarantine its route");
+        assert_eq!(
+            crate::value::error_to_category(&error),
+            crate::value::ErrorCategory::CircuitOpen
         );
     }
 
@@ -4289,12 +4514,14 @@ mod empty_completion_retry_tests {
         result.output_tokens = 17;
 
         assert!(
-            terminal_unproductive_completion_failover_error(&opts, &result, false, 2).is_none(),
+            terminal_unproductive_completion_failover_error(&opts, &result, false, 2, None)
+                .is_none(),
             "non-empty actionless completions retain the existing throttle gate"
         );
-        let message = terminal_unproductive_completion_failover_error(&opts, &result, true, 2)
-            .expect("throttled-provider actionless error should fail over")
-            .to_string();
+        let message =
+            terminal_unproductive_completion_failover_error(&opts, &result, true, 2, None)
+                .expect("throttled-provider actionless error should fail over")
+                .to_string();
         assert!(message.contains("circuit_open"));
         assert!(message.contains("completion_tokens=17"));
         assert!(message.contains("no dispatchable tool call"));

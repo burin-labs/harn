@@ -16,9 +16,9 @@ use super::openai_normalize::{
 use super::options::{DeltaSender, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{
-    billed_noncommittal_completion_error, extract_cache_read_tokens, extract_cache_write_tokens,
-    is_billed_noncommittal_completion, parse_llm_response, parse_openai_tool_argument_json_values,
-    CompletionContractSignals,
+    billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
+    extract_cache_write_tokens, is_billed_noncommittal_completion, parse_llm_response,
+    parse_openai_tool_argument_json_values, CompletionContractSignals,
 };
 use super::result::LlmResult;
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
@@ -1743,9 +1743,14 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         } else {
             "openai-compatible"
         };
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{wire_style} model {provider}:{model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
-        )))));
+        return Err(empty_generation_error(
+            provider,
+            model,
+            Some(output_tokens),
+            format!(
+                "{wire_style} model {provider}:{model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
+            ),
+        ));
     }
     // Deterministic upstream contract-violation backstop (streaming path).
     // Mirrors the non-streaming detector in `response::parse_llm_response`: a

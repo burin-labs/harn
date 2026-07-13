@@ -62,14 +62,26 @@ pub(crate) fn build_equivalent_failover_policy(
         overrides: None,
     }];
 
-    for (candidate_model, candidate) in
-        crate::llm_config::equivalent_model_catalog_entries_for_requirements(model, requirements)
-    {
+    let candidates =
+        crate::llm_config::equivalent_model_catalog_entries_for_requirements(model, requirements);
+    // A same-provider equivalent keeps auth and transport locality while
+    // rotating away from the sticky model route. Try one before crossing a
+    // provider boundary, then retain any remaining same-provider candidates as
+    // tail capacity. This keeps the default three-route ladder as primary ->
+    // local rotation -> cross-provider recovery instead of letting aliases
+    // consume every bounded slot.
+    let (same_provider, cross_provider): (Vec<_>, Vec<_>) = candidates
+        .into_iter()
+        .partition(|(_, candidate)| candidate.provider == provider);
+    let mut same_provider = same_provider.into_iter();
+    let ordered_candidates = same_provider
+        .next()
+        .into_iter()
+        .chain(cross_provider)
+        .chain(same_provider);
+    for (candidate_model, candidate) in ordered_candidates {
         if chain.len() >= max_routes {
             break;
-        }
-        if candidate.provider == provider {
-            continue;
         }
         if chain
             .iter()
@@ -77,14 +89,18 @@ pub(crate) fn build_equivalent_failover_policy(
         {
             continue;
         }
-        if super::resolve_api_key(&candidate.provider).is_err() {
+        if !provider_route_available(&candidate.provider) {
             continue;
         }
         chain.push(ChainLink {
             provider: candidate.provider.clone(),
             model: candidate_model,
             timeout_ms: None,
-            label: Some(format!("equivalent:{}", candidate.provider)),
+            label: Some(if candidate.provider == provider {
+                format!("equivalent_same_provider:{}", candidate.provider)
+            } else {
+                format!("equivalent:{}", candidate.provider)
+            }),
             region: None,
             overrides: None,
         });
@@ -95,7 +111,82 @@ pub(crate) fn build_equivalent_failover_policy(
     }
 
     let label = format!("equivalent_failover({provider}:{model})");
-    Some(Arc::new(RoutingPolicyConfig {
+    Some(linear_failover_policy(label, chain, on_no_dispatch))
+}
+
+/// Lower the legacy preference/fallback options onto the canonical routing
+/// executor so transport errors and empty-generation failures share one
+/// attempt ledger and one exhaustion contract.
+pub(crate) fn build_transport_failover_policy(
+    provider: &str,
+    model: &str,
+    route_fallbacks: &[super::api::LlmRouteFallback],
+    fallback_chain: &[String],
+) -> Option<Arc<RoutingPolicyConfig>> {
+    let mut chain = vec![ChainLink {
+        provider: provider.to_string(),
+        model: model.to_string(),
+        timeout_ms: None,
+        label: Some("primary".to_string()),
+        region: None,
+        overrides: None,
+    }];
+    let mut push = |candidate_provider: &str, candidate_model: &str, label: String| {
+        if candidate_provider == provider && candidate_model == model {
+            return;
+        }
+        if chain
+            .iter()
+            .any(|link| link.provider == candidate_provider && link.model == candidate_model)
+            || !provider_route_available(candidate_provider)
+        {
+            return;
+        }
+        chain.push(ChainLink {
+            provider: candidate_provider.to_string(),
+            model: candidate_model.to_string(),
+            timeout_ms: None,
+            label: Some(label),
+            region: None,
+            overrides: None,
+        });
+    };
+    for route in route_fallbacks {
+        push(
+            &route.provider,
+            &route.model,
+            format!("preference:{}", route.provider),
+        );
+    }
+    for fallback_provider in fallback_chain {
+        push(
+            fallback_provider,
+            model,
+            format!("fallback:{fallback_provider}"),
+        );
+    }
+    if let Some(config_fallback) =
+        crate::llm_config::provider_config(provider).and_then(|definition| definition.fallback)
+    {
+        push(
+            &config_fallback,
+            model,
+            format!("provider_config:{config_fallback}"),
+        );
+    }
+    if chain.len() < 2 {
+        return None;
+    }
+    let label = format!("transport_failover({provider}:{model})");
+    Some(linear_failover_policy(label, chain, false))
+}
+
+fn linear_failover_policy(
+    label: String,
+    chain: Vec<ChainLink>,
+    on_no_dispatch: bool,
+) -> Arc<RoutingPolicyConfig> {
+    Arc::new(RoutingPolicyConfig {
         failover: FailoverRules {
             max_attempts: Some(chain.len()),
             on_no_dispatch,
@@ -109,7 +200,11 @@ pub(crate) fn build_equivalent_failover_policy(
         label,
         chain,
         is_ladder: false,
-    }))
+    })
+}
+
+fn provider_route_available(provider: &str) -> bool {
+    super::provider_auth::provider_auth_status(provider).available
 }
 
 /// What to do when a budget cap is exceeded while the chain is running.
@@ -1200,6 +1295,9 @@ impl AttemptStatus {
 #[derive(Clone, Debug)]
 pub(crate) struct RoutingErrorSnapshot {
     pub category: String,
+    pub code: Option<String>,
+    pub reason: Option<String>,
+    pub attempt_count: Option<usize>,
     pub message: String,
     pub status: Option<u16>,
 }
@@ -1208,6 +1306,10 @@ pub(crate) struct RoutingErrorSnapshot {
 /// when the error is eligible to advance the chain.
 fn matches_failover(rules: &FailoverRules, error: &VmError) -> (bool, RoutingErrorSnapshot) {
     let category = crate::value::error_to_category(error);
+    let structured = match error {
+        VmError::Thrown(VmValue::Dict(fields)) => Some(fields),
+        _ => None,
+    };
     let message = match error {
         VmError::CategorizedError { message, .. } => message.clone(),
         VmError::Thrown(VmValue::String(s)) => s.to_string(),
@@ -1220,6 +1322,12 @@ fn matches_failover(rules: &FailoverRules, error: &VmError) -> (bool, RoutingErr
     let status = extract_status_code(error);
     let snapshot = RoutingErrorSnapshot {
         category: category.as_str().to_string(),
+        code: structured.and_then(|fields| vm_string_field(fields, "code")),
+        reason: structured.and_then(|fields| vm_string_field(fields, "reason")),
+        attempt_count: structured
+            .and_then(|fields| fields.get("attempt_count"))
+            .and_then(VmValue::as_int)
+            .and_then(|value| usize::try_from(value).ok()),
         message,
         status,
     };
@@ -1298,6 +1406,13 @@ fn matches_failover(rules: &FailoverRules, error: &VmError) -> (bool, RoutingErr
     (false, snapshot)
 }
 
+fn vm_string_field(fields: &crate::value::DictMap, key: &str) -> Option<String> {
+    match fields.get(key) {
+        Some(VmValue::String(value)) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
 fn is_no_dispatch_contract_violation(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("returned billed output")
@@ -1357,6 +1472,9 @@ fn budget_overrun_snapshot(
 ) -> RoutingErrorSnapshot {
     RoutingErrorSnapshot {
         category: "budget_exceeded".to_string(),
+        code: Some("budget_exceeded".to_string()),
+        reason: Some(kind.to_string()),
+        attempt_count: None,
         message: format!(
             "{kind} budget exceeded (cap=${cap:.6}, projected=${projected:.6}, session=${session:.6})"
         ),
@@ -1577,8 +1695,29 @@ async fn execute_link(
     opts: &LlmCallOptions,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
     delta_sink: Option<super::api::DeltaSender>,
-) -> Result<super::api::LlmResult, VmError> {
-    super::agent_observe::observed_llm_call(
+) -> (Result<super::api::LlmResult, VmError>, bool) {
+    let Some(delta_sink) = delta_sink else {
+        return (
+            super::agent_observe::observed_llm_call(
+                opts,
+                None,
+                bridge,
+                None,
+                false,
+                bridge.is_some(),
+                None,
+                None,
+            )
+            .await,
+            false,
+        );
+    };
+
+    // Forward deltas while the call is in flight and remember whether public
+    // output committed this route. A later route cannot replace visible bytes
+    // without splicing two providers into one answer.
+    let (attempt_tx, mut attempt_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let mut call = Box::pin(super::agent_observe::observed_llm_call(
         opts,
         None,
         bridge,
@@ -1586,9 +1725,31 @@ async fn execute_link(
         false,
         bridge.is_some(),
         None,
-        delta_sink,
-    )
-    .await
+        Some(attempt_tx),
+    ));
+    let mut stream_committed = false;
+    let mut deltas_open = true;
+    let result = loop {
+        tokio::select! {
+            maybe_delta = attempt_rx.recv(), if deltas_open => {
+                match maybe_delta {
+                    Some(delta) => {
+                        if delta_sink.send(delta).is_ok() {
+                            stream_committed = true;
+                        }
+                    }
+                    None => deltas_open = false,
+                }
+            }
+            result = &mut call => break result,
+        }
+    };
+    while let Ok(delta) = attempt_rx.try_recv() {
+        if delta_sink.send(delta).is_ok() {
+            stream_committed = true;
+        }
+    }
+    (result, stream_committed)
 }
 
 fn pending_attempt_record(
@@ -1759,6 +1920,7 @@ pub(crate) async fn execute_with_routing(
     }
     let mut last_error: Option<VmError> = None;
     let mut last_snapshot: Option<RoutingErrorSnapshot> = None;
+    let mut terminal_was_failover_eligible = false;
     let mut attempts_used: usize = 0;
     let original_messages = base_opts.messages.clone();
     // Per-link refine bookkeeping. Both reset on `idx` advance so a
@@ -1817,6 +1979,7 @@ pub(crate) async fn execute_with_routing(
                 trace.attempts.extend(local_attempts);
                 last_error = Some(err);
                 last_snapshot = Some(snapshot);
+                terminal_was_failover_eligible = false;
                 break;
             }
         }
@@ -1870,10 +2033,11 @@ pub(crate) async fn execute_with_routing(
             None
         };
 
-        let (result, mut attempt_records) = if let Some(outcome) = race_outcome {
-            outcome
+        let raced = race_outcome.is_some();
+        let (result, mut attempt_records, stream_committed) = if let Some(outcome) = race_outcome {
+            (outcome.0, outcome.1, false)
         } else {
-            let result = execute_link(&opts, bridge, delta_sink.clone()).await;
+            let (result, stream_committed) = execute_link(&opts, bridge, delta_sink.clone()).await;
             (
                 result,
                 vec![pending_attempt_record(
@@ -1882,6 +2046,7 @@ pub(crate) async fn execute_with_routing(
                     &link_label,
                     start.elapsed(),
                 )],
+                stream_committed,
             )
         };
         // Each record in `attempt_records` is one chain slot consumed
@@ -1893,6 +2058,16 @@ pub(crate) async fn execute_with_routing(
 
         match result {
             Ok(value) => {
+                // Racing attempts are intentionally unstreamed until a winner
+                // is known. Publish only the selected response after routing
+                // resolves so callers receive one coherent stream.
+                if raced {
+                    if let Some(sink) = delta_sink.as_ref() {
+                        if !value.text.is_empty() {
+                            let _ = sink.send(value.text.clone());
+                        }
+                    }
+                }
                 if let Some(record) = attempt_records
                     .iter_mut()
                     .find(|rec| matches!(rec.status, AttemptStatus::Failed) && rec.error.is_none())
@@ -1989,7 +2164,21 @@ pub(crate) async fn execute_with_routing(
                 }
             }
             Err(err) => {
-                let (eligible, snapshot) = matches_failover(&policy.failover, &err);
+                let (mut eligible, snapshot) = matches_failover(&policy.failover, &err);
+                if stream_committed {
+                    // Public bytes bind this logical call to the current route.
+                    // Advancing would concatenate a backup answer after a
+                    // partial primary response.
+                    eligible = false;
+                    let mut meta = serde_json::Map::new();
+                    meta.insert("policy".to_string(), json!(policy.label.clone()));
+                    meta.insert("attempt".to_string(), json!(attempt_no));
+                    meta.insert("provider".to_string(), json!(link.provider.clone()));
+                    meta.insert("model".to_string(), json!(link.model.clone()));
+                    meta.insert("reason".to_string(), json!("public_stream_committed"));
+                    emit_routing_event(&dispatch, "failover_suppressed", meta);
+                }
+                terminal_was_failover_eligible = eligible;
                 let failure_category = snapshot.category.clone();
                 if let Some(record) = attempt_records
                     .iter_mut()
@@ -2049,15 +2238,109 @@ pub(crate) async fn execute_with_routing(
     let mut meta = serde_json::Map::new();
     meta.insert("policy".to_string(), json!(policy.label.clone()));
     meta.insert("attempts".to_string(), json!(trace.attempts.len()));
-    if let Some(snapshot) = last_snapshot {
-        meta.insert("last_error_category".to_string(), json!(snapshot.category));
-        meta.insert("last_error_message".to_string(), json!(snapshot.message));
+    if let Some(snapshot) = last_snapshot.as_ref() {
+        meta.insert("last_error_category".to_string(), json!(&snapshot.category));
+        meta.insert("last_error_message".to_string(), json!(&snapshot.message));
+        if let Some(code) = snapshot.code.as_ref() {
+            meta.insert("last_error_code".to_string(), json!(code));
+        }
+        if let Some(reason) = snapshot.reason.as_ref() {
+            meta.insert("last_error_reason".to_string(), json!(reason));
+        }
         if let Some(status) = snapshot.status {
             meta.insert("last_error_status".to_string(), json!(status));
         }
     }
+    meta.insert(
+        "attempt_chain".to_string(),
+        super::helpers::vm_value_to_json(&trace_to_vm_attempts(&trace)),
+    );
     emit_routing_event(&dispatch, "exhausted", meta);
+    if terminal_was_failover_eligible {
+        return Err(provider_exhausted_routing_error(
+            &trace,
+            last_snapshot.as_ref(),
+        ));
+    }
     Err(err)
+}
+
+fn provider_exhausted_routing_error(
+    trace: &RoutingTrace,
+    last: Option<&RoutingErrorSnapshot>,
+) -> VmError {
+    let reason = last
+        .and_then(|snapshot| snapshot.reason.as_deref())
+        .unwrap_or("provider_exhausted");
+    let category = last
+        .map(|snapshot| snapshot.category.as_str())
+        .unwrap_or("generic");
+    let request_attempt_count = physical_request_attempt_count(trace);
+    let message = format!(
+        "provider routes exhausted after {request_attempt_count} request attempt(s) across {} route(s)",
+        trace.attempts.len()
+    );
+    provider_exhausted_error(
+        category,
+        reason,
+        request_attempt_count,
+        message,
+        trace_to_vm_attempts(trace),
+    )
+}
+
+fn physical_request_attempt_count(trace: &RoutingTrace) -> usize {
+    trace
+        .attempts
+        .iter()
+        .map(|attempt| {
+            if matches!(attempt.status, AttemptStatus::Skipped) {
+                0
+            } else {
+                attempt
+                    .error
+                    .as_ref()
+                    .and_then(|error| error.attempt_count)
+                    .unwrap_or(1)
+            }
+        })
+        .sum()
+}
+
+pub(crate) fn provider_exhausted_error(
+    category: &str,
+    reason: &str,
+    attempt_count: usize,
+    message: String,
+    attempts: VmValue,
+) -> VmError {
+    VmError::Thrown(VmValue::dict(BTreeMap::from([
+        (
+            "category".to_string(),
+            VmValue::String(arcstr::ArcStr::from(category)),
+        ),
+        (
+            "code".to_string(),
+            VmValue::String(arcstr::ArcStr::from("provider_exhausted")),
+        ),
+        (
+            "kind".to_string(),
+            VmValue::String(arcstr::ArcStr::from("terminal")),
+        ),
+        (
+            "reason".to_string(),
+            VmValue::String(arcstr::ArcStr::from(reason)),
+        ),
+        (
+            "message".to_string(),
+            VmValue::String(arcstr::ArcStr::from(message)),
+        ),
+        (
+            "attempt_count".to_string(),
+            VmValue::Int(attempt_count as i64),
+        ),
+        ("attempts".to_string(), attempts),
+    ])))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2083,7 +2366,7 @@ async fn run_race(
     let primary_opts = opts.clone();
 
     let mut primary_future = Box::pin(async move {
-        let res = execute_link(&primary_opts, bridge, None).await;
+        let (res, _) = execute_link(&primary_opts, bridge, None).await;
         (res, primary_start.elapsed())
     });
 
@@ -2125,7 +2408,7 @@ async fn run_race(
             let mut backup_future = Box::pin({
                 let backup_opts = backup_opts.clone();
                 async move {
-                    let res = execute_link(&backup_opts, bridge, None).await;
+                    let (res, _) = execute_link(&backup_opts, bridge, None).await;
                     (res, backup_start.elapsed())
                 }
             });
@@ -2325,6 +2608,18 @@ pub(crate) fn trace_to_vm_attempts(trace: &RoutingTrace) -> VmValue {
                 let mut err_dict = BTreeMap::new();
                 err_dict.put_str("category", error.category.clone());
                 err_dict.put_str("message", error.message.clone());
+                if let Some(code) = &error.code {
+                    err_dict.put_str("code", code.clone());
+                }
+                if let Some(reason) = &error.reason {
+                    err_dict.put_str("reason", reason.clone());
+                }
+                if let Some(attempt_count) = error.attempt_count {
+                    err_dict.insert(
+                        "attempt_count".to_string(),
+                        VmValue::Int(attempt_count as i64),
+                    );
+                }
                 if let Some(status) = error.status {
                     err_dict.insert("status".to_string(), VmValue::Int(status as i64));
                 }
@@ -2380,6 +2675,139 @@ mod tests {
             crate::llm_config::EquivalentModelRequirements::default(),
         );
         assert!(policy.is_none());
+    }
+
+    #[test]
+    fn transport_fallbacks_lower_to_one_routing_chain() {
+        let policy = build_transport_failover_policy(
+            "mock",
+            "primary-model",
+            &[crate::llm::api::LlmRouteFallback {
+                provider: "fake".to_string(),
+                model: "backup-model".to_string(),
+            }],
+            &["mock".to_string()],
+        )
+        .expect("available fallback creates a routing policy");
+
+        let routes: Vec<(&str, &str)> = policy
+            .chain
+            .iter()
+            .map(|link| (link.provider.as_str(), link.model.as_str()))
+            .collect();
+        assert_eq!(
+            routes,
+            vec![("mock", "primary-model"), ("fake", "backup-model")]
+        );
+        assert_eq!(policy.failover.max_attempts, Some(2));
+    }
+
+    #[test]
+    fn routing_exhaustion_preserves_structured_attempt_chain() {
+        let snapshot = RoutingErrorSnapshot {
+            category: "circuit_open".to_string(),
+            code: Some("provider_exhausted".to_string()),
+            reason: Some("empty_generation".to_string()),
+            attempt_count: Some(2),
+            message: "empty generation".to_string(),
+            status: None,
+        };
+        let mut trace = RoutingTrace {
+            label: "test".to_string(),
+            attempts: vec![RoutingAttempt {
+                index: 0,
+                provider: "primary".to_string(),
+                model: "model".to_string(),
+                label: "primary".to_string(),
+                status: AttemptStatus::Failed,
+                duration_ms: 12,
+                cost_usd: None,
+                input_tokens: None,
+                output_tokens: None,
+                error: Some(snapshot.clone()),
+                verifier_signals: Vec::new(),
+                verifier_outcome: None,
+            }],
+            selected: None,
+            session_cost_usd: 0.0,
+        };
+
+        let error = provider_exhausted_routing_error(&trace, Some(&snapshot));
+        let VmError::Thrown(VmValue::Dict(fields)) = error else {
+            panic!("expected typed provider exhaustion");
+        };
+        assert_eq!(
+            fields.get("code").map(VmValue::display).as_deref(),
+            Some("provider_exhausted")
+        );
+        assert_eq!(
+            fields.get("reason").map(VmValue::display).as_deref(),
+            Some("empty_generation")
+        );
+        assert_eq!(
+            fields.get("attempt_count").and_then(VmValue::as_int),
+            Some(2)
+        );
+        let Some(VmValue::List(attempts)) = fields.get("attempts") else {
+            panic!("expected attempt list");
+        };
+        assert_eq!(attempts.len(), 1);
+        let attempt = attempts[0].as_dict().expect("attempt dict");
+        let nested = attempt
+            .get("error")
+            .and_then(VmValue::as_dict)
+            .expect("structured attempt error");
+        assert_eq!(
+            nested.get("reason").map(VmValue::display).as_deref(),
+            Some("empty_generation")
+        );
+
+        trace.attempts.push(RoutingAttempt {
+            index: 1,
+            provider: "budget-skipped".to_string(),
+            model: "model".to_string(),
+            label: "budget-skipped".to_string(),
+            status: AttemptStatus::Skipped,
+            duration_ms: 0,
+            cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
+            error: None,
+            verifier_signals: Vec::new(),
+            verifier_outcome: None,
+        });
+        assert_eq!(
+            physical_request_attempt_count(&trace),
+            2,
+            "budget-skipped routes are receipts, not physical provider requests"
+        );
+
+        trace.attempts.push(RoutingAttempt {
+            index: 2,
+            provider: "quarantined".to_string(),
+            model: "model".to_string(),
+            label: "quarantined".to_string(),
+            status: AttemptStatus::Failed,
+            duration_ms: 0,
+            cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
+            error: Some(RoutingErrorSnapshot {
+                category: "circuit_open".to_string(),
+                code: Some("route_quarantined".to_string()),
+                reason: Some("unproductive_completion".to_string()),
+                attempt_count: Some(0),
+                message: "route is quarantined".to_string(),
+                status: None,
+            }),
+            verifier_signals: Vec::new(),
+            verifier_outcome: None,
+        });
+        assert_eq!(
+            physical_request_attempt_count(&trace),
+            2,
+            "quarantined routes are logical attempts with zero provider requests"
+        );
     }
 
     #[test]
