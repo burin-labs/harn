@@ -29,12 +29,12 @@ path = "src/bin/harn-nativec.rs"
 [dependencies]
 harn-vm = { path = "../harn-vm", version = "=0.10.15" }
 harn-parser = { path = "../harn-parser", version = "=0.10.15" }
-cranelift-codegen = "0.132"
-cranelift-frontend = "0.132"
-cranelift-module = "0.132"
-cranelift-jit = "0.132"
-cranelift-native = "0.132"
-cranelift-object = "0.132"
+cranelift-codegen = "0.133"
+cranelift-frontend = "0.133"
+cranelift-module = "0.133"
+cranelift-jit = "0.133"
+cranelift-native = "0.133"
+cranelift-object = "0.133"
 
 [dev-dependencies]
 # Dev-only: the VM-fidelity differential test drives the real `harn-vm`

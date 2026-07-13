@@ -27,7 +27,7 @@
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
-    types, AbiParam, BlockArg, Function, InstBuilder, MemFlags, Signature, Type, Value,
+    types, AbiParam, BlockArg, Function, InstBuilder, MemFlagsData, Signature, Type, Value,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{FuncId, Linkage, Module};
@@ -137,7 +137,9 @@ pub(crate) fn lower(
 
     // Initialise the status byte to OK up front; only a fault epilogue sets it.
     let zero8 = builder.ins().iconst(types::I8, i64::from(status::OK));
-    builder.ins().store(MemFlags::trusted(), zero8, trap_ptr, 0);
+    builder
+        .ins()
+        .store(MemFlagsData::trusted(), zero8, trap_ptr, 0);
 
     // One Cranelift block per scalar block, carrying the operand-stack shape
     // as block parameters.
@@ -243,7 +245,7 @@ fn emit_fault_epilogue(
     let code_val = builder.ins().iconst(types::I8, i64::from(code));
     builder
         .ins()
-        .store(MemFlags::trusted(), code_val, status_ptr, 0);
+        .store(MemFlagsData::trusted(), code_val, status_ptr, 0);
     let zero_ret = zero_of(builder, ret);
     store_ret(builder, ret_ptr, ret, zero_ret);
     builder.ins().return_(&[]);
@@ -508,11 +510,11 @@ fn load_arg(builder: &mut FunctionBuilder, args_ptr: Value, idx: usize, ty: Scal
     let offset = i32::try_from(idx * 8).expect("argument index fits in i32 offset");
     let raw = builder
         .ins()
-        .load(types::I64, MemFlags::trusted(), args_ptr, offset);
+        .load(types::I64, MemFlagsData::trusted(), args_ptr, offset);
     match ty {
         ScalarType::Int => raw,
         ScalarType::Bool => builder.ins().ireduce(types::I8, raw),
-        ScalarType::Float => builder.ins().bitcast(types::F64, MemFlags::new(), raw),
+        ScalarType::Float => builder.ins().bitcast(types::F64, MemFlagsData::new(), raw),
     }
 }
 
@@ -521,9 +523,13 @@ fn store_ret(builder: &mut FunctionBuilder, ret_ptr: Value, ty: ScalarType, valu
     let bits = match ty {
         ScalarType::Int => value,
         ScalarType::Bool => builder.ins().uextend(types::I64, value),
-        ScalarType::Float => builder.ins().bitcast(types::I64, MemFlags::new(), value),
+        ScalarType::Float => builder
+            .ins()
+            .bitcast(types::I64, MemFlagsData::new(), value),
     };
-    builder.ins().store(MemFlags::trusted(), bits, ret_ptr, 0);
+    builder
+        .ins()
+        .store(MemFlagsData::trusted(), bits, ret_ptr, 0);
 }
 
 fn zero_of(builder: &mut FunctionBuilder, ty: ScalarType) -> Value {
