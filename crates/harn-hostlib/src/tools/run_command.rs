@@ -28,8 +28,86 @@ use crate::tools::payload::{
     optional_string_map, optional_timeout, optional_u64, parse_argv_program, require_dict_arg,
 };
 use crate::tools::proc::{self, CaptureConfig, SpawnRequest};
+use crate::tools::response::ResponseBuilder;
 
 pub(crate) const NAME: &str = "hostlib_tools_run_command";
+
+/// Project the VM command-policy denial into the public run-command contract.
+///
+/// The VM envelope intentionally carries compatibility fields for
+/// `host_call("process.exec", ...)`; exposing that envelope here would both
+/// omit required hostlib fields and leak properties forbidden by the hostlib
+/// response schema.
+pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
+    let map = response.as_dict();
+    let command_id = map
+        .and_then(|value| dict_string(value, "command_id"))
+        .unwrap_or_else(proc::next_command_id);
+    let status = map
+        .and_then(|value| dict_string(value, "status"))
+        .unwrap_or_else(|| "blocked".to_string());
+    let started_at = map
+        .and_then(|value| dict_string(value, "started_at"))
+        .unwrap_or_else(proc::now_rfc3339);
+    let ended_at = map
+        .and_then(|value| dict_string(value, "ended_at"))
+        .unwrap_or_else(|| started_at.clone());
+    let message = map
+        .and_then(|value| dict_string(value, "stderr"))
+        .unwrap_or_default();
+    let audit_id = map
+        .and_then(|value| dict_string(value, "audit_id"))
+        .unwrap_or_else(|| format!("audit_{command_id}"));
+
+    let mut sandbox = harn_vm::value::DictMap::new();
+    sandbox.put_str("kind", proc::sandbox_kind());
+    sandbox.insert(
+        harn_vm::value::intern_key("enforced"),
+        VmValue::Bool(proc::sandbox_enforced()),
+    );
+
+    let mut builder = ResponseBuilder::new()
+        .str("command_id", command_id)
+        .str("status", status)
+        .nil("pid")
+        .nil("process_group_id")
+        .nil("handle_id")
+        .str("started_at", started_at)
+        .str("ended_at", ended_at)
+        .int("duration_ms", 0)
+        .int("exit_code", -1)
+        .nil("signal")
+        .bool("timed_out", false)
+        .str("stdout", "")
+        .str("stderr", message.clone())
+        .str("output_path", "")
+        .str("stdout_path", "")
+        .str("stderr_path", "")
+        .int("line_count", message.lines().count() as i64)
+        .int("byte_count", message.len() as i64)
+        .str("output_sha256", "")
+        .dict("sandbox", sandbox)
+        .str("audit_id", audit_id);
+    if let Some(policy) = map.and_then(|value| value.get("command_policy")).cloned() {
+        builder = builder.value("command_policy", policy);
+    }
+    builder.build()
+}
+
+fn dict_string(map: &harn_vm::value::DictMap, key: &str) -> Option<String> {
+    match map.get(key) {
+        Some(VmValue::String(value)) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+pub(crate) fn request_is_background(map: &harn_vm::value::DictMap) -> bool {
+    matches!(map.get("background"), Some(VmValue::Bool(true)))
+        || matches!(map.get("long_running"), Some(VmValue::Bool(true)))
+        || map
+            .get("background_after_ms")
+            .is_some_and(|value| !matches!(value, VmValue::Nil))
+}
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let map = require_dict_arg(NAME, args)?;
@@ -357,4 +435,53 @@ fn parse_capture(map: &harn_vm::value::DictMap) -> Result<CaptureConfig, Hostlib
         capture.max_inline_bytes = usize::try_from(max).unwrap_or(usize::MAX);
     }
     Ok(capture)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn policy_blocked_response_matches_public_schema() {
+        let params = harn_vm::value::DictMap::new();
+        let generic = harn_vm::orchestration::blocked_command_response(
+            &params,
+            "consent_denied",
+            "operator declined",
+            serde_json::json!({"caller": {"surface": "hostlib"}}),
+            Vec::new(),
+        );
+        let response = policy_blocked_response(generic);
+        let schema =
+            crate::schemas::lookup("tools", "run_command", crate::schemas::SchemaKind::Response)
+                .expect("run_command response schema");
+        let schema: serde_json::Value = serde_json::from_str(schema).expect("valid schema JSON");
+        let schema = harn_vm::schema::json_to_vm_value(&schema);
+
+        harn_vm::schema::validate_value_against_schema(&response, &schema, false)
+            .expect("blocked response must satisfy the public hostlib schema");
+        let response = response.as_dict().expect("dict response");
+        assert_eq!(
+            dict_string(response, "status").as_deref(),
+            Some("consent_denied")
+        );
+        assert!(response.get("command_policy").is_some());
+        assert!(response.get("request").is_none());
+    }
+
+    #[test]
+    fn background_detection_matches_public_request_modes() {
+        for key in ["background", "long_running"] {
+            let mut request = harn_vm::value::DictMap::new();
+            request.insert(harn_vm::value::intern_key(key), VmValue::Bool(true));
+            assert!(request_is_background(&request));
+        }
+        let mut delayed = harn_vm::value::DictMap::new();
+        delayed.insert(
+            harn_vm::value::intern_key("background_after_ms"),
+            VmValue::Int(0),
+        );
+        assert!(request_is_background(&delayed));
+        assert!(!request_is_background(&harn_vm::value::DictMap::new()));
+    }
 }

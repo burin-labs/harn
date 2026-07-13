@@ -7,7 +7,15 @@
     "command_id": { "type": "string" },
     "status": {
       "type": "string",
-      "enum": ["completed", "running", "timed_out", "killed", "blocked", "spawn_failed"]
+      "enum": [
+        "completed",
+        "running",
+        "timed_out",
+        "killed",
+        "blocked",
+        "consent_denied",
+        "spawn_failed"
+      ]
     },
     "pid": { "type": ["integer", "null"] },
     "process_group_id": { "type": ["integer", "null"] },
@@ -37,6 +45,10 @@
     },
     "audit_id": { "type": "string" },
     "policy_context": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "command_policy": {
       "type": "object",
       "additionalProperties": true
     },

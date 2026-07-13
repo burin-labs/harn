@@ -66,6 +66,11 @@ impl ResponseBuilder {
         self
     }
 
+    pub(crate) fn value(mut self, key: &str, value: VmValue) -> Self {
+        self.inner.insert(harn_vm::value::intern_key(key), value);
+        self
+    }
+
     pub(crate) fn list(mut self, key: &str, value: Vec<VmValue>) -> Self {
         self.inner.insert(
             harn_vm::value::intern_key(key),
