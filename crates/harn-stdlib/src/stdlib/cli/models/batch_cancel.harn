@@ -1,0 +1,471 @@
+import { __batch_artifact_read } from "std/cli/models/batch_artifacts"
+import {
+  __batch_lifecycle_job_base,
+  __batch_lifecycle_state,
+  __batch_receipt_lifecycle,
+  __count_jobs_with_status,
+  __provider_batch_status,
+  __with_batch_lifecycle,
+} from "std/cli/models/batch_lifecycle"
+import {
+  __api_key_for_job,
+  __http_result,
+  __join_url,
+  __live_batch_adapter_key,
+  __live_batch_operation_error,
+  __mkdirp,
+  __provider_auth_env,
+  __provider_base_url,
+  __redact_download_url,
+  __safe_int,
+  __truthy_env,
+} from "std/cli/models/batch_transport"
+import {
+  cli_json_envelope,
+  print_list,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+
+/** Cancel eligible live batches without changing receipt vocabulary. */
+fn __cancel_status(job: dict, dry_run: bool) -> dict {
+  return __batch_lifecycle_job_base(job, dry_run)
+    + {
+    request_count: __safe_int(job["request_count"]) ?? 0,
+    provider_status: job["provider_status"],
+    source_status: safe_string(job["status"], ""),
+    output_file_id: job["output_file_id"],
+    error_file_id: job["error_file_id"],
+    output_file: job["output_file"],
+    error_file: job["error_file"],
+    results_url: job["results_url"],
+    responses_file: job["responses_file"],
+    input_dataset_id: job["input_dataset_id"],
+    input_dataset_resource: job["input_dataset_resource"],
+    output_dataset_id: job["output_dataset_id"],
+    output_dataset_resource: job["output_dataset_resource"],
+    job_progress: job["job_progress"],
+  }
+}
+
+fn __cancel_operation(provider: string, method: string, url: string, credential_env: string) -> dict {
+  return {
+    provider: provider,
+    operation: method + " " + __redact_download_url(url),
+    credential_env: credential_env,
+    auth: if credential_env == "" {
+      "none"
+    } else {
+      credential_env + "=<redacted>"
+    },
+  }
+}
+
+fn __cancel_url_for_job(harness: Harness, job: dict, provider: string) -> string {
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  if provider == "anthropic" {
+    return __join_url(
+      __provider_base_url(harness, "anthropic"),
+      "/v1/messages/batches/" + batch_id + "/cancel",
+    )
+  }
+  if provider == "gemini" {
+    return __join_url(__provider_base_url(harness, "gemini"), "/v1beta/" + batch_id + ":cancel")
+  }
+  return __join_url(__provider_base_url(harness, provider), "/batches/" + batch_id + "/cancel")
+}
+
+fn __cancel_operation_for_job(harness: Harness, job: dict, provider: string) -> dict {
+  return __cancel_operation(
+    provider,
+    "POST",
+    __cancel_url_for_job(harness, job, provider),
+    __provider_auth_env(provider),
+  )
+}
+
+fn __batch_cancel_skip_reason(job: dict) -> string {
+  const state = __batch_lifecycle_state(job["status"])
+  if state == "completed" || state == "downloaded" || state == "canceled" || state == "failed"
+    || state == "not_ready" {
+    return "job " + safe_string(job["id"], "") + " is terminal (" + to_string(state) + ")"
+  }
+  const cancellation = safe_string(safe_dict(job["batch"])["cancellation"], "unknown")
+  if cancellation != "supported" {
+    return "provider catalog marks cancellation as " + cancellation
+  }
+  const provider = safe_string(job["provider"], "")
+  const wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  const adapter = __live_batch_adapter_key(provider, wire)
+  if adapter != "anthropic" && adapter != "openai" && adapter != "gemini" {
+    return __live_batch_operation_error("cancel", provider, wire)
+  }
+  if safe_string(job["provider_batch_id"], "") == "" {
+    return "job " + safe_string(job["id"], "") + " has no provider_batch_id; submit live first"
+  }
+  return ""
+}
+
+fn __dry_run_cancel_job(harness: Harness, job: dict, provider: string) -> dict {
+  const base = __cancel_status(job, true)
+  return {
+    ok: true,
+    job: base
+      + {
+      status: __batch_lifecycle_state(job["status"]),
+      cancel_requested: false,
+      skipped: false,
+      cancel_operation: __cancel_operation_for_job(harness, job, provider),
+    },
+    skipped: false,
+    errors: [],
+  }
+}
+
+fn __skipped_cancel_job(job: dict, dry_run: bool, reason: string) -> dict {
+  return {
+    ok: true,
+    job: __cancel_status(job, dry_run)
+      + {status: "skipped", cancel_requested: false, skipped: true, skip_reason: reason},
+    skipped: true,
+    errors: [],
+  }
+}
+
+fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> dict {
+  const auth = __api_key_for_job(harness, provider)
+  const base_job = __cancel_status(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  const response = __http_result(
+    harness,
+    "POST",
+    __cancel_url_for_job(harness, job, provider),
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: [provider + " batch cancel failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const provider_status = body["status"] ?? "canceling"
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      cancel_requested: true,
+      skipped: false,
+      cancel_operation: __cancel_operation_for_job(harness, job, provider),
+      output_file_id: body["output_file_id"] ?? job["output_file_id"],
+      error_file_id: body["error_file_id"] ?? job["error_file_id"],
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __cancel_anthropic(harness: Harness, job: dict) -> dict {
+  const auth = __api_key_for_job(harness, "anthropic")
+  const base_job = __cancel_status(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  const response = __http_result(
+    harness,
+    "POST",
+    __cancel_url_for_job(harness, job, "anthropic"),
+    {
+      headers: {"x-api-key": safe_string(auth["value"], ""), "anthropic-version": "2023-06-01"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["anthropic batch cancel failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const provider_status = body["processing_status"] ?? "canceling"
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      cancel_requested: true,
+      skipped: false,
+      cancel_operation: __cancel_operation_for_job(harness, job, "anthropic"),
+      results_url: body["results_url"] ?? job["results_url"],
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __cancel_gemini(harness: Harness, job: dict) -> dict {
+  const auth = __api_key_for_job(harness, "gemini")
+  const base_job = __cancel_status(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  const response = __http_result(
+    harness,
+    "POST",
+    __cancel_url_for_job(harness, job, "gemini"),
+    {
+      headers: {"x-goog-api-key": safe_string(auth["value"], ""), "content-type": "application/json"},
+      body: "{}",
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["gemini batch cancel failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: "canceling",
+      provider_status: "canceling",
+      cancel_requested: true,
+      skipped: false,
+      cancel_operation: __cancel_operation_for_job(harness, job, "gemini"),
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __cancel_live(harness: Harness, job: dict, provider: string, adapter: string) -> dict {
+  if adapter == "anthropic" {
+    return __cancel_anthropic(harness, job)
+  }
+  if adapter == "openai" {
+    return __cancel_openai_compatible(harness, job, provider)
+  }
+  if adapter == "gemini" {
+    return __cancel_gemini(harness, job)
+  }
+  return {
+    ok: false,
+    job: __cancel_status(job, false) + {status: "failed"},
+    errors: [
+      __live_batch_operation_error(
+        "cancel",
+        provider,
+        safe_string(safe_dict(job["batch"])["wire_format"], ""),
+      ),
+    ],
+  }
+}
+
+fn __cancel_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
+  const reason = __batch_cancel_skip_reason(job)
+  if reason != "" {
+    return __skipped_cancel_job(job, dry_run, reason)
+  }
+  const provider = safe_string(job["provider"], "")
+  const wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  const adapter = __live_batch_adapter_key(provider, wire)
+  if dry_run {
+    return __dry_run_cancel_job(harness, job, provider)
+  }
+  return __cancel_live(harness, job, provider, adapter)
+}
+
+fn __count_cancelable_jobs(jobs: list) -> int {
+  let count = 0
+  for job in jobs {
+    const j = safe_dict(job)
+    if safe_bool(j["skipped"], false) {
+      continue
+    }
+    if safe_string(j["status"], "") != "failed" {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn __cancel_status_summary(jobs: list, errors: list, dry_run: bool) -> string {
+  if len(errors) > 0 {
+    if __count_jobs_with_status(jobs, "canceling") > 0
+      || __count_jobs_with_status(jobs, "canceled") > 0 {
+      return "partial"
+    }
+    return "failed"
+  }
+  if dry_run {
+    return "dry_run"
+  }
+  const canceled = __count_jobs_with_status(jobs, "canceled")
+  const canceling = __count_jobs_with_status(jobs, "canceling")
+  const skipped = __count_jobs_with_status(jobs, "skipped")
+  if canceling > 0 {
+    return "canceling"
+  }
+  if canceled > 0 && skipped > 0 {
+    return "partial"
+  }
+  if canceled > 0 {
+    return "canceled"
+  }
+  if skipped > 0 {
+    return "skipped"
+  }
+  return "unknown"
+}
+
+fn __render_cancel_human(harness: Harness, report: dict) {
+  if !safe_bool(report["ok"], false) {
+    harness.stdio.eprintln("Batch cancel failed")
+  } else if safe_bool(report["dry_run"], false) {
+    harness.stdio.println("Batch cancel dry run written: " + safe_string(report["out"], ""))
+  } else {
+    harness.stdio.println("Batch cancellation receipt written: " + safe_string(report["out"], ""))
+  }
+  harness.stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
+  harness.stdio.println("  cancelable: " + safe_int_string(report["cancelable_count"], "0"))
+  harness.stdio.println("  canceling: " + safe_int_string(report["canceling_count"], "0"))
+  harness.stdio.println("  canceled: " + safe_int_string(report["canceled_count"], "0"))
+  harness.stdio.println("  skipped: " + safe_int_string(report["skipped_count"], "0"))
+  harness.stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
+  if safe_string(report["receipt_sha256"], "") != "" {
+    harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+  }
+  print_list(harness, "errors", safe_list(report["errors"]))
+  print_list(harness, "warnings", safe_list(report["warnings"]))
+}
+
+fn __render_cancel_json(report: dict) -> string {
+  if safe_bool(report["ok"], false) {
+    return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
+  }
+  return json_stringify_pretty(
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "batch_cancel_failed",
+          message: "Submitted batch jobs could not be canceled.",
+          details: report,
+        },
+        warnings: safe_list(report["warnings"]),
+      },
+    ),
+  )
+}
+
+/**
+ * Execute the batch cancel command and write its receipt.
+ *
+ * @api_stability: internal
+ * @effects: [env.read, fs.read, fs.write, network, stdio.write]
+ * @errors: [runtime]
+ */
+pub fn __run_cancel(harness: Harness) -> int {
+  const receipt_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_RECEIPT", ""))
+  const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_CANCEL_OUT", ""))
+  const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
+  const loaded = __batch_artifact_read(harness, receipt_path, "cancel_source_receipt")
+  let errors = loaded.errors
+  const warnings = []
+  if out_path == "" {
+    errors = errors.push("--out is required")
+  }
+  const source_receipt = loaded.artifact
+  let jobs = []
+  if len(errors) == 0 {
+    for raw_job in safe_list(source_receipt["jobs"]) {
+      const canceled = __cancel_one_job(harness, safe_dict(raw_job), dry_run)
+      jobs = jobs.push(__with_batch_lifecycle(safe_dict(canceled["job"]), "cancel", dry_run))
+      errors = errors + safe_list(canceled["errors"])
+    }
+  }
+  const status = __cancel_status_summary(jobs, errors, dry_run)
+  let receipt = {
+    schemaVersion: 1,
+    kind: "harn.model_batch_cancel_receipt",
+    producer: "harn models batch cancel",
+    dryRun: dry_run,
+    source: {
+      path: receipt_path,
+      sha256: loaded.source_sha256,
+      kind: safe_string(source_receipt["kind"], ""),
+      status: safe_string(source_receipt["status"], ""),
+      upstream_source: safe_dict(source_receipt["source"]),
+    },
+    out: out_path,
+    jobCount: len(jobs),
+    cancelableCount: __count_cancelable_jobs(jobs),
+    cancelingCount: __count_jobs_with_status(jobs, "canceling"),
+    canceledCount: __count_jobs_with_status(jobs, "canceled"),
+    skippedCount: __count_jobs_with_status(jobs, "skipped"),
+    failedCount: __count_jobs_with_status(jobs, "failed"),
+    jobs: jobs,
+    status: status,
+    lifecycle: __batch_receipt_lifecycle(status, jobs, dry_run, "cancel"),
+    warnings: warnings,
+    errors: errors,
+  }
+  let report = {
+    schema_version: 1,
+    ok: len(errors) == 0,
+    dry_run: dry_run,
+    out: out_path,
+    source: receipt["source"],
+    status: status,
+    job_count: len(jobs),
+    cancelable_count: __count_cancelable_jobs(jobs),
+    canceling_count: __count_jobs_with_status(jobs, "canceling"),
+    canceled_count: __count_jobs_with_status(jobs, "canceled"),
+    skipped_count: __count_jobs_with_status(jobs, "skipped"),
+    failed_count: __count_jobs_with_status(jobs, "failed"),
+    jobs: jobs,
+    lifecycle: __batch_receipt_lifecycle(status, jobs, dry_run, "cancel"),
+    errors: errors,
+    warnings: warnings,
+  }
+  if out_path != "" {
+    __mkdirp(harness, dirname(out_path) ?? ".")
+    const receipt_text = json_stringify_pretty(receipt) + "\n"
+    harness.fs.write_text(out_path, receipt_text)
+    receipt = receipt + {receipt_sha256: sha256(receipt_text)}
+    report = report + {receipt_sha256: sha256(receipt_text)}
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(__render_cancel_json(report))
+  } else {
+    __render_cancel_human(harness, report)
+  }
+  if len(errors) == 0 {
+    return 0
+  }
+  return 1
+}

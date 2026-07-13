@@ -1,9 +1,9 @@
 /**
  * Typed readers for file-backed `harn models batch` inputs and receipts.
  *
- * This is an internal dependency leaf. Provider transport, lifecycle policy,
- * artifact rendering, and CLI dispatch stay in `models/batch_plan`; this module
- * owns only the repeated read/parse/hash/shape boundary.
+ * This is an internal dependency leaf. The neighboring batch modules own
+ * transport, lifecycle policy, rendering, and dispatch; this module owns only
+ * the repeated read/parse/hash/shape boundary.
  */
 import { safe_dict, safe_list, safe_string } from "std/cli/render"
 

@@ -1,0 +1,555 @@
+import { __batch_artifact_read } from "std/cli/models/batch_artifacts"
+import {
+  __batch_lifecycle_job_base,
+  __batch_receipt_lifecycle,
+  __count_jobs_with_status,
+  __provider_batch_status,
+  __with_batch_lifecycle,
+} from "std/cli/models/batch_lifecycle"
+import {
+  __api_key_for_job,
+  __fireworks_account_id,
+  __fireworks_dataset_resource,
+  __gemini_provider_status,
+  __gemini_responses_file,
+  __http_result,
+  __is_openai_compatible_live_adapter,
+  __join_url,
+  __live_batch_adapter_key,
+  __live_batch_operation_error,
+  __mkdirp,
+  __provider_base_url,
+  __safe_int,
+  __truthy_env,
+  __xai_provider_status,
+  __xai_results_url,
+} from "std/cli/models/batch_transport"
+import {
+  cli_json_envelope,
+  print_list,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+
+/** Poll submitted batches and persist normalized lifecycle receipts. */
+fn __status_job_base(job: dict, dry_run: bool) -> dict {
+  return __batch_lifecycle_job_base(job, dry_run)
+    + {request_count: __safe_int(job["request_count"]) ?? 0}
+}
+
+fn __cached_status_job(job: dict, dry_run: bool) -> dict {
+  const provider_status = job["provider_status"] ?? job["status"]
+  return __status_job_base(job, dry_run)
+    + {
+    status: __provider_batch_status(provider_status),
+    provider_status: provider_status,
+    status_checked: false,
+    output_file_id: job["output_file_id"],
+    error_file_id: job["error_file_id"],
+    output_file: job["output_file"],
+    error_file: job["error_file"],
+    results_url: job["results_url"],
+    responses_file: job["responses_file"],
+    input_dataset_id: job["input_dataset_id"],
+    input_dataset_resource: job["input_dataset_resource"],
+    output_dataset_id: job["output_dataset_id"],
+    output_dataset_resource: job["output_dataset_resource"],
+    job_progress: job["job_progress"],
+    response: job["response"],
+  }
+}
+
+fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string) -> dict {
+  const auth = __api_key_for_job(harness, provider)
+  const base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
+    harness,
+    "GET",
+    __join_url(__provider_base_url(harness, provider), "/batches/" + batch_id),
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: [provider + " batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const provider_status = body["status"]
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      output_file_id: body["output_file_id"],
+      error_file_id: body["error_file_id"],
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
+  const auth = __api_key_for_job(harness, "anthropic")
+  const base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
+    harness,
+    "GET",
+    __join_url(__provider_base_url(harness, "anthropic"), "/v1/messages/batches/" + batch_id),
+    {
+      headers: {"x-api-key": safe_string(auth["value"], ""), "anthropic-version": "2023-06-01"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["anthropic batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const provider_status = body["processing_status"]
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      results_url: body["results_url"],
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
+  const auth = __api_key_for_job(harness, "mistral")
+  const base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
+    harness,
+    "GET",
+    __join_url(__provider_base_url(harness, "mistral"), "/batch/jobs/" + batch_id),
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], "")},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["mistral batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const provider_status = body["status"]
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      output_file: body["output_file"],
+      error_file: body["error_file"],
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __fireworks_batch_id_path(provider_batch_id: string) -> string {
+  const trimmed = trim(provider_batch_id)
+  if starts_with(trimmed, "accounts/") {
+    const parts = split(trimmed, "/batchInferenceJobs/")
+    if len(parts) > 1 {
+      return safe_string(parts[1], trimmed)
+    }
+  }
+  return trimmed
+}
+
+fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
+  const auth = __api_key_for_job(harness, "fireworks")
+  const account = __fireworks_account_id(harness)
+  const base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  if !safe_bool(account["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(account["error"], "")]}
+  }
+  const account_id = safe_string(account["value"], "")
+  const batch_id = __fireworks_batch_id_path(safe_string(job["provider_batch_id"], ""))
+  const response = __http_result(
+    harness,
+    "GET",
+    __join_url(
+      __provider_base_url(harness, "fireworks"),
+      "/accounts/" + account_id + "/batchInferenceJobs/" + batch_id,
+    ),
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["fireworks batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const provider_status = body["state"]
+  const output_dataset = safe_string(
+    body["outputDatasetId"],
+    safe_string(job["output_dataset_resource"], safe_string(job["output_dataset_id"], "")),
+  )
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      input_dataset_id: job["input_dataset_id"],
+      input_dataset_resource: job["input_dataset_resource"],
+      output_dataset_id: if starts_with(output_dataset, "accounts/") {
+        safe_string(job["output_dataset_id"], output_dataset)
+      } else {
+        output_dataset
+      },
+      output_dataset_resource: if starts_with(output_dataset, "accounts/") {
+        output_dataset
+      } else {
+        __fireworks_dataset_resource(account_id, output_dataset)
+      },
+      job_progress: body["jobProgress"],
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __poll_xai_status(harness: Harness, job: dict) -> dict {
+  const auth = __api_key_for_job(harness, "xai")
+  const base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
+    harness,
+    "GET",
+    __join_url(__provider_base_url(harness, "xai"), "/batches/" + batch_id),
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["xai batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const provider_status = __xai_provider_status(body)
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      results_url: __xai_results_url(harness, batch_id, ""),
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
+  const auth = __api_key_for_job(harness, "gemini")
+  const base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  const batch_id = safe_string(job["provider_batch_id"], "")
+  const response = __http_result(
+    harness,
+    "GET",
+    __join_url(__provider_base_url(harness, "gemini"), "/v1beta/" + batch_id),
+    {
+      headers: {"x-goog-api-key": safe_string(auth["value"], ""), "content-type": "application/json"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["gemini batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const provider_status = __gemini_provider_status(body)
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      input_file_name: job["input_file_name"],
+      responses_file: __gemini_responses_file(body),
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
+  if dry_run {
+    return {ok: true, job: __cached_status_job(job, true), errors: []}
+  }
+  const provider = safe_string(job["provider"], "")
+  const wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  const provider_batch_id = safe_string(job["provider_batch_id"], "")
+  if provider_batch_id == "" {
+    return {
+      ok: false,
+      job: __cached_status_job(job, false) + {status: "failed"},
+      errors: [
+        "job "
+          + safe_string(job["id"], "")
+          + " has no provider_batch_id; submit live first or use --dry-run",
+      ],
+    }
+  }
+  const adapter = __live_batch_adapter_key(provider, wire)
+  if __is_openai_compatible_live_adapter(adapter) {
+    return __poll_openai_compatible_status(harness, job, adapter)
+  }
+  if adapter == "gemini" {
+    return __poll_gemini_status(harness, job)
+  }
+  if adapter == "fireworks" {
+    return __poll_fireworks_status(harness, job)
+  }
+  if adapter == "anthropic" {
+    return __poll_anthropic_status(harness, job)
+  }
+  if adapter == "mistral" {
+    return __poll_mistral_status(harness, job)
+  }
+  if adapter == "xai" {
+    return __poll_xai_status(harness, job)
+  }
+  return {
+    ok: false,
+    job: __cached_status_job(job, false) + {status: "failed"},
+    errors: [__live_batch_operation_error("status", provider, wire)],
+  }
+}
+
+fn __aggregate_status(jobs: list, errors: list, dry_run: bool) -> string {
+  if len(errors) > 0 {
+    for job in jobs {
+      const status = safe_string(safe_dict(job)["status"], "")
+      if status == "completed" || status == "running" || status == "ready" || status == "unknown"
+        || status == "canceling"
+        || status == "canceled" {
+        return "partial"
+      }
+    }
+    return "failed"
+  }
+  if dry_run {
+    return "dry_run"
+  }
+  const failed = __count_jobs_with_status(jobs, "failed")
+  const running = __count_jobs_with_status(jobs, "running")
+  const ready = __count_jobs_with_status(jobs, "ready")
+  const unknown = __count_jobs_with_status(jobs, "unknown")
+  const canceling = __count_jobs_with_status(jobs, "canceling")
+  const canceled = __count_jobs_with_status(jobs, "canceled")
+  const completed = __count_jobs_with_status(jobs, "completed")
+  if failed > 0 {
+    return "partial"
+  }
+  if canceling > 0 {
+    return "canceling"
+  }
+  if running > 0 || ready > 0 || unknown > 0 {
+    return "running"
+  }
+  if canceled > 0 && completed > 0 {
+    return "partial"
+  }
+  if canceled > 0 {
+    return "canceled"
+  }
+  return "completed"
+}
+
+fn __render_status_human(harness: Harness, report: dict) {
+  if !safe_bool(report["ok"], false) {
+    harness.stdio.eprintln("Batch status failed")
+  } else if safe_bool(report["dry_run"], false) {
+    harness.stdio.println("Batch status dry run written: " + safe_string(report["out"], ""))
+  } else {
+    harness.stdio.println("Batch status receipt written: " + safe_string(report["out"], ""))
+  }
+  harness.stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
+  harness.stdio.println("  completed: " + safe_int_string(report["completed_count"], "0"))
+  harness.stdio.println("  running: " + safe_int_string(report["running_count"], "0"))
+  harness.stdio.println("  ready: " + safe_int_string(report["ready_count"], "0"))
+  harness.stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
+  harness.stdio.println("  unknown: " + safe_int_string(report["unknown_count"], "0"))
+  if safe_string(report["receipt_sha256"], "") != "" {
+    harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+  }
+  print_list(harness, "errors", safe_list(report["errors"]))
+  print_list(harness, "warnings", safe_list(report["warnings"]))
+}
+
+fn __render_status_json(report: dict) -> string {
+  if safe_bool(report["ok"], false) {
+    return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
+  }
+  return json_stringify_pretty(
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {code: "batch_status_failed", message: "Submitted batch jobs could not be polled.", details: report},
+        warnings: safe_list(report["warnings"]),
+      },
+    ),
+  )
+}
+
+/**
+ * Execute the batch status command and write its receipt.
+ *
+ * @api_stability: internal
+ * @effects: [env.read, fs.read, fs.write, network, stdio.write]
+ * @errors: [runtime]
+ */
+pub fn __run_status(harness: Harness) -> int {
+  const submission_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMISSION", ""))
+  const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS_OUT", ""))
+  const dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
+  const loaded = __batch_artifact_read(harness, submission_path, "submission_receipt")
+  let errors = loaded.errors
+  const warnings = []
+  if out_path == "" {
+    errors = errors.push("--out is required")
+  }
+  const submission = loaded.artifact
+  let jobs = []
+  if len(errors) == 0 {
+    for raw_job in safe_list(submission["jobs"]) {
+      const checked = __status_one_job(harness, safe_dict(raw_job), dry_run)
+      jobs = jobs.push(__with_batch_lifecycle(safe_dict(checked["job"]), "status", dry_run))
+      errors = errors + safe_list(checked["errors"])
+    }
+  }
+  const status = __aggregate_status(jobs, errors, dry_run)
+  let receipt = {
+    schemaVersion: 1,
+    kind: "harn.model_batch_status_receipt",
+    producer: "harn models batch status",
+    dryRun: dry_run,
+    source: {
+      path: submission_path,
+      sha256: loaded.source_sha256,
+      submission_status: safe_string(submission["status"], ""),
+      prepare_source: safe_dict(safe_dict(submission["source"])["manifest"]),
+    },
+    out: out_path,
+    jobCount: len(jobs),
+    completedCount: __count_jobs_with_status(jobs, "completed"),
+    runningCount: __count_jobs_with_status(jobs, "running"),
+    readyCount: __count_jobs_with_status(jobs, "ready"),
+    failedCount: __count_jobs_with_status(jobs, "failed"),
+    unknownCount: __count_jobs_with_status(jobs, "unknown"),
+    jobs: jobs,
+    status: status,
+    lifecycle: __batch_receipt_lifecycle(status, jobs, dry_run, "status"),
+    warnings: warnings,
+    errors: errors,
+  }
+  let report = {
+    schema_version: 1,
+    ok: len(errors) == 0,
+    dry_run: dry_run,
+    out: out_path,
+    source: receipt["source"],
+    status: status,
+    job_count: len(jobs),
+    completed_count: __count_jobs_with_status(jobs, "completed"),
+    running_count: __count_jobs_with_status(jobs, "running"),
+    ready_count: __count_jobs_with_status(jobs, "ready"),
+    failed_count: __count_jobs_with_status(jobs, "failed"),
+    unknown_count: __count_jobs_with_status(jobs, "unknown"),
+    jobs: jobs,
+    lifecycle: __batch_receipt_lifecycle(status, jobs, dry_run, "status"),
+    errors: errors,
+    warnings: warnings,
+  }
+  if out_path != "" {
+    __mkdirp(harness, dirname(out_path) ?? ".")
+    const receipt_text = json_stringify_pretty(receipt) + "\n"
+    harness.fs.write_text(out_path, receipt_text)
+    receipt = receipt + {receipt_sha256: sha256(receipt_text)}
+    report = report + {receipt_sha256: sha256(receipt_text)}
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(__render_status_json(report))
+  } else {
+    __render_status_human(harness, report)
+  }
+  if len(errors) == 0 {
+    return 0
+  }
+  return 1
+}
