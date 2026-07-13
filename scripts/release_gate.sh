@@ -479,13 +479,11 @@ cmd_prepare() {
   current="$(current_version)"
   next="$(next_version "$bump")"
   bump_version "$next"
-  # The audit lanes that ran before prepare populate cache state keyed to the
-  # old workspace crate hashes. Once `bump_version` rewrites Cargo.toml, the
-  # prepare-time cargo calls are one-shot rebuilds of generated-artifact
-  # helpers; caching them has little value and has failed under macOS sccache
-  # file-descriptor pressure. Use direct rustc and skip incremental state for
-  # this post-bump phase. `CARGO_BUILD_RUSTC_WRAPPER=` is required because
-  # Harn's checked-in `.cargo/config.toml` otherwise still applies sccache.
+  # The canonical release path supplies the CLI already audited before this
+  # metadata-only version rewrite. Direct/manual prepare may still resolve a
+  # binary through Cargo, so keep that fallback isolated from incremental and
+  # sccache state. `CARGO_BUILD_RUSTC_WRAPPER=` is required because Harn's
+  # checked-in `.cargo/config.toml` otherwise still applies sccache.
   export CARGO_INCREMENTAL=0
   export RUSTC_WRAPPER=
   export CARGO_BUILD_RUSTC_WRAPPER=
@@ -508,13 +506,10 @@ updated = re.sub(r'tag = "v\d+\.\d+\.\d+"', f'tag = "v{next_version}"', text)
 if updated != text:
     doc.write_text(updated)
 PY
-  # HARN_BIN may still point at the pre-bump binary warmed during the audit
-  # phase. Protocol artifacts stamp the compiled crate version, so force this
-  # target through a fresh post-bump cargo-built binary. The full workspace was
-  # already validated by the release audit before this version-only rewrite, and
-  # CI validates the pushed release branch, so do not pay for a second
-  # post-bump workspace check here.
-  HARN_BIN="" make gen-protocol-artifacts
+  # Artifact contents come from the already-audited source checkout. Stamp the
+  # selected release version explicitly so a Cargo.toml-only rewrite does not
+  # force a second full CLI build.
+  harn_cmd dump-protocol-artifacts --artifact-version "$next"
   echo "Version updated: $current -> $next"
   echo "Next steps:"
   echo "  1. Review docs/release notes diff"

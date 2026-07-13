@@ -74,7 +74,13 @@ mkdir -p "$fake_bin"
 cat > "$fake_bin/harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >> "$FAKE_HARN_RECORD"
+{
+  printf 'argv=%s\n' "$*"
+  printf 'CARGO_INCREMENTAL=%s\n' "${CARGO_INCREMENTAL-__unset__}"
+  printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
+  printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
+  printf 'SCCACHE_DISABLE=%s\n' "${SCCACHE_DISABLE-__unset__}"
+} >> "$FAKE_HARN_RECORD"
 exit 0
 SH
 chmod +x "$fake_bin/harn"
@@ -90,6 +96,10 @@ chmod +x "$fake_bin/cargo"
 cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${FAIL_ON_MAKE:-0}" == "1" ]]; then
+  echo "unexpected make invocation: $*" >&2
+  exit 2
+fi
 {
   printf 'target=%s\n' "$*"
   printf 'HARN_BIN=%s\n' "${HARN_BIN-__unset__}"
@@ -110,10 +120,11 @@ HARN_RELEASE_ROOT="$release_root" \
 HARN_BIN="$fake_bin/harn" \
 FAKE_HARN_RECORD="$record_harn" \
 FAKE_MAKE_RECORD="$record_make" \
+FAIL_ON_MAKE=1 \
 PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/release_gate.sh" prepare --bump minor
 
-if ! grep -Fq "run scripts/sync_protocol_fixture_runtime_versions.harn -- --from 1.2.3 --to 1.3.0" "$record_harn"; then
+if ! grep -Fxq "argv=run scripts/sync_protocol_fixture_runtime_versions.harn -- --from 1.2.3 --to 1.3.0" "$record_harn"; then
   echo "release_gate prepare did not route fixture sync through HARN_BIN" >&2
   cat "$record_harn" >&2
   exit 1
@@ -135,40 +146,35 @@ if ! grep -Fq 'serde = { version = "1", optional = true }' "$release_root/crates
   exit 1
 fi
 
-if ! grep -Fxq "target=gen-protocol-artifacts" "$record_make"; then
-  echo "release_gate prepare did not regenerate protocol artifacts" >&2
-  cat "$record_make" >&2
-  exit 1
-fi
-if ! grep -Fxq "HARN_BIN=" "$record_make"; then
-  echo "release_gate prepare should force protocol artifact generation through a post-bump binary" >&2
-  cat "$record_make" >&2
+if ! grep -Fxq "argv=dump-protocol-artifacts --artifact-version 1.3.0" "$record_harn"; then
+  echo "release_gate prepare did not generate explicitly versioned protocol artifacts through HARN_BIN" >&2
+  cat "$record_harn" >&2
   exit 1
 fi
 if [[ -e "$record_cargo" ]]; then
-  echo "release_gate prepare should not run a redundant post-bump cargo check" >&2
+  echo "release_gate prepare should not run Cargo with a warmed HARN_BIN" >&2
   cat "$record_cargo" >&2
   exit 1
 fi
 
-if ! grep -Fxq "CARGO_INCREMENTAL=0" "$record_make"; then
-  echo "expected CARGO_INCREMENTAL=0 in $record_make" >&2
-  cat "$record_make" >&2
+if ! grep -Fxq "CARGO_INCREMENTAL=0" "$record_harn"; then
+  echo "expected CARGO_INCREMENTAL=0 in $record_harn" >&2
+  cat "$record_harn" >&2
   exit 1
 fi
-if ! grep -Fxq "RUSTC_WRAPPER=" "$record_make"; then
-  echo "expected empty RUSTC_WRAPPER in $record_make" >&2
-  cat "$record_make" >&2
+if ! grep -Fxq "RUSTC_WRAPPER=" "$record_harn"; then
+  echo "expected empty RUSTC_WRAPPER in $record_harn" >&2
+  cat "$record_harn" >&2
   exit 1
 fi
-if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record_make"; then
-  echo "expected empty CARGO_BUILD_RUSTC_WRAPPER in $record_make" >&2
-  cat "$record_make" >&2
+if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record_harn"; then
+  echo "expected empty CARGO_BUILD_RUSTC_WRAPPER in $record_harn" >&2
+  cat "$record_harn" >&2
   exit 1
 fi
-if ! grep -Fxq "SCCACHE_DISABLE=1" "$record_make"; then
-  echo "expected SCCACHE_DISABLE=1 in $record_make" >&2
-  cat "$record_make" >&2
+if ! grep -Fxq "SCCACHE_DISABLE=1" "$record_harn"; then
+  echo "expected SCCACHE_DISABLE=1 in $record_harn" >&2
+  cat "$record_harn" >&2
   exit 1
 fi
 
