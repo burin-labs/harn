@@ -13,7 +13,7 @@ real_git=$(command -v git)
 
 git init --bare --quiet "$origin"
 git init --quiet "$work"
-mkdir -p "$fake_bin" "$work/.githooks" "$work/crates/harn-lint/src"
+mkdir -p "$fake_bin" "$work/.githooks" "$work/crates/harn-lint/src" "$work/crates/harn-other/src"
 
 cat > "$fake_bin/cargo" <<'SH'
 #!/usr/bin/env bash
@@ -54,7 +54,7 @@ chmod +x "$work/.githooks/pre-commit" "$work/.githooks/pre-push"
 
 cat > "$work/Cargo.toml" <<'TOML'
 [workspace]
-members = ["crates/harn-lint"]
+members = ["crates/harn-lint", "crates/harn-other"]
 resolver = "2"
 TOML
 cat > "$work/crates/harn-lint/Cargo.toml" <<'TOML'
@@ -63,7 +63,15 @@ name = "harn-lint"
 version = "0.0.0"
 edition = "2021"
 TOML
-printf 'pub fn base() {}\n' > "$work/crates/harn-lint/src/lib.rs"
+cat > "$work/crates/harn-other/Cargo.toml" <<'TOML'
+[package]
+name = "harn-other"
+version = "0.0.0"
+edition = "2021"
+TOML
+printf 'pub mod obsolete;\npub fn base() {}\n' > "$work/crates/harn-lint/src/lib.rs"
+printf 'pub fn removable() {}\n' > "$work/crates/harn-lint/src/obsolete.rs"
+printf 'pub fn other() {}\n' > "$work/crates/harn-other/src/lib.rs"
 
 git -C "$work" config user.email "test@example.com"
 git -C "$work" config user.name "Test User"
@@ -75,7 +83,7 @@ git -C "$work" branch -M main
 git -C "$work" push --quiet -u origin main
 git -C "$work" checkout --quiet -b feature
 
-printf 'pub fn base() {}\npub fn changed() {}\n' > "$work/crates/harn-lint/src/lib.rs"
+printf 'pub mod obsolete;\npub fn base() {}\npub fn changed() {}\n' > "$work/crates/harn-lint/src/lib.rs"
 git -C "$work" add crates/harn-lint/src/lib.rs
 
 : > "$record"
@@ -143,6 +151,63 @@ make test
 EOF
 if ! diff -u "$tmp_root/expected-full-pre-push.txt" "$record"; then
   echo "full-test pre-push should preserve lint coverage before running the full suite" >&2
+  exit 1
+fi
+
+# A deleted Rust path must still select its owning package. This deliberately
+# strands `mod obsolete;`: real Cargo would reject the push, while the fake
+# Cargo receipt proves the public hook invokes exactly the one compile gate.
+git -C "$work" checkout --quiet -B deletion-feature origin/main
+git -C "$work" rm --quiet crates/harn-lint/src/obsolete.rs
+git -C "$work" commit --quiet --no-verify -m "delete obsolete module"
+deletion_sha=$(git -C "$work" rev-parse HEAD)
+
+: > "$record"
+(
+  cd "$work"
+  printf 'refs/heads/deletion-feature %s refs/heads/deletion-feature %s\n' \
+    "$deletion_sha" "$remote_sha" \
+    | CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
+      CARGO_TARGET_DIR="$tmp_root/target" \
+      FAKE_CARGO_RECORD="$record" \
+      HOOK_TIMING_LOG_DIR="$tmp_root/timings" \
+      PATH="$fake_bin:$PATH" \
+      REAL_GIT="$real_git" \
+      ./.githooks/pre-push origin "$origin" >/dev/null
+)
+
+if ! diff -u "$tmp_root/expected-pre-push.txt" "$record"; then
+  echo "deletion-only Rust changes must run one owning-package compile gate" >&2
+  exit 1
+fi
+
+# Rename detection normally makes --name-only report only the destination.
+# Expanding a cross-crate rename into delete+add must select both owners: the
+# source crate lost a module while the destination crate gained a Rust file.
+git -C "$work" checkout --quiet -B rename-feature origin/main
+git -C "$work" mv crates/harn-lint/src/obsolete.rs crates/harn-other/src/moved.rs
+git -C "$work" commit --quiet --no-verify -m "move module across crates"
+rename_sha=$(git -C "$work" rev-parse HEAD)
+
+: > "$record"
+(
+  cd "$work"
+  printf 'refs/heads/rename-feature %s refs/heads/rename-feature %s\n' \
+    "$rename_sha" "$remote_sha" \
+    | CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
+      CARGO_TARGET_DIR="$tmp_root/target" \
+      FAKE_CARGO_RECORD="$record" \
+      HOOK_TIMING_LOG_DIR="$tmp_root/timings" \
+      PATH="$fake_bin:$PATH" \
+      REAL_GIT="$real_git" \
+      ./.githooks/pre-push origin "$origin" >/dev/null
+)
+
+cat > "$tmp_root/expected-rename-pre-push.txt" <<'EOF'
+cargo clippy -p harn-lint -p harn-other --tests -- -D warnings
+EOF
+if ! diff -u "$tmp_root/expected-rename-pre-push.txt" "$record"; then
+  echo "cross-crate Rust renames must compile both owning packages" >&2
   exit 1
 fi
 

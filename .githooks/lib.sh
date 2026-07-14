@@ -279,7 +279,7 @@ hook_export_existing_harn_bin_for_non_rust_changes() {
 }
 
 hook_write_staged_files() {
-  git diff --cached --name-only --diff-filter=ACMR > "$1"
+  git diff --cached --name-only --no-renames --diff-filter=ACMRD > "$1"
 }
 
 hook_push_base() {
@@ -318,7 +318,7 @@ hook_validation_base() {
 hook_write_push_files() {
   output=$1
   base=${2:-$(hook_validation_base)}
-  git diff --name-only --diff-filter=ACMR "$base"...HEAD > "$output"
+  git diff --name-only --no-renames --diff-filter=ACMRD "$base"...HEAD > "$output"
 }
 
 # Cover the same incremental-cache corruption that scripts/release_gate.sh
