@@ -200,7 +200,7 @@ fn trigger_replay_diff_reports_structured_drift() {
     let workspace_root = temp.path().to_path_buf();
     write_manifest(&workspace_root);
     let child_replay_expr = if cfg!(windows) {
-        r#"shell("[Console]::Out.Write($env:HARN_REPLAY)").stdout"#
+        r#"trim(exec("cmd.exe", "/D", "/C", "if defined HARN_REPLAY echo %HARN_REPLAY% & exit /B 0").stdout)"#
     } else {
         r#"shell("printf '%s' \"$HARN_REPLAY\"").stdout"#
     };

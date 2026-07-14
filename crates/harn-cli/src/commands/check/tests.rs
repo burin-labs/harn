@@ -131,11 +131,9 @@ pub fn chat() -> string {
         diag.message
     );
     assert!(
-        diag.message.contains(
+        diag.message.contains(&crate::format::slash_path(
             &dir.join("lane-classifier.harn.prompt")
-                .display()
-                .to_string()
-        ),
+        )),
         "expected diagnostic to include the resolved candidate path, got: {}",
         diag.message
     );

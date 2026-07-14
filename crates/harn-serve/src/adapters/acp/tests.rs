@@ -1245,10 +1245,10 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
         }))
         .await;
     let discard_response = recv_json(&mut rx).await;
-    assert_eq!(
-        discard_response["result"]["discardedPaths"],
-        serde_json::json!([discarded_file.to_string_lossy()])
-    );
+    let discarded = &discard_response["result"]["discardedPaths"];
+    assert_eq!(discarded.as_array().expect("discarded paths").len(), 1);
+    let discarded_path = discarded[0].as_str().expect("discarded path");
+    assert_eq!(std::path::Path::new(discarded_path), discarded_file);
     assert!(
         !discarded_file.exists(),
         "discarding a staged write must not touch disk"
