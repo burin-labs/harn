@@ -9,6 +9,23 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.17
+
+### Changed
+
+- Made `harn test` defer manifest trigger modules until a trigger fires, initialize
+  each module once under dispatch authority, and share its state across handlers in
+  one test VM while preserving isolation between tests.
+- Reuse comprehensive merge-queue CI proof for an identical post-merge commit
+  instead of rerunning the same Rust, format, and Windows cross-compile jobs.
+
+### Fixed
+
+- Preserve the original release prepare failure when rollback sees deleted tracked changelog fragments.
+- Fix atomic package installation failing to sync generation files on Windows.
+- Keep the audited Harn binary alive through `release_gate.sh full` prepare and
+  publish steps, then clean its temporary directory on success or failure.
+
 ## v0.10.16
 
 ### Breaking
