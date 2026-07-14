@@ -4778,6 +4778,13 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+# xAI rejects these OpenAI sampling fields on every Grok model with HTTP 400
+# ("Model grok-* does not support parameter ..."); confirmed by live probe on
+# grok-4.5, grok-4.3, and grok-build-0.1 (2026-07-14). Gating them here keeps
+# the quirk in Harn's compat layer so no caller ever sends an invalid request.
+frequency_penalty_supported = false
+presence_penalty_supported = false
+stop_supported = false
 
 # Groq Compound systems route through the chat-completions endpoint but reject
 # OpenAI `tools` outright (`tool calling is not supported with this model`,

@@ -1523,6 +1523,10 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.presence_penalty_supported),
     );
     dict.insert(
+        crate::value::intern_key("stop_supported"),
+        VmValue::Bool(caps.stop_supported),
+    );
+    dict.insert(
         crate::value::intern_key("allowed_tool_choice_modes"),
         VmValue::List(std::sync::Arc::new(
             caps.allowed_tool_choice_modes
