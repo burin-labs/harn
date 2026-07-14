@@ -796,6 +796,7 @@ mod tests {
         crate::llm::mock::push_llm_mock(crate::llm::mock::LlmMock {
             text: "sampled text".to_string(),
             tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
             match_pattern: None,
             consume_on_match: true,
             input_tokens: None,

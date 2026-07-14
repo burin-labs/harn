@@ -457,6 +457,7 @@ async fn play_stream(
     Ok(LlmResult {
         served_fast: false,
         text,
+        raw_tool_calls: Vec::new(),
         tool_calls,
         input_tokens: count_input_tokens(&request.messages),
         output_tokens: 0,

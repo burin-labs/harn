@@ -19,10 +19,73 @@ fn is_true(value: &bool) -> bool {
     *value
 }
 
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct RawProviderToolCall(serde_json::Value);
+
+impl RawProviderToolCall {
+    pub(crate) fn new(value: serde_json::Value) -> Result<Self, String> {
+        if value.is_object() {
+            Ok(Self(value))
+        } else {
+            Err("raw provider tool call must be a JSON object".to_string())
+        }
+    }
+
+    pub(crate) fn array_from_value(value: &serde_json::Value) -> Result<Vec<Self>, String> {
+        match value {
+            serde_json::Value::Null => Ok(Vec::new()),
+            serde_json::Value::Array(items) => items.iter().cloned().map(Self::new).collect(),
+            _ => Err("raw_tool_calls must be an array".to_string()),
+        }
+    }
+
+    pub(crate) fn into_value(self) -> serde_json::Value {
+        self.0
+    }
+}
+
+impl std::ops::Deref for RawProviderToolCall {
+    type Target = serde_json::Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<serde_json::Value> for RawProviderToolCall {
+    type Error = String;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RawProviderToolCall {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl From<RawProviderToolCall> for serde_json::Value {
+    fn from(value: RawProviderToolCall) -> Self {
+        value.into_value()
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub(crate) struct LlmResult {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
+    /// Provider-native tool-call envelopes before Harn normalizes names and
+    /// arguments for dispatch. Transcript-only receipt for format/adapter
+    /// forensics; dispatch must keep using `tool_calls`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_tool_calls: Vec<RawProviderToolCall>,
     pub input_tokens: i64,
     pub output_tokens: i64,
     /// Prompt tokens served from the provider's cache (when supported).
@@ -429,6 +492,7 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
         served_fast: false,
         text: text.clone(),
         tool_calls: Vec::new(),
+        raw_tool_calls: Vec::new(),
         input_tokens: (prefix.len() + suffix.len()) as i64,
         output_tokens: 16,
         cache_read_tokens: 0,
@@ -453,7 +517,7 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
 mod cache_supported_serde_tests {
     use crate::value::VmValue;
 
-    use super::{mock_completion_response, vm_build_llm_result, LlmResult};
+    use super::{mock_completion_response, vm_build_llm_result, LlmResult, RawProviderToolCall};
     use std::collections::BTreeMap;
 
     fn run_tool_registry() -> VmValue {
@@ -476,6 +540,16 @@ mod cache_supported_serde_tests {
             "tools".to_string(),
             VmValue::List(std::sync::Arc::new(vec![tool])),
         )]))
+    }
+
+    #[test]
+    fn raw_provider_tool_call_rejects_non_object() {
+        let constructed = RawProviderToolCall::new(serde_json::json!("tool_call"));
+        let deserialized =
+            serde_json::from_value::<RawProviderToolCall>(serde_json::json!("tool_call"));
+
+        assert!(constructed.is_err());
+        assert!(deserialized.is_err());
     }
 
     #[test]

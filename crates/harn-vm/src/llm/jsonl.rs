@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use crate::llm::api::RawProviderToolCall;
 use crate::llm::mock::{self, LlmMock, MockError};
 
 /// Parse a JSONL fixture file into a vector of [`LlmMock`] entries.
@@ -65,6 +66,7 @@ pub fn parse_llm_mock_value(value: &serde_json::Value) -> Result<LlmMock, String
     let blocks = optional_vec_field(object, "blocks")?;
     let logprobs = optional_vec_field(object, "logprobs")?.unwrap_or_default();
     let tool_calls = parse_llm_tool_calls(object.get("tool_calls"))?;
+    let raw_tool_calls = parse_raw_provider_tool_calls(object.get("raw_tool_calls"))?;
     let error = parse_llm_mock_error(object.get("error"))?;
     let stream_chunks = match object.get("stream_chunks") {
         None | Some(serde_json::Value::Null) => Vec::new(),
@@ -82,6 +84,7 @@ pub fn parse_llm_mock_value(value: &serde_json::Value) -> Result<LlmMock, String
     Ok(LlmMock {
         text,
         tool_calls,
+        raw_tool_calls,
         match_pattern,
         consume_on_match,
         input_tokens,
@@ -148,6 +151,17 @@ pub fn serialize_llm_mock(mock: LlmMock) -> Result<String, String> {
         object.insert(
             "tool_calls".to_string(),
             serde_json::Value::Array(tool_calls),
+        );
+    }
+    if !mock.raw_tool_calls.is_empty() {
+        object.insert(
+            "raw_tool_calls".to_string(),
+            serde_json::Value::Array(
+                mock.raw_tool_calls
+                    .into_iter()
+                    .map(RawProviderToolCall::into_value)
+                    .collect(),
+            ),
         );
     }
     if let Some(input_tokens) = mock.input_tokens {
@@ -258,6 +272,15 @@ fn parse_llm_tool_calls(
             normalize_llm_tool_call(item).map_err(|error| format!("tool_calls[{idx}] {error}"))
         })
         .collect()
+}
+
+fn parse_raw_provider_tool_calls(
+    value: Option<&serde_json::Value>,
+) -> Result<Vec<RawProviderToolCall>, String> {
+    match value {
+        None => Ok(Vec::new()),
+        Some(value) => RawProviderToolCall::array_from_value(value),
+    }
 }
 
 fn normalize_llm_tool_call(value: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -400,6 +423,56 @@ mod tests {
         assert_eq!(reparsed.text, "hello");
         assert_eq!(reparsed.tool_calls.len(), 1);
         assert_eq!(reparsed.tool_calls[0]["name"].as_str(), Some("search"));
+    }
+
+    #[test]
+    fn roundtrip_preserves_raw_tool_calls() {
+        let mock = parse_llm_mock_value(&serde_json::json!({
+            "text": "hello",
+            "model": "mock",
+            "raw_tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "tool_call",
+                        "arguments": "{\"cmd\":\"test\"}"
+                    }
+                }
+            ]
+        }))
+        .expect("parse");
+        let line = serialize_llm_mock(mock).expect("serialize");
+        let value: serde_json::Value = serde_json::from_str(&line).expect("reparse json");
+        let reparsed = parse_llm_mock_value(&value).expect("reparse mock");
+        assert_eq!(
+            reparsed.raw_tool_calls[0]["function"]["name"].as_str(),
+            Some("tool_call")
+        );
+        assert_eq!(
+            reparsed.raw_tool_calls[0]["function"]["arguments"].as_str(),
+            Some("{\"cmd\":\"test\"}")
+        );
+    }
+
+    #[test]
+    fn parse_does_not_synthesize_raw_tool_calls_from_normalized_calls() {
+        let mock = parse_llm_mock_value(&serde_json::json!({
+            "text": "hello",
+            "model": "mock",
+            "tool_calls": [
+                {
+                    "name": "search",
+                    "arguments": {"query": "rust"}
+                }
+            ]
+        }))
+        .expect("parse");
+
+        assert!(
+            mock.raw_tool_calls.is_empty(),
+            "normalized tool_calls must not be promoted to provider-native raw_tool_calls"
+        );
     }
 
     #[test]

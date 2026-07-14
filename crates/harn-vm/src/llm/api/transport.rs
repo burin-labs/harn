@@ -20,7 +20,7 @@ use super::response::{
     extract_cache_write_tokens, is_billed_noncommittal_completion, parse_llm_response,
     parse_openai_tool_argument_json_values, CompletionContractSignals,
 };
-use super::result::LlmResult;
+use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
 use super::thinking::ThinkingStreamSplitter;
 
@@ -1125,6 +1125,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     let mut input_tokens: i64 = 0;
     let mut output_tokens: i64 = 0;
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    let mut raw_tool_calls: Vec<RawProviderToolCall> = Vec::new();
     let mut blocks: Vec<serde_json::Value> = Vec::new();
     let mut telemetry = ProviderTelemetry::default();
     let mut anth_request_id: Option<String> = None;
@@ -1135,6 +1136,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     struct ToolBlock {
         name: String,
         input_json: String,
+        provider_id: String,
         /// Stable id used for `AgentEvent::ToolCall*` streaming
         /// emissions and as the dispatched call's `id`.
         /// `__tool_envelope` reuses this id for the executed
@@ -1282,6 +1284,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                             current_tool = Some(ToolBlock {
                                 name,
                                 input_json: String::new(),
+                                provider_id: id,
                                 tool_call_id,
                                 coalescer: DeltaCoalescer::new(),
                             });
@@ -1361,6 +1364,15 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 Some("content_block_stop") => {
                     if let Some(tool) = current_tool.take() {
                         let args = parse_anthropic_streamed_tool_input(&tool.input_json);
+                        raw_tool_calls.push(
+                            RawProviderToolCall::new(serde_json::json!({
+                                "type": "tool_use",
+                                "id": tool.provider_id,
+                                "name": tool.name,
+                                "input": args.clone(),
+                            }))
+                            .expect("anthropic stream raw tool call is an object"),
+                        );
                         let (name, args) =
                             crate::llm::tools::normalize_tool_call_shape(&tool.name, args);
                         // Dispatch under the id already used for
@@ -1605,6 +1617,17 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     }
 
     for (_, stream) in oai_tool_map {
+        raw_tool_calls.push(
+            RawProviderToolCall::new(serde_json::json!({
+                "id": stream.id.clone(),
+                "type": "function",
+                "function": {
+                    "name": stream.name.clone(),
+                    "arguments": stream.args.clone(),
+                },
+            }))
+            .expect("openai stream raw tool call is an object"),
+        );
         match crate::llm::tools::parse_text_tool_call_from_native_name(&stream.name) {
             crate::llm::tools::NativeToolNameTextCall::Parsed { name, arguments } => {
                 let (name, arguments) =
@@ -1794,6 +1817,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     Ok(LlmResult {
         text,
         tool_calls,
+        raw_tool_calls,
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -2019,6 +2043,7 @@ where
 
     Ok(LlmResult {
         text,
+        raw_tool_calls: Vec::new(),
         tool_calls,
         input_tokens,
         output_tokens,

@@ -548,6 +548,7 @@ mod tests {
                 "name": "json_response",
                 "arguments": {"answer": "ok"},
             })],
+            raw_tool_calls: Vec::new(),
             input_tokens: 1,
             output_tokens: 1,
             cache_read_tokens: 0,

@@ -292,6 +292,7 @@ where
         served_fast: false,
         text: collector.text.clone(),
         tool_calls: Vec::new(),
+        raw_tool_calls: Vec::new(),
         input_tokens: approximate_tokens(&prompt_text),
         output_tokens,
         cache_read_tokens: 0,
