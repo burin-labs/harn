@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="${HARN_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="${HARN_RELEASE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 cd "$ROOT_DIR"
 PUBLISH_SCRIPT="${HARN_PUBLISH_SCRIPT:-./scripts/publish.sh}"
-if [[ -f "$ROOT_DIR/scripts/lib/cargo_env.sh" ]]; then
-  # shellcheck source=scripts/lib/cargo_env.sh
-  source "$ROOT_DIR/scripts/lib/cargo_env.sh"
-fi
+# shellcheck source=scripts/lib/cargo_env.sh
+source "$SCRIPT_DIR/lib/cargo_env.sh"
 
 release_gate_target_name() {
   printf '%s' "$(basename "$ROOT_DIR")" | tr -c 'A-Za-z0-9._-' '-'
@@ -26,12 +25,7 @@ configure_release_gate_cargo_env() {
     CARGO_TARGET_DIR="$(default_release_gate_target_dir)"
   fi
   if [[ -z "${CARGO_BUILD_BUILD_DIR:-}" ]]; then
-    if declare -F harn_export_cargo_build_dir_under_target >/dev/null; then
-      harn_export_cargo_build_dir_under_target "$CARGO_TARGET_DIR" || true
-    else
-      export CARGO_BUILD_BUILD_DIR
-      CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR/build"
-    fi
+    harn_export_cargo_build_dir_for_target "$CARGO_TARGET_DIR" || true
   fi
 }
 

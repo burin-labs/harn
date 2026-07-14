@@ -44,7 +44,7 @@ if [[ -n "${HARN_BIN:-}" ]]; then
   harn_require_fresh_bin "$HARN_BIN"
 else
   echo "=== Warming Harn CLI binary ==="
-  harn_export_cargo_build_dir_under_target "${CARGO_TARGET_DIR:-}" || true
+  harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
   cargo build --quiet --bin harn
   HARN_BIN="$(harn_debug_binary_path)"
   harn_require_fresh_bin "$HARN_BIN"

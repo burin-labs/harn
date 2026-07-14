@@ -372,6 +372,7 @@ jobs:
           cp scripts/release_ship.sh "$RUNNER_TEMP/release-tools/release_ship.sh"
           cp scripts/release_gate.sh "$RUNNER_TEMP/release-tools/release_gate.sh"
           cp scripts/publish.sh "$RUNNER_TEMP/release-tools/publish.sh"
+          cp -R scripts/lib "$RUNNER_TEMP/release-tools/lib"
           publish_ref="${{ needs.detect-drift.outputs.publish_ref }}"
           if [[ "$publish_ref" != "main" ]]; then
             git fetch --force --tags origin

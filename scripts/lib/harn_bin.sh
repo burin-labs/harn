@@ -198,7 +198,7 @@ harn_resolve_binary() {
       | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
     export CARGO_TARGET_DIR
   fi
-  harn_export_cargo_build_dir_under_target "$CARGO_TARGET_DIR" || true
+  harn_export_cargo_build_dir_for_target "$CARGO_TARGET_DIR" || true
 
   bin="$(harn_debug_binary_path)"
   if harn_bin_is_fresh "$bin"; then
