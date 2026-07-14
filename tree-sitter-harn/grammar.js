@@ -24,6 +24,7 @@ module.exports = grammar({
     [$.parallel_expression],
     [$.typed_parameter, $.type_annotation],
     [$.type_arguments, $.type_annotation],
+    [$.shape_type],
     [$.block],
     [$.closure],
     [$.select_block],
@@ -1240,23 +1241,25 @@ module.exports = grammar({
     shape_type: ($) =>
       seq(
         "{",
+        repeat(lineBreak($)),
         optional(
           choice(
             // Fields, optionally followed by row tails.
             seq(
               $.shape_field,
-              repeat(seq(",", $.shape_field)),
-              repeat(seq(",", $.row_tail)),
-              optional(",")
+              repeat(seq(",", repeat(lineBreak($)), $.shape_field)),
+              repeat(seq(",", repeat(lineBreak($)), $.row_tail)),
+              optional(seq(",", repeat(lineBreak($))))
             ),
             // Row tails only (no explicit fields).
             seq(
               $.row_tail,
-              repeat(seq(",", $.row_tail)),
-              optional(",")
+              repeat(seq(",", repeat(lineBreak($)), $.row_tail)),
+              optional(seq(",", repeat(lineBreak($))))
             )
           )
         ),
+        repeat(lineBreak($)),
         "}"
       ),
 
