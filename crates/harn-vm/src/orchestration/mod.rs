@@ -44,6 +44,8 @@ pub use command_policy::*;
 mod compaction;
 pub use compaction::*;
 
+mod repair_ledger;
+
 mod compact_lifecycle;
 pub use compact_lifecycle::*;
 
