@@ -145,20 +145,32 @@ pub(super) fn write_lora_manifest_fixture(
 }
 
 pub(super) fn write_lora_probe_summary(root: &std::path::Path, case_id: &str, passed: bool) {
+    write_lora_probe_summary_with_trials(root, case_id, passed, 5);
+}
+
+pub(super) fn write_lora_probe_summary_with_trials(
+    root: &std::path::Path,
+    case_id: &str,
+    passed: bool,
+    trials: usize,
+) {
     let case_dir = root.join(case_id);
     fs::create_dir_all(&case_dir).expect("probe case dir");
-    let summary = serde_json::json!({
-        "total_cases": 1,
-        "passed_cases": i32::from(passed),
-        "pass_rate": if passed { 1.0 } else { 0.0 },
-        "total_cost_usd": 0.01,
-        "cases": [
-            {
+    let cases = (0..trials)
+        .map(|_| {
+            serde_json::json!({
                 "id": case_id,
                 "passed": passed,
                 "reason": if passed { "ok" } else { "failed" }
-            }
-        ]
+            })
+        })
+        .collect::<Vec<_>>();
+    let summary = serde_json::json!({
+        "total_cases": trials,
+        "passed_cases": if passed { trials } else { 0 },
+        "pass_rate": if passed { 1.0 } else { 0.0 },
+        "total_cost_usd": 0.01,
+        "cases": cases
     });
     fs::write(
         case_dir.join("summary.json"),
@@ -167,7 +179,11 @@ pub(super) fn write_lora_probe_summary(root: &std::path::Path, case_id: &str, pa
     .expect("write summary");
     fs::write(
         case_dir.join("per_case.jsonl"),
-        format!("{}\n", serde_json::json!({"id": case_id, "passed": passed})),
+        (0..trials)
+            .map(|_| serde_json::json!({"id": case_id, "passed": passed}).to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n",
     )
     .expect("write per-case");
 }

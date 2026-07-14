@@ -738,8 +738,8 @@ fn test_parses_models_lora_promote_args() {
         "./adapters/burin-tools.manifest.json",
         "--probe-root",
         "./promotions/probes",
-        "--not-applicable",
-        "parallel_tool_calls=route does not advertise parallel tools",
+        "--base-probe-root",
+        "./promotions/base-probes",
         "--out",
         "./promotions/probe-matrix.receipt.json",
         "--check",
@@ -761,8 +761,8 @@ fn test_parses_models_lora_promote_args() {
     );
     assert_eq!(args.probe_root.display().to_string(), "./promotions/probes");
     assert_eq!(
-        args.not_applicable,
-        vec!["parallel_tool_calls=route does not advertise parallel tools"]
+        args.base_probe_root.as_deref(),
+        Some(std::path::Path::new("./promotions/base-probes"))
     );
     assert_eq!(
         args.out

@@ -458,9 +458,9 @@ pub(crate) struct ModelsLoraPromoteArgs {
         default_value = "PROMOTION_PROBES"
     )]
     pub probe_root: std::path::PathBuf,
-    /// Record a required-but-not-applicable probe as CASE=REASON.
-    #[arg(long = "not-applicable", value_name = "CASE=REASON")]
-    pub not_applicable: Vec<String>,
+    /// Directory containing base-route per-case `<case_id>/summary.json` probe outputs.
+    #[arg(long = "base-probe-root", value_name = "DIR")]
+    pub base_probe_root: Option<std::path::PathBuf>,
     /// Write the promotion probe matrix receipt JSON to this path.
     #[arg(long, value_name = "PATH")]
     pub out: Option<std::path::PathBuf>,

@@ -3,6 +3,7 @@ use std::fs;
 use super::lora_fixtures::{
     write_lora_adapter_fixture, write_lora_adapter_fixture_with_contract_and_modules,
     write_lora_corpus_fixture, write_lora_grouped_result_corpus_fixture, write_lora_probe_summary,
+    write_lora_probe_summary_with_trials,
 };
 use super::support::{parse_json, run, success_data, LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION};
 
@@ -603,7 +604,7 @@ fn models_lora_manifest_json_writes_training_manifest() {
         manifest_probe_cases.iter().any(|probe_case| {
             probe_case["id"] == "serving_concurrency_probe"
                 && probe_case["requirement"]
-                    == "required_for_adapter_loaded_serving_else_not_applicable_receipt"
+                    == "required_for_adapter_loaded_serving_with_serving_receipt"
         }),
         "manifest required probe cases={manifest_probe_cases:?}"
     );
@@ -898,13 +899,17 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
     assert_eq!(manifest.exit_code, 0, "manifest stderr={}", manifest.stderr);
 
     let probe_root = tmp.path().join("PROMOTION_PROBES");
+    let base_probe_root = tmp.path().join("BASE_PROMOTION_PROBES");
     for case_id in [
         "sequential_tool_call",
+        "parallel_tool_calls",
         "no_tool_answer",
         "unavailable_tool_repair",
         "multi_turn_tool_result_continuation",
+        "serving_concurrency_probe",
     ] {
         write_lora_probe_summary(&probe_root, case_id, true);
+        write_lora_probe_summary(&base_probe_root, case_id, case_id == "no_tool_answer");
     }
     let receipt = tmp.path().join("promotion.receipt.json");
     let promoted = run(
@@ -916,10 +921,8 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
             manifest_path.to_str().expect("utf8 manifest path"),
             "--probe-root",
             probe_root.to_str().expect("utf8 probe root"),
-            "--not-applicable",
-            "parallel_tool_calls=route does not advertise parallel tools",
-            "--not-applicable",
-            "serving_concurrency_probe=not running adapter server",
+            "--base-probe-root",
+            base_probe_root.to_str().expect("utf8 base probe root"),
             "--out",
             receipt.to_str().expect("utf8 receipt path"),
             "--check",
@@ -931,8 +934,8 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
     assert_eq!(promoted.exit_code, 0, "promote stderr={}", promoted.stderr);
     let promoted_value = parse_json(&promoted.stdout, "promote");
     let report = success_data(&promoted_value);
-    assert_eq!(report["producer"], "harn_models_lora_promote_v1");
-    assert_eq!(report["receipt_kind"], "promotion_probe_matrix_receipt");
+    assert_eq!(report["producer"], "harn_models_lora_promote_v2");
+    assert_eq!(report["receipt_kind"], "promotion_evidence_bundle_receipt");
     assert_eq!(report["ok"], true);
     assert_eq!(
         report["contract"]["eval_dataset"],
@@ -941,16 +944,25 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
     assert_eq!(report["contract"]["trainer_identity"]["status"], "matched");
     assert_eq!(report["contract"]["trainer_identity"]["promotable"], true);
     assert_eq!(report["totals"]["required_cases"], 6);
-    assert_eq!(report["totals"]["passed"], 4);
-    assert_eq!(report["totals"]["not_applicable"], 2);
-    assert_eq!(report["totals"]["failed"], 0);
+    assert_eq!(report["totals"]["evidence_records"], 12);
+    assert_eq!(report["totals"]["adapter_passed"], 6);
+    assert_eq!(report["totals"]["adapter_failed"], 0);
+    assert_eq!(report["totals"]["base_present"], 6);
+    assert_eq!(report["totals"]["baseline_failed"], 5);
     assert_eq!(report["totals"]["missing"], 0);
     let cases = report["cases"].as_array().expect("promotion cases");
     assert!(
         cases
             .iter()
             .any(|case| case["case_id"] == "sequential_tool_call"
+                && case["route_role"] == "adapter"
                 && case["status"] == "pass"
+                && case["summary_sha256"]
+                    .as_str()
+                    .is_some_and(|sha| sha.starts_with("sha256:"))
+                && case["per_case_sha256"]
+                    .as_str()
+                    .is_some_and(|sha| sha.starts_with("sha256:"))
                 && case["summary_path"]
                     .as_str()
                     .is_some_and(|path| path.ends_with("sequential_tool_call/summary.json"))),
@@ -959,16 +971,106 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
     assert!(
         cases
             .iter()
-            .any(|case| case["case_id"] == "parallel_tool_calls"
-                && case["status"] == "not_applicable"),
+            .any(|case| case["case_id"] == "sequential_tool_call"
+                && case["route_role"] == "base"
+                && case["status"] == "baseline_fail"),
         "cases={cases:?}"
     );
     let receipt_value = parse_json(
         &fs::read_to_string(&receipt).expect("read promotion receipt"),
         "promotion receipt",
     );
-    assert_eq!(receipt_value["producer"], "harn_models_lora_promote_v1");
-    assert_eq!(receipt_value["totals"]["passed"], 4);
+    assert_eq!(receipt_value["producer"], "harn_models_lora_promote_v2");
+    assert_eq!(receipt_value["totals"]["adapter_passed"], 6);
+}
+
+#[test]
+fn models_lora_promote_check_rejects_single_trial_probe_receipts() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dataset = tmp.path().join("train.jsonl");
+    fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+    let export_manifest = tmp.path().join("export.manifest.json");
+    fs::write(&export_manifest, "{}\n").expect("export manifest");
+    let adapter = write_lora_adapter_fixture();
+    let manifest_path = tmp.path().join("adapter.manifest.json");
+    let manifest = run(
+        &[
+            "models",
+            "lora",
+            "manifest",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "local-vllm",
+            "--tool-format",
+            "json",
+            "--dataset",
+            dataset.to_str().expect("utf8 dataset path"),
+            "--export-manifest",
+            export_manifest.to_str().expect("utf8 export manifest path"),
+            "--out",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--adapter-name",
+            "burin-tools",
+            "--adapter-path",
+            adapter.path().to_str().expect("utf8 adapter path"),
+            "--request-model",
+            "burin-tools",
+            "--trainer-version",
+            "trainer-2026.7",
+            "--observed-trainer-identity",
+            "version=trainer-2026.7",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(manifest.exit_code, 0, "manifest stderr={}", manifest.stderr);
+
+    let probe_root = tmp.path().join("PROMOTION_PROBES");
+    let base_probe_root = tmp.path().join("BASE_PROMOTION_PROBES");
+    for case_id in [
+        "sequential_tool_call",
+        "parallel_tool_calls",
+        "no_tool_answer",
+        "unavailable_tool_repair",
+        "multi_turn_tool_result_continuation",
+        "serving_concurrency_probe",
+    ] {
+        write_lora_probe_summary_with_trials(&probe_root, case_id, true, 1);
+        write_lora_probe_summary_with_trials(&base_probe_root, case_id, true, 1);
+    }
+    let promoted = run(
+        &[
+            "models",
+            "lora",
+            "promote",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--probe-root",
+            probe_root.to_str().expect("utf8 probe root"),
+            "--base-probe-root",
+            base_probe_root.to_str().expect("utf8 base probe root"),
+            "--check",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(promoted.exit_code, 1, "promote stdout={}", promoted.stdout);
+    let promoted_value = parse_json(&promoted.stdout, "failed promote");
+    assert_eq!(promoted_value["ok"], serde_json::Value::Bool(false));
+    let details = &promoted_value["error"]["details"];
+    assert_eq!(details["producer"], "harn_models_lora_promote_v2");
+    assert!(
+        details["errors"]
+            .as_array()
+            .expect("promotion errors")
+            .iter()
+            .any(|error| error
+                .as_str()
+                .is_some_and(|text| text.contains("has only 1 trials; required 5"))),
+        "details={details:?}"
+    );
 }
 
 #[test]
@@ -1035,8 +1137,8 @@ fn models_lora_promote_check_fails_when_probe_matrix_is_missing() {
         "lora_promotion_probe_matrix_failed"
     );
     let report = &promoted_value["error"]["details"];
-    assert_eq!(report["producer"], "harn_models_lora_promote_v1");
-    assert_eq!(report["totals"]["missing"], 6);
+    assert_eq!(report["producer"], "harn_models_lora_promote_v2");
+    assert_eq!(report["totals"]["missing"], 12);
     assert!(
         report["errors"]
             .as_array()
@@ -1044,7 +1146,7 @@ fn models_lora_promote_check_fails_when_probe_matrix_is_missing() {
             .iter()
             .any(|error| error
                 .as_str()
-                .is_some_and(|text| text.contains("sequential_tool_call status=missing"))),
+                .is_some_and(|text| text.contains("sequential_tool_call adapter missing"))),
         "report={report:?}"
     );
 }
@@ -1094,7 +1196,7 @@ fn models_lora_manifest_human_text_reports_contract() {
         "promotion minimum trials: 5",
         "required probe cases:",
         "unavailable_tool_repair [always]",
-        "serving_concurrency_probe [required_for_adapter_loaded_serving_else_not_applicable_receipt]",
+        "serving_concurrency_probe [required_for_adapter_loaded_serving_with_serving_receipt]",
         "harn eval tool-calls --planner burin-tools --tool-format json",
         "warnings:",
         "- no --out supplied; manifest report was not written to disk",
