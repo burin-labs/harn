@@ -131,6 +131,65 @@ fn stdlib_module_artifact(
 }
 
 impl Vm {
+    /// Resolve a callable against this VM. Lazy callables initialize once per
+    /// VM execution tree, then retain that module scope for later child VMs in
+    /// the same tree. Fresh VM roots remain isolated.
+    pub async fn resolve_callable(
+        &mut self,
+        callable: &crate::value::VmCallable,
+    ) -> Result<Arc<crate::value::VmClosure>, VmError> {
+        match callable {
+            crate::value::VmCallable::Eager(closure) => Ok(Arc::clone(closure)),
+            crate::value::VmCallable::Lazy(lazy) => {
+                let (cache_key, module_path) = self.lazy_callable_module_path(lazy);
+                let resolution = {
+                    let mut modules = self.lazy_callable_modules.lock();
+                    Arc::clone(
+                        modules
+                            .entry(cache_key)
+                            .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new())),
+                    )
+                };
+                let exports = resolution
+                    .get_or_try_init(|| async {
+                        let exports = self.load_module_exports(&module_path).await?;
+                        Ok::<_, VmError>(Arc::new(
+                            exports
+                                .into_iter()
+                                .map(|(name, closure)| (name, closure.retained_for_host_registry()))
+                                .collect(),
+                        ))
+                    })
+                    .await?;
+                exports.get(&lazy.function_name).cloned().ok_or_else(|| {
+                    VmError::Runtime(format!(
+                        "function '{}' is not exported by module '{}'",
+                        lazy.function_name,
+                        lazy.module_path.display()
+                    ))
+                })
+            }
+        }
+    }
+
+    fn lazy_callable_module_path(&self, lazy: &crate::value::LazyVmCallable) -> (PathBuf, PathBuf) {
+        let mut module_path = if lazy.module_path.is_absolute() {
+            lazy.module_path.clone()
+        } else {
+            self.source_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(&lazy.module_path)
+        };
+        if !module_path.exists() && module_path.extension().is_none() {
+            module_path.set_extension("harn");
+        }
+        let cache_key = module_path
+            .canonicalize()
+            .unwrap_or_else(|_| module_path.clone());
+        (cache_key, module_path)
+    }
+
     async fn load_module_from_source(
         &mut self,
         synthetic: PathBuf,

@@ -440,38 +440,13 @@ impl std::fmt::Debug for EventPatternExpression {
     }
 }
 
-/// A manifest hook handler that has not been resolved to a [`VmClosure`]
-/// yet. Resolving a handler requires loading its module's whole import
-/// graph (for an IDE host that is ~1s of instantiation), so eager
-/// resolution at registration time made every test — even pure-logic
-/// unit tests that never fire a hook — pay that cost. A lazy handler
-/// defers the module load until the hook actually fires, against the
-/// firing child VM (whose `module_cache` already holds the graph if the
-/// test imported it, making the fire-time load a cache hit and keeping
-/// per-test module-state isolation intact).
-#[derive(Clone, Debug)]
-pub struct LazyVmHookHandler {
-    /// Directory of the manifest that declared the hook.
-    pub manifest_dir: std::path::PathBuf,
-    /// Source path of the module the handler lives in.
-    pub module_path: std::path::PathBuf,
-    /// Exported function name to resolve from that module.
-    pub function_name: String,
-}
-
 #[derive(Clone)]
 enum RuntimeHookHandler {
     NativePreTool(PreToolHookFn),
     NativePostTool(PostToolHookFn),
     Vm {
         handler_name: String,
-        closure: Arc<VmClosure>,
-    },
-    /// Manifest hook whose closure is resolved on first fire. See
-    /// [`LazyVmHookHandler`].
-    LazyVm {
-        handler_name: String,
-        lazy: LazyVmHookHandler,
+        callable: crate::value::VmCallable,
     },
 }
 
@@ -482,10 +457,6 @@ impl std::fmt::Debug for RuntimeHookHandler {
             Self::NativePostTool(_) => f.write_str("NativePostTool(..)"),
             Self::Vm { handler_name, .. } => f
                 .debug_struct("Vm")
-                .field("handler_name", handler_name)
-                .finish(),
-            Self::LazyVm { handler_name, .. } => f
-                .debug_struct("LazyVm")
                 .field("handler_name", handler_name)
                 .finish(),
         }
@@ -501,10 +472,7 @@ struct RuntimeHook {
 
 #[derive(Clone, Debug)]
 pub struct VmLifecycleHookInvocation {
-    /// Eagerly-resolved closure, or `None` for a lazy manifest hook that
-    /// must be resolved with [`VmLifecycleHookInvocation::resolve`].
-    closure: Option<Arc<VmClosure>>,
-    lazy: Option<LazyVmHookHandler>,
+    callable: crate::value::VmCallable,
     pub handler_name: String,
 }
 
@@ -513,27 +481,19 @@ impl VmLifecycleHookInvocation {
     /// handler's module on demand for a lazy manifest hook (a cache hit
     /// when `vm` already imported the graph).
     pub async fn resolve(&self, vm: &mut crate::vm::Vm) -> Result<Arc<VmClosure>, VmError> {
-        match (&self.closure, &self.lazy) {
-            (Some(closure), _) => Ok(Arc::clone(closure)),
-            (None, Some(lazy)) => resolve_lazy_hook_closure(vm, lazy).await,
-            (None, None) => Err(VmError::Runtime(format!(
-                "lifecycle hook '{}' has no handler",
+        vm.resolve_callable(&self.callable).await.map_err(|error| {
+            VmError::Runtime(format!(
+                "failed to resolve lifecycle hook '{}': {error}",
                 self.handler_name
-            ))),
-        }
+            ))
+        })
     }
-}
-
-#[derive(Clone, Debug)]
-enum VmLifecycleHandlerRef {
-    Eager(Arc<VmClosure>),
-    Lazy(LazyVmHookHandler),
 }
 
 #[derive(Clone, Debug)]
 struct VmLifecycleHookRegistration {
     handler_name: String,
-    handler: VmLifecycleHandlerRef,
+    callable: crate::value::VmCallable,
 }
 
 thread_local! {
@@ -625,9 +585,9 @@ pub fn register_vm_hook(
     // pin its module scope — otherwise the sibling `pub fn`s its body calls
     // become unresolvable once the registering VM's `module_cache` drops, and
     // the call falls through to host-bridge dispatch. See
-    // `VmClosure::retained_for_host_registry`. The lazy handler path
-    // (`register_vm_hook_lazy`) sidesteps this by re-resolving against the
-    // firing VM instead.
+    // `VmClosure::retained_for_host_registry`. The lazy handler path resolves
+    // and retains the module export set on first fire in the firing VM's
+    // execution-root cache instead.
     let closure = closure.retained_for_host_registry();
     RUNTIME_HOOKS.with(|hooks| {
         hooks.borrow_mut().push(RuntimeHook {
@@ -635,67 +595,36 @@ pub fn register_vm_hook(
             matcher: compile_event_pattern(pattern.into()),
             handler: RuntimeHookHandler::Vm {
                 handler_name: handler_name.into(),
-                closure,
+                callable: crate::value::VmCallable::Eager(closure),
             },
         });
     });
 }
 
-/// Register a manifest hook whose handler closure is resolved on first
-/// fire instead of at registration time. See [`LazyVmHookHandler`].
+/// Register a manifest hook whose handler closure is resolved on first fire.
 pub fn register_vm_hook_lazy(
     event: HookEvent,
     pattern: impl Into<String>,
     handler_name: impl Into<String>,
-    lazy: LazyVmHookHandler,
+    lazy: crate::value::LazyVmCallable,
 ) {
     RUNTIME_HOOKS.with(|hooks| {
         hooks.borrow_mut().push(RuntimeHook {
             event,
             matcher: compile_event_pattern(pattern.into()),
-            handler: RuntimeHookHandler::LazyVm {
+            handler: RuntimeHookHandler::Vm {
                 handler_name: handler_name.into(),
-                lazy,
+                callable: crate::value::VmCallable::Lazy(lazy),
             },
         });
     });
 }
 
-/// Resolve a lazy hook handler to its closure against `vm`, loading the
-/// handler's module (a cache hit when the firing VM already imported the
-/// graph). The resolved closure is memoized on the firing VM's module
-/// cache via `load_module_exports`, so repeated fires within one VM stay
-/// cheap, while a fresh VM (next test) re-resolves against its own state.
-async fn resolve_lazy_hook_closure(
-    vm: &mut crate::vm::Vm,
-    lazy: &LazyVmHookHandler,
-) -> Result<Arc<VmClosure>, VmError> {
-    let exports = vm
-        .load_module_exports(&lazy.module_path)
-        .await
-        .map_err(|error| {
-            VmError::Runtime(format!(
-                "failed to load manifest hook module '{}': {error}",
-                lazy.module_path.display()
-            ))
-        })?;
-    exports.get(&lazy.function_name).cloned().ok_or_else(|| {
-        VmError::Runtime(format!(
-            "manifest hook handler '{}' is not exported by module '{}'",
-            lazy.function_name,
-            lazy.module_path.display()
-        ))
-    })
-}
-
 async fn resolve_lifecycle_handler(
     vm: &mut crate::vm::Vm,
-    handler: &VmLifecycleHandlerRef,
+    callable: &crate::value::VmCallable,
 ) -> Result<Arc<VmClosure>, VmError> {
-    match handler {
-        VmLifecycleHandlerRef::Eager(closure) => Ok(Arc::clone(closure)),
-        VmLifecycleHandlerRef::Lazy(lazy) => resolve_lazy_hook_closure(vm, lazy).await,
-    }
+    vm.resolve_callable(callable).await
 }
 
 pub fn clear_tool_hooks() {
@@ -866,9 +795,7 @@ fn runtime_hooks_for_event(event: HookEvent) -> Vec<RuntimeHook> {
     })
 }
 
-/// Invoke a VM-backed hook handler (eager [`RuntimeHookHandler::Vm`] or
-/// lazily-resolved [`RuntimeHookHandler::LazyVm`]) against a child of the
-/// firing VM. Returns `None` for handlers that are not VM-backed.
+/// Invoke a VM-backed hook handler against a child of the firing VM.
 async fn invoke_vm_hook_handler(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     handler: &RuntimeHookHandler,
@@ -879,17 +806,16 @@ async fn invoke_vm_hook_handler(
             "runtime hook requires an async builtin VM context".to_string(),
         ));
     };
-    let closure = match handler {
-        RuntimeHookHandler::Vm { closure, .. } => Arc::clone(closure),
-        RuntimeHookHandler::LazyVm { lazy, .. } => resolve_lazy_hook_closure(&mut vm, lazy).await?,
-        _ => return Ok(None),
-    };
-    let arg = crate::stdlib::json_to_vm_value(payload);
     // First-party registered hook (`register_session_hook` /
     // `register_checkpoint_hook`): the runtime chose to invoke this closure,
     // so its body's bridge/builtin calls are a trusted bridge call and must
     // not trip the agent loop's active execution policy. Held across the await.
     let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
+    let closure = match handler {
+        RuntimeHookHandler::Vm { callable, .. } => vm.resolve_callable(callable).await?,
+        _ => return Ok(None),
+    };
+    let arg = crate::stdlib::json_to_vm_value(payload);
     let result = vm.call_closure_pub(&closure, &[arg]).await;
     if let Some(ctx) = ctx {
         ctx.forward_output(&vm.take_output());
@@ -922,7 +848,7 @@ async fn invoke_vm_lifecycle_hooks(
         // across resolution and the invocation await for this registration.
         let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
         record_hook_call(&session_id, event, &registration.handler_name, payload);
-        let closure = resolve_lifecycle_handler(&mut vm, &registration.handler).await?;
+        let closure = resolve_lifecycle_handler(&mut vm, &registration.callable).await?;
         let raw = vm.call_closure_pub(&closure, &[arg.clone()]).await?;
         if let Some(ctx) = ctx {
             ctx.forward_output(&vm.take_output());
@@ -1505,7 +1431,7 @@ pub async fn run_pre_tool_hooks_with_ctx(
         }
         let action = match &hook.handler {
             RuntimeHookHandler::NativePreTool(pre) => pre(tool_name, &current_args),
-            RuntimeHookHandler::Vm { .. } | RuntimeHookHandler::LazyVm { .. } => {
+            RuntimeHookHandler::Vm { .. } => {
                 let payload = payload.as_ref().ok_or_else(|| {
                     VmError::Runtime("VM PreToolUse hook requires an event payload".to_string())
                 })?;
@@ -1570,7 +1496,7 @@ pub async fn run_post_tool_hooks_with_ctx(
         }
         let action = match &hook.handler {
             RuntimeHookHandler::NativePostTool(post) => post(tool_name, &current),
-            RuntimeHookHandler::Vm { .. } | RuntimeHookHandler::LazyVm { .. } => {
+            RuntimeHookHandler::Vm { .. } => {
                 let payload = payload.as_ref().ok_or_else(|| {
                     VmError::Runtime("VM PostToolUse hook requires an event payload".to_string())
                 })?;
@@ -1672,7 +1598,7 @@ pub async fn run_lifecycle_hooks_with_control_with_ctx(
             &registration.handler_name,
             &current_payload,
         );
-        let closure = resolve_lifecycle_handler(&mut vm, &registration.handler).await?;
+        let closure = resolve_lifecycle_handler(&mut vm, &registration.callable).await?;
         let raw = vm.call_closure_pub(&closure, &[arg]).await?;
         if let Some(ctx) = ctx {
             ctx.forward_output(&vm.take_output());
@@ -1879,17 +1805,9 @@ pub fn matching_vm_lifecycle_hooks(
 ) -> Vec<VmLifecycleHookInvocation> {
     matching_vm_lifecycle_registrations(event, payload)
         .into_iter()
-        .map(|registration| match registration.handler {
-            VmLifecycleHandlerRef::Eager(closure) => VmLifecycleHookInvocation {
-                closure: Some(closure),
-                lazy: None,
-                handler_name: registration.handler_name,
-            },
-            VmLifecycleHandlerRef::Lazy(lazy) => VmLifecycleHookInvocation {
-                closure: None,
-                lazy: Some(lazy),
-                handler_name: registration.handler_name,
-            },
+        .map(|registration| VmLifecycleHookInvocation {
+            callable: registration.callable,
+            handler_name: registration.handler_name,
         })
         .collect()
 }
@@ -1906,18 +1824,12 @@ fn matching_vm_lifecycle_registrations(
             .filter(|hook| hook_matches(hook, None, payload))
             .filter_map(|hook| match &hook.handler {
                 RuntimeHookHandler::Vm {
-                    closure,
+                    callable,
                     handler_name,
                 } => Some(VmLifecycleHookRegistration {
                     handler_name: handler_name.clone(),
-                    handler: VmLifecycleHandlerRef::Eager(Arc::clone(closure)),
+                    callable: callable.clone(),
                 }),
-                RuntimeHookHandler::LazyVm { lazy, handler_name } => {
-                    Some(VmLifecycleHookRegistration {
-                        handler_name: handler_name.clone(),
-                        handler: VmLifecycleHandlerRef::Lazy(lazy.clone()),
-                    })
-                }
                 RuntimeHookHandler::NativePreTool(_) | RuntimeHookHandler::NativePostTool(_) => {
                     None
                 }

@@ -1356,7 +1356,7 @@ pub struct CollectedManifestTrigger {
 pub enum CollectedTriggerHandler {
     Local {
         reference: TriggerFunctionRef,
-        closure: Arc<harn_vm::VmClosure>,
+        callable: harn_vm::VmCallable,
     },
     A2a {
         target: String,
@@ -1376,10 +1376,10 @@ pub enum CollectedTriggerHandler {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Predicate closures are validated now and reused by harn#161 dispatch gating.
+#[allow(dead_code)] // Predicate callables are validated now and reused by harn#161 dispatch gating.
 pub struct CollectedTriggerPredicate {
     pub reference: TriggerFunctionRef,
-    pub closure: Arc<harn_vm::VmClosure>,
+    pub callable: harn_vm::VmCallable,
 }
 
 pub(crate) type ManifestModuleCacheKey = (PathBuf, Option<String>, Option<String>);

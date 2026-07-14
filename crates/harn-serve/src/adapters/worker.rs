@@ -953,7 +953,7 @@ fn job_binding_spec(
         autonomy_tier: harn_vm::AutonomyTier::ActAuto,
         handler: TriggerHandlerSpec::Local {
             raw: function.name.clone(),
-            closure,
+            callable: harn_vm::VmCallable::Eager(closure),
         },
         dispatch_priority: WorkerQueuePriority::Normal,
         when: None,

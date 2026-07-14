@@ -16,7 +16,10 @@ pub use core::{
     StructLayout, VmAsyncBuiltinFn, VmBuiltinFn, VmBuiltinRefId, VmEnumVariant, VmValue,
 };
 pub(crate) use env::Binding;
-pub use env::{closest_match, ModuleFunctionRegistry, ModuleState, VmClosure, VmEnv};
+pub use env::{
+    closest_match, LazyVmCallable, ModuleFunctionRegistry, ModuleState, VmCallable, VmClosure,
+    VmEnv,
+};
 pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,
     ArityExpect, ArityMismatchError, DeadlockError, ErrorCategory, VmError,

@@ -1,17 +1,23 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::chunk::{Chunk, ChunkRef, Constant};
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::{
-    ModuleFunctionRegistry, VmAsyncBuiltinFn, VmBuiltinFn, VmEnv, VmError, VmTaskHandle, VmValue,
+    ModuleFunctionRegistry, VmAsyncBuiltinFn, VmBuiltinFn, VmClosure, VmEnv, VmError, VmMutex,
+    VmTaskHandle, VmValue,
 };
 use crate::BuiltinId;
 
 use super::debug::DebugHook;
 use super::modules::LoadedModule;
 use super::VmBuiltinMetadata;
+
+pub(crate) type LazyCallableExports = Arc<BTreeMap<String, Arc<VmClosure>>>;
+pub(crate) type LazyCallableModuleCache =
+    Arc<VmMutex<BTreeMap<PathBuf, Arc<tokio::sync::OnceCell<LazyCallableExports>>>>>;
 
 /// RAII guard that starts a tracing span on creation and ends it on drop.
 pub(crate) struct ScopeSpan(u64);
@@ -283,6 +289,10 @@ pub struct Vm {
     pub(crate) deferred_cyclic_imports: Vec<super::modules::DeferredCyclicImport>,
     /// Loaded module cache keyed by canonical or synthetic module path.
     pub(crate) module_cache: Arc<BTreeMap<std::path::PathBuf, LoadedModule>>,
+    /// Lazy manifest modules initialized by any child in this execution tree.
+    /// The complete export set is retained so handlers and predicates from the
+    /// same module share one module state across repeated child invocations.
+    pub(crate) lazy_callable_modules: LazyCallableModuleCache,
     /// Source text keyed by canonical or synthetic module path for debugger retrieval.
     pub(crate) source_cache: Arc<BTreeMap<std::path::PathBuf, String>>,
     /// Source file path for error reporting.
@@ -415,6 +425,7 @@ impl VmBaseline {
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
+            lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(source_cache),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
@@ -654,6 +665,7 @@ impl Vm {
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
+            lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(BTreeMap::new()),
             source_file: None,
             source_text: None,
@@ -816,6 +828,7 @@ impl Vm {
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::clone(&self.module_cache),
+            lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
             source_cache: Arc::clone(&self.source_cache),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),

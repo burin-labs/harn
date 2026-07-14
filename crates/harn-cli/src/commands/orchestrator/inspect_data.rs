@@ -570,8 +570,14 @@ async fn evaluate_flow_key(
         &serde_json::to_value(event)
             .map_err(|error| format!("failed to encode trigger event: {error}"))?,
     );
+    let closure = vm.resolve_callable(&expr.callable).await.map_err(|error| {
+        format!(
+            "failed to resolve flow-control expression '{}': {error}",
+            expr.raw
+        )
+    })?;
     let value = vm
-        .call_closure_pub(&expr.closure, &[arg])
+        .call_closure_pub(&closure, &[arg])
         .await
         .map_err(|error| {
             format!(

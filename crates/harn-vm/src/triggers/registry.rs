@@ -139,7 +139,7 @@ impl Default for OrchestratorBudgetState {
 pub enum TriggerHandlerSpec {
     Local {
         raw: String,
-        closure: Arc<VmClosure>,
+        callable: crate::value::VmCallable,
     },
     A2a {
         target: String,
@@ -368,7 +368,7 @@ impl TriggerHandlerSpec {
 #[derive(Clone)]
 pub struct TriggerPredicateSpec {
     pub raw: String,
-    pub closure: Arc<VmClosure>,
+    pub callable: crate::value::VmCallable,
 }
 
 impl std::fmt::Debug for TriggerPredicateSpec {

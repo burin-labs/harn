@@ -19,6 +19,8 @@ mod depth_regression_tests;
 #[cfg(test)]
 mod tests_debug;
 #[cfg(test)]
+mod tests_lazy_callable;
+#[cfg(test)]
 mod tests_package_runtime;
 #[cfg(test)]
 mod tests_runtime;

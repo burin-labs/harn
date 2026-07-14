@@ -2209,7 +2209,7 @@ impl Dispatcher {
     ) -> Result<DispatchCallResult, DispatchError> {
         match route {
             DispatchUri::Local { .. } => {
-                let TriggerHandlerSpec::Local { closure, .. } = &binding.handler else {
+                let TriggerHandlerSpec::Local { callable, .. } = &binding.handler else {
                     return Err(DispatchError::Local(format!(
                         "trigger '{}' resolved to a local dispatch URI but does not carry a local closure",
                         binding.id.as_str()
@@ -2217,7 +2217,7 @@ impl Dispatcher {
                 };
                 let value = self
                     .invoke_vm_callable(
-                        closure,
+                        callable,
                         &binding.binding_key(),
                         event,
                         None,
@@ -2483,7 +2483,7 @@ impl Dispatcher {
         pool: &str,
         priority_from: Option<&str>,
         key_from: Option<&str>,
-        task_factory: &crate::value::VmClosure,
+        task_factory: &Arc<crate::value::VmClosure>,
         autonomy_tier: AutonomyTier,
         wait_lease: Option<DispatchWaitLease>,
         cancel_rx: &mut broadcast::Receiver<()>,
@@ -2493,7 +2493,7 @@ impl Dispatcher {
         // bookkeeping all work the same way as a Local handler.
         let factory_value = self
             .invoke_vm_callable(
-                task_factory,
+                &crate::value::VmCallable::Eager(Arc::clone(task_factory)),
                 &binding.binding_key(),
                 event,
                 None,
@@ -2627,7 +2627,7 @@ impl Dispatcher {
             TargetExpr::Closure(closure) => {
                 let value = self
                     .invoke_vm_callable(
-                        closure,
+                        &crate::value::VmCallable::Eager(Arc::clone(closure)),
                         &binding.binding_key(),
                         event,
                         None,
@@ -2883,7 +2883,7 @@ impl Dispatcher {
             AgentScope::Closure(closure) => {
                 let value = self
                     .invoke_vm_callable(
-                        closure,
+                        &crate::value::VmCallable::Eager(Arc::clone(closure)),
                         &binding.binding_key(),
                         event,
                         None,
@@ -3293,7 +3293,7 @@ impl Dispatcher {
     ) -> Result<String, DispatchError> {
         let value = self
             .invoke_vm_callable(
-                &expr.closure,
+                &expr.callable,
                 binding_key,
                 event,
                 replay_of_event_id,

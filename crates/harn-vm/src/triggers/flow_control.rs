@@ -1,12 +1,9 @@
-use std::sync::Arc;
 use std::time::Duration;
-
-use crate::value::VmClosure;
 
 #[derive(Clone)]
 pub struct TriggerExpressionSpec {
     pub raw: String,
-    pub closure: Arc<VmClosure>,
+    pub callable: crate::value::VmCallable,
 }
 
 impl std::fmt::Debug for TriggerExpressionSpec {

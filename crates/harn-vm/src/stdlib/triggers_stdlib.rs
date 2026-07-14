@@ -1260,8 +1260,8 @@ fn parse_trigger_config(config: &crate::value::DictMap) -> Result<TriggerBinding
         Some(value) => {
             let (handler, _) = parse_handler_value(value, "trigger_register", "when", false)?;
             match handler {
-                TriggerHandlerSpec::Local { raw, closure } => {
-                    Some(TriggerPredicateSpec { raw, closure })
+                TriggerHandlerSpec::Local { raw, callable } => {
+                    Some(TriggerPredicateSpec { raw, callable })
                 }
                 _ => {
                     return Err(VmError::Runtime(
@@ -2067,7 +2067,7 @@ fn parse_handler_value(
             Ok((
                 TriggerHandlerSpec::Local {
                     raw: raw.clone(),
-                    closure: closure.clone(),
+                    callable: crate::value::VmCallable::Eager(closure.clone()),
                 },
                 serde_json::json!({
                     "kind": "local",
@@ -2929,7 +2929,7 @@ mod tests {
             autonomy_tier: crate::AutonomyTier::ActAuto,
             handler: TriggerHandlerSpec::Local {
                 raw: handler_name.to_string(),
-                closure,
+                callable: crate::value::VmCallable::Eager(closure),
             },
             dispatch_priority: crate::WorkerQueuePriority::Normal,
             when: None,
