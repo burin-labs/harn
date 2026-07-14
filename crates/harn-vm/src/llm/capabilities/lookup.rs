@@ -306,6 +306,31 @@ mod tests {
     }
 
     #[test]
+    fn moonshot_kimi_gates_temperature_and_top_p_but_other_hosts_do_not() {
+        reset();
+        // Moonshot's API pins temperature/top_p to one value and 400s on any
+        // other; the general `*kimi*` rule strips both so callers never hit it.
+        for id in [
+            "moonshot/kimi-k2.5",
+            "moonshot/kimi-k2.6",
+            "moonshot/kimi-k2.7-code",
+        ] {
+            let caps = lookup("moonshot", id);
+            assert!(
+                !caps.temperature_supported,
+                "{id} temperature should be gated"
+            );
+            assert!(!caps.top_p_supported, "{id} top_p should be gated");
+        }
+        // The same weights on Fireworks accept both — the restriction is a
+        // Moonshot serving-API policy, not a model limit, so it stays scoped to
+        // the moonshot route.
+        let fw = lookup("fireworks", "accounts/fireworks/models/kimi-k2p6");
+        assert!(fw.temperature_supported);
+        assert!(fw.top_p_supported);
+    }
+
+    #[test]
     fn fireworks_gpt_oss_disables_parallel_tool_call_history() {
         reset();
         assert!(
