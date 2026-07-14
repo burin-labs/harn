@@ -100,7 +100,7 @@ case "$*" in
   "merge-base HEAD origin/main")
     printf '%s\n' base
     ;;
-  "diff --name-only --diff-filter=ACMR base...HEAD")
+  "diff --name-only --no-renames --diff-filter=ACMRD base...HEAD")
     printf '%s\n' \
       ".githooks/pre-push" \
       "CHANGELOG.md" \
