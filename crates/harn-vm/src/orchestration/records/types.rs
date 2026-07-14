@@ -279,6 +279,31 @@ pub struct RunTranscriptPointerRecord {
     pub location: String,
     pub path: Option<String>,
     pub available: bool,
+    pub verification_status: String,
+    pub verification_error: Option<String>,
+    pub descriptor: Option<RunTranscriptArtifactDescriptor>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunTranscriptArtifactDescriptor {
+    pub schema_version: String,
+    pub artifact_kind: String,
+    pub run_id: String,
+    pub session_id: Option<String>,
+    pub path: String,
+    pub relative_path: Option<String>,
+    pub sha256: String,
+    pub byte_len: u64,
+    pub event_count: usize,
+    pub first_event_type: Option<String>,
+    pub first_event_id: Option<String>,
+    pub last_event_type: Option<String>,
+    pub last_event_id: Option<String>,
+    pub complete: bool,
+    pub terminal_status: Option<String>,
+    pub effective_tool_format: Option<String>,
+    pub tool_schema_hash: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

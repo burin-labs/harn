@@ -665,7 +665,7 @@ fn save_and_load_run_record_materializes_observability_summary() {
     let run_path = temp_dir.path().join("run.json");
     let sidecar_dir = temp_dir.path().join("run-llm");
     std::fs::create_dir_all(&sidecar_dir).unwrap();
-    std::fs::write(sidecar_dir.join("llm_transcript.jsonl"), "").unwrap();
+    std::fs::write(sidecar_dir.join("llm_transcript.jsonl"), "{}\n").unwrap();
 
     let run = RunRecord {
         id: "run_obs".to_string(),

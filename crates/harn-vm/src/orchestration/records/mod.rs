@@ -8,6 +8,7 @@ mod diff;
 mod eval_pack;
 mod json;
 mod persistence;
+mod transcript_descriptor;
 mod types;
 mod view;
 
@@ -29,6 +30,10 @@ pub use persistence::{
     load_agent_session_replay_events, load_agent_session_replay_events_from_log, load_run_record,
     normalize_run_record, save_run_record, AgentSessionReplayEvent,
 };
+pub use transcript_descriptor::{
+    describe_llm_transcript_sidecar, verified_llm_transcript_pointer_path,
+    LlmTranscriptDescriptorError,
+};
 pub use types::{
     tool_fixture_hash, ClarifyingQuestionEvalSpec, CompactionEventRecord, DaemonEventKindRecord,
     DaemonEventRecord, EvalLedgerAppendReport, EvalLedgerFingerprintMismatch,
@@ -45,8 +50,8 @@ pub use types::{
     RunHitlQuestionRecord, RunObservabilityDiffRecord, RunObservabilityRecord,
     RunPersonaRuntimeRecord, RunPlannerRoundRecord, RunRecord, RunStageAttemptRecord,
     RunStageDiffRecord, RunStageRecord, RunTaskLedgerSummaryRecord, RunTraceSpanRecord,
-    RunTranscriptPointerRecord, RunTransitionRecord, RunVerificationOutcomeRecord,
-    RunWorkerLineageRecord, ToolCallDiffRecord, ToolCallRecord,
+    RunTranscriptArtifactDescriptor, RunTranscriptPointerRecord, RunTransitionRecord,
+    RunVerificationOutcomeRecord, RunWorkerLineageRecord, ToolCallDiffRecord, ToolCallRecord,
     ACTION_GRAPH_EDGE_KIND_A2A_DISPATCH, ACTION_GRAPH_EDGE_KIND_DELEGATES,
     ACTION_GRAPH_EDGE_KIND_DLQ_MOVE, ACTION_GRAPH_EDGE_KIND_ENTRY,
     ACTION_GRAPH_EDGE_KIND_PREDICATE_GATE, ACTION_GRAPH_EDGE_KIND_REPLAY_CHAIN,
