@@ -13,7 +13,8 @@ pub(crate) use messages::{
 pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
 pub(crate) use options::{
     assemble_system_prompt, compose_system_prompt, expects_structured_output, extract_json,
-    extract_llm_options, system_prompt_event_metadata, system_prompt_metadata,
+    extract_llm_options, resolve_catalog_thinking_config, resolve_thinking_config,
+    system_prompt_event_metadata, system_prompt_metadata,
 };
 pub(crate) use provider::{vm_resolve_model, vm_resolve_provider, ResolvedProvider};
 #[cfg(test)]

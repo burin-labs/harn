@@ -250,10 +250,6 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision", "long_context"]
 
-# Groq compound systems.
-[model_defaults."groq/compound*"]
-max_tokens = 8192
-
 [models."groq/compound"]
 name = "Groq Compound"
 provider = "groq"
@@ -275,12 +271,6 @@ rate_limits = { rpm = 200, tpm = 200000, tier = "developer", source_url = "https
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "agentic"]
-
-# Direct Moonshot legacy route kept for pinned callers.
-[model_defaults."moonshot/kimi-k2.5"]
-# Live Moonshot API probe on 2026-07-09 rejected other temperatures:
-# `invalid temperature: only 1 is allowed for this model`.
-temperature = 1.0
 
 [models."moonshot/kimi-k2.5"]
 name = "Kimi K2.5 (Moonshot direct)"

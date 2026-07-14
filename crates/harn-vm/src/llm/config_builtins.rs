@@ -169,7 +169,7 @@ fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         .unwrap_or(VmValue::Nil))
 }
 
-/// Return glob-merged model_defaults for `model_id`.
+/// Return logical- and route-merged model defaults for `model_id`.
 #[harn_builtin(
     sig = "llm_model_defaults(model_id: string) -> dict",
     category = "llm.config"
@@ -181,7 +181,8 @@ fn llm_model_defaults_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
             "llm_model_defaults: model_id is required".to_string(),
         ));
     }
-    let params = llm_config::model_params(&model_id);
+    let resolved = llm_config::resolve_model_info(&model_id);
+    let params = llm_config::model_params_for_route(&resolved.provider, &resolved.id);
     let mut dict = crate::value::DictMap::new();
     for (k, v) in &params {
         dict.insert(crate::value::intern_key(k), toml_value_to_vm_value(v));
@@ -199,7 +200,6 @@ fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         .first()
         .and_then(|a| a.as_dict())
         .ok_or_else(|| VmError::Runtime("llm_resolved_options: opts must be a dict".to_string()))?;
-
     let model = opts
         .get("model")
         .map(|v| v.display())
@@ -207,19 +207,15 @@ fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         .ok_or_else(|| {
             VmError::Runtime("llm_resolved_options: opts.model is required".to_string())
         })?;
-
     let user_provider = opts
         .get("provider")
         .map(|v| v.display())
         .filter(|s| !s.is_empty());
-
     let (resolved_id, provider_from_alias) = llm_config::resolve_model(&model);
     let final_provider = user_provider.unwrap_or_else(|| {
         provider_from_alias.unwrap_or_else(|| llm_config::infer_provider(&resolved_id))
     });
-
-    let defaults = llm_config::model_params(&resolved_id);
-
+    let defaults = llm_config::model_params_for_route(&final_provider, &resolved_id);
     let mut out = opts.clone();
     for (k, v) in &defaults {
         if !out.contains_key(k.as_str()) {
@@ -1914,6 +1910,9 @@ fn healthcheck_model_arg(args: &[VmValue]) -> Option<String> {
     Some(resolved)
 }
 
+#[cfg(test)]
+#[path = "config_builtins_logical_defaults_tests.rs"]
+mod logical_defaults_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
