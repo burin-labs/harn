@@ -3,6 +3,7 @@
 HARN_BIN ?=
 HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
 HARN_BIN_CMD = ./scripts/harn_bin.sh
+HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
 HARN_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --,$(HARN_BIN_CMD) --)
 HARN_CMD_VERBOSE = $(HARN_CMD)
 HARN_CLI_CMD = $(HARN_CMD)
@@ -236,11 +237,7 @@ lint-actions:
 # error tests whose diagnostics are validated by the conformance runner.
 lint-harn:
 	@echo "=== Linting Harn conformance tests ==="
-	@if [ -z "$(strip $(HARN_BIN))" ]; then $(HARN_CARGO_CMD) build --quiet --bin harn; fi
-	@harn_bin="$(HARN_BIN)"; \
-	if [ -z "$$harn_bin" ]; then \
-		harn_bin=$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json,sys; meta=json.load(sys.stdin); suffix=".exe" if sys.platform == "win32" else ""; print(meta["target_directory"] + "/debug/harn" + suffix)'); \
-	fi; \
+	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
 	workers=$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8); \
 	tmp=$$(mktemp -d); \
 	status=0; \
@@ -265,10 +262,7 @@ lint-harn:
 	@echo "=== Linting bundled demo scenarios ==="
 	@$(HARN_CMD) lint --strict crates/harn-cli/assets/demo
 	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="
-	@harn_bin="$(HARN_BIN)"; \
-	if [ -z "$$harn_bin" ]; then \
-		harn_bin=$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json,sys; meta=json.load(sys.stdin); suffix=".exe" if sys.platform == "win32" else ""; print(meta["target_directory"] + "/debug/harn" + suffix)'); \
-	fi; \
+	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
 	tmp=$$(mktemp); \
 	find crates/harn-stdlib/src/stdlib -name '*.harn' -print0 | xargs -0 "$$harn_bin" lint > "$$tmp" 2>&1 || true; \
 	if grep -q 'HARN-STD-101' "$$tmp"; then \
@@ -384,8 +378,7 @@ release-smoke:
 smoke-audit:
 	@harn_binary="$(HARN_BIN)" && \
 	if [ -z "$$harn_binary" ]; then \
-		target_dir="$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')" && \
-		harn_binary="$$target_dir/debug/harn$(if $(filter Windows_NT,$(OS)),.exe,)"; \
+		harn_binary="$$($(HARN_BIN_PRINT_CMD))"; \
 	fi && \
 	if [ ! -x "$$harn_binary" ]; then \
 		if [ -n "$(strip $(HARN_BIN))" ]; then \
