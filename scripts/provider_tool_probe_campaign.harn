@@ -1,32 +1,58 @@
 import { parse_args } from "std/cli"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v1"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v2"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
-pub type ProviderToolProbeRoute = {id: string, provider: string, model: string}
-
-pub type ProviderToolProbeJob = {
+pub type ProviderToolProbeRoute = {
   id: string,
-  route_id: string,
   provider: string,
   model: string,
+  env_keys: list<string>,
+  local: bool,
+  cheap: bool,
+}
+
+pub type ProviderToolProbeBehavior = {
+  id: string,
+  category: string,
+  description: string,
+  runner: string,
+  modes: list<string>,
+  tool_formats: list<string>,
+  cheap: bool,
+}
+
+pub type ProviderToolProbeCell = {
+  id: string,
+  provider: string,
+  model: string,
+  route_id: string,
+  behavior: string,
+  category: string,
   mode: string,
+  tool_format: string,
+  runner: string,
   status: string,
-  command: list<string>,
   reason: string,
+  command?: list<string>,
   artifact_path?: string,
-  observed?: dict,
+  observed: dict,
+  catalog: dict,
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v1",
+  schema_version: "harn.provider_tool_probe_campaign.v2",
   live: bool,
+  include_expensive: bool,
   route_count: int,
-  job_count: int,
+  behavior_count: int,
+  cell_count: int,
   summary: dict,
+  spend: dict,
   routes: list<ProviderToolProbeRoute>,
-  jobs: list<ProviderToolProbeJob>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  cells: list<ProviderToolProbeCell>,
   artifacts: dict,
 }
 
@@ -52,7 +78,14 @@ fn __route_from_spec(spec: string) -> ProviderToolProbeRoute? {
   if provider == "" || model == "" {
     return nil
   }
-  return {id: __slug(provider + "-" + model), provider: provider, model: model}
+  return {
+    id: __slug(provider + "-" + model),
+    provider: provider,
+    model: model,
+    env_keys: [],
+    local: false,
+    cheap: true,
+  }
 }
 
 pub fn provider_tool_probe_campaign_routes(specs: list<string>) -> list<ProviderToolProbeRoute> {
@@ -66,6 +99,70 @@ pub fn provider_tool_probe_campaign_routes(specs: list<string>) -> list<Provider
   return routes
 }
 
+pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> list<ProviderToolProbeRoute> {
+  const routes: list<ProviderToolProbeRoute> = [
+    {
+      id: "fireworks-gpt-oss-120b",
+      provider: "fireworks",
+      model: "accounts/fireworks/models/gpt-oss-120b",
+      env_keys: ["FIREWORKS_API_KEY"],
+      local: false,
+      cheap: true,
+    },
+    {
+      id: "cerebras-gpt-oss-120b",
+      provider: "cerebras",
+      model: "gpt-oss-120b",
+      env_keys: ["CEREBRAS_API_KEY"],
+      local: false,
+      cheap: true,
+    },
+    {
+      id: "openrouter-gpt-oss-120b",
+      provider: "openrouter",
+      model: "openai/gpt-oss-120b",
+      env_keys: ["OPENROUTER_API_KEY"],
+      local: false,
+      cheap: true,
+    },
+    {
+      id: "moonshot-kimi",
+      provider: "moonshot",
+      model: "kimi-k2.6",
+      env_keys: ["MOONSHOT_API_KEY"],
+      local: false,
+      cheap: true,
+    },
+    {
+      id: "local-vllm",
+      provider: "local",
+      model: "local-gemma4-e4b",
+      env_keys: [],
+      local: true,
+      cheap: true,
+    },
+    {id: "ollama", provider: "ollama", model: "gemma4:e4b", env_keys: [], local: true, cheap: true},
+    {
+      id: "xai-grok",
+      provider: "xai",
+      model: "grok-4.5",
+      env_keys: ["XAI_API_KEY"],
+      local: false,
+      cheap: false,
+    },
+  ]
+  if include_expensive {
+    return routes
+  }
+  let selected: list<ProviderToolProbeRoute> = []
+  for route in routes {
+    if route.cheap {
+      selected = selected + [route]
+    }
+  }
+  return selected
+}
+
 pub fn provider_tool_probe_campaign_modes(mode: string) -> list<string> {
   if mode == "both" {
     return ["non-streaming", "streaming"]
@@ -77,6 +174,180 @@ pub fn provider_tool_probe_campaign_modes(mode: string) -> list<string> {
     return ["streaming"]
   }
   return []
+}
+
+pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavior> {
+  return [
+    {
+      id: "tool_calling_non_streaming",
+      category: "tool_calls",
+      description: "Single required tool call through non-streaming transport, classified by Harn provider tool-probe.",
+      runner: "provider_tool_probe",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "tool_calling_streaming",
+      category: "tool_calls",
+      description: "Single required tool call through streaming transport, classified by Harn provider tool-probe.",
+      runner: "provider_tool_probe",
+      modes: ["streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "parallel_tool_calls",
+      category: "dispatch",
+      description: "Multiple sibling tool calls in one assistant turn; assertion target is dispatch receipt cardinality.",
+      runner: "planned_agent_loop",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "multi_turn_tool_results",
+      category: "dispatch",
+      description: "Tool result consumed in a follow-up turn without provider-side message-order rejection.",
+      runner: "planned_agent_loop",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "stop_sequences",
+      category: "options",
+      description: "Stop sequence option is either accepted by the route or catalog-gated before dispatch.",
+      runner: "planned_llm_call",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "presence_frequency_penalties",
+      category: "options",
+      description: "Presence/frequency penalties are provider-gated so unsupported routes fail before live API 400s.",
+      runner: "planned_llm_call",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "temperature_top_p_policy",
+      category: "options",
+      description: "Route-specific temperature/top_p policy is catalog-owned, including Kimi-style constraints.",
+      runner: "planned_llm_call",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "long_heredoc_unicode_args",
+      category: "parser",
+      description: "Long heredoc and Unicode tool arguments survive provider parsing and dispatch byte-identically.",
+      runner: "planned_agent_loop",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "harmony_control_tokens_in_content",
+      category: "parser",
+      description: "Harmony-looking control tokens inside user/tool payload content remain payload bytes, not framing.",
+      runner: "planned_agent_loop",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "tool_choice_forcing",
+      category: "options",
+      description: "Forced tool_choice either reaches the provider correctly or is rejected before dispatch.",
+      runner: "planned_agent_loop",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "empty_args_calls",
+      category: "parser",
+      description: "Empty-argument tool calls are preserved as empty dicts, not treated as dropped or truncated args.",
+      runner: "planned_agent_loop",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+  ]
+}
+
+fn __behavior_matches(behavior: ProviderToolProbeBehavior, filters: list<string>) -> bool {
+  if len(filters) == 0 {
+    return true
+  }
+  for raw in filters {
+    const filter = trim(raw)
+    if filter == "" {
+      continue
+    }
+    if filter == behavior.id || filter == behavior.category || filter == behavior.runner {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn provider_tool_probe_campaign_select_behaviors(filters: list<string>) -> list<ProviderToolProbeBehavior> {
+  let selected: list<ProviderToolProbeBehavior> = []
+  for behavior in provider_tool_probe_campaign_behaviors() {
+    if __behavior_matches(behavior, filters) {
+      selected = selected + [behavior]
+    }
+  }
+  return selected
+}
+
+fn __mode_allowed(mode: string, allowed: list<string>) -> bool {
+  for item in allowed {
+    if item == mode {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn provider_tool_probe_campaign_filter_behavior_modes(
+  behaviors: list<ProviderToolProbeBehavior>,
+  mode: string,
+) -> list<ProviderToolProbeBehavior> {
+  if mode == "both" {
+    return behaviors
+  }
+  let selected: list<ProviderToolProbeBehavior> = []
+  for behavior in behaviors {
+    if __mode_allowed(mode, behavior.modes) {
+      selected = selected + [behavior + {modes: [mode]}]
+    }
+  }
+  return selected
+}
+
+fn __provider_catalog_claim(route: ProviderToolProbeRoute) -> dict {
+  const caps = provider_capabilities(route.provider, route.model)
+  return {
+    tools: caps?.tools,
+    native_tools: caps?.native_tools,
+    text_tool_wire_format_supported: caps?.text_tool_wire_format_supported,
+    preferred_tool_format: caps?.preferred_tool_format,
+    tool_mode_parity: caps?.tool_mode_parity,
+    message_wire_format: caps?.message_wire_format,
+    native_tool_wire_format: caps?.native_tool_wire_format,
+    requires_tool_result_adjacency: caps?.requires_tool_result_adjacency,
+    stop_supported: caps?.stop_supported,
+    presence_penalty_supported: caps?.presence_penalty_supported,
+    frequency_penalty_supported: caps?.frequency_penalty_supported,
+    temperature_supported: caps?.temperature_supported,
+    top_p_supported: caps?.top_p_supported,
+  }
 }
 
 fn __tool_probe_command(
@@ -103,131 +374,328 @@ fn __tool_probe_command(
   ]
 }
 
-fn __job_id(route: ProviderToolProbeRoute, mode: string) -> string {
-  return route.id + "-" + __slug(mode)
+fn __cell_id(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  format: string,
+) -> string {
+  return route.id + "/" + behavior.id + "/" + mode + "/" + format
 }
 
-fn __planned_job(
+fn __base_cell(
   route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
   mode: string,
-  harn_bin: string,
-  repeat: int,
-  timeout_secs: int,
-) -> ProviderToolProbeJob {
+  format: string,
+  status: string,
+  reason: string,
+  observed: dict,
+) -> ProviderToolProbeCell {
   return {
-    id: __job_id(route, mode),
-    route_id: route.id,
+    id: __cell_id(route, behavior, mode, format),
     provider: route.provider,
     model: route.model,
+    route_id: route.id,
+    behavior: behavior.id,
+    category: behavior.category,
     mode: mode,
-    status: "planned",
-    command: __tool_probe_command(harn_bin, route, mode, repeat, timeout_secs),
-    reason: "dry run; pass --live to execute harn provider tool-probe",
+    tool_format: format,
+    runner: behavior.runner,
+    status: status,
+    reason: reason,
+    observed: observed,
+    catalog: __provider_catalog_claim(route),
   }
 }
 
-fn __safe_dict(value) -> dict {
-  if type_of(value) == "dict" {
-    return value
-  }
-  return {}
+fn __planned_cell(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  format: string,
+) -> ProviderToolProbeCell {
+  return __base_cell(
+    route,
+    behavior,
+    mode,
+    format,
+    "planned",
+    if behavior.runner == "provider_tool_probe" {
+      "dry run; pass --live to execute harn provider tool-probe for the executable transport cells"
+    } else {
+      "behavior case is declared in the campaign matrix but does not yet have an executable runner"
+    },
+    {},
+  )
 }
 
-fn __safe_string(value, fallback: string) -> string {
+pub fn provider_tool_probe_campaign_planned_cells(
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+) -> list<ProviderToolProbeCell> {
+  let cells: list<ProviderToolProbeCell> = []
+  for route in routes {
+    for behavior in behaviors {
+      for mode in behavior.modes {
+        for format in behavior.tool_formats {
+          cells = cells + [__planned_cell(route, behavior, mode, format)]
+        }
+      }
+    }
+  }
+  return cells
+}
+
+fn __safe_status(value) -> string {
   if type_of(value) == "string" {
     return value
   }
-  return fallback
+  return "unknown"
 }
 
-fn __status_from_probe(exit_code: int, parsed) -> dict {
-  if type_of(parsed) != "dict" {
-    return {status: "error", reason: "tool-probe did not emit JSON"}
+fn __status_from_probe(value) -> string {
+  const status = __safe_status(value)
+  if status == "pass" {
+    return "pass"
   }
-  const tool_calling = __safe_dict(parsed["tool_calling"])
-  const fallback = __safe_string(tool_calling["fallback_mode"], "")
-  const failure = __safe_string(tool_calling["failure_reason"], "")
-  if fallback == "disabled" {
-    return {
-      status: "fail",
-      reason: if failure == "" {
-        "tool-probe classified fallback mode as disabled"
-      } else {
-        failure
-      },
+  if status == "fail" {
+    return "fail"
+  }
+  return "skip"
+}
+
+fn __probe_status_for_format(report: dict, mode: string, format: string) -> string {
+  const tool_calling = report?.tool_calling ?? {}
+  if format == "native" && mode == "streaming" {
+    return __safe_status(tool_calling?.streaming_native)
+  }
+  if format == "native" {
+    return __safe_status(tool_calling?.native)
+  }
+  if format == "json" && mode == "non-streaming" {
+    return __safe_status(tool_calling?.text)
+  }
+  return "unknown"
+}
+
+fn __probe_cell(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  format: string,
+  report: dict,
+  artifact_path: string,
+  command: list<string>,
+) -> ProviderToolProbeCell {
+  const status_value = __probe_status_for_format(report, mode, format)
+  const status = __status_from_probe(status_value)
+  const reason = if format == "text/tagged" {
+    "legacy tagged text runner is declared but not yet separated from the current JSON text-channel probe"
+  } else if format == "json" && mode == "streaming" {
+    "provider tool-probe does not currently produce a streaming JSON text-channel verdict"
+  } else if status == "pass" {
+    "provider tool-probe reported pass at the Harn parse/dispatch boundary"
+  } else if status == "fail" {
+    report?.tool_calling?.failure_reason ?? "provider tool-probe reported fail"
+  } else {
+    "provider tool-probe did not produce a verdict for this format/mode"
+  }
+  return __base_cell(
+    route,
+    behavior,
+    mode,
+    format,
+    if format == "text/tagged" || (format == "json" && mode == "streaming") {
+      "planned"
+    } else {
+      status
+    },
+    reason,
+    {
+      tool_calling: report?.tool_calling ?? {},
+      case_count: len(report?.cases ?? []),
+      schema_version: report?.schema_version,
+    },
+  )
+    + {artifact_path: artifact_path, command: command}
+}
+
+fn __missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
+  let missing: list<string> = []
+  for key in route.env_keys {
+    if trim(to_string(env[key] ?? "")) == "" {
+      missing = missing + [key]
     }
   }
-  if exit_code == 0 {
-    return {status: "pass", reason: "tool-probe completed with an enabled tool-call path"}
-  }
-  return {status: "fail", reason: "tool-probe exited " + to_string(exit_code)}
+  return missing
 }
 
-fn __ensure_dir(harness: Harness, path: string) {
-  if !harness.fs.exists(path) {
-    harness.fs.mkdir(path)
+fn __skipped_cells_for_missing_env(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  missing: list<string>,
+) -> list<ProviderToolProbeCell> {
+  let cells: list<ProviderToolProbeCell> = []
+  for format in behavior.tool_formats {
+    cells = cells
+      + [
+      __base_cell(
+        route,
+        behavior,
+        mode,
+        format,
+        "skip",
+        "missing required environment keys: " + join(missing, ", "),
+        {missing_env_keys: missing},
+      ),
+    ]
   }
+  return cells
 }
 
-fn __run_job(
+fn __run_tool_probe(
   harness: Harness,
   route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
   mode: string,
   harn_bin: string,
+  env: dict,
   repeat: int,
   timeout_secs: int,
   output_dir: string,
-) -> ProviderToolProbeJob {
-  const cmd = __tool_probe_command(harn_bin, route, mode, repeat, timeout_secs)
-  const artifact_path = path_join(output_dir, __job_id(route, mode) + ".json")
-  const child = harness.process.spawn_captured({cmd: harn_bin, args: cmd[1:len(cmd)]})
-  harness.fs.write_text(artifact_path, child.stdout ?? "")
+) -> list<ProviderToolProbeCell> {
+  const missing = __missing_env_keys(route, env)
+  if len(missing) > 0 {
+    return __skipped_cells_for_missing_env(route, behavior, mode, missing)
+  }
+  const command = __tool_probe_command(harn_bin, route, mode, repeat, timeout_secs)
+  const artifact_path = path_join(output_dir, "tool-probe-" + route.id + "-" + mode + ".json")
+  const child = harness.process.spawn_captured({cmd: harn_bin, args: command[1:len(command)], env: env})
+  const stdout = child.stdout ?? ""
+  if trim(stdout) != "" {
+    harness.fs.write_text(artifact_path, stdout)
+  }
   const parsed = try {
-    json_parse(child.stdout ?? "")
+    json_parse(stdout)
   } catch (_) {
     nil
   }
-  const outcome = __status_from_probe(child.exit_code, parsed)
-  return {
-    id: __job_id(route, mode),
-    route_id: route.id,
-    provider: route.provider,
-    model: route.model,
-    mode: mode,
-    status: outcome.status,
-    command: cmd,
-    reason: outcome.reason,
-    artifact_path: artifact_path,
-    observed: if type_of(parsed) == "dict" {
-      parsed
-    } else {
-      {stderr: trim(child.stderr ?? ""), exit_code: child.exit_code}
-    },
+  if parsed == nil {
+    let cells: list<ProviderToolProbeCell> = []
+    for format in behavior.tool_formats {
+      cells = cells
+        + [
+        __base_cell(
+          route,
+          behavior,
+          mode,
+          format,
+          "error",
+          if trim(stdout) == "" {
+            trim(child.stderr ?? "provider tool-probe failed before producing JSON")
+          } else {
+            "provider tool-probe produced non-JSON stdout"
+          },
+          {exit_code: child.exit_code, stderr: trim(child.stderr ?? "")},
+        )
+          + {command: command},
+      ]
+    }
+    return cells
   }
+  let cells: list<ProviderToolProbeCell> = []
+  for format in behavior.tool_formats {
+    cells = cells + [__probe_cell(route, behavior, mode, format, parsed, artifact_path, command)]
+  }
+  return cells
 }
 
-fn __summary(jobs: list<ProviderToolProbeJob>) -> dict {
-  let summary: dict = {planned: 0, pass: 0, fail: 0, error: 0}
-  for job in jobs {
-    summary = summary + {[job.status]: (summary[job.status] ?? 0) + 1}
+fn __live_cells(
+  harness: Harness,
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  harn_bin: string,
+  env: dict,
+  repeat: int,
+  timeout_secs: int,
+  output_dir: string,
+) -> list<ProviderToolProbeCell> {
+  let cells: list<ProviderToolProbeCell> = []
+  for route in routes {
+    for behavior in behaviors {
+      if behavior.runner != "provider_tool_probe" {
+        for mode in behavior.modes {
+          for format in behavior.tool_formats {
+            cells = cells + [__planned_cell(route, behavior, mode, format)]
+          }
+        }
+        continue
+      }
+      for mode in behavior.modes {
+        cells = cells
+          + __run_tool_probe(harness, route, behavior, mode, harn_bin, env, repeat, timeout_secs, output_dir)
+      }
+    }
+  }
+  return cells
+}
+
+fn __summary(cells: list<ProviderToolProbeCell>) -> dict {
+  let summary: dict = {pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
+  for cell in cells {
+    summary = summary + {[cell.status]: (summary[cell.status] ?? 0) + 1}
   }
   return summary
 }
 
+fn __estimated_spend(
+  live: bool,
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  repeat: int,
+) -> dict {
+  let executable = 0
+  for behavior in behaviors {
+    if behavior.runner == "provider_tool_probe" {
+      executable = executable + len(behavior.modes)
+    }
+  }
+  return {
+    cap_usd: 10.0,
+    estimated_usd: 0.0,
+    actual_usd: 0.0,
+    accounting: if live {
+      "provider APIs report usage after each call; this campaign records zero until a per-provider cost mapper is added"
+    } else {
+      "dry run; no provider calls"
+    },
+    executable_probe_count: len(routes) * executable * repeat,
+  }
+}
+
 pub fn provider_tool_probe_campaign_report(
   routes: list<ProviderToolProbeRoute>,
-  jobs: list<ProviderToolProbeJob>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  cells: list<ProviderToolProbeCell>,
   live: bool,
+  include_expensive: bool,
   output_dir: string,
+  repeat: int,
 ) -> ProviderToolProbeCampaignReport {
   return {
     schema_version: SCHEMA_VERSION,
     live: live,
+    include_expensive: include_expensive,
     route_count: len(routes),
-    job_count: len(jobs),
-    summary: __summary(jobs),
+    behavior_count: len(behaviors),
+    cell_count: len(cells),
+    summary: __summary(cells),
+    spend: __estimated_spend(live, routes, behaviors, repeat),
     routes: routes,
-    jobs: jobs,
+    behaviors: behaviors,
+    cells: cells,
     artifacts: {
       report_json: path_join(output_dir, "report.json"),
       report_markdown: path_join(output_dir, "report.md"),
@@ -239,26 +707,49 @@ fn __markdown_escape(text: string) -> string {
   return replace(text, "|", "\\|")
 }
 
+fn __markdown_status(status: string) -> string {
+  if status == "pass" {
+    return "PASS"
+  }
+  if status == "fail" {
+    return "FAIL"
+  }
+  if status == "error" {
+    return "ERROR"
+  }
+  if status == "skip" {
+    return "SKIP"
+  }
+  return "PLANNED"
+}
+
 pub fn provider_tool_probe_campaign_markdown(report: ProviderToolProbeCampaignReport) -> string {
   let out = "# Provider Tool-Probe Campaign\n\n"
   out = out + "- Schema: `" + report.schema_version + "`\n"
   out = out + "- Live: " + to_string(report.live) + "\n"
+  out = out + "- Include expensive defaults: " + to_string(report.include_expensive) + "\n"
   out = out + "- Routes: " + to_string(report.route_count) + "\n"
-  out = out + "- Jobs: " + to_string(report.job_count) + "\n"
-  out = out + "- Summary: `" + json_stringify(report.summary) + "`\n\n"
-  out = out + "| Status | Provider | Model | Mode | Reason |\n"
-  out = out + "| --- | --- | --- | --- | --- |\n"
-  for job in report.jobs {
+  out = out + "- Behaviors: " + to_string(report.behavior_count) + "\n"
+  out = out + "- Cells: " + to_string(report.cell_count) + "\n"
+  out = out + "- Summary: `" + json_stringify(report.summary) + "`\n"
+  out = out + "- Spend: `" + json_stringify(report.spend) + "`\n\n"
+  out = out + "| Status | Provider | Model | Behavior | Mode | Tool format | Reason |\n"
+  out = out + "| --- | --- | --- | --- | --- | --- | --- |\n"
+  for cell in report.cells {
     out = out + "| "
-      + job.status
+      + __markdown_status(cell.status)
       + " | "
-      + job.provider
+      + cell.provider
       + " | `"
-      + job.model
+      + cell.model
       + "` | "
-      + job.mode
+      + cell.behavior
       + " | "
-      + __markdown_escape(job.reason)
+      + cell.mode
+      + " | "
+      + cell.tool_format
+      + " | "
+      + __markdown_escape(cell.reason)
       + " |\n"
   }
   return out
@@ -278,14 +769,74 @@ fn __as_string_list(value) -> list<string> {
   return [to_string(value)]
 }
 
+fn __unquote_env_value(value: string) -> string {
+  const trimmed = trim(value)
+  if len(trimmed) >= 2 && trimmed[0] == "\"" && trimmed[len(trimmed) - 1] == "\"" {
+    return trimmed[1:len(trimmed) - 1]
+  }
+  if len(trimmed) >= 2 && trimmed[0] == "'" && trimmed[len(trimmed) - 1] == "'" {
+    return trimmed[1:len(trimmed) - 1]
+  }
+  return trimmed
+}
+
+pub fn provider_tool_probe_campaign_env_from_dotenv_text(text: string) -> dict {
+  let env = {}
+  for raw_line in split(text, "\n") {
+    const line = trim(raw_line)
+    if line == "" || starts_with(line, "#") {
+      continue
+    }
+    const clean = if starts_with(line, "export ") {
+      trim(line[7:len(line)])
+    } else {
+      line
+    }
+    const pair = __split_once(clean, "=")
+    if pair == nil {
+      continue
+    }
+    const key = trim(pair.left)
+    if key == "" || contains(key, " ") {
+      continue
+    }
+    env = env + {[key]: __unquote_env_value(pair.right)}
+  }
+  return env
+}
+
+fn __env_for_child(harness: Harness, env_file: string) -> dict {
+  if env_file == "" || !harness.fs.exists(env_file) {
+    return {}
+  }
+  return provider_tool_probe_campaign_env_from_dotenv_text(harness.fs.read_text(env_file))
+}
+
+fn __default_env_file(harness: Harness) -> string {
+  const explicit = trim(harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_ENV_FILE", ""))
+  if explicit != "" {
+    return explicit
+  }
+  return path_join(home_dir(), "projects", "burin-code", ".env")
+}
+
+fn __ensure_dir(harness: Harness, path: string) {
+  if !harness.fs.exists(path) {
+    harness.fs.mkdir(path)
+  }
+}
+
 fn __arg_spec() -> list {
   return [
     {kind: "option", name: "route", flags: ["--route"], repeat: true, default: []},
+    {kind: "option", name: "behavior", flags: ["--behavior"], repeat: true, default: []},
     {kind: "option", name: "mode", flags: ["--mode"], default: "both"},
     {kind: "option", name: "repeat", flags: ["--repeat"], parse: "int", default: 1},
     {kind: "option", name: "timeout_secs", flags: ["--timeout-secs"], parse: "int", default: 60},
     {kind: "option", name: "harn_bin", flags: ["--harn-bin"], default: "harn"},
+    {kind: "option", name: "env_file", flags: ["--env-file"], default: ""},
     {kind: "option", name: "output_dir", flags: ["--output-dir"], default: DEFAULT_OUTPUT_DIR},
+    {kind: "flag", name: "include_expensive", flags: ["--include-expensive"]},
     {kind: "flag", name: "live", flags: ["--live"]},
     {kind: "flag", name: "markdown", flags: ["--markdown"]},
   ]
@@ -296,7 +847,7 @@ fn main(harness: Harness) {
   if parsed?._help ?? false {
     harness.stdio
       .println(
-      "usage: harn run scripts/provider_tool_probe_campaign.harn -- --route provider:model [--route provider:model] [--mode both|non-streaming|streaming] [--live]",
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--include-expensive] [--live] [--markdown]",
     )
     return nil
   }
@@ -304,15 +855,28 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(join((parsed?._errors ?? []) + (parsed?._extras ?? []), "\n"))
     exit(2)
   }
-  const routes = provider_tool_probe_campaign_routes(__as_string_list(parsed?.route))
+  const include_expensive = parsed?.include_expensive ?? false
+  const route_specs = __as_string_list(parsed?.route)
+  const routes = if len(route_specs) == 0 {
+    provider_tool_probe_campaign_default_routes(include_expensive)
+  } else {
+    provider_tool_probe_campaign_routes(route_specs)
+  }
   if len(routes) == 0 {
-    harness.stdio.eprintln("at least one --route provider:model is required")
+    harness.stdio.eprintln("no provider routes selected")
     exit(2)
   }
-  const mode = to_string(parsed?.mode ?? "both")
-  const modes = provider_tool_probe_campaign_modes(mode)
-  if len(modes) == 0 {
+  const requested_mode = to_string(parsed?.mode ?? "both")
+  if len(provider_tool_probe_campaign_modes(requested_mode)) == 0 {
     harness.stdio.eprintln("--mode must be one of: both, non-streaming, streaming")
+    exit(2)
+  }
+  const behaviors = provider_tool_probe_campaign_filter_behavior_modes(
+    provider_tool_probe_campaign_select_behaviors(__as_string_list(parsed?.behavior)),
+    requested_mode,
+  )
+  if len(behaviors) == 0 {
+    harness.stdio.eprintln("no provider behaviors selected")
     exit(2)
   }
   const live = parsed?.live ?? false
@@ -322,18 +886,33 @@ fn main(harness: Harness) {
   const output_dir = to_string(parsed?.output_dir ?? DEFAULT_OUTPUT_DIR)
   __ensure_dir(harness, ".harn-runs")
   __ensure_dir(harness, output_dir)
-  let jobs: list<ProviderToolProbeJob> = []
-  for route in routes {
-    for selected_mode in modes {
-      if live {
-        jobs = jobs
-          + [__run_job(harness, route, selected_mode, harn_bin, repeat, timeout_secs, output_dir)]
+  const env_file_arg = trim(to_string(parsed?.env_file ?? ""))
+  const env = if live {
+    __env_for_child(
+      harness,
+      if env_file_arg == "" {
+        __default_env_file(harness)
       } else {
-        jobs = jobs + [__planned_job(route, selected_mode, harn_bin, repeat, timeout_secs)]
-      }
-    }
+        env_file_arg
+      },
+    )
+  } else {
+    {}
   }
-  const report = provider_tool_probe_campaign_report(routes, jobs, live, output_dir)
+  const cells = if live {
+    __live_cells(harness, routes, behaviors, harn_bin, env, repeat, timeout_secs, output_dir)
+  } else {
+    provider_tool_probe_campaign_planned_cells(routes, behaviors)
+  }
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    live,
+    include_expensive,
+    output_dir,
+    repeat,
+  )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
   harness.fs
     .write_text(report.artifacts.report_markdown, provider_tool_probe_campaign_markdown(report))
