@@ -4,36 +4,69 @@
 // mock LLM script and explicit callback verdicts, so it proves the loop
 // mechanics without sleeps, wall-clock polling, API calls, or broad eval
 // machinery.
-import { llm_text, with_llm_script } from "std/testing"
+import { AgentLoopOptions } from "std/agent/options"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn terminal_callback_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "Inspect the target.",
+    {
+      handler: { _args -> "target contents" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "fail",
+    "Fail to inspect the target.",
+    {
+      handler: { _args ->
+        throw "inspection failed"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
 
 pipeline test_terminal_callback_can_continue_max_iteration_exit(task) {
   with_llm_script(
     [
-      llm_text("The first turn still needs work."),
+      llm_tool_call("inspect", {}, "inspect-1"),
+      llm_tool_call("inspect", {}, "inspect-2"),
+      llm_tool_call("fail", {}, "fail-1"),
+      llm_tool_call("fail", {}, "fail-2"),
       llm_text("The rescue turn completed the task. ##DONE##"),
     ],
     { ->
-      const result = agent_loop(
-        "Continue once, then finish.",
-        nil,
-        {
-          provider: "mock",
-          loop_until_done: true,
-          iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0, expose_decisions: true},
-          post_turn_callback: { _info -> return {message: "Keep going until the done sentinel is present."} },
-          terminal_callback: { info ->
-            assert_eq(info?.final_status, "budget_exhausted")
-            assert_eq(info?.stop_reason, "max_iterations")
-            assert(info?.budget_exhausted ?? false, "payload must expose a budget_exhausted boolean")
-            return {
-              message: "Terminal callback granted a bounded rescue turn.",
-              next_options: {llm_options: {temperature: 0.0}},
-            }
-          },
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        tools: terminal_callback_tools(),
+        loop_until_done: true,
+        iteration_budget: {mode: "fixed", initial: 4, max: 4, extend_by: 0, expose_decisions: true},
+        post_turn_callback: { _info -> return {message: "Keep going until the done sentinel is present."} },
+        terminal_callback: { info ->
+          assert_eq(info?.final_status, "budget_exhausted")
+          assert_eq(info?.stop_reason, "max_iterations")
+          assert(info?.budget_exhausted ?? false, "payload must expose a budget_exhausted boolean")
+          assert_eq(info?.session_successful_tools, ["inspect"])
+          assert_eq(info?.session_rejected_tools, ["fail"])
+          return {
+            message: "Terminal callback granted a bounded rescue turn.",
+            next_options: {llm_options: {temperature: 0.0}},
+          }
         },
-      )
+      }
+      const result = agent_loop("Continue once, then finish.", nil, opts)
       assert_eq(result.status, "done")
-      assert(result.llm.iterations >= 2, "terminal callback must allow the scripted rescue turn")
+      assert(result.llm.iterations >= 5, "terminal callback must allow the scripted rescue turn")
       const decisions = result?.adaptive_budget?.decisions ?? []
       assert(
         len(decisions) > 0 && decisions[len(decisions) - 1]?.reason == "terminal_callback_continue",

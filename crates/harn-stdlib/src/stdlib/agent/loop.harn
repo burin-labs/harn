@@ -5470,9 +5470,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
         stop_reason = reserve_kind + "_failed"
       }
-      if final_status != ""
-        && suspend_result == nil
-        && terminal_error == nil
+      if final_status != "" && suspend_result == nil && terminal_error == nil
         && terminal_callback_continues == 0
         && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
         const terminal_outcome = agent_compute_terminal_callback(
@@ -5484,6 +5482,8 @@ fn __agent_loop_run(message, session, initial_opts) {
             stop_reason: stop_reason ?? "",
             max_iterations: current_max,
             iteration_budget: budget,
+            session_successful_tools: successful_tools_seen,
+            session_rejected_tools: rejected_tools_seen,
           },
         )
         if terminal_outcome.kind == "continue" {
