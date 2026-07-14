@@ -49,10 +49,13 @@ jobs:
   # the incremental diff from that previous head to the current speculative
   # commit is provably only docs/website/Markdown, the earlier queue entry is
   # already running the full code backstop. Any parse/fetch/diff uncertainty
-  # falls back to heavy coverage. Release metadata-only push events are
-  # bookkeeping for a tree the merge queue already tested, so keep them on the
-  # cheap lanes. Do not wire the downstream `if:`s back to the raw
-  # `steps.filter.outputs.*`; they must read `steps.force.outputs.*`.
+  # falls back to heavy coverage. Push events reuse comprehensive merge-queue
+  # proof only when the Actions API returns a successful run of this workflow
+  # for the exact commit SHA; any API/schema/match uncertainty runs the full
+  # backstop. Release metadata-only push events are bookkeeping for a tree the
+  # merge queue already tested, so keep them on the cheap lanes too. Do not wire
+  # the downstream `if:`s back to the raw `steps.filter.outputs.*`; they must
+  # read `steps.force.outputs.*`.
   #
   # The filter is an EXCLUSION list with `predicate-quantifier: every`: a file
   # only fails to mark `rust=true` when it matches EVERY pattern, i.e. it is
@@ -65,9 +68,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
       pull-requests: read
     outputs:
+      merge_group_proven: ${{ steps.merge_group_proof.outputs.proven }}
       rust: ${{ steps.force.outputs.rust }}
       portal: ${{ steps.surface_filter.outputs.portal }}
       docs_site: ${{ steps.surface_filter.outputs.docs_site }}
@@ -194,6 +199,28 @@ jobs:
 
           echo "docs_only_tail=$docs_only_tail" >> "$GITHUB_OUTPUT"
           echo "merge-group docs-only tail: $docs_only_tail"
+      - name: Detect exact-SHA merge-group proof
+        id: merge_group_proof
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          proven=false
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            if ! proven="$(./scripts/ci_merge_group_proof.sh "$REPOSITORY" ci.yml "$COMMIT_SHA")"; then
+              echo "::notice::merge-group proof helper failed; keeping the full push CI graph enabled"
+              proven=false
+            fi
+          fi
+          if [[ "$proven" != "true" ]]; then
+            proven=false
+          fi
+          echo "proven=$proven" >> "$GITHUB_OUTPUT"
+          echo "exact-SHA merge-group proof: $proven"
       - name: Resolve heavy-lane gate
         id: force
         # `pull_request`: honour the paths filter — a docs/website/markdown-only
@@ -205,16 +232,21 @@ jobs:
         #   catches cross-PR interaction regressions. The only skip is a
         #   stacked docs-only tail whose incremental diff from the previous
         #   queue head is provably docs/website/Markdown-only.
-        # `push`: honour release metadata-only detection so a merge queue-tested
-        #   release bookkeeping merge does not rerun the full Rust suite.
+        # `push`: skip the heavy Rust lanes when this exact SHA already passed
+        #   this workflow on merge_group. Otherwise only release metadata-only
+        #   bookkeeping skips; all uncertainty retains the full backstop.
         env:
           FORCE_MERGE_GROUP: ${{ github.event_name == 'merge_group' }}
           F_RUST: ${{ steps.filter.outputs.rust }}
+          MERGE_GROUP_PROVEN: ${{ steps.merge_group_proof.outputs.proven }}
           RELEASE_METADATA_ONLY: ${{ steps.release_metadata.outputs.release_metadata_only }}
           MERGE_GROUP_DOCS_ONLY_TAIL: ${{ steps.merge_group_tail.outputs.docs_only_tail }}
         run: |
           set -euo pipefail
-          if [ "${FORCE_MERGE_GROUP}" = "true" ] && [ "${MERGE_GROUP_DOCS_ONLY_TAIL}" = "true" ]; then
+          if [ "${MERGE_GROUP_PROVEN}" = "true" ]; then
+            echo "::notice::changes: exact ${GITHUB_SHA} already passed this workflow on merge_group — skipping duplicate heavy push lanes"
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          elif [ "${FORCE_MERGE_GROUP}" = "true" ] && [ "${MERGE_GROUP_DOCS_ONLY_TAIL}" = "true" ]; then
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes for a proven docs-only merge-queue tail"
             echo "rust=false" >> "$GITHUB_OUTPUT"
           elif [ "${FORCE_MERGE_GROUP}" = "true" ]; then
@@ -232,6 +264,8 @@ jobs:
     name: Format check
     # Runs `make fmt-check` + a small shell script; no compilation, no cache
     # benefit, and no reason to wait for a scarce self-hosted runner.
+    needs: changes
+    if: needs.changes.outputs.merge_group_proven != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -737,6 +771,8 @@ jobs:
   # behavior (build + smoke test).
   windows-cross-check:
     name: Windows cross-compile check
+    needs: changes
+    if: needs.changes.outputs.merge_group_proven != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -1019,16 +1055,29 @@ jobs:
     needs: [runner-availability, changes, fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
+        env:
+          MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
         run: |
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
-            ["Format check"]="${{ needs.fmt.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Runner availability"]="${{ needs['runner-availability'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
+
+          merge_group_proven="$MERGE_GROUP_PROVEN"
+
+          # Format already ran for this exact workflow + SHA on merge_group
+          # when proof reuse is active. Otherwise it remains required.
+          fmt_result="${{ needs.fmt.result }}"
+          echo "Format check: $fmt_result"
+          if [ "$fmt_result" != "success" ] \
+            && { [ "$merge_group_proven" != "true" ] || [ "$fmt_result" != "skipped" ]; }; then
+            echo "::error::Format check failed or skipped without exact-SHA merge-group proof."
+            exit 1
+          fi
 
           # The heavy Linux Rust lanes (rust-builds, audit-scripts) skip on a
           # docs/website/markdown-only PR (gated by the `changes` job) and run
@@ -1061,14 +1110,16 @@ jobs:
             exit 1
           fi
 
-          # The cross-compile check runs on EVERY event (no path gate, no skip),
-          # so it must actually succeed — `skipped` is not acceptable here. This
-          # is the non-flaky Windows-compile gate that closes the path-filter /
+          # The cross-compile check runs on every source-changing event. A push
+          # may skip only when this exact workflow + SHA already passed on
+          # merge_group; otherwise `skipped` remains a hard failure. This is the
+          # non-flaky Windows-compile gate that closes the path-filter /
           # merge-queue coverage gaps that let #4199 through.
           windows_cross_result="${{ needs['windows-cross-check'].result }}"
           echo "Windows cross-compile check: $windows_cross_result"
-          if [ "$windows_cross_result" != "success" ]; then
-            echo "::error::Windows cross-compile check failed."
+          if [ "$windows_cross_result" != "success" ] \
+            && { [ "$merge_group_proven" != "true" ] || [ "$windows_cross_result" != "skipped" ]; }; then
+            echo "::error::Windows cross-compile check failed or skipped without exact-SHA merge-group proof."
             exit 1
           fi
 
