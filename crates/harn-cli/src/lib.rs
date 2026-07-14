@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 pub mod acp;
+mod bootstrap;
 pub mod cli;
 mod cli_bytecode;
 pub mod commands;
@@ -42,7 +43,6 @@ use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 use runtime::{build_cli_runtime, cli_runtime_mode, CliRuntimeMode};
 
 pub const CLI_RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
-
 static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
 
 /// Install the macro-emitted builtin signature slice into the
@@ -78,6 +78,7 @@ pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 /// drives the async dispatcher in `async_main`.
 pub fn run() {
     install_broken_pipe_panic_hook();
+    let raw_args = normalize_serve_args(bootstrap::args_after_pre_runtime_command());
 
     // Defeat rlib dead-code stripping of `#[harn_builtin]`-emitted statics
     // (linkme issue #36). Without this touch the linker can drop every
@@ -87,7 +88,6 @@ pub fn run() {
 
     ensure_builtin_signatures_installed();
 
-    let raw_args = normalize_serve_args(env::args().collect());
     let runtime_mode = cli_runtime_mode(&raw_args);
 
     let handle = thread::Builder::new()

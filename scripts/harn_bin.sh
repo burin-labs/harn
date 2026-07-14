@@ -14,13 +14,12 @@ usage() {
   cat <<'EOF'
 usage: scripts/harn_bin.sh [--print] [--no-build] [--] [harn args...]
 
-Resolves a fresh worktree harn binary, rebuilding it only when the existing
-binary is missing or older than Rust/Cargo executable inputs. With command
-arguments, executes the resolved harn binary.
+Resolves a worktree harn binary through Cargo unless HARN_BIN is explicit. With
+command arguments, executes the resolved binary.
 
 Environment:
-  HARN_BIN                 explicit binary to validate and use
-  HARN_BIN_ASSUME_FRESH=1  test-only escape hatch for fake binaries
+  HARN_BIN          explicit executable to validate and use
+  CARGO_TARGET_DIR  target directory for --no-build worktree lookup
 EOF
 }
 

@@ -21,7 +21,7 @@ set -euo pipefail
   printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
 } >> "$FAKE_CARGO_RECORD"
 case "$*" in
-  "build --quiet --bin harn")
+  "run --quiet --bin harn -- __internal-executable-path")
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
@@ -29,13 +29,7 @@ set -euo pipefail
 printf 'fake harn\n'
 BIN
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
-    ;;
-  "metadata --format-version=1 --no-deps")
-    python3 - <<'PY'
-import json
-import os
-print(json.dumps({"target_directory": os.environ["CARGO_TARGET_DIR"]}))
-PY
+    printf '%s\n' "$CARGO_TARGET_DIR/debug/harn"
     ;;
   *)
     echo "unexpected cargo invocation: $*" >&2
@@ -52,8 +46,8 @@ CARGO_TARGET_DIR="$target_dir" \
   "$repo_root/scripts/ci_warm_harn_bin.sh" > "$tmp_root/warm.out"
 
 expected_bin="$target_dir/debug/harn"
-if ! grep -Fxq "args=build --quiet --bin harn" "$record"; then
-  echo "ci_warm_harn_bin did not build harn" >&2
+if ! grep -Fxq "args=run --quiet --bin harn -- __internal-executable-path" "$record"; then
+  echo "ci_warm_harn_bin did not resolve harn through cargo run" >&2
   cat "$record" >&2
   exit 1
 fi
@@ -98,7 +92,6 @@ fi
 : > "$record"
 : > "$github_env"
 HARN_BIN="$expected_bin" \
-  HARN_BIN_ASSUME_FRESH=1 \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   GITHUB_ENV="$github_env" \
