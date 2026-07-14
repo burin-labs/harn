@@ -324,6 +324,15 @@ SELECTED_AUDIT_STEPS=()
 SELECTED_AUDIT_RUNNERS=()
 AUDIT_PLAN_REASON=""
 AUDIT_RECEIPT_REUSED="false"
+PRESERVE_AUDIT_TMP=0
+AUDIT_TMP_DIR=""
+
+cleanup_preserved_audit_tmp() {
+  if [[ -n "$AUDIT_TMP_DIR" ]]; then
+    rm -rf "$AUDIT_TMP_DIR"
+    AUDIT_TMP_DIR=""
+  fi
+}
 
 resolve_audit_plan() {
   local receipt_path="$1"
@@ -470,6 +479,9 @@ cmd_audit() {
 
   local tmp
   tmp="$(mktemp -d)"
+  if [[ "$PRESERVE_AUDIT_TMP" -eq 1 ]]; then
+    AUDIT_TMP_DIR="$tmp"
+  fi
   local stable_bin_dir stable_harn_bin stable_suffix
   stable_bin_dir="$tmp/harn-bin"
   mkdir -p "$stable_bin_dir"
@@ -587,7 +599,9 @@ cmd_audit() {
     exit 1
   fi
 
-  rm -rf "$tmp"
+  if [[ "$PRESERVE_AUDIT_TMP" -ne 1 ]]; then
+    rm -rf "$tmp"
+  fi
   local audit_elapsed=$(( $(date +%s) - audit_started ))
   echo "=== Audit complete (${audit_elapsed}s) ==="
 }
@@ -751,9 +765,13 @@ cmd_full() {
         ;;
     esac
   done
+  PRESERVE_AUDIT_TMP=1
+  trap cleanup_preserved_audit_tmp EXIT
   cmd_audit
   cmd_prepare --bump "${bump:-patch}"
   cmd_publish ${dry_run}
+  cleanup_preserved_audit_tmp
+  trap - EXIT
 }
 
 case "${1:-}" in

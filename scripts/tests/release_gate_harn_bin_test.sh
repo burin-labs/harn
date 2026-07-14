@@ -194,6 +194,7 @@ members = []
 EOF
 printf 'OAuth MCP trust boundary mutation session worker_update\n' > "$audit_root/README.md"
 printf 'spec\n' > "$audit_root/spec/HARN_SPEC.md"
+printf 'tag = "v1.2.3"\n' > "$audit_root/docs/src/embedding-rust.md"
 printf '{}\n' > "$audit_root/scripts/release_audit_contract.json"
 printf 'jobs: {}\n' > "$audit_root/.github/workflows/ci.yml"
 git -C "$audit_root" init -q
@@ -256,12 +257,19 @@ if [[ "${HARN_CONFORMANCE_HARN_BIN-}" == "$CARGO_TARGET_DIR/debug/harn" ]]; then
   echo "harn command received cargo target HARN_CONFORMANCE_HARN_BIN" >&2
   exit 1
 fi
+if [[ "${FAIL_FULL_PREPARE:-0}" == "1" && "${1:-}" == "dump-protocol-artifacts" ]]; then
+  exit 23
+fi
 exit 0
 HARN
   chmod +x "$CARGO_TARGET_DIR/debug/harn"
   exit 0
 fi
 if [[ "${1:-}" == "clippy" ]]; then
+  exit 0
+fi
+if [[ "${1:-}" == "metadata" ]]; then
+  printf '%s\n' '{}'
   exit 0
 fi
 echo "unexpected fake cargo invocation: $*" >&2
@@ -336,6 +344,9 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]];
     printf '%s\n' '{"ok":true,"receipt_reused":false,"reason":"no_receipt","proof_kind":"full_local","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lane_names":["rust-audit","harn-audit","generated-audit","docs-audit","grammar-audit","security-audit","package-audit","smoke-audit"],"lane_runners":["run_rust_audit","run_harn_audit","run_generated_audit","run_docs_audit","run_grammar_audit","run_security_audit","run_package_audit","run_smoke_audit"],"lanes":[],"errors":[]}'
   fi
   exit 0
+fi
+if [[ "${FAIL_FULL_PREPARE:-0}" == "1" && "${1:-}" == "dump-protocol-artifacts" ]]; then
+  exit 23
 fi
 exit 0
 SH
@@ -591,5 +602,62 @@ for lane in rust-audit harn-audit generated-audit docs-audit grammar-audit secur
     exit 1
   fi
 done
+
+fake_publish="$tmp_root/fake-publish.sh"
+cat > "$fake_publish" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'publish %s\n' "$*" >> "$FAKE_AUDIT_RECORD"
+SH
+chmod +x "$fake_publish"
+
+git -C "$audit_root" reset --hard --quiet HEAD
+: > "$audit_record"
+PATH="$fake_tools:$PATH" \
+  HARN_RELEASE_ROOT="$audit_root" \
+  HARN_BIN="$fake_audit_harn" \
+  HARN_PUBLISH_SCRIPT="$fake_publish" \
+  TMPDIR="$tmp_root" \
+  FAKE_AUDIT_RECORD="$audit_record" \
+  "$release_gate" full --bump patch --dry-run > "$tmp_root/full.txt" 2>&1 || {
+  cat "$tmp_root/full.txt" >&2
+  exit 1
+}
+if ! grep -Fq "dump-protocol-artifacts --artifact-version 1.2.4" "$audit_record"; then
+  echo "release_gate full did not preserve the audited HARN_BIN through prepare" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+if ! grep -Fxq "publish --dry-run" "$audit_record"; then
+  echo "release_gate full did not reach the publish dry run" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+preserved_harn="$(grep -F "dump-protocol-artifacts --artifact-version 1.2.4" "$audit_record" | sed -n 's/.*self=\([^ ]*\/harn-bin\/harn\).*/\1/p' | head -1)"
+if [[ -z "$preserved_harn" || -e "$(dirname "$(dirname "$preserved_harn")")" ]]; then
+  echo "release_gate full did not clean its preserved audit directory" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+
+git -C "$audit_root" reset --hard --quiet HEAD
+: > "$audit_record"
+if PATH="$fake_tools:$PATH" \
+  HARN_RELEASE_ROOT="$audit_root" \
+  HARN_BIN="$fake_audit_harn" \
+  HARN_PUBLISH_SCRIPT="$fake_publish" \
+  TMPDIR="$tmp_root" \
+  FAKE_AUDIT_RECORD="$audit_record" \
+  FAIL_FULL_PREPARE=1 \
+  "$release_gate" full --bump patch --dry-run > "$tmp_root/full-failure.txt" 2>&1; then
+  echo "release_gate full ignored the injected prepare failure" >&2
+  exit 1
+fi
+failed_harn="$(grep -F "dump-protocol-artifacts --artifact-version 1.2.4" "$audit_record" | sed -n 's/.*self=\([^ ]*\/harn-bin\/harn\).*/\1/p' | head -1)"
+if [[ -z "$failed_harn" || -e "$(dirname "$(dirname "$failed_harn")")" ]]; then
+  echo "release_gate full did not clean its audit directory after prepare failure" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
 
 echo "release_gate_harn_bin_test: ok"
