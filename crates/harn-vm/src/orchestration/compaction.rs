@@ -610,15 +610,13 @@ fn line_has_file_line_prefix(trimmed: &str) -> bool {
 /// assertion values, rustc continuation lines, and structured failing-line
 /// markers survive in the detail the model re-reads to fix the bug.
 ///
-/// In addition to keyword/positional error lines and `file:line` diagnostics,
-/// this keeps three structured kinds that are easy to drop accidentally:
 ///   - assertion value lines with no `file:line` (`left:`, `right:`,
 ///     `expected:`, `actual:`, `got`, `want`) — the values the model needs to
 ///     see the actual-vs-expected mismatch.
 ///   - rustc continuation lines (`-->` location pointers, `= help:`/`= note:`,
 ///     numbered source rows like `12 |`, and `^^^` carets).
 ///   - `Lnnn:` failing-line structure some test harnesses emit.
-fn is_failure_signal_line(line: &str) -> bool {
+pub(super) fn is_failure_signal_line(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return false;
@@ -646,7 +644,6 @@ fn is_failure_signal_line(line: &str) -> bool {
         || lower.starts_with("note:")
         || lower.contains("panic:");
 
-    // Assertion value lines (no file:line) — the actual-vs-expected values.
     let assertion_value = lower.starts_with("left:")
         || lower.starts_with("right:")
         || lower.starts_with("expected:")
@@ -681,7 +678,6 @@ fn is_failure_signal_line(line: &str) -> bool {
             saw_digit && rest.trim_start().starts_with('|')
         };
 
-    // `Lnnn:` failing-line structure (`L42:`), some harnesses emit this.
     let failing_line_marker = {
         if let Some(rest) = trimmed.strip_prefix('L') {
             let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -1485,7 +1481,10 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
         }
     }
 
-    summary = apply_model_visible_policy(summary, &config.policy);
+    summary = super::repair_ledger::append_repair_ledger_to_summary(
+        apply_model_visible_policy(summary, &config.policy),
+        &old_messages,
+    );
 
     messages.insert(
         compact_start,

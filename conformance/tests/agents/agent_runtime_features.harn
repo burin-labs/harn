@@ -84,6 +84,32 @@ pipeline test(task) {
     policy_compacted.messages[0].content
       .contains("policy compact preserve_test_failures failing test names"),
   )
+  const repair_messages = [
+    {role: "user", content: "Fix the include path"},
+    {role: "tool", name: "edit", content: "Applied edit to src/main.cpp: fixed include path"},
+    {role: "tool", name: "run", content: "src/main.cpp:1:10: error: missing generated/widget.h"},
+    {role: "tool", name: "edit", content: "Applied edit to src/main.cpp: included generated/widget.h"},
+    {role: "tool", name: "run", content: "All tests passed\nexit code 0"},
+    {role: "user", content: "What remains?"},
+  ]
+  const repair_compacted = transcript_auto_compact(
+    repair_messages,
+    {
+      keep_last: 1,
+      token_threshold: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived -> {summary: "repair compact " + to_string(len(archived))} },
+    },
+  )
+  assert(
+    repair_compacted.summary.contains("harn.agent.repair_ledger.v1"),
+    "forced compaction carries repair ledger",
+  )
+  assert(repair_compacted.summary.contains("verified-good"), "repair ledger records verified fixes")
+  assert(
+    !repair_compacted.summary.contains("missing generated/widget.h"),
+    "superseded diagnostics are not retained as current diagnostics",
+  )
   const loop_compacted = agent_loop(
     "Inspect the workspace",
     "You are helpful",
