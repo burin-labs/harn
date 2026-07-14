@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -7,14 +6,17 @@ use sha2::{Digest as _, Sha256};
 
 use crate::cli::{ModelsLoraArgs, ModelsLoraCommand, ModelsLoraInspectArgs, ModelsLoraPlanArgs};
 use crate::commands::local::runtime::normalize_local_provider_id;
-use crate::dispatch;
-use crate::env_guard::ScopedEnvVar;
 
 mod export;
 mod manifest;
 mod preflight;
 mod promote;
+mod promotion_templates;
+mod render;
 mod train;
+
+use promotion_templates::lora_promotion_probe_command_templates;
+pub(super) use render::{render_embedded_lora_report, run_embedded_lora_report};
 
 const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
 const LORA_INSPECT_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY";
@@ -27,9 +29,6 @@ const LORA_PEFT_SAVE_POLICY_SCHEMA_VERSION: u64 = 1;
 const LORA_TOOL_CATALOG_CONTRACT_SCHEMA_VERSION: u64 = 1;
 const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 4;
 const LORA_TRAINER_IDENTITY_SCHEMA_VERSION: u64 = 1;
-/// Serialises the dispatch path so concurrent in-process callers do not race on
-/// the env vars that carry the Rust-collected adapter/catalog facts.
-static LORA_RENDER_DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(crate) async fn run(args: ModelsLoraArgs) {
     let exit_code = match args.command {
@@ -82,42 +81,6 @@ async fn plan(args: &ModelsLoraPlanArgs) -> i32 {
         "LoRA plan",
     )
     .await
-}
-
-pub(super) async fn render_embedded_lora_report<T: Serialize>(
-    report: &T,
-    payload_env: &'static str,
-    pretty_env: &'static str,
-    script_name: &'static str,
-    json: bool,
-    label: &str,
-) -> i32 {
-    let payload_json = match serde_json::to_string(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to serialise {label} payload: {error}");
-            return 1;
-        }
-    };
-    let pretty_json = match serde_json::to_string_pretty(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to render {label} JSON: {error}");
-            return 1;
-        }
-    };
-
-    let _guard = LORA_RENDER_DISPATCH_LOCK.lock().await;
-    let _payload = ScopedEnvVar::set(payload_env, &payload_json);
-    let _pretty = ScopedEnvVar::set(pretty_env, &pretty_json);
-    let outcome = dispatch::run_embedded_script(script_name, Vec::new(), json).await;
-    if !outcome.stderr.is_empty() {
-        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
-    }
-    if !outcome.stdout.is_empty() {
-        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
-    }
-    outcome.exit_code
 }
 
 fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, String> {
@@ -806,6 +769,8 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "ADAPTER_OUTPUT_DIR/adapter.manifest.json".to_string(),
         "--probe-root".to_string(),
         "PROMOTION_PROBES".to_string(),
+        "--base-probe-root".to_string(),
+        "BASE_PROMOTION_PROBES".to_string(),
         "--out".to_string(),
         "ADAPTER_OUTPUT_DIR/promotion.receipt.json".to_string(),
         "--check".to_string(),
@@ -2591,7 +2556,7 @@ fn lora_required_probe_cases(tool_format: &str) -> Vec<PromotionProbeCase> {
         },
         PromotionProbeCase {
             id: "parallel_tool_calls".to_string(),
-            requirement: "required_when_route_supports_parallel_tool_calls_else_not_applicable_receipt"
+            requirement: "required_when_route_supports_parallel_tool_calls_with_route_capability_receipt"
                 .to_string(),
             expected:
                 "adapter-loaded route emits distinct tool calls with stable ids, names, and arguments when the route advertises parallel tools"
@@ -2633,7 +2598,7 @@ fn lora_required_probe_cases(tool_format: &str) -> Vec<PromotionProbeCase> {
         },
         PromotionProbeCase {
             id: "serving_concurrency_probe".to_string(),
-            requirement: "required_for_adapter_loaded_serving_else_not_applicable_receipt"
+            requirement: "required_for_adapter_loaded_serving_with_serving_receipt"
                 .to_string(),
             expected:
                 "adapter-loaded serving route preserves adapter binding, parser mode, and request ids across concurrent probe requests"
@@ -2643,51 +2608,6 @@ fn lora_required_probe_cases(tool_format: &str) -> Vec<PromotionProbeCase> {
                 .to_string(),
         },
     ]
-}
-
-fn lora_promotion_probe_command_templates(
-    input: &PromotionEvidenceInput<'_>,
-    required_probe_cases: &[PromotionProbeCase],
-) -> Vec<PromotionProbeCommandTemplate> {
-    let planner = format!("provider={},model={}", input.provider, input.request_model);
-    required_probe_cases
-        .iter()
-        .map(|probe_case| {
-            let output_dir = format!("PROMOTION_PROBES/{}", probe_case.id);
-            let mut notes = Vec::new();
-            if probe_case.id == "serving_concurrency_probe" {
-                notes.push(
-                    "the selected dataset/evaluator must exercise concurrent adapter-loaded requests; a sequential filtered run is not enough evidence"
-                        .to_string(),
-                );
-            }
-            PromotionProbeCommandTemplate {
-                case_id: probe_case.id.clone(),
-                route_role: "adapter".to_string(),
-                executor: "harn_eval_tool_calls_filter".to_string(),
-                command: vec![
-                    "harn".to_string(),
-                    "eval".to_string(),
-                    "tool-calls".to_string(),
-                    "--dataset".to_string(),
-                    input.eval_dataset.to_string(),
-                    "--planner".to_string(),
-                    planner.clone(),
-                    "--tool-format".to_string(),
-                    input.tool_format.to_string(),
-                    "--filter".to_string(),
-                    probe_case.id.clone(),
-                    "--output".to_string(),
-                    output_dir.clone(),
-                ],
-                output_dir: output_dir.clone(),
-                summary_path: format!("{output_dir}/summary.json"),
-                per_case_path: format!("{output_dir}/per_case.jsonl"),
-                receipt: probe_case.receipt.clone(),
-                notes,
-            }
-        })
-        .collect()
 }
 
 struct PromotionEvidenceInput<'a> {
@@ -3975,6 +3895,8 @@ mod tests {
                 "ADAPTER_OUTPUT_DIR/adapter.manifest.json",
                 "--probe-root",
                 "PROMOTION_PROBES",
+                "--base-probe-root",
+                "BASE_PROMOTION_PROBES",
                 "--out",
                 "ADAPTER_OUTPUT_DIR/promotion.receipt.json",
                 "--check",
@@ -4024,13 +3946,15 @@ mod tests {
         }));
         assert_eq!(
             evidence.probe_command_templates.len(),
-            evidence.required_probe_cases.len()
+            evidence.required_probe_cases.len() * 2
         );
         let sequential_probe_command = evidence
             .probe_command_templates
             .iter()
-            .find(|template| template.case_id == "sequential_tool_call")
-            .expect("sequential probe command template");
+            .find(|template| {
+                template.case_id == "sequential_tool_call" && template.route_role == "adapter"
+            })
+            .expect("sequential adapter probe command template");
         assert_eq!(
             sequential_probe_command.command,
             [
@@ -4056,10 +3980,40 @@ mod tests {
             sequential_probe_command.summary_path,
             "PROMOTION_PROBES/sequential_tool_call/summary.json"
         );
+        let base_sequential_probe_command = evidence
+            .probe_command_templates
+            .iter()
+            .find(|template| {
+                template.case_id == "sequential_tool_call" && template.route_role == "base"
+            })
+            .expect("sequential base probe command template");
+        assert_eq!(
+            base_sequential_probe_command.command,
+            [
+                "harn",
+                "eval",
+                "tool-calls",
+                "--dataset",
+                "lora-corpus",
+                "--planner",
+                "provider=vllm,model=gemma-4-e4b-it",
+                "--tool-format",
+                "json",
+                "--filter",
+                "sequential_tool_call",
+                "--output",
+                "BASE_PROMOTION_PROBES/sequential_tool_call",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        );
         let concurrency_probe_command = evidence
             .probe_command_templates
             .iter()
-            .find(|template| template.case_id == "serving_concurrency_probe")
+            .find(|template| {
+                template.case_id == "serving_concurrency_probe" && template.route_role == "adapter"
+            })
             .expect("serving concurrency probe command template");
         assert!(concurrency_probe_command
             .notes

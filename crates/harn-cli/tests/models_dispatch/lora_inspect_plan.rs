@@ -407,9 +407,9 @@ fn models_lora_plan_human_text_includes_recipe() {
         "Harn text parser acceptance rate",
         "required probe cases:",
         "sequential_tool_call [always]",
-        "parallel_tool_calls [required_when_route_supports_parallel_tool_calls_else_not_applicable_receipt]",
+        "parallel_tool_calls [required_when_route_supports_parallel_tool_calls_with_route_capability_receipt]",
         "multi_turn_tool_result_continuation [always]",
-        "serving_concurrency_probe [required_for_adapter_loaded_serving_else_not_applicable_receipt]",
+        "serving_concurrency_probe [required_for_adapter_loaded_serving_with_serving_receipt]",
         "require a positive paired lift before promotion; inconclusive movement stays experimental",
         "require zero contract-id drift between export manifest, adapter metadata, and served route",
         "adapter binding: runtime_lora_adapter",
@@ -422,7 +422,7 @@ fn models_lora_plan_human_text_includes_recipe() {
         "harn models lora export --base local-gemma4-e4b --provider vllm --tool-format json --corpus ./lora-corpus --out ADAPTER_DATASET.jsonl --manifest ADAPTER_DATASET.manifest.json --adapter-name ADAPTER_NAME --chat-template harn_text_tool_calls_json_fences",
         "harn models lora train --base local-gemma4-e4b --provider vllm --tool-format json --dataset ADAPTER_DATASET.jsonl --export-manifest ADAPTER_DATASET.manifest.json --output-dir ADAPTER_OUTPUT_DIR --receipt-out ADAPTER_OUTPUT_DIR/train.receipt.json",
         "harn eval tool-calls --planner ADAPTER_MODEL --tool-format json --dataset ./lora-corpus",
-        "harn models lora promote --manifest ADAPTER_OUTPUT_DIR/adapter.manifest.json --probe-root PROMOTION_PROBES --out ADAPTER_OUTPUT_DIR/promotion.receipt.json --check",
+        "harn models lora promote --manifest ADAPTER_OUTPUT_DIR/adapter.manifest.json --probe-root PROMOTION_PROBES --base-probe-root BASE_PROMOTION_PROBES --out ADAPTER_OUTPUT_DIR/promotion.receipt.json --check",
         "harn models lora inspect --base local-gemma4-e4b --provider vllm --name ADAPTER_NAME ADAPTER_PATH_OR_REPO",
         "harn local launch local-gemma4-e4b --provider vllm --model-source gemma-4-e4b-it",
     ] {
@@ -834,13 +834,15 @@ fn models_lora_plan_json_shape_is_stable() {
         .expect("probe command templates");
     assert_eq!(
         probe_command_templates.len(),
-        required_probe_cases.len(),
+        required_probe_cases.len() * 2,
         "probe command templates={probe_command_templates:?}"
     );
     let sequential_probe = probe_command_templates
         .iter()
-        .find(|template| template["case_id"] == "sequential_tool_call")
-        .expect("sequential probe command template");
+        .find(|template| {
+            template["case_id"] == "sequential_tool_call" && template["route_role"] == "adapter"
+        })
+        .expect("sequential adapter probe command template");
     assert_eq!(
         sequential_probe["summary_path"],
         "PROMOTION_PROBES/sequential_tool_call/summary.json"
