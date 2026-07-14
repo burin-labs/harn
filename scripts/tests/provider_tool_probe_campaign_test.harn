@@ -1,0 +1,75 @@
+import "../provider_tool_probe_campaign.harn"
+
+@test
+pipeline test_provider_tool_probe_campaign_parses_explicit_routes(task) {
+  const routes = provider_tool_probe_campaign_routes(
+    ["anthropic:claude-sonnet-5", "fireworks:accounts/fireworks/models/gpt-oss-120b"],
+  )
+  assert_eq(len(routes), 2)
+  const first = routes[0] ?? {id: "", provider: "", model: ""}
+  const second = routes[1] ?? {id: "", provider: "", model: ""}
+  assert_eq(first.provider, "anthropic")
+  assert_eq(first.model, "claude-sonnet-5")
+  assert_eq(second.provider, "fireworks")
+  assert_eq(second.model, "accounts/fireworks/models/gpt-oss-120b")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_rejects_malformed_routes(task) {
+  const routes = provider_tool_probe_campaign_routes(["missing-separator", "openai:", ":model", "ollama:gemma4"])
+  assert_eq(len(routes), 1)
+  const route = routes[0] ?? {id: "", provider: "", model: ""}
+  assert_eq(route.provider, "ollama")
+  assert_eq(route.model, "gemma4")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_modes_expand_both(task) {
+  assert_eq(provider_tool_probe_campaign_modes("both"), ["non-streaming", "streaming"])
+  assert_eq(provider_tool_probe_campaign_modes("streaming"), ["streaming"])
+  assert_eq(provider_tool_probe_campaign_modes("non-streaming"), ["non-streaming"])
+  assert_eq(provider_tool_probe_campaign_modes("nonsense"), [])
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_report_summarizes_planned_jobs(task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4"])
+  const route = routes[0] ?? {id: "", provider: "", model: ""}
+  const jobs = [
+    {
+      id: "ollama-gemma4-non-streaming",
+      route_id: route.id,
+      provider: route.provider,
+      model: route.model,
+      mode: "non-streaming",
+      status: "planned",
+      command: ["harn", "provider", "tool-probe"],
+      reason: "dry",
+    },
+  ]
+  const report = provider_tool_probe_campaign_report(routes, jobs, false, ".out")
+  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v1")
+  assert_eq(report.summary.planned, 1)
+  assert_eq(report.summary.pass, 0)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(task) {
+  const routes = provider_tool_probe_campaign_routes(["mock:model"])
+  const route = routes[0] ?? {id: "", provider: "", model: ""}
+  const jobs = [
+    {
+      id: "mock-model-non-streaming",
+      route_id: route.id,
+      provider: "mock",
+      model: "model",
+      mode: "non-streaming",
+      status: "fail",
+      command: ["harn"],
+      reason: "left | right",
+    },
+  ]
+  const report = provider_tool_probe_campaign_report(routes, jobs, true, ".out")
+  const markdown = provider_tool_probe_campaign_markdown(report)
+  assert(contains(markdown, "left \\| right"), "pipe escaped")
+}
