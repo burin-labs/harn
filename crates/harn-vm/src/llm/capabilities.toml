@@ -3021,6 +3021,16 @@ vision_supported = true
 prompt_caching = true
 requires_tool_result_adjacency = true
 allowed_tool_choice_modes = ["auto", "none"]
+# Every Kimi model pins these sampling fields to a single server-side value and
+# rejects any other with HTTP 400 ("invalid temperature: only 1 is allowed for
+# this model" / "invalid top_p: only 0.95 is allowed"); confirmed by live probe
+# on kimi-k2.5, k2.6, k2.7-code, and k2.7-code-highspeed (2026-07-14). Gating
+# them here strips the fields so the server default (the sole allowed value)
+# applies. The more specific k2.7-code rule sets these too; rules are
+# first-match, so this general rule is what covers k2.5/k2.6. The non-kimi
+# moonshot-v1-* models accept both and are correctly not matched here.
+temperature_supported = false
+top_p_supported = false
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true

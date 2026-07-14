@@ -1,0 +1,1 @@
+- Strip `temperature`/`top_p` for all Moonshot Kimi models, which 400 on any non-default value (fixes k2.5/k2.6).
