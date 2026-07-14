@@ -23,6 +23,7 @@ mod corpus_conformance;
 mod entity_decode;
 mod function_markup;
 mod heredoc_and_messages;
+mod implicit_call_paren_close;
 mod native_tools;
 mod reserved_token;
 mod string_escape_fidelity;
