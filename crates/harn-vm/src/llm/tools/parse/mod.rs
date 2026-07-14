@@ -7,6 +7,7 @@
 
 mod bare;
 mod fenced_json;
+mod harmony;
 mod native_json;
 mod streaming;
 mod syntax;
