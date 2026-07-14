@@ -866,6 +866,30 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn xai_grok_marks_stop_and_penalties_unsupported() {
+        reset();
+        // xAI returns HTTP 400 on `stop`, `frequency_penalty`, and
+        // `presence_penalty` for every Grok model (live probe 2026-07-14). The
+        // `grok-*` rule gates all three so no request carries an invalid field.
+        let caps = lookup("xai", "grok-4.5");
+        assert!(!caps.stop_supported);
+        assert!(!caps.frequency_penalty_supported);
+        assert!(!caps.presence_penalty_supported);
+        assert!(caps.native_tools);
+        assert!(caps.prompt_caching);
+        assert!(caps.vision_supported);
+
+        // The gate is the `grok-*` wildcard, so older Grok models inherit it.
+        let older = lookup("xai", "grok-4.3");
+        assert!(!older.stop_supported);
+        assert!(!older.frequency_penalty_supported);
+
+        // A route with no stop override keeps the default-true behavior.
+        let unrestricted = lookup("openrouter", "moonshotai/kimi-k2.6");
+        assert!(unrestricted.stop_supported);
+    }
+
+    #[test]
     fn openrouter_kimi27_code_records_tool_choice_and_sampling_limits() {
         reset();
         let caps = lookup("openrouter", "moonshotai/kimi-k2.7-code");

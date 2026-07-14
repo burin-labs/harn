@@ -1525,7 +1525,17 @@ id = "command-a-plus-05-2026"
 provider = "cohere"
 
 [aliases.grok]
-id = "grok-4.3"
+id = "grok-4.5"
+provider = "xai"
+tool_format = "native"
+
+[aliases."grok-4.5"]
+id = "grok-4.5"
+provider = "xai"
+tool_format = "native"
+
+[aliases."grok-4.5-latest"]
+id = "grok-4.5"
 provider = "xai"
 tool_format = "native"
 

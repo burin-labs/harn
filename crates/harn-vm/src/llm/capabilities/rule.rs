@@ -341,6 +341,10 @@ pub struct ProviderRule {
     pub frequency_penalty_supported: Option<bool>,
     #[serde(default)]
     pub presence_penalty_supported: Option<bool>,
+    /// Whether the route accepts OpenAI `stop` sequences. `false` strips the
+    /// field before dispatch (xAI's Grok models reject it with HTTP 400).
+    #[serde(default)]
+    pub stop_supported: Option<bool>,
     /// Accepted provider-native `tool_choice` modes. Empty means unrestricted
     /// or unknown. Use this for routes whose native tools work, but whose API
     /// rejects forced/specified tool choices.
@@ -567,6 +571,7 @@ impl ProviderRule {
             top_p_supported,
             frequency_penalty_supported,
             presence_penalty_supported,
+            stop_supported,
             allowed_tool_choice_modes,
             requires_tool_result_adjacency,
             supports_parallel_tool_calls,
@@ -700,6 +705,7 @@ impl ProviderRule {
             &mut self.presence_penalty_supported,
             presence_penalty_supported,
         );
+        fill_opt(&mut self.stop_supported, stop_supported);
         fill_opt(
             &mut self.allowed_tool_choice_modes,
             allowed_tool_choice_modes,
@@ -1033,6 +1039,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         top_p_supported: None,
         frequency_penalty_supported: None,
         presence_penalty_supported: None,
+        stop_supported: None,
         allowed_tool_choice_modes: None,
         requires_tool_result_adjacency: None,
         supports_parallel_tool_calls: None,
@@ -1223,6 +1230,10 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         presence_penalty_supported: rule
             .presence_penalty_supported
             .or(defaults.presence_penalty_supported)
+            .unwrap_or(true),
+        stop_supported: rule
+            .stop_supported
+            .or(defaults.stop_supported)
             .unwrap_or(true),
         allowed_tool_choice_modes: rule.allowed_tool_choice_modes.clone().unwrap_or_default(),
         requires_tool_result_adjacency: rule.requires_tool_result_adjacency.unwrap_or(false),

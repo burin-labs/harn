@@ -155,6 +155,8 @@ pub struct ProviderDefaults {
     pub frequency_penalty_supported: Option<bool>,
     #[serde(default)]
     pub presence_penalty_supported: Option<bool>,
+    #[serde(default)]
+    pub stop_supported: Option<bool>,
 }
 
 /// Copies `src` into `dst` when `src` is set (last-writer-wins overlay).
@@ -229,6 +231,7 @@ macro_rules! merge_provider_defaults {
             &mut $dst.presence_penalty_supported,
             &$src.presence_penalty_supported,
         );
+        $op(&mut $dst.stop_supported, &$src.stop_supported);
     }};
 }
 
@@ -268,6 +271,7 @@ impl ProviderDefaults {
             || self.top_p_supported.is_some()
             || self.frequency_penalty_supported.is_some()
             || self.presence_penalty_supported.is_some()
+            || self.stop_supported.is_some()
     }
 }
 
@@ -461,6 +465,7 @@ pub struct Capabilities {
     pub top_p_supported: bool,
     pub frequency_penalty_supported: bool,
     pub presence_penalty_supported: bool,
+    pub stop_supported: bool,
     pub allowed_tool_choice_modes: Vec<String>,
     pub requires_tool_result_adjacency: bool,
     pub supports_parallel_tool_calls: bool,
@@ -574,6 +579,7 @@ impl Default for Capabilities {
             top_p_supported: true,
             frequency_penalty_supported: true,
             presence_penalty_supported: true,
+            stop_supported: true,
             allowed_tool_choice_modes: Vec::new(),
             requires_tool_result_adjacency: false,
             supports_parallel_tool_calls: true,
