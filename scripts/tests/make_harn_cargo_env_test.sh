@@ -55,8 +55,8 @@ if ! grep -Fxq "CARGO_TARGET_DIR=$target_dir" "$record"; then
   cat "$record" >&2
   exit 1
 fi
-if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir/build" "$record"; then
-  echo "wrapper did not default CARGO_BUILD_BUILD_DIR under CARGO_TARGET_DIR" >&2
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
+  echo "wrapper did not reuse CARGO_TARGET_DIR for Cargo intermediates" >&2
   cat "$record" >&2
   exit 1
 fi
@@ -92,8 +92,8 @@ if ! grep -Fxq "CARGO_TARGET_DIR=$metadata_target_dir" "$record"; then
   cat "$record" >&2
   exit 1
 fi
-if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$metadata_target_dir/build" "$record"; then
-  echo "wrapper did not isolate build dir under metadata target_directory" >&2
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$metadata_target_dir" "$record"; then
+  echo "wrapper did not reuse metadata target_directory for Cargo intermediates" >&2
   cat "$record" >&2
   exit 1
 fi

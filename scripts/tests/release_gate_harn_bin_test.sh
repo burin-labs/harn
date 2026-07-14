@@ -13,6 +13,21 @@ cat > "$release_root/Cargo.toml" <<'EOF'
 version = "1.2.3"
 members = []
 EOF
+git -C "$release_root" init -q
+git -C "$release_root" config user.email test@example.com
+git -C "$release_root" config user.name test
+git -C "$release_root" add Cargo.toml
+git -C "$release_root" commit -qm init
+
+# Match publish-release.yml's standalone release-tools layout. release_gate.sh
+# intentionally requires its shared Cargo helper relative to its own location.
+release_tools="$tmp_root/release-tools"
+mkdir -p "$release_tools"
+cp "$repo_root/scripts/release_ship.sh" "$release_tools/release_ship.sh"
+cp "$repo_root/scripts/release_gate.sh" "$release_tools/release_gate.sh"
+cp "$repo_root/scripts/publish.sh" "$release_tools/publish.sh"
+cp -R "$repo_root/scripts/lib" "$release_tools/lib"
+release_gate="$release_tools/release_gate.sh"
 
 fake_harn_dir="$tmp_root/fake bin"
 mkdir -p "$fake_harn_dir"
@@ -31,6 +46,10 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/render_release_notes.harn" ]]; t
   printf 'fake release notes\n'
   exit 0
 fi
+if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]]; then
+  printf '%s\n' '{"ok":true,"receipt_reused":false,"reason":"no_receipt","proof_kind":"full_local","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lane_names":["rust-audit"],"lane_runners":["run_rust_audit"],"lanes":[],"errors":[]}'
+  exit 0
+fi
 echo "unexpected fake harn invocation: $*" >&2
 exit 2
 SH
@@ -42,7 +61,7 @@ HARN_RELEASE_ROOT="$release_root" \
   HARN_BIN="$fake_harn" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \
-  "$repo_root/scripts/release_gate.sh" notes --version v1.2.3 > "$tmp_root/notes.txt"
+  "$release_gate" notes --version v1.2.3 > "$tmp_root/notes.txt"
 
 expected="run scripts/render_release_notes.harn -- --version v1.2.3"
 actual=$(cat "$record")
@@ -54,14 +73,36 @@ fi
 default_tmp="${TMPDIR:-/tmp}"
 default_tmp="${default_tmp%/}"
 expected_target="$default_tmp/harn-release-gate-target-release-root"
-expected_build="$expected_target/build"
+expected_build="$expected_target"
 if ! grep -Fxq "CARGO_TARGET_DIR=$expected_target" "$env_record"; then
   echo "release_gate did not default CARGO_TARGET_DIR to a release-local path" >&2
   cat "$env_record" >&2
   exit 1
 fi
 if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$expected_build" "$env_record"; then
-  echo "release_gate did not default CARGO_BUILD_BUILD_DIR under the target dir" >&2
+  echo "release_gate did not reuse its target dir for Cargo intermediates" >&2
+  cat "$env_record" >&2
+  exit 1
+fi
+
+HARN_RELEASE_ROOT="$release_root" \
+  HARN_BIN="$fake_harn" \
+  FAKE_HARN_RECORD="$record" \
+  FAKE_HARN_ENV_RECORD="$env_record" \
+  "$release_gate" audit --validate-only > "$tmp_root/audit-standalone.txt"
+
+if ! grep -Fq "audit plan: no_receipt" "$tmp_root/audit-standalone.txt"; then
+  echo "standalone release_gate did not start audit plan validation" >&2
+  cat "$tmp_root/audit-standalone.txt" >&2
+  exit 1
+fi
+if [[ "$(grep -Fxc "CARGO_TARGET_DIR=$expected_target" "$env_record")" -ne 2 ]]; then
+  echo "standalone notes and audit did not share the exact default Cargo target dir" >&2
+  cat "$env_record" >&2
+  exit 1
+fi
+if [[ "$(grep -Fxc "CARGO_BUILD_BUILD_DIR=$expected_build" "$env_record")" -ne 2 ]]; then
+  echo "standalone notes and audit did not reuse the exact Cargo build dir" >&2
   cat "$env_record" >&2
   exit 1
 fi
@@ -76,7 +117,7 @@ HARN_RELEASE_ROOT="$release_root" \
   CARGO_BUILD_BUILD_DIR="$custom_build" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \
-  "$repo_root/scripts/release_gate.sh" notes --version v1.2.3 > "$tmp_root/notes-custom.txt"
+  "$release_gate" notes --version v1.2.3 > "$tmp_root/notes-custom.txt"
 
 if ! grep -Fxq "CARGO_TARGET_DIR=$custom_target" "$env_record"; then
   echo "release_gate did not preserve explicit CARGO_TARGET_DIR" >&2
@@ -310,7 +351,7 @@ run_audit() {
     HARN_BIN="$fake_audit_harn" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    "$repo_root/scripts/release_gate.sh" audit "$@" > "$tmp_root/audit-$label.txt" 2>&1 || {
+    "$release_gate" audit "$@" > "$tmp_root/audit-$label.txt" 2>&1 || {
     cat "$tmp_root/audit-$label.txt" >&2
     exit 1
   }
@@ -434,7 +475,7 @@ assert_residual_prerequisite_fails() {
     HARN_BIN="$fake_audit_harn" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    "$repo_root/scripts/release_gate.sh" audit --receipt "$receipt" \
+    "$release_gate" audit --receipt "$receipt" \
       > "$tmp_root/audit-$label.txt" 2>&1; then
     echo "residual audit passed without required prerequisite: $label" >&2
     exit 1
@@ -484,7 +525,7 @@ assert_residual_lane_failure() {
     HARN_BIN="$fake_audit_harn" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    "$repo_root/scripts/release_gate.sh" audit --receipt "$receipt" \
+    "$release_gate" audit --receipt "$receipt" \
       > "$tmp_root/audit-$label.txt" 2>&1; then
     echo "injected residual lane failure unexpectedly passed: $label" >&2
     exit 1
@@ -534,11 +575,11 @@ assert_arg_fails_before_work() {
 assert_arg_fails_before_work \
   removed-profile \
   "error: unknown audit arg: --profile" \
-  "$repo_root/scripts/release_gate.sh" audit --profile residual
+  "$release_gate" audit --profile residual
 assert_arg_fails_before_work \
   missing \
   "error: audit --receipt requires a path" \
-  "$repo_root/scripts/release_gate.sh" audit --receipt
+  "$release_gate" audit --receipt
 
 invalid_receipt="$tmp_root/receipt-invalid.json"
 printf '{}\n' > "$invalid_receipt"

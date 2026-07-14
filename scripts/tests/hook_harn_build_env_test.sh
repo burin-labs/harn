@@ -80,8 +80,8 @@ if ! grep -Fxq "CARGO_TARGET_DIR=$target_dir" "$record"; then
   cat "$record" >&2
   exit 1
 fi
-if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir/build" "$record"; then
-  echo "hook_ensure_harn did not default CARGO_BUILD_BUILD_DIR under CARGO_TARGET_DIR" >&2
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
+  echo "hook_ensure_harn did not reuse CARGO_TARGET_DIR for Cargo intermediates" >&2
   cat "$record" >&2
   exit 1
 fi
@@ -147,8 +147,8 @@ if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record"; then
   cat "$record" >&2
   exit 1
 fi
-if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir/build" "$record"; then
-  echo "check_no_rust_prompt_prose did not default CARGO_BUILD_BUILD_DIR under CARGO_TARGET_DIR" >&2
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
+  echo "check_no_rust_prompt_prose did not reuse CARGO_TARGET_DIR for Cargo intermediates" >&2
   cat "$record" >&2
   exit 1
 fi

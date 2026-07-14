@@ -173,18 +173,11 @@ hook_export_cargo_build_dir() {
   fi
 
   repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
-  if [ -f "$repo_root/scripts/lib/cargo_env.sh" ]; then
-    # shellcheck source=/dev/null
-    . "$repo_root/scripts/lib/cargo_env.sh"
-    if harn_export_cargo_build_dir_under_target "$CARGO_TARGET_DIR"; then
-      printf '=== Hook: using Cargo build dir %s ===\n' "$CARGO_BUILD_BUILD_DIR" >&2
-    fi
-    return 0
+  # shellcheck source=/dev/null
+  . "$repo_root/scripts/lib/cargo_env.sh"
+  if harn_export_cargo_build_dir_for_target "$CARGO_TARGET_DIR"; then
+    printf '=== Hook: using Cargo build dir %s ===\n' "$CARGO_BUILD_BUILD_DIR" >&2
   fi
-
-  CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR/build"
-  export CARGO_BUILD_BUILD_DIR
-  printf '=== Hook: using Cargo build dir %s ===\n' "$CARGO_BUILD_BUILD_DIR" >&2
 }
 
 hook_export_cargo_target_dir() {

@@ -13,6 +13,6 @@ if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
   export CARGO_TARGET_DIR
 fi
 
-harn_export_cargo_build_dir_under_target "$CARGO_TARGET_DIR" || true
+harn_export_cargo_build_dir_for_target "$CARGO_TARGET_DIR" || true
 
 exec cargo "$@"
