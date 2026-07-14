@@ -257,6 +257,22 @@ run_generated_audit() {
 }
 
 run_grammar_audit() {
+  # Grammar-parse regressions are a common, cheap-to-detect defect class, so run
+  # the tree-sitter parse sweep FIRST in this lane. It depends only on the grammar
+  # deps (npm ci) and the already-warm CLI, not on the spec-verification phases
+  # below, so hoisting it makes a parse failure surface in seconds after npm ci
+  # instead of after the metadata/spec checks.
+  if [[ ! -d tree-sitter-harn ]]; then
+    echo "error: tree-sitter-harn is required for the release grammar audit" >&2
+    return 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "error: npm (Node.js) is required for the release grammar audit" >&2
+    return 1
+  fi
+  time_phase "tree-sitter npm ci" bash -c "cd tree-sitter-harn && npm ci"
+  time_phase "verify_tree_sitter_parse" harn_cmd run scripts/verify_tree_sitter_parse.harn -- --strict
+  time_phase "tree-sitter npm test" bash -c "cd tree-sitter-harn && npm test"
   if [[ ! -f spec/HARN_SPEC.md ]]; then
     echo "error: missing spec/HARN_SPEC.md"
     return 1
@@ -270,17 +286,6 @@ run_grammar_audit() {
   # the canonical spec source directly (SPEC_PATH = spec/HARN_SPEC.md), not the
   # mirror, so it does not depend on the sync having run in this lane.
   time_phase "verify_language_spec" harn_cmd run scripts/verify_language_spec.harn
-  if [[ ! -d tree-sitter-harn ]]; then
-    echo "error: tree-sitter-harn is required for the release grammar audit" >&2
-    return 1
-  fi
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "error: npm (Node.js) is required for the release grammar audit" >&2
-    return 1
-  fi
-  time_phase "tree-sitter npm ci" bash -c "cd tree-sitter-harn && npm ci"
-  time_phase "verify_tree_sitter_parse" harn_cmd run scripts/verify_tree_sitter_parse.harn -- --strict
-  time_phase "tree-sitter npm test" bash -c "cd tree-sitter-harn && npm test"
 }
 
 run_security_audit() {
