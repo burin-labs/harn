@@ -277,7 +277,7 @@ pub(crate) fn parse_budget_envelope(
     Ok((!envelope.is_empty()).then_some(envelope))
 }
 
-fn estimate_json_tokens(value: &serde_json::Value, model: &str) -> i64 {
+pub(super) fn estimate_json_tokens(value: &serde_json::Value, model: &str) -> i64 {
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => 1,
         serde_json::Value::String(s) => estimate_text_tokens_for_model(s, model),
@@ -317,10 +317,13 @@ pub(crate) fn project_llm_call_context_breakdown(
     let mut other_message_tokens = 0;
     for message in &opts.messages {
         let tokens = estimate_json_tokens(message, &opts.model);
+        if super::context_breakdown::message_is_tool_result(message) {
+            tool_result_tokens += tokens;
+            continue;
+        }
         match message.get("role").and_then(serde_json::Value::as_str) {
             Some("user") => user_message_tokens += tokens,
             Some("assistant") => assistant_message_tokens += tokens,
-            Some("tool") => tool_result_tokens += tokens,
             _ => other_message_tokens += tokens,
         }
     }
@@ -1345,57 +1348,6 @@ mod tests {
             .models
             .insert("test/banded-pricing".to_string(), model);
         crate::llm_config::set_user_overrides(Some(overlay));
-    }
-
-    fn segment_tokens(breakdown: &LlmContextTokenBreakdown, id: &'static str) -> Option<i64> {
-        breakdown
-            .segments
-            .iter()
-            .find(|segment| segment.id == id)
-            .map(|segment| segment.tokens)
-    }
-
-    #[test]
-    fn context_breakdown_reports_request_segments_and_matches_projection() {
-        let mut opts = crate::llm::api::options::base_opts("openai");
-        opts.system = Some("System policy".to_string());
-        opts.messages = vec![
-            serde_json::json!({"role": "user", "content": "fix the bug"}),
-            serde_json::json!({"role": "assistant", "content": "I will inspect"}),
-            serde_json::json!({"role": "tool", "content": "test failed"}),
-            serde_json::json!({"role": "developer", "content": "keep it small"}),
-        ];
-        opts.native_tools = Some(vec![serde_json::json!({
-            "type": "function",
-            "function": {"name": "read_file", "parameters": {"type": "object"}}
-        })]);
-        opts.provider_tools = vec![serde_json::json!({
-            "type": "web_search_preview",
-            "search_context_size": "low"
-        })];
-        opts.max_tokens = 128;
-
-        let breakdown = project_llm_call_context_breakdown(&opts);
-        let (input_tokens, output_tokens) = project_llm_call_tokens(&opts);
-
-        assert_eq!(breakdown.schema, "harn.llm.context_token_breakdown.v1");
-        assert_eq!(breakdown.message_count, 4);
-        assert_eq!(breakdown.native_tool_count, 1);
-        assert_eq!(breakdown.provider_tool_count, 1);
-        assert_eq!(breakdown.input_tokens, input_tokens);
-        assert_eq!(breakdown.output_budget_tokens, output_tokens);
-        assert_eq!(
-            breakdown.context_tokens,
-            input_tokens.saturating_add(output_tokens)
-        );
-        assert!(segment_tokens(&breakdown, "system_prompt").unwrap_or(0) > 0);
-        assert!(segment_tokens(&breakdown, "user_messages").unwrap_or(0) > 0);
-        assert!(segment_tokens(&breakdown, "assistant_messages").unwrap_or(0) > 0);
-        assert!(segment_tokens(&breakdown, "tool_results").unwrap_or(0) > 0);
-        assert!(segment_tokens(&breakdown, "other_messages").unwrap_or(0) > 0);
-        assert!(segment_tokens(&breakdown, "native_tool_schemas").unwrap_or(0) > 0);
-        assert!(segment_tokens(&breakdown, "provider_tools").unwrap_or(0) > 0);
-        assert_eq!(segment_tokens(&breakdown, "output_budget"), Some(128));
     }
 
     #[test]

@@ -27,8 +27,11 @@ pub(crate) mod compass_router;
 pub(crate) mod computer_use;
 pub(crate) mod config_builtins;
 pub(crate) mod content;
+mod context_breakdown;
 mod conversation;
 pub(crate) mod cost;
+#[cfg(test)]
+mod cost_context_tests;
 pub(crate) mod cost_route;
 pub(crate) mod daemon;
 pub mod eval;
