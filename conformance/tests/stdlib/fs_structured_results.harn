@@ -1,6 +1,7 @@
 import {
   StructuredDataFormat,
   StructuredReadFailure,
+  TypedReadFailure,
   TypedReadResult,
   read_json,
   read_json_result,
@@ -91,6 +92,10 @@ fn read_manifest_required(format: StructuredDataFormat, path: string, schema: Sc
   return read_toml_typed(path, schema)
 }
 
+fn format_typed_read_failure(failure: TypedReadFailure) -> string {
+  return failure.format + ":" + failure.kind + ":" + to_string(failure.path != "")
+}
+
 pipeline default(task) {
   const root = path_join(harness.fs.temp_dir(), "harn-fs-structured-results-" + uuid_v7())
   harness.fs.mkdir(root)
@@ -153,6 +158,9 @@ pipeline default(task) {
   const invalid = unwrap_err(read_json_typed_result(invalid_path, schema_of(User)))
   __io_println(invalid.kind)
   __io_println(len(invalid.issues) > 0)
+  __io_println(format_typed_read_failure(invalid))
+  const typed_absent: TypedReadFailure = unwrap_err(absent)
+  __io_println(format_typed_read_failure(typed_absent))
   const required_invalid = try {
     read_json_typed(invalid_path, schema_of(User))
   }
@@ -186,8 +194,7 @@ pipeline default(task) {
     harness.fs.write_text(valid_path, case.valid)
     const manifest = unwrap(read_manifest_result(case.format, valid_path, manifest_schema, true))
     __io_println(
-      case.format
-        + ":"
+      "${case.format}:"
         + manifest.name
         + ":"
         + manifest.mode

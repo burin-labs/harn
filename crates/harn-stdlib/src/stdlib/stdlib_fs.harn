@@ -25,7 +25,9 @@ pub type SchemaValidationFailure = {
   issues: list<unknown>,
 }
 
-pub type TypedReadResult<T> = Result<T, StructuredReadFailure | SchemaValidationFailure>
+pub type TypedReadFailure = StructuredReadFailure | SchemaValidationFailure
+
+pub type TypedReadResult<T> = Result<T, TypedReadFailure>
 
 fn __fs_norm(path) -> string {
   return replace(path ?? "", "\\", "/")
