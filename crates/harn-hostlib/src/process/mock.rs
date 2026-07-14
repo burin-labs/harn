@@ -7,13 +7,14 @@
 //! `thread::sleep`, no `Instant::now` polling.
 
 use std::collections::VecDeque;
+use std::fs;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use super::handle::{
-    ExitStatus, ProcessCleanupReport, ProcessError, ProcessHandle, ProcessKiller, ProcessSpawner,
-    SpawnSpec, WaitOutcome,
+    ExitStatus, OutputCapture, ProcessCleanupReport, ProcessError, ProcessHandle, ProcessKiller,
+    ProcessSpawner, SpawnSpec, WaitOutcome,
 };
 
 /// Behaviour to script for a single mocked spawn.
@@ -168,7 +169,7 @@ impl ProcessSpawner for MockSpawner {
     fn spawn(&self, spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
         let (config, state) = {
             let mut inner = self.inner.lock().expect("MockSpawner mutex poisoned");
-            inner.captured.push(spec);
+            inner.captured.push(spec.clone());
             inner.queue.pop_front().expect(
                 "MockSpawner: spawn() called with no enqueued configuration. Call \
                  MockSpawner::enqueue(...) before each expected spawn.",
@@ -177,6 +178,17 @@ impl ProcessSpawner for MockSpawner {
 
         if let Some(err) = config.spawn_error {
             return Err(err);
+        }
+
+        if let OutputCapture::File {
+            stdout_path,
+            stderr_path,
+        } = &spec.output_capture
+        {
+            fs::write(stdout_path, &config.stdout)
+                .map_err(|error| ProcessError::Spawn(format!("write stdout capture: {error}")))?;
+            fs::write(stderr_path, &config.stderr)
+                .map_err(|error| ProcessError::Spawn(format!("write stderr capture: {error}")))?;
         }
 
         let killer: Arc<dyn ProcessKiller> = Arc::new(MockKiller {
@@ -189,6 +201,7 @@ impl ProcessSpawner for MockSpawner {
             pgid: config.pgid,
             killer,
             state,
+            file_output: matches!(spec.output_capture, OutputCapture::File { .. }),
             stdin_taken: false,
             stdout_taken: false,
             stderr_taken: false,
@@ -378,6 +391,7 @@ pub struct MockProcess {
     pgid: Option<u32>,
     killer: Arc<dyn ProcessKiller>,
     state: Arc<MockState>,
+    file_output: bool,
     stdin_taken: bool,
     stdout_taken: bool,
     stderr_taken: bool,
@@ -407,6 +421,9 @@ impl ProcessHandle for MockProcess {
     }
 
     fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>> {
+        if self.file_output {
+            return None;
+        }
         if self.stdout_taken {
             return None;
         }
@@ -418,6 +435,9 @@ impl ProcessHandle for MockProcess {
     }
 
     fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>> {
+        if self.file_output {
+            return None;
+        }
         if self.stderr_taken {
             return None;
         }

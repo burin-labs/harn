@@ -15,6 +15,17 @@ fn echo_argv(text) {
   return ["printf", "%s", text]
 }
 
+fn file_capture_shell_spec() {
+  if platform() == "windows" {
+    return {mode: "shell", shell_id: "cmd", command: "echo file-stdout && echo file-stderr 1>&2 && exit /b 7"}
+  }
+  return {
+    mode: "shell",
+    shell_id: "sh",
+    command: "printf 'file-stdout\\n'; printf 'file-stderr\\n' >&2; exit 7",
+  }
+}
+
 pipeline default() {
   const result = command_run(echo_argv("smoke"), {capture: {max_inline_bytes: 64}})
   if !result.success {
@@ -25,6 +36,19 @@ pipeline default() {
   }
   if !contains(result.stdout, "smoke") {
     throw "process smoke failed: stdout did not contain expected marker (got ${result.stdout})"
+  }
+  const file_result = command_run(file_capture_shell_spec(), {capture: {transport: "file", max_inline_bytes: 128}})
+  if file_result.success {
+    throw "process file-capture smoke failed: nonzero shell command unexpectedly succeeded"
+  }
+  if file_result.exit_code != 7 {
+    throw "process file-capture smoke failed: expected exit 7, got ${file_result.exit_code}"
+  }
+  if !contains(file_result.stdout, "file-stdout") {
+    throw "process file-capture smoke failed: stdout missing marker (got ${file_result.stdout})"
+  }
+  if !contains(file_result.stderr, "file-stderr") {
+    throw "process file-capture smoke failed: stderr missing marker (got ${file_result.stderr})"
   }
   __io_println("process ok on " + platform())
 }

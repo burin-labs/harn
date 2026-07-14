@@ -11,9 +11,9 @@ pub mod mock;
 pub mod real;
 
 pub use handle::{
-    current_spawner, install_spawner, spawn_process, EnvMode, ExitStatus, ProcessCleanupChild,
-    ProcessCleanupReport, ProcessError, ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec,
-    SpawnerGuard, WaitOutcome,
+    current_spawner, install_spawner, spawn_process, EnvMode, ExitStatus, OutputCapture,
+    ProcessCleanupChild, ProcessCleanupReport, ProcessError, ProcessHandle, ProcessKiller,
+    ProcessSpawner, SpawnSpec, SpawnerGuard, WaitOutcome,
 };
 pub use mock::{MockHandleController, MockProcess, MockProcessConfig, MockSpawner};
 pub use real::default_spawner;
