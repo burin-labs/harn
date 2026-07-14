@@ -435,13 +435,10 @@ async fn vm_call_llm_api_with_body_inner(
     };
 
     if !is_ollama {
-        if let Some(ref overrides) = opts.provider_overrides {
-            if let Some(obj) = overrides.as_object() {
-                for (k, v) in obj {
-                    body[k] = v.clone();
-                }
-            }
-        }
+        crate::llm::provider::apply_provider_wire_overrides(
+            &mut body,
+            opts.provider_overrides.as_ref(),
+        );
     }
     if is_anthropic_style {
         crate::llm::providers::anthropic::strip_unsupported_sampling_params(

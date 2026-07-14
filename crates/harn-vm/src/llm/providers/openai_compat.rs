@@ -326,11 +326,7 @@ impl OpenAiCompatibleProvider {
         }
         if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
-                body["tools"] = serde_json::Value::Array(provider_request_tools(
-                    &opts.provider,
-                    &opts.model,
-                    tools,
-                ));
+                body["tools"] = serde_json::Value::Array(provider_request_tools(opts, tools));
             }
         }
         if has_native_tools && !caps.supports_parallel_tool_calls {
@@ -1129,24 +1125,23 @@ fn tool_choice_mode(tool_choice: &serde_json::Value) -> Option<String> {
 }
 
 fn provider_request_tools(
-    provider: &str,
-    model: &str,
+    opts: &LlmRequestPayload,
     tools: &[serde_json::Value],
 ) -> Vec<serde_json::Value> {
-    let caps = crate::llm::capabilities::lookup(provider, model);
-    let has_openai_tool_search = tools
-        .iter()
-        .any(|tool| tool.get("type").and_then(serde_json::Value::as_str) == Some("tool_search"));
-    let supports_openai_tool_search_extensions = has_openai_tool_search
-        && caps.defer_loading
-        && caps.tool_search.iter().any(|variant| variant == "hosted");
+    let supports_openai_tool_search_extensions =
+        crate::llm::provider::openai_tool_search_wire_extensions_enabled(
+            &opts.provider,
+            &opts.model,
+            tools,
+            opts.provider_overrides.as_ref(),
+        );
 
     tools
         .iter()
         .map(|tool| {
             sanitize_openai_tool_for_request(
-                provider,
-                model,
+                &opts.provider,
+                &opts.model,
                 tool,
                 supports_openai_tool_search_extensions,
             )

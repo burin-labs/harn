@@ -64,8 +64,10 @@ pipeline test(task) {
       )
       const calls = llm_mock_calls()
       const meta = calls[0].tools[0]
+      assert(calls[0].api_mode == "responses", "forced native search selects the Responses API")
       assert(meta.type == "tool_search", "escape hatch emits OpenAI meta-tool")
       assert(meta.mode == "hosted", "defaults to hosted mode")
+      assert(len(calls[0].tools) == 1, "native search sends the hosted search meta-tool")
       log("tool_search_provider_overrides tests passed")
     },
   )

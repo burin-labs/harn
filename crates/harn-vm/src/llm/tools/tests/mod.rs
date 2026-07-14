@@ -169,6 +169,7 @@ pub(super) fn defer_loading_registry() -> VmValue {
         ("description", vm_str("Deploy the app")),
         ("parameters", VmValue::dict(deferred_params)),
         ("defer_loading", vm_bool(true)),
+        ("namespace", vm_str("ops")),
     ]);
 
     vm_list(vec![eager, deferred])

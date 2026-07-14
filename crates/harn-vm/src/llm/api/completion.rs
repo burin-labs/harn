@@ -102,13 +102,10 @@ async fn vm_call_completion_openai_style(
     if let Some(seed) = opts.seed {
         body["seed"] = serde_json::json!(seed);
     }
-    if let Some(overrides) = &opts.provider_overrides {
-        if let Some(obj) = overrides.as_object() {
-            for (k, v) in obj {
-                body[k] = v.clone();
-            }
-        }
-    }
+    crate::llm::provider::apply_provider_wire_overrides(
+        &mut body,
+        opts.provider_overrides.as_ref(),
+    );
     if crate::llm::provider::provider_uses_anthropic_messages(&opts.provider, &opts.model) {
         crate::llm::providers::anthropic::strip_unsupported_sampling_params(
             &mut body,

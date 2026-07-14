@@ -353,6 +353,7 @@ fn apply_non_runtime_ollama_overrides(body: &mut Value, overrides: Option<&Value
     for (key, value) in obj {
         match key.as_str() {
             "num_ctx" | "keep_alive" => {}
+            key if key == crate::llm::provider::FORCE_NATIVE_TOOL_SEARCH_OVERRIDE => {}
             "options" => {
                 if let Some(options) = value.as_object() {
                     let body_options = ensure_options_object(body);

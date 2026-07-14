@@ -564,6 +564,12 @@ pub(crate) fn extract_llm_options(
                             cfg.variant.as_short(),
                             "hosted",
                         );
+                        // OpenAI tool search is a Responses-only tool. The mock
+                        // route follows the same projection contract so Harn
+                        // conformance can verify endpoint selection offline.
+                        if provider == "openai" || provider == "mock" {
+                            api_mode = LlmApiMode::Responses;
+                        }
                     }
                 }
             }
