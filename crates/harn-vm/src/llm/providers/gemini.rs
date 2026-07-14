@@ -1,8 +1,8 @@
 //! Google Gemini provider.
 
 use crate::llm::api::{
-    DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry, ReasoningEffort,
-    ThinkingConfig,
+    DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry,
+    RawProviderToolCall, ReasoningEffort, ThinkingConfig,
 };
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
@@ -418,6 +418,7 @@ pub(crate) fn parse_response(
     let mut thinking = String::new();
     let mut blocks = Vec::new();
     let mut tool_calls = Vec::new();
+    let mut raw_tool_calls = Vec::new();
     if let Some(parts) = json["candidates"][0]["content"]["parts"].as_array() {
         for (idx, part) in parts.iter().enumerate() {
             let thought_signature = part
@@ -447,6 +448,11 @@ pub(crate) fn parse_response(
                 else {
                     continue;
                 };
+                raw_tool_calls.push(RawProviderToolCall::new(part.clone()).map_err(|message| {
+                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                        "gemini raw tool call parse error: {message}"
+                    ))))
+                })?);
                 let args = call
                     .get("args")
                     .cloned()
@@ -497,6 +503,7 @@ pub(crate) fn parse_response(
     Ok(LlmResult {
         served_fast: false,
         text,
+        raw_tool_calls,
         tool_calls,
         input_tokens,
         output_tokens,
@@ -575,6 +582,45 @@ mod tests {
             reminder_lifecycle: Vec::new(),
             cli_llm_mock_scope: None,
         }
+    }
+
+    #[test]
+    fn parse_response_preserves_raw_function_call_part() {
+        let payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        let response = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "thoughtSignature": "sig-123",
+                        "functionCall": {
+                            "name": "search",
+                            "args": {"query": "rust"}
+                        }
+                    }]
+                },
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 5
+            }
+        });
+
+        let result = parse_response(&response, &payload).expect("gemini response parses");
+
+        assert_eq!(result.tool_calls[0]["name"], "search");
+        assert_eq!(result.tool_calls[0]["arguments"]["query"], "rust");
+        assert_eq!(result.tool_calls[0]["thought_signature"], "sig-123");
+        assert_eq!(result.raw_tool_calls[0]["functionCall"]["name"], "search");
+        assert_eq!(
+            result.raw_tool_calls[0]["functionCall"]["args"]["query"],
+            "rust"
+        );
+        assert_eq!(result.raw_tool_calls[0]["thoughtSignature"], "sig-123");
+        assert!(
+            result.raw_tool_calls[0].get("arguments").is_none(),
+            "raw Gemini receipt must keep the provider envelope, not Harn's normalized shape"
+        );
     }
 
     #[test]

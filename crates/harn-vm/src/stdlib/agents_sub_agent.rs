@@ -1509,6 +1509,7 @@ mod tests {
         push_llm_mock(LlmMock {
             text: "child result".to_string(),
             tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
             match_pattern: None,
             consume_on_match: true,
             input_tokens: None,
@@ -1525,7 +1526,6 @@ mod tests {
             error: None,
             stream_chunks: Vec::new(),
         });
-
         let spec = SubAgentRunSpec {
             name: "research-worker".to_string(),
             task: "inspect the repo".to_string(),

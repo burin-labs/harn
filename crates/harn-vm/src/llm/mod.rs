@@ -945,6 +945,7 @@ mod tests {
         mock::push_llm_mock(mock::LlmMock {
             text: "Analyzing the task carefully".to_string(),
             tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
             match_pattern: None,
             consume_on_match: false,
             input_tokens: None,
@@ -964,6 +965,7 @@ mod tests {
         mock::push_llm_mock(mock::LlmMock {
             text: "{\"name\":\"Ada\"}".to_string(),
             tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
             match_pattern: None,
             consume_on_match: false,
             input_tokens: None,

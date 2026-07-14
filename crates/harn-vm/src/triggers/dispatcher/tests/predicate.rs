@@ -38,6 +38,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
             push_llm_mock(LlmMock {
                 text: "yes".to_string(),
                 tool_calls: Vec::new(),
+                raw_tool_calls: Vec::new(),
                 match_pattern: None,
                 consume_on_match: false,
                 input_tokens: Some(3_000),
@@ -124,6 +125,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
             push_llm_mock(LlmMock {
                 text: "yes".to_string(),
                 tool_calls: Vec::new(),
+                raw_tool_calls: Vec::new(),
                 match_pattern: None,
                 consume_on_match: false,
                 input_tokens: Some(3_000),
@@ -378,6 +380,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
             push_llm_mock(LlmMock {
                 text: "yes".to_string(),
                 tool_calls: Vec::new(),
+                raw_tool_calls: Vec::new(),
                 match_pattern: None,
                 consume_on_match: false,
                 input_tokens: Some(10),

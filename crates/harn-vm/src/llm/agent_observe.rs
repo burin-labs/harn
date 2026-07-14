@@ -47,7 +47,9 @@
 //!   (empty for text-format local models); `parsed_tool_calls` is the
 //!   merged view (native when present, otherwise the calls parsed out of
 //!   the inline tagged `<tool_call>` blocks in `text`) so the record is
-//!   self-describing for text-format runs. Also carries diagnostics
+//!   self-describing for text-format runs. `raw_tool_calls` is present only
+//!   when the provider supplied native object receipts before normalization;
+//!   dispatch continues to use `tool_calls`. Also carries diagnostics
 //!   `{cost_usd, cache_* (cache_read_tokens, cache_write_tokens,
 //!   cache_creation_input_tokens, cache_hit_ratio, cache_savings_usd,
 //!   cache_hit), thinking, thinking_summary, provider_telemetry,
@@ -75,6 +77,8 @@ use super::api::{
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
 use super::agent_tools::next_call_id;
+
+mod raw_tool_receipts;
 
 thread_local! {
     /// Last-emitted hash for the current transcript's system prompt and
@@ -1677,21 +1681,6 @@ fn should_emit_context_token_breakdown_checkpoint(opts: &super::api::LlmCallOpti
 /// not dropped). By the time the result reaches this function `text` has
 /// already been canonicalized from any `[[CALL]]` wire form back to
 /// `<tool_call>`, so the tagged parser sees the calls.
-///
-/// Observability-only: this is read off the existing `result` + `tools`
-/// and does not flow back into the request-construction / history path, so
-/// the model's next-turn payload is byte-identical with or without this
-/// call.
-fn merged_tool_calls_for_observability(
-    result: &super::api::LlmResult,
-    tools: Option<&crate::value::VmValue>,
-) -> Vec<serde_json::Value> {
-    if !result.tool_calls.is_empty() {
-        return result.tool_calls.clone();
-    }
-    crate::llm::tools::parse_text_tool_calls_with_tools(&result.text, tools).calls
-}
-
 pub(super) fn dump_llm_response(
     iteration: usize,
     call_id: &str,
@@ -1706,8 +1695,8 @@ pub(super) fn dump_llm_response(
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
     let telemetry = serde_json::to_value(&result.telemetry).unwrap_or(serde_json::Value::Null);
-    let parsed_tool_calls = merged_tool_calls_for_observability(result, tools);
-    append_llm_transcript_entry(&serde_json::json!({
+    let parsed_tool_calls = raw_tool_receipts::merged_tool_calls_for_observability(result, tools);
+    let mut event = serde_json::json!({
         "type": "provider_call_response",
         "iteration": iteration,
         "call_id": call_id,
@@ -1767,7 +1756,9 @@ pub(super) fn dump_llm_response(
         // decode breakdown, etc.). Empty for providers that report nothing.
         "provider_telemetry": telemetry,
         "structural_experiment": structural_experiment,
-    }));
+    });
+    raw_tool_receipts::project_onto_event(&mut event, result);
+    append_llm_transcript_entry(&event);
 }
 
 /// Emit the self-contained `resolved_dispatch` transcript record for one LLM
@@ -3151,6 +3142,7 @@ mod retry_tests {
             served_fast: false,
             text: text.to_string(),
             tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
             input_tokens: 12,
             output_tokens: 5,
             cache_read_tokens: 0,
@@ -4412,6 +4404,7 @@ mod empty_completion_retry_tests {
         crate::llm::api::LlmResult {
             text: String::new(),
             tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
             input_tokens: 0,
             output_tokens: 0,
             cache_read_tokens: 0,

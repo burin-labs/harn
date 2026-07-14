@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
-use super::api::{LlmResult, ProviderTelemetry};
+use super::api::{LlmResult, ProviderTelemetry, RawProviderToolCall};
 use crate::orchestration::ToolCallRecord;
 use crate::value::{ErrorCategory, VmError, VmValue};
 
@@ -187,6 +187,7 @@ fn default_mock_error_message(
 pub struct LlmMock {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
+    pub raw_tool_calls: Vec<RawProviderToolCall>,
     pub match_pattern: Option<String>, // None = FIFO (consumed), Some = glob (reusable)
     pub consume_on_match: bool,
     pub input_tokens: Option<i64>,
@@ -475,6 +476,11 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
     LlmResult {
         served_fast: false,
         text: mock.text.clone(),
+        raw_tool_calls: if mock.raw_tool_calls.is_empty() {
+            Vec::new()
+        } else {
+            mock.raw_tool_calls.clone()
+        },
         tool_calls,
         input_tokens: mock.input_tokens.unwrap_or(last_msg_len as i64),
         output_tokens: mock.output_tokens.unwrap_or(30),
@@ -700,6 +706,7 @@ pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, res
     state.recordings.push(LlmMock {
         text: result.text.clone(),
         tool_calls: result.tool_calls.clone(),
+        raw_tool_calls: result.raw_tool_calls.clone(),
         match_pattern: None,
         consume_on_match: false,
         input_tokens: Some(result.input_tokens),
@@ -856,6 +863,7 @@ pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
     let json = serde_json::json!({
         "text": result.text,
         "tool_calls": result.tool_calls,
+        "raw_tool_calls": result.raw_tool_calls,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
         "cache_read_tokens": result.cache_read_tokens,
@@ -887,6 +895,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
         served_fast: false,
         text: json["text"].as_str().unwrap_or("").to_string(),
         tool_calls: json["tool_calls"].as_array().cloned().unwrap_or_default(),
+        raw_tool_calls: RawProviderToolCall::array_from_value(&json["raw_tool_calls"]).ok()?,
         input_tokens: json["input_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["output_tokens"].as_i64().unwrap_or(0),
         cache_read_tokens: json["cache_read_tokens"].as_i64().unwrap_or(0),
@@ -1028,6 +1037,7 @@ pub(crate) fn mock_llm_response(
                         "name": tool_name,
                 "arguments": mock_args
                 })],
+                raw_tool_calls: Vec::new(),
                 input_tokens: prompt_text.len() as i64,
                 output_tokens: 20,
                 cache_read_tokens: 0,
@@ -1080,6 +1090,7 @@ pub(crate) fn mock_llm_response(
         served_fast: false,
         text: response.clone(),
         tool_calls: vec![],
+        raw_tool_calls: Vec::new(),
         input_tokens: prompt_text.len() as i64,
         output_tokens: 30,
         cache_read_tokens: 0,
@@ -1118,6 +1129,7 @@ mod tests {
         LlmMock {
             text: text.to_string(),
             tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
             match_pattern: None,
             consume_on_match: false,
             input_tokens: None,

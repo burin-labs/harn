@@ -80,6 +80,7 @@ pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
         served_fast: false,
         text: String::new(),
         tool_calls: Vec::new(),
+        raw_tool_calls: Vec::new(),
         input_tokens: 0,
         output_tokens: 0,
         cache_read_tokens: 0,

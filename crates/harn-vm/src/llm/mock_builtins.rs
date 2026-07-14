@@ -197,6 +197,7 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     mock::push_llm_mock(mock::LlmMock {
         text,
         tool_calls,
+        raw_tool_calls: Vec::new(),
         match_pattern,
         consume_on_match,
         input_tokens,

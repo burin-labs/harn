@@ -409,6 +409,7 @@ fn parse_raw_generate_json(
         blocks: blocks_from_text_and_thinking(&text, &thinking),
         text,
         tool_calls: Vec::new(),
+        raw_tool_calls: Vec::new(),
         input_tokens,
         output_tokens,
         // Native Ollama `/api/chat` done frames carry no cache field; 0 here
@@ -513,6 +514,7 @@ async fn parse_raw_generate_stream(
         blocks: blocks_from_text_and_thinking(&text, &thinking),
         text,
         tool_calls: Vec::new(),
+        raw_tool_calls: Vec::new(),
         input_tokens,
         output_tokens,
         // Native Ollama `/api/generate` streaming reports no cache field;

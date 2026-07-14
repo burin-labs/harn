@@ -146,6 +146,7 @@ async fn vm_call_completion_openai_style(
             .unwrap_or("")
             .to_string(),
         tool_calls: Vec::new(),
+        raw_tool_calls: Vec::new(),
         input_tokens: json["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0),
         cache_read_tokens: extract_cache_read_tokens(&json["usage"]),
@@ -248,6 +249,7 @@ async fn vm_call_completion_ollama(
         served_fast: false,
         text: json["response"].as_str().unwrap_or("").to_string(),
         tool_calls: Vec::new(),
+        raw_tool_calls: Vec::new(),
         input_tokens: json["prompt_eval_count"].as_i64().unwrap_or(0),
         output_tokens: json["eval_count"].as_i64().unwrap_or(0),
         // Native Ollama generate responses carry no cache field; 0 is

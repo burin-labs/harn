@@ -5,7 +5,7 @@
 use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{append_paragraph, normalize_openai_message_text};
-use super::result::LlmResult;
+use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::ProviderTelemetry;
 
 fn render_reasoning_summary_value(value: &serde_json::Value) -> String {
@@ -457,6 +457,7 @@ pub(crate) fn parse_openai_responses_response(
     let mut text = String::new();
     let mut thinking_summary = String::new();
     let mut tool_calls = Vec::new();
+    let mut raw_tool_calls = Vec::new();
     let mut blocks = Vec::new();
 
     for item in output {
@@ -487,6 +488,9 @@ pub(crate) fn parse_openai_responses_response(
                 }
             }
             "function_call" => {
+                raw_tool_calls.push(RawProviderToolCall::new(item.clone()).map_err(|error| {
+                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error)))
+                })?);
                 let provider_id = item
                     .get("id")
                     .and_then(|value| value.as_str())
@@ -622,6 +626,7 @@ pub(crate) fn parse_openai_responses_response(
     Ok(LlmResult {
         text,
         tool_calls,
+        raw_tool_calls,
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -790,6 +795,7 @@ pub(crate) fn parse_llm_response(
         let mut text = String::new();
         let mut thinking_text = String::new();
         let mut tool_calls = Vec::new();
+        let mut raw_tool_calls = Vec::new();
         let mut blocks = Vec::new();
 
         let content = json
@@ -815,6 +821,9 @@ pub(crate) fn parse_llm_response(
                     }
                 }
                 Some("tool_use") => {
+                    raw_tool_calls.push(RawProviderToolCall::new(block.clone()).map_err(
+                        |error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))),
+                    )?);
                     let raw_name = block["name"].as_str().unwrap_or("").to_string();
                     let id = block["id"].as_str().unwrap_or("").to_string();
                     let input = block["input"].clone();
@@ -892,6 +901,7 @@ pub(crate) fn parse_llm_response(
         Ok(LlmResult {
             text,
             tool_calls,
+            raw_tool_calls,
             input_tokens,
             output_tokens,
             cache_read_tokens,
@@ -963,6 +973,8 @@ pub(crate) fn parse_llm_response(
         }
 
         let mut tool_calls = Vec::new();
+        let raw_tool_calls = RawProviderToolCall::array_from_value(&message["tool_calls"])
+            .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
         if let Some(calls) = message["tool_calls"].as_array() {
             for (call_index, call) in calls.iter().enumerate() {
                 // OpenAI Responses-API tool_search (harn#71) emits
@@ -1138,6 +1150,7 @@ pub(crate) fn parse_llm_response(
         Ok(LlmResult {
             text,
             tool_calls,
+            raw_tool_calls,
             input_tokens,
             output_tokens,
             cache_read_tokens,
@@ -1274,6 +1287,9 @@ pub(crate) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
     }
     0
 }
+
+#[cfg(test)]
+mod raw_tool_receipts_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2189,77 +2205,6 @@ mod tests {
         assert_eq!(result.tool_calls.len(), 2);
         assert_eq!(result.tool_calls[0]["id"], "call_0_1");
         assert_eq!(result.tool_calls[1]["id"], "call_0_2");
-    }
-
-    #[test]
-    fn openai_parser_normalizes_harmony_wrapper_tool_call() {
-        let response = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "id": "chatcmpl-tool-1",
-                            "type": "function",
-                            "function": {
-                                "name": "tool",
-                                "arguments": "{\"name\":\"look\",\"args\":{\"intent\":\"read\",\"file\":\"src/lib.rs\"}}"
-                            }
-                        }
-                    ]
-                },
-                "finish_reason": "tool_calls"
-            }],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 20}
-        });
-
-        let result = parse_llm_response(
-            &response,
-            "fireworks",
-            "accounts/fireworks/models/gpt-oss-120b",
-            false,
-            false,
-        )
-        .expect("parser succeeds");
-        assert_eq!(result.tool_calls.len(), 1);
-        assert_eq!(result.tool_calls[0]["name"], "look");
-        assert_eq!(result.tool_calls[0]["arguments"]["intent"], "read");
-        assert_eq!(result.tool_calls[0]["arguments"]["file"], "src/lib.rs");
-    }
-
-    #[test]
-    fn openai_parser_strips_harmony_channel_suffix_from_tool_name() {
-        let response = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "id": "chatcmpl-tool-1",
-                            "type": "function",
-                            "function": {
-                                "name": "run<|channel|>commentary",
-                                "arguments": "{\"command\":\"cargo test\"}"
-                            }
-                        }
-                    ]
-                },
-                "finish_reason": "tool_calls"
-            }],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 20}
-        });
-
-        let result = parse_llm_response(
-            &response,
-            "fireworks",
-            "accounts/fireworks/models/gpt-oss-120b",
-            false,
-            false,
-        )
-        .expect("parser succeeds");
-        assert_eq!(result.tool_calls.len(), 1);
-        assert_eq!(result.tool_calls[0]["name"], "run");
-        assert_eq!(result.tool_calls[0]["arguments"]["command"], "cargo test");
     }
 
     #[test]
