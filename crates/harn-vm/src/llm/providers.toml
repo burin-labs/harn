@@ -1552,6 +1552,12 @@ provider = "xai"
 id = "grok-build-0.1"
 provider = "xai"
 
+# The provider-published logical id resolves through the same alias path as the
+# short selectors. Tool format remains capability-owned.
+[aliases."grok-code-fast-1"]
+id = "grok-build-0.1"
+provider = "xai"
+
 # Devstral (Mistral's agentic-coding tune).
 # No `tool_format` pin: these aliases inherit the `devstral-small-2*` capability
 # row's `json` (fenced-JSON) text-channel default. devstral has no

@@ -103,3 +103,25 @@ fn guard_tool_format(provider: &str, model: &str, requested: &str, alias: Option
     }
     decision.effective
 }
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_model_info;
+
+    #[test]
+    fn grok_code_aliases_resolve_through_live_resolver() {
+        for selector in ["grok-code", "grok-code-fast", "grok-code-fast-1"] {
+            let model = resolve_model_info(selector);
+            assert_eq!(
+                (
+                    model.id.as_str(),
+                    model.provider.as_str(),
+                    model.alias.as_deref(),
+                    model.tool_format.as_str(),
+                ),
+                ("grok-build-0.1", "xai", Some(selector), "native"),
+                "selector: {selector}",
+            );
+        }
+    }
+}
