@@ -739,3 +739,9 @@ path = "src/triggers/webhook_intake.rs"
 statics = ["CACHED_INBOX"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/vm/execution.rs"
+statics = ["SCOPE_INTERRUPT_ASYNC_DISPATCHES"]
+category = "thread_private"
+plan = "thread_private_test"

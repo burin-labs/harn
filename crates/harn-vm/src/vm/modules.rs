@@ -138,6 +138,7 @@ impl Vm {
         &mut self,
         callable: &crate::value::VmCallable,
     ) -> Result<Arc<crate::value::VmClosure>, VmError> {
+        self.ensure_execution_available()?;
         match callable {
             crate::value::VmCallable::Eager(closure) => Ok(Arc::clone(closure)),
             crate::value::VmCallable::Lazy(lazy) => {
@@ -698,6 +699,7 @@ impl Vm {
         &mut self,
         path: &Path,
     ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
+        self.ensure_execution_available()?;
         let path_str = path.to_string_lossy().into_owned();
         self.execute_import(&path_str, None).await?;
 
@@ -750,6 +752,7 @@ impl Vm {
         source_key: impl Into<PathBuf>,
         source: &str,
     ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
+        self.ensure_execution_available()?;
         let synthetic = source_key.into();
         let loaded = self
             .load_module_from_source(synthetic.clone(), source)
@@ -781,6 +784,7 @@ impl Vm {
         &mut self,
         import_path: &str,
     ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
+        self.ensure_execution_available()?;
         self.execute_import(import_path, None).await?;
 
         if let Some(module) = import_path

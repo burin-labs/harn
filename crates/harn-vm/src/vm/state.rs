@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -31,11 +31,16 @@ impl ScopeSpan {
 
 /// Cancellation-safe host deadline state. The guard owns the shared state so
 /// dropping an in-flight `execute_with_timeout` future restores the previous
-/// deadline even though that future still holds `&mut Vm`.
+/// deadline and poisons the abandoned VM even though the future still holds
+/// `&mut Vm`.
 pub(crate) struct ExecutionDeadlineState {
     origin: Instant,
     /// Nanoseconds from `origin`, plus one so zero remains the inactive value.
     deadline_offset: AtomicU64,
+    /// Set when the host drops a polled execution future. Arbitrary async
+    /// cancellation cannot unwind interpreter state, so subsequent execution
+    /// entries fail loudly instead of resuming a partial frame.
+    abandoned: AtomicBool,
 }
 
 impl ExecutionDeadlineState {
@@ -43,12 +48,26 @@ impl ExecutionDeadlineState {
         Arc::new(Self {
             origin,
             deadline_offset: AtomicU64::new(Self::encode(origin, deadline)),
+            abandoned: AtomicBool::new(false),
         })
     }
 
     #[inline]
     pub(crate) fn is_active(&self) -> bool {
         self.deadline_offset.load(Ordering::Acquire) != 0
+    }
+
+    #[inline]
+    pub(crate) fn is_abandoned(&self) -> bool {
+        self.abandoned.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn fork(&self) -> Arc<Self> {
+        let state = Self::new(self.origin, self.current());
+        state
+            .abandoned
+            .store(self.is_abandoned(), Ordering::Release);
+        state
     }
 
     pub(crate) fn current(&self) -> Option<Instant> {
@@ -69,6 +88,7 @@ impl ExecutionDeadlineState {
         ExecutionDeadlineGuard {
             state: Arc::clone(self),
             previous,
+            completed: false,
         }
     }
 
@@ -85,6 +105,15 @@ impl ExecutionDeadlineState {
 pub(crate) struct ExecutionDeadlineGuard {
     state: Arc<ExecutionDeadlineState>,
     previous: u64,
+    completed: bool,
+}
+
+impl ExecutionDeadlineGuard {
+    /// Mark an awaited execution as terminal before restoring its prior host
+    /// deadline. Dropping without this acknowledgement poisons the VM.
+    pub(crate) fn complete(mut self) {
+        self.completed = true;
+    }
 }
 
 impl Drop for ExecutionDeadlineGuard {
@@ -92,6 +121,10 @@ impl Drop for ExecutionDeadlineGuard {
         self.state
             .deadline_offset
             .store(self.previous, Ordering::Release);
+        if !self.completed {
+            self.state.abandoned.store(true, Ordering::Release);
+            crate::orchestration::clear_pipeline_on_finish();
+        }
     }
 }
 
@@ -525,6 +558,13 @@ impl VmBaseline {
 }
 
 impl Vm {
+    pub(crate) fn ensure_execution_available(&self) -> Result<(), VmError> {
+        if self.execution_deadline.is_abandoned() {
+            return Err(VmError::AbandonedExecution);
+        }
+        Ok(())
+    }
+
     pub(crate) fn fresh_local_slots(chunk: &Chunk) -> Vec<LocalSlot> {
         chunk
             .local_slots
@@ -818,7 +858,8 @@ impl Vm {
     }
 
     /// Initialize execution (push the initial frame).
-    pub fn start(&mut self, chunk: &Chunk) {
+    pub fn start(&mut self, chunk: &Chunk) -> Result<(), VmError> {
+        self.ensure_execution_available()?;
         // The top-level pipeline frame captures env at start so
         // restartFrame on the outermost frame rewinds to the
         // pre-pipeline state — basically "restart session" in
@@ -857,6 +898,7 @@ impl Vm {
             local_scope_base: self.env.scope_depth().saturating_sub(1),
             local_scope_depth: 0,
         });
+        Ok(())
     }
 
     /// Create a child VM that shares builtins and env but has fresh execution state.
@@ -888,9 +930,7 @@ impl Vm {
             runtime_context_counter: self.runtime_context_counter,
             runtime_context: self.runtime_context.clone(),
             deadlines: self.deadlines.clone(),
-            execution_deadline: super::execution::new_execution_deadline_state(
-                self.execution_deadline.current(),
-            ),
+            execution_deadline: self.execution_deadline.fork(),
             breakpoints: BTreeMap::new(),
             function_breakpoints: std::collections::BTreeSet::new(),
             pending_function_bp: None,

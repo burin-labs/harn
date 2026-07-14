@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crate::chunk::{Chunk, ChunkRef, Op};
 use crate::value::{ModuleFunctionRegistry, VmError, VmValue};
 
-use super::state::ExecutionDeadlineState;
+use super::state::{ExecutionDeadlineState, ScopeSpan};
 use super::{CallFrame, LocalSlot, Vm};
 
 const CANCEL_GRACE_ASYNC_OP: Duration = Duration::from_millis(250);
@@ -71,6 +71,15 @@ impl Vm {
     /// This is distinct from Harn's catchable `deadline` expression: test
     /// runners and embedding hosts must be able to stop CPU-bound user code
     /// even when it never yields to the async runtime.
+    ///
+    /// The returned future must be awaited to completion. Dropping it after it
+    /// has been polled is unsupported: Rust futures cannot synchronously unwind
+    /// interpreter frames or every thread-local program scope. The VM is then
+    /// poisoned, so every later execution returns
+    /// [`VmError::AbandonedExecution`], and dropping it aborts its spawned child
+    /// tasks. An embedding host must also exclusively own the polling execution
+    /// context and reset that context before running another VM on it; it must
+    /// not globally reset a context shared with unrelated executions.
     pub async fn execute_with_timeout(
         &mut self,
         chunk: &Chunk,
@@ -79,8 +88,10 @@ impl Vm {
         let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
             VmError::Runtime("execution timeout exceeds the platform clock range".to_string())
         })?;
-        let _deadline_guard = self.execution_deadline.install(deadline);
-        self.execute(chunk).await
+        let deadline_guard = self.execution_deadline.install(deadline);
+        let result = self.execute(chunk).await;
+        deadline_guard.complete();
+        result
     }
 
     /// Execute a shared compiled chunk without cloning its bytecode.
@@ -89,6 +100,7 @@ impl Vm {
     /// re-running the same chunk is a refcount bump rather than an
     /// `O(code + constants)` copy.
     pub async fn execute_arc(&mut self, chunk: ChunkRef) -> Result<VmValue, VmError> {
+        self.ensure_execution_available()?;
         let registry = self.pool_registry.clone();
         crate::stdlib::pool::with_pool_registry_scope(registry, async {
             self.execute_scoped(chunk).await
@@ -100,7 +112,7 @@ impl Vm {
         let _execution_activity = self
             .wait_for_graph
             .register_task(self.runtime_context.task_id.clone());
-        let span_id = crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "main".into());
+        let _span = ScopeSpan::new(crate::tracing::SpanKind::Pipeline, "main".into());
         let result = self.run_chunk(chunk).await;
         let result = match result {
             Ok(value) => self.run_pipeline_finish_lifecycle(value).await,
@@ -109,7 +121,6 @@ impl Vm {
                 Err(error)
             }
         };
-        crate::tracing::span_end(span_id);
         result
     }
 
@@ -304,6 +315,7 @@ impl Vm {
         module_state: Option<crate::value::ModuleState>,
         local_slots: Option<Vec<LocalSlot>>,
     ) -> Result<VmValue, VmError> {
+        self.ensure_execution_available()?;
         let debugger = self.debugger_attached();
         let local_slots = local_slots.unwrap_or_else(|| Self::fresh_local_slots(&chunk));
         let initial_env = if debugger {
@@ -370,6 +382,7 @@ impl Vm {
         target_depth: usize,
         restore_on_final_pop: bool,
     ) -> Result<VmValue, VmError> {
+        self.ensure_execution_available()?;
         let _task_activity = self
             .wait_for_graph
             .register_task(self.runtime_context.task_id.clone());
@@ -922,6 +935,7 @@ mod tests {
     use crate::stdlib::register_vm_stdlib;
     use harn_lexer::Lexer;
     use harn_parser::Parser;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn compile_harn(source: &str) -> Chunk {
         let mut lexer = Lexer::new(source);
@@ -932,26 +946,107 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn dropping_timed_execution_restores_host_deadline() {
+    async fn dropping_timed_execution_poison_vm_reuse() {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let slow = compile_harn("pipeline default() { sleep(5s) }");
+                let slow = compile_harn(
+                    r#"pipeline default() {
+  pipeline_on_finish({ _h, value -> value })
+  const child = spawn {
+    child_started()
+    wait_for_child_release()
+    child_effect()
+  }
+  __io_println("first-started")
+  sleep(5s)
+  return 7
+}"#,
+                );
                 let quick = compile_harn("pipeline default() { return 42 }");
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                let child_started = Arc::new(AtomicBool::new(false));
+                let child_effect = Arc::new(AtomicBool::new(false));
+                let child_release = Arc::new(tokio::sync::Notify::new());
+                let started_for_builtin = Arc::clone(&child_started);
+                vm.register_builtin("child_started", move |_args, _output| {
+                    started_for_builtin.store(true, Ordering::Release);
+                    Ok(VmValue::Nil)
+                });
+                let effect_for_builtin = Arc::clone(&child_effect);
+                vm.register_builtin("child_effect", move |_args, _output| {
+                    effect_for_builtin.store(true, Ordering::Release);
+                    Ok(VmValue::Nil)
+                });
+                let release_for_builtin = Arc::clone(&child_release);
+                vm.register_async_builtin("wait_for_child_release", move |_ctx, _args| {
+                    let release = Arc::clone(&release_for_builtin);
+                    async move {
+                        release.notified().await;
+                        Ok(VmValue::Nil)
+                    }
+                });
+                let callable = vm
+                    .load_module_exports_from_source(
+                        "<abandoned-execution-test>",
+                        "pub fn answer() { return 42 }",
+                    )
+                    .await
+                    .unwrap()
+                    .remove("answer")
+                    .unwrap();
 
                 let mut execution =
                     Box::pin(vm.execute_with_timeout(&slow, Duration::from_secs(30)));
                 tokio::select! {
+                    biased;
                     result = &mut execution => panic!("slow execution unexpectedly finished: {result:?}"),
-                    () = tokio::task::yield_now() => {}
+                    started = tokio::time::timeout(Duration::from_secs(1), async {
+                        while !child_started.load(Ordering::Acquire) {
+                            tokio::task::yield_now().await;
+                        }
+                    }) => started.expect("spawned child did not start"),
                 }
                 drop(execution);
 
                 assert!(!vm.execution_deadline.is_active());
-                let value = vm.execute(&quick).await.unwrap();
-                assert!(matches!(value, VmValue::Int(42)));
+                assert!(vm.output().contains("first-started"));
+                assert!(!vm.frames.is_empty(), "fixture must abandon a live frame");
+                assert!(crate::orchestration::take_pipeline_on_finish().is_none());
+                let frame_depth = vm.frames.len();
+                let output = vm.output().to_string();
+                let error = vm.execute(&quick).await.unwrap_err();
+                assert!(matches!(error, VmError::AbandonedExecution));
+                let closure_error = vm.call_closure_pub(&callable, &[]).await.unwrap_err();
+                assert!(matches!(closure_error, VmError::AbandonedExecution));
+                let source_cache_len = vm.source_cache.len();
+                let module_cache_len = vm.module_cache.len();
+                let module_error = vm
+                    .load_module_exports_from_source(
+                        "<poisoned-module-load>",
+                        "pub fn poisoned() { return 0 }",
+                    )
+                    .await
+                    .unwrap_err();
+                assert!(matches!(module_error, VmError::AbandonedExecution));
+                assert_eq!(vm.source_cache.len(), source_cache_len);
+                assert_eq!(vm.module_cache.len(), module_cache_len);
+                let start_error = vm.start(&quick).unwrap_err();
+                assert!(matches!(start_error, VmError::AbandonedExecution));
+                let restart_error = vm.restart_frame(0).unwrap_err();
+                assert!(matches!(restart_error, VmError::AbandonedExecution));
+                assert_eq!(vm.frames.len(), frame_depth);
+                assert_eq!(vm.output(), output);
+                drop(vm);
+                child_release.notify_one();
+                for _ in 0..10 {
+                    tokio::task::yield_now().await;
+                }
+                assert!(
+                    !child_effect.load(Ordering::Acquire),
+                    "dropping an abandoned VM must abort spawned side effects"
+                );
             })
             .await;
     }
