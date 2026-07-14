@@ -9,6 +9,76 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.16
+
+### Breaking
+
+- `agent_loop` now applies bounded transport retry by default when no explicit
+  `llm_caller` is supplied; use `retry: false` or `llm_retry: nil` for
+  fail-fast tests and workflows.
+- Provider route network breakers now scale repeated storm cooldowns from 5s to
+  30s and then 120s instead of reopening every 5s indefinitely.
+
+### Added
+
+- Add format-neutral structured file read results and closed-schema typed readers for JSON, YAML, and TOML,
+  backed by one typed parser-error envelope with source locations.
+
+### Changed
+
+- Split the batch CLI lifecycle into focused Harn modules while preserving its provider and receipt contracts.
+- Added a closed exact-HEAD release-audit receipt contract for merge-group reuse.
+  Release prepare now validates generated output in a rollback-safe transaction,
+  runs residual generated/docs/grammar/security/smoke gates, and exposes no audit
+  profile or blanket-skip selector.
+- Keep GitHub Actions Rust, npm, and container caches restore-only outside the canonical
+  main branch, preventing ephemeral PR and merge-queue caches from evicting reusable build state.
+- Publish package installs as immutable, leased generations behind an atomic pointer. Concurrent runs, checks, LSP
+  requests, MCP prompt discovery, skills, rules, eval packs, and audits can no longer observe partially replaced
+  dependency trees.
+- Add typed `package_snapshot_open` / `package_snapshot_close` builtins for Harn workflows that need a stable
+  installed-package view.
+- **Lockstep Cargo dependency updates (#4647).** Dependabot now updates the
+  Cranelift, Wasmtime, and OpenTelemetry compatibility families atomically, with
+  a structural policy gate that rejects missing, overlapping, or catch-all
+  assignments.
+- Apply publisher-recommended generation defaults once per logical model, with route and caller overrides.
+
+### Fixed
+
+- Apply command-policy deny, consent, rewrite, and postflight hooks to direct
+  `hostlib_tools_run_command` calls before any process is started.
+- Skip local commit validation for deletion-only pushes, while preserving the normal
+  pre-push checks for empty, malformed, and mixed ref-update streams.
+- Keep benchmark-only pre-tag size gates fast by reserving cargo-bloat analysis for warm-cache builds.
+- Replaced the always-on Windows cross-check's live apt bootstrap with an
+  immutable cross-rs toolchain image, removing Ubuntu mirror throughput from the merge gate.
+- Keep action-only text tool-call responses out of public LLM result text and prose surfaces
+  while preserving structured tool calls and canonical replay text.
+- Streaming LLM calls now bound their overall budget by the resolved timeout
+  (env/catalog/default) instead of a hard-coded 30-minute fallback, so a dead
+  provider stream fails fast rather than hanging until the fallback expires.
+- Preserve runtime parameter checks for optional open-record aliases.
+- Thread rich agent callback `feedback_kind` verdicts into typed feedback-injected events.
+- Make warm-build cache-budget reporting fail when usage telemetry is unavailable
+  or over policy, instead of masking API errors as a successful job.
+- Add foreground `command_run` file-backed capture so successful commands no
+  longer wait for output-holding descendants when callers opt into
+  `capture.transport: "file"`.
+- Preserve successful and rejected session tool rollups in terminal agent-loop callbacks so terminal recovery
+  policies can act on the work the loop actually observed.
+- **Local hooks and release checks now reuse isolated Cargo intermediates
+  (#4662).** Workflows with an isolated `CARGO_TARGET_DIR` use that same path
+  for `build.build-dir` instead of compiling a second cold tree under
+  `target/build`, while explicit build-directory overrides remain authoritative.
+- Gate the OpenAI sampling fields xAI rejects (`stop`, `frequency_penalty`, `presence_penalty`)
+  behind capability flags for every Grok model, so a request that sets any of them no longer
+  fails with an HTTP 400. Adds a general `stop_supported` capability (default on) that drops
+  `stop` before dispatch for any route that rejects it, and points the `grok` / `grok-4.5`
+  aliases at Grok 4.5.
+- Stop `stream_object` from emitting structural partials after its schema validator reaches a terminal invalid state.
+- Strip `temperature`/`top_p` for all Moonshot Kimi models, which 400 on any non-default value (fixes k2.5/k2.6).
+
 ## v0.10.15
 
 ### Breaking

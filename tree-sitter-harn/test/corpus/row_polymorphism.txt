@@ -128,3 +128,42 @@ type C = { a: int, b?: string }
           name: (identifier)
           type: (type_annotation
             (identifier)))))))
+
+==================
+Multiline Closed Shape Parses
+==================
+
+type Manifest = {
+  name: string,
+  mode: "strict" | "relaxed",
+  retries?: int
+}
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (shape_type
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (type_annotation
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter)))
+            (type_annotation
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter)))))
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))))))
