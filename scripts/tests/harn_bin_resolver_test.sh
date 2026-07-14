@@ -12,69 +12,92 @@ cat > "$fake_bin" <<'SH'
 printf 'fake harn\n'
 SH
 chmod +x "$fake_bin"
-touch -t 200001010000 "$fake_bin"
 
-if HARN_BIN="$fake_bin" "$repo_root/scripts/harn_bin.sh" --print >"$tmp_root/stale.out" 2>"$tmp_root/stale.err"; then
-  echo "harn_bin resolver accepted a stale explicit HARN_BIN" >&2
-  cat "$tmp_root/stale.out" >&2
-  exit 1
-fi
-if ! grep -Fq "harn binary is stale" "$tmp_root/stale.err"; then
-  echo "stale HARN_BIN error did not explain the freshness failure" >&2
-  cat "$tmp_root/stale.err" >&2
+HARN_BIN="$fake_bin" "$repo_root/scripts/harn_bin.sh" --print >"$tmp_root/explicit.out"
+if ! grep -Fxq "$fake_bin" "$tmp_root/explicit.out"; then
+  echo "harn_bin resolver did not return the explicit executable HARN_BIN" >&2
+  cat "$tmp_root/explicit.out" >&2
   exit 1
 fi
 
-HARN_BIN="$fake_bin" \
-  HARN_BIN_ASSUME_FRESH=1 \
-  "$repo_root/scripts/harn_bin.sh" --print >"$tmp_root/fresh.out"
-if ! grep -Fxq "$fake_bin" "$tmp_root/fresh.out"; then
-  echo "harn_bin resolver did not return the explicit assumed-fresh binary" >&2
-  cat "$tmp_root/fresh.out" >&2
+non_exec="$tmp_root/not-executable"
+printf 'not executable\n' > "$non_exec"
+if HARN_BIN="$non_exec" "$repo_root/scripts/harn_bin.sh" --print >"$tmp_root/non-exec.out" 2>"$tmp_root/non-exec.err"; then
+  echo "harn_bin resolver accepted a non-executable HARN_BIN" >&2
+  cat "$tmp_root/non-exec.out" >&2
+  exit 1
+fi
+if ! grep -Fq "harn binary is not executable" "$tmp_root/non-exec.err"; then
+  echo "non-executable HARN_BIN error did not explain the validation failure" >&2
+  cat "$tmp_root/non-exec.err" >&2
   exit 1
 fi
 
-# Cargo's production-binary depfile includes embedded assets but excludes
-# integration-test-only sources that do not relink the executable.
-freshness_repo="$tmp_root/freshness-repo"
-mkdir -p "$freshness_repo/crates/example/src/explanations" "$freshness_repo/crates/example/tests"
-git -C "$freshness_repo" init -q
-printf '# embedded explanation\n' > "$freshness_repo/crates/example/src/explanations/example.md"
-printf '#[test]\nfn integration_only() {}\n' > "$freshness_repo/crates/example/tests/example.rs"
-git -C "$freshness_repo" add crates/example
+fake_cargo_bin="$tmp_root/fake-cargo-bin"
+target_dir="$tmp_root/target dir"
+record="$tmp_root/cargo-record.txt"
+mkdir -p "$fake_cargo_bin" "$target_dir/debug"
+cat > "$fake_cargo_bin/cargo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+{
+  printf 'args=%s\n' "$*"
+  printf 'CARGO_TARGET_DIR=%s\n' "${CARGO_TARGET_DIR-__unset__}"
+  printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
+} >> "$FAKE_CARGO_RECORD"
+case "$*" in
+  "run --quiet --bin harn -- __internal-executable-path")
+    mkdir -p "${CARGO_TARGET_DIR:?}/debug"
+    cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'fake harn\n'
+BIN
+    chmod +x "$CARGO_TARGET_DIR/debug/harn"
+    printf '%s\n' "$CARGO_TARGET_DIR/debug/harn"
+    ;;
+  *)
+    echo "unexpected cargo invocation: $*" >&2
+    exit 2
+    ;;
+esac
+SH
+chmod +x "$fake_cargo_bin/cargo"
 
-embedded_bin="$tmp_root/embedded-harn"
-cp "$fake_bin" "$embedded_bin"
-printf '%s: %s\n' \
-  "$embedded_bin" \
-  "$freshness_repo/crates/example/src/explanations/example.md" \
-  > "$tmp_root/embedded-harn.d"
-touch -t 202001010000 "$embedded_bin"
-touch -t 202101010000 "$freshness_repo/crates/example/src/explanations/example.md"
-touch -t 202201010000 "$freshness_repo/crates/example/tests/example.rs"
-
-if (
-  cd "$freshness_repo"
-  source "$repo_root/scripts/lib/harn_bin.sh"
-  harn_bin_newer_source_report "$embedded_bin"
-) > "$tmp_root/embedded-stale.out"; then
-  echo "harn_bin resolver accepted a binary older than an embedded crate asset" >&2
+CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/cargo-run.out"
+expected_bin="$target_dir/debug/harn"
+if ! grep -Fxq "$expected_bin" "$tmp_root/cargo-run.out"; then
+  echo "harn_bin resolver did not return Cargo's executable-path probe result" >&2
+  cat "$tmp_root/cargo-run.out" >&2
   exit 1
 fi
-if ! grep -Fxq "crates/example/src/explanations/example.md" "$tmp_root/embedded-stale.out"; then
-  echo "harn_bin resolver did not report the newer embedded crate asset" >&2
-  cat "$tmp_root/embedded-stale.out" >&2
+if ! grep -Fxq "args=run --quiet --bin harn -- __internal-executable-path" "$record"; then
+  echo "harn_bin resolver did not delegate binary resolution to cargo run" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
+  echo "harn_bin resolver did not align Cargo build-dir with CARGO_TARGET_DIR" >&2
+  cat "$record" >&2
   exit 1
 fi
 
-touch -t 202301010000 "$embedded_bin"
-touch -t 202401010000 "$freshness_repo/crates/example/tests/example.rs"
-if ! (
-  cd "$freshness_repo"
-  source "$repo_root/scripts/lib/harn_bin.sh"
-  harn_bin_newer_source_report "$embedded_bin"
-); then
-  echo "harn_bin resolver treated integration-test-only source as a production input" >&2
+: > "$record"
+CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --no-build --print > "$tmp_root/no-build.out"
+if ! grep -Fxq "$expected_bin" "$tmp_root/no-build.out"; then
+  echo "harn_bin --no-build did not return the target-dir executable" >&2
+  cat "$tmp_root/no-build.out" >&2
+  exit 1
+fi
+if [[ -s "$record" ]]; then
+  echo "harn_bin --no-build invoked cargo" >&2
+  cat "$record" >&2
   exit 1
 fi
 

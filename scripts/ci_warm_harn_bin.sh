@@ -41,13 +41,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -n "${HARN_BIN:-}" ]]; then
-  harn_require_fresh_bin "$HARN_BIN"
+  harn_require_executable_bin "$HARN_BIN"
 else
   echo "=== Warming Harn CLI binary ==="
   harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
-  cargo build --quiet --bin harn
-  HARN_BIN="$(harn_debug_binary_path)"
-  harn_require_fresh_bin "$HARN_BIN"
+  HARN_BIN="$(cargo run --quiet --bin harn -- "$(harn_internal_executable_path_command)")"
+  harn_require_executable_bin "$HARN_BIN"
 fi
 
 export HARN_BIN
