@@ -1036,11 +1036,17 @@ mod tests {
             .iter()
             .position(|arg| arg == "--lora-modules")
             .expect("lora modules flag");
-        let expected_home_spec = format!(
-            "burin-tools={}/adapters/burin-tools",
-            std::env::var("HOME").unwrap_or_else(|_| "~".to_string())
+        let (adapter_name, adapter_path) = built[modules_idx + 1]
+            .split_once('=')
+            .expect("name=path adapter module");
+        let expected_home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("~"));
+        assert_eq!(adapter_name, "burin-tools");
+        assert_eq!(
+            PathBuf::from(adapter_path),
+            expected_home.join("adapters").join("burin-tools")
         );
-        assert_eq!(built[modules_idx + 1], expected_home_spec);
         assert_eq!(built[modules_idx + 2], "sql=hf-user/sql-lora");
         assert!(built
             .windows(2)
