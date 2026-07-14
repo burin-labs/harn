@@ -949,14 +949,35 @@ pub(crate) fn parse_ts_call_from(
         })?
     };
     parser.skip_ws_and_comments();
-    if parser.peek() != Some(b')') {
+    // Recover an omitted call-closing `)`. Cheap models routinely close the
+    // object-literal argument with `}` but forget the tool call's own `)` —
+    // e.g. `edit({ ..., "content": <<EOF ... EOF }` (a bare `}` where `})` was
+    // meant). When the argument already parsed as a COMPLETE object literal and
+    // the sole remaining omission is the `)` at end-of-input, treat the call as
+    // implicitly closed rather than dropping an otherwise-complete edit. This
+    // mirrors the heredoc `unterminated_or_implicit_close` tolerance for a
+    // botched terminator, and is unambiguous: a genuinely truncated argument
+    // fails earlier in `parse_value`, and any trailing bytes (a non-`)` peek)
+    // keep the hard error, so this only fires on a structurally-complete object
+    // whose one missing token is the closing paren.
+    let implicit_paren_close =
+        parser.peek().is_none() && matches!(args_value, serde_json::Value::Object(_));
+    if parser.peek() != Some(b')') && !implicit_paren_close {
         return Err(format!(
             "TOOL CALL PARSE ERROR: `{name}(...)` — missing closing `)`. \
              Every tool call must be a complete TypeScript expression."
         ));
     }
+    if implicit_paren_close {
+        tracing::debug!(
+            target: "harn::tool_parse",
+            "recovered tool call with omitted closing `)` (implicit close at end of arguments)"
+        );
+    }
     let consumed_in_parser = parser.position();
-    let total_consumed = paren_open + 1 + consumed_in_parser + 1; // +1 for the ')'
+    // Advance past a `)` only when one is actually present; the recovered
+    // implicit-close form has none.
+    let total_consumed = paren_open + 1 + consumed_in_parser + usize::from(!implicit_paren_close);
 
     // Tool contract: every call takes a single object literal. Bare
     // positional scalars error precisely rather than being promoted.
