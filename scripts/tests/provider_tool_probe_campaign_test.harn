@@ -6,21 +6,42 @@ pipeline test_provider_tool_probe_campaign_parses_explicit_routes(task) {
     ["anthropic:claude-sonnet-5", "fireworks:accounts/fireworks/models/gpt-oss-120b"],
   )
   assert_eq(len(routes), 2)
-  const first = routes[0] ?? {id: "", provider: "", model: ""}
-  const second = routes[1] ?? {id: "", provider: "", model: ""}
+  const first = routes[0]
+  const second = routes[1]
   assert_eq(first.provider, "anthropic")
   assert_eq(first.model, "claude-sonnet-5")
+  assert_eq(first.env_keys, [])
   assert_eq(second.provider, "fireworks")
   assert_eq(second.model, "accounts/fireworks/models/gpt-oss-120b")
 }
 
 @test
 pipeline test_provider_tool_probe_campaign_rejects_malformed_routes(task) {
-  const routes = provider_tool_probe_campaign_routes(["missing-separator", "openai:", ":model", "ollama:gemma4"])
+  const routes = provider_tool_probe_campaign_routes(["missing-separator", "openai:", ":model", "ollama:gemma4:e4b"])
   assert_eq(len(routes), 1)
-  const route = routes[0] ?? {id: "", provider: "", model: ""}
+  const route = routes[0]
   assert_eq(route.provider, "ollama")
-  assert_eq(route.model, "gemma4")
+  assert_eq(route.model, "gemma4:e4b")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_default_routes_are_cheap_by_default(task) {
+  const routes = provider_tool_probe_campaign_default_routes(false)
+  const ids = routes.map({ route -> route.id }).to_list()
+  assert(ids.contains("fireworks-gpt-oss-120b"), "fireworks route present")
+  assert(ids.contains("cerebras-gpt-oss-120b"), "cerebras route present")
+  assert(ids.contains("openrouter-gpt-oss-120b"), "openrouter route present")
+  assert(ids.contains("moonshot-kimi"), "moonshot route present")
+  assert(ids.contains("local-vllm"), "local vLLM route present")
+  assert(ids.contains("ollama"), "ollama route present")
+  assert(!ids.contains("xai-grok"), "xAI is excluded unless expensive defaults are requested")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_include_expensive_adds_xai(task) {
+  const routes = provider_tool_probe_campaign_default_routes(true)
+  const ids = routes.map({ route -> route.id }).to_list()
+  assert(ids.contains("xai-grok"), "xAI expensive default route present")
 }
 
 @test
@@ -32,44 +53,89 @@ pipeline test_provider_tool_probe_campaign_modes_expand_both(task) {
 }
 
 @test
-pipeline test_provider_tool_probe_campaign_report_summarizes_planned_jobs(task) {
-  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4"])
-  const route = routes[0] ?? {id: "", provider: "", model: ""}
-  const jobs = [
-    {
-      id: "ollama-gemma4-non-streaming",
-      route_id: route.id,
-      provider: route.provider,
-      model: route.model,
-      mode: "non-streaming",
-      status: "planned",
-      command: ["harn", "provider", "tool-probe"],
-      reason: "dry",
-    },
-  ]
-  const report = provider_tool_probe_campaign_report(routes, jobs, false, ".out")
-  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v1")
-  assert_eq(report.summary.planned, 1)
+pipeline test_provider_tool_probe_campaign_behavior_filter_matches_category_and_runner(task) {
+  const tool_calls = provider_tool_probe_campaign_select_behaviors(["tool_calls"])
+  const executable = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
+  const parser = provider_tool_probe_campaign_select_behaviors(["parser"])
+  assert_eq(len(tool_calls), 2)
+  assert_eq(len(executable), 2)
+  assert(len(parser) >= 2, "parser behaviors are selected by category")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_mode_filter_keeps_matching_behaviors(task) {
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calls"])
+  const streaming = provider_tool_probe_campaign_filter_behavior_modes(behaviors, "streaming")
+  const non_streaming = provider_tool_probe_campaign_filter_behavior_modes(behaviors, "non-streaming")
+  assert_eq(len(streaming), 1)
+  assert_eq(streaming[0]?.id, "tool_calling_streaming")
+  assert_eq(streaming[0]?.modes, ["streaming"])
+  assert_eq(len(non_streaming), 1)
+  assert_eq(non_streaming[0]?.id, "tool_calling_non_streaming")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_planned_cells_cover_route_behavior_formats(task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
+  const cells = provider_tool_probe_campaign_planned_cells(routes, behaviors)
+  assert_eq(len(cells), 3)
+  assert_eq(cells[0]?.status, "planned")
+  assert_eq(cells[0]?.catalog?.tools, provider_capabilities("ollama", "gemma4:e4b")?.tools)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_report_summarizes_cells(task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
+  const cells = provider_tool_probe_campaign_planned_cells(routes, behaviors)
+  const report = provider_tool_probe_campaign_report(routes, behaviors, cells, false, false, ".out", 1)
+  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v2")
+  assert_eq(report.summary.planned, 3)
   assert_eq(report.summary.pass, 0)
+  assert_eq(report.cell_count, 3)
+  assert_eq(report.spend.executable_probe_count, 1)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_dotenv_parser_does_not_require_shell(task) {
+  const env = provider_tool_probe_campaign_env_from_dotenv_text(
+    "# ignored\nexport FIREWORKS_API_KEY=\"secret=value\"\nEMPTY=\nBAD LINE\nMOONSHOT_API_KEY='moon'\n",
+  )
+  assert_eq(env.FIREWORKS_API_KEY, "secret=value")
+  assert_eq(env.MOONSHOT_API_KEY, "moon")
+  assert_eq(env.EMPTY, "")
+  assert_eq(env.BAD, nil)
 }
 
 @test
 pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(task) {
-  const routes = provider_tool_probe_campaign_routes(["mock:model"])
-  const route = routes[0] ?? {id: "", provider: "", model: ""}
-  const jobs = [
-    {
-      id: "mock-model-non-streaming",
-      route_id: route.id,
-      provider: "mock",
-      model: "model",
-      mode: "non-streaming",
-      status: "fail",
-      command: ["harn"],
-      reason: "left | right",
-    },
-  ]
-  const report = provider_tool_probe_campaign_report(routes, jobs, true, ".out")
+  const route: ProviderToolProbeRoute = {id: "fixture-route", provider: "mock", model: "mock", env_keys: [], local: true, cheap: true}
+  const behavior: ProviderToolProbeBehavior = {
+    id: "fixture-behavior",
+    category: "tool_calls",
+    description: "fixture",
+    runner: "provider_tool_probe",
+    modes: ["non-streaming"],
+    tool_formats: ["native"],
+    cheap: true,
+  }
+  const cell = {
+    id: "cell",
+    provider: route.provider,
+    model: route.model,
+    route_id: route.id,
+    behavior: behavior.id,
+    category: behavior.category,
+    mode: "non-streaming",
+    tool_format: "native",
+    runner: behavior.runner,
+    status: "planned",
+    reason: "left | right",
+    observed: {},
+    catalog: {},
+  }
+  const report = provider_tool_probe_campaign_report([route], [behavior], [cell], false, false, ".out", 1)
   const markdown = provider_tool_probe_campaign_markdown(report)
   assert(contains(markdown, "left \\| right"), "pipe escaped")
 }
