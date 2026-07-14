@@ -23,6 +23,7 @@
 #   HARN_BIN                 pre-built binary to reuse (skips the warm build)
 #   AUDIT_GATES_CONCURRENCY  `make -j` cap (default: nproc)
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -82,16 +83,7 @@ echo "ok: conformance ($(( $(date +%s) - started ))s)"
 
 # Resolve and export the warm binary so no downstream gate re-runs cargo.
 if [ -z "${HARN_BIN:-}" ]; then
-  target_dir="${CARGO_TARGET_DIR:-}"
-  if [ -z "$target_dir" ]; then
-    target_dir="$(cargo metadata --format-version=1 --no-deps \
-      | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
-  fi
-  suffix=""
-  case "${OS:-$(uname -s)}" in
-    Windows_NT|MINGW*|MSYS*|CYGWIN*) suffix=".exe" ;;
-  esac
-  HARN_BIN="$target_dir/debug/harn$suffix"
+  HARN_BIN="$("$SCRIPT_DIR/harn_bin.sh" --print)"
 fi
 if [ ! -x "$HARN_BIN" ]; then
   echo "error: conformance completed but HARN_BIN is not executable: $HARN_BIN" >&2

@@ -201,19 +201,6 @@ time_phase() {
   return "$rc"
 }
 
-debug_harn_binary() {
-  local target_dir="${CARGO_TARGET_DIR:-}"
-  if [[ -z "$target_dir" ]]; then
-    target_dir="$(cargo metadata --format-version=1 --no-deps \
-      | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
-  fi
-  local suffix=""
-  case "${OS:-$(uname -s)}" in
-    Windows_NT|MINGW*|MSYS*|CYGWIN*) suffix=".exe" ;;
-  esac
-  printf '%s/debug/harn%s\n' "$target_dir" "$suffix"
-}
-
 harn_cmd() {
   if [[ -n "${HARN_BIN:-}" ]]; then
     "$HARN_BIN" "$@"
@@ -473,7 +460,7 @@ cmd_audit() {
       echo "error: warm prebuild failed; rerun without --quiet for details"
       exit 1
     fi
-    cargo_harn_bin="$(debug_harn_binary)"
+    cargo_harn_bin="$("$SCRIPT_DIR/harn_bin.sh" --no-build --print)"
   fi
   prebuild_elapsed=$(( $(date +%s) - prebuild_started ))
   printf 'ok: %-15s (%ss)\n' "warm-prebuild" "$prebuild_elapsed"

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="${HARN_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="${HARN_RELEASE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 cd "$ROOT_DIR"
 RELEASE_GATE_SCRIPT="${HARN_RELEASE_GATE_SCRIPT:-./scripts/release_gate.sh}"
 
@@ -278,26 +279,12 @@ print(f"{major}.{minor}.{patch}")
 PY
 }
 
-debug_harn_binary() {
-  local target_dir="${CARGO_TARGET_DIR:-}"
-  if [[ -z "$target_dir" ]]; then
-    target_dir="$(cargo metadata --format-version=1 --no-deps \
-      | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
-  fi
-  local suffix=""
-  case "${OS:-$(uname -s)}" in
-    Windows_NT|MINGW*|MSYS*|CYGWIN*) suffix=".exe" ;;
-  esac
-  printf '%s/debug/harn%s\n' "$target_dir" "$suffix"
-}
-
 export_warmed_harn_bin() {
   if [[ -n "${HARN_BIN:-}" ]]; then
     return 0
   fi
   local harn_bin
-  harn_bin="$(debug_harn_binary)"
-  if [[ -x "$harn_bin" ]]; then
+  if harn_bin="$("$SCRIPT_DIR/harn_bin.sh" --no-build --print 2>/dev/null)" && [[ -x "$harn_bin" ]]; then
     export HARN_BIN="$harn_bin"
     printf 'Reusing warmed HARN_BIN: %s\n' "$HARN_BIN"
   fi
