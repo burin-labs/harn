@@ -24,8 +24,8 @@ use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
 
 use super::super::format::format_type;
-use super::super::schema_inference::schema_type_expr_from_node;
-use super::super::scope::{is_builtin, EnumDeclInfo, FnSignature, StructDeclInfo, TypeScope};
+use super::super::schema_inference::{schema_of_type_token_call, schema_type_expr_from_node};
+use super::super::scope::{EnumDeclInfo, FnSignature, StructDeclInfo, TypeScope};
 use super::super::union::collapse_members_opt;
 use super::super::union::reference_path_key;
 use super::super::union::simplify_union;
@@ -558,6 +558,15 @@ impl TypeChecker {
             Vec::with_capacity(args.len());
         let mut contextual_args = Vec::with_capacity(args.len());
         for (i, arg) in args.iter().enumerate() {
+            if matches!(sig.kind, CallKind::Builtin)
+                && sig.name == "schema_of"
+                && i == 0
+                && matches!(arg.node, Node::Identifier(_))
+            {
+                expected_args.push(None);
+                contextual_args.push(false);
+                continue;
+            }
             let Some(param) = Self::call_param_for_arg(&sig.params, sig.has_rest, i) else {
                 self.check_node(arg, scope);
                 expected_args.push(None);
@@ -1441,76 +1450,7 @@ impl TypeChecker {
         scope: &mut TypeScope,
         span: Span,
     ) {
-        // Cross-module undefined-call check. Only active when the caller
-        // supplied a resolved imported-name set via `with_imported_names`;
-        // in that mode every call target must be satisfied by builtins,
-        // local declarations, struct constructors, callable variables, or
-        // an imported symbol. Anything else is a static resolution error
-        // (not a lint warning, so it fails `harn check`/`harn run` before
-        // the VM does).
-        if let Some(imported) = self.imported_names.as_ref() {
-            let resolvable = is_builtin(name)
-                || scope.get_fn(name).is_some()
-                || scope.get_struct(name).is_some()
-                || scope.get_enum(name).is_some()
-                || scope.get_var(name).is_some()
-                || imported.contains(name)
-                || scope.is_generic_type_param(name)
-                || name.starts_with("__")
-                // `hostlib_*` builtins are registered onto the VM at
-                // runtime by `harn_hostlib::install_default` (see the
-                // `hostlib` cargo feature in `harn-cli`). The parser
-                // has no static signature for them, so static
-                // resolution treats the prefix as an opaque escape
-                // hatch — same idea as `__`-prefixed names.
-                || name.starts_with("hostlib_")
-                // Built-in value constructors — `Ok`/`Err` are VM
-                // builtins (Result variants) but are not in the
-                // parser's BUILTIN_SIGNATURES table because they have
-                // no static arity signature. `Some`/`None` are Option
-                // variants constructed via the same path.
-                || matches!(name, "Ok" | "Err" | "Some" | "None");
-            if !resolvable {
-                // Suggest a close match across builtins, local
-                // functions, and imported names so typos show the same
-                // "did you mean?" hint the linter used to provide.
-                let candidates: Vec<String> = builtin_signatures::iter_builtin_names()
-                    .map(|s| s.to_string())
-                    .chain(scope.all_fn_names())
-                    .chain(imported.iter().cloned())
-                    .collect();
-                let suggestion = crate::diagnostic::renamed_stdlib_symbol(name)
-                    .map(str::to_string)
-                    .or_else(|| {
-                        crate::diagnostic::find_closest_match(
-                            name,
-                            candidates.iter().map(|s| s.as_str()),
-                            2,
-                        )
-                        .map(|c| c.to_string())
-                    });
-                // Fold the suggestion into the message so callers that
-                // only surface `diag.message` (like `harn run` / the
-                // conformance runner) still see the "did you mean"
-                // hint. The rendered help line also duplicates it for
-                // pretty-printed output.
-                let message = match &suggestion {
-                    Some(s) => format!(
-                        "call target `{name}` is not defined or imported — did you mean `{s}`?"
-                    ),
-                    None => format!("call target `{name}` is not defined or imported"),
-                };
-                match suggestion {
-                    Some(s) => self.error_at_with_help(
-                        Code::UndefinedFunction,
-                        message,
-                        span,
-                        format!("did you mean `{s}`?"),
-                    ),
-                    None => self.error_at(Code::UndefinedFunction, message, span),
-                }
-            }
-        }
+        self.check_cross_module_call_target_resolves(name, args, scope, span);
 
         // Deprecation: emit a warning at every call site of an `@deprecated`
         // function, including `since:` and `use:` hints when present.
@@ -1589,7 +1529,7 @@ impl TypeChecker {
             // bindings: dict`) and report phantom errors. Like every other
             // imported call in that mode, we then only check the arguments.
             self.check_builtin_signature_call(name, sig, type_args, args, has_spread, scope, span);
-        } else {
+        } else if !schema_of_type_token_call(name, args) {
             for arg in args {
                 self.check_node(arg, scope);
             }

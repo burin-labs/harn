@@ -233,6 +233,29 @@ impl TypeScope {
                 ],
             },
         );
+        scope.define_var("argv", None);
+        for (name, ty) in [
+            ("e", TypeExpr::Named("float".into())),
+            ("harness", TypeExpr::Named("Harness".into())),
+            ("pi", TypeExpr::Named("float".into())),
+        ] {
+            scope.define_var(name, Some(ty));
+        }
+        for name in [
+            "compaction",
+            "corrections",
+            "event_log",
+            "git",
+            "harn",
+            "pg",
+            "skills",
+            "step",
+            "stream",
+            "trust",
+            "workflow",
+        ] {
+            scope.define_var(name, Some(TypeExpr::Named("dict".into())));
+        }
         scope
     }
 
@@ -367,6 +390,15 @@ impl TypeScope {
         let mut names: Vec<String> = self.functions.keys().cloned().collect();
         if let Some(parent) = &self.parent {
             names.extend(parent.all_fn_names());
+        }
+        names
+    }
+
+    /// Collect every variable name visible through this scope chain.
+    pub(super) fn all_var_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.vars.keys().cloned().collect();
+        if let Some(parent) = &self.parent {
+            names.extend(parent.all_var_names());
         }
         names
     }

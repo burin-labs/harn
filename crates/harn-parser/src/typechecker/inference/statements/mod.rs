@@ -15,6 +15,7 @@ mod attributes;
 mod blocks;
 mod check_node;
 mod expressions;
+mod name_resolution;
 mod patterns;
 
 use crate::ast::*;

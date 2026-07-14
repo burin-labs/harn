@@ -1,14 +1,16 @@
 // Verify every ```harn fenced code block in docs/src/*.md parses cleanly
-// via `harn check`. Used to enforce "copy/paste runnable" snippets: readers
-// should be able to lift any block verbatim into a .harn file and have it
-// at least type-check.
+// via `harn parse`. Most docs snippets are intentionally partial fragments:
+// the guard keeps them syntactically valid without requiring each fragment to
+// declare every surrounding variable from the prose. Blocks tagged
+// ```harn,check opt into full `harn check` for complete copy/paste examples.
 //
-// Blocks tagged ```harn,ignore are skipped — use that for intentional
-// partial fragments (grammar demos in language-spec.md, etc.).
+// Blocks tagged ```harn,ignore are skipped — use that for intentionally
+// non-syntactic fragments (grammar demos in language-spec.md, etc.).
 //
 // Ported from scripts/check_docs_snippets.sh — same fence state machine
-// (exact ```harn / ```harn,ignore info strings, unclosed-fence detection),
-// same FAIL output shape, same summary line and exit codes.
+// (exact ```harn / ```harn,check / ```harn,ignore info strings,
+// unclosed-fence detection), same FAIL output shape, same summary line and
+// exit codes.
 //
 // Usage:
 //   harn run scripts/check_docs_snippets.harn
@@ -20,21 +22,26 @@ const DOCS_GLOB = "docs/src/**/*.md"
  *   {kind: "unclosed", open_line}      — a ```harn fence that never closed
  *                                        before the next fence / EOF;
  *   {kind: "skip", idx}                — a ```harn,ignore block;
- *   {kind: "block", idx, content}      — a checkable ```harn block body
- *                                        (lines joined, trailing newline).
+ *   {kind: "block", idx, mode, content}
+ *                                      — a parseable/checkable Harn block
+ *                                        body (lines joined, trailing
+ *                                        newline). `mode` is "parse" for
+ *                                        ```harn and "check" for
+ *                                        ```harn,check.
  * `idx` counts harn fences per file, 1-based. Pure so tests can drive it.
  */
 pub fn extract_blocks(text: string) -> list {
   let events: list = []
   let in_block = false
   let skip = false
+  let block_mode = "parse"
   let idx = 0
   let open_line = 0
   let body: list<string> = []
   let line_no = 0
   for line in text.lines() {
     line_no = line_no + 1
-    if line == "```harn" || line == "```harn,ignore" {
+    if line == "```harn" || line == "```harn,check" || line == "```harn,ignore" {
       if in_block {
         // Nested or unclosed fence — markdown is malformed. Surface the
         // line where the previous fence opened so the author can find it.
@@ -42,6 +49,11 @@ pub fn extract_blocks(text: string) -> list {
       }
       in_block = true
       skip = line == "```harn,ignore"
+      block_mode = if line == "```harn,check" {
+        "check"
+      } else {
+        "parse"
+      }
       idx = idx + 1
       open_line = line_no
       body = []
@@ -53,7 +65,7 @@ pub fn extract_blocks(text: string) -> list {
     if line.starts_with("```") && in_block {
       in_block = false
       if !skip {
-        events = events + [{kind: "block", idx: idx, content: body.join("\n") + "\n"}]
+        events = events + [{kind: "block", idx: idx, mode: block_mode, content: body.join("\n") + "\n"}]
       }
       continue
     }
@@ -104,7 +116,7 @@ pub fn indent_output(output: string) -> list<string> {
 }
 
 /**
- * Resolve the harn binary used to type-check snippets: $HARN_BIN wins,
+ * Resolve the harn binary used to validate snippets: $HARN_BIN wins,
  * else the workspace target dir's debug build (building it quietly when
  * missing) — the same ladder as the bash original.
  */
@@ -187,7 +199,17 @@ pipeline main(task) {
       checked = checked + 1
       const block_path = "${prefix}_${event.idx}.harn"
       harness.fs.write_text(block_path, event.content)
-      const res = harness.process.spawn_captured({cmd: harn_bin, args: ["check", block_path]})
+      const subcommand = if event.mode == "check" {
+        "check"
+      } else {
+        "parse"
+      }
+      const args = if subcommand == "parse" {
+        ["parse", "--json", block_path]
+      } else {
+        ["check", block_path]
+      }
+      const res = harness.process.spawn_captured({cmd: harn_bin, args: args})
       if !res.success {
         failures = failures + 1
         __io_println("")
@@ -205,8 +227,8 @@ pipeline main(task) {
   )
   if failures > 0 {
     __io_println("")
-    __io_println("hint: snippets must parse under `harn check`. Wrap bare statements")
-    __io_println("      in `pipeline default() { ... }`, inline any referenced helpers,")
+    __io_println("hint: snippets must parse under `harn parse`. Wrap bare statements")
+    __io_println("      in `pipeline default() { ... }`, fix syntax placeholders,")
     __io_println("      or tag the block as ```harn,ignore if it's an intentional fragment.")
     // exit() bypasses defer, so remove the scratch directory before reporting
     // failure to the calling shell.

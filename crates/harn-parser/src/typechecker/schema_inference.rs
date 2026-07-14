@@ -15,6 +15,10 @@ use crate::ast::*;
 
 use super::scope::TypeScope;
 
+pub(super) fn schema_of_type_token_call(name: &str, args: &[SNode]) -> bool {
+    name == "schema_of" && args.len() == 1 && matches!(args[0].node, Node::Identifier(_))
+}
+
 pub(super) fn schema_type_expr_from_node(node: &SNode, scope: &TypeScope) -> Option<TypeExpr> {
     match &node.node {
         Node::Identifier(name) => {

@@ -63,11 +63,17 @@ pipeline test_temp_tree_skips_generated_and_reports_findings(task) {
       write_text(root, "docs/bad.md", "```harn\n" + "var " + "reg = tool_registry()\n```\n")
       write_text(root, "docs/good.md", "```harn\nlet reg = tool_registry()\n```\n")
       write_text(root, "docs/dist/generated.md", "var " + "reg = tool_registry()\n")
+      write_text(
+        root,
+        "harn-docs-snippets-AbCd/35_concurrency_8.harn",
+        "var " + "reg = tool_registry()\n",
+      )
       write_text(root, "target/generated.harn", "const pattern = \"let\\\\s+x\"\n")
       const files = harn_syntax_sensitive_files(root)
       assert_eq(files.contains("scripts/bad.harn"), true)
       assert_eq(files.contains("docs/bad.md"), true)
       assert_eq(files.contains("docs/dist/generated.md"), false)
+      assert_eq(files.contains("harn-docs-snippets-AbCd/35_concurrency_8.harn"), false)
       assert_eq(files.contains("target/generated.harn"), false)
       const report = check_harn_syntax_sensitive_scans(root)
       assert_eq(report.violation_count, 2)

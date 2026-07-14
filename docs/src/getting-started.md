@@ -121,7 +121,7 @@ harn completion fish > ~/.config/fish/completions/harn.fish
 
 Create a file called `hello.harn`:
 
-```harn
+```harn,check
 fn main(harness: Harness) {
   harness.stdio.println("Hello, world!")
 }

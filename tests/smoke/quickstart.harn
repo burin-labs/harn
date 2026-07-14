@@ -3,8 +3,8 @@
  * smoke matrix. This is the *literal* first runnable script from the
  * getting-started guide (docs/src/getting-started.md): the
  * `fn main(harness: Harness)` entry point plus a `harness.stdio.println`
- * host call. The docs snippet is typecheck-only in CI (check_docs_snippets.harn
- * runs `harn check`); this fixture *executes* it against the released
+ * host call. The docs snippet is tagged `harn,check`, so CI typechecks it;
+ * this fixture *executes* it against the released
  * binary so the documented first-run experience stays frozen end-to-end.
  *
  * Distinct from hello.harn, which covers the `pipeline default()` +

@@ -1,7 +1,15 @@
 import { parse_args } from "std/cli"
 import { find_files } from "std/fs"
 
-const SKIP_SEGMENTS = ["/.git/", "/.harn/", "/.harn-runs/", "/docs/dist/", "/node_modules/", "/target/"]
+const SKIP_SEGMENTS = [
+  "/.git/",
+  "/.harn/",
+  "/.harn-runs/",
+  "/docs/dist/",
+  "/harn-docs-snippets-",
+  "/node_modules/",
+  "/target/",
+]
 
 const SCANNED_SUFFIXES = [".harn", ".harn.prompt", ".md", ".prompt", ".rs", ".ts", ".tsx"]
 
@@ -51,7 +59,8 @@ pub fn harn_syntax_sensitive_files(root: string = "") -> list<string> {
   let out: list<string> = []
   for path in find_files(resolved_root, "**/*") {
     const rel = rel_path(path, resolved_root)
-    if is_skipped(rel) || !has_scanned_suffix(rel) || !harness.fs.stat(path).is_file {
+    if is_skipped(rel) || !has_scanned_suffix(rel) || !harness.fs.exists(path)
+      || !harness.fs.stat(path).is_file {
       continue
     }
     out = out + [rel]

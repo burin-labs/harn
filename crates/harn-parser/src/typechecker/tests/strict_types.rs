@@ -243,6 +243,111 @@ fn test_cross_module_unresolved_call_errors() {
 }
 
 #[test]
+fn test_cross_module_unresolved_value_identifier_errors() {
+    let diags = check_source_with_imports(
+        r"pipeline t(task) {
+  const tools = {allow: SOME_ALLOWLIST}
+  log(tools)
+}",
+        &["other_helper"],
+    );
+    let errs: Vec<&String> = diags
+        .iter()
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
+        .map(|d| &d.message)
+        .collect();
+    assert!(
+        errs.iter().any(|m| m.contains("SOME_ALLOWLIST")),
+        "expected undefined value identifier error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_cross_module_imported_value_identifier_is_allowed() {
+    let diags = check_source_with_imports(
+        r"pipeline t(task) {
+  const tools = {allow: SOME_ALLOWLIST}
+  log(tools)
+}",
+        &["SOME_ALLOWLIST"],
+    );
+    let errs: Vec<&String> = diags
+        .iter()
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
+        .map(|d| &d.message)
+        .collect();
+    assert!(
+        !errs.iter().any(|m| m.contains("SOME_ALLOWLIST")),
+        "imported value identifier should not error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_cross_module_dict_keys_and_match_binders_are_not_value_reads() {
+    let diags = check_source_with_imports(
+        r#"pipeline t(task) {
+  const payload = {allow: "yes"}
+  match payload.allow {
+    accepted -> { log(accepted) }
+  }
+}"#,
+        &[],
+    );
+    let errs: Vec<&String> = diags
+        .iter()
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
+        .map(|d| &d.message)
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "syntactic names should not error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_cross_module_schema_of_type_identifier_is_allowed() {
+    let diags = check_source_with_imports(
+        r"type Payload = {name: string}
+pipeline t(task) {
+  const schema = schema_of(Payload)
+  log(schema)
+}",
+        &[],
+    );
+    let errs: Vec<&String> = diags
+        .iter()
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
+        .map(|d| &d.message)
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "schema_of type name should not error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_cross_module_ambient_runtime_values_are_allowed() {
+    let diags = check_source_with_imports(
+        r#"import { parse_args } from "std/cli"
+pipeline t(task) {
+  const args = parse_args(argv, {})
+  const exists = harness.fs.exists(".")
+  log({args: args, exists: exists, pi: pi, git: git})
+}"#,
+        &["parse_args"],
+    );
+    let errs: Vec<&String> = diags
+        .iter()
+        .filter(|d| d.severity == DiagnosticSeverity::Error)
+        .map(|d| &d.message)
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "ambient values should not error, got: {errs:?}"
+    );
+}
+
+#[test]
 fn test_cross_module_imported_call_is_allowed() {
     let diags = check_source_with_imports(r"pipeline t(task) { helper_fn(1, 2) }", &["helper_fn"]);
     let errs: Vec<&String> = diags
