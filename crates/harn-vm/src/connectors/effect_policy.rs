@@ -133,6 +133,7 @@ fn builtin_effect_group(builtin: &str) -> Option<BuiltinEffectGroup> {
         | "write_file"
         | "write_file_bytes"
         | "append_file"
+        | "append_file_locked"
         | "copy_file"
         | "delete_file"
         | "mkdir"

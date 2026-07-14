@@ -66,7 +66,7 @@ fidelity checkers still produce a structured report.
 | `clock_sleep` | `duration_ms` | `sleep(...)` / `advance_time(...)` |
 | `llm_call` | `request_digest`, `response` (inline or CAS) | LLM provider interception |
 | `file_read` | `path`, `content_hash`, `len_bytes` | `read_file(...)` builtins |
-| `file_write` | `path`, `content_hash`, `len_bytes` | `write_file(...)`, `append_file(...)` |
+| `file_write` | `path`, `content_hash`, `len_bytes` | `write_file(...)`, `append_file(...)`, `append_file_locked(...)` |
 | `file_delete` | `path` | `remove_file(...)` |
 | `process_spawn` | `program`, `args`, `cwd`, `exit_code`, `duration_ms`, `stdout_payload`, `stderr_payload` | Sandboxed subprocess invocation |
 

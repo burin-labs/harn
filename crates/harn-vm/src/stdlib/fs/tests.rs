@@ -51,6 +51,63 @@ fn result_error(value: &VmValue) -> &VmValue {
     }
 }
 
+#[test]
+fn append_file_locked_creates_parent_dirs_and_honors_advisory_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("logs/deep/coord.ndjson");
+    let path_arg = path.to_string_lossy().into_owned();
+    let mut vm = vm();
+
+    call(
+        &mut vm,
+        "append_file_locked",
+        vec![s(&path_arg), s("one\n")],
+    )
+    .unwrap();
+    call(
+        &mut vm,
+        "append_file_locked",
+        vec![s(&path_arg), s("two\n")],
+    )
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\ntwo\n");
+
+    let holder = std::fs::OpenOptions::new()
+        .read(true)
+        .append(true)
+        .open(&path)
+        .unwrap();
+    fs2::FileExt::try_lock_exclusive(&holder).unwrap();
+    let clock = crate::stdlib::clock::MockClockGuard::install(0);
+    let error = call(
+        &mut vm,
+        "append_file_locked",
+        vec![
+            s(&path_arg),
+            s("blocked\n"),
+            dict(vec![("timeout_ms", VmValue::Int(25))]),
+        ],
+    )
+    .expect_err("held advisory lock must make locked append time out");
+    match error {
+        VmError::Thrown(value) => {
+            assert_eq!(field(&value, "kind").display(), "timed_out");
+        }
+        other => panic!("expected structured io error, got {other:?}"),
+    }
+    assert_eq!(clock.now_monotonic_ms(), 25);
+    drop(clock);
+    fs2::FileExt::unlock(&holder).unwrap();
+
+    call(
+        &mut vm,
+        "append_file_locked",
+        vec![s(&path_arg), s("three\n")],
+    )
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\ntwo\nthree\n");
+}
+
 fn drain_feedback(session_id: &str, handle_id: &str) -> serde_json::Value {
     const FEEDBACK_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 

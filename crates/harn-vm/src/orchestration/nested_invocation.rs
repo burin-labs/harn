@@ -402,6 +402,12 @@ const BUILTIN_CAPABILITIES: &[(&str, &str, &str, &str)] = &[
         "workspace_write",
     ),
     ("append_file", "workspace", "write_text", "workspace_write"),
+    (
+        "append_file_locked",
+        "workspace",
+        "write_text",
+        "workspace_write",
+    ),
     ("mkdir", "workspace", "write_text", "workspace_write"),
     ("copy_file", "workspace", "write_text", "workspace_write"),
     ("delete_file", "workspace", "delete", "workspace_write"),

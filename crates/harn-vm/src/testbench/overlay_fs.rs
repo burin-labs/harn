@@ -738,6 +738,24 @@ pub mod helpers {
         result
     }
 
+    pub(crate) fn append_locked_scoped(
+        builtin: &str,
+        path: &Path,
+        contents: &[u8],
+        options: crate::stdlib::sandbox::AppendLockOptions,
+    ) -> std::io::Result<()> {
+        let result = match active_overlay() {
+            Some(overlay) => overlay.append(path, contents),
+            None => crate::stdlib::sandbox::append_locked_scoped_at_open(
+                builtin, path, contents, options,
+            ),
+        };
+        if result.is_ok() {
+            record_file_write(path, contents);
+        }
+        result
+    }
+
     pub fn copy(src: &Path, dst: &Path) -> std::io::Result<u64> {
         match active_overlay() {
             Some(overlay) => {

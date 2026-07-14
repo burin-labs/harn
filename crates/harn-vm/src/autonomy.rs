@@ -215,7 +215,12 @@ pub fn enforce_builtin_side_effect_boxed<'a>(
 pub fn side_effect_action_for_builtin(name: &str) -> Option<SideEffectAction> {
     first_workspace_write_action(
         name,
-        &["write_file", "write_file_bytes", "append_file"],
+        &[
+            "write_file",
+            "write_file_bytes",
+            "append_file",
+            "append_file_locked",
+        ],
         "fs.write",
     )
     .or_else(|| first_workspace_write_action(name, &["mkdir"], "fs.mkdir"))
