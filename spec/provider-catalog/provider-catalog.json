@@ -21791,7 +21791,8 @@
       "provider": "xai",
       "aliases": [
         "grok-code",
-        "grok-code-fast"
+        "grok-code-fast",
+        "grok-code-fast-1"
       ],
       "context_window": 256000,
       "logical_model": "grok-code-fast-1",
@@ -22696,6 +22697,11 @@
     },
     {
       "name": "grok-code-fast",
+      "model_id": "grok-build-0.1",
+      "provider": "xai"
+    },
+    {
+      "name": "grok-code-fast-1",
       "model_id": "grok-build-0.1",
       "provider": "xai"
     },
