@@ -141,6 +141,13 @@ fn generated_provider_config(source_dir: &Path) -> Result<GeneratedProviderConfi
             "generated provider config contains unknown fields:\n{rendered}"
         ));
     }
+    let default_issues = harn_vm::llm_config::model_default_issues(&parsed.config);
+    if !default_issues.is_empty() {
+        return Err(format!(
+            "generated provider config has invalid model defaults:\n{}",
+            default_issues.join("\n")
+        ));
+    }
 
     Ok(GeneratedProviderConfig {
         body,
@@ -346,5 +353,53 @@ fast_mode = true
         );
         assert!(error.contains("fast_mode"), "got: {error}");
         assert!(error.contains("serving_tiers"), "got: {error}");
+    }
+
+    #[test]
+    fn generated_config_rejects_unknown_logical_default() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let defaults_dir = tempdir.path().join("40-defaults");
+        fs::create_dir_all(&defaults_dir).expect("create defaults dir");
+        fs::write(
+            defaults_dir.join("generation.toml"),
+            r#"
+[model_defaults."logical:not-in-catalog"]
+temperature = 1.0
+"#,
+        )
+        .expect("write fragment");
+
+        let error = match generated_provider_config(tempdir.path()) {
+            Ok(_) => panic!("unknown logical selector should be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("logical:not-in-catalog references an unknown logical model"),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn generated_config_rejects_malformed_route_tombstone() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let defaults_dir = tempdir.path().join("40-defaults");
+        fs::create_dir_all(&defaults_dir).expect("create defaults dir");
+        fs::write(
+            defaults_dir.join("generation.toml"),
+            r#"
+[model_defaults."provider/model"]
+_unset = ["not_a_generation_default"]
+"#,
+        )
+        .expect("write fragment");
+
+        let error = match generated_provider_config(tempdir.path()) {
+            Ok(_) => panic!("invalid route tombstone should be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("_unset must be a non-empty list of supported route-default keys"),
+            "got: {error}"
+        );
     }
 }

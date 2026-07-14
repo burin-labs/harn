@@ -235,14 +235,34 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
     let provider = super::helpers::vm_resolve_provider(&options);
     let model = super::helpers::vm_resolve_model(&options, &provider);
-    let model_defaults = crate::llm_config::model_params(&model);
+    let model_defaults = crate::llm_config::model_params_for_route(&provider, &model);
     let default_float =
         |key: &str| -> Option<f64> { model_defaults.get(key).and_then(|v| v.as_float()) };
+    let default_int =
+        |key: &str| -> Option<i64> { model_defaults.get(key).and_then(|v| v.as_integer()) };
 
-    let max_tokens = super::helpers::opt_int(&options, "max_tokens").unwrap_or(16384);
+    let max_tokens = super::helpers::opt_int(&options, "max_tokens")
+        .or_else(|| default_int("max_tokens"))
+        .unwrap_or(16384);
     let temperature =
         super::helpers::opt_float(&options, "temperature").or_else(|| default_float("temperature"));
     let top_p = super::helpers::opt_float(&options, "top_p").or_else(|| default_float("top_p"));
+    let top_k = super::helpers::opt_int(&options, "top_k").or_else(|| default_int("top_k"));
+    let frequency_penalty = super::helpers::opt_float(&options, "frequency_penalty")
+        .or_else(|| default_float("frequency_penalty"));
+    let presence_penalty = super::helpers::opt_float(&options, "presence_penalty")
+        .or_else(|| default_float("presence_penalty"));
+    let caps = crate::llm::capabilities::lookup(&provider, &model);
+    let enforce_capability_gates = !crate::llm::mock::cli_llm_mock_replay_active()
+        && !crate::llm::mock::builtin_llm_mock_active();
+    let thinking = super::helpers::resolve_thinking_config(
+        options.as_ref(),
+        &model_defaults,
+        &provider,
+        &model,
+        &caps,
+        enforce_capability_gates,
+    )?;
 
     let prompt = args
         .first()
@@ -261,6 +281,19 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     identity.insert("system", system);
     identity.insert("temperature", json_float_or_null(temperature));
     identity.insert("top_p", json_float_or_null(top_p));
+    identity.insert("top_k", serde_json::json!(top_k));
+    identity.insert("frequency_penalty", json_float_or_null(frequency_penalty));
+    identity.insert("presence_penalty", json_float_or_null(presence_penalty));
+    if !thinking.is_disabled() {
+        identity.insert(
+            "thinking",
+            serde_json::to_value(thinking).map_err(|error| {
+                VmError::Runtime(format!(
+                    "__llm_cache_key: failed to encode thinking identity: {error}"
+                ))
+            })?,
+        );
+    }
 
     // Tools, structured-output schema, and stop sequences all change the
     // model's output, so two calls that differ ONLY in one of these must NOT

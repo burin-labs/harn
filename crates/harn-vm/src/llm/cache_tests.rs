@@ -294,6 +294,21 @@ mod cache_key_identity_tests {
         map
     }
 
+    fn gpt_oss_options() -> crate::value::DictMap {
+        let mut map = crate::value::DictMap::new();
+        map.insert(
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("fireworks")),
+        );
+        map.insert(
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from(
+                "accounts/fireworks/models/gpt-oss-120b",
+            )),
+        );
+        map
+    }
+
     fn dict(map: crate::value::DictMap) -> VmValue {
         VmValue::dict(map)
     }
@@ -303,6 +318,56 @@ mod cache_key_identity_tests {
         let a = key("hello", dict(base_options()));
         let b = key("hello", dict(base_options()));
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn logical_generation_defaults_participate_in_effective_cache_identity() {
+        let _guard = crate::llm::env_guard();
+        crate::llm_config::clear_user_overrides();
+        let mut overlay = crate::llm_config::ProvidersConfig::default();
+        overlay.model_defaults.insert(
+            "fireworks/accounts/fireworks/models/gpt-oss-120b".to_string(),
+            std::collections::BTreeMap::from_iter([
+                ("max_tokens".to_string(), toml::Value::Integer(2048)),
+                ("top_k".to_string(), toml::Value::Integer(40)),
+                ("frequency_penalty".to_string(), toml::Value::Float(0.2)),
+                ("presence_penalty".to_string(), toml::Value::Float(0.3)),
+            ]),
+        );
+        crate::llm_config::set_user_overrides(Some(overlay));
+        let default_key = key("hello", dict(gpt_oss_options()));
+
+        let mut explicit_same = gpt_oss_options();
+        explicit_same.insert(crate::value::intern_key("max_tokens"), VmValue::Int(2048));
+        explicit_same.insert(crate::value::intern_key("temperature"), VmValue::Float(1.0));
+        explicit_same.insert(crate::value::intern_key("top_p"), VmValue::Float(1.0));
+        explicit_same.insert(crate::value::intern_key("top_k"), VmValue::Int(40));
+        explicit_same.insert(
+            crate::value::intern_key("frequency_penalty"),
+            VmValue::Float(0.2),
+        );
+        explicit_same.insert(
+            crate::value::intern_key("presence_penalty"),
+            VmValue::Float(0.3),
+        );
+        explicit_same.insert(
+            crate::value::intern_key("reasoning_effort"),
+            VmValue::String(arcstr::ArcStr::from("high")),
+        );
+        assert_eq!(default_key, key("hello", dict(explicit_same)));
+
+        let mut low_effort = gpt_oss_options();
+        low_effort.insert(
+            crate::value::intern_key("reasoning_effort"),
+            VmValue::String(arcstr::ArcStr::from("low")),
+        );
+        assert_ne!(default_key, key("hello", dict(low_effort)));
+
+        let mut disabled = gpt_oss_options();
+        disabled.insert(crate::value::intern_key("thinking"), VmValue::Bool(false));
+        assert_ne!(default_key, key("hello", dict(disabled)));
+
+        crate::llm_config::clear_user_overrides();
     }
 
     #[test]

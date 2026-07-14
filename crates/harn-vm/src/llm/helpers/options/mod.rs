@@ -21,6 +21,8 @@ mod thinking;
 mod tool_search;
 
 #[cfg(test)]
+mod logical_defaults_tests;
+#[cfg(test)]
 mod output_format_tests;
 #[cfg(test)]
 mod reminder_render_tests;
@@ -49,3 +51,4 @@ pub(crate) use system_prompt::{
     assemble_system_prompt, compose_system_prompt, system_prompt_event_metadata,
     system_prompt_metadata,
 };
+pub(crate) use thinking::{resolve_catalog_thinking_config, resolve_thinking_config};

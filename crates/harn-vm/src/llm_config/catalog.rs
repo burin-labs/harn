@@ -7,6 +7,9 @@ use super::*;
 
 use harn_glob::match_name as glob_match;
 
+const LOGICAL_MODEL_DEFAULT_PREFIX: &str = "logical:";
+const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
+
 /// Get provider config for resolving base_url, auth, etc.
 pub fn provider_config(name: &str) -> Option<ProviderDef> {
     effective_config().providers.get(name).cloned()
@@ -26,15 +29,257 @@ pub fn provider_uses_acp(name: &str) -> bool {
 /// Matches glob patterns in model_defaults keys.
 pub fn model_params(model_id: &str) -> BTreeMap<String, toml::Value> {
     let config = effective_config();
+    matching_model_params(&config, model_id)
+}
+
+fn matching_model_params(
+    config: &ProvidersConfig,
+    model_id: &str,
+) -> BTreeMap<String, toml::Value> {
     let mut params = BTreeMap::new();
+    apply_matching_model_params(config, model_id, &mut params);
+    params
+}
+
+fn apply_matching_model_params(
+    config: &ProvidersConfig,
+    model_id: &str,
+    params: &mut BTreeMap<String, toml::Value>,
+) {
     for (pattern, defaults) in &config.model_defaults {
-        if glob_match(pattern, model_id) {
-            for (k, v) in defaults {
-                params.insert(k.clone(), v.clone());
+        if !pattern.starts_with(LOGICAL_MODEL_DEFAULT_PREFIX) && glob_match(pattern, model_id) {
+            apply_model_param_layer(params, defaults);
+        }
+    }
+}
+
+fn apply_model_param_layer(
+    params: &mut BTreeMap<String, toml::Value>,
+    defaults: &BTreeMap<String, toml::Value>,
+) {
+    for (key, value) in defaults {
+        if key != MODEL_DEFAULT_UNSET_KEY {
+            params.insert(key.clone(), value.clone());
+        }
+    }
+    if let Some(keys) = defaults
+        .get(MODEL_DEFAULT_UNSET_KEY)
+        .and_then(toml::Value::as_array)
+    {
+        for key in keys.iter().filter_map(toml::Value::as_str) {
+            params.remove(key);
+        }
+    }
+}
+
+/// Get generation defaults for one concrete serving route.
+///
+/// Publisher/model defaults use an exact `logical:<logical_model>` selector.
+/// Route-id patterns then override them, preserving the existing precedence
+/// where a provider-qualified pattern wins over a bare wire-model pattern.
+pub fn model_params_for_route(provider: &str, model_id: &str) -> BTreeMap<String, toml::Value> {
+    let config = effective_config();
+    model_params_for_route_with_config(&config, provider, model_id)
+}
+
+pub(crate) fn model_params_for_route_with_config(
+    config: &ProvidersConfig,
+    provider: &str,
+    model_id: &str,
+) -> BTreeMap<String, toml::Value> {
+    let normalized_id = normalize_model_id(model_id);
+    let route = config
+        .models
+        .get_key_value(model_id)
+        .filter(|(_, model)| model.provider == provider)
+        .or_else(|| {
+            config
+                .models
+                .get_key_value(&normalized_id)
+                .filter(|(_, model)| model.provider == provider)
+        })
+        .or_else(|| {
+            config.models.iter().find(|(_, model)| {
+                model.provider == provider
+                    && model
+                        .wire_model
+                        .as_deref()
+                        .is_some_and(|wire| wire == model_id || wire == normalized_id.as_str())
+            })
+        });
+
+    let mut params = route
+        .and_then(|(_, model)| model.logical_model.as_deref())
+        .and_then(|logical_model| {
+            config
+                .model_defaults
+                .get(&format!("{LOGICAL_MODEL_DEFAULT_PREFIX}{logical_model}"))
+        })
+        .map(|defaults| {
+            let mut params = BTreeMap::new();
+            apply_model_param_layer(&mut params, defaults);
+            params
+        })
+        .unwrap_or_default();
+
+    let mut identities = vec![model_id.to_string()];
+    if normalized_id != model_id {
+        identities.push(normalized_id);
+    }
+    if let Some((catalog_id, model)) = route {
+        for identity in [Some(catalog_id.as_str()), model.wire_model.as_deref()]
+            .into_iter()
+            .flatten()
+        {
+            if !identities.iter().any(|known| known == identity) {
+                identities.push(identity.to_string());
             }
         }
     }
+    for identity in &identities {
+        apply_matching_model_params(config, identity, &mut params);
+    }
+    let provider_prefix = format!("{provider}/");
+    for identity in identities {
+        if !identity.starts_with(&provider_prefix) {
+            apply_matching_model_params(
+                config,
+                &format!("{provider_prefix}{identity}"),
+                &mut params,
+            );
+        }
+    }
     params
+}
+
+/// Validate logical-model defaults against catalog identities and route caps.
+/// Route-specific patterns remain intentionally free-form for operator
+/// overrides; `logical:` selectors are publisher-level contracts and must be
+/// exact, typed, and representable by every route that inherits them.
+pub fn model_default_issues(config: &ProvidersConfig) -> Vec<String> {
+    let mut issues = Vec::new();
+    for (selector, defaults) in &config.model_defaults {
+        if let Some(unset) = defaults.get(MODEL_DEFAULT_UNSET_KEY) {
+            let valid = !selector.starts_with(LOGICAL_MODEL_DEFAULT_PREFIX)
+                && unset.as_array().is_some_and(|keys| {
+                    !keys.is_empty()
+                        && keys.iter().all(|key| {
+                            key.as_str()
+                                .is_some_and(is_supported_generation_default_key)
+                        })
+                });
+            if !valid {
+                issues.push(format!(
+                    "model_defaults.{selector}.{MODEL_DEFAULT_UNSET_KEY} must be a non-empty list of supported route-default keys"
+                ));
+            }
+        }
+        let Some(logical_model) = selector.strip_prefix(LOGICAL_MODEL_DEFAULT_PREFIX) else {
+            continue;
+        };
+        if logical_model.is_empty()
+            || logical_model.contains('*')
+            || logical_model.contains('?')
+            || logical_model.contains('[')
+        {
+            issues.push(format!(
+                "model_defaults.{selector} must name one exact logical model"
+            ));
+            continue;
+        }
+        let routes: Vec<_> = config
+            .models
+            .iter()
+            .filter(|(_, model)| model.logical_model.as_deref() == Some(logical_model))
+            .collect();
+        if routes.is_empty() {
+            issues.push(format!(
+                "model_defaults.{selector} references an unknown logical model"
+            ));
+            continue;
+        }
+
+        for (key, value) in defaults {
+            if key == MODEL_DEFAULT_UNSET_KEY {
+                continue;
+            }
+            let valid = match key.as_str() {
+                "temperature" => value
+                    .as_float()
+                    .is_some_and(|value| value.is_finite() && (0.0..=2.0).contains(&value)),
+                "frequency_penalty" | "presence_penalty" => value
+                    .as_float()
+                    .is_some_and(|value| value.is_finite() && (-2.0..=2.0).contains(&value)),
+                "top_p" => value
+                    .as_float()
+                    .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value)),
+                "top_k" => value.as_integer().is_some_and(|value| value >= 0),
+                "max_tokens" => value.as_integer().is_some_and(|value| value > 0),
+                "reasoning_effort" => value.as_str().is_some_and(|value| {
+                    matches!(
+                        value,
+                        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+                    )
+                }),
+                _ => false,
+            };
+            if !valid {
+                issues.push(format!(
+                    "model_defaults.{selector}.{key} is not a supported generation default"
+                ));
+                continue;
+            }
+
+            for (model_id, model) in &routes {
+                let caps = crate::llm::capabilities::lookup_with_user_overrides(
+                    &model.provider,
+                    model_id,
+                    None,
+                );
+                let supported = match key.as_str() {
+                    "temperature" => caps.temperature_supported,
+                    "top_p" => caps.top_p_supported,
+                    "top_k" => caps.top_k_supported,
+                    "frequency_penalty" => caps.frequency_penalty_supported,
+                    "presence_penalty" => caps.presence_penalty_supported,
+                    "reasoning_effort" => {
+                        let effort = value.as_str().expect("validated effort string");
+                        caps.reasoning_effort_supported
+                            && caps.thinking_modes.iter().any(|mode| mode == "effort")
+                            && (caps.reasoning_effort_levels.is_empty()
+                                || caps
+                                    .reasoning_effort_levels
+                                    .iter()
+                                    .any(|level| level == effort))
+                    }
+                    "max_tokens" => true,
+                    _ => false,
+                };
+                let effective =
+                    model_params_for_route_with_config(config, &model.provider, model_id);
+                if !supported && effective.contains_key(key) {
+                    issues.push(format!(
+                        "model_defaults.{selector}.{key} cannot be represented by route {}:{}",
+                        model.provider, model_id
+                    ));
+                }
+            }
+        }
+    }
+    issues
+}
+
+fn is_supported_generation_default_key(key: &str) -> bool {
+    matches!(
+        key,
+        "temperature"
+            | "top_p"
+            | "top_k"
+            | "frequency_penalty"
+            | "presence_penalty"
+            | "max_tokens"
+            | "reasoning_effort"
+    )
 }
 
 /// Get per-role LLM defaults, e.g. `[model_roles.merge]`.

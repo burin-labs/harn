@@ -161,7 +161,7 @@ pub(crate) fn extract_llm_options(
 
     // Apply providers.toml model_defaults as fallbacks for unspecified params
     // (e.g. presence_penalty=1.5 for Qwen to avoid repetition loops).
-    let model_defaults = crate::llm_config::model_params(&model);
+    let model_defaults = crate::llm_config::model_params_for_route(&provider, &model);
     let default_float =
         |key: &str| -> Option<f64> { model_defaults.get(key).and_then(|v| v.as_float()) };
     let default_int =
@@ -224,83 +224,14 @@ pub(crate) fn extract_llm_options(
         });
     let output_validation = opt_str(&options, "output_validation");
 
-    let reasoning_policy_application = crate::llm::reasoning_policy::resolve_for_llm_call(
+    let thinking = resolve_thinking_config(
         options.as_ref(),
+        &model_defaults,
         &provider,
         &model,
         &caps,
+        enforce_capability_gates,
     )?;
-    let thinking_from_reasoning_policy = reasoning_policy_application.is_some();
-    let policy_thinking = reasoning_policy_application
-        .as_ref()
-        .map(|application| application.thinking.clone());
-
-    let reasoning_effort = parse_reasoning_effort_option(options.as_ref())?;
-    let thinking_from_reasoning_effort = reasoning_effort.is_some()
-        && !options
-            .as_ref()
-            .and_then(|o| o.get("thinking"))
-            .is_some_and(|value| value.is_truthy());
-    let thinking = if let Some(level) = reasoning_effort {
-        if options
-            .as_ref()
-            .and_then(|o| o.get("thinking"))
-            .is_some_and(|value| value.is_truthy())
-        {
-            return Err(thinking_error(
-                "reasoning_effort cannot be combined with a non-disabled thinking option",
-            ));
-        }
-        crate::llm::api::ThinkingConfig::Effort { level }
-    } else if let Some(thinking) = policy_thinking {
-        thinking
-    } else {
-        parse_thinking_option(options.as_ref())?
-    };
-    let reasoning_effort_requires_provider_support = matches!(
-        thinking,
-        crate::llm::api::ThinkingConfig::Effort { level }
-            if level != crate::llm::api::ReasoningEffort::None
-    );
-    if enforce_capability_gates
-        && thinking_from_reasoning_effort
-        && reasoning_effort_requires_provider_support
-        && !caps.reasoning_effort_supported
-    {
-        return Err(unsupported_option_error(
-            "reasoning_effort",
-            &provider,
-            &model,
-        ));
-    }
-    if enforce_capability_gates {
-        validate_thinking_supported(
-            &thinking,
-            &provider,
-            &model,
-            &caps.thinking_modes,
-            if thinking_from_reasoning_effort {
-                "reasoning_effort"
-            } else if thinking_from_reasoning_policy {
-                "reasoning_policy"
-            } else {
-                "thinking"
-            },
-        )?;
-        validate_reasoning_effort_level_supported(
-            &thinking,
-            &provider,
-            &model,
-            &caps,
-            if thinking_from_reasoning_effort {
-                "reasoning_effort"
-            } else if thinking_from_reasoning_policy {
-                "reasoning_policy"
-            } else {
-                "thinking"
-            },
-        )?;
-    }
     let mut anthropic_beta_features = parse_anthropic_beta_features_option(
         options.as_ref(),
         &thinking,

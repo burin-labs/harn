@@ -1,0 +1,27 @@
+# Generation defaults are inherited when a call does not set the option.
+# Exact route patterns may override publisher defaults selected through
+# `logical:<logical_model>`.
+
+# OpenAI's GPT-OSS reference configuration recommends neutral sampling and
+# high reasoning effort for maximum coding/reasoning quality. Every hosted
+# route below shares `logical_model = "openai-gpt-oss-120b"`; provider-specific
+# wire translation remains owned by the capability registry.
+# https://huggingface.co/openai/gpt-oss-120b/discussions/21
+[model_defaults."logical:openai-gpt-oss-120b"]
+temperature = 1.0
+top_p = 1.0
+reasoning_effort = "high"
+
+# Baseten's managed GPT-OSS route does not expose nucleus sampling. Keep the
+# remaining logical defaults while omitting the unsupported field at the route
+# boundary. https://docs.baseten.co/inference/model-apis/overview
+[model_defaults."baseten/openai/gpt-oss-120b"]
+_unset = ["top_p"]
+
+# Groq compound systems publish an 8192-token completion ceiling.
+[model_defaults."groq/compound*"]
+max_tokens = 8192
+
+# Moonshot's direct Kimi K2.5 route accepts only temperature 1.
+[model_defaults."moonshot/kimi-k2.5"]
+temperature = 1.0

@@ -45,6 +45,158 @@ pub(super) fn parse_reasoning_effort_option(
     }
 }
 
+#[derive(Clone, Copy)]
+enum ThinkingSource {
+    ReasoningEffort,
+    ReasoningPolicy,
+    Thinking,
+}
+
+impl ThinkingSource {
+    fn option_name(self) -> &'static str {
+        match self {
+            Self::ReasoningEffort => "reasoning_effort",
+            Self::ReasoningPolicy => "reasoning_policy",
+            Self::Thinking => "thinking",
+        }
+    }
+}
+
+fn default_reasoning_effort(
+    model_defaults: &std::collections::BTreeMap<String, toml::Value>,
+) -> Result<Option<crate::llm::api::ReasoningEffort>, VmError> {
+    let Some(raw) = model_defaults.get("reasoning_effort") else {
+        return Ok(None);
+    };
+    let Some(level) = raw.as_str() else {
+        return Err(thinking_error(
+            "model_defaults.reasoning_effort: expected a string",
+        ));
+    };
+    parse_reasoning_effort_field("model_defaults.reasoning_effort", level).map(Some)
+}
+
+/// Resolve one effective provider-agnostic thinking shape.
+///
+/// Explicit call options and reasoning policy own the decision. Catalog
+/// defaults apply only when neither surface made a choice, then pass through
+/// the same capability and supported-level validation as explicit effort.
+pub(crate) fn resolve_thinking_config(
+    options: Option<&crate::value::DictMap>,
+    model_defaults: &std::collections::BTreeMap<String, toml::Value>,
+    provider: &str,
+    model: &str,
+    caps: &crate::llm::capabilities::Capabilities,
+    enforce_capability_gates: bool,
+) -> Result<crate::llm::api::ThinkingConfig, VmError> {
+    let policy =
+        crate::llm::reasoning_policy::resolve_for_llm_call(options, provider, model, caps)?;
+    resolve_thinking_config_with_policy(
+        options,
+        model_defaults,
+        provider,
+        model,
+        caps,
+        enforce_capability_gates,
+        policy,
+    )
+}
+
+/// Resolve catalog defaults without inheriting ambient session policy.
+pub(crate) fn resolve_catalog_thinking_config(
+    model_defaults: &std::collections::BTreeMap<String, toml::Value>,
+    provider: &str,
+    model: &str,
+    caps: &crate::llm::capabilities::Capabilities,
+    enforce_capability_gates: bool,
+) -> Result<crate::llm::api::ThinkingConfig, VmError> {
+    resolve_thinking_config_with_policy(
+        None,
+        model_defaults,
+        provider,
+        model,
+        caps,
+        enforce_capability_gates,
+        None,
+    )
+}
+
+fn resolve_thinking_config_with_policy(
+    options: Option<&crate::value::DictMap>,
+    model_defaults: &std::collections::BTreeMap<String, toml::Value>,
+    provider: &str,
+    model: &str,
+    caps: &crate::llm::capabilities::Capabilities,
+    enforce_capability_gates: bool,
+    policy: Option<crate::llm::reasoning_policy::ReasoningPolicyApplication>,
+) -> Result<crate::llm::api::ThinkingConfig, VmError> {
+    let explicit_effort = parse_reasoning_effort_option(options)?;
+    let has_reasoning_option = options.is_some_and(|opts| opts.contains_key("reasoning_effort"));
+    let has_thinking_option = options.is_some_and(|opts| opts.contains_key("thinking"));
+    let catalog_effort = if explicit_effort.is_none()
+        && !has_reasoning_option
+        && !has_thinking_option
+        && policy.is_none()
+    {
+        default_reasoning_effort(model_defaults)?
+    } else {
+        None
+    };
+    let reasoning_effort = explicit_effort.or(catalog_effort);
+    let (thinking, source) = if let Some(level) = reasoning_effort {
+        if options
+            .and_then(|opts| opts.get("thinking"))
+            .is_some_and(|value| value.is_truthy())
+        {
+            return Err(thinking_error(
+                "reasoning_effort cannot be combined with a non-disabled thinking option",
+            ));
+        }
+        (
+            crate::llm::api::ThinkingConfig::Effort { level },
+            ThinkingSource::ReasoningEffort,
+        )
+    } else if let Some(application) = policy {
+        (application.thinking, ThinkingSource::ReasoningPolicy)
+    } else {
+        (parse_thinking_option(options)?, ThinkingSource::Thinking)
+    };
+
+    let effort_requires_provider_support = matches!(
+        thinking,
+        crate::llm::api::ThinkingConfig::Effort { level }
+            if level != crate::llm::api::ReasoningEffort::None
+    );
+    if enforce_capability_gates
+        && matches!(source, ThinkingSource::ReasoningEffort)
+        && effort_requires_provider_support
+        && !caps.reasoning_effort_supported
+    {
+        return Err(unsupported_option_error(
+            source.option_name(),
+            provider,
+            model,
+        ));
+    }
+    if enforce_capability_gates {
+        validate_thinking_supported(
+            &thinking,
+            provider,
+            model,
+            &caps.thinking_modes,
+            source.option_name(),
+        )?;
+        validate_reasoning_effort_level_supported(
+            &thinking,
+            provider,
+            model,
+            caps,
+            source.option_name(),
+        )?;
+    }
+    Ok(thinking)
+}
+
 pub(super) fn parse_thinking_budget(raw: Option<&VmValue>) -> Result<Option<u32>, VmError> {
     let Some(raw) = raw else {
         return Ok(None);

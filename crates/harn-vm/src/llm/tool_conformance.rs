@@ -10,10 +10,14 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat, ThinkingConfig};
-use crate::llm::capabilities::WireDialect;
 use crate::llm_config::{self, ProviderDef};
 use crate::value::VmValue;
+
+#[path = "tool_conformance_request.rs"]
+mod request;
+use request::probe_request_body;
+#[cfg(test)]
+use request::probe_request_payload;
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
@@ -399,7 +403,16 @@ async fn execute_live_probe_case(
             );
         }
     };
-    let body = probe_request_body(provider, model, mode, marker);
+    let body = match probe_request_body(provider, model, mode, marker) {
+        Ok(body) => body,
+        Err(message) => {
+            return ToolConformanceCase::transport_error(
+                mode,
+                message,
+                Some(elapsed_ms(&*clock, started_ms)),
+            );
+        }
+    };
     let client = if mode == ToolProbeMode::Streaming {
         crate::llm::shared_streaming_client().clone()
     } else {
@@ -605,120 +618,6 @@ fn chat_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
     reqwest::Url::parse(&url)
         .map(|_| url.clone())
         .map_err(|error| format!("invalid provider chat URL '{url}': {error}"))
-}
-
-fn probe_request_body(provider: &str, model: &str, mode: ToolProbeMode, marker: &str) -> Value {
-    let payload = probe_request_payload(provider, model, mode, marker);
-    provider_compatible_probe_request_body(&payload)
-}
-
-fn probe_request_payload(
-    provider: &str,
-    model: &str,
-    mode: ToolProbeMode,
-    marker: &str,
-) -> LlmRequestPayload {
-    let model_defaults = probe_model_defaults(provider, model);
-    let default_float =
-        |key: &str| -> Option<f64> { model_defaults.get(key).and_then(|v| v.as_float()) };
-    let default_int =
-        |key: &str| -> Option<i64> { model_defaults.get(key).and_then(|v| v.as_integer()) };
-    let prompt = format!(
-        "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once with value {marker:?}. Do not answer in prose."
-    );
-    let native_tools =
-        crate::llm::tools::vm_tools_to_native(&probe_tool_registry(), provider, model)
-            .expect("tool probe registry is static and should convert to native tools");
-    let tool_choice = if crate::llm::provider::provider_uses_ollama_messages(provider, model) {
-        None
-    } else {
-        Some(json!({
-            "type": "function",
-            "function": {"name": TOOL_PROBE_TOOL_NAME}
-        }))
-    };
-    LlmRequestPayload {
-        provider: provider.to_string(),
-        model: model.to_string(),
-        region: None,
-        api_key: String::new(),
-        api_mode: LlmApiMode::ChatCompletions,
-        messages: vec![json!({"role": "user", "content": prompt})],
-        system: None,
-        max_tokens: default_int("max_tokens").unwrap_or(256),
-        temperature: Some(default_float("temperature").unwrap_or(0.0)),
-        top_p: default_float("top_p"),
-        top_k: default_int("top_k"),
-        logprobs: false,
-        top_logprobs: None,
-        stop: None,
-        seed: None,
-        frequency_penalty: None,
-        presence_penalty: None,
-        fast: false,
-        output_format: OutputFormat::Text,
-        response_format: None,
-        json_schema: None,
-        output_schema: None,
-        schema_stream_abort: false,
-        thinking: ThinkingConfig::Disabled,
-        anthropic_beta_features: Vec::new(),
-        vision: false,
-        native_tools: Some(native_tools),
-        provider_tools: Vec::new(),
-        tool_choice,
-        cache: false,
-        prompt_cache_ttl: None,
-        timeout: None,
-        stream: mode == ToolProbeMode::Streaming,
-        provider_overrides: None,
-        previous_response_id: None,
-        store: None,
-        background: None,
-        truncation: None,
-        compact: None,
-        include: None,
-        max_tool_calls: None,
-        prefill: None,
-        session_id: None,
-        reminder_lifecycle: Vec::new(),
-        cli_llm_mock_scope: None,
-    }
-}
-
-fn probe_model_defaults(provider: &str, model: &str) -> BTreeMap<String, toml::Value> {
-    let mut defaults = llm_config::model_params(model);
-    let qualified = format!("{provider}/{model}");
-    if qualified != model {
-        defaults.extend(llm_config::model_params(&qualified));
-    }
-    defaults
-}
-
-fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value {
-    match payload.provider.as_str() {
-        "azure_openai" => {
-            return crate::llm::providers::AzureOpenAiProvider::build_request_body(payload);
-        }
-        "bedrock" => {
-            return crate::llm::providers::BedrockProvider::build_request_body(payload);
-        }
-        "vertex" => {
-            return crate::llm::providers::VertexProvider::build_request_body(payload);
-        }
-        _ => {}
-    }
-
-    match crate::llm::capabilities::lookup(&payload.provider, &payload.model).message_wire_format {
-        WireDialect::Anthropic => {
-            crate::llm::providers::AnthropicProvider::build_request_body(payload)
-        }
-        WireDialect::Gemini => crate::llm::providers::GeminiProvider::build_request_body(payload),
-        WireDialect::Ollama => crate::llm::providers::OllamaProvider::build_request_body(payload),
-        WireDialect::OpenAiCompat => {
-            crate::llm::providers::OpenAiCompatibleProvider::build_request_body(payload, false)
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -1145,7 +1044,8 @@ mod tests {
             "wire-model",
             ToolProbeMode::NonStreaming,
             DEFAULT_TOOL_PROBE_MARKER,
-        );
+        )
+        .expect("probe payload");
 
         assert_eq!(payload.max_tokens, 321);
         assert_eq!(payload.temperature, Some(1.0));
@@ -1162,7 +1062,8 @@ mod tests {
             "claude-sonnet-4-6",
             ToolProbeMode::NonStreaming,
             DEFAULT_TOOL_PROBE_MARKER,
-        );
+        )
+        .expect("Anthropic probe body");
 
         assert_eq!(
             body["tools"][0]["name"], TOOL_PROBE_TOOL_NAME,
@@ -1190,7 +1091,8 @@ mod tests {
             "gpt-5.4-mini",
             ToolProbeMode::NonStreaming,
             DEFAULT_TOOL_PROBE_MARKER,
-        );
+        )
+        .expect("OpenAI probe body");
 
         assert_eq!(body["tools"][0]["type"], "function");
         assert_eq!(body["tools"][0]["function"]["name"], TOOL_PROBE_TOOL_NAME);
@@ -1207,7 +1109,8 @@ mod tests {
             "gemini-2.5-pro",
             ToolProbeMode::NonStreaming,
             DEFAULT_TOOL_PROBE_MARKER,
-        );
+        )
+        .expect("Gemini probe body");
         assert_eq!(
             body["tools"][0]["functionDeclarations"][0]["name"],
             TOOL_PROBE_TOOL_NAME
