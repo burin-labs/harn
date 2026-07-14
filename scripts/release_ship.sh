@@ -570,6 +570,11 @@ capture_prepare_tree() {
     GIT_INDEX_FILE="$index_path" git update-index --no-assume-unchanged -z --stdin
   GIT_INDEX_FILE="$index_path" git ls-files -z |
     GIT_INDEX_FILE="$index_path" git update-index --no-skip-worktree -z --stdin
+  # Record deletions before renormalization. `git add --renormalize -u` can
+  # still try to stat paths that were tracked in the copied index but deleted by
+  # prepare-time folding, which masks the real release failure with a secondary
+  # "unable to stat" diagnostic.
+  GIT_INDEX_FILE="$index_path" git add -u -- .
   GIT_INDEX_FILE="$index_path" git add --renormalize -u -- .
   GIT_INDEX_FILE="$index_path" git add -A -- .
   GIT_INDEX_FILE="$index_path" git write-tree
@@ -591,7 +596,9 @@ prepare_transaction_exit() {
   if [[ "$PREPARE_TXN_ARMED" -eq 1 ]]; then
     rollback_prepare_transaction || {
       echo "error: failed to restore the pre-prepare release tree" >&2
-      rc=1
+      if [[ "$rc" -eq 0 ]]; then
+        rc=1
+      fi
     }
   fi
   rm -f "$PREPARE_TXN_INDEX" "$PREPARE_TXN_ORIGINAL_INDEX" "$PREPARE_TXN_PATCH"

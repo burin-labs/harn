@@ -411,6 +411,12 @@ if [[ -s "$record_make" || -s "$record_ship" ]]; then
 fi
 
 git -C "$release_root" reset --hard --quiet HEAD
+mkdir -p "$release_root/changelog.d"
+printf '*.md text eol=lf\n' > "$release_root/.gitattributes"
+printf 'rollback masker regression\n' > "$release_root/changelog.d/rollback-masker.fixed.md"
+git -C "$release_root" add .gitattributes changelog.d/rollback-masker.fixed.md
+git -C "$release_root" commit --quiet -m "add tracked changelog fragment"
+rm "$release_root/changelog.d/rollback-masker.fixed.md"
 printf '\n- authored before failed prepare\n' >> "$release_root/CHANGELOG.md"
 git -C "$release_root" add CHANGELOG.md
 printf '\nunstaged authored note\n' >> "$release_root/docs/src/embedding-rust.md"
@@ -425,7 +431,8 @@ baseline_status="$tmp_root/prepare-baseline.status"
 git -C "$release_root" status --porcelain=v1 > "$baseline_status"
 : > "$record_make"
 : > "$record_ship"
-if HARN_RELEASE_ROOT="$release_root" \
+set +e
+HARN_RELEASE_ROOT="$release_root" \
   HARN_RELEASE_HARNESS=1 \
   HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
   CARGO_TARGET_DIR="$target_dir" \
@@ -436,8 +443,27 @@ if HARN_RELEASE_ROOT="$release_root" \
   PATH="$fake_bin:$PATH" \
     "$repo_root/scripts/release_ship.sh" \
       --prepare --bump patch --skip-dry-run \
-      > "$tmp_root/ship-rollback.txt" 2>&1; then
+      > "$tmp_root/ship-rollback.txt" 2>&1
+rollback_rc=$?
+set -e
+if [[ "$rollback_rc" -eq 0 ]]; then
   echo "release_ship unexpectedly passed injected post-generation audit failure" >&2
+  exit 1
+fi
+if [[ "$rollback_rc" -ne 9 ]]; then
+  echo "release_ship did not preserve the original audit failure status" >&2
+  echo "status: $rollback_rc" >&2
+  cat "$tmp_root/ship-rollback.txt" >&2
+  exit 1
+fi
+if ! grep -Fq "injected release audit failure" "$tmp_root/ship-rollback.txt"; then
+  echo "release_ship output did not include the original audit failure" >&2
+  cat "$tmp_root/ship-rollback.txt" >&2
+  exit 1
+fi
+if grep -Fq "unable to stat" "$tmp_root/ship-rollback.txt"; then
+  echo "release_ship rollback masked the audit failure with a deleted-fragment stat error" >&2
+  cat "$tmp_root/ship-rollback.txt" >&2
   exit 1
 fi
 after_diff="$tmp_root/prepare-after.diff"
