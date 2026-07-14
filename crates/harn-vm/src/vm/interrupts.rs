@@ -148,6 +148,15 @@ impl Vm {
     }
 
     pub(crate) async fn pending_scope_interrupt(&mut self) -> Option<VmError> {
+        if self
+            .execution_deadline
+            .current()
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.cancel_spawned_tasks();
+            return Some(VmError::ExecutionDeadlineExceeded);
+        }
+
         let mut pending_from_host = false;
         if self.pending_interrupt_signal.is_none() {
             self.pending_interrupt_signal = self.take_host_interrupt_signal();

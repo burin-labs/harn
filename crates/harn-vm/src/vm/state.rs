@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -25,6 +26,72 @@ pub(crate) struct ScopeSpan(u64);
 impl ScopeSpan {
     pub(crate) fn new(kind: crate::tracing::SpanKind, name: String) -> Self {
         Self(crate::tracing::span_start(kind, name))
+    }
+}
+
+/// Cancellation-safe host deadline state. The guard owns the shared state so
+/// dropping an in-flight `execute_with_timeout` future restores the previous
+/// deadline even though that future still holds `&mut Vm`.
+pub(crate) struct ExecutionDeadlineState {
+    origin: Instant,
+    /// Nanoseconds from `origin`, plus one so zero remains the inactive value.
+    deadline_offset: AtomicU64,
+}
+
+impl ExecutionDeadlineState {
+    pub(crate) fn new(origin: Instant, deadline: Option<Instant>) -> Arc<Self> {
+        Arc::new(Self {
+            origin,
+            deadline_offset: AtomicU64::new(Self::encode(origin, deadline)),
+        })
+    }
+
+    #[inline]
+    pub(crate) fn is_active(&self) -> bool {
+        self.deadline_offset.load(Ordering::Acquire) != 0
+    }
+
+    pub(crate) fn current(&self) -> Option<Instant> {
+        let encoded = self.deadline_offset.load(Ordering::Acquire);
+        (encoded != 0)
+            .then(|| self.origin + std::time::Duration::from_nanos(encoded.saturating_sub(1)))
+    }
+
+    pub(crate) fn install(self: &Arc<Self>, deadline: Instant) -> ExecutionDeadlineGuard {
+        let previous = self.deadline_offset.load(Ordering::Acquire);
+        let requested = Self::encode(self.origin, Some(deadline));
+        let active = if previous == 0 {
+            requested
+        } else {
+            previous.min(requested)
+        };
+        self.deadline_offset.store(active, Ordering::Release);
+        ExecutionDeadlineGuard {
+            state: Arc::clone(self),
+            previous,
+        }
+    }
+
+    fn encode(origin: Instant, deadline: Option<Instant>) -> u64 {
+        deadline.map_or(0, |deadline| {
+            let nanos = deadline.saturating_duration_since(origin).as_nanos();
+            u64::try_from(nanos)
+                .unwrap_or(u64::MAX - 1)
+                .saturating_add(1)
+        })
+    }
+}
+
+pub(crate) struct ExecutionDeadlineGuard {
+    state: Arc<ExecutionDeadlineState>,
+    previous: u64,
+}
+
+impl Drop for ExecutionDeadlineGuard {
+    fn drop(&mut self) {
+        self.state
+            .deadline_offset
+            .store(self.previous, Ordering::Release);
     }
 }
 
@@ -255,6 +322,8 @@ pub struct Vm {
     pub(crate) runtime_context: crate::runtime_context::RuntimeContext,
     /// Active deadline stack: (deadline_instant, frame_depth).
     pub(crate) deadlines: Vec<(Instant, usize)>,
+    /// Uncatchable wall-clock deadline imposed by the embedding host.
+    pub(crate) execution_deadline: Arc<ExecutionDeadlineState>,
     /// Breakpoints, keyed by source-file path so a breakpoint at line N
     /// in `auto.harn` doesn't also fire when execution hits line N in an
     /// imported lib. The empty-string key is a wildcard used by callers
@@ -414,6 +483,7 @@ impl VmBaseline {
             runtime_context_counter: 0,
             runtime_context: crate::runtime_context::RuntimeContext::root(),
             deadlines: Vec::new(),
+            execution_deadline: super::execution::new_execution_deadline_state(None),
             breakpoints: BTreeMap::new(),
             function_breakpoints: std::collections::BTreeSet::new(),
             pending_function_bp: None,
@@ -654,6 +724,7 @@ impl Vm {
             runtime_context_counter: 0,
             runtime_context: crate::runtime_context::RuntimeContext::root(),
             deadlines: Vec::new(),
+            execution_deadline: super::execution::new_execution_deadline_state(None),
             breakpoints: BTreeMap::new(),
             function_breakpoints: std::collections::BTreeSet::new(),
             pending_function_bp: None,
@@ -817,6 +888,9 @@ impl Vm {
             runtime_context_counter: self.runtime_context_counter,
             runtime_context: self.runtime_context.clone(),
             deadlines: self.deadlines.clone(),
+            execution_deadline: super::execution::new_execution_deadline_state(
+                self.execution_deadline.current(),
+            ),
             breakpoints: BTreeMap::new(),
             function_breakpoints: std::collections::BTreeSet::new(),
             pending_function_bp: None,

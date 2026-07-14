@@ -4,12 +4,35 @@ use std::time::{Duration, Instant};
 use crate::chunk::{Chunk, ChunkRef, Op};
 use crate::value::{ModuleFunctionRegistry, VmError, VmValue};
 
+use super::state::ExecutionDeadlineState;
 use super::{CallFrame, LocalSlot, Vm};
 
 const CANCEL_GRACE_ASYNC_OP: Duration = Duration::from_millis(250);
 
+pub(super) fn new_execution_deadline_state(
+    deadline: Option<Instant>,
+) -> Arc<ExecutionDeadlineState> {
+    ExecutionDeadlineState::new(Instant::now(), deadline)
+}
+
+#[cfg(test)]
+thread_local! {
+    static SCOPE_INTERRUPT_ASYNC_DISPATCHES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn reset_scope_interrupt_async_dispatches() {
+    SCOPE_INTERRUPT_ASYNC_DISPATCHES.set(0);
+}
+
+#[cfg(test)]
+pub(super) fn scope_interrupt_async_dispatches() -> u64 {
+    SCOPE_INTERRUPT_ASYNC_DISPATCHES.get()
+}
+
 #[derive(Clone, Copy)]
 enum DeadlineKind {
+    Execution,
     Scope,
     InterruptHandler,
 }
@@ -27,6 +50,7 @@ impl Vm {
             && self.interrupt_signal_token.is_none()
             && self.pending_interrupt_signal.is_none()
             && self.interrupt_handler_deadline.is_none()
+            && !self.execution_deadline.is_active()
             && self.deadlines.is_empty()
     }
 
@@ -40,6 +64,23 @@ impl Vm {
     /// per-execution deep copy of the bytecode + constant pool.
     pub async fn execute(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
         self.execute_arc(Arc::new(chunk.clone())).await
+    }
+
+    /// Execute a compiled chunk under an uncatchable host wall-clock limit.
+    ///
+    /// This is distinct from Harn's catchable `deadline` expression: test
+    /// runners and embedding hosts must be able to stop CPU-bound user code
+    /// even when it never yields to the async runtime.
+    pub async fn execute_with_timeout(
+        &mut self,
+        chunk: &Chunk,
+        timeout: Duration,
+    ) -> Result<VmValue, VmError> {
+        let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
+            VmError::Runtime("execution timeout exceeds the platform clock range".to_string())
+        })?;
+        let _deadline_guard = self.execution_deadline.install(deadline);
+        self.execute(chunk).await
     }
 
     /// Execute a shared compiled chunk without cloning its bytecode.
@@ -196,6 +237,9 @@ impl Vm {
 
     /// Convert a VmError into either a handled exception (returning Ok) or a propagated error.
     pub(crate) fn handle_error(&mut self, error: VmError) -> Result<Option<VmValue>, VmError> {
+        if matches!(error, VmError::ExecutionDeadlineExceeded) {
+            return Err(error);
+        }
         let thrown_value = error.thrown_value();
 
         if let Some(handler) = self.exception_handlers.pop() {
@@ -399,21 +443,18 @@ impl Vm {
             }
             frame.ip += 1;
 
-            // Sync/async split dispatch: skip the `execute_op` async fn
-            // (a per-iteration `Future` state machine over ~80 match arms)
-            // and the `tokio::select!` deadline/cancel wrapper whenever
-            // the VM has no interrupt machinery armed. Only call/iter/
-            // pipe/parallel/import/yield opcodes still need an `.await`.
-            let op_result: Result<(), VmError> = if self.scope_interrupts_clean() {
-                let op = match Op::from_byte(op_byte) {
-                    Some(op) => op,
-                    None => return Err(VmError::InvalidInstruction(op_byte)),
-                };
-                if let Some(result) = self.execute_op_sync(op) {
-                    result
-                } else {
-                    self.execute_op_async(op).await
-                }
+            // Sync/async split dispatch: sync opcodes stay on the direct hot
+            // path even while a host deadline is armed. The instruction-boundary
+            // check above makes CPU-bound code interruptible without paying for
+            // a future and `tokio::select!` on every arithmetic/local opcode.
+            let op = match Op::from_byte(op_byte) {
+                Some(op) => op,
+                None => return Err(VmError::InvalidInstruction(op_byte)),
+            };
+            let op_result: Result<(), VmError> = if let Some(result) = self.execute_op_sync(op) {
+                result
+            } else if self.scope_interrupts_clean() {
+                self.execute_op_async(op).await
             } else {
                 match self.execute_op_with_scope_interrupts(op_byte).await {
                     Ok(Some(val)) => return Ok(val),
@@ -599,17 +640,21 @@ impl Vm {
 }
 
 fn next_deadline(
+    execution_deadline: Option<Instant>,
     scope_deadline: Option<Instant>,
     interrupt_handler_deadline: Option<Instant>,
 ) -> (Option<Instant>, Option<DeadlineKind>) {
-    match (scope_deadline, interrupt_handler_deadline) {
-        (Some(scope), Some(interrupt)) if interrupt < scope => {
-            (Some(interrupt), Some(DeadlineKind::InterruptHandler))
-        }
-        (Some(scope), _) => (Some(scope), Some(DeadlineKind::Scope)),
-        (None, Some(interrupt)) => (Some(interrupt), Some(DeadlineKind::InterruptHandler)),
-        (None, None) => (None, None),
-    }
+    [
+        (execution_deadline, DeadlineKind::Execution),
+        (scope_deadline, DeadlineKind::Scope),
+        (interrupt_handler_deadline, DeadlineKind::InterruptHandler),
+    ]
+    .into_iter()
+    .filter_map(|(deadline, kind)| deadline.map(|deadline| (deadline, kind)))
+    .min_by_key(|(deadline, _)| *deadline)
+    .map_or((None, None), |(deadline, kind)| {
+        (Some(deadline), Some(kind))
+    })
 }
 
 fn step_runtime_error_message(error: &VmError) -> String {
@@ -706,6 +751,10 @@ impl crate::vm::Vm {
         &mut self,
         op: u8,
     ) -> Result<Option<VmValue>, VmError> {
+        #[cfg(test)]
+        SCOPE_INTERRUPT_ASYNC_DISPATCHES
+            .set(SCOPE_INTERRUPT_ASYNC_DISPATCHES.get().saturating_add(1));
+
         enum ScopeInterruptResult {
             Op(Result<Option<VmValue>, VmError>),
             Deadline(DeadlineKind),
@@ -713,6 +762,7 @@ impl crate::vm::Vm {
         }
 
         let (deadline, deadline_kind) = next_deadline(
+            self.execution_deadline.current(),
             self.deadlines.last().map(|(deadline, _)| *deadline),
             self.interrupt_handler_deadline,
         );
@@ -765,6 +815,10 @@ impl crate::vm::Vm {
 
         match result {
             ScopeInterruptResult::Op(result) => result,
+            ScopeInterruptResult::Deadline(DeadlineKind::Execution) => {
+                self.cancel_spawned_tasks();
+                Err(VmError::ExecutionDeadlineExceeded)
+            }
             ScopeInterruptResult::Deadline(DeadlineKind::Scope) => {
                 self.deadlines.pop();
                 self.cancel_spawned_tasks();
@@ -858,5 +912,81 @@ impl crate::vm::Vm {
             // - StackUnderflow / InvalidInstruction: internal VM bugs
             other => other,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler::Compiler;
+    use crate::stdlib::register_vm_stdlib;
+    use harn_lexer::Lexer;
+    use harn_parser::Parser;
+
+    fn compile_harn(source: &str) -> Chunk {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        Compiler::new().compile(&program).unwrap()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dropping_timed_execution_restores_host_deadline() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let slow = compile_harn("pipeline default() { sleep(5s) }");
+                let quick = compile_harn("pipeline default() { return 42 }");
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+
+                let mut execution =
+                    Box::pin(vm.execute_with_timeout(&slow, Duration::from_secs(30)));
+                tokio::select! {
+                    result = &mut execution => panic!("slow execution unexpectedly finished: {result:?}"),
+                    () = tokio::task::yield_now() => {}
+                }
+                drop(execution);
+
+                assert!(!vm.execution_deadline.is_active());
+                let value = vm.execute(&quick).await.unwrap();
+                assert!(matches!(value, VmValue::Int(42)));
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn timed_finite_loop_keeps_sync_opcodes_on_direct_dispatch() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let chunk = compile_harn(
+                    r"
+pipeline default() {
+  let total = 0
+  for i in 0 to 10000 {
+    total = total + i
+  }
+  return total
+}
+",
+                );
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                reset_scope_interrupt_async_dispatches();
+
+                let value = vm
+                    .execute_with_timeout(&chunk, Duration::from_secs(1))
+                    .await
+                    .unwrap();
+
+                assert!(matches!(value, VmValue::Int(_)));
+                assert!(
+                    scope_interrupt_async_dispatches() <= 4,
+                    "finite sync loop fell back to per-op async dispatch"
+                );
+            })
+            .await;
     }
 }

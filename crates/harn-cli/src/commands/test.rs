@@ -2005,11 +2005,7 @@ fn user_test_report_from_summary(
     for result in &summary.results {
         let outcome = if result.passed {
             TestOutcome::Passed
-        } else if result
-            .error
-            .as_deref()
-            .is_some_and(|msg| msg.starts_with("timed out after"))
-        {
+        } else if result.timeout.is_some() {
             TestOutcome::TimedOut
         } else {
             TestOutcome::Failed
@@ -2165,7 +2161,6 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
         agg.collection_ms, agg.setup_ms, agg.compile_ms, agg.execute_ms, agg.teardown_ms,
     );
 }
-
 async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_runner::TestSummary {
     let options = test_runner::RunOptions {
         filter: args.filter.map(str::to_owned),
@@ -2179,6 +2174,8 @@ async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_run
         cli_skill_dirs: args.cli_skill_dirs.to_vec(),
         progress: Some(user_test_progress(args.verbose)),
         diagnose: args.diagnose,
+        #[cfg(test)]
+        setup_delay_ms: 0,
     };
     let summary = test_runner::run_tests_with_options(path, &options).await;
     print_test_results(
@@ -2190,7 +2187,6 @@ async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_run
     );
     summary
 }
-
 pub(crate) async fn run_user_tests(
     path_str: &str,
     args: UserTestRunArgs<'_>,
