@@ -47,7 +47,9 @@
 //!   (empty for text-format local models); `parsed_tool_calls` is the
 //!   merged view (native when present, otherwise the calls parsed out of
 //!   the inline tagged `<tool_call>` blocks in `text`) so the record is
-//!   self-describing for text-format runs. Also carries diagnostics
+//!   self-describing for text-format runs. `raw_tool_calls` is present only
+//!   when the provider supplied native object receipts before normalization;
+//!   dispatch continues to use `tool_calls`. Also carries diagnostics
 //!   `{cost_usd, cache_* (cache_read_tokens, cache_write_tokens,
 //!   cache_creation_input_tokens, cache_hit_ratio, cache_savings_usd,
 //!   cache_hit), thinking, thinking_summary, provider_telemetry,
@@ -75,6 +77,8 @@ use super::api::{
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
 use super::agent_tools::next_call_id;
+
+mod raw_tool_receipts;
 
 thread_local! {
     /// Last-emitted hash for the current transcript's system prompt and
@@ -1677,21 +1681,6 @@ fn should_emit_context_token_breakdown_checkpoint(opts: &super::api::LlmCallOpti
 /// not dropped). By the time the result reaches this function `text` has
 /// already been canonicalized from any `[[CALL]]` wire form back to
 /// `<tool_call>`, so the tagged parser sees the calls.
-///
-/// Observability-only: this is read off the existing `result` + `tools`
-/// and does not flow back into the request-construction / history path, so
-/// the model's next-turn payload is byte-identical with or without this
-/// call.
-fn merged_tool_calls_for_observability(
-    result: &super::api::LlmResult,
-    tools: Option<&crate::value::VmValue>,
-) -> Vec<serde_json::Value> {
-    if !result.tool_calls.is_empty() {
-        return result.tool_calls.clone();
-    }
-    crate::llm::tools::parse_text_tool_calls_with_tools(&result.text, tools).calls
-}
-
 pub(super) fn dump_llm_response(
     iteration: usize,
     call_id: &str,
@@ -1706,7 +1695,7 @@ pub(super) fn dump_llm_response(
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
     let telemetry = serde_json::to_value(&result.telemetry).unwrap_or(serde_json::Value::Null);
-    let parsed_tool_calls = merged_tool_calls_for_observability(result, tools);
+    let parsed_tool_calls = raw_tool_receipts::merged_tool_calls_for_observability(result, tools);
     let mut event = serde_json::json!({
         "type": "provider_call_response",
         "iteration": iteration,
@@ -1768,16 +1757,7 @@ pub(super) fn dump_llm_response(
         "provider_telemetry": telemetry,
         "structural_experiment": structural_experiment,
     });
-    if !result.raw_tool_calls.is_empty() {
-        event["raw_tool_calls"] = serde_json::Value::Array(
-            result
-                .raw_tool_calls
-                .iter()
-                .cloned()
-                .map(super::api::RawProviderToolCall::into_value)
-                .collect(),
-        );
-    }
+    raw_tool_receipts::project_onto_event(&mut event, result);
     append_llm_transcript_entry(&event);
 }
 
@@ -3245,87 +3225,6 @@ mod retry_tests {
             ),
             other => panic!("tool_calls must be a list, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn response_record_retains_raw_provider_tool_calls() {
-        let result = parsed_wrapped_text_tool_call_result();
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-        dump_llm_response(0, "call-raw", &result, 42, None, None);
-        pop_llm_transcript_dir();
-
-        let transcript = std::fs::read_to_string(dir.path().join("llm_transcript.jsonl"))
-            .expect("read transcript");
-        let event = transcript
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("valid jsonl"))
-            .find(|event| event["type"].as_str() == Some("provider_call_response"))
-            .expect("provider_call_response event");
-
-        assert_eq!(event["tool_calls"][0]["name"], "look");
-        assert_eq!(event["raw_tool_calls"][0]["function"]["name"], "tool_call");
-        assert_eq!(
-            event["raw_tool_calls"][0]["function"]["arguments"],
-            "<tool_call>\nlook({ file: \"Sources/App.swift\", intent: \"read\" })\n</tool_call>"
-        );
-    }
-
-    #[test]
-    fn response_record_omits_absent_raw_provider_tool_calls() {
-        let mut result = parsed_wrapped_text_tool_call_result();
-        result.raw_tool_calls.clear();
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-        dump_llm_response(0, "call-no-raw", &result, 42, None, None);
-        pop_llm_transcript_dir();
-
-        let transcript = std::fs::read_to_string(dir.path().join("llm_transcript.jsonl"))
-            .expect("read transcript");
-        let event = transcript
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("valid jsonl"))
-            .find(|event| event["type"].as_str() == Some("provider_call_response"))
-            .expect("provider_call_response event");
-
-        assert_eq!(event["tool_calls"][0]["name"], "look");
-        assert!(
-            event.get("raw_tool_calls").is_none(),
-            "raw_tool_calls must be omitted when no provider-native receipt exists: {event}"
-        );
-    }
-
-    fn parsed_wrapped_text_tool_call_result() -> super::super::api::LlmResult {
-        use super::super::api::parse_llm_response_for_provider;
-
-        let response = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_wrapper_args",
-                        "type": "function",
-                        "function": {
-                            "name": "tool_call",
-                            "arguments": "<tool_call>\nlook({ file: \"Sources/App.swift\", intent: \"read\" })\n</tool_call>"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }],
-            "usage": {"prompt_tokens": 12, "completion_tokens": 5}
-        });
-
-        parse_llm_response_for_provider(
-            &response,
-            "fireworks",
-            "accounts/fireworks/models/gpt-oss-120b",
-            false,
-            false,
-        )
-        .expect("parser succeeds")
     }
 
     #[test]

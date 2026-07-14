@@ -24,52 +24,16 @@ use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
 use super::thinking::ThinkingStreamSplitter;
 
+mod capture;
+
+use capture::{capture_stream_bytes, captured_stream_text, RawProviderCaptureTarget};
+
 fn response_content_type(response: &reqwest::Response) -> Option<String> {
     response
         .headers()
         .get("content-type")
         .and_then(|value| value.to_str().ok())
         .map(str::to_string)
-}
-
-fn capture_stream_bytes(capture: Option<&Arc<Mutex<Vec<u8>>>>, bytes: &bytes::Bytes) {
-    let Some(capture) = capture else {
-        return;
-    };
-    let mut raw = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    raw.extend_from_slice(bytes);
-}
-
-fn captured_stream_text(capture: &Arc<Mutex<Vec<u8>>>) -> String {
-    let raw = capture
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    String::from_utf8_lossy(&raw).into_owned()
-}
-
-#[derive(Clone)]
-struct RawProviderCaptureTarget {
-    context: Option<crate::llm::agent_observe::RawProviderCaptureContext>,
-    attempt: Option<usize>,
-}
-
-impl RawProviderCaptureTarget {
-    fn new(
-        context: Option<crate::llm::agent_observe::RawProviderCaptureContext>,
-        attempt: Option<usize>,
-    ) -> Self {
-        Self { context, attempt }
-    }
-
-    fn context(&self) -> Option<&crate::llm::agent_observe::RawProviderCaptureContext> {
-        self.context.as_ref()
-    }
-
-    fn enabled(&self) -> bool {
-        crate::llm::agent_observe::raw_provider_capture_enabled(self.context())
-    }
 }
 
 fn parse_ollama_tool_arguments(arguments: &serde_json::Value) -> serde_json::Value {

@@ -1526,7 +1526,6 @@ mod tests {
             error: None,
             stream_chunks: Vec::new(),
         });
-
         let spec = SubAgentRunSpec {
             name: "research-worker".to_string(),
             task: "inspect the repo".to_string(),
