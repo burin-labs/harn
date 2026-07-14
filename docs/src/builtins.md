@@ -612,6 +612,7 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 | `package_snapshot_close(handle)` | handle: string | bool | Release a package-generation reader lease; returns false when the handle was not open |
 | `write_file(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
 | `append_file(path, content)` | path: string, content: string | nil | Append string to file, creating it if it doesn't exist. Throws on failure |
+| `append_file_locked(path, content, options?)` | path: string, content: string, options?: dict | nil | Append string to file while holding a cross-process advisory lock. Options: `timeout_ms` (default 10000), `sync_data` (default false) |
 | `copy_file(src, dst)` | src: string, dst: string | nil | Copy a file. Throws on failure |
 | `delete_file(path)` | path: string | nil | Delete a file or directory (recursive). Throws on failure |
 | `file_exists(path)` | path: string | bool | Check if a file or directory exists |
@@ -2885,7 +2886,7 @@ For slow background context work, return a receipt from
 |---|---|---|---|
 | `register_session_hook(event, pattern?, handler)` | event: string, pattern: string?, handler: closure | nil | Register a session-level lifecycle hook |
 | `clear_session_hooks()` | none | nil | Remove all registered session-level hooks |
-| `notify_file_edited(path, metadata?)` | path: string, metadata: dict? | nil | Explicitly queue a `file_edited` notification; the standard fs builtins (`write_file`, `append_file`, `write_file_bytes`) also queue automatically. Hooks fire at the next agent-loop turn boundary. |
+| `notify_file_edited(path, metadata?)` | path: string, metadata: dict? | nil | Explicitly queue a `file_edited` notification; the standard fs builtins (`write_file`, `append_file`, `append_file_locked`, `write_file_bytes`) also queue automatically. Hooks fire at the next agent-loop turn boundary. |
 
 ### Reminder providers
 

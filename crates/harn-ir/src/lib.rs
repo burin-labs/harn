@@ -2032,8 +2032,8 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
         "egress_policy" => CallClassification::PolicyGate(PolicyScopeKind::Egress),
         "command_policy_push" => CallClassification::PolicyPush(PolicyScopeKind::Command),
         "command_policy_pop" => CallClassification::PolicyPop(PolicyScopeKind::Command),
-        "write_file" | "write_file_bytes" | "append_file" | "delete_file" | "mkdir" | "mkdtemp"
-        | "apply_edit" | "move_file" => {
+        "write_file" | "write_file_bytes" | "append_file" | "append_file_locked"
+        | "delete_file" | "mkdir" | "mkdtemp" | "apply_edit" | "move_file" => {
             let path = literal_args
                 .first()
                 .and_then(LiteralValue::as_str)
@@ -2137,7 +2137,6 @@ fn classify_tool_call(tool_name: &str, args: Option<&LiteralValue>) -> CallClass
     if matches!(
         normalized.as_str(),
         "write_file"
-            | "append_file"
             | "copy_file"
             | "delete_file"
             | "mkdir"
@@ -2148,7 +2147,8 @@ fn classify_tool_call(tool_name: &str, args: Option<&LiteralValue>) -> CallClass
             | "move"
             | "rename"
             | "patch"
-    ) || normalized.contains("write")
+    ) || normalized.contains("append")
+        || normalized.contains("write")
         || normalized.contains("edit")
         || normalized.contains("delete")
         || normalized.contains("move")

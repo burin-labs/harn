@@ -3771,7 +3771,7 @@ register_session_hook("file_edited", { event ->
 })
 ```
 
-`write_file` / `append_file` / `write_file_bytes` queue automatically;
+`write_file` / `append_file` / `append_file_locked` / `write_file_bytes` queue automatically;
 hooks fire at the next agent-loop turn boundary. Call
 `notify_file_edited(path, metadata?)` to explicitly emit one.
 For background context refresh/librarian jobs, import

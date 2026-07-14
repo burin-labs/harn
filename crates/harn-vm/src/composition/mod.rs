@@ -990,6 +990,7 @@ fn validate_composition_program(
 
 const DENIED_COMPOSITION_CALLS: &[&str] = &[
     "append_file",
+    "append_file_locked",
     "ask_user",
     "connector_call",
     "copy_file",

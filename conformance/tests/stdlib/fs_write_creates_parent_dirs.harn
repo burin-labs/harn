@@ -3,7 +3,7 @@
  * recreate missing ancestor directories (`mkdir -p`). Before the fix, writing
  * into a not-yet-created directory failed with "No such file or directory".
  * Covers the exact shape that broke qmode's exit_plan_mode (harness.fs.write_text
- * into a fresh state dir) plus the stdlib write_file / append_file builtins.
+ * into a fresh state dir) plus the stdlib write_file / append_file variants.
  */
 pipeline default() {
   const root = path_join(harness.fs.temp_dir(), "harn-scoped-parent-" + uuid())
@@ -20,5 +20,10 @@ pipeline default() {
   append_file(log_p, "line1\n")
   append_file(log_p, "line2\n")
   __io_println(read_file(log_p) == "line1\nline2\n")
+  // append_file_locked preserves the same parent-creation contract while
+  // taking an advisory cross-process lock around the append.
+  const locked_log_p = path_join(root, "locked/logs/deep/qa.jsonl")
+  harness.fs.append_locked(locked_log_p, "locked\n", {timeout_ms: 1000})
+  __io_println(read_file(locked_log_p) == "locked\n")
   harness.fs.delete(root)
 }

@@ -2,7 +2,7 @@ use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use std::{cell::RefCell, thread_local};
 
 use crate::runtime_limits::RuntimeLimits;
@@ -29,6 +29,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &PATH_STATUS_BUILTIN_DEF,
     &DELETE_FILE_BUILTIN_DEF,
     &APPEND_FILE_BUILTIN_DEF,
+    &APPEND_FILE_LOCKED_BUILTIN_DEF,
     &LIST_DIR_BUILTIN_DEF,
     &MKDIR_BUILTIN_DEF,
     &PATH_JOIN_BUILTIN_DEF,
@@ -76,6 +77,14 @@ struct GlobOptions {
     base: String,
     long_running: bool,
 }
+
+#[derive(Clone, Copy)]
+struct AppendLockBuiltinOptions {
+    timeout: Duration,
+    sync_data: bool,
+}
+
+const APPEND_FILE_LOCKED_DEFAULT_TIMEOUT_MS: u64 = 10_000;
 
 fn resolve_fs_path(path: &str) -> PathBuf {
     crate::stdlib::process::resolve_source_relative_path(path)
@@ -200,6 +209,10 @@ fn int_option(opts: &crate::value::DictMap, key: &str) -> Option<i64> {
     opts.get(key).and_then(VmValue::as_int)
 }
 
+fn duration_ms_option(opts: &crate::value::DictMap, key: &str) -> Option<Duration> {
+    u64_option(opts, key).map(Duration::from_millis)
+}
+
 fn string_list_option(opts: &crate::value::DictMap, key: &str) -> Vec<String> {
     match opts.get(key) {
         Some(VmValue::String(value)) => vec![value.to_string()],
@@ -308,6 +321,20 @@ fn parse_glob_options(args: &[VmValue]) -> GlobOptions {
             }
         }
         None => {}
+    }
+    options
+}
+
+fn parse_append_locked_options(args: &[VmValue]) -> AppendLockBuiltinOptions {
+    let mut options = AppendLockBuiltinOptions {
+        timeout: Duration::from_millis(APPEND_FILE_LOCKED_DEFAULT_TIMEOUT_MS),
+        sync_data: false,
+    };
+    if let Some(VmValue::Dict(opts)) = args.get(2) {
+        if let Some(timeout) = duration_ms_option(opts, "timeout_ms") {
+            options.timeout = timeout;
+        }
+        options.sync_data = bool_option(opts, "sync_data").unwrap_or(false);
     }
     options
 }
@@ -838,6 +865,50 @@ fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             cache.borrow_mut().remove(&resolved);
         });
         queue_file_edited_for(&resolved, "append", bytes);
+    }
+    Ok(VmValue::Nil)
+}
+
+#[harn_builtin(
+    sig = "append_file_locked(path: string, content: string, options?: dict) -> nil",
+    category = "fs",
+    doc = "Append UTF-8 text to a file while holding a cross-process advisory lock."
+)]
+fn append_file_locked_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() >= 2 {
+        let path = args[0].display();
+        let content = args[1].display();
+        let resolved = resolve_fs_path(&path);
+        crate::stdlib::sandbox::enforce_fs_path(
+            "append_file_locked",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Write,
+        )?;
+        let options = parse_append_locked_options(args);
+        let lock_options = crate::stdlib::sandbox::AppendLockOptions {
+            timeout: options.timeout,
+            sync_data: options.sync_data,
+        };
+        overlay::append_locked_scoped(
+            "append_file_locked",
+            &resolved,
+            content.as_bytes(),
+            lock_options,
+        )
+        .map_err(|e| {
+            io_error_thrown(
+                format!(
+                    "Failed to locked-append to file {}: {e}",
+                    resolved.display()
+                ),
+                &e,
+            )
+        })?;
+        let bytes = content.len();
+        FILE_TEXT_CACHE.with(|cache| {
+            cache.borrow_mut().remove(&resolved);
+        });
+        queue_file_edited_for(&resolved, "append_locked", bytes);
     }
     Ok(VmValue::Nil)
 }
