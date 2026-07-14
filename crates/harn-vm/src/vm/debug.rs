@@ -384,6 +384,7 @@ impl Vm {
     /// cleanup ops emitted at line 0 after branch/loop exits — keeps
     /// the debugger aligned with what's actually going to run.
     pub async fn step_execute(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
+        self.ensure_execution_available()?;
         // Cooperative cancellation and std/signal interrupts are both
         // observed before instruction work so debug stepping exits promptly.
         if let Some(err) = self.pending_scope_interrupt().await {
@@ -470,6 +471,7 @@ impl Vm {
     /// should warn on frames whose source text contains obvious
     /// side-effectful calls before invoking restartFrame.
     pub fn restart_frame(&mut self, frame_id: usize) -> Result<(), VmError> {
+        self.ensure_execution_available()?;
         if frame_id >= self.frames.len() {
             return Err(VmError::Runtime(format!(
                 "restartFrame: frame id {frame_id} out of range (have {} frames)",
@@ -571,6 +573,7 @@ impl Vm {
         expr: &str,
         _frame_id: usize,
     ) -> Result<VmValue, VmError> {
+        self.ensure_execution_available()?;
         let trimmed = expr.trim();
         if trimmed.is_empty() {
             return Err(VmError::Runtime("evaluate: empty expression".into()));

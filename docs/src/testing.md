@@ -60,6 +60,13 @@ harn test conformance --filter my_test -v
 harn test conformance --timing --filter my_test
 ```
 
+For user tests, `--timeout` bounds only the pipeline execution phase. VM,
+stdlib, skill, and manifest setup is measured separately and cannot consume the
+test body's correctness budget. Use `--max-test-ms` when total wall time is a
+performance requirement, or `--max-execute-ms` to ratchet execution cost.
+Conformance and other non-user targets continue to apply `--timeout` to their
+whole test case or subprocess.
+
 ### Writing a conformance test
 
 Create a `.harn` file with a `pipeline default(task)` entry point and use

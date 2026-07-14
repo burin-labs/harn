@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -25,6 +26,105 @@ pub(crate) struct ScopeSpan(u64);
 impl ScopeSpan {
     pub(crate) fn new(kind: crate::tracing::SpanKind, name: String) -> Self {
         Self(crate::tracing::span_start(kind, name))
+    }
+}
+
+/// Cancellation-safe host deadline state. The guard owns the shared state so
+/// dropping an in-flight `execute_with_timeout` future restores the previous
+/// deadline and poisons the abandoned VM even though the future still holds
+/// `&mut Vm`.
+pub(crate) struct ExecutionDeadlineState {
+    origin: Instant,
+    /// Nanoseconds from `origin`, plus one so zero remains the inactive value.
+    deadline_offset: AtomicU64,
+    /// Set when the host drops a polled execution future. Arbitrary async
+    /// cancellation cannot unwind interpreter state, so subsequent execution
+    /// entries fail loudly instead of resuming a partial frame.
+    abandoned: AtomicBool,
+}
+
+impl ExecutionDeadlineState {
+    pub(crate) fn new(origin: Instant, deadline: Option<Instant>) -> Arc<Self> {
+        Arc::new(Self {
+            origin,
+            deadline_offset: AtomicU64::new(Self::encode(origin, deadline)),
+            abandoned: AtomicBool::new(false),
+        })
+    }
+
+    #[inline]
+    pub(crate) fn is_active(&self) -> bool {
+        self.deadline_offset.load(Ordering::Acquire) != 0
+    }
+
+    #[inline]
+    pub(crate) fn is_abandoned(&self) -> bool {
+        self.abandoned.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn fork(&self) -> Arc<Self> {
+        let state = Self::new(self.origin, self.current());
+        state
+            .abandoned
+            .store(self.is_abandoned(), Ordering::Release);
+        state
+    }
+
+    pub(crate) fn current(&self) -> Option<Instant> {
+        let encoded = self.deadline_offset.load(Ordering::Acquire);
+        (encoded != 0)
+            .then(|| self.origin + std::time::Duration::from_nanos(encoded.saturating_sub(1)))
+    }
+
+    pub(crate) fn install(self: &Arc<Self>, deadline: Instant) -> ExecutionDeadlineGuard {
+        let previous = self.deadline_offset.load(Ordering::Acquire);
+        let requested = Self::encode(self.origin, Some(deadline));
+        let active = if previous == 0 {
+            requested
+        } else {
+            previous.min(requested)
+        };
+        self.deadline_offset.store(active, Ordering::Release);
+        ExecutionDeadlineGuard {
+            state: Arc::clone(self),
+            previous,
+            completed: false,
+        }
+    }
+
+    fn encode(origin: Instant, deadline: Option<Instant>) -> u64 {
+        deadline.map_or(0, |deadline| {
+            let nanos = deadline.saturating_duration_since(origin).as_nanos();
+            u64::try_from(nanos)
+                .unwrap_or(u64::MAX - 1)
+                .saturating_add(1)
+        })
+    }
+}
+
+pub(crate) struct ExecutionDeadlineGuard {
+    state: Arc<ExecutionDeadlineState>,
+    previous: u64,
+    completed: bool,
+}
+
+impl ExecutionDeadlineGuard {
+    /// Mark an awaited execution as terminal before restoring its prior host
+    /// deadline. Dropping without this acknowledgement poisons the VM.
+    pub(crate) fn complete(mut self) {
+        self.completed = true;
+    }
+}
+
+impl Drop for ExecutionDeadlineGuard {
+    fn drop(&mut self) {
+        self.state
+            .deadline_offset
+            .store(self.previous, Ordering::Release);
+        if !self.completed {
+            self.state.abandoned.store(true, Ordering::Release);
+            crate::orchestration::clear_pipeline_on_finish();
+        }
     }
 }
 
@@ -255,6 +355,8 @@ pub struct Vm {
     pub(crate) runtime_context: crate::runtime_context::RuntimeContext,
     /// Active deadline stack: (deadline_instant, frame_depth).
     pub(crate) deadlines: Vec<(Instant, usize)>,
+    /// Uncatchable wall-clock deadline imposed by the embedding host.
+    pub(crate) execution_deadline: Arc<ExecutionDeadlineState>,
     /// Breakpoints, keyed by source-file path so a breakpoint at line N
     /// in `auto.harn` doesn't also fire when execution hits line N in an
     /// imported lib. The empty-string key is a wildcard used by callers
@@ -414,6 +516,7 @@ impl VmBaseline {
             runtime_context_counter: 0,
             runtime_context: crate::runtime_context::RuntimeContext::root(),
             deadlines: Vec::new(),
+            execution_deadline: super::execution::new_execution_deadline_state(None),
             breakpoints: BTreeMap::new(),
             function_breakpoints: std::collections::BTreeSet::new(),
             pending_function_bp: None,
@@ -455,6 +558,13 @@ impl VmBaseline {
 }
 
 impl Vm {
+    pub(crate) fn ensure_execution_available(&self) -> Result<(), VmError> {
+        if self.execution_deadline.is_abandoned() {
+            return Err(VmError::AbandonedExecution);
+        }
+        Ok(())
+    }
+
     pub(crate) fn fresh_local_slots(chunk: &Chunk) -> Vec<LocalSlot> {
         chunk
             .local_slots
@@ -654,6 +764,7 @@ impl Vm {
             runtime_context_counter: 0,
             runtime_context: crate::runtime_context::RuntimeContext::root(),
             deadlines: Vec::new(),
+            execution_deadline: super::execution::new_execution_deadline_state(None),
             breakpoints: BTreeMap::new(),
             function_breakpoints: std::collections::BTreeSet::new(),
             pending_function_bp: None,
@@ -747,7 +858,8 @@ impl Vm {
     }
 
     /// Initialize execution (push the initial frame).
-    pub fn start(&mut self, chunk: &Chunk) {
+    pub fn start(&mut self, chunk: &Chunk) -> Result<(), VmError> {
+        self.ensure_execution_available()?;
         // The top-level pipeline frame captures env at start so
         // restartFrame on the outermost frame rewinds to the
         // pre-pipeline state — basically "restart session" in
@@ -786,6 +898,7 @@ impl Vm {
             local_scope_base: self.env.scope_depth().saturating_sub(1),
             local_scope_depth: 0,
         });
+        Ok(())
     }
 
     /// Create a child VM that shares builtins and env but has fresh execution state.
@@ -817,6 +930,7 @@ impl Vm {
             runtime_context_counter: self.runtime_context_counter,
             runtime_context: self.runtime_context.clone(),
             deadlines: self.deadlines.clone(),
+            execution_deadline: self.execution_deadline.fork(),
             breakpoints: BTreeMap::new(),
             function_breakpoints: std::collections::BTreeSet::new(),
             pending_function_bp: None,

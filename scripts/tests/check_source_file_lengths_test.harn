@@ -155,6 +155,8 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
       write_source(root, "conformance/tests/case.harn", 1)
       write_source(root, "scripts/helper.harn", 1)
       write_source(root, "crates/app/target/debug/generated.rs", 1)
+      write_source(root, "crates/app/.target/debug/generated.rs", 1)
+      write_source(root, ".target-4688/debug/build/pkg/out/generated.rs", 1)
       write_source(root, "tree-sitter-harn/node_modules/pkg/binding.rs", 1)
       write_text(root, "crates/app/src/not-source.txt", "text\n")
       assert_eq(

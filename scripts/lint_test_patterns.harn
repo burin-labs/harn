@@ -258,6 +258,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-cli/src/commands/trigger/replay.rs",
   "crates/harn-cli/src/package/registry.rs",
   "crates/harn-cli/src/skill_provenance.rs",
+  // User-test phase timings report real host wall time; the extracted execution
+  // module preserves the existing `test_runner.rs` observability contract.
+  "crates/harn-cli/src/test_runner/execution.rs",
   "crates/harn-cli/src/test_runner.rs",
   "crates/harn-vm/src/a2a/mod.rs",
   "crates/harn-vm/src/agent_events/sinks.rs",

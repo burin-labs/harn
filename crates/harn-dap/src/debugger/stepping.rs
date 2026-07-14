@@ -132,7 +132,7 @@ impl Debugger {
         });
 
         // Push the initial frame but don't run -- the first continue/step drives execution.
-        vm.start(&chunk);
+        vm.start(&chunk).map_err(|error| error.to_string())?;
         *self
             .latest_debug_state
             .lock()

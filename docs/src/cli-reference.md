@@ -415,7 +415,9 @@ harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 | `--verbose` / `-v` | Show per-test timing and detailed failures |
 | `--timing` | Show per-test timing plus summary statistics |
 | `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly |
-| `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000) |
+| `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup is measured separately and does not consume the pipeline-execution budget; other targets bound their test case or subprocess |
+| `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget |
+| `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
 | `--replay` | Replay recorded LLM responses |
 | `--coverage` | Print per-file line coverage for executed Harn source (user test suites only) |

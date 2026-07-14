@@ -87,6 +87,10 @@ fn source_path_for_baseline(shard_path: string) -> string? {
 }
 
 /** Collect matching files while pruning dependency, build, and runtime trees. */
+fn skip_dir_name(name: string) -> bool {
+  return SKIP_DIR_NAMES.contains(name) || name == ".target" || name.starts_with(".target-")
+}
+
 fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
   const dir = if rel_dir == "" {
     root
@@ -104,7 +108,7 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
     .sort_by({ entry -> entry.path })
   for entry in entries {
     const name = basename(entry.path)
-    if SKIP_DIR_NAMES.contains(name) {
+    if skip_dir_name(name) {
       continue
     }
     const rel = normalize_source_path(

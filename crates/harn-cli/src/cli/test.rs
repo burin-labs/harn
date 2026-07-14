@@ -29,7 +29,8 @@ pub(crate) struct TestArgs {
     /// Write a JUnit XML report to this path.
     #[arg(long)]
     pub junit: Option<String>,
-    /// Per-test timeout in milliseconds.
+    /// Per-test timeout in milliseconds. For user suites, this bounds only
+    /// pipeline execution; other targets bound their test case or subprocess.
     #[arg(long, default_value_t = 30_000)]
     pub timeout: u64,
     /// Fail a passing user test whose total wall-clock time exceeds this

@@ -107,6 +107,14 @@ pub enum VmError {
     TypeError(String),
     Runtime(String),
     DivisionByZero,
+    /// A host-imposed deadline expired while executing the VM. Unlike a Harn
+    /// `deadline` block, this control-plane stop cannot be caught by user code.
+    ExecutionDeadlineExceeded,
+    /// A host dropped a polled top-level execution future. Interpreter state is
+    /// intentionally not resumed after arbitrary async cancellation. Discard
+    /// this VM; see [`crate::Vm::execute_with_timeout`] for ambient-state
+    /// cleanup requirements.
+    AbandonedExecution,
     Thrown(VmValue),
     /// Thrown with error category for structured error handling.
     CategorizedError {
@@ -314,6 +322,8 @@ pub fn categorized_error(message: impl Into<String>, category: ErrorCategory) ->
 /// 5. Fallback to Generic
 pub fn error_to_category(err: &VmError) -> ErrorCategory {
     match err {
+        VmError::ExecutionDeadlineExceeded => ErrorCategory::Timeout,
+        VmError::AbandonedExecution => ErrorCategory::Cancelled,
         VmError::CategorizedError { category, .. } => category.clone(),
         VmError::Thrown(VmValue::Dict(d)) => d
             .get("category")
@@ -460,6 +470,11 @@ impl std::fmt::Display for VmError {
             VmError::TypeError(msg) => write!(f, "Type error: {msg}"),
             VmError::Runtime(msg) => write!(f, "Runtime error: {msg}"),
             VmError::DivisionByZero => write!(f, "Division by zero"),
+            VmError::ExecutionDeadlineExceeded => write!(f, "Execution deadline exceeded"),
+            VmError::AbandonedExecution => write!(
+                f,
+                "Execution future was abandoned; discard this VM and reset its exclusively owned execution context"
+            ),
             VmError::Thrown(v) => write!(f, "Thrown: {}", v.display()),
             VmError::CategorizedError { message, category } => {
                 write!(f, "Error [{}]: {}", category.as_str(), message)

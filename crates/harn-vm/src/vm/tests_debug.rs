@@ -10,7 +10,7 @@ use super::*;
 /// by the `evaluate_in_frame` tests below so we can inspect a paused
 /// scope without wiring a full DAP session.
 fn run_until_paused(vm: &mut Vm, chunk: &Chunk) {
-    vm.start(chunk);
+    vm.start(chunk).unwrap();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -269,7 +269,7 @@ fn test_signal_cancel_unwinds_step_loop() {
     let chunk =
         crate::compile_source("pipeline t(task) { let i = 0\n while i < 1000000 { i = i + 1 } }\n")
             .unwrap();
-    vm.start(&chunk);
+    vm.start(&chunk).unwrap();
     vm.signal_cancel();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -347,7 +347,7 @@ fn test_function_breakpoint_unknown_name_does_not_fire() {
     // without latching a hit; run_until_paused would have panicked
     // with "step budget exceeded" if the VM idled, so wrap with a
     // finite run of step_execute until a natural terminate.
-    vm.start(&chunk);
+    vm.start(&chunk).unwrap();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
