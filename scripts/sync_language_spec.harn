@@ -113,11 +113,22 @@ pub fn page_path(path: string) -> string {
  * chapter (the only one with a top-level `#` heading).
  */
 pub fn render_index() -> string {
-  const overview = harness.fs.read_text(chapter_paths()[0]).trim()
+  const chapters = chapter_paths()
+  const overview_path = chapters[0] ?? ""
+  if overview_path == "" {
+    return HEADER
+  }
+  const overview = harness.fs.read_text(overview_path).trim()
   let toc = "\n\n## Specification chapters\n\nThe language specification is organized into the chapters below.\n\n"
-  for path in page_paths() {
+  let i = 0
+  for path in chapters {
+    if i == 0 {
+      i = i + 1
+      continue
+    }
     const title = chapter_title(harness.fs.read_text(path))
     toc = toc + "- [" + title + "](./spec/language/" + page_slug(path) + ".md)\n"
+    i = i + 1
   }
   return HEADER + overview + toc
 }

@@ -628,9 +628,10 @@ check-diagnostics-catalog:
 	@echo "    Diagnostic-code catalog OK."
 
 # CI guard: every ```harn block in docs/src/*.md must parse under
-# `harn check`. Blocks tagged ```harn,ignore are skipped.
+# `harn parse`; blocks tagged ```harn,check must pass full `harn check`.
+# Blocks tagged ```harn,ignore are skipped.
 check-docs-snippets:
-	@echo "=== Checking docs snippets parse under harn check ==="
+	@echo "=== Checking docs snippets parse under harn parse ==="
 	@$(HARN_CMD) run scripts/check_docs_snippets.harn
 
 # CI guard: every harn long flag in docs/src bash/sh blocks must exist in

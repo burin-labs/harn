@@ -10,6 +10,7 @@ pipeline test_extract_basic_block(task) {
   assert_eq(events.count, 1)
   assert_eq(events[0].kind, "block")
   assert_eq(events[0].idx, 1)
+  assert_eq(events[0].mode, "parse")
   assert_eq(events[0].content, "let x = 1\nlog(x)\n")
 }
 
@@ -32,6 +33,18 @@ pipeline test_extract_idx_counts_all_harn_fences(task) {
   assert_eq(events[0].kind, "skip")
   assert_eq(events[1].kind, "block")
   assert_eq(events[1].idx, 2)
+  assert_eq(events[1].mode, "parse")
+}
+
+@test
+pipeline test_extract_check_block_opts_into_full_check(task) {
+  const md = "```harn,check\npipeline default() { return 1 }\n```\n"
+  const events = extract_blocks(md)
+  assert_eq(events.count, 1)
+  assert_eq(events[0].kind, "block")
+  assert_eq(events[0].idx, 1)
+  assert_eq(events[0].mode, "check")
+  assert_eq(events[0].content, "pipeline default() { return 1 }\n")
 }
 
 @test
@@ -68,6 +81,7 @@ pipeline test_extract_reopened_fence_reports_previous(task) {
   assert_eq(events[0].open_line, 1)
   assert_eq(events[1].kind, "block")
   assert_eq(events[1].idx, 2)
+  assert_eq(events[1].mode, "parse")
   assert_eq(events[1].content, "b\n")
 }
 

@@ -846,20 +846,7 @@ impl TypeChecker {
                 self.check_node(value, scope);
                 let value_type = self.infer_type(value, scope);
                 for arm in arms {
-                    // A bare call-shaped variant pattern (`Ok(v)`) is a
-                    // *pattern*, not a call expression — checking it as an
-                    // expression would flag the payload binding as an
-                    // undefined name. It compiles as an enum-variant arm
-                    // whenever some visible enum declares the variant, so
-                    // mirror that resolution rule here.
-                    let is_bare_variant_pattern = matches!(
-                        &arm.pattern.node,
-                        Node::FunctionCall { name, .. }
-                            if !scope.enum_owners_of_variant(name).is_empty()
-                    );
-                    if !is_bare_variant_pattern {
-                        self.check_node(&arm.pattern, scope);
-                    }
+                    self.check_match_pattern(&arm.pattern, scope);
                     // Check for incompatible literal pattern types —
                     // once per alternative inside an OrPattern so
                     // mixed-type or-patterns still surface the warning.
@@ -1459,7 +1446,7 @@ impl TypeChecker {
 
             Node::DictLiteral(entries) => {
                 for entry in entries {
-                    self.check_node(&entry.key, scope);
+                    self.check_dict_key(&entry.key, scope);
                     self.check_node(&entry.value, scope);
                 }
             }
@@ -1524,7 +1511,7 @@ impl TypeChecker {
                 fields,
             } => {
                 for entry in fields {
-                    self.check_node(&entry.key, scope);
+                    self.check_dict_key(&entry.key, scope);
                 }
                 if let Some(struct_info) = scope.get_struct(struct_name).cloned() {
                     let type_bindings = self.infer_struct_bindings(&struct_info, fields, scope);
@@ -1775,13 +1762,15 @@ impl TypeChecker {
             | Node::FloatLiteral(_)
             | Node::BoolLiteral(_)
             | Node::NilLiteral
-            | Node::Identifier(_)
             | Node::DurationLiteral(_)
             | Node::BreakStmt
             | Node::ContinueStmt
             | Node::ReturnStmt { value: None }
             | Node::ImportDecl { .. }
             | Node::SelectiveImport { .. } => {}
+            Node::Identifier(name) => {
+                self.check_value_identifier_resolves(name, span, scope);
+            }
 
             // Declarations already handled above; catch remaining variants
             // that have no meaningful type-check behavior.

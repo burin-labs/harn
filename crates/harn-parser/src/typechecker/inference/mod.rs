@@ -12,6 +12,7 @@
 //! are in scope (i.e. a file that names `mod statements` somewhere).
 
 mod binary_ops;
+mod call_resolution;
 mod calls;
 mod decls;
 mod entry;

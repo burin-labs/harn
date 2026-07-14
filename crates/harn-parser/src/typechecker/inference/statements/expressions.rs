@@ -42,7 +42,7 @@ impl TypeChecker {
         match (&snode.node, self.resolve_alias(expected, scope)) {
             (Node::DictLiteral(entries), TypeExpr::Shape(fields)) => {
                 for entry in entries {
-                    self.check_node(&entry.key, scope);
+                    self.check_dict_key(&entry.key, scope);
                     let expected_field = match &entry.key.node {
                         Node::StringLiteral(key) | Node::Identifier(key) => {
                             fields.iter().find(|field| field.name == *key)
@@ -59,7 +59,7 @@ impl TypeChecker {
             }
             (Node::DictLiteral(entries), TypeExpr::DictType(_, value_type)) => {
                 for entry in entries {
-                    self.check_node(&entry.key, scope);
+                    self.check_dict_key(&entry.key, scope);
                     self.check_node_with_expected(&entry.value, Some(&value_type), scope);
                 }
                 true
