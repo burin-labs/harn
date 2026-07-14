@@ -765,6 +765,218 @@ fn tagged_parser_dispatches_harmony_multicall_batch_without_drop_violation() {
 }
 
 #[test]
+fn tagged_parser_recovers_malformed_harmony_tool_call_open() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n\
+                run({ \"command\": \"cargo test -p core\" })\n\
+                </tool_call><tool_call<|message|>run({ \"command\": \"cargo test -p app\" })";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        2,
+        "calls: {:?}, errors: {:?}, violations: {:?}, canonical: {}",
+        result.calls,
+        result.errors,
+        result.violations,
+        result.canonical
+    );
+    assert_eq!(result.calls[0]["name"], "run");
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        "cargo test -p core"
+    );
+    assert_eq!(result.calls[1]["name"], "run");
+    assert_eq!(result.calls[1]["arguments"]["command"], "cargo test -p app");
+    assert!(
+        result.errors.is_empty(),
+        "recoverable wrapper debris should not produce parse errors: {:?}",
+        result.errors
+    );
+    assert!(
+        result.violations.is_empty(),
+        "recoverable wrapper debris should not produce parse guidance: {:?}",
+        result.violations
+    );
+    assert!(
+        !result.canonical.contains("<tool_call<|message|>"),
+        "canonical replay must not preserve malformed wrapper debris: {}",
+        result.canonical
+    );
+}
+
+#[test]
+fn tagged_parser_recovers_malformed_harmony_assistant_header() {
+    let tools = sample_tool_registry();
+    let text = "<assistant<|channel|>analysis<|message|>\
+                We need to inspect the file.<tool_call>\n\
+                run({ \"command\": \"zig test src/root.zig\" })\n\
+                </tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "calls: {:?}", result.calls);
+    assert_eq!(result.calls[0]["name"], "run");
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        "zig test src/root.zig"
+    );
+    assert!(
+        result.errors.is_empty(),
+        "recoverable assistant header should not produce parse errors: {:?}",
+        result.errors
+    );
+    assert!(
+        result.violations.is_empty(),
+        "recoverable assistant header should not produce parse guidance: {:?}",
+        result.violations
+    );
+    assert!(
+        result.canonical.contains("We need to inspect the file."),
+        "assistant prose after the header should be preserved: {}",
+        result.canonical
+    );
+    assert!(
+        !result.canonical.contains("<assistant<|channel|>")
+            && !result.canonical.contains("<|message|>"),
+        "canonical replay must not preserve Harmony framing: {}",
+        result.canonical
+    );
+}
+
+#[test]
+fn tagged_parser_bounds_malformed_harmony_assistant_header_before_tool_call() {
+    let tools = sample_tool_registry();
+    let text = "<assistant<|channel|>analysis\n\
+                <tool_call>\n\
+                run({ \"command\": \"cargo test\" })\n\
+                </tool_call>\n\
+                note: emit <|message|> only after the tool finishes";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "later message marker must not swallow the intervening call: calls={:?} errors={:?} violations={:?} canonical={}",
+        result.calls,
+        result.errors,
+        result.violations,
+        result.canonical
+    );
+    assert_eq!(result.calls[0]["name"], "run");
+    assert_eq!(result.calls[0]["arguments"]["command"], "cargo test");
+    assert!(
+        result.errors.is_empty(),
+        "bounded header recovery should not create parse errors: {:?}",
+        result.errors
+    );
+    assert!(
+        result.violations.is_empty(),
+        "bounded header recovery should not create parse guidance: {:?}",
+        result.violations
+    );
+}
+
+#[test]
+fn tagged_parser_bounds_harmony_frame_header_before_tool_call() {
+    let tools = sample_tool_registry();
+    let text = "<|channel|>analysis\n\
+                <tool_call>\n\
+                run({ \"command\": \"cargo test -p harn-vm\" })\n\
+                </tool_call>\n\
+                note: literal <|message|> marker in prose";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "later message marker must not swallow the intervening call: calls={:?} errors={:?} violations={:?} canonical={}",
+        result.calls,
+        result.errors,
+        result.violations,
+        result.canonical
+    );
+    assert_eq!(result.calls[0]["name"], "run");
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        "cargo test -p harn-vm"
+    );
+    assert!(
+        result.errors.is_empty(),
+        "bounded frame recovery should not create parse errors: {:?}",
+        result.errors
+    );
+    assert!(
+        result.violations.is_empty(),
+        "bounded frame recovery should not create parse guidance: {:?}",
+        result.violations
+    );
+}
+
+#[test]
+fn tagged_parser_preserves_harmony_like_text_inside_tool_heredoc_argument() {
+    let tools = sample_tool_registry();
+    let inline_marker = "<assistant<|channel|>analysis<|message|>";
+    let heredoc_marker = "<tool_call<|message|>";
+    let text = format!(
+        "<tool_call>\n\
+         edit({{ action: \"create\", path: \"a.rs\", content: <<EOF\n\
+         inline {inline_marker}\n\
+         {heredoc_marker}\n\
+         EOF\n\
+         }})\n\
+         </tool_call>"
+    );
+    let result = parse_text_tool_calls_with_tools(&text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "calls: {:?}", result.calls);
+    let content = result.calls[0]["arguments"]["content"]
+        .as_str()
+        .expect("content should remain a string");
+    assert!(
+        content.contains(inline_marker),
+        "inline Harmony-like text must remain argument data: {content:?}"
+    );
+    assert!(
+        content.contains(heredoc_marker),
+        "tool-call-like marker must remain argument data: {content:?}"
+    );
+    assert!(
+        result.violations.is_empty(),
+        "argument markers should not be top-level violations: {:?}",
+        result.violations
+    );
+}
+
+#[test]
+fn tagged_parser_keeps_unknown_malformed_harmony_marker_strict() {
+    let tools = sample_tool_registry();
+    let text = "<assistant<|bogus|>analysis<|message|><tool_call>\n\
+                run({ \"command\": \"cargo test\" })\n\
+                </tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result
+            .violations
+            .iter()
+            .any(|violation| violation.contains("Unknown top-level tag")),
+        "unknown malformed Harmony marker should remain strict: {:?}",
+        result.violations
+    );
+    assert_eq!(result.calls.len(), 1, "known <tool_call> still executes");
+    assert_eq!(result.calls[0]["name"], "run");
+}
+
+#[test]
+fn tagged_parser_keeps_empty_malformed_harmony_marker_strict() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call<||>run({ \"command\": \"cargo test\" })";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result
+            .violations
+            .iter()
+            .any(|violation| violation.contains("Unknown top-level tag")),
+        "empty malformed Harmony marker should remain strict: {:?}",
+        result.violations
+    );
+}
+
+#[test]
 fn tagged_parser_executes_bare_tool_call_with_heredoc_body() {
     // Regression: the top-level scanner's stray-bytes chunker scanned to
     // the next `<` byte, which truncated bare `name({ key: <<EOF\n...\nEOF })`
