@@ -1,0 +1,76 @@
+import {
+  worktree_prune_classify,
+  worktree_prune_default_disposable_paths,
+  worktree_prune_default_min_age_seconds,
+  worktree_prune_normalize_disposable_path,
+  worktree_prune_reason_label,
+  worktree_prune_status_has_real_edits,
+} from "std/worktree"
+
+fn base_entry() {
+  return {
+    path: "/tmp/wt-old-merged",
+    branch: "feat/done",
+    is_main: false,
+    is_current: false,
+    has_process: false,
+    dirty: false,
+    unpushed: false,
+    merged: true,
+    abandoned: false,
+    age_seconds: 2 * 60 * 60,
+    size_bytes: 3 * 1073741824,
+  }
+}
+
+fn verdict_reason(entry) {
+  return worktree_prune_classify(entry).reason
+}
+
+pipeline default() {
+  const base = base_entry()
+  __io_println(worktree_prune_default_min_age_seconds() == 3600)
+  __io_println(worktree_prune_reason_label("dirty") == "dirty (uncommitted edits)")
+  __io_println(worktree_prune_default_disposable_paths().any({ path -> path == "target" }))
+  __io_println(worktree_prune_classify(base).reclaimable)
+  __io_println(
+    worktree_prune_classify(base + {branch: nil, merged: false, abandoned: true}).reclaimable,
+  )
+  __io_println(verdict_reason(base + {is_main: true}) == "main_checkout")
+  __io_println(verdict_reason(base + {is_current: true}) == "current_worktree")
+  __io_println(verdict_reason(base + {has_process: true}) == "in_use")
+  __io_println(verdict_reason(base + {dirty: true}) == "dirty")
+  __io_println(verdict_reason(base + {unpushed: true}) == "unpushed")
+  __io_println(verdict_reason(base + {merged: false, abandoned: false}) == "not_merged")
+  __io_println(verdict_reason(base + {age_seconds: 10 * 60}) == "too_young")
+  __io_println(worktree_prune_classify(base + {age_seconds: 10 * 60}, 5 * 60).reclaimable)
+  __io_println(verdict_reason(base + {has_process: true, age_seconds: 10 * 24 * 60 * 60}) == "in_use")
+  __io_println(!worktree_prune_status_has_real_edits(""))
+  __io_println(
+    !worktree_prune_status_has_real_edits(
+      " M target/debug/foo\n?? .build/x\n M .harn/state.json\n?? node_modules/pkg/\n",
+    ),
+  )
+  __io_println(
+    !worktree_prune_status_has_real_edits(
+      "?? frontend/node_modules/react/index.js\n?? ios/Pods/Alamofire\n",
+      {disposable_paths: ["frontend/node_modules", "ios/Pods"]},
+    ),
+  )
+  __io_println(worktree_prune_status_has_real_edits(" M src/main.rs\n M target/debug/foo\n"))
+  __io_println(!worktree_prune_status_has_real_edits("R  old.rs -> target/old.rs\n"))
+  __io_println(worktree_prune_status_has_real_edits("R  target/x -> src/x.rs\n"))
+  __io_println(
+    worktree_prune_status_has_real_edits(
+      "?? target-notes.md\n?? .DS_Store.backup\n",
+      {disposable_paths: [".DS_Store", "target"]},
+    ),
+  )
+  __io_println(
+    worktree_prune_normalize_disposable_path("./frontend/node_modules/") == "frontend/node_modules",
+  )
+  __io_println(worktree_prune_normalize_disposable_path("ios\\Pods") == "ios/Pods")
+  __io_println(worktree_prune_normalize_disposable_path("/tmp/cache") == nil)
+  __io_println(worktree_prune_normalize_disposable_path("../outside") == nil)
+  __io_println(worktree_prune_normalize_disposable_path(".git/hooks") == nil)
+}
