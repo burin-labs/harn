@@ -208,41 +208,18 @@ fn agent_primitive_denied_tool(
     reason: impl Into<String>,
     category: crate::agent_events::ToolCallErrorCategory,
     denial: Option<&crate::agent_events::ToolDenial>,
+    resolved_repair: Option<serde_json::Value>,
 ) -> serde_json::Value {
     let reason = reason.into();
-    // Split the inner result body by category. A RECOVERABLE rejection
-    // (`SchemaValidation` — bad/missing arguments or an empty tool name) must
-    // coach a retry *with the correction* via `recoverable_tool_result`
-    // (`error: "invalid_arguments"`), never the permission-denial body. Reusing
-    // `denied_tool_result` here was the live convergence bug: cheap models read
-    // "permission_denied / Do not retry the same call" after one fixable arg
-    // mistake and gave up (false FAIL across ~26 recent eval transcripts). True
-    // policy/permission denials keep the don't-retry `denied_tool_result` body.
-    // A denial the gate marked `retryable` (an argument allow-list miss — the
-    // tool is permitted, only this argument value is out of scope) is coached
-    // like a fixable-argument slip: retry with a corrected argument, not "give
-    // up". Hard ceilings and true permission denials keep the don't-retry body.
-    //
-    // A `ToolCeiling` denial is a NAME-RESOLUTION failure — the name is not in
-    // the session's available tool set — so it must never use permission
-    // framing (a headless model that reads "tell the user what you need
-    // permission for" starts petitioning a user that does not exist). Two
-    // sub-cases:
-    //   - the "name" is the text-format wrapper (`tool_call`) smuggling one
-    //     valid embedded call: parse-repair feedback that names the embedded
-    //     call and shows the direct invocation;
-    //   - any other unknown/excluded name: action-oriented unavailable-tool
-    //     feedback listing the callable tools.
+    // Recoverable argument failures coach a corrected retry; hard denials do not.
+    // Tool ceilings are name resolution: repair unique calls or list callable names.
     let retryable_denial = denial.is_some_and(|denial| denial.retryable);
     let tool_ceiling_denial =
         denial.is_some_and(|denial| denial.gate == crate::agent_events::DenialGate::ToolCeiling);
-    let repair = if tool_ceiling_denial {
-        agent_tools::embedded_call_repair_result(tool_name, tool_args)
-    } else {
-        None
-    };
-    let repaired = repair.is_some();
-    let mut result = if let Some(repair) = repair {
+    // `deny_tool_call` is the sole owner of resolving repairs and normalizing
+    // their typed denial. This result builder only projects that contract.
+    let denial_json = denial.map(crate::agent_events::ToolDenial::to_json);
+    let mut result = if let Some(repair) = resolved_repair {
         repair
     } else if category.is_recoverable() || retryable_denial {
         agent_tools::recoverable_tool_result(tool_name, reason.clone())
@@ -251,20 +228,8 @@ fn agent_primitive_denied_tool(
     } else {
         agent_tools::denied_tool_result(tool_name, reason.clone())
     };
-    // Mirror the structured denial onto the inner tool result so it rides
-    // along in the transcript the model sees, and onto the envelope so a
-    // host harness reading the dispatch outcome can fail or pivot early
-    // without re-parsing the rendered reason (harn#2780). A wrapper-repair
-    // flips `retryable` on: re-issuing WITH the correction is exactly the
-    // coached next move, so the structured record must not say "terminal".
-    let denial_json = denial.map(|denial| {
-        let mut denial = denial.clone();
-        if repaired {
-            denial.gate = crate::agent_events::DenialGate::MalformedToolWrapper;
-            denial.retryable = true;
-        }
-        denial.to_json()
-    });
+    // Mirror the denial into the result and envelope. A successful name repair
+    // makes both copies retryable, matching the corrected next step.
     if let Some(denial_json) = denial_json.clone() {
         if let Some(obj) = result.as_object_mut() {
             obj.insert("denial".to_string(), denial_json);
@@ -465,14 +430,7 @@ fn emit_permission_deny_event(
     let _ = crate::agent_sessions::append_event(session_id, event);
 }
 
-/// Emit the `PermissionDeny` event and build the denied `tool_result` for a
-/// refused agent tool call. Centralizes the structured-denial plumbing so
-/// every gate (capability ceiling, argument allow-list, dynamic permission,
-/// approval policy, host rejection, pre-tool hook) produces an identical
-/// shape. Fills `denied_paths` from the tool's annotated path arguments when
-/// the caller left them empty. Returns the raw `serde_json::Value` so callers
-/// that need to enrich it further (e.g. attach hook-reminder audit) can do so
-/// before converting to a `VmValue`.
+/// Emit the canonical `PermissionDeny` event/result and fill missing paths from tool annotations.
 fn deny_tool_call(
     session_id: &str,
     tool_name: &str,
@@ -481,7 +439,12 @@ fn deny_tool_call(
     mut denial: crate::agent_events::ToolDenial,
     escalated: bool,
     policy_decision: Option<serde_json::Value>,
+    schema_repair: Option<serde_json::Value>,
 ) -> serde_json::Value {
+    let repair = (denial.gate == crate::agent_events::DenialGate::ToolCeiling)
+        .then(|| agent_tools::embedded_call_repair_result(tool_name, tool_args).or(schema_repair))
+        .flatten();
+    denial = tools::normalize_repaired_denial(denial, repair.as_ref());
     if denial.denied_paths.is_empty() {
         denial.denied_paths =
             crate::orchestration::current_tool_declared_paths(tool_name, tool_args);
@@ -501,12 +464,11 @@ fn deny_tool_call(
         denial.reason.clone(),
         crate::agent_events::ToolCallErrorCategory::PermissionDenied,
         Some(&denial),
+        repair,
     )
 }
 
-/// `deny_tool_call` for the common case where no further enrichment is
-/// needed — emits the event, builds the denied result, and converts to a
-/// `VmValue` ready to return from the dispatch primitive.
+/// Canonical denied result converted for direct dispatch return.
 fn deny_tool_call_value(
     session_id: &str,
     tool_name: &str,
@@ -515,6 +477,7 @@ fn deny_tool_call_value(
     denial: crate::agent_events::ToolDenial,
     escalated: bool,
     policy_decision: Option<serde_json::Value>,
+    schema_repair: Option<serde_json::Value>,
 ) -> VmValue {
     json_to_vm_value(&deny_tool_call(
         session_id,
@@ -524,6 +487,7 @@ fn deny_tool_call_value(
         denial,
         escalated,
         policy_decision,
+        schema_repair,
     ))
 }
 
@@ -1241,13 +1205,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
     };
     let mut tool_name = match call.get("name") {
         Some(VmValue::String(name)) if !name.trim().is_empty() => name.to_string(),
-        // An empty/missing/non-string tool name is a recoverable parse slip,
-        // not a terminal harness error: the model emitted a malformed call and
-        // can fix it on the next turn. Surface it through the same
-        // schema-validation denied-tool envelope the loop already re-injects
-        // for bad arguments (a hard `Err` here aborts the whole agent_loop,
-        // wrongly tanking a run over one fixable slip). The unknown-but-named
-        // path is already recoverable this way; align the unnamed path with it.
+        // A missing name is a recoverable parse slip, not a reason to abort the loop.
         _ => {
             let denied = agent_primitive_denied_tool(
                 "<unnamed>",
@@ -1257,6 +1215,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                  `name({ ... })` using a non-empty tool name from the allowed \
                  list, then retry.",
                 crate::agent_events::ToolCallErrorCategory::SchemaValidation,
+                None,
                 None,
             );
             return Ok(json_to_vm_value(&denied));
@@ -1300,11 +1259,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
     if let Err(policy_denial) =
         enforce_dispatch_policies(policy_machinery_active, &tool_name, &tool_args)
     {
-        // An argument allow-list miss (e.g. a sub-agent scoped to `test/users.*`
-        // that tried to edit the shared reference file) is RECOVERABLE: the tool
-        // is permitted, only this path is out of scope, so coach a retry with an
-        // allowed path instead of a terminal "do not retry". Hard ceilings
-        // (tool/capability/side-effect) stay terminal.
+        // Argument constraints are correctable; hard policy ceilings remain terminal.
         let denial = if policy_denial.gate == crate::agent_events::DenialGate::ArgConstraint {
             crate::agent_events::ToolDenial::retryable(
                 policy_denial.gate,
@@ -1318,6 +1273,15 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 policy_denial.reason,
             )
         };
+        let schema_repair = if denial.gate == crate::agent_events::DenialGate::ToolCeiling {
+            let schemas = tools::collect_tool_schemas(tools, None);
+            let allowed = crate::orchestration::current_allowed_tool_names();
+            crate::llm::tools::schema_match_repair_result(
+                &tool_name, &tool_args, &schemas, &allowed,
+            )
+        } else {
+            None
+        };
         return Ok(deny_tool_call_value(
             &session_id,
             &tool_name,
@@ -1326,6 +1290,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             denial,
             false,
             None,
+            schema_repair,
         ));
     }
 
@@ -1418,6 +1383,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     denial,
                     escalated,
                     None,
+                    None,
                 ));
             }
         }
@@ -1492,6 +1458,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 denial,
                 false,
                 Some(decision.receipt),
+                None,
             ));
         }
         Some(decision) if decision.is_ask() => {
@@ -1509,6 +1476,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     denial,
                     false,
                     Some(decision.receipt.clone()),
+                    None,
                 ));
             };
             let approval_id = if tool_id.is_empty() {
@@ -1572,6 +1540,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             denial,
                             true,
                             Some(decision.receipt.clone()),
+                            None,
                         ));
                     }
                 },
@@ -1589,6 +1558,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         denial,
                         true,
                         Some(decision.receipt.clone()),
+                        None,
                     ));
                 }
             }
@@ -1626,6 +1596,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             &tool_args,
             denial,
             false,
+            None,
             None,
         );
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
@@ -1733,6 +1704,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             &tool_args,
             message,
             crate::agent_events::ToolCallErrorCategory::SchemaValidation,
+            None,
             None,
         );
         if let Some(cause) = cause {
@@ -2621,7 +2593,7 @@ mod denied_tool_routing_tests {
     //! tool name) coach a retry-with-correction, while TRUE policy/permission
     //! denials keep the don't-retry body. Reverting the split (sending every
     //! category through `denied_tool_result`) fails the recoverable assertions.
-    use super::agent_primitive_denied_tool;
+    use super::{agent_primitive_denied_tool, deny_tool_call};
     use crate::agent_events::ToolCallErrorCategory;
 
     #[test]
@@ -2633,6 +2605,7 @@ mod denied_tool_routing_tests {
             "Tool 'edit' is missing required parameter(s): path. \
              Provide all required parameters and try again.",
             ToolCallErrorCategory::SchemaValidation,
+            None,
             None,
         );
         // Envelope-level category is still schema_validation for the wire...
@@ -2669,6 +2642,7 @@ mod denied_tool_routing_tests {
              `name({ ... })` using a non-empty tool name from the allowed list, then retry.",
             ToolCallErrorCategory::SchemaValidation,
             None,
+            None,
         );
         let result = &envelope["result"];
         assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
@@ -2698,6 +2672,7 @@ mod denied_tool_routing_tests {
             denial.reason.clone(),
             ToolCallErrorCategory::PermissionDenied,
             Some(&denial),
+            None,
         );
         let result = &envelope["result"];
         // Retry-positive body, NOT a hard permission denial.
@@ -2733,15 +2708,17 @@ mod denied_tool_routing_tests {
             tools: vec!["look".to_string(), "search".to_string(), "edit".to_string()],
             ..Default::default()
         });
-        let envelope = agent_primitive_denied_tool(
+        let envelope = deny_tool_call(
+            "",
             "tool_call",
             "call_8",
             &serde_json::json!(
                 "<tool_call>\nlook({ file: \"src/main.rs\", intent: \"read\" })\n</tool_call>"
             ),
-            denial.reason.clone(),
-            ToolCallErrorCategory::PermissionDenied,
-            Some(&denial),
+            denial,
+            false,
+            None,
+            None,
         );
         pop_execution_policy();
         let result = &envelope["result"];
@@ -2762,6 +2739,9 @@ mod denied_tool_routing_tests {
         assert_eq!(envelope["denial"]["retryable"], true);
         assert_eq!(result["denial"]["gate"], "malformed_tool_wrapper");
         assert_eq!(result["denial"]["retryable"], true);
+        assert_eq!(envelope["denial"]["reason"], result["reason"]);
+        assert_eq!(result["denial"]["reason"], result["reason"]);
+        assert_eq!(envelope["error"], result["reason"]);
         // The wire-level category is unchanged for host harnesses.
         assert_eq!(envelope["error_category"], "permission_denied");
     }
@@ -2784,6 +2764,7 @@ mod denied_tool_routing_tests {
             denial.reason.clone(),
             ToolCallErrorCategory::PermissionDenied,
             Some(&denial),
+            None,
         );
         let result = &envelope["result"];
         assert_eq!(result["error"], serde_json::json!("unknown_tool"));
@@ -2817,6 +2798,7 @@ mod denied_tool_routing_tests {
             denial.reason.clone(),
             ToolCallErrorCategory::PermissionDenied,
             Some(&denial),
+            None,
         );
         let result = &envelope["result"];
         assert_eq!(result["error"], serde_json::json!("permission_denied"));
@@ -2845,6 +2827,7 @@ mod denied_tool_routing_tests {
             denial.reason.clone(),
             ToolCallErrorCategory::PermissionDenied,
             Some(&denial),
+            None,
         );
         let result = &envelope["result"];
         // Retry-positive body, NOT a hard permission denial.
@@ -2875,6 +2858,7 @@ mod denied_tool_routing_tests {
             denial.reason.clone(),
             ToolCallErrorCategory::PermissionDenied,
             Some(&denial),
+            None,
         );
         let result = &envelope["result"];
         assert_eq!(result["error"], serde_json::json!("permission_denied"));
@@ -2902,6 +2886,7 @@ mod denied_tool_routing_tests {
                 denial.reason.clone(),
                 ToolCallErrorCategory::PermissionDenied,
                 Some(&denial),
+                None,
             );
             let result = &envelope["result"];
             assert_eq!(result["error"], serde_json::json!("permission_denied"));
@@ -3038,6 +3023,7 @@ mod denied_tool_routing_tests {
             &serde_json::json!({ "command": "rm -rf /" }),
             "shell access is disabled by policy",
             ToolCallErrorCategory::PermissionDenied,
+            None,
             None,
         );
         assert_eq!(envelope["error_category"], "permission_denied");
