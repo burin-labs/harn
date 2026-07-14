@@ -12,8 +12,229 @@
 // their own `env` / `env_mode` in `options`.
 //
 // Import: import "std/worktree"
+import { unique } from "std/collections"
 import { git_env_remove, git_noninteractive_env } from "std/git"
 import { process_run, process_shell } from "std/runtime"
+
+const WORKTREE_PRUNE_DEFAULT_MIN_AGE_SECONDS = 60 * 60
+
+const WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS = [
+  "target",
+  ".target",
+  ".build",
+  ".harn",
+  "node_modules",
+  "Pods",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".codex",
+  ".burin",
+  ".DS_Store",
+]
+
+pub type WorktreePruneReason = "main_checkout" | "current_worktree" | "in_use" | "dirty" | "unpushed" | "not_merged" | "too_young"
+
+pub type WorktreePruneFacts = {
+  path: string,
+  branch?: string,
+  is_main: bool,
+  is_current: bool,
+  has_process: bool,
+  dirty: bool,
+  unpushed: bool,
+  merged: bool,
+  abandoned: bool,
+  age_seconds: int,
+  size_bytes?: int,
+}
+
+pub type WorktreePruneVerdict = {reclaimable: bool, reason?: WorktreePruneReason, label?: string}
+
+pub type WorktreeStatusEditOptions = {disposable_paths?: list<string>}
+
+/**
+ * worktree_prune_default_min_age_seconds returns the default age floor for
+ * guarded worktree pruning. Younger worktrees are treated as active even when
+ * they otherwise look clean.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_default_min_age_seconds() -> int {
+  return WORKTREE_PRUNE_DEFAULT_MIN_AGE_SECONDS
+}
+
+/**
+ * worktree_prune_default_disposable_paths returns path prefixes that are
+ * treated as disposable build/cache output when interpreting git status.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_default_disposable_paths() -> list<string> {
+  return WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS
+}
+
+/**
+ * worktree_prune_reason_label returns stable user-facing text for a
+ * non-reclaimable worktree guard.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_reason_label(reason: WorktreePruneReason) -> string {
+  if reason == "main_checkout" {
+    return "main checkout"
+  }
+  if reason == "current_worktree" {
+    return "current worktree"
+  }
+  if reason == "in_use" {
+    return "in use (process attached)"
+  }
+  if reason == "dirty" {
+    return "dirty (uncommitted edits)"
+  }
+  if reason == "unpushed" {
+    return "unpushed commits"
+  }
+  if reason == "not_merged" {
+    return "branch not merged"
+  }
+  return "too recent"
+}
+
+fn __worktree_prune_protected(reason: WorktreePruneReason) -> WorktreePruneVerdict {
+  return {reclaimable: false, reason: reason, label: worktree_prune_reason_label(reason)}
+}
+
+/**
+ * worktree_prune_classify is the pure safety policy for deciding whether a git
+ * worktree may be reclaimed. It never shells out; callers supply already-gathered
+ * facts so the policy is deterministic and easy to test.
+ *
+ * A worktree is reclaimable only when it is linked, not current, unused, clean,
+ * has no unpushed work, is merged or abandoned, and is older than the age floor.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_classify(
+  entry: WorktreePruneFacts,
+  min_age_seconds: int = WORKTREE_PRUNE_DEFAULT_MIN_AGE_SECONDS,
+) -> WorktreePruneVerdict {
+  if entry.is_main {
+    return __worktree_prune_protected("main_checkout")
+  }
+  if entry.is_current {
+    return __worktree_prune_protected("current_worktree")
+  }
+  if entry.has_process {
+    return __worktree_prune_protected("in_use")
+  }
+  if entry.dirty {
+    return __worktree_prune_protected("dirty")
+  }
+  if entry.unpushed {
+    return __worktree_prune_protected("unpushed")
+  }
+  if !entry.merged && !entry.abandoned {
+    return __worktree_prune_protected("not_merged")
+  }
+  if entry.age_seconds < min_age_seconds {
+    return __worktree_prune_protected("too_young")
+  }
+  return {reclaimable: true}
+}
+
+/**
+ * worktree_prune_normalize_disposable_path returns a safe repo-relative path
+ * prefix for disposable artifact cleanup, or nil for unsafe inputs. Absolute
+ * paths, dot-dot traversal, empty paths, and `.git` paths are rejected.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_normalize_disposable_path(raw: string) -> string? {
+  let normalized = replace(trim(raw ?? ""), "\\", "/")
+  if starts_with(normalized, "/") {
+    return nil
+  }
+  normalized = regex_replace("^\\./+", "", normalized)
+  normalized = regex_replace("/+$", "", normalized)
+  if normalized == "" || normalized == ".git" || starts_with(normalized, ".git/") {
+    return nil
+  }
+  for component in split(normalized, "/") {
+    if component == "" || component == "." || component == ".." {
+      return nil
+    }
+  }
+  return normalized
+}
+
+fn __worktree_prune_disposable_paths(extra_paths: list<string> = []) -> list<string> {
+  let out = []
+  for path in WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS + (extra_paths ?? []) {
+    const normalized = worktree_prune_normalize_disposable_path(path)
+    if normalized != nil {
+      out = out + [normalized]
+    }
+  }
+  return unique(out)
+}
+
+fn __worktree_prune_status_path(line: string) -> string {
+  if len(line) < 3 {
+    return ""
+  }
+  const raw = trim(substring(line, 3))
+  const renamed = split(raw, " -> ")
+  return renamed[len(renamed) - 1] ?? raw
+}
+
+fn __worktree_prune_path_matches_prefix(path: string, prefix: string) -> bool {
+  const normalized = replace(trim(path), "\\", "/")
+  const clean = regex_replace("^\\./+", "", normalized)
+  return clean == prefix || starts_with(clean, prefix + "/")
+}
+
+/**
+ * worktree_prune_status_has_real_edits returns true when a `git status
+ * --porcelain` stream contains source/user edits after ignoring known
+ * disposable build/cache paths. It is pure so product hosts can share the same
+ * cleanup policy without depending on wall-clock or git process behavior.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_status_has_real_edits(
+  porcelain: string,
+  options: WorktreeStatusEditOptions = {},
+) -> bool {
+  const disposable_paths = __worktree_prune_disposable_paths(options.disposable_paths ?? [])
+  for line in split(porcelain ?? "", "\n") {
+    if len(line) < 3 {
+      continue
+    }
+    const path = __worktree_prune_status_path(line)
+    if path == "" {
+      continue
+    }
+    let disposable = false
+    for prefix in disposable_paths {
+      if __worktree_prune_path_matches_prefix(path, prefix) {
+        disposable = true
+        break
+      }
+    }
+    if !disposable {
+      return true
+    }
+  }
+  return false
+}
 
 /**
  * worktree_noninteractive_env returns the default prompt guard env applied
