@@ -16,7 +16,7 @@ pipeline test(task) {
     registry,
     "deploy_service",
     "Ship the service",
-    {parameters: {env: {type: "string"}}, defer_loading: true, handler: { _ -> "ok" }},
+    {parameters: {env: {type: "string"}}, defer_loading: true, namespace: "ops", handler: { _ -> "ok" }},
   )
   with_llm_script(
     [
@@ -52,7 +52,7 @@ pipeline test(task) {
           }
         }
       }
-      assert(promoted_deploy, "explicit client mode promotes matches")
+      assert(promoted_deploy, "client mode promotes a namespaced deferred tool")
     },
   )
   let big = tool_registry()

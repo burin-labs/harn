@@ -1,6 +1,6 @@
 use super::{
     apply_tool_search_native_injection_typed, defer_loading_registry, extract_deferred_tool_names,
-    json, sample_tool_registry, vm_bool, vm_dict, vm_list, vm_str, vm_tools_to_native,
+    json, sample_tool_registry, vm_dict, vm_list, vm_str, vm_tools_to_native,
 };
 use crate::llm::provider::NativeToolSearchShape;
 use std::collections::BTreeMap;
@@ -48,34 +48,17 @@ fn vm_tools_to_native_uses_model_capability_shape_for_bedrock_claude() {
 }
 
 #[test]
-fn vm_tools_to_native_emits_namespace_for_openai_compat() {
-    // `namespace` on a tool entry (harn#71) flows through to the
-    // OpenAI-shape wrapper alongside `defer_loading`. Provider request
-    // builders may strip it from outbound HTTP bodies, but keeping it
-    // in the native tool value preserves transcript and tool-search
-    // grouping fidelity.
-    let mut deferred_params = BTreeMap::new();
-    deferred_params.insert("env".to_string(), vm_str("string"));
-    let deferred = vm_dict(&[
-        ("name", vm_str("deploy")),
-        ("description", vm_str("Deploy the app")),
-        ("parameters", super::VmValue::dict(deferred_params)),
-        ("defer_loading", vm_bool(true)),
-        ("namespace", vm_str("ops")),
-    ]);
-    let registry = vm_list(vec![deferred]);
-
-    let openai = vm_tools_to_native(&registry, "openai", "gpt-5.4").expect("openai native tools");
-    assert_eq!(openai[0]["namespace"].as_str(), Some("ops"));
-    assert_eq!(openai[0]["defer_loading"].as_bool(), Some(true));
-
-    let anthropic = vm_tools_to_native(&registry, "anthropic", "claude-opus-4-7")
-        .expect("anthropic native tools");
-    assert_eq!(
-        anthropic[0]["namespace"].as_str(),
-        Some("ops"),
-        "namespace survives Anthropic passthrough (harmlessly ignored by API)"
-    );
+fn vm_tools_to_native_retains_tool_search_metadata_for_strict_route() {
+    // Internal metadata is route-independent. Provider projections decide what
+    // reaches a wire; Harn-managed search, transcript, and replay keep it.
+    let registry = defer_loading_registry();
+    let openai = vm_tools_to_native(&registry, "openai", "gpt-5.3").expect("openai native tools");
+    let deploy = openai
+        .iter()
+        .find(|tool| tool["function"]["name"] == "deploy")
+        .expect("deferred tool");
+    assert_eq!(deploy["namespace"], "ops");
+    assert_eq!(deploy["defer_loading"], true);
 }
 
 #[test]

@@ -100,12 +100,7 @@ pub(super) fn apply_provider_overrides(
     body: &mut serde_json::Value,
     overrides: Option<&serde_json::Value>,
 ) {
-    let Some(obj) = overrides.and_then(|value| value.as_object()) else {
-        return;
-    };
-    for (key, value) in obj {
-        body[key] = value.clone();
-    }
+    crate::llm::provider::apply_provider_wire_overrides(body, overrides);
 }
 
 pub(super) fn google_function_declaration_tools(
@@ -182,6 +177,20 @@ pub(super) fn parse_major_minor_tail(tail: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_overrides_do_not_emit_harn_control_fields() {
+        let mut body = serde_json::json!({"model": "example"});
+        let overrides = serde_json::json!({
+            "force_native_tool_search": true,
+            "custom_wire_field": "kept",
+        });
+
+        apply_provider_overrides(&mut body, Some(&overrides));
+
+        assert!(body.get("force_native_tool_search").is_none());
+        assert_eq!(body["custom_wire_field"], "kept");
+    }
 
     #[test]
     fn parse_major_minor_tail_dotted() {

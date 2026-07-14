@@ -10,6 +10,8 @@ use std::collections::HashSet;
 use super::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::value::VmError;
 
+pub(crate) const FORCE_NATIVE_TOOL_SEARCH_OVERRIDE: &str = "force_native_tool_search";
+
 /// Source of an automatic provider inference decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProviderInferenceSource {
@@ -259,6 +261,45 @@ pub(crate) fn provider_supports_defer_loading(provider: &str, model: &str) -> bo
 /// `capabilities.toml` replaced the per-provider hard-coded gates.
 pub(crate) fn provider_tool_search_variants(provider: &str, model: &str) -> Vec<String> {
     super::capabilities::lookup(provider, model).tool_search
+}
+
+/// Whether an OpenAI-shape request may emit per-tool search extensions.
+/// Capability support alone is insufficient: ordinary function-tool requests
+/// must stay free of these fields unless the request also carries the provider's
+/// `tool_search` meta-tool.
+pub(crate) fn openai_tool_search_wire_extensions_enabled(
+    provider: &str,
+    model: &str,
+    tools: &[serde_json::Value],
+    provider_overrides: Option<&serde_json::Value>,
+) -> bool {
+    let caps = super::capabilities::lookup(provider, model);
+    let route_supports_extensions =
+        caps.defer_loading && caps.tool_search.iter().any(|variant| variant == "hosted");
+    let native_search_forced = provider_overrides
+        .and_then(serde_json::Value::as_object)
+        .and_then(|overrides| overrides.get(FORCE_NATIVE_TOOL_SEARCH_OVERRIDE))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    (route_supports_extensions || native_search_forced)
+        && tools
+            .iter()
+            .any(|tool| tool.get("type").and_then(serde_json::Value::as_str) == Some("tool_search"))
+}
+
+/// Apply caller-supplied provider body fields without serializing Harn controls.
+pub(crate) fn apply_provider_wire_overrides(
+    body: &mut serde_json::Value,
+    provider_overrides: Option<&serde_json::Value>,
+) {
+    let Some(overrides) = provider_overrides.and_then(serde_json::Value::as_object) else {
+        return;
+    };
+    for (key, value) in overrides {
+        if key != FORCE_NATIVE_TOOL_SEARCH_OVERRIDE {
+            body[key] = value.clone();
+        }
+    }
 }
 
 /// Shared helper message/request/response wire format. This is a model

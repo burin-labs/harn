@@ -64,6 +64,7 @@ pipeline test(task) {
       )
       const calls = llm_mock_calls()
       assert(len(calls) >= 1, "at least one LLM call happened")
+      assert(calls[0].api_mode == "responses", "OpenAI native tool search selects the Responses API")
       const tools = calls[0].tools
       assert(tools != nil, "tools captured")
       assert(len(tools) == 4, "meta-tool + 3 user tools = 4")

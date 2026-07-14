@@ -14,7 +14,7 @@ pub(super) fn provider_overrides_force_native(
         return false;
     };
     matches!(
-        overrides.get("force_native_tool_search"),
+        overrides.get(crate::llm::provider::FORCE_NATIVE_TOOL_SEARCH_OVERRIDE),
         Some(VmValue::Bool(true))
     )
 }

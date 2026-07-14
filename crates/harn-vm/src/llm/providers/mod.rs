@@ -19,6 +19,8 @@ mod gemini;
 mod mock;
 mod ollama;
 pub(crate) mod openai_compat;
+#[cfg(test)]
+mod openai_compat_tests;
 pub(crate) mod openai_responses;
 mod schema_compat;
 pub(crate) mod vertex;

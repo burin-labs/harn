@@ -37,13 +37,10 @@ impl OpenAiResponsesProvider {
         } else {
             Self::build_request_body(request)
         };
-        if let Some(ref overrides) = request.provider_overrides {
-            if let Some(object) = overrides.as_object() {
-                for (key, value) in object {
-                    body[key] = value.clone();
-                }
-            }
-        }
+        crate::llm::provider::apply_provider_wire_overrides(
+            &mut body,
+            request.provider_overrides.as_ref(),
+        );
 
         let mut resolved = crate::llm::helpers::ResolvedProvider::resolve(&request.provider);
         resolved.endpoint = if compact {
@@ -224,20 +221,34 @@ fn responses_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::V
 
 fn responses_tools(opts: &LlmRequestPayload) -> Vec<serde_json::Value> {
     let mut tools = opts.provider_tools.clone();
+    let provider_tool_count = tools.len();
     if let Some(native_tools) = opts.native_tools.as_ref() {
-        tools.extend(
-            native_tools
-                .iter()
-                .map(|tool| responses_function_tool(&opts.provider, &opts.model, tool)),
-        );
+        tools.extend(native_tools.iter().cloned());
     }
+    let tool_search_extensions = crate::llm::provider::openai_tool_search_wire_extensions_enabled(
+        &opts.provider,
+        &opts.model,
+        &tools,
+        opts.provider_overrides.as_ref(),
+    );
     tools
+        .into_iter()
+        .enumerate()
+        .map(|(index, tool)| {
+            if index < provider_tool_count {
+                tool
+            } else {
+                responses_function_tool(&opts.provider, &opts.model, &tool, tool_search_extensions)
+            }
+        })
+        .collect()
 }
 
 fn responses_function_tool(
     provider: &str,
     model: &str,
     tool: &serde_json::Value,
+    tool_search_extensions: bool,
 ) -> serde_json::Value {
     if tool.get("type").and_then(serde_json::Value::as_str) != Some("function") {
         return tool.clone();
@@ -274,9 +285,13 @@ fn responses_function_tool(
             ),
         );
     }
-    for key in ["defer_loading", "namespace", "namespaces"] {
-        if let Some(value) = tool.get(key).or_else(|| function.get(key)) {
-            out.insert(key.to_string(), value.clone());
+    // Strict endpoints reject tool-search-only fields on ordinary function
+    // tools. Preserve the Harn-side metadata and gate only this outbound shape.
+    if tool_search_extensions {
+        for key in ["defer_loading", "namespace", "namespaces"] {
+            if let Some(value) = tool.get(key).or_else(|| function.get(key)) {
+                out.insert(key.to_string(), value.clone());
+            }
         }
     }
     serde_json::Value::Object(out)
@@ -533,6 +548,30 @@ mod tests {
     use super::*;
     use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
 
+    fn tool_search_native_tools() -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({
+                "type": "tool_search",
+                "mode": "hosted",
+                "namespaces": ["ops"],
+            }),
+            serde_json::json!({
+                "type": "function",
+                "namespace": "ops",
+                "defer_loading": true,
+                "function": {
+                    "name": "deploy",
+                    "description": "Deploy the app",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"env": {"type": "string"}},
+                        "required": ["env"],
+                    },
+                },
+            }),
+        ]
+    }
+
     #[test]
     fn responses_tool_result_screenshot_relocated_to_user_input_image() {
         // A computer-use tool result carries [text, neutral-screenshot-dict].
@@ -691,7 +730,6 @@ mod tests {
         })];
         opts.native_tools = Some(vec![serde_json::json!({
             "type": "function",
-            "defer_loading": true,
             "function": {
                 "name": "lookup",
                 "description": "Lookup a record",
@@ -763,7 +801,6 @@ mod tests {
         assert_eq!(body["tools"][0]["type"], "web_search_preview");
         assert_eq!(body["tools"][1]["type"], "function");
         assert_eq!(body["tools"][1]["name"], "lookup");
-        assert_eq!(body["tools"][1]["defer_loading"], true);
         assert_eq!(
             body["tools"][1]["parameters"]["additionalProperties"],
             false
@@ -784,6 +821,60 @@ mod tests {
         assert!(body["tools"][1]["parameters"]["properties"]["mode"]
             .get("oneOf")
             .is_none());
+    }
+
+    #[test]
+    fn responses_strict_route_omits_tool_search_extensions() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.3".to_string();
+        opts.api_mode = LlmApiMode::Responses;
+        opts.native_tools = Some(vec![tool_search_native_tools()
+            .into_iter()
+            .nth(1)
+            .expect("function tool")]);
+        let payload = LlmRequestPayload::from(&opts);
+
+        let body = OpenAiResponsesProvider::build_request_body(&payload);
+
+        assert_eq!(body["tools"][0]["name"], "deploy");
+        assert!(body["tools"][0].get("namespace").is_none());
+        assert!(body["tools"][0].get("defer_loading").is_none());
+        let source = &payload.native_tools.as_ref().expect("source tools")[0];
+        assert_eq!(source["namespace"], "ops");
+        assert_eq!(source["defer_loading"], true);
+    }
+
+    #[test]
+    fn responses_capable_tool_search_request_keeps_extensions() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.4".to_string();
+        opts.api_mode = LlmApiMode::Responses;
+        opts.native_tools = Some(tool_search_native_tools());
+        let payload = LlmRequestPayload::from(&opts);
+
+        let body = OpenAiResponsesProvider::build_request_body(&payload);
+
+        assert_eq!(body["tools"][0]["type"], "tool_search");
+        assert_eq!(body["tools"][0]["namespaces"], serde_json::json!(["ops"]));
+        assert_eq!(body["tools"][1]["name"], "deploy");
+        assert_eq!(body["tools"][1]["namespace"], "ops");
+        assert_eq!(body["tools"][1]["defer_loading"], true);
+    }
+
+    #[test]
+    fn responses_forced_native_search_keeps_extensions_for_unknown_model() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "my-internal-model".to_string();
+        opts.api_mode = LlmApiMode::Responses;
+        opts.native_tools = Some(tool_search_native_tools());
+        opts.provider_overrides = Some(serde_json::json!({"force_native_tool_search": true}));
+        let payload = LlmRequestPayload::from(&opts);
+
+        let body = OpenAiResponsesProvider::build_request_body(&payload);
+
+        assert_eq!(body["tools"][0]["type"], "tool_search");
+        assert_eq!(body["tools"][1]["namespace"], "ops");
+        assert_eq!(body["tools"][1]["defer_loading"], true);
     }
 
     #[test]
