@@ -439,3 +439,37 @@ hook_write_changed_cargo_packages() {
   done < "$input"
   sort -u -o "$output" "$output"
 }
+
+# Run the one local Rust compilation gate for a commit lifecycle. Pre-commit
+# owns formatting and cheap structural feedback; pre-push owns changed-package
+# test-target compilation plus clippy so those two concerns share one Cargo
+# profile/fingerprint instead of compiling overlapping graphs twice.
+hook_run_rust_test_lint_gate() {
+  changed_file_list=$1
+  changed_packages=$2
+
+  if hook_paths_match "$changed_file_list" '(^Cargo\.toml$|^Cargo\.lock$|^\.config/nextest\.toml$)'; then
+    echo "=== Pre-push: running workspace Rust lint/test compile ==="
+    cargo clippy --workspace --tests -- -D warnings
+    return
+  fi
+
+  hook_write_changed_cargo_packages "$changed_file_list" "$changed_packages"
+  if [ ! -s "$changed_packages" ]; then
+    if hook_paths_match "$changed_file_list" "$HOOK_RUST_PATTERN"; then
+      echo "=== Pre-push: running workspace Rust lint/test compile (no crate package matched) ==="
+      cargo clippy --workspace --tests -- -D warnings
+      return
+    fi
+    echo "=== Pre-push: skipping Rust lint/test compile (no changed crate packages) ==="
+    return
+  fi
+
+  package_flags=""
+  while IFS= read -r package; do
+    package_flags="$package_flags -p $package"
+  done < "$changed_packages"
+  echo "=== Pre-push: running Rust lint/test compile for changed packages ($(tr '\n' ' ' < "$changed_packages")) ==="
+  # shellcheck disable=SC2086  # intentional word splitting on -p flags
+  cargo clippy $package_flags --tests -- -D warnings
+}

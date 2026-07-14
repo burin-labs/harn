@@ -9,13 +9,12 @@ hook_timing_start pre-commit
 changed=$(mktemp)
 harn_format_files=$(mktemp)
 harn_lint_files=$(mktemp)
-changed_packages=$(mktemp)
 # Combine into a single EXIT trap (a second `trap ... EXIT` would replace,
 # not stack with, this one): capture the hook's real exit code FIRST (the
 # subsequent `rm` would otherwise clobber $? with its own status), clean up
 # temp files, then let hook_timing_finish append the NDJSON timing line and
 # re-exit with the captured code.
-trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"; hook_timing_finish "$hook_timing_exit_code"' EXIT
+trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files"; hook_timing_finish "$hook_timing_exit_code"' EXIT
 hook_write_staged_files "$changed"
 if ! hook_no_local_build_mode; then
   hook_export_cargo_target_dir
@@ -143,8 +142,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Phase 2 — formatters, clippy, and generated-file sync (the expensive,
-# tree-mutating steps). Reached only once the fast validators above pass.
+# Phase 2 — formatters and generated-file sync (the tree-mutating steps).
+# Reached only once the fast validators above pass; Rust compilation and
+# linting run once at pre-push.
 # ---------------------------------------------------------------------------
 
 if hook_skip_no_local_build "pre-commit local build/format/lint phases"; then
@@ -196,35 +196,6 @@ else
 fi
 
 hook_write_staged_files "$changed"
-
-if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
-  # Match the intent of 63b3ebdc: pre-commit lints the *library* surface
-  # of changed packages only — fast feedback for the dev loop. Workspace
-  # `--all-targets` clippy is still enforced by the `Rust lint` CI job
-  # and by `make lint` for ad-hoc local runs; pre-push catches
-  # test-target compile errors via `cargo check --tests`.
-  hook_write_changed_cargo_packages "$changed" "$changed_packages"
-  if hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$)'; then
-    echo "=== Pre-commit: running clippy on full workspace (workspace-scope change) ==="
-    cargo clippy --workspace -- -D warnings
-  elif [ -s "$changed_packages" ]; then
-    package_flags=""
-    while IFS= read -r package; do
-      package_flags="$package_flags -p $package"
-    done < "$changed_packages"
-    # shellcheck disable=SC2086  # intentional word splitting on -p flags
-    echo "=== Pre-commit: running clippy on changed packages ($(tr '\n' ' ' < "$changed_packages")) ==="
-    cargo clippy $package_flags -- -D warnings
-  else
-    # `.rs` outside any `crates/` package (eg. top-level build script) —
-    # fall back to a workspace check rather than skip silently.
-    echo "=== Pre-commit: running clippy on full workspace (no crate package matched) ==="
-    cargo clippy --workspace -- -D warnings
-  fi
-  echo "    Rust lint OK."
-else
-  echo "=== Pre-commit: skipping clippy (no Rust/Cargo changes) ==="
-fi
 
 if hook_paths_need_highlight "$changed" --cached; then
   echo "=== Pre-commit: syncing generated highlight keywords ==="

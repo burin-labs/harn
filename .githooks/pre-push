@@ -217,26 +217,14 @@ fi
 
 echo "=== Pre-push: running targeted local checks ==="
 if [ "${HARN_PREPUSH_FULL_TESTS:-0}" = "1" ] && hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
+  hook_run_rust_test_lint_gate "$changed" "$changed_packages"
   make test
 elif hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$|^\.config/nextest\.toml$)'; then
-  cargo check --workspace --tests
+  hook_run_rust_test_lint_gate "$changed" "$changed_packages"
 elif hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
-  hook_write_changed_cargo_packages "$changed" "$changed_packages"
-  if [ -s "$changed_packages" ]; then
-    # Collect all changed packages into a single `cargo check` so cargo
-    # only resolves the dep graph and re-evaluates fingerprints once,
-    # instead of paying that overhead N times in a shell loop.
-    package_flags=""
-    while IFS= read -r package; do
-      package_flags="$package_flags -p $package"
-    done < "$changed_packages"
-    # shellcheck disable=SC2086  # intentional word splitting on -p flags
-    cargo check $package_flags --tests
-  else
-    echo "=== Pre-push: skipping Cargo check (no changed crate packages) ==="
-  fi
+  hook_run_rust_test_lint_gate "$changed" "$changed_packages"
 else
-  echo "=== Pre-push: skipping Cargo check (no Rust/Harn code changes) ==="
+  echo "=== Pre-push: skipping Rust lint/test compile (no Rust/Harn code changes) ==="
 fi
 
 if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
