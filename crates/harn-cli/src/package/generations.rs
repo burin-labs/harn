@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
@@ -300,10 +300,15 @@ fn remove_generation_path(path: &Path) -> Result<(), PackageError> {
 }
 
 fn write_generation_file(path: &Path, bytes: &[u8]) -> Result<(), PackageError> {
-    fs::write(path, bytes)
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-    File::open(path)
-        .and_then(|file| file.sync_all())
+    file.write_all(bytes)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    file.sync_all()
         .map_err(|error| format!("failed to sync {}: {error}", path.display()))?;
     Ok(())
 }
@@ -360,6 +365,17 @@ mod tests {
             .unwrap(),
             dir: root.to_path_buf(),
         }
+    }
+
+    #[test]
+    fn generation_file_write_and_sync_replaces_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("harn.lock");
+
+        write_generation_file(&path, b"long initial contents").unwrap();
+        write_generation_file(&path, b"replacement").unwrap();
+
+        assert_eq!(fs::read(path).unwrap(), b"replacement");
     }
 
     #[test]
