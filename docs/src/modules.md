@@ -957,10 +957,10 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | Function | Description |
 |---|---|
 | `ensure_parent_dir(path)` | Create the parent directory for a file path when needed |
-| `read_json(path)` | Read required JSON, throwing `JsonReadFailure` for absent, unreadable, malformed, or over-depth input |
-| `read_json_result(path)` | Read JSON as `Result<unknown, JsonReadFailure>` without erasing failure kind, path, or parser location |
+| `read_json(path)` | Read required JSON, throwing `StructuredReadFailure` for absent, unreadable, malformed, or over-depth input |
+| `read_json_result(path)` | Read JSON as `Result<unknown, StructuredReadFailure>` without erasing failure kind, path, or parser location |
 | `read_json_typed<T>(path, schema: Schema<T>, apply_defaults?) -> T` | Read required JSON and validate it against a schema, throwing the typed read or schema failure |
-| `read_json_typed_result<T>(path, schema: Schema<T>, apply_defaults?)` | Read and schema-validate JSON as `Result<T, JsonReadFailure \| SchemaValidationFailure>` |
+| `read_json_typed_result<T>(path, schema: Schema<T>, apply_defaults?)` | Read and schema-validate JSON as `TypedReadResult<T>`, whose error is `TypedReadFailure` |
 | `write_json(path, value, options?)` | Write JSON with optional `{pretty, trailing_newline, ensure_parent}` |
 | `read_yaml(path, fallback?)` / `write_yaml(path, value, options?)` | YAML file helpers |
 | `read_toml(path, fallback?)` / `write_toml(path, value, options?)` | TOML file helpers |
@@ -972,12 +972,14 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | `is_file(path)` / `is_dir(path)` | Return type-aware existence checks |
 | `file_size(path)` | Return file size in bytes, or `nil` when unavailable |
 
-`JsonReadFailure` contains `{kind, path, detail, line?, column?}`. Its closed
+`StructuredReadFailure` contains `{kind, format, path, detail, line?, column?}`. Its closed
 `kind` union is
 `"absent" | "unreadable" | "malformed" | "recursion_limit"`; only callers that
 explicitly treat absence as optional should default that case.
 `SchemaValidationFailure` contains `{kind: "schema_invalid", path, detail,
-issues}`.
+issues}`. `TypedReadFailure` is the owner alias for
+`StructuredReadFailure | SchemaValidationFailure` across JSON, YAML, and TOML
+typed readers.
 
 ```harn
 import { read_json, relative_path, write_json } from "std/fs"

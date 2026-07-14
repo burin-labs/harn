@@ -18,6 +18,8 @@ Ada
 user
 schema_invalid
 true
+json:schema_invalid:true
+json:absent:true
 schema_invalid
 json:Ada:strict:Lin:true:3:none
 json:schema_invalid:true:true:true
