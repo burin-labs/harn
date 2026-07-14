@@ -1,0 +1,350 @@
+import { parse_args } from "std/cli"
+
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v1"
+
+const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
+
+pub type ProviderToolProbeRoute = {id: string, provider: string, model: string}
+
+pub type ProviderToolProbeJob = {
+  id: string,
+  route_id: string,
+  provider: string,
+  model: string,
+  mode: string,
+  status: string,
+  command: list<string>,
+  reason: string,
+  artifact_path?: string,
+  observed?: dict,
+}
+
+pub type ProviderToolProbeCampaignReport = {
+  schema_version: "harn.provider_tool_probe_campaign.v1",
+  live: bool,
+  route_count: int,
+  job_count: int,
+  summary: dict,
+  routes: list<ProviderToolProbeRoute>,
+  jobs: list<ProviderToolProbeJob>,
+  artifacts: dict,
+}
+
+fn __split_once(text: string, sep: string) -> dict? {
+  const parts = split(text, sep)
+  if len(parts) < 2 {
+    return nil
+  }
+  return {left: parts[0], right: join(parts[1:len(parts)], sep)}
+}
+
+fn __slug(text: string) -> string {
+  return replace(replace(replace(replace(text, "/", "-"), ":", "-"), ".", "-"), "_", "-")
+}
+
+fn __route_from_spec(spec: string) -> ProviderToolProbeRoute? {
+  const pair = __split_once(trim(spec), ":")
+  if pair == nil {
+    return nil
+  }
+  const provider = trim(pair.left)
+  const model = trim(pair.right)
+  if provider == "" || model == "" {
+    return nil
+  }
+  return {id: __slug(provider + "-" + model), provider: provider, model: model}
+}
+
+pub fn provider_tool_probe_campaign_routes(specs: list<string>) -> list<ProviderToolProbeRoute> {
+  let routes: list<ProviderToolProbeRoute> = []
+  for spec in specs {
+    const route = __route_from_spec(spec)
+    if route != nil {
+      routes = routes + [route]
+    }
+  }
+  return routes
+}
+
+pub fn provider_tool_probe_campaign_modes(mode: string) -> list<string> {
+  if mode == "both" {
+    return ["non-streaming", "streaming"]
+  }
+  if mode == "non-streaming" {
+    return ["non-streaming"]
+  }
+  if mode == "streaming" {
+    return ["streaming"]
+  }
+  return []
+}
+
+fn __tool_probe_command(
+  harn_bin: string,
+  route: ProviderToolProbeRoute,
+  mode: string,
+  repeat: int,
+  timeout_secs: int,
+) -> list<string> {
+  return [
+    harn_bin,
+    "provider",
+    "tool-probe",
+    route.provider,
+    "--model",
+    route.model,
+    "--mode",
+    mode,
+    "--repeat",
+    to_string(repeat),
+    "--timeout-secs",
+    to_string(timeout_secs),
+    "--json",
+  ]
+}
+
+fn __job_id(route: ProviderToolProbeRoute, mode: string) -> string {
+  return route.id + "-" + __slug(mode)
+}
+
+fn __planned_job(
+  route: ProviderToolProbeRoute,
+  mode: string,
+  harn_bin: string,
+  repeat: int,
+  timeout_secs: int,
+) -> ProviderToolProbeJob {
+  return {
+    id: __job_id(route, mode),
+    route_id: route.id,
+    provider: route.provider,
+    model: route.model,
+    mode: mode,
+    status: "planned",
+    command: __tool_probe_command(harn_bin, route, mode, repeat, timeout_secs),
+    reason: "dry run; pass --live to execute harn provider tool-probe",
+  }
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __status_from_probe(exit_code: int, parsed) -> dict {
+  if type_of(parsed) != "dict" {
+    return {status: "error", reason: "tool-probe did not emit JSON"}
+  }
+  const tool_calling = __safe_dict(parsed["tool_calling"])
+  const fallback = __safe_string(tool_calling["fallback_mode"], "")
+  const failure = __safe_string(tool_calling["failure_reason"], "")
+  if fallback == "disabled" {
+    return {
+      status: "fail",
+      reason: if failure == "" {
+        "tool-probe classified fallback mode as disabled"
+      } else {
+        failure
+      },
+    }
+  }
+  if exit_code == 0 {
+    return {status: "pass", reason: "tool-probe completed with an enabled tool-call path"}
+  }
+  return {status: "fail", reason: "tool-probe exited " + to_string(exit_code)}
+}
+
+fn __ensure_dir(harness: Harness, path: string) {
+  if !harness.fs.exists(path) {
+    harness.fs.mkdir(path)
+  }
+}
+
+fn __run_job(
+  harness: Harness,
+  route: ProviderToolProbeRoute,
+  mode: string,
+  harn_bin: string,
+  repeat: int,
+  timeout_secs: int,
+  output_dir: string,
+) -> ProviderToolProbeJob {
+  const cmd = __tool_probe_command(harn_bin, route, mode, repeat, timeout_secs)
+  const artifact_path = path_join(output_dir, __job_id(route, mode) + ".json")
+  const child = harness.process.spawn_captured({cmd: harn_bin, args: cmd[1:len(cmd)]})
+  harness.fs.write_text(artifact_path, child.stdout ?? "")
+  const parsed = try {
+    json_parse(child.stdout ?? "")
+  } catch (_) {
+    nil
+  }
+  const outcome = __status_from_probe(child.exit_code, parsed)
+  return {
+    id: __job_id(route, mode),
+    route_id: route.id,
+    provider: route.provider,
+    model: route.model,
+    mode: mode,
+    status: outcome.status,
+    command: cmd,
+    reason: outcome.reason,
+    artifact_path: artifact_path,
+    observed: if type_of(parsed) == "dict" {
+      parsed
+    } else {
+      {stderr: trim(child.stderr ?? ""), exit_code: child.exit_code}
+    },
+  }
+}
+
+fn __summary(jobs: list<ProviderToolProbeJob>) -> dict {
+  let summary: dict = {planned: 0, pass: 0, fail: 0, error: 0}
+  for job in jobs {
+    summary = summary + {[job.status]: (summary[job.status] ?? 0) + 1}
+  }
+  return summary
+}
+
+pub fn provider_tool_probe_campaign_report(
+  routes: list<ProviderToolProbeRoute>,
+  jobs: list<ProviderToolProbeJob>,
+  live: bool,
+  output_dir: string,
+) -> ProviderToolProbeCampaignReport {
+  return {
+    schema_version: SCHEMA_VERSION,
+    live: live,
+    route_count: len(routes),
+    job_count: len(jobs),
+    summary: __summary(jobs),
+    routes: routes,
+    jobs: jobs,
+    artifacts: {
+      report_json: path_join(output_dir, "report.json"),
+      report_markdown: path_join(output_dir, "report.md"),
+    },
+  }
+}
+
+fn __markdown_escape(text: string) -> string {
+  return replace(text, "|", "\\|")
+}
+
+pub fn provider_tool_probe_campaign_markdown(report: ProviderToolProbeCampaignReport) -> string {
+  let out = "# Provider Tool-Probe Campaign\n\n"
+  out = out + "- Schema: `" + report.schema_version + "`\n"
+  out = out + "- Live: " + to_string(report.live) + "\n"
+  out = out + "- Routes: " + to_string(report.route_count) + "\n"
+  out = out + "- Jobs: " + to_string(report.job_count) + "\n"
+  out = out + "- Summary: `" + json_stringify(report.summary) + "`\n\n"
+  out = out + "| Status | Provider | Model | Mode | Reason |\n"
+  out = out + "| --- | --- | --- | --- | --- |\n"
+  for job in report.jobs {
+    out = out + "| "
+      + job.status
+      + " | "
+      + job.provider
+      + " | `"
+      + job.model
+      + "` | "
+      + job.mode
+      + " | "
+      + __markdown_escape(job.reason)
+      + " |\n"
+  }
+  return out
+}
+
+fn __as_string_list(value) -> list<string> {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    let out: list<string> = []
+    for item in value {
+      out = out + [to_string(item)]
+    }
+    return out
+  }
+  return [to_string(value)]
+}
+
+fn __arg_spec() -> list {
+  return [
+    {kind: "option", name: "route", flags: ["--route"], repeat: true, default: []},
+    {kind: "option", name: "mode", flags: ["--mode"], default: "both"},
+    {kind: "option", name: "repeat", flags: ["--repeat"], parse: "int", default: 1},
+    {kind: "option", name: "timeout_secs", flags: ["--timeout-secs"], parse: "int", default: 60},
+    {kind: "option", name: "harn_bin", flags: ["--harn-bin"], default: "harn"},
+    {kind: "option", name: "output_dir", flags: ["--output-dir"], default: DEFAULT_OUTPUT_DIR},
+    {kind: "flag", name: "live", flags: ["--live"]},
+    {kind: "flag", name: "markdown", flags: ["--markdown"]},
+  ]
+}
+
+fn main(harness: Harness) {
+  const parsed = parse_args(argv, __arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio
+      .println(
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- --route provider:model [--route provider:model] [--mode both|non-streaming|streaming] [--live]",
+    )
+    return nil
+  }
+  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
+    harness.stdio.eprintln(join((parsed?._errors ?? []) + (parsed?._extras ?? []), "\n"))
+    exit(2)
+  }
+  const routes = provider_tool_probe_campaign_routes(__as_string_list(parsed?.route))
+  if len(routes) == 0 {
+    harness.stdio.eprintln("at least one --route provider:model is required")
+    exit(2)
+  }
+  const mode = to_string(parsed?.mode ?? "both")
+  const modes = provider_tool_probe_campaign_modes(mode)
+  if len(modes) == 0 {
+    harness.stdio.eprintln("--mode must be one of: both, non-streaming, streaming")
+    exit(2)
+  }
+  const live = parsed?.live ?? false
+  const repeat = parsed?.repeat ?? 1
+  const timeout_secs = parsed?.timeout_secs ?? 60
+  const harn_bin = to_string(parsed?.harn_bin ?? "harn")
+  const output_dir = to_string(parsed?.output_dir ?? DEFAULT_OUTPUT_DIR)
+  __ensure_dir(harness, ".harn-runs")
+  __ensure_dir(harness, output_dir)
+  let jobs: list<ProviderToolProbeJob> = []
+  for route in routes {
+    for selected_mode in modes {
+      if live {
+        jobs = jobs
+          + [__run_job(harness, route, selected_mode, harn_bin, repeat, timeout_secs, output_dir)]
+      } else {
+        jobs = jobs + [__planned_job(route, selected_mode, harn_bin, repeat, timeout_secs)]
+      }
+    }
+  }
+  const report = provider_tool_probe_campaign_report(routes, jobs, live, output_dir)
+  harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
+  harness.fs
+    .write_text(report.artifacts.report_markdown, provider_tool_probe_campaign_markdown(report))
+  if parsed?.markdown ?? false {
+    harness.stdio.println(provider_tool_probe_campaign_markdown(report))
+  } else {
+    harness.stdio.println(json_stringify_pretty(report))
+  }
+  const summary = report.summary
+  if live && ((summary.fail ?? 0) > 0 || (summary.error ?? 0) > 0) {
+    exit(1)
+  }
+  return nil
+}
