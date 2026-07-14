@@ -21594,7 +21594,6 @@
       "name": "Grok 4.3",
       "provider": "xai",
       "aliases": [
-        "grok",
         "grok-4.3"
       ],
       "context_window": 1000000,
@@ -21692,7 +21691,11 @@
       "id": "grok-4.5",
       "name": "Grok 4.5",
       "provider": "xai",
-      "aliases": [],
+      "aliases": [
+        "grok",
+        "grok-4.5",
+        "grok-4.5-latest"
+      ],
       "context_window": 500000,
       "rate_limits": {
         "source_url": "https://docs.x.ai/developers/models",
@@ -22664,13 +22667,25 @@
     },
     {
       "name": "grok",
-      "model_id": "grok-4.3",
+      "model_id": "grok-4.5",
       "provider": "xai",
       "tool_format": "native"
     },
     {
       "name": "grok-4.3",
       "model_id": "grok-4.3",
+      "provider": "xai",
+      "tool_format": "native"
+    },
+    {
+      "name": "grok-4.5",
+      "model_id": "grok-4.5",
+      "provider": "xai",
+      "tool_format": "native"
+    },
+    {
+      "name": "grok-4.5-latest",
+      "model_id": "grok-4.5",
       "provider": "xai",
       "tool_format": "native"
     },
