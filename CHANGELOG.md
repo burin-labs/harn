@@ -9,6 +9,172 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.18
+
+### Added
+
+- Resolve the `grok-code-fast-1` alias to xAI's coding model (short `grok-code`/`grok-code-fast` already worked).
+- Added a Hugging Face router catalog row and aliases for Qwen3-Coder 480B A35B.
+- **Filesystem builtins.** Added `append_file_locked` / `harness.fs.append_locked`
+  for advisory cross-process row appends with bounded lock waits.
+- Added a Harn provider tool-probe campaign script for dry planning and live route sweeps over explicit provider:model routes.
+- Provider tool-probe campaigns now emit a typed provider conformance matrix with default cheap routes,
+  catalog snapshots, planned cells, and live probe results in one report.
+- Added typed `std/worktree` helpers for deterministic worktree-prune safety
+  classification and disposable-artifact status filtering.
+
+### Changed
+
+- Added an AST-backed lint and CI ratchet for public stdlib functions that omit explicit return types.
+- Consolidate local Rust hook compilation into one changed-package pre-push
+  lint and test-target gate.
+- Removed embedded Python from Harn binary bootstrap freshness checks by letting Cargo resolve the worktree executable.
+- **`std/fs` now exports `TypedReadFailure` (#4698).** Typed JSON, YAML, and
+  TOML readers share the owner alias for structured read and schema-validation
+  failures, so downstream callers can format the failure contract without
+  restating the union locally.
+- **Run transcript sidecars now carry verified artifact descriptors (#4703).**
+  LLM JSONL sidecar pointers include digest, byte length, event bounds, and
+  strict parse status so portal and replay readers can share one loader.
+- `harn models lora promote` now requires typed, hash-bound base and adapter probe evidence before issuing a promotion receipt.
+- Retain provider-native tool-call envelopes in LLM transcript response records for adapter and format forensics.
+- **Harn binary bootstrap now reuses the shared Cargo resolver in release and
+  audit helpers (#4696).** Release gates, audit fan-out, and Makefile Harn lint
+  targets no longer parse Cargo metadata with embedded Python to find the debug
+  `harn` binary.
+- **Harn CI audit gate wall-clock.** The conformance and independent audit-gate
+  fan-out now share one warmed `harn` binary and run in parallel, preserving the
+  same coverage while reducing merge-queue critical-path time.
+- Run the tree-sitter parse sweep first in the release grammar-audit lane, ahead of the metadata and
+  language-spec verification phases, so a grammar-parse regression surfaces in seconds after the grammar
+  dependencies install instead of minutes into the lane.
+- Removed the ambiguous `std/json.safe_parse` helper in favor of bare
+  `try { json_parse(...) }` result handling with the documented
+  `JsonParseFailure` contract.
+
+### Fixed
+
+- Recover a top-level malformed reserved-token tool-call opener `[[CALL]` (one bracket
+  short of the `[[CALL]]` wire marker) instead of leaking it into assistant prose. Cheap
+  `reserved_tool_call_token` models sometimes truncate their `[[CALL]]` opener; the stub
+  is now normalized to a canonical tool call — recovering a complete action, or surfacing
+  a typed truncated-call diagnostic — so a malformed opener can never be presented as
+  ordinary narration. Literal `[[CALL]` inside a tool argument, heredoc, code fence, or
+  prose (and unrelated bracket text such as `[[CALLER]`) is left byte-identical.
+- Classify an agent-loop session's terminal condition ONCE, at the finalize boundary, into
+  a typed `AgentTerminalKind` (natural, user-cancelled, the specific policy stops, provider
+  vs harness error, suspended) plus a coarse `owner`, and surface it on the finalize result
+  as `terminal: {kind, reason, owner}` alongside the unchanged raw `final_status` /
+  `stop_reason` / `terminal_class`. Harn owns the agent stop vocabulary, so hosts read the
+  typed outcome instead of substring-matching a free-form status — closing the class of bug
+  where a post-turn/custom policy stop (empty `final_status`, canonicalized to `done`) is
+  reported as a natural completion, masking a provider, runtime, or permission failure.
+- Recover a denied tool call's intended tool from its arguments when the tool
+  name is unresolvable — for example a generic `tool_call` name from a native
+  gpt-oss/Harmony channel that dropped the real function name — by naming the
+  single callable tool whose required-parameter schema the arguments satisfy,
+  instead of a bare "unknown tool" denial.
+- OpenAI Responses requests now retain Harn's deferred-tool metadata internally
+  while emitting `namespace` and `defer_loading` only for routes and requests that
+  activate native provider tool search. Strict endpoints no longer receive fields
+  they reject, client-executed search remains available on other routes, and the
+  explicit native-search override is consumed by Harn instead of sent as a wire
+  field.
+- For user suites, `harn test --timeout` now budgets pipeline execution rather
+  than deterministic VM setup, preventing host contention from misreporting fast
+  tests as timeouts; CPU-bound code stops at VM instruction boundaries, and
+  timeout reports carry typed phase metadata while preserving phase timings.
+  Dropping a polled timed-execution future now poisons that VM instead of
+  silently resuming partial interpreter state; debugger and module execution
+  entries fail closed until the embedding host discards the abandoned context.
+- Mark finalized agent-session LLM transcript sidecars with a terminal descriptor row so authoritative
+  loaders can distinguish complete sidecars from digest-valid partials.
+- **Tool-call parsing now tolerates malformed Harmony wrapper opens (#4707).**
+  Top-level `<tool_call<|message|>` and assistant Harmony header debris no
+  longer produce false parse guidance after their inner tool calls recover,
+  while the parser still preserves those bytes when they appear inside tool
+  arguments.
+- **`harn check` now reports unresolved value identifiers inside function
+  bodies (#4708).** Resolved-import checking now emits HARN-NAM-001 for
+  undefined value reads while preserving runtime globals such as `harness` and
+  `argv`, dict keys, match binders, and `schema_of(Type)` type tokens.
+- Recover text-channel tool calls that close their object-literal argument with
+  `}` but omit the call's own closing `)` (e.g. `edit({ ..., content: <<EOF ...
+  EOF }`). Previously such calls were rejected as "missing closing `)`", so in a
+  turn with several tool calls only the first well-formed one landed and the rest
+  were silently dropped; the complete object is now accepted, while genuinely
+  truncated arguments and trailing bytes still error.
+- **Compaction now preserves a bounded repair trajectory ledger (#4712).**
+  Auto-compaction summaries include deterministic edit, verification, and
+  current-diagnostic facts from the archived transcript window so resumed
+  agents can distinguish resolved repairs from still-live failures.
+- **Observation-mask compaction recap is now durable, bounded, and
+  result-preserving (#4731).** The post-compaction recap is delivered as a
+  durable reminder (never expiring after two turns), so the only surviving
+  memory of the archived window is no longer lost mid-session. The recap body
+  honors a configurable byte budget (`recap_budget_bytes`), spends it on
+  load-bearing tool results rather than verbatim assistant call replay, carries
+  a prior recap forward once instead of re-expanding it (recaps no longer
+  compound across successive compactions), and collapses repeated lines to a
+  count. Pending reminders are de-duplicated by `dedupe_key` at the read
+  boundary so a recap emits at most once per iteration. The `TranscriptCompacted`
+  event carries a `recap` receipt (`recap_bytes`, `budget_bytes`,
+  `kept_results_count`, `dropped_count`, `carried_prior_recap`).
+- The agent loop now resolves every in-flight tool call when a session ends. If
+  the loop reached a terminal condition (completion judge `done`, max iterations,
+  budget exhausted, or stuck) while a tool call was still streaming and had not
+  been dispatched to a result, the call was previously dropped with no terminal
+  update, leaving the transcript ending on a dangling `pending` tool call. Session
+  finalize now synthesizes a terminal `tool_call_update` (status `failed`, error
+  category `abandoned_at_loop_exit`) for each such call, so transcripts never end
+  with an unresolved call.
+- Stop a text tool-call completion at its terminator instead of letting the model free-run
+  past `</tool_call>`. In the text tool-call lane the call rides in visible content, and with
+  no stop sequence the provider kept generating additional fabricated tool-call blocks and
+  prose that the loop discards — one observed completion burned ~8k tokens on a 41-block fake
+  transcript. The per-call `stop_at_tool_call` option now injects the canonical text tool-call
+  terminator(s) as provider stop sequences, gated on the route honoring stop sequences (a route
+  that rejects stop extras, e.g. xAI/Grok, is never sent one), de-duplicated against any
+  caller-supplied `stop`, and capped at the provider limit. The resolved stop list is recorded
+  on the `resolved_dispatch` receipt so a dropped terminator is observable per call. The text
+  parser already recovers a complete tool-call body whose close tag the stop consumed, so no
+  call is lost.
+- Retry and account for a whitespace-only or echoed-stop-sequence completion instead of
+  booking it as `served`. A provider that billed output tokens but returned no usable content
+  (only whitespace, or a consumed stop sequence) slipped past the empty-completion detector,
+  which required an exact-empty `text` and zero `output_tokens` — so it booked as served with
+  no retry and no provider-error signal, burning an agent-loop iteration on an empty turn.
+  Emptiness is now defined once, on `LlmResult`, as "committed nothing usable": trimmed text is
+  empty, no tool calls, no thinking. Both the dispatch-outcome booking and the one-shot
+  empty-completion retry key on that single predicate, so a whitespace serve can no longer be
+  counted as content in one place while the retry misses it in another.
+- Prioritize malformed tool-call argument diagnostics before wrapper/protocol guidance in structural-validator feedback.
+- Allow configured LLM provider endpoints on loopback or private LAN hosts without disabling the SSRF guard for generic egress.
+- Background `run_command` responses now satisfy the closed host response schema when initial progress is returned.
+- Avoid compiling the Harn CLI before PR Rust test package selection.
+- Attribute user-role tool-result messages to the `tool_results` context-token segment instead of `user_messages`.
+- `harn models install` now recognizes Hugging Face `*-GGUF[:quant]` selectors as
+  llama.cpp local-runtime setup targets, and `harn models recommend` surfaces
+  cached local GGUF routes instead of hiding them behind configured cloud
+  credentials.
+- Manifest-registered lifecycle and tool hook handlers now resolve `pub fn`s
+  from transitively imported modules on every fire, not only the first. Lazy hook
+  resolution retained just the handler's entry module, so a handler that called an
+  imported function which in turn called a `pub fn` sibling in its own module threw
+  `Undefined builtin: <name>` on the second and later fires — a fresh child VM hit
+  the lazy callable cache without re-importing the module graph, leaving the
+  transitively imported module's function registry unreachable. The lazy callable
+  cache now pins the complete module graph loaded during first resolution, so every
+  transitively reachable registry and module state stays live for the cache's
+  lifetime.
+- Allow MCP servers to negotiate with clients that still initialize with the
+  original `2024-11-05` protocol version.
+- Fixed provider tool-probe campaigns so repeated `--route` and `--behavior`
+  flags are all executed instead of silently keeping only the last value.
+- Provider catalog Make targets now reuse one resolved Harn binary per composed recipe, avoiding repeated
+  Cargo executable-path probes during catalog refresh and check workflows.
+- Fixed `harn provider tool-scorecard` so it accepts compact `tool-probe` reports that omit empty diagnostic arrays.
+
 ## v0.10.17
 
 ### Changed

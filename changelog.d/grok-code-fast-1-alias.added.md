@@ -1,1 +1,0 @@
-- Resolve the `grok-code-fast-1` alias to xAI's coding model (short `grok-code`/`grok-code-fast` already worked).

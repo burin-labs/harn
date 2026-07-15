@@ -1,6 +1,7 @@
-// Extract every ```harn fenced code block from spec/HARN_SPEC.md and
-// verify each one compiles via `harn check`. A behavior-identical port
-// of scripts/verify_language_spec.py.
+// Extract every Harn fenced code block from spec/HARN_SPEC.md and verify it.
+// Bare ```harn blocks are parse-checked because the language spec includes
+// schematic fragments; ```harn,check blocks opt into full `harn check`, and
+// ```harn,ignore blocks are skipped. This matches the docs snippet checker.
 //
 // Usage:
 //   harn run scripts/verify_language_spec.harn
@@ -138,11 +139,10 @@ pub fn strip_ws(s: string) -> string {
 }
 
 /**
- * Extract every bare ```harn fenced block from `markdown`. Returns a list
- * of {heading, line, snippet} records where `line` is the 1-based source
+ * Extract every Harn fenced block from `markdown`. Returns a list
+ * of {heading, line, mode, snippet} records where `line` is the 1-based source
  * line of the first content line of the fence and `snippet` is the
- * stripped block body with a trailing newline appended. Mirrors
- * `extract_harn_fences` in the Python script.
+ * stripped block body with a trailing newline appended.
  */
 pub fn extract_harn_fences(markdown: string) -> list {
   let fences = []
@@ -170,11 +170,18 @@ pub fn extract_harn_fences(markdown: string) -> list {
         fence_start = line_no + 1
         fence_lines = []
       } else {
-        if fence_lang == "harn" {
+        const mode = if fence_lang == "harn,check" {
+          "check"
+        } else if fence_lang == "harn" {
+          "parse"
+        } else {
+          ""
+        }
+        if mode != "" {
           const snippet = strip_ws(fence_lines.join("\n"))
           if snippet != "" {
             fences = fences
-              + [{heading: current_heading, line: fence_start, snippet: snippet + "\n"}]
+              + [{heading: current_heading, line: fence_start, mode: mode, snippet: snippet + "\n"}]
           }
         }
         in_fence = false
@@ -211,17 +218,21 @@ pub fn pad3(n: int) -> string {
 }
 
 /**
- * Resolve the argv prefix (command + leading args, ending in `check`)
+ * Resolve the argv prefix (command + leading args, ending in the subcommand)
  * used to type-check each extracted fence. Mirrors the Python
  * `harn_check_command`: honor HARN_CHECK_BIN, else ask `cargo metadata`
  * for the workspace `target_directory` (so a redirected `CARGO_TARGET_DIR`
  * is respected) and use its `debug/harn`, else fall back to
  * `cargo run --bin harn` which builds on demand.
  */
-fn harn_check_argv() -> list<string> {
+fn harn_command_argv(subcommand: string) -> list<string> {
   const bin_override = harness.env.get("HARN_CHECK_BIN")
   if bin_override != nil && bin_override != "" {
-    return [bin_override, "check"]
+    return [bin_override, subcommand]
+  }
+  const harn_bin = harness.env.get("HARN_BIN")
+  if harn_bin != nil && harn_bin != "" {
+    return [harn_bin, subcommand]
   }
   const meta = harness.process
     .spawn_captured({cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]})
@@ -235,11 +246,11 @@ fn harn_check_argv() -> list<string> {
     if target_dir != nil && target_dir != "" {
       const bin = target_dir + "/debug/harn"
       if harness.fs.exists(bin) {
-        return [bin, "check"]
+        return [bin, subcommand]
       }
     }
   }
-  return ["cargo", "run", "--quiet", "--bin", "harn", "--", "check"]
+  return ["cargo", "run", "--quiet", "--bin", "harn", "--", subcommand]
 }
 
 pipeline main(task) {
@@ -270,6 +281,7 @@ pipeline main(task) {
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
   }
   let manifest_lines = []
+  let failures = []
   let idx = 0
   for fence in fences {
     idx = idx + 1
@@ -280,27 +292,35 @@ pipeline main(task) {
     const path = tmpbase + "/" + name
     harness.fs.write_text(path, normalize_snippet(fence.snippet))
     manifest_lines = manifest_lines
-      + ["${name}: ${fence.heading} (spec line ${fence.line})"]
+      + ["${name}: ${fence.heading} (${fence.mode}, spec line ${fence.line})"]
+    const argv_prefix = harn_command_argv(fence.mode)
+    const bin = argv_prefix[0]
+    const args = if fence.mode == "parse" {
+      argv_prefix.slice(1, argv_prefix.count) + ["--json", path]
+    } else {
+      argv_prefix.slice(1, argv_prefix.count) + [path]
+    }
+    const result = harness.process.spawn_captured({cmd: bin, args: args})
+    if result.exit_code != 0 {
+      failures = failures + [{name: name, result: result}]
+    }
   }
-  const argv_prefix = harn_check_argv()
-  const bin = argv_prefix[0]
-  const check_args = argv_prefix.slice(1, argv_prefix.count) + [tmpbase]
-  const result = harness.process
-    .spawn_captured({cmd: bin, args: check_args})
-  if result.exit_code != 0 {
+  if failures.count > 0 {
     __io_eprintln("language spec verification failed")
     __io_eprintln("")
     __io_eprintln("Extracted examples:")
     __io_eprintln(manifest_lines.join("\n"))
-    if result.stdout != "" {
+    for failure in failures {
       __io_eprintln("")
-      __io_eprintln(result.stdout)
+      __io_eprintln("FAIL: ${failure.name}")
+      if failure.result.stdout != "" {
+        __io_eprintln(failure.result.stdout)
+      }
+      if failure.result.stderr != "" {
+        __io_eprintln(failure.result.stderr)
+      }
     }
-    if result.stderr != "" {
-      __io_eprintln("")
-      __io_eprintln(result.stderr)
-    }
-    return result.exit_code
+    return 1
   }
   __io_println("verified ${fences.count} Harn code fences from spec/HARN_SPEC.md")
   return 0

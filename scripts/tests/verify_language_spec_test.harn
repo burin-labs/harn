@@ -109,6 +109,7 @@ pipeline test_extract_single_harn_fence(task) {
   assert_eq(fences.count, 1)
   assert_eq(fences[0].heading, "Intro")
   assert_eq(fences[0].line, 4)
+  assert_eq(fences[0].mode, "parse")
   assert_eq(fences[0].snippet, "let x = 1\n")
 }
 
@@ -124,6 +125,15 @@ pipeline test_extract_skips_harn_ignore(task) {
   const md = "```harn,ignore\nbroken on purpose\n```\n"
   const fences = extract_harn_fences(md)
   assert_eq(fences.count, 0)
+}
+
+@test
+pipeline test_extract_harn_check_fence(task) {
+  const md = "```harn,check\npipeline default() { return 1 }\n```\n"
+  const fences = extract_harn_fences(md)
+  assert_eq(fences.count, 1)
+  assert_eq(fences[0].mode, "check")
+  assert_eq(fences[0].snippet, "pipeline default() { return 1 }\n")
 }
 
 @test
