@@ -1,5 +1,6 @@
 use super::*;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn eval_pack_trial_report(
     trial: usize,
     severity: &str,

@@ -1217,7 +1217,6 @@ fn evaluate_eval_pack_friction_trial(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 mod live_tool_budget_tests {
     use super::*;
