@@ -9,13 +9,18 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## v0.10.18
+## Unreleased
 
 ### Added
 
 - Eval-pack statistics rows now retain case metadata, and `std/eval/stats`
   exposes `axis_breakdown` for deterministic language, task, platform, and
   other pack-defined breakdowns with explicit unclassified coverage.
+
+## v0.10.18
+
+### Added
+
 - Resolve the `grok-code-fast-1` alias to xAI's coding model (short `grok-code`/`grok-code-fast` already worked).
 - Added a Hugging Face router catalog row and aliases for Qwen3-Coder 480B A35B.
 - **Filesystem builtins.** Added `append_file_locked` / `harness.fs.append_locked`
