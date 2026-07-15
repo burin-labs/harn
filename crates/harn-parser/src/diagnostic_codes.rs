@@ -18,8 +18,7 @@
 //! );
 //! ```
 
-use std::fmt;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 /// Top-level diagnostic category used in a stable Harn diagnostic code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -254,6 +253,7 @@ diagnostic_codes! {
     StdlibUsageInvalid, "HARN-STD-002", Std, "stdlib call is invalid";
     BuiltinArity, "HARN-STD-003", Std, "builtin call has invalid arity";
     LintMissingStdlibMetadata, "HARN-STD-101", Std, "public stdlib function is missing declared metadata";
+    LintMissingStdlibReturnType, "HARN-STD-102", Std, "public stdlib function is missing an explicit return type";
     PromptTemplateParse, "HARN-PRM-001", Prm, "prompt template cannot be parsed";
     PromptVariantExplosion, "HARN-PRM-002", Prm, "prompt template has too many capability-aware branches";
     PromptInjectionRisk, "HARN-PRM-003", Prm, "prompt construction risks direct injection";

@@ -310,3 +310,21 @@ fn test_is_generated_path_matches_only_suffix() {
     assert!(!is_generated_path(Path::new("generated.harn")));
     assert!(!is_generated_path(Path::new("my_generated_types.harn")));
 }
+
+#[test]
+fn test_path_is_stdlib_source_matches_canonical_embedded_tree() {
+    use std::path::Path;
+    assert!(path_is_stdlib_source(Path::new(
+        "crates/harn-stdlib/src/stdlib/stdlib_fs.harn"
+    )));
+    assert!(path_is_stdlib_source(Path::new(
+        "/abs/path/crates/harn-stdlib/src/stdlib/agent/loop.harn"
+    )));
+    assert!(!path_is_stdlib_source(Path::new("scripts/foo.harn")));
+    assert!(!path_is_stdlib_source(Path::new(
+        "crates/harn-vm/src/stdlib_acp.harn"
+    )));
+    assert!(!path_is_stdlib_source(Path::new(
+        "conformance/tests/foo.harn"
+    )));
+}

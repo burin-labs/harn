@@ -41,7 +41,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
 | [`LLM`](#llm--llm-calls) | LLM calls | 5 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
-| [`STD`](#std--stdlib-usage) | Stdlib usage | 4 |
+| [`STD`](#std--stdlib-usage) | Stdlib usage | 5 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
@@ -180,6 +180,7 @@ A stdlib symbol is used in a way Harn does not support, or has been renamed/remo
 | [`HARN-STD-002`](#harn-std-002) | stdlib call is invalid | — | — |
 | [`HARN-STD-003`](#harn-std-003) | builtin call has invalid arity | — | — |
 | [`HARN-STD-101`](#harn-std-101) | public stdlib function is missing declared metadata | `doc/add-stdlib-metadata` | `behavior-preserving` |
+| [`HARN-STD-102`](#harn-std-102) | public stdlib function is missing an explicit return type | — | — |
 
 ## PRM — Prompt templates
 
@@ -1627,6 +1628,39 @@ pub fn render_readme(path: string) -> Result<string, FsError> { ... }
 The lint considers `@effects: []` and `@errors: []` valid declarations — they
 explicitly assert "no effects" and "infallible" respectively, which is what
 agents need to read out of the graph.
+
+### `HARN-STD-102`
+
+**Category:** `STD` (Stdlib usage) &nbsp;·&nbsp; **API stability:** `stable`
+
+public stdlib function is missing an explicit return type
+
+#### What it means
+
+Every public function exported from Harn's embedded standard library is a
+contract boundary. The function's return type is part of that contract: callers,
+generated docs, LSP hovers, schema export, and downstream agents should be able
+to depend on the producer shape without rediscovering it from implementation
+details.
+
+This lint warns when a `pub fn` declared inside
+`crates/harn-stdlib/src/stdlib/**/*.harn` omits an explicit `-> Type`
+annotation. Private helpers remain inferable.
+
+#### How to fix
+
+Declare the narrowest honest return type in the function signature:
+
+```harn,ignore
+pub fn read_json(path: string) -> Result<JsonValue, JsonReadError> {
+  ...
+}
+```
+
+Use named closed records for finite object shapes, `Result<T, E>` for fallible
+operations, and typed maps such as `dict<string, V>` for true open-key maps.
+Do not silence the lint with `any` or open `dict` unless the value is genuinely
+opaque and the caller must narrow it before use.
 
 ### `HARN-PRM-001`
 

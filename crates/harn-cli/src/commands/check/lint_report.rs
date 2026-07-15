@@ -22,7 +22,6 @@ use super::analysis::{analyze_file, FileAnalysisError};
 use super::check_cmd::{
     check_diagnostic_from_analysis_error, check_span, CheckDiagnostic, CheckFileStatus,
 };
-use super::lint::path_is_stdlib_source;
 use super::outcome::CommandOutcome;
 
 pub(crate) const LINT_SCHEMA_VERSION: u32 = 1;
@@ -117,7 +116,7 @@ pub(crate) fn lint_file_report(
         require_docstrings: super::harn_lint_require_docstrings(path),
         complexity_threshold,
         persona_step_allowlist,
-        require_stdlib_metadata: path_is_stdlib_source(path),
+        require_stdlib_metadata: harn_lint::path_is_stdlib_source(path),
         engine_rules: &engine_rules,
         native_rule_paths: &native_rule_paths,
         severity_overrides: super::harn_lint_severity_overrides(path),
