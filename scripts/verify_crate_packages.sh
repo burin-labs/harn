@@ -20,84 +20,91 @@ while [[ $# -gt 0 ]]; do
 done
 
 metadata="$(cargo metadata --format-version 1 --no-deps)"
-target_dir="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])' <<<"$metadata")"
+metadata_parent="$ROOT_DIR/.harn-package-verify-tmp"
+mkdir -p "$metadata_parent"
+metadata_tmp="$(mktemp -d "$metadata_parent/metadata.XXXXXX")"
+
+scratch_parent="${HARN_PACKAGE_VERIFY_SCRATCH_DIR:-}"
+if [[ -z "$scratch_parent" ]]; then
+  tmp_root="$(cd "${TMPDIR:-/tmp}" && pwd)"
+  case "$tmp_root" in
+    "$ROOT_DIR"|"$ROOT_DIR"/*)
+      scratch_parent="$(dirname "$ROOT_DIR")/.harn-package-verify-tmp"
+      ;;
+    *)
+      scratch_parent="$tmp_root"
+      ;;
+  esac
+else
+  mkdir -p "$scratch_parent"
+fi
+mkdir -p "$scratch_parent"
+tmp="$(mktemp -d "$scratch_parent/package-verify.XXXXXX")"
+trap 'rm -rf "$tmp" "$metadata_tmp"' EXIT
+metadata_file="$metadata_tmp/cargo-metadata.json"
+printf '%s\n' "$metadata" >"$metadata_file"
+
+plan_rows="$("./scripts/harn_bin.sh" run "$ROOT_DIR/scripts/verify_crate_packages_plan.harn" -- --metadata "$metadata_file" --root "$ROOT_DIR")"
+target_dir=""
+publishable_crates=()
+publishable_package_rows=()
+
+while IFS=$'\t' read -r row_kind package_name package_version manifest_path crate_dir; do
+  case "$row_kind" in
+    "")
+      ;;
+    target_directory)
+      target_dir="$package_name"
+      ;;
+    package)
+      publishable_crates+=("$package_name")
+      publishable_package_rows+=("$package_name"$'\t'"$package_version"$'\t'"$manifest_path"$'\t'"$crate_dir")
+      ;;
+    *)
+      echo "error: unknown verify_crate_packages_plan row kind: $row_kind" >&2
+      exit 1
+      ;;
+  esac
+done <<<"$plan_rows"
+
+if [[ -z "$target_dir" ]]; then
+  echo "error: verify_crate_packages_plan did not report target_directory" >&2
+  exit 1
+fi
+
 package_check_target_dir="${HARN_PACKAGE_VERIFY_TARGET_DIR:-$target_dir/package-check-target}"
 package_check_build_dir="${HARN_PACKAGE_VERIFY_BUILD_DIR:-$package_check_target_dir/build}"
 mkdir -p "$package_check_target_dir" "$package_check_build_dir"
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
-stdlib_version="$(
-  python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "harn-stdlib"))' \
-    <<<"$metadata"
-)"
-modules_version="$(
-  python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "harn-modules"))' \
-    <<<"$metadata"
-)"
-vm_version="$(
-  python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "harn-vm"))' \
-    <<<"$metadata"
-)"
-
-scratch_parent="${HARN_PACKAGE_VERIFY_SCRATCH_DIR:-}"
-if [[ -z "$scratch_parent" ]]; then
-  scratch_parent="$(
-    python3 - "$ROOT_DIR" <<'PY'
-import os
-import pathlib
-import sys
-
-root = pathlib.Path(sys.argv[1]).resolve()
-tmp = pathlib.Path(os.environ.get("TMPDIR", "/tmp")).resolve()
-if tmp == root or root in tmp.parents:
-    parent = root.parent / ".harn-package-verify-tmp"
-else:
-    parent = tmp
-parent.mkdir(parents=True, exist_ok=True)
-print(parent)
-PY
-  )"
-else
-  mkdir -p "$scratch_parent"
-fi
-tmp="$(mktemp -d "$scratch_parent/package-verify.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
-metadata_file="$tmp/cargo-metadata.json"
-printf '%s\n' "$metadata" >"$metadata_file"
 
 # Verify the candidate workspace as a coherent publish set instead of
 # resolving workspace-local dependencies to whatever versions are already
 # on crates.io. That catches package-only failures without needing a
 # prior bootstrap publish for newly split crates.
 local_harn_patches=()
-while IFS=$'\t' read -r crate manifest_path; do
+for row in "${publishable_package_rows[@]}"; do
+  IFS=$'\t' read -r crate _version manifest_path _crate_dir <<<"$row"
   crate_dir="$(cd "$(dirname "$manifest_path")" && pwd)"
   local_harn_patches+=(--config "patch.crates-io.$crate.path=\"$crate_dir\"")
-done < <(
-  python3 - "$metadata_file" <<'PY'
-import json
-import pathlib
-import sys
-
-metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
-members = set(metadata["workspace_members"])
-for package in sorted(metadata["packages"], key=lambda p: p["name"]):
-    if package["id"] in members and package.get("publish") != []:
-        print(f'{package["name"]}\t{package["manifest_path"]}')
-PY
-)
+done
 
 package_version() {
   local crate="$1"
-  python3 - "$crate" "$metadata_file" <<'PY'
-import json
-import sys
-import pathlib
-
-crate = sys.argv[1]
-metadata = json.loads(pathlib.Path(sys.argv[2]).read_text())
-print(next(p["version"] for p in metadata["packages"] if p["name"] == crate))
-PY
+  local row name version _manifest_path _crate_dir
+  for row in "${publishable_package_rows[@]}"; do
+    IFS=$'\t' read -r name version _manifest_path _crate_dir <<<"$row"
+    if [[ "$name" == "$crate" ]]; then
+      printf '%s\n' "$version"
+      return 0
+    fi
+  done
+  echo "error: package version not found for $crate" >&2
+  return 1
 }
+
+stdlib_version="$(package_version harn-stdlib)"
+modules_version="$(package_version harn-modules)"
+vm_version="$(package_version harn-vm)"
 
 cargo_package() {
   CARGO_BUILD_BUILD_DIR="$package_check_build_dir" cargo package "$@"
@@ -183,17 +190,7 @@ while IFS= read -r crate; do
       ;;
   esac
 done < <(
-  python3 - "$metadata_file" <<'PY'
-import json
-import sys
-import pathlib
-
-metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
-members = set(metadata["workspace_members"])
-for package in sorted(metadata["packages"], key=lambda p: p["name"]):
-    if package["id"] in members and package.get("publish") != []:
-        print(package["name"])
-PY
+  printf '%s\n' "${publishable_crates[@]}"
 )
 
 echo "=== Package harn-stdlib ==="

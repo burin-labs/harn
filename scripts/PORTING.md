@@ -40,6 +40,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `verify_tree_sitter_parse.harn` | `release_gate.sh` grammar audit | Regenerates/builds the tree-sitter grammar when stale, sweeps positive `.harn` sources, and preserves strict/non-strict failure policy. |
 | `check_burin_protocol_bindings.harn` | `make check-burin-protocol-artifacts` | Cross-repo Swift/TypeScript protocol artifact drift check against a Burin checkout. |
 | `check_protocol_bindings.harn` | `make check-bindings` | Harn owns the round-trip driver and diagnostics; Python is invoked only as the generated Python SDK runtime under test. |
+| `verify_crate_packages_plan.harn` | `scripts/verify_crate_packages.sh` | Cargo metadata normalization for package verification; the shell remains the Cargo/tar driver and Python remains only for Rust include-path inspection. |
 
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.

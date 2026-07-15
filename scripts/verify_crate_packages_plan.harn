@@ -1,0 +1,121 @@
+import { parse_args } from "std/cli"
+
+type PublishablePackage = {dir: string, manifest_path: string, name: string, version: string}
+
+fn rel_path(path: string, root: string) -> string {
+  const normalized = replace(path_normalize(path), "\\", "/")
+  const normalized_root = replace(path_normalize(root), "\\", "/")
+  const prefix = normalized_root + "/"
+  if normalized == normalized_root {
+    return "."
+  }
+  if normalized.starts_with(prefix) {
+    return normalized[len(prefix):]
+  }
+  return normalized
+}
+
+fn workspace_member_ids(meta: dict) -> list<string> {
+  return (meta?.workspace_members ?? []).map({ id -> to_string(id) }).to_list()
+}
+
+fn require_string(value, field: string) -> string {
+  const out = to_string(value ?? "")
+  if out == "" {
+    throw "cargo metadata is missing " + field
+  }
+  return out
+}
+
+pub fn target_directory_from_metadata(meta: dict) -> string {
+  return require_string(meta?.target_directory, "target_directory")
+}
+
+pub fn publishable_workspace_packages_from_metadata(meta: dict, root: string) -> list<PublishablePackage> {
+  const members = workspace_member_ids(meta)
+  let packages: list<PublishablePackage> = []
+  let seen: list<string> = []
+  for package in meta?.packages ?? [] {
+    const id = to_string(package?.id ?? "")
+    if !members.contains(id) {
+      continue
+    }
+    if package?.publish == [] {
+      continue
+    }
+    const name = require_string(package?.name, "packages[].name")
+    if seen.contains(name) {
+      throw "cargo metadata contains duplicate workspace package name: " + name
+    }
+    seen = seen + [name]
+    const version = require_string(package?.version, "packages[].version")
+    const manifest_path = require_string(package?.manifest_path, "packages[].manifest_path")
+    packages = packages
+      + [
+      {
+        dir: rel_path(dirname(manifest_path) ?? ".", root),
+        manifest_path: manifest_path,
+        name: name,
+        version: version,
+      },
+    ]
+  }
+  return packages.sort_by({ package -> package.name })
+}
+
+fn ensure_no_tabs(value: string, field: string) -> nil {
+  if value.contains("\t") || value.contains("\n") {
+    throw field + " contains a tab or newline, cannot render shell row safely"
+  }
+  return nil
+}
+
+pub fn verify_crate_packages_plan_rows(meta: dict, root: string) -> list<string> {
+  const target_dir = target_directory_from_metadata(meta)
+  ensure_no_tabs(target_dir, "target_directory")
+  let rows = ["target_directory\t" + target_dir]
+  for package in publishable_workspace_packages_from_metadata(meta, root) {
+    ensure_no_tabs(package.name, "package name")
+    ensure_no_tabs(package.version, "package version")
+    ensure_no_tabs(package.manifest_path, "manifest path")
+    ensure_no_tabs(package.dir, "package dir")
+    rows = rows
+      + [
+      "package\t" + package.name + "\t" + package.version + "\t" + package.manifest_path + "\t"
+        + package.dir,
+    ]
+  }
+  return rows
+}
+
+fn arg_spec() -> list {
+  return [
+    {kind: "option", name: "metadata", flags: ["--metadata"], parse: "string", default: ""},
+    {kind: "option", name: "root", flags: ["--root"], parse: "string", default: ""},
+  ]
+}
+
+fn main(harness: Harness) {
+  const parsed = parse_args(argv, arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio
+      .println(
+      "usage: harn run scripts/verify_crate_packages_plan.harn -- --metadata PATH --root PATH",
+    )
+    return nil
+  }
+  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    harness.stdio.eprintln(join(errors, "\n"))
+    exit(2)
+  }
+  const metadata_path = to_string(parsed?.metadata ?? "")
+  const root = to_string(parsed?.root ?? "")
+  if metadata_path == "" || root == "" {
+    harness.stdio.eprintln("error: --metadata and --root are required")
+    exit(2)
+  }
+  const meta = json_parse(harness.fs.read_text(metadata_path))
+  harness.stdio.println(join(verify_crate_packages_plan_rows(meta, path_normalize(root)), "\n"))
+  return nil
+}
