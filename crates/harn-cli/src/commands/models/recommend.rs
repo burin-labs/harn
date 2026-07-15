@@ -20,9 +20,11 @@ use std::io::Write as _;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::ModelRecommendArgs;
-use crate::commands::hardware::{collect_hardware_snapshot, HardwareSnapshot};
+use crate::commands::hardware::{collect_hardware_snapshot, GpuKind, HardwareSnapshot};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
+
+use super::recommend_sources::{detect_cloud_model, detect_local_model};
 
 const RECOMMENDATIONS_TOML: &str = include_str!("../../../data/model_recommendations.toml");
 const RAM_BUCKETS: [RamBucket; 4] = [
@@ -78,23 +80,31 @@ pub(crate) enum RecommendationGpu {
 }
 
 #[derive(Debug, Deserialize)]
-struct RecommendationTable {
-    recommendations: Vec<RecommendationRule>,
+pub(super) struct RecommendationTable {
+    pub(super) recommendations: Vec<RecommendationRule>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-struct RecommendationRule {
-    ram_bucket: RamBucket,
-    gpu: RecommendationGpu,
-    has_provider_key: bool,
-    provider: String,
-    model_id: String,
+pub(super) struct RecommendationRule {
+    pub(super) ram_bucket: RamBucket,
+    pub(super) gpu: RecommendationGpu,
+    pub(super) has_provider_key: bool,
+    pub(super) provider: String,
+    pub(super) model_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct CloudModel {
-    provider: String,
-    model_id: String,
+pub(super) struct CloudModel {
+    pub(super) provider: String,
+    pub(super) model_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(super) struct LocalModel {
+    pub(super) provider: String,
+    pub(super) model_id: String,
+    pub(super) harn_selector: String,
+    pub(super) cached: bool,
 }
 
 /// JSON payload handed to the embedded `cli/models/recommend` script.
@@ -105,6 +115,7 @@ struct RecommendDispatchPayload<'a> {
     hardware: &'a HardwareSnapshot,
     has_provider_key: bool,
     cloud_model: Option<&'a CloudModel>,
+    local_model: Option<&'a LocalModel>,
     recommendations: &'a [RecommendationRule],
 }
 
@@ -130,11 +141,13 @@ async fn run_dispatch(args: &ModelRecommendArgs) -> i32 {
         eprintln!("error: {error}");
         return 1;
     }
+    let local_model = detect_local_model(&snapshot, &table);
 
     let payload = RecommendDispatchPayload {
         hardware: &snapshot,
         has_provider_key,
         cloud_model: cloud_model.as_ref(),
+        local_model: local_model.as_ref(),
         recommendations: &table.recommendations,
     };
     let payload_json = match serde_json::to_string(&payload) {
@@ -252,75 +265,42 @@ fn validate_recommendation_model(
     Ok(())
 }
 
-fn detect_cloud_model() -> Option<CloudModel> {
-    for provider in cloud_provider_candidates() {
-        if cloud_provider_key_available(&provider) {
-            let model_id = cloud_model_for_provider(&provider);
-            return Some(CloudModel { provider, model_id });
-        }
-    }
-    None
-}
-
-fn cloud_provider_candidates() -> Vec<String> {
-    let mut candidates = Vec::new();
-    push_unique(&mut candidates, harn_vm::llm_config::default_provider());
-    for provider in [
-        "anthropic",
-        "openai",
-        "openrouter",
-        "gemini",
-        "together",
-        "groq",
-        "cerebras",
-        "deepseek",
-        "fireworks",
-        "dashscope",
-        "huggingface",
-        "azure_openai",
-    ] {
-        push_unique(&mut candidates, provider.to_string());
-    }
-    let mut provider_names = harn_vm::llm_config::provider_names();
-    provider_names.sort();
-    for provider in provider_names {
-        push_unique(&mut candidates, provider);
-    }
-    candidates
-}
-
-fn push_unique(values: &mut Vec<String>, value: String) {
-    if !values.iter().any(|existing| existing == &value) {
-        values.push(value);
-    }
-}
-
-fn cloud_model_for_provider(provider: &str) -> String {
-    harn_vm::llm::selected_model_for_provider(provider)
-        .or_else(|| harn_vm::llm_config::qc_default_model(provider))
-        .unwrap_or_else(|| harn_vm::llm_config::default_model_for_provider(provider))
-}
-
-fn cloud_provider_key_available(provider: &str) -> bool {
-    let Some(def) = harn_vm::llm_config::provider_config(provider) else {
-        return false;
+pub(super) fn ram_bucket_from_available_bytes(available_bytes: Option<u64>) -> RamBucket {
+    let Some(bytes) = available_bytes else {
+        return RamBucket::Lt8;
     };
-    if def.auth_style == "none" || matches!(def.auth_env, harn_vm::llm_config::AuthEnv::None) {
-        return false;
+    let gib = bytes / (1024 * 1024 * 1024);
+    if gib <= 7 {
+        RamBucket::Lt8
+    } else if gib <= 15 {
+        RamBucket::Between8And16
+    } else if gib <= 31 {
+        RamBucket::Between16And32
+    } else {
+        RamBucket::Plus32
     }
-    matches!(
-        harn_vm::llm::provider_auth_status(provider).credential_status,
-        harn_vm::llm::ProviderCredentialStatus::Ok
-            | harn_vm::llm::ProviderCredentialStatus::Deferred
-    )
+}
+
+pub(super) fn recommendation_gpu_from_kind(kind: GpuKind) -> RecommendationGpu {
+    match kind {
+        GpuKind::None => RecommendationGpu::None,
+        GpuKind::Mps => RecommendationGpu::Mps,
+        GpuKind::Cuda => RecommendationGpu::Cuda,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::recommend_sources::{detect_local_model, hf_cache_repo_dir};
     use super::{
         load_recommendation_table, validate_recommendation_table, RamBucket, RecommendationGpu,
         RecommendationRule, RecommendationTable, GPU_KEYS, RAM_BUCKETS,
     };
+    use crate::commands::hardware::{
+        DiskSnapshot, GpuKind, GpuSnapshot, HardwareSnapshot, RamSnapshot,
+    };
+    use crate::dispatch;
+    use crate::env_guard::ScopedEnvVar;
 
     #[test]
     fn recommendation_table_has_unique_tuple_keys() {
@@ -345,5 +325,96 @@ mod tests {
         };
         let error = validate_recommendation_table(&table).expect_err("dead model should fail");
         assert!(error.contains("unknown model_id=ollama/qwen2.5:3b-instruct"));
+    }
+
+    #[test]
+    fn local_candidate_is_detected_for_cached_cuda_gguf_even_with_cloud_possible() {
+        let cache = tempfile::tempdir().expect("cache");
+        std::fs::create_dir_all(hf_cache_repo_dir(
+            cache.path(),
+            "unsloth/Qwen3.6-35B-A3B-GGUF",
+        ))
+        .expect("repo cache dir");
+        let _cache_guard = ScopedEnvVar::set(
+            "HUGGINGFACE_HUB_CACHE",
+            cache.path().to_str().expect("utf8 temp path"),
+        );
+        let table = load_recommendation_table().expect("table parses");
+        let snapshot = HardwareSnapshot {
+            ram: RamSnapshot {
+                total_bytes: Some(64 * 1024 * 1024 * 1024),
+                available_bytes: Some(51 * 1024 * 1024 * 1024),
+            },
+            gpu: GpuSnapshot {
+                kind: GpuKind::Cuda,
+                total_memory_bytes: Some(32 * 1024 * 1024 * 1024),
+                free_memory_bytes: Some(31 * 1024 * 1024 * 1024),
+            },
+            disk: DiskSnapshot {
+                path: ".".into(),
+                free_bytes: Some(500 * 1024 * 1024 * 1024),
+            },
+        };
+        let local = detect_local_model(&snapshot, &table).expect("local candidate");
+        assert_eq!(local.provider, "llamacpp");
+        assert_eq!(local.harn_selector, "local-qwen3.6");
+        assert!(local.cached, "cached GGUF should be visible to recommend");
+    }
+
+    #[tokio::test]
+    async fn renderer_prefers_cached_local_route_and_keeps_uncached_route_visible() {
+        let rendered = render_recommend_payload(true).await;
+        assert_eq!(rendered["provider"], "llamacpp");
+        assert_eq!(rendered["harn_selector"], "local-qwen3.6");
+        assert!(
+            rendered["rationale"]
+                .as_str()
+                .unwrap_or("")
+                .contains("cloud route available: vertex/claude-sonnet-4-6"),
+            "rationale={}",
+            rendered["rationale"]
+        );
+
+        let rendered = render_recommend_payload(false).await;
+        assert_eq!(rendered["provider"], "vertex");
+        assert_eq!(rendered["model_id"], "vertex/claude-sonnet-4-6");
+        assert!(
+            rendered["rationale"]
+                .as_str()
+                .unwrap_or("")
+                .contains("local installable route available: local-qwen3.6"),
+            "rationale={}",
+            rendered["rationale"]
+        );
+    }
+
+    async fn render_recommend_payload(local_cached: bool) -> serde_json::Value {
+        let payload = serde_json::json!({
+            "hardware": {
+                "ram": {"total_bytes": 64_i64 * 1024 * 1024 * 1024, "available_bytes": 51_i64 * 1024 * 1024 * 1024},
+                "gpu": {"kind": "cuda", "total_memory_bytes": 32_i64 * 1024 * 1024 * 1024, "free_memory_bytes": 31_i64 * 1024 * 1024 * 1024},
+                "disk": {"path": ".", "free_bytes": 500_i64 * 1024 * 1024 * 1024}
+            },
+            "has_provider_key": true,
+            "cloud_model": {"provider": "vertex", "model_id": "claude-sonnet-4-6"},
+            "local_model": {
+                "provider": "llamacpp",
+                "model_id": "local-qwen3.6",
+                "harn_selector": "local-qwen3.6",
+                "cached": local_cached
+            },
+            "recommendations": [
+                {"ram_bucket": "32_plus", "gpu": "cuda", "has_provider_key": true, "provider": "cloud", "model_id": "$cloud_default"}
+            ]
+        });
+        let _payload_guard = ScopedEnvVar::set(
+            super::RECOMMEND_PAYLOAD_ENV,
+            &serde_json::to_string(&payload).expect("payload json"),
+        );
+
+        let outcome = dispatch::run_embedded_script("models/recommend", Vec::new(), true).await;
+
+        assert_eq!(outcome.exit_code, 0, "stderr={}", outcome.stderr);
+        serde_json::from_str(&outcome.stdout).expect("renderer json")
     }
 }

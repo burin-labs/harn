@@ -22,6 +22,7 @@
  *       "hardware": HardwareSnapshot,    // ram/gpu/disk
  *       "has_provider_key": bool,
  *       "cloud_model": {provider, model_id} | null,
+ *       "local_model": {provider, model_id, harn_selector, cached} | null,
  *       "recommendations": [             // parsed model_recommendations.toml
  *         {ram_bucket, gpu, has_provider_key, provider, model_id},
  *         ...
@@ -167,6 +168,27 @@ fn __rationale(ram_bytes, gpu: string, has_provider_key: bool, model_id: string)
   return ram + ", " + __gpu_label(gpu) + ", " + creds + " -> " + model_id
 }
 
+fn __alternative_suffix(local_model, cloud_model, selected_provider: string, selected_model: string) -> string {
+  const local = __resolve_local_model(local_model)
+  if local != nil && (local["provider"] != selected_provider || local["model_id"] != selected_model) {
+    const cached = if __safe_bool(__safe_dict(local_model)["cached"], false) {
+      "cached"
+    } else {
+      "installable"
+    }
+    return " (local " + cached + " route available: " + local["model_id"] + ")"
+  }
+  if type_of(cloud_model) == "dict" {
+    const cloud_provider = __safe_string(cloud_model["provider"], "")
+    const cloud_id = __safe_string(cloud_model["model_id"], "")
+    const cloud_display = cloud_provider + "/" + cloud_id
+    if cloud_provider != "" && cloud_id != "" && cloud_display != selected_model {
+      return " (cloud route available: " + cloud_display + ")"
+    }
+  }
+  return ""
+}
+
 /**
  * Resolve a rule against the optional cloud model. Returns
  * `{provider, model_id}` (model_id already in display form, e.g.
@@ -192,6 +214,19 @@ fn __resolve_rule(rule: dict, cloud_model) -> dict? {
   return {provider: provider, model_id: provider + "/" + cloud_model_id}
 }
 
+fn __resolve_local_model(local_model) -> dict? {
+  if type_of(local_model) != "dict" {
+    return nil
+  }
+  const provider = __safe_string(local_model["provider"], "")
+  const model_id = __safe_string(local_model["model_id"], "")
+  const selector = __safe_string(local_model["harn_selector"], "")
+  if provider == "" || model_id == "" || selector == "" {
+    return nil
+  }
+  return {provider: provider, model_id: model_id, harn_selector: selector}
+}
+
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_MODELS_RECOMMEND_PAYLOAD_JSON", "")
   if raw == "" {
@@ -211,6 +246,7 @@ fn main(harness: Harness) -> int {
   const gpu = __safe_string(gpu_snap["kind"], "none")
   const has_provider_key = __safe_bool(payload["has_provider_key"], false)
   const cloud_model = payload["cloud_model"]
+  const local_model = payload["local_model"]
   const rules = __safe_list(payload["recommendations"])
   const ram_bucket = __ram_bucket_from_bytes(ram["available_bytes"])
   const rule = __find_rule(rules, ram_bucket, gpu, has_provider_key)
@@ -231,10 +267,17 @@ fn main(harness: Harness) -> int {
       .eprintln("recommendation table requested a cloud default without cloud credentials")
     return 1
   }
-  const provider = resolved["provider"]
-  const model_id = resolved["model_id"]
-  const harn_selector = __harn_selector_for(provider, model_id)
+  const local_resolved = __resolve_local_model(local_model)
+  const selected = if local_resolved != nil && __safe_bool(__safe_dict(local_model)["cached"], false) {
+    local_resolved
+  } else {
+    resolved
+  }
+  const provider = selected["provider"]
+  const model_id = selected["model_id"]
+  const harn_selector = __safe_string(selected["harn_selector"], __harn_selector_for(provider, model_id))
   const rationale = __rationale(ram["available_bytes"], gpu, has_provider_key, model_id)
+    + __alternative_suffix(local_model, cloud_model, provider, model_id)
   const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     const envelope = {
@@ -245,6 +288,8 @@ fn main(harness: Harness) -> int {
       ram_bucket: ram_bucket,
       gpu: gpu,
       has_provider_key: has_provider_key,
+      local_model: local_model,
+      cloud_model: cloud_model,
       hardware: hardware,
     }
     harness.stdio.println(json_stringify_pretty(envelope))
