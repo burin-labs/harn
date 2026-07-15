@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::cli::ModelsLoraPreflightArgs;
 
+use super::behavior::{behavior_strata_report, record_behavior_classes, BehaviorStrataReport};
 use super::export::{
     available_tool_names, parse_json_tool_body, record_id, record_messages, resolve_corpus_path,
     source_tool_format, ExportRegexes,
@@ -225,6 +226,12 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
             stats.records_with_unrecognized_tools
         ));
     }
+    if !stats.behavior_strata.missing_required.is_empty() {
+        errors.push(format!(
+            "missing required behavior strata: {}",
+            stats.behavior_strata.missing_required.join(", ")
+        ));
+    }
 
     let mut warnings = Vec::new();
     if args.config.is_none() && args.max_seq_length.is_none() {
@@ -340,6 +347,7 @@ fn analyze_record(
     let mut unrecognized_tools = BTreeSet::new();
     let mut assistant_message_count = 0_u64;
     let mut last_assistant_content = "";
+    let behavior_classes = record_behavior_classes(record)?;
 
     for message in &messages {
         if message.get("role").and_then(Value::as_str) != Some("assistant") {
@@ -403,6 +411,7 @@ fn analyze_record(
         unknown_tool_blocks,
         malformed_json_bodies,
         unrecognized_tools: unrecognized_tools.into_iter().collect(),
+        behavior_classes: behavior_classes.into_iter().collect(),
         missing_done_marker: done_marker
             .is_some_and(|marker| !last_assistant_content.contains(marker)),
     })
@@ -464,12 +473,18 @@ fn preflight_stats(
         .filter(|example| !example.unrecognized_tools.is_empty())
         .count() as u64;
     let mut tool_calls = ToolCallStats::default();
+    let mut source_behavior_counts = BTreeMap::new();
     for example in examples {
         tool_calls.json_tool_calls += example.json_tool_calls;
         tool_calls.text_tool_calls += example.text_tool_calls;
         tool_calls.unknown_tool_blocks += example.unknown_tool_blocks;
         tool_calls.malformed_json_bodies += example.malformed_json_bodies;
+        for class in &example.behavior_classes {
+            *source_behavior_counts.entry(class.clone()).or_insert(0) += 1;
+        }
     }
+    let behavior_strata =
+        behavior_strata_report(source_behavior_counts.clone(), source_behavior_counts);
     PreflightStats {
         raw_records,
         trainable_records,
@@ -479,6 +494,7 @@ fn preflight_stats(
         missing_done_marker_records,
         records_with_unrecognized_tools,
         tool_calls,
+        behavior_strata,
     }
 }
 
@@ -636,6 +652,7 @@ struct ExampleStats {
     unknown_tool_blocks: u64,
     malformed_json_bodies: u64,
     unrecognized_tools: Vec<String>,
+    behavior_classes: Vec<String>,
     missing_done_marker: bool,
 }
 
@@ -696,6 +713,7 @@ struct PreflightStats {
     missing_done_marker_records: u64,
     records_with_unrecognized_tools: u64,
     tool_calls: ToolCallStats,
+    behavior_strata: BehaviorStrataReport,
 }
 
 #[derive(Default, Debug, Serialize)]

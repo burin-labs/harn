@@ -7,6 +7,7 @@ use sha2::{Digest as _, Sha256};
 use crate::cli::{ModelsLoraArgs, ModelsLoraCommand, ModelsLoraInspectArgs, ModelsLoraPlanArgs};
 use crate::commands::local::runtime::normalize_local_provider_id;
 
+mod behavior;
 mod export;
 mod manifest;
 mod preflight;
@@ -14,7 +15,6 @@ mod promote;
 mod promotion_templates;
 mod render;
 mod train;
-
 use promotion_templates::lora_promotion_probe_command_templates;
 pub(super) use render::{render_embedded_lora_report, run_embedded_lora_report};
 

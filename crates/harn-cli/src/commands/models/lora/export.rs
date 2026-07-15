@@ -10,6 +10,11 @@ use sha2::{Digest as _, Sha256};
 
 use crate::cli::ModelsLoraExportArgs;
 
+use super::behavior::{
+    behavior_strata_report, increment_counts, no_tool_row_behavior_classes,
+    record_behavior_classes, should_emit_no_tool_completion, text_tool_row_behavior_classes,
+    BehaviorStrataReport,
+};
 use super::{
     dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format, normalize_lora_method,
@@ -136,6 +141,8 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         )?)
     };
     let mut stats = ExportStats::default();
+    let mut source_behavior_counts = BTreeMap::new();
+    let mut emitted_behavior_counts = BTreeMap::new();
     let regexes = ExportRegexes::new();
     let file = File::open(&corpus_path)
         .map_err(|error| format!("failed to open corpus {}: {error}", corpus_path.display()))?;
@@ -176,10 +183,18 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
             stats.skipped += 1;
             continue;
         }
+        let behavior_classes = record_behavior_classes(record)?;
+        increment_counts(&mut source_behavior_counts, &behavior_classes);
         let converted = if dataset_format == "messages_with_tool_calls" {
-            convert_structured_record(record, &target, &regexes)
+            convert_structured_record(record, &target, &regexes, &behavior_classes)
         } else {
-            convert_text_records(record, &target, &dataset_format, &regexes)
+            convert_text_records(
+                record,
+                &target,
+                &dataset_format,
+                &regexes,
+                &behavior_classes,
+            )
         };
         let converted = match converted {
             Ok(converted) => converted,
@@ -196,6 +211,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         stats.emitted += converted.rows.len() as u64;
         stats.tool_calls += converted.tool_calls;
         stats.tool_results += converted.tool_results;
+        increment_counts(&mut emitted_behavior_counts, &converted.behavior_classes);
         if let Some(writer) = writer.as_mut() {
             for row in converted.rows {
                 serde_json::to_writer(&mut *writer, &row)
@@ -218,6 +234,13 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     } else {
         args.out.as_deref().map(sha256_file).transpose()?
     };
+    stats.behavior_strata = behavior_strata_report(source_behavior_counts, emitted_behavior_counts);
+    if !stats.behavior_strata.missing_required.is_empty() {
+        errors.push(format!(
+            "missing required behavior strata: {}",
+            stats.behavior_strata.missing_required.join(", ")
+        ));
+    }
     let serving = export_serving_report(
         &target,
         &dataset_format,
@@ -432,12 +455,14 @@ struct ConvertedExport {
     rows: Vec<Value>,
     tool_calls: u64,
     tool_results: u64,
+    behavior_classes: BTreeSet<String>,
 }
 
 fn convert_structured_record(
     record: &Map<String, Value>,
     target: &ExportTarget,
     regexes: &ExportRegexes,
+    behavior_classes: &BTreeSet<String>,
 ) -> Result<ConvertedExport, String> {
     let messages = record_messages(record)?;
     let system_text = messages
@@ -464,6 +489,12 @@ fn convert_structured_record(
             .unwrap_or("");
         match role {
             "assistant" => {
+                if !pending_tool_calls.is_empty() {
+                    return Err(
+                        "assistant tool calls must be followed by typed tool-result messages before the next assistant turn"
+                            .to_string(),
+                    );
+                }
                 let parsed_calls = parse_json_tool_blocks(content, regexes)?;
                 let assistant_content =
                     normalize_blank_lines(&regexes.tool_block.replace_all(content, "\n"), regexes);
@@ -503,13 +534,23 @@ fn convert_structured_record(
                     tool_result_count += tool_results.len() as u64;
                     structured_messages.extend(tool_results);
                 } else {
-                    pending_tool_calls.clear();
+                    if !pending_tool_calls.is_empty() {
+                        return Err(
+                            "assistant tool calls must be followed by typed tool-result messages before the next user turn"
+                                .to_string(),
+                        );
+                    }
                     structured_messages.push(normalized_message(role, content));
                 }
             }
             "system" => structured_messages.push(normalized_message(role, content)),
             _ => {}
         }
+    }
+    if !pending_tool_calls.is_empty() {
+        return Err(
+            "record ends with assistant tool calls that have no typed tool results".to_string(),
+        );
     }
 
     let tools = tool_schemas(&available_tools, &calls_by_tool);
@@ -530,12 +571,14 @@ fn convert_structured_record(
             "messages_with_tool_calls",
             &tools,
             &system_text,
+            behavior_classes,
         ),
     });
     Ok(ConvertedExport {
         rows: vec![row],
         tool_calls: tool_call_count,
         tool_results: tool_result_count,
+        behavior_classes: behavior_classes.clone(),
     })
 }
 
@@ -544,6 +587,7 @@ fn convert_text_records(
     target: &ExportTarget,
     dataset_format: &str,
     regexes: &ExportRegexes,
+    behavior_classes: &BTreeSet<String>,
 ) -> Result<ConvertedExport, String> {
     let messages = record_messages(record)?;
     let system_text = messages
@@ -557,6 +601,8 @@ fn convert_text_records(
     let mut context = Vec::new();
     let mut rows = Vec::new();
     let mut tool_call_count = 0_u64;
+    let mut emitted_tool_turns = 0_u64;
+    let mut emitted_behavior_classes = BTreeSet::new();
     let source_tool_format = source_tool_format(record);
 
     for (index, raw_message) in messages.iter().enumerate() {
@@ -592,6 +638,12 @@ fn convert_text_records(
                     tool_call_count += block_count as u64;
                 }
                 let tools = tool_schemas(&available_tools, &calls_by_tool);
+                let row_classes = text_tool_row_behavior_classes(
+                    block_count,
+                    behavior_classes,
+                    emitted_tool_turns > 0,
+                );
+                emitted_behavior_classes.extend(row_classes.iter().cloned());
                 rows.push(json!({
                     "id": format!("{}#turn-{index}", record_id(record, index + 1)),
                     "source_id": record_string(record, "id"),
@@ -608,6 +660,32 @@ fn convert_text_records(
                         dataset_format,
                         &tools,
                         &system_text,
+                        &row_classes,
+                    ),
+                }));
+                emitted_tool_turns += 1;
+            } else if should_emit_no_tool_completion(behavior_classes) && !content.trim().is_empty()
+            {
+                let tools = tool_schemas(&available_tools, &calls_by_tool);
+                let row_classes = no_tool_row_behavior_classes(behavior_classes);
+                emitted_behavior_classes.extend(row_classes.iter().cloned());
+                rows.push(json!({
+                    "id": format!("{}#turn-{index}", record_id(record, index + 1)),
+                    "source_id": record_string(record, "id"),
+                    "eval_name": record_string(record, "eval_name"),
+                    "language": record_string(record, "language"),
+                    "task_type": record_string(record, "task_type"),
+                    "messages": context,
+                    "tools": tools,
+                    "assistant_tool_text": content,
+                    "metadata": export_metadata(
+                        record,
+                        target,
+                        "harn_text_tool_calls_v1",
+                        dataset_format,
+                        &tools,
+                        &system_text,
+                        &row_classes,
                     ),
                 }));
             }
@@ -618,6 +696,7 @@ fn convert_text_records(
         rows,
         tool_calls: tool_call_count,
         tool_results: 0,
+        behavior_classes: emitted_behavior_classes,
     })
 }
 
@@ -902,6 +981,7 @@ fn export_metadata(
     dataset_format: &str,
     tools: &[Value],
     system_text: &str,
+    behavior_classes: &BTreeSet<String>,
 ) -> Value {
     let mut metadata = record
         .get("metadata")
@@ -1009,6 +1089,23 @@ fn export_metadata(
         "lora_contract_id".to_string(),
         Value::String(target.contract_id.clone()),
     );
+    if !behavior_classes.is_empty() {
+        metadata.insert(
+            "behavior_classes".to_string(),
+            Value::Array(
+                behavior_classes
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+        if behavior_classes.len() == 1 {
+            if let Some(only) = behavior_classes.iter().next() {
+                metadata.insert("behavior_class".to_string(), Value::String(only.clone()));
+            }
+        }
+    }
     Value::Object(metadata)
 }
 
@@ -1313,4 +1410,5 @@ struct ExportStats {
     skipped: u64,
     tool_calls: u64,
     tool_results: u64,
+    behavior_strata: BehaviorStrataReport,
 }

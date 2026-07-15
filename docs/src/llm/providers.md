@@ -207,6 +207,11 @@ template hash. Source metadata wins when it declares those fields; otherwise
 manifest repeats the required metadata list and defaults, so external trainers
 can prove that a PEFT/QLoRA run used the same frozen cases, schemas, prompt
 template, and Harn tool-call contract that promotion evals will probe. The
+preflight and export surfaces also fail closed unless declared
+`behavior_class` / `behavior_classes` metadata covers valid tool calls,
+parallel tool calls, no-tool answers, unavailable-tool repair, and multi-turn
+continuation, so adapter datasets cannot silently collapse to overcalling-only
+positive examples. The
 default tool-catalog policy is `full_schema`; fixed-catalog compression
 experiments must opt into `compressed_names` or `fixed_catalog_internalized` and
 record `--tool-catalog-id` or `--tool-catalog-hash`, which becomes part of the

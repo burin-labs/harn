@@ -31,6 +31,7 @@ fn __render_human(harness: Harness, report: dict) {
   const thresholds = safe_dict(report["thresholds"])
   const stats = safe_dict(report["stats"])
   const tool_calls = safe_dict(stats["tool_calls"])
+  const behavior_strata = safe_dict(stats["behavior_strata"])
   const config = safe_dict(report["config"])
   const breakdown = safe_dict(report["breakdown"])
   const longest = safe_list(report["longest"])
@@ -111,6 +112,13 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_int_string(tool_calls["unknown_tool_blocks"], "0")
       + " malformed_json="
       + safe_int_string(tool_calls["malformed_json_bodies"], "0"),
+  )
+  harness.stdio
+    .println(
+    "  behavior strata: source="
+      + json_stringify(safe_dict(behavior_strata["source"]))
+      + " emitted="
+      + json_stringify(safe_dict(behavior_strata["emitted"])),
   )
   harness.stdio
     .println(
