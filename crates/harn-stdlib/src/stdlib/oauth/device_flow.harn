@@ -53,6 +53,8 @@
  * standard `sleep(ms)` builtin and so honors `mock_time(...)` /
  * `advance_time(...)` in tests.
  */
+import { JsonParseFailure } from "std/json"
+
 const __DEFAULT_INTERVAL_SECONDS = 5
 
 const __SLOW_DOWN_BUMP_SECONDS = 5
@@ -150,18 +152,6 @@ fn __form_body(params) {
   return join(parts, "&")
 }
 
-fn __safe_json_parse(text) {
-  const s = to_string(text ?? "")
-  if s == "" {
-    return nil
-  }
-  try {
-    return json_parse(s)
-  } catch (_err) {
-    return nil
-  }
-}
-
 fn __now_seconds(harness: Harness) {
   return to_int(harness.clock.timestamp())
 }
@@ -246,25 +236,40 @@ fn __request_device_code(harness: Harness, cfg) {
   const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
   const response = harness.net.post(cfg.device_code_url, __form_body(form), {headers: headers})
   if !(response?.ok ?? false) {
-    const parsed = __safe_json_parse(response?.body ?? "")
-    const detail = (parsed?.error_description ?? parsed?.error ?? "device authorization endpoint returned status ")
+    const parsed: Result<unknown, JsonParseFailure> = try {
+      json_parse(response?.body ?? "")
+    }
+    const error_body = if is_ok(parsed) && type_of(unwrap(parsed)) == "dict" {
+      unwrap(parsed)
+    } else {
+      {}
+    }
+    const detail = (error_body?.error_description ?? error_body?.error
+      ?? "device authorization endpoint returned status ")
       + to_string(response?.status ?? 0)
     throw "std/oauth/device_flow: device authorization request failed: " + to_string(detail)
   }
-  const parsed = __safe_json_parse(response?.body ?? "")
-  if parsed == nil {
-    throw "std/oauth/device_flow: device authorization endpoint did not return JSON"
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(response?.body ?? "")
   }
-  const device_code = to_string(parsed?.device_code ?? "")
-  const user_code = to_string(parsed?.user_code ?? "")
-  const verification_uri = to_string(parsed?.verification_uri ?? parsed?.verification_url ?? "")
+  if is_err(parsed) {
+    throw "std/oauth/device_flow: device authorization endpoint did not return valid JSON: "
+      + unwrap_err(parsed).message
+  }
+  const body = unwrap(parsed)
+  if type_of(body) != "dict" {
+    throw "std/oauth/device_flow: device authorization endpoint returned non-object JSON"
+  }
+  const device_code = to_string(body?.device_code ?? "")
+  const user_code = to_string(body?.user_code ?? "")
+  const verification_uri = to_string(body?.verification_uri ?? body?.verification_url ?? "")
   if device_code == "" || user_code == "" || verification_uri == "" {
     throw "std/oauth/device_flow: device authorization response missing required fields"
   }
-  const verification_uri_complete = parsed?.verification_uri_complete
-  const interval_raw = parsed?.interval ?? __DEFAULT_INTERVAL_SECONDS
+  const verification_uri_complete = body?.verification_uri_complete
+  const interval_raw = body?.interval ?? __DEFAULT_INTERVAL_SECONDS
   const interval_seconds = to_int(interval_raw)
-  const expires_in_raw = parsed?.expires_in ?? 0
+  const expires_in_raw = body?.expires_in ?? 0
   const expires_in_seconds = to_int(expires_in_raw)
   return {
     device_code: device_code,
@@ -288,11 +293,18 @@ fn __poll_once(harness: Harness, cfg, device_code) {
   const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
   const response = harness.net.post(cfg.token_url, __form_body(form), {headers: headers})
   const status = to_int(response?.status ?? 0)
-  const parsed = __safe_json_parse(response?.body ?? "") ?? {}
-  if (response?.ok ?? false) && parsed?.access_token != nil {
-    return {kind: "ok", parsed: parsed}
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(response?.body ?? "")
   }
-  const error_code = to_string(parsed?.error ?? "")
+  const body = if is_ok(parsed) && type_of(unwrap(parsed)) == "dict" {
+    unwrap(parsed)
+  } else {
+    {}
+  }
+  if (response?.ok ?? false) && body?.access_token != nil {
+    return {kind: "ok", parsed: body}
+  }
+  const error_code = to_string(body?.error ?? "")
   if error_code == __ERROR_AUTHORIZATION_PENDING {
     return {kind: "pending"}
   }
@@ -305,7 +317,7 @@ fn __poll_once(harness: Harness, cfg, device_code) {
   if error_code == __ERROR_ACCESS_DENIED {
     throw "std/oauth/device_flow: user denied the device authorization request"
   }
-  const detail = (parsed?.error_description ?? error_code ?? "token endpoint returned status ") + to_string(status)
+  const detail = (body?.error_description ?? error_code ?? "token endpoint returned status ") + to_string(status)
   const prefix = error_code == "" ? "token endpoint error: " : "token endpoint error `" + error_code + "`: "
   throw "std/oauth/device_flow: " + prefix + to_string(detail)
 }

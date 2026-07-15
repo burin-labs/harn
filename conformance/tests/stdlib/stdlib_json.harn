@@ -1,14 +1,32 @@
 // Test std/json module functions
-import { merge, omit, pick, safe_parse } from "std/json"
+import { JsonParseFailure, merge, omit, pick } from "std/json"
 
 pipeline default(task) {
-  // safe_parse: valid JSON
-  const data = safe_parse("{\"name\":\"test\",\"value\":42}")
+  // Bare try over json_parse gives the canonical Result contract.
+  const parsed_data: Result<unknown, JsonParseFailure> = try {
+    json_parse("{\"name\":\"test\",\"value\":42}")
+  }
+  const data = unwrap(parsed_data)
   __io_println(data.name)
   __io_println(data.value)
-  // safe_parse: invalid JSON returns nil
-  const bad = safe_parse("not json {{{")
-  __io_println(bad)
+  // Valid JSON null is Ok(nil), not a parse failure.
+  const valid_null: Result<unknown, JsonParseFailure> = try {
+    json_parse("null")
+  }
+  __io_println(is_ok(valid_null))
+  __io_println(unwrap(valid_null))
+  // Invalid JSON preserves the structured failure kind.
+  const bad: Result<unknown, JsonParseFailure> = try {
+    json_parse("not json {{{")
+  }
+  __io_println(is_err(bad))
+  __io_println(unwrap_err(bad).kind)
+  // Over-depth JSON has a distinct failure kind.
+  const too_deep: Result<unknown, JsonParseFailure> = try {
+    json_parse("[".repeat(129) + "0" + "]".repeat(129))
+  }
+  __io_println(is_err(too_deep))
+  __io_println(unwrap_err(too_deep).kind)
   // merge: combine two dicts
   const merged = merge({a: 1, b: 2}, {b: 3, c: 4})
   __io_println(merged.a)

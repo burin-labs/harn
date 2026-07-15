@@ -1,5 +1,5 @@
 import { filter_nil } from "std/collections"
-import { merge, safe_parse } from "std/json"
+import { JsonParseFailure, merge } from "std/json"
 
 const GIT_FORGE_PULL_REQUEST_TOPIC = "connectors.git_forge.pull_request"
 
@@ -102,9 +102,15 @@ pub fn verify_jwt(token, jwks_url, options = nil) {
     if !(response.ok ?? false) {
       return {ok: false, claims: nil, error: response.body, status: response.status}
     }
-    jwks = safe_parse(response.body)
-    if jwks == nil {
+    const parsed_jwks: Result<unknown, JsonParseFailure> = try {
+      json_parse(response.body)
+    }
+    if is_err(parsed_jwks) {
       return {ok: false, claims: nil, error: "JWKS response was not valid JSON", status: response.status}
+    }
+    jwks = unwrap(parsed_jwks)
+    if type_of(jwks) != "dict" {
+      return {ok: false, claims: nil, error: "JWKS response was not a JSON object", status: response.status}
     }
   }
   return connector_shared_verify_jwt_inline(token, jwks, opts)
@@ -655,11 +661,25 @@ pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, 
     opts.headers ?? {},
   )
   const response = harness.net.post(token_url, __form_body(params), {headers: headers})
-  const parsed = safe_parse(response.body)
-  if !(response.ok ?? false) {
-    return {ok: false, status: response.status, error: parsed ?? response.body}
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(response.body)
   }
-  return merge(parsed ?? {body: response.body}, {ok: true, status: response.status})
+  if !(response.ok ?? false) {
+    const error_body = if is_ok(parsed) {
+      unwrap(parsed)
+    } else {
+      response.body
+    }
+    return {ok: false, status: response.status, error: error_body}
+  }
+  if is_err(parsed) {
+    return {ok: false, status: response.status, error: "OAuth2 token response was not valid JSON"}
+  }
+  const body = unwrap(parsed)
+  if type_of(body) != "dict" {
+    return {ok: false, status: response.status, error: "OAuth2 token response was not a JSON object"}
+  }
+  return merge(body, {ok: true, status: response.status})
 }
 
 /**

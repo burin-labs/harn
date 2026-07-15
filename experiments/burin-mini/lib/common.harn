@@ -1,4 +1,4 @@
-import { safe_parse } from "std/json"
+import { JsonParseFailure } from "std/json"
 import "std/schema"
 
 /** Resolve the LLM provider for Burin Mini runs. */
@@ -794,18 +794,26 @@ pub fn evaluator_options(system, tools) {
 /** Safely parse a JSON object from model output. */
 pub fn parse_json_object(text) {
   const raw = text ?? ""
-  const parsed = safe_parse(raw)
-  if parsed == nil {
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(raw)
+  }
+  if is_err(parsed) {
     const trimmed = raw.trim()
     const unfenced = regex_replace("^```[A-Za-z0-9_-]*\\n", "", trimmed)
     const unwrapped = regex_replace("\\n```$", "", unfenced)
-    const retried = safe_parse(unwrapped)
-    if retried == nil {
+    const retried: Result<unknown, JsonParseFailure> = try {
+      json_parse(unwrapped)
+    }
+    if is_err(retried) || type_of(unwrap(retried)) != "dict" {
       return {}
     }
-    return retried
+    return unwrap(retried)
   }
-  return parsed
+  const value = unwrap(parsed)
+  if type_of(value) != "dict" {
+    return {}
+  }
+  return value
 }
 
 /** Decode a direct `sub_agent_run` result into `{ok, error, data}`. */

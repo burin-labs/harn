@@ -1,0 +1,661 @@
+import { edit_safe_patch_content_hash } from "std/edit/internal"
+import { edit_apply_old_new_patch } from "std/edit/patch"
+
+fn __edit_hook_callable(value) {
+  return type_of(value) == "closure"
+}
+
+fn __edit_lifecycle_hooks(options) {
+  const opts = options ?? {}
+  const nested = opts?.lifecycle ?? {}
+  return {
+    pre_apply: opts?.pre_apply ?? nested?.pre_apply,
+    post_apply: opts?.post_apply ?? nested?.post_apply,
+    write_policy: opts?.write_policy ?? nested?.write_policy,
+    on_rollback: opts?.on_rollback ?? nested?.on_rollback,
+  }
+}
+
+/**
+ * Extracts lifecycle hooks that should be forwarded into nested edit helpers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_lifecycle_forward_options(options) {
+  const hooks = __edit_lifecycle_hooks(options)
+  return {
+    pre_apply: hooks.pre_apply,
+    post_apply: hooks.post_apply,
+    write_policy: hooks.write_policy,
+    on_rollback: hooks.on_rollback,
+  }
+}
+
+fn __edit_lifecycle_rejection(kind, verdict) {
+  if verdict == nil {
+    return nil
+  }
+  if type_of(verdict) == "string" {
+    const reason = trim(verdict)
+    if reason != "" {
+      return {code: kind + "_rejected", reason: reason}
+    }
+    return nil
+  }
+  if type_of(verdict) != "dict" {
+    return nil
+  }
+  if verdict?.reject ?? false {
+    return {
+      code: verdict?.code ?? (kind + "_rejected"),
+      reason: verdict?.reason ?? verdict?.message ?? (kind + " rejected the edit"),
+      cause: verdict?.cause,
+      verdict: verdict,
+    }
+  }
+  return nil
+}
+
+fn __edit_lifecycle_reject_fields(kind, rejection, fields = nil) {
+  const reason = rejection?.reason ?? (kind + " rejected the edit")
+  const code = rejection?.code ?? (kind + "_rejected")
+  return (fields ?? {})
+    .merge(
+    {
+      result: "rejected",
+      errors: [{code: code, message: reason, reason: reason, cause: rejection?.cause, lifecycle_hook: kind}],
+      rejection: {hook: kind, code: code, reason: reason, cause: rejection?.cause},
+    },
+  )
+}
+
+fn __edit_lifecycle_pre_apply(options, action) {
+  const hooks = __edit_lifecycle_hooks(options)
+  const request = (options ?? {}).merge({action: action})
+  if !__edit_hook_callable(hooks.pre_apply) {
+    return {ok: true, request: request}
+  }
+  const verdict = try {
+    hooks.pre_apply(request)
+  } catch {
+    return {
+      ok: false,
+      rejection: {code: "pre_apply_failed", reason: "pre_apply hook failed"},
+      request: request,
+    }
+  }
+  const rejection = __edit_lifecycle_rejection("pre_apply", verdict)
+  if rejection != nil {
+    return {ok: false, rejection: rejection, verdict: verdict, request: request}
+  }
+  if type_of(verdict) == "dict" && verdict?.rewrite != nil {
+    if type_of(verdict.rewrite) != "dict" {
+      return {
+        ok: false,
+        rejection: {code: "pre_apply_invalid_rewrite", reason: "pre_apply rewrite must be a request dict"},
+        verdict: verdict,
+        request: request,
+      }
+    }
+    return {ok: true, request: verdict.rewrite, verdict: verdict}
+  }
+  return {ok: true, request: request, verdict: verdict}
+}
+
+fn __edit_lifecycle_write_policy(options, path, content, action) {
+  const hooks = __edit_lifecycle_hooks(options)
+  if !__edit_hook_callable(hooks.write_policy) {
+    return {ok: true}
+  }
+  const verdict = try {
+    hooks.write_policy(path, content, action)
+  } catch {
+    return {ok: false, rejection: {code: "write_policy_failed", reason: "write_policy hook failed"}}
+  }
+  const rejection = __edit_lifecycle_rejection("write_policy", verdict)
+  if rejection != nil {
+    return {ok: false, rejection: rejection, verdict: verdict}
+  }
+  return {ok: true, verdict: verdict}
+}
+
+fn __edit_lifecycle_has_post_apply(options) {
+  return __edit_hook_callable(__edit_lifecycle_hooks(options).post_apply)
+}
+
+fn __edit_lifecycle_post_apply(options, context) {
+  const hooks = __edit_lifecycle_hooks(options)
+  if !__edit_hook_callable(hooks.post_apply) {
+    return {ok: true, warnings: []}
+  }
+  const verdict = try {
+    hooks.post_apply(context)
+  } catch {
+    return {ok: false, rejection: {code: "post_apply_failed", reason: "post_apply hook failed"}, warnings: []}
+  }
+  const rejection = __edit_lifecycle_rejection("post_apply", verdict)
+  if rejection != nil {
+    return {ok: false, rejection: rejection, verdict: verdict, warnings: []}
+  }
+  if type_of(verdict) == "dict" && verdict?.advisory != nil {
+    return {ok: true, verdict: verdict, warnings: [{code: "post_apply_advisory", message: verdict.advisory}]}
+  }
+  return {ok: true, verdict: verdict, warnings: []}
+}
+
+fn __edit_lifecycle_snapshot(path, options) {
+  const session_id = "edit-lifecycle-" + uuid_v7()
+  const snapshot_id = "post-apply-" + uuid_v7()
+  let request: dict = {session_id: session_id, scope_id: snapshot_id, paths: [path]}
+  if options?.snapshot_root != nil {
+    request = request.merge({root: options.snapshot_root})
+  } else if options?.root != nil {
+    request = request.merge({root: options.root})
+  }
+  const captured = try {
+    hostlib_fs_snapshot(request)
+  } catch {
+    nil
+  }
+  if captured?.snapshot_id != snapshot_id {
+    return {
+      ok: false,
+      error: "failed to capture rollback snapshot",
+      session_id: session_id,
+      snapshot_id: snapshot_id,
+    }
+  }
+  return {ok: true, session_id: session_id, snapshot_id: snapshot_id, path: path, captured: captured}
+}
+
+fn __edit_lifecycle_restore(snapshot, options, path) {
+  if !(snapshot?.ok ?? false) {
+    return {ok: false, error: "rollback snapshot was not available"}
+  }
+  const restored = try {
+    hostlib_fs_restore(
+      {session_id: snapshot.session_id, snapshot_id: snapshot.snapshot_id, paths: [path]},
+    )
+  } catch {
+    nil
+  }
+  const skipped = restored?.skipped_paths_with_reasons ?? []
+  const restore_ok = restored != nil && len(skipped) == 0
+  const hooks = __edit_lifecycle_hooks(options)
+  let hook_result = nil
+  if __edit_hook_callable(hooks.on_rollback) {
+    hook_result = try {
+      hooks.on_rollback(path)
+    } catch {
+      nil
+    }
+  }
+  hostlib_fs_drop_snapshot({session_id: snapshot.session_id, snapshot_id: snapshot.snapshot_id})
+  return {ok: restore_ok, restored: restored, skipped_paths_with_reasons: skipped, on_rollback: hook_result}
+}
+
+fn __edit_lifecycle_drop_snapshot(snapshot) {
+  if snapshot?.ok ?? false {
+    hostlib_fs_drop_snapshot({session_id: snapshot.session_id, snapshot_id: snapshot.snapshot_id})
+  }
+}
+
+fn __edit_safe_patch_telemetry(result, hunks_count, failed_hunk_index) {
+  return {
+    result: result,
+    hunks: hunks_count,
+    stale_base: if result == "stale_base" {
+      1
+    } else {
+      0
+    },
+    hunk_conflict: if result == "hunk_conflict" {
+      1
+    } else {
+      0
+    },
+    applied: if result == "applied" {
+      1
+    } else {
+      0
+    },
+    no_op: if result == "no_op" {
+      1
+    } else {
+      0
+    },
+    rejected: if result == "rejected" {
+      1
+    } else {
+      0
+    },
+    failed_hunk_index: failed_hunk_index,
+  }
+}
+
+fn __edit_safe_patch_result(ctx, fields = nil) {
+  const extra = fields ?? {}
+  const result = extra?.result ?? ctx.result
+  const matched = result == "applied" || result == "no_op"
+  const failed_idx = extra?.failed_hunk_index
+  const bytes_written = extra?.bytes_written ?? 0
+  if result == "applied" || result == "no_op" || result == "stale_base" || result == "hunk_conflict" {
+    hostlib_fs_emit_safe_text_patch_result(
+      {
+        session_id: ctx.session_id,
+        path: ctx.path,
+        result: result,
+        hunks_count: ctx.hunks_count,
+        bytes_written: bytes_written,
+        failed_hunk_index: failed_idx,
+      },
+    )
+  }
+  const base = {
+    ok: matched,
+    result: result,
+    applied: matched,
+    dry_run: ctx.dry_run ?? false,
+    path: ctx.path,
+    before_sha256: ctx.before_hash,
+    after_sha256: ctx.before_hash,
+    current_hash: ctx.current_hash,
+    expected_hash: ctx.expected_hash,
+    hunks_count: ctx.hunks_count,
+    hunk_results: extra?.hunk_results ?? [],
+    failed_hunk_index: failed_idx,
+    failed_hunk_error_code: extra?.failed_hunk_error_code,
+    stale_base: result == "stale_base",
+    bytes_written: bytes_written,
+    created: false,
+    preview: nil,
+    errors: [],
+    warnings: [],
+    telemetry: __edit_safe_patch_telemetry(result, ctx.hunks_count, failed_idx),
+    provenance: {
+      module: "std/edit",
+      helper: "edit_safe_text_patch",
+      path: ctx.path,
+      before_sha256: ctx.before_hash,
+      after_sha256: extra?.after_sha256 ?? ctx.before_hash,
+      current_hash: ctx.current_hash,
+      expected_hash: ctx.expected_hash,
+      caller: ctx.options?.provenance,
+    },
+  }
+  return base.merge(extra)
+}
+
+/**
+ * Apply a sequence of old/new hunks to `path` atomically against the
+ * staged-fs overlay (#1722). Snapshots the current bytes at `path`,
+ * checks `expected_hash` (when supplied) for stale-base rejection, runs
+ * each hunk through `edit_apply_old_new_patch` against the running
+ * post-image, and writes the final bytes back through the same overlay.
+ *
+ * All-or-nothing: if any hunk rejects (no match / ambiguous / lazy /
+ * etc.) the call returns `hunk_conflict` and no bytes are written.
+ *
+ * ## Params
+ *
+ * - `path`: file to mutate.
+ * - `hunks`: list of `{old_text, new_text, options?}`. Each hunk's
+ *   `options` override the top-level `match_options` for that hunk.
+ * - `expected_hash`: `sha256:HEX` of the pre-image the caller observed.
+ *   When omitted the stale-base check is skipped (still atomic w.r.t.
+ *   other staged-fs writers in the same process).
+ * - `session_id`: hostlib session whose staged-fs overlay should
+ *   intercept the read and the write.
+ * - `match_options`: default `edit_apply_old_new_patch` options merged
+ *   into every hunk; per-hunk `options` win when keys overlap.
+ * - `dry_run`: when true the post-image is computed and returned in
+ *   `preview` but no bytes are written.
+ * - `pre_apply(req)`: optional lifecycle hook. Return `nil` to continue,
+ *   a string or `{reject: true, reason}` to reject before matching, or
+ *   `{rewrite: req}` to replace the request before it is evaluated.
+ * - `write_policy(path, content, action)`: optional final-content hook.
+ *   Return `nil` to continue or a string / `{reject: true, reason}` to
+ *   reject before the write reaches disk.
+ * - `post_apply(ctx)`: optional post-write hook. Return
+ *   `{advisory: string}` to attach a warning, or `{reject: true, reason}`
+ *   to restore the pre-image atomically and return `result: "rejected"`.
+ * - `on_rollback(path)`: optional host-injected invalidation hook called
+ *   after a `post_apply` rejection restores the pre-image. Harn performs
+ *   the filesystem restore; hosts own their own index/cache invalidation.
+ *
+ * ## Result
+ *
+ * Returns `{ok, result, applied, dry_run, path, before_sha256,
+ * after_sha256, current_hash, expected_hash, hunks_count,
+ * hunk_results, failed_hunk_index?, failed_hunk_error_code?,
+ * stale_base, bytes_written, created, preview?, errors, warnings,
+ * telemetry, provenance}`. `result` is one of `applied`, `no_op`,
+ * `stale_base`, `hunk_conflict`; `applied: true` means the matcher
+ * succeeded (mirrors `edit_apply_node`'s convention — `dry_run: true`
+ * keeps `applied` true while skipping the on-disk write). `telemetry`
+ * carries per-call counters hosts roll up into stale-base /
+ * hunk-conflict rates and average hunks-per-patch.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_safe_text_patch({path: "src/lib.rs", expected_hash: "sha256:...", hunks: [{old_text: "x = 1", new_text: "x = 2"}]})
+ */
+pub fn edit_safe_text_patch(params) {
+  let opts = params ?? {}
+  const pre_apply = __edit_lifecycle_pre_apply(opts, "safe_text_patch")
+  const initial_ctx = {
+    path: opts?.path ?? "",
+    session_id: opts?.session_id,
+    before_hash: edit_safe_patch_content_hash(""),
+    current_hash: edit_safe_patch_content_hash(""),
+    expected_hash: opts?.expected_hash,
+    hunks_count: len(opts?.hunks ?? []),
+    dry_run: opts?.dry_run ?? false,
+    result: "rejected",
+    options: opts,
+  }
+  if !pre_apply.ok {
+    return __edit_safe_patch_result(
+      initial_ctx,
+      __edit_lifecycle_reject_fields("pre_apply", pre_apply.rejection),
+    )
+  }
+  opts = pre_apply.request ?? opts
+  const {path = "", hunks = []} = opts ?? {}
+  const session_id = opts?.session_id
+  const {match_options = {}, dry_run = false} = opts ?? {}
+  const expected_hash = opts?.expected_hash
+  const read_response = hostlib_fs_read_text({path: path, session_id: session_id})
+  const current_content = read_response?.content ?? ""
+  const current_hash = read_response?.sha256 ?? edit_safe_patch_content_hash(current_content)
+  const ctx = {
+    path: path,
+    session_id: session_id,
+    before_hash: current_hash,
+    current_hash: current_hash,
+    expected_hash: expected_hash,
+    hunks_count: len(hunks),
+    dry_run: dry_run,
+    result: "applied",
+    options: opts,
+  }
+  if expected_hash != nil && expected_hash != current_hash {
+    return __edit_safe_patch_result(
+      ctx,
+      {
+        result: "stale_base",
+        errors: [
+          {
+            code: "stale_base",
+            message: "expected_hash did not match the current pre-image",
+            current_hash: current_hash,
+            expected_hash: expected_hash,
+          },
+        ],
+      },
+    )
+  }
+  let working = current_content
+  let hunk_results = []
+  let idx = 0
+  while idx < len(hunks) {
+    const hunk = hunks[idx]
+    const hunk_opts = match_options.merge(hunk?.options ?? {})
+    const outcome = edit_apply_old_new_patch(working, hunk?.old_text, hunk?.new_text, hunk_opts)
+    hunk_results = hunk_results + [outcome]
+    if !outcome.ok {
+      const hunk_error_code = outcome?.error_code ?? "no_match"
+      return __edit_safe_patch_result(
+        ctx,
+        {
+          result: "hunk_conflict",
+          after_sha256: edit_safe_patch_content_hash(working),
+          hunk_results: hunk_results,
+          failed_hunk_index: idx,
+          failed_hunk_error_code: hunk_error_code,
+          errors: [
+            {
+              code: "hunk_conflict",
+              message: "hunk " + to_string(idx) + " rejected: " + hunk_error_code,
+              hunk_index: idx,
+              hunk_error_code: hunk_error_code,
+              hunk_message: outcome?.message,
+            },
+          ],
+        },
+      )
+    }
+    working = outcome.patched
+    idx = idx + 1
+  }
+  if dry_run {
+    const after_hash = edit_safe_patch_content_hash(working)
+    const result_kind = if current_content == working {
+      "no_op"
+    } else {
+      "applied"
+    }
+    return __edit_safe_patch_result(
+      ctx,
+      {result: result_kind, after_sha256: after_hash, hunk_results: hunk_results, preview: working},
+    )
+  }
+  const policy = __edit_lifecycle_write_policy(opts, path, working, "safe_text_patch")
+  if !policy.ok {
+    return __edit_safe_patch_result(
+      ctx,
+      __edit_lifecycle_reject_fields(
+        "write_policy",
+        policy.rejection,
+        {after_sha256: edit_safe_patch_content_hash(working), hunk_results: hunk_results},
+      ),
+    )
+  }
+  const rollback_snapshot = if __edit_lifecycle_has_post_apply(opts) {
+    __edit_lifecycle_snapshot(path, opts)
+  } else {
+    nil
+  }
+  if rollback_snapshot != nil && !rollback_snapshot.ok {
+    return __edit_safe_patch_result(
+      ctx,
+      __edit_lifecycle_reject_fields(
+        "post_apply",
+        {
+          code: "rollback_snapshot_failed",
+          reason: rollback_snapshot?.error ?? "failed to capture rollback snapshot",
+        },
+        {after_sha256: edit_safe_patch_content_hash(working), hunk_results: hunk_results},
+      ),
+    )
+  }
+  const commit = hostlib_fs_safe_text_patch(
+    {
+      path: path,
+      content: working,
+      expected_hash: current_hash,
+      session_id: session_id,
+      create_parents: opts?.create_parents ?? true,
+      overwrite: opts?.overwrite ?? true,
+    },
+  )
+  const commit_result = commit?.result ?? "applied"
+  const committed_hash = commit?.current_hash ?? current_hash
+  const committed_after = commit?.after_sha256 ?? current_hash
+  if commit_result == "stale_base" {
+    __edit_lifecycle_drop_snapshot(rollback_snapshot)
+    return __edit_safe_patch_result(
+      ctx.merge({current_hash: committed_hash}),
+      {
+        result: "stale_base",
+        after_sha256: committed_after,
+        hunk_results: hunk_results,
+        errors: [
+          {
+            code: "stale_base",
+            message: "another writer committed between snapshot and write",
+            current_hash: committed_hash,
+            expected_hash: current_hash,
+          },
+        ],
+      },
+    )
+  }
+  const post = __edit_lifecycle_post_apply(
+    opts,
+    {
+      path: path,
+      action: "safe_text_patch",
+      original_text: current_content,
+      new_text: working,
+      applied: commit_result == "applied",
+      result: commit_result,
+      dry_run: false,
+    },
+  )
+  if !post.ok {
+    const rollback = __edit_lifecycle_restore(rollback_snapshot, opts, path)
+    const rollback_hash = if rollback.ok {
+      current_hash
+    } else {
+      committed_after
+    }
+    return __edit_safe_patch_result(
+      ctx.merge({current_hash: rollback_hash}),
+      __edit_lifecycle_reject_fields(
+        "post_apply",
+        post.rejection,
+        {
+          after_sha256: rollback_hash,
+          hunk_results: hunk_results,
+          bytes_written: commit?.bytes_written ?? 0,
+          created: commit?.created ?? false,
+          rollback: rollback,
+        },
+      ),
+    )
+  }
+  __edit_lifecycle_drop_snapshot(rollback_snapshot)
+  return __edit_safe_patch_result(
+    ctx.merge({current_hash: committed_hash}),
+    {
+      result: commit_result,
+      after_sha256: committed_after,
+      hunk_results: hunk_results,
+      bytes_written: commit?.bytes_written ?? 0,
+      created: commit?.created ?? false,
+      warnings: post.warnings ?? [],
+    },
+  )
+}
+
+/**
+ * Rename a symbol across the workspace using the typed symbol graph
+ * (#2434). Pass `symbol_ref` (`{name, path, line?, kind?}`), the
+ * `new_name`, and a `scope` (`"file"` | `"module"` | `"workspace"`).
+ *
+ * The helper resolves the seed against the indexed graph, walks every
+ * file in scope, replaces identifier-context occurrences of the symbol
+ * name (skipping comments and string literals), and rejects the edit
+ * with `result: "conflict"` if `new_name` already exists as an
+ * identifier in any rewritten file. Languages: Rust, TypeScript/TSX,
+ * JavaScript/JSX, Python, Swift, Go.
+ *
+ * Pass `session_id` to route writes through staged-fs (#1722) so all
+ * touched files succeed or none do — the host still buffers every plan
+ * in memory and only persists after pre-flight validation passes, so
+ * the same all-or-nothing guarantee applies even without a session.
+ *
+ * `dry_run` returns the planned per-file edits without writing.
+ * `validate` (default true) re-parses every rewritten file and aborts
+ * with `result: "syntax_error"` on any ERROR/MISSING node.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_rename_symbol({symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"}, new_name: "Gadget", scope: "workspace"})
+ */
+pub fn edit_rename_symbol(params) {
+  const req = params ?? {}
+  const raw = hostlib_code_index_rename_symbol(req)
+  const payload = raw ?? {}
+  const result_tag = payload?.result ?? "no_match"
+  const provenance = {
+    module: "std/edit",
+    helper: "edit_rename_symbol",
+    symbol: payload?.symbol,
+    scope: payload?.scope ?? req?.scope,
+    dry_run: payload?.dry_run ?? false,
+    touched_count: len(payload?.touched_files ?? []),
+    caller: req?.provenance,
+  }
+  return {
+    ok: result_tag == "applied",
+    applied: payload?.applied ?? false,
+    result: result_tag,
+    dry_run: payload?.dry_run ?? false,
+    scope: payload?.scope ?? req?.scope,
+    symbol: payload?.symbol,
+    touched_files: payload?.touched_files ?? [],
+    conflicts: payload?.conflicts ?? [],
+    match_count: payload?.match_count ?? 0,
+    failed_paths_with_reasons: payload?.failed_paths_with_reasons ?? [],
+    details: payload?.details,
+    errors: [],
+    warnings: payload?.warnings ?? [],
+    provenance: provenance,
+  }
+}
+
+/**
+ * Render a multi-op edit plan as a per-file unified-diff bundle without
+ * committing anything to disk. The host opens a *transient* staged-fs
+ * (#1722) session, dispatches each op through its op-specific handler
+ * with that session id wired in, walks the resulting overlay to produce
+ * the diff, then discards the session — so the on-disk tree is
+ * byte-identical before and after the call.
+ *
+ * `plan` is an ordered list of operations. Each op carries an `op` tag:
+ *
+ * - `{op: "apply_node", path, query, replacement, select?, nth?, target_capture?, language?, validate?}`
+ * - `{op: "insert_at_anchor", path, query, position, content, target_capture?, language?, validate?}`
+ *   — `position` ∈ `before | after | first_child | last_child`.
+ * - `{op: "safe_text_patch", path, old_text, new_text}` — exact unique match.
+ * - `{op: "rename_symbol", symbol_ref, new_name, scope?}` — cross-file
+ *   rename via the typed symbol graph (#2434).
+ *
+ * Returns `{ok, result, per_file_unified_diff, summary, ops, provenance,
+ *           errors, warnings}` where `per_file_unified_diff` carries
+ * `{path, diff, lines_added, lines_removed}` per touched file. The diff
+ * format is standard unified diff, compatible with `git apply --check`.
+ * `result` is one of `ok | partial | no_ops_applied`.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_dry_run({plan: [{op: "apply_node", path: "src/lib.rs", query: query, replacement: "{ 42 }"}]})
+ */
+pub fn edit_dry_run(params) {
+  const plan = params?.plan ?? []
+  const raw = hostlib_ast_dry_run({plan: plan})
+  const payload = raw ?? {}
+  const summary = payload?.summary ?? {}
+  return {
+    ok: (payload?.result ?? "no_ops_applied") != "no_ops_applied",
+    result: payload?.result ?? "no_ops_applied",
+    per_file_unified_diff: payload?.per_file_unified_diff ?? [],
+    summary: {
+      files_touched: summary?.files_touched ?? 0,
+      lines_added: summary?.lines_added ?? 0,
+      lines_removed: summary?.lines_removed ?? 0,
+      ops_applied: summary?.ops_applied ?? 0,
+      ops_rejected: summary?.ops_rejected ?? 0,
+    },
+    ops: payload?.ops ?? [],
+    errors: [],
+    warnings: [],
+    provenance: {module: "std/edit", helper: "edit_dry_run", caller: params?.provenance},
+  }
+}

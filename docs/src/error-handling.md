@@ -341,17 +341,18 @@ The two patterns can be combined:
 ```harn
 fn transform(data) { return data }
 
-fn safe_parse(input) {
-  try {
-    const data = json_parse(input)
-    return Ok(data)
-  } catch (e) {
-    return Err("parse error: ${e.message}")
+fn parse_json_result(input) {
+  const parsed = try {
+    json_parse(input)
   }
+  if is_err(parsed) {
+    return Err("parse error: ${unwrap_err(parsed).message}")
+  }
+  return parsed
 }
 
 fn process(raw) {
-  const data = safe_parse(raw)?   // propagate Err if parse fails
+  const data = parse_json_result(raw)?   // propagate Err if parse fails
   return Ok(transform(data))
 }
 ```
