@@ -8,12 +8,21 @@
 //! channel for the active session id and bridge.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
-use crate::agent_events::{self, AgentEvent, AgentEventSink};
+use crate::agent_events::{
+    self, AgentEvent, AgentEventSink, ToolCallErrorCategory, ToolCallStatus, ToolMutationStatus,
+};
 use crate::mcp::VmMcpClientHandle;
 use crate::value::VmValue;
+
+/// Model-facing reason attached to the terminal update synthesized for a tool
+/// call still in flight when its session finalizes (harn#4733).
+const LOOP_EXIT_ABANDON_REASON: &str =
+    "The agent loop exited while this tool call was still in flight; it was \
+     never dispatched to a result. No terminal update was emitted by the \
+     dispatch path, so the loop resolved it as abandoned at loop exit.";
 
 /// Boxed session-end hook: receives a `session_id` string.
 pub type SessionEndHook = Arc<dyn Fn(&str) + Send + Sync>;
@@ -46,7 +55,12 @@ static SESSION_MCP_CLIENTS: LazyLock<Mutex<BTreeMap<String, BTreeMap<String, VmM
 
 #[derive(Default)]
 struct ToolLifecycleStarts {
-    live: BTreeSet<(String, String)>,
+    /// `(session_id, tool_call_id)` → `tool_name` for every tool call that has
+    /// emitted a `ToolCall` start but not yet a terminal
+    /// `ToolCallUpdate { Completed | Failed }`. The `tool_name` is retained so a
+    /// terminal update synthesized at session finalize (harn#4733) carries the
+    /// same name as the original start.
+    live: BTreeMap<(String, String), String>,
 }
 
 impl ToolLifecycleStarts {
@@ -55,19 +69,23 @@ impl ToolLifecycleStarts {
             AgentEvent::ToolCall {
                 session_id,
                 tool_call_id,
+                tool_name,
                 ..
             } => {
                 if tool_call_id.trim().is_empty() {
                     return true;
                 }
-                self.live.insert((session_id.clone(), tool_call_id.clone()))
+                self.live
+                    .insert(
+                        (session_id.clone(), tool_call_id.clone()),
+                        tool_name.clone(),
+                    )
+                    .is_none()
             }
             AgentEvent::ToolCallUpdate {
                 session_id,
                 tool_call_id,
-                status:
-                    crate::agent_events::ToolCallStatus::Completed
-                    | crate::agent_events::ToolCallStatus::Failed,
+                status: ToolCallStatus::Completed | ToolCallStatus::Failed,
                 ..
             } => {
                 self.live
@@ -78,9 +96,29 @@ impl ToolLifecycleStarts {
         }
     }
 
+    /// Remove every still-in-flight call for `session_id`, returning
+    /// `(tool_call_id, tool_name)` for each so the caller can synthesize a
+    /// terminal update. Callers that only need to release the entries (e.g.
+    /// tests) use [`Self::clear_session`].
+    fn drain_session(&mut self, session_id: &str) -> Vec<(String, String)> {
+        let live = std::mem::take(&mut self.live);
+        let mut drained = Vec::new();
+        for ((active_session_id, tool_call_id), tool_name) in live {
+            if active_session_id == session_id {
+                drained.push((tool_call_id, tool_name));
+            } else {
+                self.live
+                    .insert((active_session_id, tool_call_id), tool_name);
+            }
+        }
+        drained
+    }
+
+    /// Release a session's in-flight entries without synthesizing terminal
+    /// updates. Used when a session *suspends* (it may resume, so its in-flight
+    /// calls are not abandoned) and by tests.
     fn clear_session(&mut self, session_id: &str) {
-        self.live
-            .retain(|(active_session_id, _)| active_session_id != session_id);
+        let _ = self.drain_session(session_id);
     }
 }
 
@@ -236,11 +274,59 @@ pub fn register_session_end_hook(hook: SessionEndHook) {
 /// Fire every registered session-end hook with `session_id`. Called by
 /// the host's session-finalize primitive once a session has been removed
 /// from the active session map.
-pub(crate) fn fire_session_end_hooks(session_id: &str) {
-    TOOL_LIFECYCLE_STARTS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clear_session(session_id);
+///
+/// `abandon_in_flight` is `true` when the session reached a genuine terminal
+/// condition (completion judge `done`, max iterations, budget exhausted,
+/// error, stuck) and `false` when it merely *suspended* — a suspended session
+/// may resume, so its in-flight calls are released without a terminal update
+/// rather than falsely resolved as abandoned.
+///
+/// On a terminal exit, before firing the hooks, resolve any tool call still in
+/// flight for this session: the loop reached a terminal condition while the
+/// call was streamed but never dispatched to a result, so no `Completed`/
+/// `Failed` update was ever emitted. For each such call this synthesizes one
+/// terminal `ToolCallUpdate` (status `failed`, category `abandoned_at_loop_exit`)
+/// so the transcript never ends with a dangling `pending` call (harn#4733). The
+/// updates are emitted through [`emit_agent_event_sync`] — the same path the
+/// streaming transport used to publish the original `ToolCall` start — so they
+/// land in exactly the sinks that recorded the start.
+pub(crate) fn fire_session_end_hooks(session_id: &str, abandon_in_flight: bool) {
+    // Drain (not just clear) while holding the lock, then release it before
+    // emitting: `emit_agent_event_sync` re-enters the lifecycle tracker to
+    // observe each update, and the tracker mutex is not reentrant.
+    let abandoned = {
+        let mut tracker = TOOL_LIFECYCLE_STARTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if abandon_in_flight {
+            tracker.drain_session(session_id)
+        } else {
+            // Suspended: release tracking, but do not synthesize terminal
+            // updates — the calls may resume.
+            tracker.clear_session(session_id);
+            Vec::new()
+        }
+    };
+    for (tool_call_id, tool_name) in abandoned {
+        emit_agent_event_sync(&AgentEvent::ToolCallUpdate {
+            session_id: session_id.to_string(),
+            tool_call_id,
+            tool_name,
+            status: ToolCallStatus::Failed,
+            raw_output: None,
+            error: Some(LOOP_EXIT_ABANDON_REASON.to_string()),
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: Some(ToolCallErrorCategory::AbandonedAtLoopExit),
+            mutation_status: ToolMutationStatus::Unknown,
+            changed_paths: None,
+            executor: None,
+            parsing: None,
+            raw_input: None,
+            raw_input_partial: None,
+            audit: None,
+        });
+    }
     if let Ok(hooks) = SESSION_END_HOOKS.lock() {
         for hook in hooks.iter() {
             hook(session_id);
@@ -315,8 +401,9 @@ pub(crate) fn session_mcp_client(session_id: &str, server_name: &str) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_events::{ToolCallStatus, ToolMutationStatus};
+    use crate::agent_events::{ToolCallErrorCategory, ToolCallStatus, ToolMutationStatus};
     use serde_json::json;
+    use std::collections::BTreeSet;
 
     #[derive(Default)]
     struct RecordingSink {
@@ -412,5 +499,153 @@ mod tests {
             "the streaming and dispatch paths share one observable start authority"
         );
         assert_eq!(events.len(), 2, "one start and one terminal update remain");
+    }
+
+    /// Falsifier for harn#4733: a session that finalizes with a tool call still
+    /// in flight (a `ToolCall` start, no terminal update) must have that call
+    /// resolved with exactly one terminal `ToolCallUpdate` — never left dangling
+    /// as `pending`. The sweep is per-session and idempotent.
+    #[tokio::test(flavor = "current_thread")]
+    async fn loop_exit_resolves_every_in_flight_call_to_a_terminal_update() {
+        const SESSION_ID: &str = "loop-exit-abandon-test";
+        const OTHER_SESSION: &str = "loop-exit-abandon-other";
+        if let Ok(mut starts) = TOOL_LIFECYCLE_STARTS.lock() {
+            starts.clear_session(SESSION_ID);
+            starts.clear_session(OTHER_SESSION);
+        }
+        let sink = Arc::new(RecordingSink::default());
+        let _guard = LoopSinkGuard::install(Some(sink.clone()));
+
+        // Two calls go in flight for this session; a third belongs to a
+        // *different* session and must survive this session's finalize.
+        emit_agent_event_sync(&start(SESSION_ID, "call-a"));
+        emit_agent_event_sync(&start(SESSION_ID, "call-b"));
+        emit_agent_event_sync(&start(OTHER_SESSION, "call-c"));
+
+        fire_session_end_hooks(SESSION_ID, true);
+
+        let abandoned: Vec<(String, String, String, Option<String>)> = {
+            let events = sink.events.lock().expect("recorded events");
+            events
+                .iter()
+                .filter_map(|event| match event {
+                    AgentEvent::ToolCallUpdate {
+                        session_id,
+                        tool_call_id,
+                        tool_name,
+                        status: ToolCallStatus::Failed,
+                        error,
+                        error_category: Some(ToolCallErrorCategory::AbandonedAtLoopExit),
+                        ..
+                    } => Some((
+                        session_id.clone(),
+                        tool_call_id.clone(),
+                        tool_name.clone(),
+                        error.clone(),
+                    )),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        assert_eq!(
+            abandoned.len(),
+            2,
+            "both in-flight calls for the finalizing session get one terminal update each"
+        );
+        for (session_id, _id, tool_name, error) in &abandoned {
+            assert_eq!(session_id, SESSION_ID);
+            assert_eq!(
+                tool_name, "verify",
+                "the terminal update carries the tool name from the observed start"
+            );
+            assert!(
+                error.as_deref().is_some_and(|reason| !reason.is_empty()),
+                "the abandoned call carries a human-readable reason"
+            );
+        }
+        let resolved: BTreeSet<&str> = abandoned.iter().map(|(_, id, _, _)| id.as_str()).collect();
+        assert_eq!(
+            resolved,
+            BTreeSet::from(["call-a", "call-b"]),
+            "a different session's in-flight call is not swept"
+        );
+
+        // Idempotent: re-finalizing the now-drained session emits nothing more.
+        let before = sink.events.lock().expect("recorded events").len();
+        fire_session_end_hooks(SESSION_ID, true);
+        let after = sink.events.lock().expect("recorded events").len();
+        assert_eq!(before, after, "re-finalizing a drained session is a no-op");
+
+        // Hygiene: release the surviving other-session entry from the global tracker.
+        if let Ok(mut starts) = TOOL_LIFECYCLE_STARTS.lock() {
+            starts.clear_session(OTHER_SESSION);
+        }
+    }
+
+    /// A call that already reached a terminal `Completed`/`Failed` update is
+    /// removed from the in-flight set, so loop exit must not resurrect it as an
+    /// abandoned call (harn#4733).
+    #[tokio::test(flavor = "current_thread")]
+    async fn loop_exit_does_not_resurrect_a_completed_call() {
+        const SESSION_ID: &str = "loop-exit-completed-test";
+        if let Ok(mut starts) = TOOL_LIFECYCLE_STARTS.lock() {
+            starts.clear_session(SESSION_ID);
+        }
+        let sink = Arc::new(RecordingSink::default());
+        let _guard = LoopSinkGuard::install(Some(sink.clone()));
+
+        emit_agent_event_sync(&start(SESSION_ID, "call-done"));
+        emit_agent_event_sync(&finish(SESSION_ID, "call-done"));
+        fire_session_end_hooks(SESSION_ID, true);
+
+        let events = sink.events.lock().expect("recorded events");
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                AgentEvent::ToolCallUpdate {
+                    error_category: Some(ToolCallErrorCategory::AbandonedAtLoopExit),
+                    ..
+                }
+            )),
+            "a call that already reached a terminal update is not swept at loop exit"
+        );
+    }
+
+    /// A *suspended* session may resume, so finalize must release its in-flight
+    /// calls without synthesizing an abandoned terminal update — otherwise a
+    /// call that resumes would carry a false `failed` result (harn#4733).
+    #[tokio::test(flavor = "current_thread")]
+    async fn suspend_releases_in_flight_calls_without_a_terminal_update() {
+        const SESSION_ID: &str = "loop-exit-suspend-test";
+        if let Ok(mut starts) = TOOL_LIFECYCLE_STARTS.lock() {
+            starts.clear_session(SESSION_ID);
+        }
+        let sink = Arc::new(RecordingSink::default());
+        let _guard = LoopSinkGuard::install(Some(sink.clone()));
+
+        emit_agent_event_sync(&start(SESSION_ID, "call-suspended"));
+        fire_session_end_hooks(SESSION_ID, false);
+
+        let events = sink.events.lock().expect("recorded events");
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                AgentEvent::ToolCallUpdate {
+                    error_category: Some(ToolCallErrorCategory::AbandonedAtLoopExit),
+                    ..
+                }
+            )),
+            "a suspended session must not emit an abandoned terminal update"
+        );
+        // Tracking was still released, so re-observing the same start is fresh.
+        drop(events);
+        if let Ok(mut starts) = TOOL_LIFECYCLE_STARTS.lock() {
+            assert!(
+                starts.observe(&start(SESSION_ID, "call-suspended")),
+                "suspend released the in-flight entry"
+            );
+            starts.clear_session(SESSION_ID);
+        }
     }
 }

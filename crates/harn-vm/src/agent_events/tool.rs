@@ -98,12 +98,21 @@ pub enum ToolCallErrorCategory {
     Network,
     /// The tool was cancelled (e.g. session aborted).
     Cancelled,
+    /// The agent loop reached a terminal condition (completion judge `done`,
+    /// max iterations, budget exhausted, stuck) while this call was still in
+    /// flight — a `ToolCall` start was observed but the call never dispatched
+    /// to a `Completed`/`Failed` result. The loop synthesizes a terminal
+    /// update in this category at session finalize so the transcript never
+    /// ends with a dangling `pending` call. Distinct from [`Self::Cancelled`]
+    /// (an explicit `cancel_in_flight_tool_call` / user preemption) so an
+    /// auditor can tell loop-lifecycle abandonment from a user-initiated stop.
+    AbandonedAtLoopExit,
     /// Default when classification was not performed.
     Unknown,
 }
 
 impl ToolCallErrorCategory {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::SchemaValidation,
         Self::ToolError,
         Self::McpServerError,
@@ -114,6 +123,7 @@ impl ToolCallErrorCategory {
         Self::Timeout,
         Self::Network,
         Self::Cancelled,
+        Self::AbandonedAtLoopExit,
         Self::Unknown,
     ];
 
@@ -140,6 +150,7 @@ impl ToolCallErrorCategory {
             Self::Timeout => "timeout",
             Self::Network => "network",
             Self::Cancelled => "cancelled",
+            Self::AbandonedAtLoopExit => "abandoned_at_loop_exit",
             Self::Unknown => "unknown",
         }
     }

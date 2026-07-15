@@ -285,6 +285,7 @@ HARN_TOOL_CALL_ERROR_CATEGORIES: tuple = (
     "timeout",
     "network",
     "cancelled",
+    "abandoned_at_loop_exit",
     "unknown",
 )
 HARN_TOOL_MUTATION_STATUSES: tuple = (
@@ -533,6 +534,7 @@ class HarnToolCallErrorCategory(str, Enum):
     TIMEOUT = "timeout"
     NETWORK = "network"
     CANCELLED = "cancelled"
+    ABANDONED_AT_LOOP_EXIT = "abandoned_at_loop_exit"
     UNKNOWN = "unknown"
 
 
