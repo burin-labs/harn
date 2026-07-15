@@ -11,6 +11,7 @@ use super::persistence::{
     compaction_events_from_transcript, daemon_events_from_sidecar, llm_transcript_sidecar_path,
     replay_of_event_id_from_run, run_trace_id, signature_status_label, trigger_event_from_run,
 };
+use super::transcript_descriptor::pointer_for_llm_transcript_sidecar;
 use super::types::{
     CompactionEventRecord, DaemonEventRecord, RunActionGraphEdgeRecord, RunActionGraphNodeRecord,
     RunObservabilityRecord, RunPlannerRoundRecord, RunRecord, RunStageRecord,
@@ -342,6 +343,9 @@ pub fn derive_run_observability(
                 location: format!("run.stages[{}].transcript", stage.node_id),
                 path: run.persisted_path.clone(),
                 available: true,
+                verification_status: "embedded".to_string(),
+                verification_error: None,
+                descriptor: None,
             });
             if let Some(transcript) = stage.transcript.as_ref() {
                 compaction_events.extend(compaction_events_from_transcript(
@@ -513,6 +517,9 @@ pub fn derive_run_observability(
             location: "run.transcript".to_string(),
             path: run.persisted_path.clone(),
             available: true,
+            verification_status: "embedded".to_string(),
+            verification_error: None,
+            descriptor: None,
         });
         if let Some(transcript) = run.transcript.as_ref() {
             compaction_events.extend(compaction_events_from_transcript(
@@ -527,14 +534,7 @@ pub fn derive_run_observability(
 
     if let Some(path) = persisted_path {
         if let Some(sidecar_path) = llm_transcript_sidecar_path(path) {
-            transcript_pointers.push(RunTranscriptPointerRecord {
-                id: "run:llm_transcript".to_string(),
-                label: "LLM transcript sidecar".to_string(),
-                kind: "llm_jsonl".to_string(),
-                location: "run sidecar".to_string(),
-                path: Some(sidecar_path.to_string_lossy().into_owned()),
-                available: sidecar_path.exists(),
-            });
+            transcript_pointers.push(pointer_for_llm_transcript_sidecar(run, path, &sidecar_path));
         }
         daemon_events.extend(daemon_events_from_sidecar(path));
     }

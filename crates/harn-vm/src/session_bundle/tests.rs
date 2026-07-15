@@ -97,6 +97,9 @@ fn fixture_observability() -> RunObservabilityRecord {
             location: "run-llm/llm_transcript.jsonl".to_string(),
             path: Some("/private/harn/run_123/run-llm/llm_transcript.jsonl".to_string()),
             available: true,
+            verification_status: "verified".to_string(),
+            verification_error: None,
+            descriptor: None,
         }],
         ..RunObservabilityRecord::default()
     }

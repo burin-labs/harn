@@ -26,10 +26,8 @@ pub(super) fn discover_template_renders(
 
 fn locate_llm_transcript(run_dir: &Path, relative_path: &str) -> Option<std::path::PathBuf> {
     let run_path = run_dir.join(relative_path);
-    let stem = run_path.file_stem()?.to_str()?;
-    let parent = run_path.parent()?;
-    let transcript_path = parent.join(format!("{stem}-llm/llm_transcript.jsonl"));
-    transcript_path.exists().then_some(transcript_path)
+    let run = harn_vm::orchestration::load_run_record(&run_path).ok()?;
+    harn_vm::orchestration::verified_llm_transcript_pointer_path(&run, &run_path).ok()
 }
 
 fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, String> {

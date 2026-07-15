@@ -327,7 +327,7 @@ fn build_run_detail_exposes_observability_summary() {
     let run_path = temp.path().join("run.json");
     fs::write(&run_path, "{}").unwrap();
     fs::create_dir_all(temp.path().join("run-llm")).unwrap();
-    fs::write(temp.path().join("run-llm/llm_transcript.jsonl"), "").unwrap();
+    fs::write(temp.path().join("run-llm/llm_transcript.jsonl"), "{}\n").unwrap();
 
     let run = harn_vm::orchestration::RunRecord {
         id: "run-obs".to_string(),
