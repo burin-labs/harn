@@ -329,7 +329,7 @@ fn provider_tool_probe_dry_run_request_large_case_is_offline_and_deterministic()
         "tool-probe dry-run JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
-    assert_eq!(harn_value["schema_version"], 1);
+    assert_eq!(harn_value["schema_version"], 2);
     assert_eq!(harn_value["probe_case"], "large_string_argument");
     assert!(
         harn_value["expected_value"]
@@ -340,6 +340,11 @@ fn provider_tool_probe_dry_run_request_large_case_is_offline_and_deterministic()
         harn.stdout
     );
     assert_eq!(harn_value["requests"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        harn_value["requests"][0]["validation"]["dialect"],
+        "openai_compat"
+    );
+    assert_eq!(harn_value["requests"][0]["validation"]["status"], "pass");
     let request = &harn_value["requests"][0]["request_body"];
     assert_eq!(request["tools"][0]["type"], "function");
     assert_eq!(
