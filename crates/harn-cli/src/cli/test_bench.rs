@@ -85,7 +85,9 @@ pub(crate) struct TestBenchRunArgs {
     /// `<dir>/<program>.wasm`; the module runs under wasmtime with the
     /// testbench's mock clock virtualized into `clock_time_get` and
     /// `poll_oneoff`. Programs with no matching `.wasm` fall through to
-    /// the native spawn path.
+    /// the native spawn path. Requires a harn-cli build with the
+    /// `testbench-wasi` Cargo feature, for example
+    /// `cargo install harn-cli --features testbench-wasi`.
     #[arg(
         long = "process-wasi",
         value_name = "DIR",

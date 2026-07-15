@@ -34,8 +34,9 @@ otel = [
     "dep:tracing-opentelemetry",
 ]
 # Enable WASI-mediated subprocess sandboxing for testbench mode. Pulls in
-# wasmtime + wasmtime-wasi (~20 MB binary increase). Enabled by default in
-# harn-cli; library consumers that don't need testbench WASI can opt out.
+# wasmtime + wasmtime-wasi (~20 MB binary increase). harn-cli exposes this as
+# its off-by-default `testbench-wasi` feature so default distributed binaries
+# stay lean while source builds can opt in.
 testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"]
 
 [dependencies]

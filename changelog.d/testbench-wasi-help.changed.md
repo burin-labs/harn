@@ -1,0 +1,1 @@
+- Disclose the `testbench-wasi` feature requirement in `harn test-bench run --help` for `--process-wasi`.
