@@ -10,6 +10,7 @@ use super::Formatter;
 impl Formatter<'_> {
     pub(super) fn format_node(&mut self, node: &SNode) {
         let node_line = node.span.line;
+        let node_end_line = node.span.end_line;
         match &node.node {
             Node::Pipeline {
                 name,
@@ -38,7 +39,7 @@ impl Formatter<'_> {
                     "{pub_prefix}pipeline {name}({params_str}){ret}{throws_str}{ext} {{"
                 ));
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -95,7 +96,7 @@ impl Formatter<'_> {
                 );
                 self.writeln(&format!("{sig} {{"));
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -125,7 +126,7 @@ impl Formatter<'_> {
                     let escaped = escape_string(desc);
                     self.writeln(&format!("description \"{escaped}\""));
                 }
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -166,11 +167,19 @@ impl Formatter<'_> {
                     let expr_str = self.format_expr(field_expr, self.indent);
                     self.writeln(&format!("{field_name}: {expr_str}"));
                 }
-                self.format_body(body, node_line);
+                self.format_body(
+                    body,
+                    node_line,
+                    if summarize.is_some() {
+                        None
+                    } else {
+                        Some(node_end_line)
+                    },
+                );
                 if let Some(summary_body) = summarize {
                     self.writeln("summarize {");
                     self.indent();
-                    self.format_body(summary_body, node_line);
+                    self.format_body(summary_body, node_line, None);
                     self.dedent();
                     self.writeln("}");
                 }
@@ -185,7 +194,15 @@ impl Formatter<'_> {
                 let cond = self.format_expr(condition, self.indent);
                 self.writeln(&format!("if {cond} {{"));
                 self.indent();
-                self.format_body(then_body, node_line);
+                self.format_body(
+                    then_body,
+                    node_line,
+                    if else_body.is_some() {
+                        None
+                    } else {
+                        Some(node_end_line)
+                    },
+                );
                 self.dedent();
                 if let Some(eb) = else_body {
                     if eb.len() == 1 {
@@ -198,7 +215,7 @@ impl Formatter<'_> {
                     }
                     self.writeln("} else {");
                     self.indent();
-                    self.format_body(eb, node_line);
+                    self.format_body(eb, node_line, Some(node_end_line));
                     self.dedent();
                     self.writeln("}");
                 } else {
@@ -214,7 +231,7 @@ impl Formatter<'_> {
                 let iter_str = self.format_expr(iterable, self.indent);
                 self.writeln(&format!("for {pat} in {iter_str} {{"));
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -222,7 +239,7 @@ impl Formatter<'_> {
                 let cond = self.format_expr(condition, self.indent);
                 self.writeln(&format!("while {cond} {{"));
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -230,7 +247,7 @@ impl Formatter<'_> {
                 let cnt = self.format_expr(count, self.indent);
                 self.writeln(&format!("retry {cnt} {{"));
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -244,19 +261,35 @@ impl Formatter<'_> {
             } => {
                 self.writeln("try {");
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(
+                    body,
+                    node_line,
+                    if *has_catch || finally_body.is_some() {
+                        None
+                    } else {
+                        Some(node_end_line)
+                    },
+                );
                 self.dedent();
                 if *has_catch {
                     let catch_param = format_catch_param(error_var, error_type);
                     self.writeln(&format!("}} catch{catch_param} {{"));
                     self.indent();
-                    self.format_body(catch_body, node_line);
+                    self.format_body(
+                        catch_body,
+                        node_line,
+                        if finally_body.is_some() {
+                            None
+                        } else {
+                            Some(node_end_line)
+                        },
+                    );
                     self.dedent();
                 }
                 if let Some(fb) = finally_body {
                     self.writeln("} finally {");
                     self.indent();
-                    self.format_body(fb, node_line);
+                    self.format_body(fb, node_line, Some(node_end_line));
                     self.dedent();
                 }
                 self.writeln("}");
@@ -264,7 +297,7 @@ impl Formatter<'_> {
             Node::TryExpr { body } => {
                 self.writeln("try {");
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -379,7 +412,7 @@ impl Formatter<'_> {
             Node::ImplBlock { type_name, methods } => {
                 self.writeln(&format!("impl {type_name} {{"));
                 self.indent();
-                self.format_body(methods, node_line);
+                self.format_body(methods, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -419,21 +452,21 @@ impl Formatter<'_> {
                 };
                 self.writeln(&header);
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln(&format!("}}{stream_suffix}"));
             }
             Node::SpawnExpr { body } => {
                 self.writeln("spawn {");
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
             Node::ScopeBlock { body } => {
                 self.writeln("scope {");
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -447,7 +480,7 @@ impl Formatter<'_> {
                 if !options.is_empty() && !body.is_empty() {
                     self.writeln("");
                 }
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -458,7 +491,7 @@ impl Formatter<'_> {
                 let cond = self.format_expr(condition, self.indent);
                 self.writeln(&format!("guard {cond} else {{"));
                 self.indent();
-                self.format_body(else_body, node_line);
+                self.format_body(else_body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -475,7 +508,7 @@ impl Formatter<'_> {
                 let dur = self.format_expr(duration, self.indent);
                 self.writeln(&format!("deadline {dur} {{"));
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -488,7 +521,7 @@ impl Formatter<'_> {
                     None => self.writeln("mutex {"),
                 }
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -509,7 +542,7 @@ impl Formatter<'_> {
                 let params_str = self.format_string_list_wrapped(params, prefix_len, self.indent);
                 self.writeln(&format!("override {name}({params_str}) {{"));
                 self.indent();
-                self.format_body(body, node_line);
+                self.format_body(body, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -533,7 +566,7 @@ impl Formatter<'_> {
             Node::Block(stmts) => {
                 self.writeln("{");
                 self.indent();
-                self.format_body(stmts, node_line);
+                self.format_body(stmts, node_line, Some(node_end_line));
                 self.dedent();
                 self.writeln("}");
             }
@@ -573,7 +606,15 @@ impl Formatter<'_> {
             let cond = self.format_expr(condition, self.indent);
             self.output.push_str(&format!("if {cond} {{\n"));
             self.indent();
-            self.format_body(then_body, line);
+            self.format_body(
+                then_body,
+                line,
+                if else_body.is_some() {
+                    None
+                } else {
+                    Some(node.span.end_line)
+                },
+            );
             self.dedent();
             if let Some(eb) = else_body {
                 if eb.len() == 1 {
@@ -586,7 +627,7 @@ impl Formatter<'_> {
                 }
                 self.writeln("} else {");
                 self.indent();
-                self.format_body(eb, line);
+                self.format_body(eb, line, Some(node.span.end_line));
                 self.dedent();
                 self.writeln("}");
             } else {
@@ -611,7 +652,7 @@ impl Formatter<'_> {
         } else {
             self.writeln(&format!("{pattern}{guard} -> {{"));
             self.indent();
-            self.format_body(&arm.body, arm.pattern.span.line);
+            self.format_body(&arm.body, arm.pattern.span.line, None);
             self.dedent();
             self.writeln("}");
         }

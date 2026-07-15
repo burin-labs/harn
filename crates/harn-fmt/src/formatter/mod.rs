@@ -454,7 +454,20 @@ impl<'a> Formatter<'a> {
         }
     }
 
-    pub(crate) fn format_body(&mut self, nodes: &[SNode], block_start_line: usize) {
+    /// `block_end_line` is the line of the block's closing brace, when the
+    /// caller can name it. A body that is the LAST thing in its node ends at
+    /// the node's own `end_line`, so those callers pass `Some`; a body with a
+    /// sibling after it (`then_body` before an `else`, a `try` before its
+    /// `catch`) does not, because the AST records no span for the block itself
+    /// — only for the whole node. Passing `None` there is deliberate: the
+    /// alternative, bounding with the node's end, would reach past this block's
+    /// brace and drag the SIBLING branch's comments into it.
+    pub(crate) fn format_body(
+        &mut self,
+        nodes: &[SNode],
+        block_start_line: usize,
+        block_end_line: Option<usize>,
+    ) {
         for (i, node) in nodes.iter().enumerate() {
             let range_start = if i > 0 {
                 nodes[i - 1].span.end_line + 1
@@ -464,6 +477,20 @@ impl<'a> Formatter<'a> {
             self.emit_comments_in_range(range_start, node.span.line);
             self.format_node(node);
             self.attach_trailing_comment(node.span.end_line);
+        }
+        // Nothing claims a comment written after the last statement, so flush
+        // the tail before the caller writes `}`. Without this the comment stays
+        // unclaimed and `format_program`'s leading-comment sweep adopts it onto
+        // the NEXT top-level declaration, where it silently describes code it
+        // was never written about.
+        if let Some(end_line) = block_end_line {
+            let range_start = nodes
+                .iter()
+                .rev()
+                .find(|n| n.span.end_line != 0)
+                .map(|n| n.span.end_line + 1)
+                .unwrap_or(block_start_line + 1);
+            self.emit_comments_in_range(range_start, end_line);
         }
     }
 
