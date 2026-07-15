@@ -511,7 +511,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["parallel_dispatch", "tool_call_count", "argument_binding"],
-            execution: missing_case_runner("provider_tool_probe_only_covers_single_tool_call"),
+            execution: executable_tool_probe_case(
+                provider,
+                model_id,
+                ToolProbeCase::ParallelToolCalls,
+            ),
         },
         ToolScorecardPlanCase {
             id: "large_string_argument",
@@ -602,6 +606,9 @@ fn executable_tool_probe_case(
         reason: match probe_case {
             ToolProbeCase::SingleToolCall => {
                 "harn provider tool-probe executes the single echo_marker tool-call transport probe"
+            }
+            ToolProbeCase::ParallelToolCalls => {
+                "harn provider tool-probe executes the parallel echo_marker tool-call transport probe"
             }
             ToolProbeCase::LargeStringArgument => {
                 "harn provider tool-probe executes the large string argument byte-fidelity probe"
@@ -1250,6 +1257,33 @@ mod tests {
                 "both".to_string(),
                 "--case".to_string(),
                 "large_string_argument".to_string(),
+                "--repeat".to_string(),
+                "1".to_string(),
+                "--timeout-secs".to_string(),
+                "120".to_string(),
+                "--json".to_string(),
+            ]
+        );
+        let parallel_case = plan.routes[0]
+            .cases
+            .iter()
+            .find(|case| case.id == "parallel_tool_calls")
+            .expect("parallel case");
+        assert_eq!(parallel_case.execution.status, "executable");
+        assert_eq!(parallel_case.execution.runner, "provider_tool_probe");
+        assert_eq!(
+            parallel_case.execution.command.as_ref().unwrap(),
+            &vec![
+                "harn".to_string(),
+                "provider".to_string(),
+                "tool-probe".to_string(),
+                "anthropic".to_string(),
+                "--model".to_string(),
+                "claude-sonnet-5".to_string(),
+                "--mode".to_string(),
+                "both".to_string(),
+                "--case".to_string(),
+                "parallel_tool_calls".to_string(),
                 "--repeat".to_string(),
                 "1".to_string(),
                 "--timeout-secs".to_string(),

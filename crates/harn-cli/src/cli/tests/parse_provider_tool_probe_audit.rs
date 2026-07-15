@@ -10,7 +10,7 @@ fn test_parses_provider_tool_probe_audit_args() {
         "--mode",
         "streaming",
         "--case",
-        "large_string_argument",
+        "parallel_tool_calls",
         "--request-profile",
         "parameter_edges",
         "--json=false",
@@ -25,7 +25,7 @@ fn test_parses_provider_tool_probe_audit_args() {
     assert_eq!(args.probe_cases.len(), 1);
     assert!(matches!(
         args.probe_cases[0],
-        ProviderToolProbeCaseArg::LargeStringArgument
+        ProviderToolProbeCaseArg::ParallelToolCalls
     ));
     assert_eq!(args.request_profiles.len(), 1);
     assert!(matches!(

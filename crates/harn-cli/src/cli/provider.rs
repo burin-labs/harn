@@ -363,6 +363,8 @@ impl ProviderToolProbeModeArg {
 pub(crate) enum ProviderToolProbeCaseArg {
     #[value(name = "single_tool_call", alias = "single-tool-call")]
     SingleToolCall,
+    #[value(name = "parallel_tool_calls", alias = "parallel-tool-calls")]
+    ParallelToolCalls,
     #[value(name = "large_string_argument", alias = "large-string-argument")]
     LargeStringArgument,
     #[value(
@@ -403,6 +405,9 @@ impl ProviderToolProbeCaseArg {
     pub(crate) fn tool_probe_case(self) -> harn_vm::llm::tool_conformance::ToolProbeCase {
         match self {
             Self::SingleToolCall => harn_vm::llm::tool_conformance::ToolProbeCase::SingleToolCall,
+            Self::ParallelToolCalls => {
+                harn_vm::llm::tool_conformance::ToolProbeCase::ParallelToolCalls
+            }
             Self::LargeStringArgument => {
                 harn_vm::llm::tool_conformance::ToolProbeCase::LargeStringArgument
             }
