@@ -542,6 +542,9 @@ jobs:
       # Strict-types ratchet: no unvalidated boundary access (HARN-OWN-004) in
       # the gated stdlib. Runs the in-repo checker through the warm HARN_BIN.
       - run: make check-stdlib-strict-types
+      # Public stdlib return-type ratchet: no new unannotated public exports
+      # (HARN-STD-102) beyond the checked-in AST-derived baseline.
+      - run: make check-stdlib-public-return-types
       # Sync guards. check-generated-registry is the meta-guard
       # that keeps scripts/generated_artifacts.toml in agreement with the
       # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the

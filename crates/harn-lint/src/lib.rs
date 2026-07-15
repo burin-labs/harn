@@ -198,6 +198,35 @@ pub fn is_generated_path(path: &Path) -> bool {
         .is_some_and(|name| name.ends_with(GENERATED_HARN_SUFFIX))
 }
 
+/// True when `path` points at Harn's canonical embedded stdlib source tree.
+///
+/// Stdlib contract lints are intentionally path-driven: files under
+/// `crates/harn-stdlib/src/stdlib/` are owned by Harn itself and must carry
+/// stable producer contracts, while user scripts and package sources should not
+/// inherit those repo-internal authoring rules.
+pub fn path_is_stdlib_source(path: &Path) -> bool {
+    use std::path::Component;
+
+    let mut prev: Option<&std::ffi::OsStr> = None;
+    let mut prev_prev: Option<&std::ffi::OsStr> = None;
+    for comp in path.components() {
+        if let Component::Normal(name) = comp {
+            if prev == Some(std::ffi::OsStr::new("src"))
+                && prev_prev == Some(std::ffi::OsStr::new("harn-stdlib"))
+                && name == std::ffi::OsStr::new("stdlib")
+            {
+                return true;
+            }
+            prev_prev = prev;
+            prev = Some(name);
+        } else {
+            prev_prev = prev;
+            prev = None;
+        }
+    }
+    false
+}
+
 fn lint_full(
     program: &[SNode],
     disabled_rules: &[String],

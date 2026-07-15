@@ -164,6 +164,10 @@ polling loops, `SystemTime::now()`, or short `recv_timeout` calls to tests. Use
   `README.md`, `CHANGELOG.md`, and conformance fixtures.
 - Keep stdlib registration authoritative. Linter and editor builtin awareness
   derives from the live stdlib.
+- Public functions under `crates/harn-stdlib/src/stdlib/` must declare explicit
+  return types. Use named closed records for finite shapes, `Result<T, E>` for
+  fallible operations, typed maps for open-key data, and avoid papering over
+  missing contracts with `any` or open `dict`.
 - Register new stdlib builtins with `#[harn_builtin]` (see
   [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-stdlib-builtin)). The legacy
   `SyncBuiltin` / `AsyncBuiltin` / `BuiltinGroup` / `register_builtin_group`

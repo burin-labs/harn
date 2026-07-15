@@ -170,7 +170,23 @@ impl DocumentState {
         }
         self.invariant_diagnostics = invariant_report.diagnostics;
 
-        let lint_diags = harn_lint::lint_with_source(&program, &self.source);
+        let file_path = uri.and_then(|uri| uri.to_file_path().ok());
+        let is_stdlib_source = file_path
+            .as_deref()
+            .is_some_and(harn_lint::path_is_stdlib_source);
+        let lint_options = harn_lint::LintOptions {
+            file_path: file_path.as_deref(),
+            require_stdlib_metadata: is_stdlib_source,
+            ..Default::default()
+        };
+        let externally_imported_names = std::collections::HashSet::new();
+        let lint_diags = harn_lint::lint_with_options(
+            &program,
+            &[],
+            Some(&self.source),
+            &externally_imported_names,
+            &lint_options,
+        );
         for ld in &lint_diags {
             let severity = match ld.severity {
                 harn_lint::LintSeverity::Info => DiagnosticSeverity::INFORMATION,
@@ -290,6 +306,38 @@ fn handler() {
                 .diagnostics
                 .iter()
                 .map(|diag| (&diag.source, &diag.message))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn stdlib_return_type_lint_surfaces_as_lsp_diagnostic() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp
+            .path()
+            .join("crates/harn-stdlib/src/stdlib/stdlib_demo.harn");
+        write(&path, "pub fn missing_contract() {\n  return 1\n}\n");
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+        let state = DocumentState::new_for_language_with_rules(
+            "pub fn missing_contract() {\n  return 1\n}\n".to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+
+        assert!(
+            state.diagnostics.iter().any(|diag| {
+                matches!(
+                    diag.code.as_ref(),
+                    Some(tower_lsp::lsp_types::NumberOrString::String(code)) if code == "HARN-STD-102"
+                )
+            }),
+            "expected HARN-STD-102 LSP diagnostic, got {:?}",
+            state
+                .diagnostics
+                .iter()
+                .map(|diag| (&diag.code, &diag.message))
                 .collect::<Vec<_>>()
         );
     }

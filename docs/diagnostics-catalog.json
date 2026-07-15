@@ -34,7 +34,7 @@
     {
       "id": "STD",
       "title": "Stdlib usage",
-      "count": 4
+      "count": 5
     },
     {
       "id": "PRM",
@@ -1036,6 +1036,15 @@
           "summary": "Add `@effects` and `@errors` fields to the stdlib function's doc block"
         }
       ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-STD-102",
+      "category": "STD",
+      "summary": "public stdlib function is missing an explicit return type",
+      "repairs": [],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"

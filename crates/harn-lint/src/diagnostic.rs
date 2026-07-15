@@ -75,9 +75,10 @@ pub struct LintOptions<'a> {
     /// Extra non-stdlib function names that persona bodies may call
     /// without requiring a `@step` declaration.
     pub persona_step_allowlist: &'a [String],
-    /// When true, the `HARN-STD-101` lint enforces an `@effects` +
-    /// `@errors` block on every `pub fn`. Auto-enabled by `harn lint`
-    /// for files under `crates/harn-stdlib/src/stdlib/`.
+    /// When true, stdlib contract lints enforce an `@effects` + `@errors`
+    /// metadata block (HARN-STD-101) and an explicit return type
+    /// (HARN-STD-102) on every public stdlib `pub fn`. Auto-enabled by
+    /// `harn lint` for files under `crates/harn-stdlib/src/stdlib/`.
     pub require_stdlib_metadata: bool,
     /// TOML sources of declarative rule-engine rules to run as lint rules,
     /// loaded from the project's `[rules] ruleDirs`. Each is compiled and

@@ -120,6 +120,21 @@ impl<'a> Linter<'a> {
                 if *is_pub && self.require_stdlib_metadata {
                     self.check_stdlib_metadata(name, snode.span);
                 }
+                if *is_pub && self.require_stdlib_metadata && return_type.is_none() {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintMissingStdlibReturnType,
+                        rule: "missing-stdlib-return-type".into(),
+                        message: format!(
+                            "public stdlib function `{name}` is missing an explicit return type"
+                        ),
+                        span: self.name_anchored_span(name, snode.span),
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!(
+                            "declare a return type: `pub fn {name}(...) -> Type {{ ... }}`"
+                        )),
+                        fix: None,
+                    });
+                }
                 self.record_callable_signature_type_references(params, return_type);
                 for clause in where_clauses {
                     self.record_type_expr_references(&clause.bound);
