@@ -71,7 +71,8 @@ pub type WeakModuleFunctionRegistry = Weak<VmMutex<BTreeMap<String, Arc<VmClosur
 pub type ModuleState = Arc<VmMutex<VmEnv>>;
 pub type WeakModuleState = Weak<VmMutex<VmEnv>>;
 
-/// Strong owners of a closure's module function table and module-level state.
+/// Strong owners of every module function table and module-level state
+/// **transitively reachable** from a retained closure.
 ///
 /// A [`VmClosure`] resolves sibling module `pub fn`s through its module's
 /// function registry, which it references only via a [`Weak`]
@@ -80,16 +81,81 @@ pub type WeakModuleState = Weak<VmMutex<VmEnv>>;
 /// `module_cache`. When a closure is registered into a process/thread-local
 /// registry (reminder providers, session/lifecycle hooks) it outlives that VM;
 /// once the VM tears down, the `Weak` dangles and a sibling-fn call inside the
-/// invoked closure falls through name resolution to host-bridge dispatch. This
-/// pins strong owners so the `Weak` stays upgradeable for the closure's whole
-/// retained lifetime.
+/// invoked closure falls through name resolution to host-bridge dispatch.
+///
+/// Pinning only the retained closure's *own* module scope is not enough: a
+/// handler body that calls an imported `pub fn` reaches that function through
+/// its captured `env`, and when the imported function in turn calls a sibling
+/// in *its* module, that call resolves through the imported module's registry.
+/// If only the entry module's scope is pinned, the transitively-imported
+/// module's registry loses its last strong owner when the loading VM tears
+/// down, and the deeper sibling call falls through to host-bridge dispatch. So
+/// this pins the whole reachable graph of module scopes, not just one level.
 ///
 /// The fields are intentionally unread — their sole purpose is to keep the
 /// referenced `Arc`s alive.
 #[derive(Debug)]
 pub struct RetainedModuleScope {
-    _functions: Option<ModuleFunctionRegistry>,
-    _state: Option<ModuleState>,
+    _functions: Vec<ModuleFunctionRegistry>,
+    _state: Vec<ModuleState>,
+}
+
+impl RetainedModuleScope {
+    /// Walk every module scope reachable from `root` and pin a strong owner of
+    /// each. Reachability follows the same edges name resolution does at call
+    /// time: a closure's own module registry and module state, the sibling
+    /// closures in that registry, and the closures bound into the closure's
+    /// captured `env` and module state (imports, module-level `let`/`var`
+    /// functions). Deduped by `Arc` identity so import cycles terminate.
+    fn collect(root: &Arc<VmClosure>) -> Self {
+        let mut seen_closures: std::collections::HashSet<*const VmClosure> =
+            std::collections::HashSet::new();
+        let mut seen_scopes: std::collections::HashSet<*const ()> =
+            std::collections::HashSet::new();
+        let mut functions: Vec<ModuleFunctionRegistry> = Vec::new();
+        let mut state: Vec<ModuleState> = Vec::new();
+        let mut stack: Vec<Arc<VmClosure>> = vec![Arc::clone(root)];
+
+        while let Some(closure) = stack.pop() {
+            if !seen_closures.insert(Arc::as_ptr(&closure)) {
+                continue;
+            }
+            if let Some(registry) = closure.module_functions() {
+                if seen_scopes.insert(Arc::as_ptr(&registry).cast::<()>()) {
+                    for sibling in registry.lock().values() {
+                        stack.push(Arc::clone(sibling));
+                    }
+                    functions.push(registry);
+                }
+            }
+            if let Some(module_state) = closure.module_state() {
+                if seen_scopes.insert(Arc::as_ptr(&module_state).cast::<()>()) {
+                    Self::push_env_closures(&module_state.lock(), &mut stack);
+                    state.push(module_state);
+                }
+            }
+            Self::push_env_closures(&closure.env, &mut stack);
+        }
+
+        Self {
+            _functions: functions,
+            _state: state,
+        }
+    }
+
+    fn push_env_closures(env: &VmEnv, stack: &mut Vec<Arc<VmClosure>>) {
+        for scope in &env.scopes {
+            for binding in scope.vars.values() {
+                if let VmValue::Closure(inner) = binding.read() {
+                    stack.push(inner);
+                }
+            }
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self._functions.is_empty() && self._state.is_empty()
+    }
 }
 
 impl VmClosure {
@@ -108,33 +174,30 @@ impl VmClosure {
     /// Return a clone of this closure suitable for storage in a process- or
     /// thread-local registry that outlives the VM that created it (reminder
     /// providers, session/lifecycle hooks). The clone pins strong owners of
-    /// this closure's module function table and module-level state
-    /// ([`RetainedModuleScope`]), so its body still resolves sibling module
-    /// `pub fn`s after the registering VM — the only other strong owner, via
-    /// `module_cache` — is dropped.
+    /// every module function table and module-level state transitively
+    /// reachable from this closure ([`RetainedModuleScope`]), so its body — and
+    /// any imported `pub fn` it calls — still resolves sibling module `pub fn`s
+    /// after the registering VM (the only other strong owner, via
+    /// `module_cache`) is dropped.
     ///
     /// The owners are pinned on a *clone* (a fresh `Arc<VmClosure>` that is
     /// never itself a member of any function registry), so retaining a closure
     /// that IS a module `pub fn` cannot form an `Arc` cycle with its registry.
     ///
     /// A no-op refcount bump when there is nothing to pin: the closure is
-    /// already pinned, or its `Weak`s do not upgrade — e.g. an entry-chunk
-    /// closure whose sibling functions live in captured `env` rather than a
-    /// module registry, which resolves without this.
+    /// already pinned, or nothing reachable owns a module scope — e.g. an
+    /// entry-chunk closure whose sibling functions live in captured `env`
+    /// rather than a module registry, which resolves without this.
     pub(crate) fn retained_for_host_registry(self: &Arc<Self>) -> Arc<Self> {
         if self.retained_module_scope.is_some() {
             return Arc::clone(self);
         }
-        let functions = self.module_functions();
-        let state = self.module_state();
-        if functions.is_none() && state.is_none() {
+        let scope = RetainedModuleScope::collect(self);
+        if scope.is_empty() {
             return Arc::clone(self);
         }
         let mut pinned = (**self).clone();
-        pinned.retained_module_scope = Some(Arc::new(RetainedModuleScope {
-            _functions: functions,
-            _state: state,
-        }));
+        pinned.retained_module_scope = Some(Arc::new(scope));
         Arc::new(pinned)
     }
 }
