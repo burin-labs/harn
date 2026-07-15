@@ -227,6 +227,17 @@ else
   echo "=== Pre-push: skipping Rust lint/test compile (no Rust/Harn code changes) ==="
 fi
 
+if hook_paths_match "$changed" "$HOOK_PROVIDER_CATALOG_PATTERN"; then
+  echo "=== Pre-push: checking provider catalog artifacts ==="
+  hook_export_harn_bin
+  make -s check-provider-catalog
+  make -s check-provider-matrix
+  make -s check-provider-support
+  "$HARN_BIN" provider capabilities audit
+else
+  echo "=== Pre-push: skipping provider catalog checks (no provider catalog changes) ==="
+fi
+
 if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
   hook_write_harn_format_files "$changed" "$harn_format_files"
   hook_write_harn_lint_files "$changed" "$harn_lint_files"
