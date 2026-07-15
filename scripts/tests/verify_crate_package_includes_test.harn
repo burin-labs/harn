@@ -1,0 +1,95 @@
+import { with_temp_dir } from "std/testing"
+import "../verify_crate_package_includes.harn"
+
+fn mkdirs(path: string) -> nil {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
+    "/"
+  } else {
+    ""
+  }
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    current = if current == "" || current == "/" {
+      current + part
+    } else {
+      path_join(current, part)
+    }
+    if !harness.fs.exists(current) {
+      harness.fs.mkdir(current)
+    }
+  }
+  return nil
+}
+
+fn write_text(root: string, rel: string, text: string) -> nil {
+  const path = path_join(root, rel)
+  mkdirs(dirname(path) ?? root)
+  harness.fs.write_text(path, text)
+  return nil
+}
+
+@test
+pipeline test_rust_include_paths_extracts_normal_and_raw_literals(task) {
+  const source = join(
+    [
+      "const A: &str = include_str!(\"data/schema.json\");",
+      "const B: &[u8] = include_bytes!(r\"assets/raw.bin\");",
+      "const C: &str = include_str!(r##\"nested/raw.txt\"##);",
+    ],
+    "\n",
+  )
+  assert_eq(
+    rust_include_paths(source),
+    [
+      {line: 1, path: "data/schema.json"},
+      {line: 2, path: "assets/raw.bin"},
+      {line: 3, path: "nested/raw.txt"},
+    ],
+  )
+}
+
+@test
+pipeline test_packaged_include_errors_accepts_existing_in_package_targets(task) {
+  with_temp_dir(
+    { root ->
+      write_text(
+        root,
+        "pkg/src/lib.rs",
+        "include_str!(\"data/schema.json\");\ninclude_bytes!(r\"assets/raw.bin\");\n",
+      )
+      write_text(root, "pkg/src/data/schema.json", "{}\n")
+      write_text(root, "pkg/src/assets/raw.bin", "x")
+      assert_eq(packaged_include_errors(path_join(root, "pkg"), "demo").count, 0)
+    },
+  )
+}
+
+@test
+pipeline test_packaged_include_errors_reports_missing_absolute_and_escape_targets(task) {
+  with_temp_dir(
+    { root ->
+      write_text(
+        root,
+        "pkg/src/lib.rs",
+        join(
+          [
+            "include_str!(\"missing.txt\");",
+            "include_bytes!(\"/tmp/outside.bin\");",
+            "include_str!(\"../../outside.txt\");",
+          ],
+          "\n",
+        ),
+      )
+      write_text(root, "outside.txt", "outside\n")
+      const errors = packaged_include_errors(path_join(root, "pkg"), "demo")
+      assert_eq(errors.count, 3)
+      const rendered = join(errors, "\n")
+      assert(rendered.contains("missing include target missing.txt"), rendered)
+      assert(rendered.contains("absolute include path /tmp/outside.bin"), rendered)
+      assert(rendered.contains("include target escapes package: ../../outside.txt"), rendered)
+    },
+  )
+}
