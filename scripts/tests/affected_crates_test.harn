@@ -13,11 +13,22 @@ const WORKSPACE = {
 
 @test
 pipeline test_global_hits_include_harn_selector_script(task) {
+  const global_paths = global_path_prefixes_from_text(
+    "Cargo.toml\nscripts/affected-crates.harn\n.github/workflows/ci.yml\n",
+  )
   assert_eq(
-    global_hits(["scripts/affected-crates.harn", "docs/a.md"]),
+    global_hits(["scripts/affected-crates.harn", "docs/a.md"], global_paths),
     ["scripts/affected-crates.harn"],
   )
-  assert_eq(global_hits(["scripts/affected-crates.py"]), [])
+  assert_eq(global_hits(["scripts/affected-crates.py"], global_paths), [])
+}
+
+@test
+pipeline test_global_path_prefixes_from_text_ignores_comments_and_blanks(task) {
+  assert_eq(
+    global_path_prefixes_from_text("\n# comment\nCargo.toml\n.github/workflows/ci.yml\n"),
+    [".github/workflows/ci.yml", "Cargo.toml"],
+  )
 }
 
 @test
@@ -68,7 +79,7 @@ pipeline test_reverse_dep_closure_selects_dependents(task) {
 
 @test
 pipeline test_selected_packages_global_change_forces_full_workspace(task) {
-  const selected = selected_packages(["Cargo.lock"], WORKSPACE, "/repo")
+  const selected = selected_packages(["Cargo.lock"], WORKSPACE, "/repo", ["Cargo.lock"])
   assert_eq(selected.mode, "full")
   assert_eq(selected.selected, WORKSPACE.all_crates)
   assert_eq(selected.global_hits, ["Cargo.lock"])
@@ -76,7 +87,7 @@ pipeline test_selected_packages_global_change_forces_full_workspace(task) {
 
 @test
 pipeline test_selected_packages_unowned_change_selects_nothing(task) {
-  const selected = selected_packages(["docs/index.md"], WORKSPACE, "/repo")
+  const selected = selected_packages(["docs/index.md"], WORKSPACE, "/repo", ["Cargo.lock"])
   assert_eq(selected.mode, "empty")
   assert_eq(selected.selected, [])
   assert_eq(selected.unowned, ["docs/index.md"])
@@ -84,7 +95,7 @@ pipeline test_selected_packages_unowned_change_selects_nothing(task) {
 
 @test
 pipeline test_selected_packages_crate_change_expands_reverse_deps(task) {
-  const selected = selected_packages(["crates/harn-core/src/lib.rs"], WORKSPACE, "/repo")
+  const selected = selected_packages(["crates/harn-core/src/lib.rs"], WORKSPACE, "/repo", ["Cargo.lock"])
   assert_eq(selected.mode, "partial")
   assert_eq(selected.directly_changed, ["harn-core"])
   assert_eq(selected.selected, ["harn-cli", "harn-core", "harn-tools"])

@@ -109,7 +109,7 @@ AFFECTED_BASE ?= origin/main
 test-affected:
 	@command -v cargo-nextest >/dev/null 2>&1 || { \
 		echo "test-affected requires cargo-nextest; run 'make setup'"; exit 1; }
-	@args="$$($(HARN_CMD) run scripts/affected-crates.harn -- --base "$(AFFECTED_BASE)" --output args)"; \
+	@args="$$(./scripts/ci/affected_crate_args.sh --base "$(AFFECTED_BASE)")"; \
 	if [ -z "$$args" ]; then \
 		echo "make test-affected: no affected crates; skipping Rust tests."; \
 		exit 0; \
@@ -342,6 +342,7 @@ test-pr-gate-scripts:
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/nextest_filters_from_paths_test.sh
+	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_no_local_build_mode_test.sh
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh

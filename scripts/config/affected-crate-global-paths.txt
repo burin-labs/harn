@@ -1,0 +1,10 @@
+# Paths that force `make test-affected` to run the full Rust workspace.
+# Prefix matching is intentional and mirrors scripts/affected-crates.harn.
+Cargo.toml
+Cargo.lock
+.cargo/
+rust-toolchain.toml
+Makefile
+scripts/affected-crates.harn
+.config/nextest.toml
+.github/workflows/ci.yml

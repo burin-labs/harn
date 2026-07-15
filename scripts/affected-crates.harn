@@ -4,16 +4,7 @@ import { parse_args } from "std/cli"
 //
 // This is a PR-only optimization. The merge queue runs the full suite
 // unconditionally; never wire this selector into that path.
-const GLOBAL_PATHS = [
-  "Cargo.toml",
-  "Cargo.lock",
-  ".cargo/",
-  "rust-toolchain.toml",
-  "Makefile",
-  "scripts/affected-crates.harn",
-  ".config/nextest.toml",
-  ".github/workflows/ci.yml",
-]
+const GLOBAL_PATHS_FILE = "scripts/config/affected-crate-global-paths.txt"
 
 pub fn unique_sorted(items: list) -> list {
   let out = []
@@ -25,10 +16,25 @@ pub fn unique_sorted(items: list) -> list {
   return out.sort()
 }
 
-pub fn global_hits(files: list<string>) -> list<string> {
+pub fn global_path_prefixes_from_text(text: string) -> list<string> {
+  let prefixes: list<string> = []
+  for line in text.lines() {
+    const trimmed = line.trim()
+    if trimmed != "" && !trimmed.starts_with("#") {
+      prefixes = prefixes + [trimmed]
+    }
+  }
+  return unique_sorted(prefixes)
+}
+
+fn load_global_path_prefixes(harness: Harness) -> list<string> {
+  return global_path_prefixes_from_text(harness.fs.read_text(GLOBAL_PATHS_FILE))
+}
+
+pub fn global_hits(files: list<string>, global_paths: list<string>) -> list<string> {
   let hits: list<string> = []
   for file in files {
-    for prefix in GLOBAL_PATHS {
+    for prefix in global_paths {
       if file.starts_with(prefix) {
         hits = hits + [file]
         break
@@ -51,7 +57,7 @@ fn repo_root() -> string {
 }
 
 fn changed_files(base: string) -> list<string> {
-  const out = command_stdout("git", ["diff", "--name-only", base + "...HEAD"])
+  let out = command_stdout("git", ["diff", "--name-only", base + "...HEAD"])
   let files: list<string> = []
   for line in out.lines() {
     const trimmed = line.trim()
@@ -154,9 +160,14 @@ pub fn reverse_dep_closure(seeds: list<string>, deps: dict) -> list<string> {
   return closure.sort()
 }
 
-pub fn selected_packages(files: list<string>, workspace: dict, root: string) -> dict {
+pub fn selected_packages(
+  files: list<string>,
+  workspace: dict,
+  root: string,
+  global_paths: list<string>,
+) -> dict {
   const all_crates = workspace.all_crates ?? []
-  const hits = global_hits(files)
+  let hits = global_hits(files, global_paths)
   if hits.count > 0 {
     return {mode: "full", selected: all_crates, global_hits: hits, directly_changed: [], unowned: []}
   }
@@ -260,13 +271,14 @@ fn main(harness: Harness) {
   const output = to_string(parsed?.output ?? "filter")
   const root = repo_root()
   const workspace = load_workspace()
-  const files = changed_files(base)
+  const global_paths = load_global_path_prefixes(harness)
+  let files = changed_files(base)
   if files.count == 0 {
     harness.stdio
       .eprintln("affected-crates: no files changed vs " + base + "; selecting nothing.")
     return nil
   }
-  const selection = selected_packages(files, workspace, root)
+  const selection = selected_packages(files, workspace, root, global_paths)
   if selection.mode == "full" {
     harness.stdio
       .eprintln(
