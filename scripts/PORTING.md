@@ -35,7 +35,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_rust_prompt_prose.harn` | `scripts/check_no_rust_prompt_prose.sh` + pre-commit hook | Rust prompt-prose ratchet with stable allowlist/digest contract. |
 | `check_generated_registry.harn` | `make check-generated-registry` + pre-push hook | Registry/Makefile/workflow generated-artifact guard. |
 | `check_python_boundary.harn` | `make check-python-boundary` + audit gate | Ratchets Python usage to explicit bootstrap/platform/generated/fixture reasons. |
-| `affected-crates.harn` | `make test-affected` + `ci.yml` Rust lanes | PR fast-feedback crate selector; Git/Cargo subprocesses stay at the boundary while reverse-dependency logic lives in Harn. |
+| `affected-crates.harn` | `make test-affected` + `ci.yml` Rust lanes | Canonical PR fast-feedback crate selector. The CI bootstrap path mirrors it in `scripts/ci/affected_crate_args.sh` so package selection can happen before compiling the Harn CLI. |
 | `bench_cli_cold_start.harn` | `scripts/bench_cli_cold_start.sh` + `cli-cold-start-budget.yml` | Cold-start benchmark controller; isolates measured Harn subprocesses with `env -i` so controller runtime state cannot leak into the timed child. |
 | `verify_tree_sitter_parse.harn` | `release_gate.sh` grammar audit | Regenerates/builds the tree-sitter grammar when stale, sweeps positive `.harn` sources, and preserves strict/non-strict failure policy. |
 | `check_burin_protocol_bindings.harn` | `make check-burin-protocol-artifacts` | Cross-repo Swift/TypeScript protocol artifact drift check against a Burin checkout. |
