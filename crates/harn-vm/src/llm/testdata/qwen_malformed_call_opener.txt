@@ -1,0 +1,3 @@
+[[CALL]
+run({ command: "cargo test -p core" })
+[[/CALL]]

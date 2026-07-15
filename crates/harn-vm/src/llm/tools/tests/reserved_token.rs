@@ -156,3 +156,146 @@ fn streaming_and_non_streaming_remap_parse_identically() {
         );
     }
 }
+
+/// The observed harn#4486 shape: a top-level `[[CALL]` opener one bracket short of
+/// the `[[CALL]]` wire marker, followed by a complete `run(...)` call and a
+/// well-formed `[[/CALL]]` close.
+const MALFORMED_OPENER: &str = include_str!("../../testdata/qwen_malformed_call_opener.txt");
+
+#[test]
+fn malformed_call_opener_recovers_complete_call() {
+    // `wire_to_canonical` maps the well-formed close `[[/CALL]]` -> `</tool_call>`
+    // but leaves the malformed `[[CALL]` opener (not the exact `[[CALL]]`). The
+    // tagged parser normalizes the top-level stub to `<tool_call>` and recovers the
+    // complete action instead of leaking it as prose.
+    let tools = sample_tool_registry();
+    let result =
+        parse_text_tool_calls_with_tools(&wire_to_canonical(MALFORMED_OPENER), Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "malformed opener with a complete call must recover it; errors: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls[0]["name"], "run");
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        "cargo test -p core"
+    );
+    assert!(
+        result.errors.is_empty(),
+        "a recovered call must not also error: {:?}",
+        result.errors
+    );
+    assert!(
+        !result.prose.contains("[[CALL"),
+        "malformed opener must never reach visible assistant prose: {:?}",
+        result.prose
+    );
+    assert!(
+        !result.canonical.contains("[[CALL"),
+        "malformed opener must never reach canonical replay: {}",
+        result.canonical
+    );
+}
+
+#[test]
+fn malformed_call_opener_truncated_emits_typed_error_not_prose() {
+    // A truncated opener (no close, cut off mid-argument) must surface a typed
+    // TRUNCATED diagnostic through the public result — never assistant prose.
+    let tools = sample_tool_registry();
+    let wire = "[[CALL]\nedit({ action: \"create\", path: \"a.rs\"";
+    let result = parse_text_tool_calls_with_tools(&wire_to_canonical(wire), Some(&tools));
+    assert!(
+        result.calls.is_empty(),
+        "a truncated opener must not dispatch a call: {:?}",
+        result.calls
+    );
+    assert!(
+        result.errors.iter().any(|e| e.contains("TRUNCATED")),
+        "a truncated opener must emit a typed TRUNCATED diagnostic: {:?}",
+        result.errors
+    );
+    assert!(
+        !result.prose.contains("[[CALL") && !result.prose.contains("edit({"),
+        "the malformed stub and its partial body must not render as prose: {:?}",
+        result.prose
+    );
+}
+
+#[test]
+fn literal_bracket_marker_inside_tool_argument_is_byte_identical() {
+    // A literal `[[CALL]` inside a tool argument is consumed within the block, never
+    // treated as a top-level opener, so the argument bytes survive unchanged.
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\nedit({ action: \"create\", path: \"a.txt\", \
+                content: \"[[CALL] literal\" })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls[0]["arguments"]["content"], "[[CALL] literal",
+        "a literal marker inside an argument must be byte-identical"
+    );
+    assert!(
+        result.errors.is_empty(),
+        "a byte-identical argument must not error: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn unknown_bracket_text_caller_stays_prose() {
+    // `[[CALLER]` is not the `[[CALL]` marker (its 7th byte is `E`, not `]`) and must
+    // remain ordinary text, neither dispatched nor errored.
+    let tools = sample_tool_registry();
+    let result = parse_text_tool_calls_with_tools(
+        &wire_to_canonical("[[CALLER] is not a call"),
+        Some(&tools),
+    );
+    assert!(
+        result.calls.is_empty(),
+        "unknown bracket text is not a call: {:?}",
+        result.calls
+    );
+    assert!(
+        result.errors.is_empty(),
+        "unknown bracket text is not an error: {:?}",
+        result.errors
+    );
+    assert!(
+        result.prose.contains("[[CALLER]"),
+        "unknown bracket text must stay in prose byte-identical: {:?}",
+        result.prose
+    );
+}
+
+#[test]
+fn literal_bracket_marker_in_closed_fence_stays_prose() {
+    // A `[[CALL]` inside a closed markdown fence is fenced example text, not a
+    // structural opener, and stays byte-identical in prose.
+    let tools = sample_tool_registry();
+    let text = "```\n[[CALL]\n```";
+    let result = parse_text_tool_calls_with_tools(&wire_to_canonical(text), Some(&tools));
+    assert!(
+        result.calls.is_empty(),
+        "a fenced marker is not a call: {:?}",
+        result.calls
+    );
+    assert!(
+        result.prose.contains("[[CALL]"),
+        "a fenced marker must stay byte-identical in prose: {:?}",
+        result.prose
+    );
+}
+
+#[test]
+fn well_formed_wire_opener_still_recovers_after_canonicalization() {
+    // Guard: the exact `[[CALL]]...[[/CALL]]` path is unchanged — canonicalized to
+    // `<tool_call>` upstream, it never reaches the malformed-opener branch.
+    let tools = sample_tool_registry();
+    let wire = "[[CALL]]\nrun({ command: \"cargo build\" })\n[[/CALL]]";
+    let result = parse_text_tool_calls_with_tools(&wire_to_canonical(wire), Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(result.calls[0]["name"], "run");
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+}
