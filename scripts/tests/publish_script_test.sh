@@ -14,6 +14,8 @@ metadata_file="$tmp_root/metadata.json"
 record_file="$tmp_root/published-order.txt"
 curl_state_dir="$tmp_root/curl-state"
 mkdir -p "$curl_state_dir"
+real_harn_bin="$("$repo_root/scripts/harn_bin.sh" --print)"
+"$real_harn_bin" test "$repo_root/scripts/tests/publish_plan_test.harn" >/dev/null
 
 cat > "$metadata_file" <<'JSON'
 {
@@ -36,6 +38,13 @@ cat > "$metadata_file" <<'JSON'
       "dependencies": []
     },
     {
+      "name": "custom-registry-helper",
+      "version": "1.2.3",
+      "id": "path+file:///repo/custom-registry-helper#1.2.3",
+      "publish": ["internal"],
+      "dependencies": []
+    },
+    {
       "name": "alpha",
       "version": "1.2.3",
       "id": "path+file:///repo/alpha#1.2.3",
@@ -55,6 +64,7 @@ cat > "$metadata_file" <<'JSON'
   "workspace_members": [
     "path+file:///repo/gamma#1.2.3",
     "path+file:///repo/private-helper#1.2.3",
+    "path+file:///repo/custom-registry-helper#1.2.3",
     "path+file:///repo/alpha#1.2.3",
     "path+file:///repo/beta#1.2.3"
   ]
@@ -80,6 +90,10 @@ if [[ "${1:-}" == "publish" && "${2:-}" == "-p" ]]; then
   printf '%s\n' "$crate" >> "$FAKE_CARGO_RECORD"
   if [[ "$crate" == "private-helper" ]]; then
     echo "private-helper should not be published" >&2
+    exit 2
+  fi
+  if [[ "$crate" == "custom-registry-helper" ]]; then
+    echo "custom-registry-helper should not be published to crates.io" >&2
     exit 2
   fi
   echo "error: failed to publish $crate v1.2.3 to registry at https://crates.io" >&2
@@ -134,6 +148,7 @@ PATH="$fake_bin:$PATH" \
   FAKE_CARGO_METADATA="$metadata_file" \
   FAKE_CARGO_RECORD="$record_file" \
   FAKE_CURL_STATE_DIR="$curl_state_dir" \
+  HARN_BIN="$real_harn_bin" \
   "$publish_script" > "$tmp_root/output.txt"
 
 expected_order=$'alpha\nbeta\ngamma'
@@ -147,9 +162,14 @@ if grep -q "private-helper" "$record_file"; then
   echo "publish fallback attempted a publish=false workspace crate" >&2
   exit 1
 fi
+if grep -q "custom-registry-helper" "$record_file"; then
+  echo "publish fallback attempted a non-crates.io workspace crate" >&2
+  exit 1
+fi
 
 grep -q "Workspace publish complete" "$tmp_root/output.txt"
 grep -q "already published at this version" "$tmp_root/output.txt"
+grep -q "Publishing workspace at version 1.2.3" "$tmp_root/output.txt"
 
 release_root="$tmp_root/release-root"
 mkdir -p "$release_root"
