@@ -1,0 +1,58 @@
+import { agent_reminder_providers_fire } from "std/agent/state"
+
+pipeline main() {
+  const chunk = "0123456789abcdefghij0123456789abcdefghij0123456789abcdefghij"
+  const long_body = chunk + chunk + chunk + chunk
+  clear_reminder_providers()
+  register_reminder_provider(
+    {
+      id: "large_delta",
+      subscribes_to: ["session_idle"],
+      evaluate: { _ctx -> return {reminder: {body: long_body, tags: ["large_delta"], dedupe_key: "large_delta"}} },
+    },
+  )
+  const delta_session = agent_session_open("reminder-provider-budget-delta")
+  agent_session_reset(delta_session)
+  const payload = {session: {id: delta_session}, iteration: 1, wake_interval_ms: 0}
+  const first = agent_reminder_providers_fire(delta_session, "session_idle", payload, {})
+  const second = agent_reminder_providers_fire(delta_session, "session_idle", payload, {})
+  const delta_events = transcript_events_by_kind(agent_session_snapshot(delta_session), "system_reminder")
+  __io_println(first.reports[0].delta_compressed)
+  __io_println(first.reports[0].body_bytes == first.reports[0].original_body_bytes)
+  __io_println(second.reports[0].delta_compressed)
+  __io_println(second.reports[0].body_bytes < second.reports[0].original_body_bytes)
+  __io_println(delta_events[0].reminder.body.contains("unchanged from its previous full emission"))
+  __io_println(delta_events[0].reminder.tags[1].contains("body_sha256:"))
+  clear_reminder_providers()
+  register_reminder_provider(
+    {
+      id: "budget_a",
+      subscribes_to: ["session_idle"],
+      evaluate: { _ctx -> return {reminder: {body: long_body, tags: ["budget_a"], dedupe_key: "budget_a"}} },
+    },
+  )
+  register_reminder_provider(
+    {
+      id: "budget_b",
+      subscribes_to: ["session_idle"],
+      evaluate: { _ctx -> return {reminder: {body: long_body, tags: ["budget_b"], dedupe_key: "budget_b"}} },
+    },
+  )
+  const budget_session = agent_session_open("reminder-provider-budget-skip")
+  agent_session_reset(budget_session)
+  const budget_payload = {session: {id: budget_session}, iteration: 1, wake_interval_ms: 0}
+  const budget = agent_reminder_providers_fire(
+    budget_session,
+    "session_idle",
+    budget_payload,
+    {reminders: {max_iteration_bytes: 300}},
+  )
+  const budget_events = transcript_events_by_kind(agent_session_snapshot(budget_session), "system_reminder")
+  __io_println(budget.fired_count)
+  __io_println(budget.skipped_count)
+  __io_println(budget.reports[0].provider)
+  __io_println(budget.skipped_reports[0].provider)
+  __io_println(budget.skipped_reports[0].reason)
+  __io_println(len(budget_events))
+  clear_reminder_providers()
+}

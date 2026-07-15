@@ -53,6 +53,7 @@ pub mod plan;
 pub mod prompt;
 pub mod readiness;
 pub mod reasoning_policy;
+pub(crate) mod reminder_iteration;
 pub(crate) mod reminder_providers;
 mod rerank;
 pub mod resolved_dispatch;
