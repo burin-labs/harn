@@ -1036,18 +1036,9 @@ async fn host_agent_session_finalize(
         })?;
     permissions::clear_session_grants(&session_id);
     crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
-    if session.pushed_transcript_dir {
-        super::agent_observe::pop_llm_transcript_dir();
-    }
 
-    // Fail loud on a model-less turn. If the loop finalized a non-error,
-    // success-shaped result but never actually called the provider (zero
-    // iterations and zero input/output tokens recorded for this session),
-    // the turn silently short-circuited — typically because no model
-    // resolved or the input was empty. Returning success-with-empty-text
-    // here masks a configuration failure and costs hours of forensics, so
-    // promote it to a terminal error that flows through the normal
-    // SessionError path below.
+    // Promote model-less success before the terminal marker so the durable
+    // descriptor matches the returned terminal result.
     if agent_turn_made_no_llm_call(
         &final_status,
         terminal_error.is_some(),
@@ -1073,6 +1064,15 @@ async fn host_agent_session_finalize(
     } else {
         final_status.clone()
     };
+    if session.pushed_transcript_dir {
+        super::agent_session_transcript::append_finalized_marker(
+            &session_id,
+            &canonical_status,
+            &stop_reason,
+            iterations,
+        );
+        super::agent_observe::pop_llm_transcript_dir();
+    }
     if terminal_error.is_some() || session_status_indicates_error(&final_status) {
         let error_payload = serde_json::json!({
             "event": crate::orchestration::HookEvent::SessionError.as_str(),
