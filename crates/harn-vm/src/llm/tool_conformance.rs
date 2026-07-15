@@ -72,6 +72,9 @@ pub enum ToolProbeCase {
     #[default]
     SingleToolCall,
     LargeStringArgument,
+    NoToolAnswerOrRefusal,
+    UnavailableToolRepair,
+    DoneSentinel,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,11 +103,20 @@ impl ToolProbeCase {
         match self {
             Self::SingleToolCall => "single_tool_call",
             Self::LargeStringArgument => "large_string_argument",
+            Self::NoToolAnswerOrRefusal => "no_tool_answer_or_refusal",
+            Self::UnavailableToolRepair => "unavailable_tool_repair",
+            Self::DoneSentinel => "done_sentinel",
         }
     }
 
     pub fn catalog_request_audit_cases() -> Vec<Self> {
-        vec![Self::SingleToolCall, Self::LargeStringArgument]
+        vec![
+            Self::SingleToolCall,
+            Self::LargeStringArgument,
+            Self::NoToolAnswerOrRefusal,
+            Self::UnavailableToolRepair,
+            Self::DoneSentinel,
+        ]
     }
 
     fn expected_value(self, marker: &str) -> String {
@@ -113,7 +125,14 @@ impl ToolProbeCase {
             Self::LargeStringArgument => format!(
                 "marker={marker}\nquoted=\"value\"\njson={{\"marker\":{marker:?},\"nested\":[1,true]}}\nheredoc=<<EOF\n{marker}\nEOF\nunicode=\\u{{2603}}\\u{{1F680}}\nend"
             ),
+            Self::NoToolAnswerOrRefusal => format!("direct_answer:{marker}"),
+            Self::UnavailableToolRepair => format!("unavailable_tool:{marker}"),
+            Self::DoneSentinel => format!("<done>{marker}</done>"),
         }
+    }
+
+    fn requires_probe_tool(self) -> bool {
+        matches!(self, Self::SingleToolCall | Self::LargeStringArgument)
     }
 }
 
@@ -200,6 +219,9 @@ pub enum ToolConformanceRequestValidationStatus {
 pub enum ToolProbeClassification {
     StructuredNativeToolCall,
     ParseableHarnTextToolCall,
+    DirectAnswerNoTool,
+    UnavailableToolRepair,
+    DoneSentinel,
     RawModelToolTag,
     ProseOnlyNonTool,
     MalformedJsonArguments,
@@ -409,7 +431,8 @@ pub fn classify_tool_conformance_fixture_for_case(
     let marker = marker.into();
     let expected_value = probe_case.expected_value(&marker);
     let response = serde_json::from_str::<Value>(raw).unwrap_or_else(|_| json!({ "content": raw }));
-    let case = classify_tool_probe_response(mode, &response, &expected_value, None, None);
+    let case =
+        classify_tool_probe_response(mode, &response, probe_case, &expected_value, None, None);
     report_from_cases(
         provider.into(),
         model.into(),
@@ -449,6 +472,7 @@ pub fn tool_conformance_request_report(
             validation: validate_probe_request_body(
                 &provider,
                 &model,
+                probe_case,
                 request_profile,
                 &request_body,
             ),
@@ -858,6 +882,7 @@ async fn execute_live_probe_case(
     classify_tool_probe_response(
         mode,
         &response_value,
+        probe_case,
         marker,
         Some(status.as_u16()),
         elapsed,
@@ -881,7 +906,8 @@ fn probe_marker_present(calls: &[Value], marker: &str) -> bool {
 fn classify_tool_probe_response(
     mode: ToolProbeMode,
     response: &Value,
-    marker: &str,
+    probe_case: ToolProbeCase,
+    expected_value: &str,
     http_status: Option<u16>,
     elapsed_ms: Option<u64>,
 ) -> ToolConformanceCase {
@@ -892,7 +918,8 @@ fn classify_tool_probe_response(
         if call.name == TOOL_PROBE_TOOL_NAME {
             match &call.arguments {
                 Some(Value::Object(map))
-                    if map.get("value").and_then(Value::as_str) == Some(marker) =>
+                    if probe_case.requires_probe_tool()
+                        && map.get("value").and_then(Value::as_str) == Some(expected_value) =>
                 {
                     return ToolConformanceCase {
                         mode,
@@ -917,24 +944,30 @@ fn classify_tool_probe_response(
 
     let content = extract_content(response);
     let tools = probe_tool_registry();
-    // Try the canonical tagged/heredoc grammar first; if it does not yield the
-    // echo_marker call, also try the fenced-JSON grammar. A fenced-JSON
-    // emission that parses to the probe call still classifies as
-    // ParseableHarnTextToolCall (it is a text-channel format) — the taxonomy is
-    // unchanged, only the body grammar the text path accepts is extended.
     let tagged = crate::llm::tools::parse_text_tool_calls_with_tools(&content, Some(&tools));
-    let parsed = if probe_marker_present(&tagged.calls, marker) {
+    let parsed = if probe_marker_present(&tagged.calls, expected_value) {
         tagged
     } else {
         let fenced = crate::llm::tools::parse_fenced_json_tool_calls(&content);
-        if probe_marker_present(&fenced.calls, marker) {
+        if probe_marker_present(&fenced.calls, expected_value) {
             fenced
         } else {
             tagged
         }
     };
     let text_count = parsed.calls.len();
-    let text_pass = probe_marker_present(&parsed.calls, marker);
+    if !probe_case.requires_probe_tool() {
+        return classify_no_tool_probe_response(
+            mode,
+            probe_case,
+            expected_value,
+            &content,
+            (native_count, text_count),
+            parsed,
+            (http_status, elapsed_ms),
+        );
+    }
+    let text_pass = probe_marker_present(&parsed.calls, expected_value);
     if text_pass {
         return ToolConformanceCase {
             mode,
@@ -990,6 +1023,61 @@ fn classify_tool_probe_response(
         parser_errors: parsed.errors,
         protocol_violations: parsed.violations,
         content_sample: sample_content(&content),
+    }
+}
+
+fn classify_no_tool_probe_response(
+    mode: ToolProbeMode,
+    probe_case: ToolProbeCase,
+    expected_value: &str,
+    content: &str,
+    counts: (usize, usize),
+    parsed: crate::llm::tools::TextToolParseResult,
+    timing: (Option<u16>, Option<u64>),
+) -> ToolConformanceCase {
+    let (native_count, text_count) = counts;
+    let (http_status, elapsed_ms) = timing;
+    let unexpected_tool = native_count > 0 || text_count > 0;
+    let empty = content.trim().is_empty() && !unexpected_tool;
+    let ok = !unexpected_tool && !empty && content.contains(expected_value);
+    let classification = if unexpected_tool {
+        ToolProbeClassification::RawModelToolTag
+    } else if empty {
+        ToolProbeClassification::EmptySilent
+    } else if ok {
+        match probe_case {
+            ToolProbeCase::NoToolAnswerOrRefusal => ToolProbeClassification::DirectAnswerNoTool,
+            ToolProbeCase::UnavailableToolRepair => ToolProbeClassification::UnavailableToolRepair,
+            ToolProbeCase::DoneSentinel => ToolProbeClassification::DoneSentinel,
+            _ => ToolProbeClassification::ProseOnlyNonTool,
+        }
+    } else if has_raw_model_tool_tag(content) {
+        ToolProbeClassification::RawModelToolTag
+    } else {
+        ToolProbeClassification::ProseOnlyNonTool
+    };
+    let failure_reason = (!ok).then(|| {
+        if unexpected_tool {
+            "unexpected_tool_call".to_string()
+        } else if empty {
+            "empty_silent_response".to_string()
+        } else {
+            format!("missing_expected_text:{expected_value}")
+        }
+    });
+    ToolConformanceCase {
+        mode,
+        ok,
+        classification,
+        fallback_mode: ToolProbeFallbackMode::Disabled,
+        failure_reason,
+        http_status,
+        elapsed_ms,
+        native_tool_call_count: native_count,
+        text_tool_call_count: text_count,
+        parser_errors: parsed.errors,
+        protocol_violations: parsed.violations,
+        content_sample: sample_content(content),
     }
 }
 

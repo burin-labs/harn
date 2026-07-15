@@ -240,6 +240,9 @@ impl CaseStats {
                 self.parseable_tool_call_cases += 1;
                 self.text_tool_call_cases += 1;
             }
+            ToolProbeClassification::DirectAnswerNoTool
+            | ToolProbeClassification::UnavailableToolRepair
+            | ToolProbeClassification::DoneSentinel => {}
             ToolProbeClassification::ProseOnlyNonTool => {
                 self.actionless_cases += 1;
             }
@@ -544,7 +547,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["no_tool", "refusal", "answer_quality"],
-            execution: missing_case_runner("no_tool_scorecard_runner_not_yet_available"),
+            execution: executable_tool_probe_case(
+                provider,
+                model_id,
+                ToolProbeCase::NoToolAnswerOrRefusal,
+            ),
         },
         ToolScorecardPlanCase {
             id: "unavailable_tool_repair",
@@ -554,7 +561,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["tool_name_repair", "no_unsafe_args", "recovery"],
-            execution: missing_case_runner("unavailable_tool_repair_runner_not_yet_available"),
+            execution: executable_tool_probe_case(
+                provider,
+                model_id,
+                ToolProbeCase::UnavailableToolRepair,
+            ),
         },
         ToolScorecardPlanCase {
             id: "done_sentinel",
@@ -564,7 +575,7 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["done_sentinel", "completion_contract"],
-            execution: missing_case_runner("completion_contract_runner_not_yet_available"),
+            execution: executable_tool_probe_case(provider, model_id, ToolProbeCase::DoneSentinel),
         },
         ToolScorecardPlanCase {
             id: "parameter_edges",
@@ -594,6 +605,15 @@ fn executable_tool_probe_case(
             }
             ToolProbeCase::LargeStringArgument => {
                 "harn provider tool-probe executes the large string argument byte-fidelity probe"
+            }
+            ToolProbeCase::NoToolAnswerOrRefusal => {
+                "harn provider tool-probe executes the no-tool direct-answer fixture"
+            }
+            ToolProbeCase::UnavailableToolRepair => {
+                "harn provider tool-probe executes the unavailable-tool repair fixture"
+            }
+            ToolProbeCase::DoneSentinel => {
+                "harn provider tool-probe executes the completion-sentinel fixture"
             }
         },
         command: Some(vec![
@@ -969,6 +989,9 @@ fn classification_key(classification: &ToolProbeClassification) -> &'static str 
     match classification {
         ToolProbeClassification::StructuredNativeToolCall => "structured_native_tool_call",
         ToolProbeClassification::ParseableHarnTextToolCall => "parseable_harn_text_tool_call",
+        ToolProbeClassification::DirectAnswerNoTool => "direct_answer_no_tool",
+        ToolProbeClassification::UnavailableToolRepair => "unavailable_tool_repair",
+        ToolProbeClassification::DoneSentinel => "done_sentinel",
         ToolProbeClassification::RawModelToolTag => "raw_model_tool_tag",
         ToolProbeClassification::ProseOnlyNonTool => "prose_only_non_tool",
         ToolProbeClassification::MalformedJsonArguments => "malformed_json_arguments",
@@ -982,6 +1005,9 @@ fn wire_dialect_key(classification: &ToolProbeClassification) -> &'static str {
     match classification {
         ToolProbeClassification::StructuredNativeToolCall => "native_tool_calls",
         ToolProbeClassification::ParseableHarnTextToolCall => "harn_text_tool_calls",
+        ToolProbeClassification::DirectAnswerNoTool
+        | ToolProbeClassification::UnavailableToolRepair
+        | ToolProbeClassification::DoneSentinel => "prose",
         ToolProbeClassification::RawModelToolTag => "raw_model_tool_tag",
         ToolProbeClassification::ProseOnlyNonTool => "prose",
         ToolProbeClassification::MalformedJsonArguments => "malformed_tool_args",
@@ -1224,6 +1250,33 @@ mod tests {
                 "both".to_string(),
                 "--case".to_string(),
                 "large_string_argument".to_string(),
+                "--repeat".to_string(),
+                "1".to_string(),
+                "--timeout-secs".to_string(),
+                "120".to_string(),
+                "--json".to_string(),
+            ]
+        );
+        let done_case = plan.routes[0]
+            .cases
+            .iter()
+            .find(|case| case.id == "done_sentinel")
+            .expect("done sentinel case");
+        assert_eq!(done_case.execution.status, "executable");
+        assert_eq!(done_case.execution.runner, "provider_tool_probe");
+        assert_eq!(
+            done_case.execution.command.as_ref().unwrap(),
+            &vec![
+                "harn".to_string(),
+                "provider".to_string(),
+                "tool-probe".to_string(),
+                "anthropic".to_string(),
+                "--model".to_string(),
+                "claude-sonnet-5".to_string(),
+                "--mode".to_string(),
+                "both".to_string(),
+                "--case".to_string(),
+                "done_sentinel".to_string(),
                 "--repeat".to_string(),
                 "1".to_string(),
                 "--timeout-secs".to_string(),
