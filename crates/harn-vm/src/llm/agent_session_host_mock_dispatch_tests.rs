@@ -1,10 +1,35 @@
-//! Coverage for the mock/fixture native tool-call path (harn#4798).
-//!
-//! Split out of `agent_session_host_tests.rs` so new coverage lands in a fresh
-//! file instead of growing that grandfathered source past its exact
-//! source-file-length baseline.
+//! Native tool-call surfacing tests, split out of `agent_session_host_tests.rs`
+//! so this coverage lands in a fresh file instead of growing that grandfathered
+//! source past its exact source-file-length baseline (harn#4798). Declared as a
+//! child of the `tests` module, so `super::super` still reaches the private
+//! `agent_session_host` helpers these tests exercise.
 
-use super::{assistant_message_from_llm_result, vm_to_json};
+use serde_json::json;
+
+use super::super::{assistant_message_from_llm_result, vm_to_json};
+
+#[test]
+fn native_tool_calls_replay_with_openai_wire_shape() {
+    let result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "local",
+        "text": "",
+        "native_tool_calls": [{
+            "id": "call_001",
+            "name": "release_run",
+            "arguments": {"command": "git status --short"}
+        }],
+    }));
+    let message = vm_to_json(&assistant_message_from_llm_result(&result));
+
+    assert_eq!(message["role"], "assistant");
+    assert_eq!(message["tool_calls"][0]["id"], "call_001");
+    assert_eq!(message["tool_calls"][0]["type"], "function");
+    assert_eq!(message["tool_calls"][0]["function"]["name"], "release_run");
+    assert_eq!(
+        message["tool_calls"][0]["function"]["arguments"],
+        r#"{"command":"git status --short"}"#
+    );
+}
 
 #[test]
 fn mock_style_native_tool_calls_reach_assistant_envelope() {
@@ -13,7 +38,7 @@ fn mock_style_native_tool_calls_reach_assistant_envelope() {
     // does not know as native-tools ("fixture"). This must still surface the
     // tool call to the assistant envelope, or a downstream native-tool mock
     // test sees zero tool-call events and stops with end_turn.
-    use super::super::api::{vm_build_llm_result, LlmResult, ProviderTelemetry};
+    use super::super::super::api::{vm_build_llm_result, LlmResult, ProviderTelemetry};
     let result = LlmResult {
         served_fast: false,
         text: String::new(),

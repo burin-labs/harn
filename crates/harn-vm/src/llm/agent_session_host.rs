@@ -3765,7 +3765,3 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
 #[cfg(test)]
 #[path = "agent_session_host_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "agent_session_host_mock_dispatch_tests.rs"]
-mod mock_dispatch_tests;
