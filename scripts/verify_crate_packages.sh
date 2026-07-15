@@ -113,49 +113,12 @@ cargo_package() {
 inspect_packaged_includes() {
   local package_dir="$1"
   local crate="$2"
-  python3 - "$package_dir" "$crate" <<'PY'
-import ast
-import pathlib
-import re
-import sys
-
-root = pathlib.Path(sys.argv[1]).resolve()
-crate = sys.argv[2]
-errors = []
-normal = re.compile(r'include_(?:str|bytes)!\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)', re.S)
-raw = re.compile(r'include_(?:str|bytes)!\s*\(\s*r(?P<hashes>#*)"(?P<path>.*?)"(?P=hashes)\s*\)', re.S)
-
-for source in sorted(root.rglob("*.rs")):
-    text = source.read_text()
-    matches = []
-    for match in normal.finditer(text):
-        try:
-            relative = ast.literal_eval('"' + match.group(1) + '"')
-        except Exception as exc:
-            errors.append(f"{source.relative_to(root)}: cannot decode include path: {exc}")
-            continue
-        matches.append(relative)
-    matches.extend(match.group("path") for match in raw.finditer(text))
-
-    for relative in matches:
-        if pathlib.PurePosixPath(relative).is_absolute():
-            errors.append(f"{source.relative_to(root)}: absolute include path {relative!r}")
-            continue
-        target = (source.parent / relative).resolve()
-        if not target.exists():
-            errors.append(f"{source.relative_to(root)}: missing include target {relative!r}")
-            continue
-        try:
-            target.relative_to(root)
-        except ValueError:
-            errors.append(f"{source.relative_to(root)}: include target escapes package: {relative!r}")
-
-if errors:
-    print(f"error: packaged {crate} has invalid include_str!/include_bytes! paths:", file=sys.stderr)
-    for error in errors:
-        print(f"  - {error}", file=sys.stderr)
-    raise SystemExit(1)
-PY
+  # Extracted crates must stay outside the workspace so Cargo checks them as
+  # publish artifacts; the inspector therefore needs explicit out-of-root read
+  # access.
+  "./scripts/harn_bin.sh" run --no-sandbox "$ROOT_DIR/scripts/verify_crate_package_includes.harn" -- \
+    --package-dir "$package_dir" \
+    --crate "$crate"
 }
 
 extract_package() {
