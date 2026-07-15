@@ -238,7 +238,7 @@ hook_export_harn_bin() {
 }
 
 hook_export_fresh_worktree_harn_bin() {
-  HARN_BIN=$(unset HARN_BIN; ./scripts/harn_bin.sh --print)
+  HARN_BIN=$(unset HARN_BIN; hook_ensure_harn)
   export HARN_BIN
 }
 
