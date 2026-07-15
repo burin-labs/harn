@@ -812,9 +812,11 @@ pub fn axis_breakdown(rows: list, axis: string) -> EvalAxisBreakdown {
     groups = groups + [__axis_group(value, grouped_rows[value])]
   }
   let worst: EvalAxisGroup? = nil
+  let worst_rate = 2.0
   for group in groups {
-    if worst == nil || group.macro_pass_at_1 < worst.macro_pass_at_1 {
+    if group.macro_pass_at_1 < worst_rate {
       worst = group
+      worst_rate = group.macro_pass_at_1
     }
   }
   return {
