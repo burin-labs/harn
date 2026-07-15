@@ -149,6 +149,13 @@ into the next model request. Its payload lives at
 }
 ```
 
+The event-log lifecycle topic also emits
+`transcript.reminder.iteration_summary` once per model request that renders
+reminders. That aggregate carries `count`, `body_bytes`, `rendered_bytes`,
+max-byte fields, and rollups by logical reminder tag, source, and rendered role,
+so operators can audit per-turn reminder pressure without scanning every
+individual `transcript.reminder.fired` event.
+
 Content extensions (`visible_text` and `visible_delta` on the
 `agent_message_chunk` content block, advertised via
 `agentCapabilities._meta.harn.contentExtensionFields`) follow the same

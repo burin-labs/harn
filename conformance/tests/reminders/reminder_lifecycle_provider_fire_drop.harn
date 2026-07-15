@@ -89,6 +89,7 @@ pipeline main() {
       const evaluated = stream.next().value
       const injected = stream.next().value
       const fired = stream.next().value
+      const summary = stream.next().value
       const dropped = stream.next().value
       __io_println(report.fired_count)
       __io_println(evaluated.kind)
@@ -101,6 +102,12 @@ pipeline main() {
       __io_println(fired.payload.session_id == session)
       __io_println(fired.payload.turn_number)
       __io_println(fired.payload.rendered_role)
+      __io_println(summary.kind)
+      __io_println(summary.payload.session_id == session)
+      __io_println(summary.payload.turn_number)
+      __io_println(summary.payload.count)
+      __io_println(summary.payload.by_source[0].source)
+      __io_println(summary.payload.by_rendered_role[0].rendered_role)
       __io_println(dropped.kind)
       __io_println(dropped.payload.session_id == session)
       __io_println(dropped.payload.reminder_id)

@@ -1,0 +1,127 @@
+import { parse_args } from "std/cli"
+import { decode_normal_literal } from "./check_rust_prompt_prose.harn"
+
+type IncludePath = {line: int, path: string}
+
+fn rel_path(path: string, root: string) -> string {
+  const normalized = replace(path_normalize(path), "\\", "/")
+  const normalized_root = replace(path_normalize(root), "\\", "/")
+  const prefix = normalized_root + "/"
+  if normalized == normalized_root {
+    return "."
+  }
+  if normalized.starts_with(prefix) {
+    return normalized[len(prefix):]
+  }
+  return normalized
+}
+
+fn line_of(text: string, offset: int) -> int {
+  let line = 1
+  let i = 0
+  while i < offset && i < text.len() {
+    if text.char_at(i) == "\n" {
+      line = line + 1
+    }
+    i = i + 1
+  }
+  return line
+}
+
+pub fn rust_include_paths(source: string) -> list<IncludePath> {
+  let out: list<IncludePath> = []
+  for m in regex_captures(r#"include_(?:str|bytes)!\s*\(\s*"((?:\\.|[^"\\])*)"\s*\)"#, source, "s") {
+    out = out + [{line: m.line, path: decode_normal_literal("\"" + m.groups[0] + "\"")}]
+  }
+  for m in regex_captures(r#"include_(?:str|bytes)!\s*\(\s*r(#+)?""#, source, "s") {
+    const hashes = to_string(m.groups[0] ?? "")
+    const body_start = m.end
+    const marker = "\"" + hashes
+    const rest = source.substring(body_start, source.len())
+    const body_end = rest.index_of(marker)
+    if body_end < 0 {
+      continue
+    }
+    const after_marker = body_start + body_end + marker.len()
+    const tail = source.substring(after_marker, source.len())
+    if regex_captures(r"^\s*\)", tail).count == 0 {
+      continue
+    }
+    out = out + [{line: line_of(source, m.start), path: rest.substring(0, body_end)}]
+  }
+  return out
+}
+
+fn within_root(path: string, root: string) -> bool {
+  const normalized = replace(path_normalize(path), "\\", "/")
+  let normalized_root = replace(path_normalize(root), "\\", "/")
+  while normalized_root.ends_with("/") && normalized_root.len() > 1 {
+    normalized_root = normalized_root.substring(0, normalized_root.len() - 1)
+  }
+  return normalized == normalized_root || normalized.starts_with(normalized_root + "/")
+}
+
+pub fn packaged_include_errors(root: string, crate: string) -> list<string> {
+  const package_root = path_normalize(root)
+  let errors: list<string> = []
+  for source in harness.fs.glob("**/*.rs", package_root).sort() {
+    const text = harness.fs.read_text(source)
+    const source_rel = rel_path(source, package_root)
+    for include_path in rust_include_paths(text) {
+      const relative = include_path.path
+      const location = source_rel + ":" + to_string(include_path.line)
+      if relative.starts_with("/") {
+        errors = errors + [location + ": absolute include path " + relative]
+        continue
+      }
+      const target = path_normalize(path_join(dirname(source) ?? package_root, relative))
+      if !harness.fs.exists(target) {
+        errors = errors + [location + ": missing include target " + relative]
+        continue
+      }
+      if !within_root(target, package_root) {
+        errors = errors + [location + ": include target escapes package: " + relative]
+      }
+    }
+  }
+  return errors
+}
+
+fn arg_spec() -> list {
+  return [
+    {kind: "option", name: "package_dir", flags: ["--package-dir"], parse: "string", default: ""},
+    {kind: "option", name: "crate", flags: ["--crate"], parse: "string", default: ""},
+  ]
+}
+
+fn main(harness: Harness) {
+  const parsed = parse_args(argv, arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio
+      .println(
+      "usage: harn run scripts/verify_crate_package_includes.harn -- --package-dir DIR --crate CRATE",
+    )
+    return nil
+  }
+  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    harness.stdio.eprintln(join(errors, "\n"))
+    exit(2)
+  }
+  const package_dir = to_string(parsed?.package_dir ?? "")
+  const crate = to_string(parsed?.crate ?? "")
+  if package_dir == "" || crate == "" {
+    harness.stdio.eprintln("error: --package-dir and --crate are required")
+    exit(2)
+  }
+  const errors = packaged_include_errors(package_dir, crate)
+  if errors.count > 0 {
+    harness.stdio
+      .eprintln("error: packaged " + crate + " has invalid include_str!/include_bytes! paths:")
+    for error in errors {
+      harness.stdio.eprintln("  - " + error)
+    }
+    exit(1)
+  }
+  return nil
+}

@@ -15,10 +15,11 @@ use crate::value::VmValue;
 
 #[path = "tool_conformance_request.rs"]
 mod request;
-use request::probe_request_body;
+use request::{probe_request_body, validate_probe_request_body};
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
-pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 2;
+pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 3;
+pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 2;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
 pub const DEFAULT_TOOL_PROBE_MARKER: &str = "harn_tool_probe_marker";
 
@@ -73,12 +74,37 @@ pub enum ToolProbeCase {
     LargeStringArgument,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolProbeRequestProfile {
+    #[default]
+    CatalogDefault,
+    ParameterEdges,
+}
+
+impl ToolProbeRequestProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CatalogDefault => "catalog_default",
+            Self::ParameterEdges => "parameter_edges",
+        }
+    }
+
+    pub fn catalog_request_audit_profiles() -> Vec<Self> {
+        vec![Self::CatalogDefault, Self::ParameterEdges]
+    }
+}
+
 impl ToolProbeCase {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SingleToolCall => "single_tool_call",
             Self::LargeStringArgument => "large_string_argument",
         }
+    }
+
+    pub fn catalog_request_audit_cases() -> Vec<Self> {
+        vec![Self::SingleToolCall, Self::LargeStringArgument]
     }
 
     fn expected_value(self, marker: &str) -> String {
@@ -100,6 +126,8 @@ pub struct ToolConformanceRequestReport {
     pub base_url: Option<String>,
     #[serde(default)]
     pub probe_case: ToolProbeCase,
+    #[serde(default)]
+    pub request_profile: ToolProbeRequestProfile,
     pub tool_name: String,
     pub marker: String,
     pub expected_value: String,
@@ -118,6 +146,45 @@ pub struct ToolConformanceRequestValidation {
     pub dialect: String,
     pub status: ToolConformanceRequestValidationStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestAuditReport {
+    pub schema_version: u32,
+    pub catalog_model_count: usize,
+    pub route_count: usize,
+    pub probe_cases: Vec<String>,
+    pub request_profiles: Vec<String>,
+    pub modes: Vec<String>,
+    pub request_count: usize,
+    pub validation_pass_count: usize,
+    pub validation_fail_count: usize,
+    pub dialect_counts: BTreeMap<String, usize>,
+    pub provider_counts: BTreeMap<String, usize>,
+    pub routes: Vec<ToolConformanceRequestAuditRoute>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<ToolConformanceRequestAuditFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestAuditRoute {
+    pub provider: String,
+    pub model: String,
+    pub request_count: usize,
+    pub validation_pass_count: usize,
+    pub validation_fail_count: usize,
+    pub dialect_counts: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestAuditFailure {
+    pub provider: String,
+    pub model: String,
+    pub probe_case: String,
+    pub request_profile: String,
+    pub mode: String,
+    pub dialect: String,
     pub issues: Vec<String>,
 }
 
@@ -360,6 +427,7 @@ pub fn tool_conformance_request_report(
     base_url: Option<String>,
     modes: Vec<ToolProbeMode>,
     probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
     marker: impl Into<String>,
 ) -> Result<ToolConformanceRequestReport, String> {
     let provider = provider.into();
@@ -368,11 +436,22 @@ pub fn tool_conformance_request_report(
     let expected_value = probe_case.expected_value(&marker);
     let mut requests = Vec::new();
     for mode in normalized_modes(&modes) {
-        let request_body =
-            probe_request_body(&provider, &model, mode, probe_case, &expected_value)?;
+        let request_body = probe_request_body(
+            &provider,
+            &model,
+            mode,
+            probe_case,
+            request_profile,
+            &expected_value,
+        )?;
         requests.push(ToolConformanceRequestCase {
             mode,
-            validation: validate_probe_request_body(&provider, &model, &request_body),
+            validation: validate_probe_request_body(
+                &provider,
+                &model,
+                request_profile,
+                &request_body,
+            ),
             request_body,
         });
     }
@@ -382,270 +461,12 @@ pub fn tool_conformance_request_report(
         model,
         base_url,
         probe_case,
+        request_profile,
         tool_name: TOOL_PROBE_TOOL_NAME.to_string(),
         marker,
         expected_value,
         requests,
     })
-}
-
-fn validate_probe_request_body(
-    provider: &str,
-    model: &str,
-    body: &Value,
-) -> ToolConformanceRequestValidation {
-    let caps = crate::llm::capabilities::lookup(provider, model);
-    let dialect = request_validation_dialect(provider, &caps);
-    let mut issues = Vec::new();
-    match dialect.as_str() {
-        "anthropic" => validate_anthropic_probe_request(body, &mut issues),
-        "bedrock" => validate_bedrock_probe_request(body, &mut issues),
-        "gemini" | "vertex" => validate_gemini_probe_request(body, &mut issues),
-        "ollama" => validate_ollama_probe_request(body, &mut issues),
-        "openai_compat" => validate_openai_compat_probe_request(body, &caps, &mut issues),
-        _ => issues.push(format!("unsupported validation dialect `{dialect}`")),
-    }
-    ToolConformanceRequestValidation {
-        dialect,
-        status: if issues.is_empty() {
-            ToolConformanceRequestValidationStatus::Pass
-        } else {
-            ToolConformanceRequestValidationStatus::Fail
-        },
-        issues,
-    }
-}
-
-fn request_validation_dialect(
-    provider: &str,
-    caps: &crate::llm::capabilities::Capabilities,
-) -> String {
-    if provider == "bedrock" {
-        return "bedrock".to_string();
-    }
-    if provider == "vertex" {
-        return "vertex".to_string();
-    }
-    match caps.message_wire_format {
-        crate::llm::capabilities::WireDialect::Anthropic => "anthropic".to_string(),
-        crate::llm::capabilities::WireDialect::Gemini => "gemini".to_string(),
-        crate::llm::capabilities::WireDialect::Ollama => "ollama".to_string(),
-        crate::llm::capabilities::WireDialect::OpenAiCompat => "openai_compat".to_string(),
-    }
-}
-
-fn validate_openai_compat_probe_request(
-    body: &Value,
-    caps: &crate::llm::capabilities::Capabilities,
-    issues: &mut Vec<String>,
-) {
-    require_array(body, "/messages", issues);
-    require_openai_function_tool(body, "/tools/0", issues);
-    validate_openai_compat_tool_choice(body, caps, issues);
-    reject_present(body, "/toolConfig", "OpenAI-compatible request", issues);
-}
-
-fn validate_openai_compat_tool_choice(
-    body: &Value,
-    caps: &crate::llm::capabilities::Capabilities,
-    issues: &mut Vec<String>,
-) {
-    let Some(tool_choice) = body.get("tool_choice") else {
-        issues.push("OpenAI-compatible request missing /tool_choice".to_string());
-        return;
-    };
-    if tool_choice.pointer("/type").and_then(Value::as_str) == Some("function") {
-        require_string_eq(
-            body,
-            "/tool_choice/function/name",
-            TOOL_PROBE_TOOL_NAME,
-            "OpenAI-compatible tool_choice.function.name",
-            issues,
-        );
-        return;
-    }
-    if let Some(mode) = tool_choice.as_str() {
-        if caps
-            .allowed_tool_choice_modes
-            .iter()
-            .any(|allowed| allowed == mode)
-        {
-            return;
-        }
-        issues.push(format!(
-            "OpenAI-compatible tool_choice mode `{mode}` is not allowed by catalog capabilities"
-        ));
-        return;
-    }
-    require_string_eq(
-        body,
-        "/tool_choice/type",
-        "function",
-        "OpenAI-compatible tool_choice.type",
-        issues,
-    );
-}
-
-fn validate_anthropic_probe_request(body: &Value, issues: &mut Vec<String>) {
-    require_array(body, "/messages", issues);
-    require_string_eq(
-        body,
-        "/tools/0/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Anthropic tool name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/tools/0/input_schema/properties/value/type",
-        "string",
-        "Anthropic input_schema value type",
-        issues,
-    );
-    reject_present(
-        body,
-        "/tools/0/function",
-        "Anthropic tool declaration",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/tool_choice/type",
-        "tool",
-        "Anthropic tool_choice.type",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/tool_choice/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Anthropic tool_choice.name",
-        issues,
-    );
-}
-
-fn validate_gemini_probe_request(body: &Value, issues: &mut Vec<String>) {
-    require_array(body, "/contents", issues);
-    require_string_eq(
-        body,
-        "/tools/0/functionDeclarations/0/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Gemini function declaration name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/tools/0/functionDeclarations/0/parameters/properties/value/type",
-        "string",
-        "Gemini function declaration value type",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/toolConfig/functionCallingConfig/mode",
-        "ANY",
-        "Gemini toolConfig mode",
-        issues,
-    );
-    require_array_contains_string(
-        body,
-        "/toolConfig/functionCallingConfig/allowedFunctionNames",
-        TOOL_PROBE_TOOL_NAME,
-        "Gemini allowedFunctionNames",
-        issues,
-    );
-    reject_present(body, "/tool_choice", "Gemini request", issues);
-}
-
-fn validate_bedrock_probe_request(body: &Value, issues: &mut Vec<String>) {
-    require_array(body, "/messages", issues);
-    require_string_eq(
-        body,
-        "/toolConfig/tools/0/toolSpec/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Bedrock toolSpec name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/toolConfig/tools/0/toolSpec/inputSchema/json/properties/value/type",
-        "string",
-        "Bedrock toolSpec value type",
-        issues,
-    );
-    reject_present(body, "/tool_choice", "Bedrock request", issues);
-}
-
-fn validate_ollama_probe_request(body: &Value, issues: &mut Vec<String>) {
-    require_array(body, "/messages", issues);
-    require_openai_function_tool(body, "/tools/0", issues);
-    reject_present(body, "/tool_choice", "Ollama request", issues);
-}
-
-fn require_openai_function_tool(body: &Value, base: &str, issues: &mut Vec<String>) {
-    require_string_eq(
-        body,
-        &format!("{base}/type"),
-        "function",
-        "tool type",
-        issues,
-    );
-    require_string_eq(
-        body,
-        &format!("{base}/function/name"),
-        TOOL_PROBE_TOOL_NAME,
-        "function tool name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        &format!("{base}/function/parameters/properties/value/type"),
-        "string",
-        "function tool value type",
-        issues,
-    );
-}
-
-fn require_array(body: &Value, pointer: &str, issues: &mut Vec<String>) {
-    if !body.pointer(pointer).is_some_and(Value::is_array) {
-        issues.push(format!("{pointer} must be an array"));
-    }
-}
-
-fn require_string_eq(
-    body: &Value,
-    pointer: &str,
-    expected: &str,
-    label: &str,
-    issues: &mut Vec<String>,
-) {
-    match body.pointer(pointer).and_then(Value::as_str) {
-        Some(actual) if actual == expected => {}
-        Some(actual) => issues.push(format!("{label} must be `{expected}`, got `{actual}`")),
-        None => issues.push(format!("{label} missing at {pointer}")),
-    }
-}
-
-fn require_array_contains_string(
-    body: &Value,
-    pointer: &str,
-    expected: &str,
-    label: &str,
-    issues: &mut Vec<String>,
-) {
-    let Some(values) = body.pointer(pointer).and_then(Value::as_array) else {
-        issues.push(format!("{label} missing array at {pointer}"));
-        return;
-    };
-    if !values.iter().any(|value| value.as_str() == Some(expected)) {
-        issues.push(format!("{label} must contain `{expected}`"));
-    }
-}
-
-fn reject_present(body: &Value, pointer: &str, label: &str, issues: &mut Vec<String>) {
-    if body.pointer(pointer).is_some() {
-        issues.push(format!("{label} must not include {pointer}"));
-    }
 }
 
 pub fn tool_conformance_request_report_json(
@@ -654,13 +475,142 @@ pub fn tool_conformance_request_report_json(
     base_url: Option<String>,
     modes: Vec<ToolProbeMode>,
     probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
     marker: impl Into<String>,
 ) -> Result<String, String> {
-    let report =
-        tool_conformance_request_report(provider, model, base_url, modes, probe_case, marker)?;
+    let report = tool_conformance_request_report(
+        provider,
+        model,
+        base_url,
+        modes,
+        probe_case,
+        request_profile,
+        marker,
+    )?;
     serde_json::to_string_pretty(&report).map_err(|error| {
         format!("internal error: failed to render tool-probe request report: {error}")
     })
+}
+
+pub fn tool_conformance_request_catalog_audit(
+    probe_cases: Vec<ToolProbeCase>,
+    request_profiles: Vec<ToolProbeRequestProfile>,
+    modes: Vec<ToolProbeMode>,
+) -> ToolConformanceRequestAuditReport {
+    let probe_cases = if probe_cases.is_empty() {
+        ToolProbeCase::catalog_request_audit_cases()
+    } else {
+        probe_cases
+    };
+    let modes = normalized_modes(&modes);
+    let request_profiles = if request_profiles.is_empty() {
+        ToolProbeRequestProfile::catalog_request_audit_profiles()
+    } else {
+        normalized_request_profiles(&request_profiles)
+    };
+    let entries = llm_config::model_catalog_entries();
+    let mut request_count = 0usize;
+    let mut validation_pass_count = 0usize;
+    let mut validation_fail_count = 0usize;
+    let mut dialect_counts = BTreeMap::new();
+    let mut provider_counts = BTreeMap::new();
+    let mut routes = Vec::new();
+    let mut failures = Vec::new();
+
+    for (model_id, model) in &entries {
+        let mut route = ToolConformanceRequestAuditRoute {
+            provider: model.provider.clone(),
+            model: model_id.clone(),
+            request_count: 0,
+            validation_pass_count: 0,
+            validation_fail_count: 0,
+            dialect_counts: BTreeMap::new(),
+        };
+        for probe_case in &probe_cases {
+            for request_profile in &request_profiles {
+                for mode in &modes {
+                    route.request_count += 1;
+                    request_count += 1;
+                    *provider_counts.entry(model.provider.clone()).or_insert(0) += 1;
+                    match tool_conformance_request_report(
+                        model.provider.clone(),
+                        model_id.clone(),
+                        None,
+                        vec![*mode],
+                        *probe_case,
+                        *request_profile,
+                        DEFAULT_TOOL_PROBE_MARKER,
+                    ) {
+                        Ok(report) => {
+                            for request in report.requests {
+                                let dialect = request.validation.dialect.clone();
+                                *dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
+                                *route.dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
+                                match request.validation.status {
+                                    ToolConformanceRequestValidationStatus::Pass => {
+                                        route.validation_pass_count += 1;
+                                        validation_pass_count += 1;
+                                    }
+                                    ToolConformanceRequestValidationStatus::Fail => {
+                                        route.validation_fail_count += 1;
+                                        validation_fail_count += 1;
+                                        failures.push(ToolConformanceRequestAuditFailure {
+                                            provider: model.provider.clone(),
+                                            model: model_id.clone(),
+                                            probe_case: probe_case.as_str().to_string(),
+                                            request_profile: request_profile.as_str().to_string(),
+                                            mode: mode.as_str().to_string(),
+                                            dialect,
+                                            issues: request.validation.issues,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            route.validation_fail_count += 1;
+                            validation_fail_count += 1;
+                            failures.push(ToolConformanceRequestAuditFailure {
+                                provider: model.provider.clone(),
+                                model: model_id.clone(),
+                                probe_case: probe_case.as_str().to_string(),
+                                request_profile: request_profile.as_str().to_string(),
+                                mode: mode.as_str().to_string(),
+                                dialect: "request_build".to_string(),
+                                issues: vec![error],
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        routes.push(route);
+    }
+
+    ToolConformanceRequestAuditReport {
+        schema_version: TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION,
+        catalog_model_count: entries.len(),
+        route_count: routes.len(),
+        probe_cases: probe_cases
+            .into_iter()
+            .map(|probe_case| probe_case.as_str().to_string())
+            .collect(),
+        request_profiles: request_profiles
+            .into_iter()
+            .map(|request_profile| request_profile.as_str().to_string())
+            .collect(),
+        modes: modes
+            .into_iter()
+            .map(|mode| mode.as_str().to_string())
+            .collect(),
+        request_count,
+        validation_pass_count,
+        validation_fail_count,
+        dialect_counts,
+        provider_counts,
+        routes,
+        failures,
+    }
 }
 
 pub fn report_satisfies_required_probe(report: &ToolConformanceReport, requirement: &str) -> bool {
@@ -683,6 +633,21 @@ fn normalized_modes(modes: &[ToolProbeMode]) -> Vec<ToolProbeMode> {
     for mode in modes {
         if !out.contains(mode) {
             out.push(*mode);
+        }
+    }
+    out
+}
+
+fn normalized_request_profiles(
+    profiles: &[ToolProbeRequestProfile],
+) -> Vec<ToolProbeRequestProfile> {
+    if profiles.is_empty() {
+        return ToolProbeRequestProfile::catalog_request_audit_profiles();
+    }
+    let mut out = Vec::new();
+    for profile in profiles {
+        if !out.contains(profile) {
+            out.push(*profile);
         }
     }
     out
@@ -822,7 +787,14 @@ async fn execute_live_probe_case(
             );
         }
     };
-    let body = match probe_request_body(provider, model, mode, probe_case, marker) {
+    let body = match probe_request_body(
+        provider,
+        model,
+        mode,
+        probe_case,
+        ToolProbeRequestProfile::CatalogDefault,
+        marker,
+    ) {
         Ok(body) => body,
         Err(message) => {
             return ToolConformanceCase::transport_error(

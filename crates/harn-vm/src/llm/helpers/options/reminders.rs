@@ -17,6 +17,15 @@ impl RenderedReminder {
                 .to_string(),
         }
     }
+
+    fn rendered_bytes(&self) -> usize {
+        match self {
+            Self::SystemText(text) => text.len(),
+            Self::Message(message) => serde_json::to_string(message)
+                .map(|rendered| rendered.len())
+                .unwrap_or(0),
+        }
+    }
 }
 
 pub(super) fn reminder_xml_text(reminder: &SystemReminder) -> String {
@@ -115,6 +124,8 @@ pub(super) fn rendered_reminder_lifecycle(
                 source: reminder.source.as_str().to_string(),
                 role_hint: reminder.role_hint.as_str().to_string(),
                 rendered_role,
+                body_bytes: reminder.body.len(),
+                rendered_bytes: rendered.rendered_bytes(),
                 ttl_turns: reminder.ttl_turns,
                 propagate: reminder.propagate.as_str().to_string(),
                 originating_agent_id: reminder.originating_agent_id.clone(),

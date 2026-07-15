@@ -357,6 +357,57 @@ fn provider_tool_probe_dry_run_request_large_case_is_offline_and_deterministic()
     );
 }
 
+#[test]
+fn provider_tool_probe_audit_validates_catalog_requests_in_process() {
+    let argv = ["provider", "tool-probe-audit"];
+    let harn = run(&argv, &[]);
+    let repeat = run(&argv, &[]);
+    assert_eq!(
+        harn.exit_code, 0,
+        "unexpected audit failure; stderr={}\nstdout={}",
+        harn.stderr, harn.stdout
+    );
+    assert_eq!(
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
+    );
+    let harn_value = parse_json(&harn.stdout, "harn");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
+    assert_eq!(
+        repeat_value, harn_value,
+        "tool-probe audit JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
+    );
+    assert_eq!(harn_value["schema_version"], 2);
+    assert_eq!(
+        harn_value["request_profiles"],
+        serde_json::json!(["catalog_default", "parameter_edges"])
+    );
+    assert_eq!(harn_value["validation_fail_count"], 0);
+    assert_eq!(
+        harn_value["validation_pass_count"],
+        harn_value["request_count"]
+    );
+    assert!(
+        harn_value["request_count"].as_u64().unwrap_or_default() >= 160,
+        "audit covered too few request combinations: {}",
+        harn.stdout
+    );
+    assert!(
+        harn_value["dialect_counts"]["openai_compat"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
+    assert!(
+        harn_value["dialect_counts"]["anthropic"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
+}
+
 fn write_minimal_tool_fixture(path: &Path) {
     // An OpenAI-style response body the fixture classifier accepts.
     // The marker matches the default `DEFAULT_TOOL_PROBE_MARKER`. Even

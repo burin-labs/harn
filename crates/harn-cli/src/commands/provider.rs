@@ -162,7 +162,7 @@ async fn aggregate_provider_probe(args: &ProviderProbeArgs) -> ProviderProbe {
     }
 }
 
-pub(crate) async fn run_provider_tool_probe(args: ProviderToolProbeArgs) {
+pub(crate) async fn run_tool_probe(args: ProviderToolProbeArgs) {
     let exit_code = dispatch_provider_tool_probe(args).await;
     if exit_code != 0 {
         process::exit(exit_code);
@@ -171,7 +171,11 @@ pub(crate) async fn run_provider_tool_probe(args: ProviderToolProbeArgs) {
 
 async fn dispatch_provider_tool_probe(args: ProviderToolProbeArgs) -> i32 {
     if args.dry_run_request {
-        return dispatch_provider_tool_probe_request_dry_run(&args);
+        return crate::commands::providers::render_tool_probe_request(&args);
+    }
+    if let Some(error) = args.live_request_profile_error() {
+        eprintln!("{error}");
+        return 1;
     }
     let report = match aggregate_tool_conformance_report(&args).await {
         Ok(report) => report,
@@ -222,26 +226,6 @@ async fn aggregate_tool_conformance_report(
             args.tool_conformance_probe_options(),
         )
         .await)
-    }
-}
-
-fn dispatch_provider_tool_probe_request_dry_run(args: &ProviderToolProbeArgs) -> i32 {
-    match harn_vm::llm::tool_conformance::tool_conformance_request_report_json(
-        args.provider.clone(),
-        args.model.clone(),
-        args.base_url.clone(),
-        args.mode.tool_probe_modes(),
-        args.probe_case.tool_probe_case(),
-        args.marker.clone(),
-    ) {
-        Ok(json) => {
-            println!("{json}");
-            0
-        }
-        Err(error) => {
-            eprintln!("{error}");
-            1
-        }
     }
 }
 
