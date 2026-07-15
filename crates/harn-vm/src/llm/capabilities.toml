@@ -1714,6 +1714,21 @@ prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.ollama]]
+model_match = "llama3.2*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "format_kw"
+recommended_endpoint = "/api/chat"
+text_tool_wire_format_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.ollama]]
 model_match = "gemma3*"
 vision_supported = true
 prefers_xml_scaffolding = false

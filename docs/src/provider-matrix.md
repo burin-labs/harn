@@ -141,6 +141,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `ollama` | `llava*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `ollama` | `bakllava*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `ollama` | `llama3.2-vision*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `ollama` | `llama3.2*` | `any` | no | no | no | no | no | yes | no | `format_kw` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | no | `native_only` | yes | no |
 | `ollama` | `gemma3*` | `any` | no | yes | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `ollama` | `gemma4:12b*` | `any` | no | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
 | `ollama` | `gemma4*` | `any` | no | yes | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
@@ -383,7 +384,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `ollama` | `gemma4:12b-mxfp8` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-nvfp4` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:26b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `ollama` | `llama3.2` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `ollama` | `llama3.2` | `native` | `native_only` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4-turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4.1-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
