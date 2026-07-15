@@ -17,7 +17,7 @@ use super::tool_conformance::{
 };
 
 pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 3;
-pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 1;
+pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolScorecardReport {
@@ -170,6 +170,18 @@ pub struct ToolScorecardPlanCase {
     pub turn_count: u8,
     pub batch_eligible: bool,
     pub probe_focus: Vec<&'static str>,
+    pub execution: ToolScorecardPlanCaseExecution,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardPlanCaseExecution {
+    pub status: &'static str,
+    pub runner: &'static str,
+    pub reason: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -323,7 +335,7 @@ pub fn tool_scorecard_plan_from_catalog(
         }
         seen_routes.insert(route_key);
         let claim = catalog_claim_for_model(model, &provider_by_id);
-        let cases = fixed_micro_cases_for_claim(&claim);
+        let cases = fixed_micro_cases_for_route(model, &claim);
         if include_batch_manifest && claim.batch_api {
             for case in &cases {
                 if !case.batch_eligible {
@@ -461,12 +473,17 @@ fn parse_route_filters(filters: &[String]) -> Result<BTreeSet<(String, String)>,
     Ok(routes)
 }
 
-fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolScorecardPlanCase> {
+fn fixed_micro_cases_for_route(
+    model: &CatalogModel,
+    claim: &ToolScorecardCatalogClaim,
+) -> Vec<ToolScorecardPlanCase> {
     let parallel_requirement = if claim.supports_parallel_tool_calls {
         ("required", "route_claims_parallel_tool_calls")
     } else {
         ("not_applicable", "route_does_not_claim_parallel_tool_calls")
     };
+    let provider = model.provider.as_str();
+    let model_id = model.id.as_str();
     vec![
         ToolScorecardPlanCase {
             id: "single_tool_call",
@@ -476,6 +493,7 @@ fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolSco
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["tool_choice", "json_arguments", "wire_dialect"],
+            execution: executable_tool_probe_case(provider, model_id),
         },
         ToolScorecardPlanCase {
             id: "parallel_tool_calls",
@@ -485,6 +503,7 @@ fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolSco
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["parallel_dispatch", "tool_call_count", "argument_binding"],
+            execution: missing_case_runner("provider_tool_probe_only_covers_single_tool_call"),
         },
         ToolScorecardPlanCase {
             id: "large_string_argument",
@@ -494,6 +513,7 @@ fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolSco
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["byte_fidelity", "escaping", "unicode"],
+            execution: missing_case_runner("provider_tool_probe_uses_fixed_marker_only"),
         },
         ToolScorecardPlanCase {
             id: "tool_result_followup",
@@ -503,6 +523,9 @@ fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolSco
             turn_count: 2,
             batch_eligible: false,
             probe_focus: vec!["tool_result_adjacency", "continuation", "action_vs_prose"],
+            execution: missing_case_runner(
+                "multi_turn_provider_scorecard_runner_not_yet_available",
+            ),
         },
         ToolScorecardPlanCase {
             id: "no_tool_answer_or_refusal",
@@ -512,6 +535,7 @@ fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolSco
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["no_tool", "refusal", "answer_quality"],
+            execution: missing_case_runner("no_tool_scorecard_runner_not_yet_available"),
         },
         ToolScorecardPlanCase {
             id: "unavailable_tool_repair",
@@ -521,6 +545,7 @@ fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolSco
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["tool_name_repair", "no_unsafe_args", "recovery"],
+            execution: missing_case_runner("unavailable_tool_repair_runner_not_yet_available"),
         },
         ToolScorecardPlanCase {
             id: "done_sentinel",
@@ -530,6 +555,7 @@ fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolSco
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["done_sentinel", "completion_contract"],
+            execution: missing_case_runner("completion_contract_runner_not_yet_available"),
         },
         ToolScorecardPlanCase {
             id: "parameter_edges",
@@ -539,8 +565,58 @@ fn fixed_micro_cases_for_claim(claim: &ToolScorecardCatalogClaim) -> Vec<ToolSco
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["temperature", "max_tokens", "tool_choice"],
+            execution: missing_case_runner("parameter_edge_runner_not_yet_available"),
         },
     ]
+}
+
+fn executable_tool_probe_case(provider: &str, model: &str) -> ToolScorecardPlanCaseExecution {
+    ToolScorecardPlanCaseExecution {
+        status: "executable",
+        runner: "provider_tool_probe",
+        reason:
+            "harn provider tool-probe executes the single echo_marker tool-call transport probe",
+        command: Some(vec![
+            "harn".to_string(),
+            "provider".to_string(),
+            "tool-probe".to_string(),
+            provider.to_string(),
+            "--model".to_string(),
+            model.to_string(),
+            "--mode".to_string(),
+            "both".to_string(),
+            "--repeat".to_string(),
+            "1".to_string(),
+            "--timeout-secs".to_string(),
+            "120".to_string(),
+            "--json".to_string(),
+        ]),
+        artifact_hint: Some(format!(
+            "tool-probe-{}-{}-single_tool_call.json",
+            artifact_segment(provider),
+            artifact_segment(model)
+        )),
+    }
+}
+
+fn missing_case_runner(reason: &'static str) -> ToolScorecardPlanCaseExecution {
+    ToolScorecardPlanCaseExecution {
+        status: "missing_runner",
+        runner: "planned_tool_scorecard_case",
+        reason,
+        command: None,
+        artifact_hint: None,
+    }
+}
+
+fn artifact_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' => ch,
+            _ => '-',
+        })
+        .collect()
 }
 
 fn score_route(
@@ -1046,6 +1122,38 @@ mod tests {
         assert!(case_ids.contains(&"done_sentinel"));
         assert_eq!(plan.case_count, plan.routes[0].cases.len());
         assert!(plan.required_case_count >= 7);
+        let single_tool_case = plan.routes[0]
+            .cases
+            .iter()
+            .find(|case| case.id == "single_tool_call")
+            .expect("single tool case");
+        assert_eq!(single_tool_case.execution.status, "executable");
+        assert_eq!(single_tool_case.execution.runner, "provider_tool_probe");
+        assert_eq!(
+            single_tool_case.execution.command.as_ref().unwrap(),
+            &vec![
+                "harn".to_string(),
+                "provider".to_string(),
+                "tool-probe".to_string(),
+                "anthropic".to_string(),
+                "--model".to_string(),
+                "claude-sonnet-5".to_string(),
+                "--mode".to_string(),
+                "both".to_string(),
+                "--repeat".to_string(),
+                "1".to_string(),
+                "--timeout-secs".to_string(),
+                "120".to_string(),
+                "--json".to_string(),
+            ]
+        );
+        let followup_case = plan.routes[0]
+            .cases
+            .iter()
+            .find(|case| case.id == "tool_result_followup")
+            .expect("follow-up case");
+        assert_eq!(followup_case.execution.status, "missing_runner");
+        assert!(followup_case.execution.command.is_none());
     }
 
     #[test]
