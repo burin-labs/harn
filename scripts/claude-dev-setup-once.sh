@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+hook_helper="$script_dir/claude_dev_setup_hook.harn"
 input="$(cat)"
-hook_cwd="$(printf '%s' "$input" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("cwd", ""))' 2>/dev/null || true)"
+
+resolve_hook_harn() {
+  "$script_dir/harn_bin.sh" --no-build --print 2>/dev/null || true
+}
+
+hook_harn="$(resolve_hook_harn)"
+hook_cwd=""
+if [[ -n "$hook_harn" ]]; then
+  hook_cwd="$(printf '%s' "$input" | "$hook_harn" run "$hook_helper" -- --cwd 2>/dev/null || true)"
+fi
 root="${CLAUDE_PROJECT_DIR:-${hook_cwd:-$PWD}}"
 root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$root")"
 cd "$root"
@@ -19,17 +30,12 @@ persist_env() {
 
 emit_context() {
   local message="$1"
-  MESSAGE="$message" python3 - <<'PY'
-import json
-import os
-
-print(json.dumps({
-    "hookSpecificOutput": {
-        "hookEventName": "SessionStart",
-        "additionalContext": os.environ["MESSAGE"],
-    }
-}))
-PY
+  if [[ -z "$hook_harn" ]]; then
+    hook_harn="$(resolve_hook_harn)"
+  fi
+  if [[ -n "$hook_harn" ]]; then
+    "$hook_harn" run "$hook_helper" -- --context "$message" 2>/dev/null || true
+  fi
 }
 
 fingerprint="$(

@@ -1,0 +1,57 @@
+import { parse_args } from "std/cli"
+
+pub fn claude_dev_setup_cwd(input: string) -> string {
+  let parsed = nil
+  try {
+    parsed = json_parse(input)
+  } catch (_) {
+    return ""
+  }
+  if type_of(parsed) != "dict" {
+    return ""
+  }
+  const cwd = parsed?.cwd
+  if type_of(cwd) != "string" {
+    return ""
+  }
+  return to_string(cwd)
+}
+
+pub fn claude_dev_setup_context(message: string) -> string {
+  return json_stringify({hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: message}})
+}
+
+fn arg_spec() -> list {
+  return [
+    {kind: "flag", name: "cwd", flags: ["--cwd"], default: false},
+    {kind: "option", name: "context", flags: ["--context"], parse: "string", default: ""},
+  ]
+}
+
+fn usage() -> string {
+  return "usage: harn run scripts/claude_dev_setup_hook.harn -- [--cwd | --context MESSAGE]"
+}
+
+fn main(harness: Harness) {
+  const parsed = parse_args(argv, arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio.println(usage())
+    return nil
+  }
+  const errors = parsed?._errors ?? []
+  if len(errors) > 0 || len(parsed?._extras ?? []) > 0 {
+    harness.stdio.eprintln(join(errors + (parsed?._extras ?? []), "\n"))
+    exit(2)
+  }
+  if parsed?.cwd ?? false {
+    harness.stdio.println(claude_dev_setup_cwd(read_stdin() ?? ""))
+    return nil
+  }
+  const context = to_string(parsed?.context ?? "")
+  if context != "" {
+    harness.stdio.println(claude_dev_setup_context(context))
+    return nil
+  }
+  harness.stdio.eprintln(usage())
+  exit(2)
+}
