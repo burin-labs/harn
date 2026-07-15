@@ -1149,6 +1149,29 @@ mod tests {
     }
 
     #[test]
+    fn build_mock_result_surfaces_fixture_tool_calls() {
+        // The CLI-mock fixture shape a downstream native-tool test uses.
+        let mock = crate::llm::jsonl::parse_llm_mock_value(&serde_json::json!({
+            "match": "*",
+            "consume_match": true,
+            "tool_calls": [{"name": "ask_user", "arguments": {"question": "Which?"}}]
+        }))
+        .expect("parse mock");
+        assert!(
+            !mock.tool_calls.is_empty(),
+            "fixture tool_calls must parse into the mock: {:?}",
+            mock.tool_calls
+        );
+        let result = build_mock_result(&mock, 10);
+        assert!(
+            !result.tool_calls.is_empty(),
+            "build_mock_result must surface tool_calls: {:?}",
+            result.tool_calls
+        );
+        assert_eq!(result.tool_calls[0]["name"], "ask_user");
+    }
+
+    #[test]
     fn cli_llm_mock_replay_scope_survives_provider_worker_thread() {
         reset_llm_mock_state();
         install_cli_llm_mocks(vec![text_mock("cross-thread replay")]);
@@ -1185,5 +1208,34 @@ mod tests {
         assert_eq!(recordings.len(), 1);
         assert_eq!(recordings[0].text, "cross-thread record");
         clear_cli_llm_mock_mode();
+    }
+
+    #[test]
+    fn cli_mock_native_tool_calls_reach_the_live_result() {
+        // Exercises the full CLI `--llm-mock` path (install scope -> match ->
+        // build) the burin native-tool fixture uses, which the isolated
+        // parse/build/message tests skip. If this yields an empty result, the
+        // downstream native-tool mock test sees zero tool-call events.
+        reset_llm_mock_state();
+        let mocks = vec![crate::llm::jsonl::parse_llm_mock_value(&serde_json::json!({
+            "match": "*",
+            "consume_match": true,
+            "tool_calls": [{"name": "ask_user", "arguments": {"question": "Which?"}}]
+        }))
+        .expect("parse mock")];
+        install_cli_llm_mocks(mocks);
+        let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("fixture"));
+        assert!(
+            request.cli_llm_mock_scope.is_some(),
+            "cli mock scope must be active"
+        );
+        let result = mock_llm_response(&request).expect("mock response");
+        clear_cli_llm_mock_mode();
+        assert!(
+            !result.tool_calls.is_empty(),
+            "CLI mock native tool_calls must reach the live result: text={:?} tool_calls={:?}",
+            result.text,
+            result.tool_calls
+        );
     }
 }

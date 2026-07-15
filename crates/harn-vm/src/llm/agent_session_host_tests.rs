@@ -11,6 +11,9 @@ use super::{
     truncated_tool_call_should_continue, vm_to_json,
 };
 
+#[path = "agent_session_host_mock_dispatch_tests.rs"]
+mod mock_dispatch;
+
 /// Execution policy that annotates the file-provenance test vocabulary so
 /// `current_tool_annotations` resolves `kind` / side effects the way the live
 /// dispatch loop would.
@@ -426,29 +429,6 @@ fn agent_emit_loop_stuck_preserves_pipeline_payload() {
         }
         other => panic!("expected LoopStuckSignal, got {other:?}"),
     }
-}
-
-#[test]
-fn native_tool_calls_replay_with_openai_wire_shape() {
-    let result = crate::stdlib::json_to_vm_value(&json!({
-        "provider": "local",
-        "text": "",
-        "native_tool_calls": [{
-            "id": "call_001",
-            "name": "release_run",
-            "arguments": {"command": "git status --short"}
-        }],
-    }));
-    let message = vm_to_json(&assistant_message_from_llm_result(&result));
-
-    assert_eq!(message["role"], "assistant");
-    assert_eq!(message["tool_calls"][0]["id"], "call_001");
-    assert_eq!(message["tool_calls"][0]["type"], "function");
-    assert_eq!(message["tool_calls"][0]["function"]["name"], "release_run");
-    assert_eq!(
-        message["tool_calls"][0]["function"]["arguments"],
-        r#"{"command":"git status --short"}"#
-    );
 }
 
 #[test]
