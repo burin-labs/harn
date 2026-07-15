@@ -59,7 +59,11 @@
       "additionalProperties": true
     },
     "command": { "type": "string" },
-    "command_or_op_descriptor": { "type": "string" }
+    "command_or_op_descriptor": { "type": "string" },
+    "feedback_kind": {
+      "type": "string",
+      "description": "Feedback/progress kind carried on background-after responses; absent on plain foreground and handle results."
+    }
   },
   "required": [
     "command_id",
