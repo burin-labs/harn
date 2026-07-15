@@ -16,9 +16,12 @@
 //!
 //! Tree-sitter for all supported languages. For each function-like node
 //! whose name matches we read the `body` /
-//! `block` / `result` field, slice the source by row range, and return
-//! the joined text plus a regex-derived list of return-object field
-//! names for hosts that build API contract summaries.
+//! `block` / `result` field, slice the exact node text, and return
+//! that text plus a regex-derived list of return-object field
+//! names for hosts that build API contract summaries. When a declaration
+//! is found but the grammar does not expose an isolated body, we return
+//! the declaration span as a typed fallback so edit tools can retarget
+//! once instead of retrying the same body-only edit.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -45,7 +48,12 @@ pub(super) struct ExtractedBody {
     pub start_line: u32,
     /// 1-based end line.
     pub end_line: u32,
+    /// 0-based UTF-8 byte column where the body starts.
+    pub start_col: u32,
+    /// 0-based UTF-8 byte column where the body ends.
+    pub end_col: u32,
     pub return_object_fields: Vec<String>,
+    pub declaration: DeclarationFallback,
 }
 
 impl ExtractedBody {
@@ -64,12 +72,99 @@ impl ExtractedBody {
             harn_vm::value::intern_key("end_line"),
             VmValue::Int(self.end_line as i64),
         );
+        dict.insert(
+            harn_vm::value::intern_key("start_col"),
+            VmValue::Int(self.start_col as i64),
+        );
+        dict.insert(
+            harn_vm::value::intern_key("end_col"),
+            VmValue::Int(self.end_col as i64),
+        );
         let fields: Vec<VmValue> = self.return_object_fields.iter().map(str_value).collect();
         dict.insert(
             harn_vm::value::intern_key("return_object_fields"),
             VmValue::List(Arc::new(fields)),
         );
+        insert_declaration_fields(&mut dict, &self.declaration, "isolated");
         VmValue::dict(dict)
+    }
+}
+
+/// Function declaration span used when body isolation fails.
+#[derive(Debug, Clone)]
+pub(super) struct DeclarationFallback {
+    pub name: String,
+    /// 1-based declaration start line.
+    pub start_line: u32,
+    /// 1-based declaration end line.
+    pub end_line: u32,
+    pub node_kind: String,
+    pub reason: String,
+}
+
+pub(super) enum BodyLookup {
+    Isolated(ExtractedBody),
+    DeclarationFallback(DeclarationFallback),
+    NotFound,
+}
+
+fn insert_declaration_fields(
+    dict: &mut harn_vm::value::DictMap,
+    declaration: &DeclarationFallback,
+    isolation_status: &'static str,
+) {
+    dict.insert(
+        harn_vm::value::intern_key("declaration_found"),
+        VmValue::Bool(declaration.start_line > 0),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("declaration_start_line"),
+        VmValue::Int(declaration.start_line as i64),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("declaration_end_line"),
+        VmValue::Int(declaration.end_line as i64),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("declaration_node_kind"),
+        str_value(&declaration.node_kind),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("isolation_status"),
+        str_value(isolation_status),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("isolation_reason"),
+        str_value(&declaration.reason),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("fallback_action"),
+        if isolation_status == "declaration_fallback" {
+            str_value("replace_range")
+        } else {
+            VmValue::Nil
+        },
+    );
+    dict.insert(
+        harn_vm::value::intern_key("retarget_instruction"),
+        if isolation_status == "declaration_fallback" {
+            str_value(format!(
+                "body could not be isolated; declaration spans L{}-L{} - use replace_range with these bounds",
+                declaration.start_line, declaration.end_line
+            ))
+        } else {
+            str_value("")
+        },
+    );
+}
+
+fn empty_declaration(function_name: &str, reason: &'static str) -> DeclarationFallback {
+    DeclarationFallback {
+        name: function_name.to_string(),
+        start_line: 0,
+        end_line: 0,
+        node_kind: String::new(),
+        reason: reason.to_string(),
     }
 }
 
@@ -82,7 +177,7 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let (source, language, path_for_response) = load_input(SINGLE_BUILTIN, dict)?;
 
     let tree = parse_source(&source, language)?;
-    let body = extract_body(
+    let lookup = extract_body(
         &tree,
         &source,
         language,
@@ -111,34 +206,63 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         harn_vm::value::intern_key("brace_based"),
         VmValue::Bool(brace_based),
     );
-    if let Some(body) = body {
-        response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(true));
-        response.insert(
-            harn_vm::value::intern_key("body_text"),
-            str_value(&body.body_text),
-        );
-        response.insert(
-            harn_vm::value::intern_key("start_line"),
-            VmValue::Int(body.start_line as i64),
-        );
-        response.insert(
-            harn_vm::value::intern_key("end_line"),
-            VmValue::Int(body.end_line as i64),
-        );
-        let fields: Vec<VmValue> = body.return_object_fields.iter().map(str_value).collect();
-        response.insert(
-            harn_vm::value::intern_key("return_object_fields"),
-            VmValue::List(Arc::new(fields)),
-        );
-    } else {
-        response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(false));
-        response.insert(harn_vm::value::intern_key("body_text"), str_value(""));
-        response.insert(harn_vm::value::intern_key("start_line"), VmValue::Int(0));
-        response.insert(harn_vm::value::intern_key("end_line"), VmValue::Int(0));
-        response.insert(
-            harn_vm::value::intern_key("return_object_fields"),
-            VmValue::List(Arc::new(Vec::new())),
-        );
+    match lookup {
+        BodyLookup::Isolated(body) => {
+            response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(true));
+            response.insert(
+                harn_vm::value::intern_key("body_text"),
+                str_value(&body.body_text),
+            );
+            response.insert(
+                harn_vm::value::intern_key("start_line"),
+                VmValue::Int(body.start_line as i64),
+            );
+            response.insert(
+                harn_vm::value::intern_key("end_line"),
+                VmValue::Int(body.end_line as i64),
+            );
+            response.insert(
+                harn_vm::value::intern_key("start_col"),
+                VmValue::Int(body.start_col as i64),
+            );
+            response.insert(
+                harn_vm::value::intern_key("end_col"),
+                VmValue::Int(body.end_col as i64),
+            );
+            let fields: Vec<VmValue> = body.return_object_fields.iter().map(str_value).collect();
+            response.insert(
+                harn_vm::value::intern_key("return_object_fields"),
+                VmValue::List(Arc::new(fields)),
+            );
+            insert_declaration_fields(&mut response, &body.declaration, "isolated");
+        }
+        BodyLookup::DeclarationFallback(declaration) => {
+            response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(false));
+            response.insert(harn_vm::value::intern_key("body_text"), str_value(""));
+            response.insert(harn_vm::value::intern_key("start_line"), VmValue::Int(0));
+            response.insert(harn_vm::value::intern_key("end_line"), VmValue::Int(0));
+            response.insert(harn_vm::value::intern_key("start_col"), VmValue::Int(0));
+            response.insert(harn_vm::value::intern_key("end_col"), VmValue::Int(0));
+            response.insert(
+                harn_vm::value::intern_key("return_object_fields"),
+                VmValue::List(Arc::new(Vec::new())),
+            );
+            insert_declaration_fields(&mut response, &declaration, "declaration_fallback");
+        }
+        BodyLookup::NotFound => {
+            response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(false));
+            response.insert(harn_vm::value::intern_key("body_text"), str_value(""));
+            response.insert(harn_vm::value::intern_key("start_line"), VmValue::Int(0));
+            response.insert(harn_vm::value::intern_key("end_line"), VmValue::Int(0));
+            response.insert(harn_vm::value::intern_key("start_col"), VmValue::Int(0));
+            response.insert(harn_vm::value::intern_key("end_col"), VmValue::Int(0));
+            response.insert(
+                harn_vm::value::intern_key("return_object_fields"),
+                VmValue::List(Arc::new(Vec::new())),
+            );
+            let declaration = empty_declaration(&function_name, "symbol_not_found");
+            insert_declaration_fields(&mut response, &declaration, "not_found");
+        }
     }
     Ok(VmValue::dict(response))
 }
@@ -154,18 +278,23 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let tree = parse_source(&source, language)?;
     let unique: BTreeSet<String> = names.iter().cloned().collect();
     let mut bodies_dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-    for name in &unique {
-        if let Some(body) = extract_body(&tree, &source, language, name, container.as_deref()) {
-            bodies_dict.insert(harn_vm::value::intern_key(name), body.to_vm_value());
-        }
-    }
 
     let brace_based = !matches!(language, Language::Python);
 
+    let mut fallback_dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     let mut missing: Vec<VmValue> = Vec::new();
     for name in &unique {
-        if !bodies_dict.contains_key(name.as_str()) {
-            missing.push(str_value(name));
+        match extract_body(&tree, &source, language, name, container.as_deref()) {
+            BodyLookup::Isolated(body) => {
+                bodies_dict.insert(harn_vm::value::intern_key(name), body.to_vm_value());
+            }
+            BodyLookup::DeclarationFallback(fallback) => {
+                fallback_dict.insert(
+                    harn_vm::value::intern_key(name),
+                    declaration_fallback_to_vm_value(&fallback),
+                );
+            }
+            BodyLookup::NotFound => missing.push(str_value(name)),
         }
     }
 
@@ -188,6 +317,10 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     response.insert(
         harn_vm::value::intern_key("bodies"),
         VmValue::dict(bodies_dict),
+    );
+    response.insert(
+        harn_vm::value::intern_key("fallback_declarations"),
+        VmValue::dict(fallback_dict),
     );
     response.insert(
         harn_vm::value::intern_key("missing"),
@@ -293,7 +426,7 @@ pub(super) fn extract_body(
     language: Language,
     function_name: &str,
     container_filter: Option<&str>,
-) -> Option<ExtractedBody> {
+) -> BodyLookup {
     let lines: Vec<&str> = split_lines(source);
     let root = tree.root_node();
     let mut stack: Vec<String> = Vec::new();
@@ -322,7 +455,7 @@ fn walk_for_body(
     container_filter: Option<&str>,
     lines: &[&str],
     stack: &mut Vec<String>,
-) -> Option<ExtractedBody> {
+) -> BodyLookup {
     if is_function_like(node, language)
         && matches_function_name(node, source, language, function_name)
     {
@@ -331,8 +464,15 @@ fn walk_for_body(
             Some(want) => stack.iter().any(|n| n == want),
         };
         if container_ok {
-            if let Some(body) = body_from_function_node(node, function_name, lines, language) {
-                return Some(body);
+            match body_from_function_node(node, source, function_name, lines, language) {
+                Some(body) => return BodyLookup::Isolated(body),
+                None => {
+                    return BodyLookup::DeclarationFallback(declaration_fallback(
+                        node,
+                        function_name,
+                        "body_not_isolated",
+                    ));
+                }
             }
         }
     }
@@ -346,7 +486,7 @@ fn walk_for_body(
         if !child.is_named() {
             continue;
         }
-        if let Some(found) = walk_for_body(
+        match walk_for_body(
             child,
             source,
             language,
@@ -355,17 +495,20 @@ fn walk_for_body(
             lines,
             stack,
         ) {
-            if pushed_container.is_some() {
-                stack.pop();
+            BodyLookup::NotFound => {}
+            found => {
+                if pushed_container.is_some() {
+                    stack.pop();
+                }
+                return found;
             }
-            return Some(found);
         }
     }
 
     if pushed_container.is_some() {
         stack.pop();
     }
-    None
+    BodyLookup::NotFound
 }
 
 /// Tree-sitter node kinds that introduce function-like declarations,
@@ -469,6 +612,7 @@ fn matches_function_name(node: Node<'_>, source: &str, language: Language, targe
 /// the grammar lacks a body field.
 fn body_from_function_node(
     node: Node<'_>,
+    source: &str,
     function_name: &str,
     lines: &[&str],
     language: Language,
@@ -486,7 +630,7 @@ fn body_from_function_node(
                 "arrow_function" | "function" | "function_expression"
             ) {
                 if let Some(body) = body_field(value) {
-                    return shape_body(body, function_name, lines);
+                    return shape_body(body, node, function_name, source);
                 }
                 return whole_minus_first(value, function_name, lines);
             }
@@ -504,13 +648,13 @@ fn body_from_function_node(
     if matches!(node.kind(), "binary_operator") && matches!(language, Language::R) {
         let rhs = node.child_by_field_name("rhs")?;
         if let Some(body) = body_field(rhs) {
-            return shape_body(body, function_name, lines);
+            return shape_body(body, node, function_name, source);
         }
         return whole_minus_first(rhs, function_name, lines);
     }
 
     if let Some(body) = body_field(node) {
-        return shape_body(body, function_name, lines);
+        return shape_body(body, node, function_name, source);
     }
     whole_minus_first(node, function_name, lines)
 }
@@ -524,17 +668,30 @@ fn body_field(node: Node<'_>) -> Option<Node<'_>> {
     None
 }
 
-fn shape_body(body: Node<'_>, function_name: &str, lines: &[&str]) -> Option<ExtractedBody> {
-    let start = body.start_position().row;
-    let end = body.end_position().row;
-    let body_text = slice_lines(lines, start, end);
+fn shape_body(
+    body: Node<'_>,
+    declaration_node: Node<'_>,
+    function_name: &str,
+    source: &str,
+) -> Option<ExtractedBody> {
+    if body.start_byte() == declaration_node.start_byte()
+        && body.end_byte() == declaration_node.end_byte()
+    {
+        return None;
+    }
+    let start = body.start_position();
+    let end = body.end_position();
+    let body_text = node_text(body, source);
     let fields = extract_return_fields(&body_text);
     Some(ExtractedBody {
         name: function_name.to_string(),
         body_text,
-        start_line: (start + 1) as u32,
-        end_line: (end + 1) as u32,
+        start_line: (start.row + 1) as u32,
+        end_line: (end.row + 1) as u32,
+        start_col: start.column as u32,
+        end_col: end.column as u32,
         return_object_fields: fields,
+        declaration: declaration_fallback(declaration_node, function_name, "body_isolated"),
     })
 }
 
@@ -551,8 +708,63 @@ fn whole_minus_first(node: Node<'_>, function_name: &str, lines: &[&str]) -> Opt
         body_text,
         start_line: (start + 2) as u32,
         end_line: (end + 1) as u32,
+        start_col: 0,
+        end_col: 0,
         return_object_fields: fields,
+        declaration: declaration_fallback(node, function_name, "body_isolated"),
     })
+}
+
+fn declaration_fallback(
+    node: Node<'_>,
+    function_name: &str,
+    reason: &'static str,
+) -> DeclarationFallback {
+    let start = node.start_position().row;
+    let end = node.end_position().row;
+    DeclarationFallback {
+        name: function_name.to_string(),
+        start_line: (start + 1) as u32,
+        end_line: (end + 1) as u32,
+        node_kind: node.kind().to_string(),
+        reason: reason.to_string(),
+    }
+}
+
+fn declaration_fallback_to_vm_value(fallback: &DeclarationFallback) -> VmValue {
+    let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
+    dict.insert(
+        harn_vm::value::intern_key("name"),
+        str_value(&fallback.name),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("declaration_start_line"),
+        VmValue::Int(fallback.start_line as i64),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("declaration_end_line"),
+        VmValue::Int(fallback.end_line as i64),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("declaration_node_kind"),
+        str_value(&fallback.node_kind),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("isolation_reason"),
+        str_value(&fallback.reason),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("fallback_action"),
+        str_value("replace_range"),
+    );
+    dict.insert(
+        harn_vm::value::intern_key("retarget_instruction"),
+        str_value(format!(
+            "body could not be isolated; declaration spans L{}-L{} - use replace_range with these bounds",
+            fallback.start_line, fallback.end_line
+        )),
+    );
+    VmValue::dict(dict)
 }
 
 fn slice_lines(lines: &[&str], start_row: usize, end_row: usize) -> String {

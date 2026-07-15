@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/function_bodies.response.json",
   "title": "ast.function_bodies response",
-  "description": "Map of function name → extracted body, plus a `missing` list naming requested functions that were not found. All line coordinates inside each body are 1-based.",
+  "description": "Map of function name → extracted body, declaration fallback, or missing name. All line coordinates inside each body or fallback are 1-based.",
   "type": "object",
   "properties": {
     "path": { "type": ["string", "null"] },
@@ -13,12 +13,17 @@
       "additionalProperties": { "$ref": "#/$defs/Body" },
       "description": "Function name → extracted body. Names absent from this map are listed under `missing`."
     },
+    "fallback_declarations": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/DeclarationFallback" },
+      "description": "Function name → declaration span fallback for declarations whose bodies could not be isolated."
+    },
     "missing": {
       "type": "array",
       "items": { "type": "string" }
     }
   },
-  "required": ["path", "language", "brace_based", "bodies", "missing"],
+  "required": ["path", "language", "brace_based", "bodies", "fallback_declarations", "missing"],
   "additionalProperties": false,
   "$defs": {
     "Body": {
@@ -28,12 +33,71 @@
         "body_text": { "type": "string" },
         "start_line": { "type": "integer", "minimum": 0 },
         "end_line": { "type": "integer", "minimum": 0 },
+        "start_col": { "type": "integer", "minimum": 0 },
+        "end_col": { "type": "integer", "minimum": 0 },
         "return_object_fields": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "declaration_found": { "type": "boolean" },
+        "declaration_start_line": { "type": "integer", "minimum": 0 },
+        "declaration_end_line": { "type": "integer", "minimum": 0 },
+        "declaration_node_kind": { "type": "string" },
+        "isolation_status": {
+          "type": "string",
+          "enum": ["isolated", "declaration_fallback", "not_found"]
+        },
+        "isolation_reason": { "type": "string" },
+        "fallback_action": {
+          "type": ["string", "null"],
+          "enum": ["replace_range", null]
+        },
+        "retarget_instruction": {
+          "type": "string"
         }
       },
-      "required": ["name", "body_text", "start_line", "end_line", "return_object_fields"],
+      "required": [
+        "name",
+        "body_text",
+        "start_line",
+        "end_line",
+        "start_col",
+        "end_col",
+        "return_object_fields",
+        "declaration_found",
+        "declaration_start_line",
+        "declaration_end_line",
+        "declaration_node_kind",
+        "isolation_status",
+        "isolation_reason",
+        "fallback_action",
+        "retarget_instruction"
+      ],
+      "additionalProperties": false
+    },
+    "DeclarationFallback": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "declaration_start_line": { "type": "integer", "minimum": 0 },
+        "declaration_end_line": { "type": "integer", "minimum": 0 },
+        "declaration_node_kind": { "type": "string" },
+        "isolation_reason": { "type": "string" },
+        "fallback_action": {
+          "type": "string",
+          "const": "replace_range"
+        },
+        "retarget_instruction": { "type": "string" }
+      },
+      "required": [
+        "name",
+        "declaration_start_line",
+        "declaration_end_line",
+        "declaration_node_kind",
+        "isolation_reason",
+        "fallback_action",
+        "retarget_instruction"
+      ],
       "additionalProperties": false
     }
   }
