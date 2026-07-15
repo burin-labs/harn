@@ -29,6 +29,7 @@ fn write_tools() {
 pipeline default() {
   const tool_text = "<tool_call>\nwrite_note({ path: \"notes.txt\" })\n</tool_call>"
   const malformed_tool_text = "<tool_call>\nwrite_note({ path: })\n</tool_call>"
+  const mixed_malformed_tool_text = "<notes>bad wrapper</notes>\n" + malformed_tool_text
   // Leading narration emitted as bare prose (NOT wrapped in
   // <assistant_prose>) ahead of a well-formed wrapped call. The parser
   // recovers the call AND flags the stray prose as a protocol violation.
@@ -238,6 +239,42 @@ pipeline default() {
     },
   )
   with_llm_script(
+    [llm_text(mixed_malformed_tool_text)],
+    { ->
+      const mixed_malformed_session = "structural-validator-mixed-malformed-" + uuid()
+      const mixed_malformed = agent_capture_events(
+        mixed_malformed_session,
+        fn() { return try {
+          agent_loop(
+            "Update notes.txt and then finish.",
+            nil,
+            {
+              provider: "mock",
+              tool_format: "text",
+              loop_until_done: true,
+              max_iterations: 2,
+              tools: write_tools(),
+              session_id: mixed_malformed_session,
+              structural_validator: with_structural_validator({on_failure: "raise", rules: ["tool_calls_well_formed"]}),
+            },
+          )
+          "no-throw"
+        } catch (_e) {
+          "caught"
+        } },
+      )
+      const mixed_malformed_decisions = events_of(mixed_malformed.events, "structural_validator_decision")
+      const mixed_diagnostic = mixed_malformed_decisions[0].diagnostic
+      const parse_idx = mixed_diagnostic.index_of("TOOL CALL PARSE ERROR")
+      const wrapper_idx = mixed_diagnostic.index_of("Unknown top-level tag")
+      __io_println(mixed_malformed.result == "caught")
+      __io_println(len(mixed_malformed_decisions) == 1)
+      __io_println(parse_idx >= 0)
+      __io_println(wrapper_idx >= 0)
+      __io_println(parse_idx < wrapper_idx)
+    },
+  )
+  with_llm_script(
     [llm_text(tool_text), llm_text("<done>##DONE##</done>")],
     { ->
       const well_formed_session = "structural-validator-well-formed-" + uuid()
@@ -411,23 +448,23 @@ pipeline default() {
   )
   // Option validation is schema-backed: malformed public options fail at
   // construction time before any validator turn can run.
-  let bad_options_type = try {
+  const bad_options_type = try {
     with_structural_validator("invalid")
   }
   __io_println(error_contains(bad_options_type, "dict"))
-  let bad_on_failure = try {
+  const bad_on_failure = try {
     with_structural_validator({on_failure: "passthrough"})
   }
   __io_println(error_contains(bad_on_failure, "on_failure"))
-  let bad_max_attempts = try {
+  const bad_max_attempts = try {
     with_structural_validator({max_attempts: 0})
   }
   __io_println(error_contains(bad_max_attempts, "max_attempts"))
-  let bad_catalog = try {
+  const bad_catalog = try {
     with_structural_validator({no_phantom_completion_catalog: {en: "done"}})
   }
   __io_println(error_contains(bad_catalog, "no_phantom_completion_catalog"))
-  let bad_warn_only = try {
+  const bad_warn_only = try {
     with_structural_validator({rules: [{name: "tool_calls_well_formed", warn_only: "yes"}]})
   }
   __io_println(error_contains(bad_warn_only, "rules[0]"))

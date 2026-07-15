@@ -38,7 +38,7 @@ fn __sv_string(value) -> string {
 fn __sv_string_list(value) -> list {
   let out = []
   for item in __sv_list(value) {
-    let text = trim(__sv_string(item))
+    const text = trim(__sv_string(item))
     if text != "" {
       out = out.push(text)
     }
@@ -66,7 +66,7 @@ fn __sv_default_no_phantom_completion_catalog() {
 fn __sv_merge_catalog_locale(base, override_items) {
   let merged = []
   for item in __sv_string_list(base) + __sv_string_list(override_items) {
-    let normalized = lowercase(item)
+    const normalized = lowercase(item)
     if normalized != "" && !contains(merged, normalized) {
       merged = merged.push(normalized)
     }
@@ -75,7 +75,7 @@ fn __sv_merge_catalog_locale(base, override_items) {
 }
 
 fn __sv_normalize_no_phantom_completion_catalog(value) {
-  let defaults = __sv_default_no_phantom_completion_catalog()
+  const defaults = __sv_default_no_phantom_completion_catalog()
   if value == nil {
     return defaults
   }
@@ -91,7 +91,7 @@ fn __sv_normalize_no_phantom_completion_catalog(value) {
 }
 
 fn __sv_locale(value) -> string {
-  let locale = trim(__sv_string(value))
+  const locale = trim(__sv_string(value))
   if locale == "" {
     return "en"
   }
@@ -109,14 +109,14 @@ fn __sv_rule_names() {
 
 fn __sv_normalize_rule_entry(value) {
   if type_of(value) == "string" {
-    let name = trim(__sv_string(value))
+    const name = trim(__sv_string(value))
     if name == "" {
       throw "with_structural_validator: rule names must be non-empty strings"
     }
     return {name: name, warn_only: false}
   }
-  let entry = __sv_dict(value)
-  let name = trim(__sv_string(entry?.name ?? entry?.rule))
+  const entry = __sv_dict(value)
+  const name = trim(__sv_string(entry?.name ?? entry?.rule))
   if name == "" {
     throw "with_structural_validator: rule entries need `name`"
   }
@@ -133,8 +133,8 @@ fn __sv_normalize_rules(value) {
   }
   let rules = []
   for item in raw {
-    let entry = __sv_normalize_rule_entry(item)
-    let name = entry.name
+    const entry = __sv_normalize_rule_entry(item)
+    const name = entry.name
     if !contains(rules.map({ rule -> rule.name }), name) {
       rules = rules.push(entry)
     }
@@ -175,7 +175,7 @@ fn __sv_options_schema() {
 }
 
 fn __sv_typed_opts(opts) {
-  let cfg = if opts == nil {
+  const cfg = if opts == nil {
     {}
   } else {
     opts
@@ -183,7 +183,7 @@ fn __sv_typed_opts(opts) {
   if type_of(cfg) != "dict" {
     throw "with_structural_validator: opts must be a dict or nil; got " + type_of(cfg)
   }
-  let report = get_typed_report(cfg, __sv_options_schema(), true)
+  const report = get_typed_report(cfg, __sv_options_schema(), true)
   if !report.ok {
     throw "with_structural_validator: " + report.message
   }
@@ -191,7 +191,7 @@ fn __sv_typed_opts(opts) {
 }
 
 fn __sv_validate_opts(opts) {
-  let cfg = __sv_typed_opts(opts)
+  const cfg = __sv_typed_opts(opts)
   let rules = __sv_normalize_rules(cfg?.rules)
   for rule in rules {
     if !contains(__sv_rule_names(), rule.name) {
@@ -208,11 +208,11 @@ fn __sv_validate_opts(opts) {
 }
 
 fn __sv_tool_annotations(entry) {
-  let direct = entry?.annotations
+  const direct = entry?.annotations
   if type_of(direct) == "dict" {
     return direct
   }
-  let func = entry?.function
+  const func = entry?.function
   if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
     return func.annotations
   }
@@ -224,7 +224,7 @@ fn __sv_annotation_enabled(value) -> bool {
 }
 
 fn __sv_tool_entry_is_structural(entry) -> bool {
-  let annotations = __sv_tool_annotations(entry)
+  const annotations = __sv_tool_annotations(entry)
   return __sv_annotation_enabled(annotations?.structural)
     || __sv_annotation_enabled(annotations?.agent_lifecycle)
 }
@@ -233,12 +233,12 @@ fn __sv_tool_entry_has_write_capability(entry) -> bool {
   if __sv_tool_entry_is_structural(entry) {
     return false
   }
-  let annotations = __sv_tool_annotations(entry)
-  let side_effect_level = lowercase(__sv_string(annotations?.side_effect_level ?? annotations?.sideEffectLevel))
+  const annotations = __sv_tool_annotations(entry)
+  const side_effect_level = lowercase(__sv_string(annotations?.side_effect_level ?? annotations?.sideEffectLevel))
   if side_effect_level == "none" || side_effect_level == "read_only" {
     return false
   }
-  let kind = lowercase(__sv_string(annotations?.kind))
+  const kind = lowercase(__sv_string(annotations?.kind))
   if contains(["read", "search", "think", "fetch"], kind) {
     return false
   }
@@ -246,12 +246,12 @@ fn __sv_tool_entry_has_write_capability(entry) -> bool {
 }
 
 fn __sv_workspace_has_write_capability(payload) -> bool {
-  let policy = __sv_dict(payload?.policy)
-  let ceiling = lowercase(__sv_string(policy?.side_effect_level))
+  const policy = __sv_dict(payload?.policy)
+  const ceiling = lowercase(__sv_string(policy?.side_effect_level))
   if ceiling == "none" || ceiling == "read_only" {
     return false
   }
-  let tools = __sv_dict(payload?.tools)
+  const tools = __sv_dict(payload?.tools)
   let entries = __sv_list(tools?.tools)
   for entry in entries {
     if type_of(entry) == "dict" && __sv_tool_entry_has_write_capability(entry) {
@@ -262,7 +262,7 @@ fn __sv_workspace_has_write_capability(payload) -> bool {
 }
 
 fn __sv_has_non_structural_tools(payload) -> bool {
-  let tools = __sv_dict(payload?.tools)
+  const tools = __sv_dict(payload?.tools)
   for entry in __sv_list(tools?.tools) {
     if type_of(entry) == "dict" && !__sv_tool_entry_is_structural(entry) {
       return true
@@ -276,12 +276,12 @@ fn __sv_done_marker_present(payload) -> bool {
 }
 
 fn __sv_registry_tool_entry(registry, name) {
-  let tools = __sv_dict(registry)
+  const tools = __sv_dict(registry)
   let entries = __sv_list(tools?.tools)
   for entry in entries {
-    let direct_name = __sv_string(entry?.name)
-    let function = entry?.function
-    let function_name = if type_of(function) == "dict" {
+    const direct_name = __sv_string(entry?.name)
+    const function = entry?.function
+    const function_name = if type_of(function) == "dict" {
       __sv_string(function?.name)
     } else {
       ""
@@ -294,11 +294,11 @@ fn __sv_registry_tool_entry(registry, name) {
 }
 
 fn __sv_any_prior_write_tools(payload) -> bool {
-  let tools = payload?.tools
-  let prior = __sv_string_list(payload?.prior_successful_tools)
+  const tools = payload?.tools
+  const prior = __sv_string_list(payload?.prior_successful_tools)
     + __sv_string_list(payload?.prior_rejected_tools)
   for name in prior {
-    let entry = __sv_registry_tool_entry(tools, name)
+    const entry = __sv_registry_tool_entry(tools, name)
     if entry != nil && __sv_tool_entry_has_write_capability(entry) {
       return true
     }
@@ -307,14 +307,14 @@ fn __sv_any_prior_write_tools(payload) -> bool {
 }
 
 fn __sv_no_phantom_completion_phrases(cfg, rule_cfg) {
-  let locale = __sv_locale(rule_cfg?.locale ?? cfg?.locale)
-  let catalog = __sv_dict(cfg?.no_phantom_completion_catalog)
-  let phrases = __sv_string_list(catalog[locale] ?? catalog?.en ?? [])
+  const locale = __sv_locale(rule_cfg?.locale ?? cfg?.locale)
+  const catalog = __sv_dict(cfg?.no_phantom_completion_catalog)
+  const phrases = __sv_string_list(catalog[locale] ?? catalog?.en ?? [])
   return __sv_merge_catalog_locale([], phrases)
 }
 
 fn __sv_claims_completion(payload, cfg, rule_cfg) -> bool {
-  let text = lowercase(
+  const text = lowercase(
     trim(__sv_string(payload?.assistant_text ?? payload?.raw_text ?? payload?.visible_text ?? "")),
   )
   if text == "" {
@@ -385,7 +385,7 @@ fn __sv_tool_call_arguments(call) {
 }
 
 fn __sv_tool_entry_parameters(entry) {
-  let function = entry?.function
+  const function = entry?.function
   if type_of(function) == "dict" && type_of(function?.parameters) == "dict" {
     return function.parameters
   }
@@ -445,13 +445,13 @@ fn __sv_schema_type_names(schema) {
   let names = []
   if type_of(raw) == "list" {
     for item in raw {
-      let name = lowercase(trim(__sv_string(item)))
+      const name = lowercase(trim(__sv_string(item)))
       if name != "" {
         names = names.push(name)
       }
     }
   } else {
-    let name = lowercase(trim(__sv_string(raw)))
+    const name = lowercase(trim(__sv_string(raw)))
     if name != "" {
       names = names.push(name)
     }
@@ -460,7 +460,7 @@ fn __sv_schema_type_names(schema) {
 }
 
 fn __sv_value_matches_schema_type(value, type_name) -> bool {
-  let actual = type_of(value)
+  const actual = type_of(value)
   if type_name == "any" || type_name == "unknown" {
     return true
   }
@@ -489,7 +489,7 @@ fn __sv_type_violation(tool_name, arg_name, value, schema) {
   if value == nil {
     return nil
   }
-  let expected = __sv_schema_type_names(schema)
+  const expected = __sv_schema_type_names(schema)
   if len(expected) == 0 {
     return nil
   }
@@ -511,32 +511,32 @@ fn __sv_type_violation(tool_name, arg_name, value, schema) {
 
 fn __sv_tool_schema_violations(payload) {
   let violations = []
-  let registry = payload?.tools
+  const registry = payload?.tools
   for call in __sv_list(payload?.tool_calls) {
-    let tool_name = __sv_tool_call_name(call)
+    const tool_name = __sv_tool_call_name(call)
     if tool_name == "" {
       violations = violations.push("Tool call is missing a tool name.")
       continue
     }
-    let entry = __sv_registry_tool_entry(registry, tool_name)
+    const entry = __sv_registry_tool_entry(registry, tool_name)
     if entry == nil {
       violations = violations.push("Unknown tool '" + tool_name + "'.")
       continue
     }
-    let args = __sv_tool_call_arguments(call)
+    const args = __sv_tool_call_arguments(call)
     if args == nil {
       violations = violations.push("Tool '" + tool_name + "' arguments must be a dict.")
       continue
     }
-    let parameters = __sv_tool_entry_parameters(entry)
+    const parameters = __sv_tool_entry_parameters(entry)
     let entries = __sv_parameter_entries(parameters)
     let missing = []
     for name in entries.keys() {
-      let schema = entries[name]
+      const schema = entries[name]
       if __sv_param_is_required(parameters, name, schema) && args[name] == nil {
         missing = missing.push(name)
       } else {
-        let type_error = __sv_type_violation(tool_name, name, args[name], schema)
+        const type_error = __sv_type_violation(tool_name, name, args[name], schema)
         if type_error != nil {
           violations = violations.push(type_error)
         }
@@ -562,10 +562,10 @@ fn __sv_tool_calls_well_formed(payload) {
   // so the well-formedness veto must enforce for either. Gating on `text` alone
   // would silently stop vetoing malformed turns once `json` became the global
   // default. (Native rides the provider channel and is never enforced here.)
-  let format = lowercase(__sv_string(payload?.tool_format))
-  let is_text_tool_format = format == "text" || format == "json"
-  let should_enforce_text_protocol = is_text_tool_format && __sv_has_non_structural_tools(payload)
-  let parse_errors = if should_enforce_text_protocol {
+  const format = lowercase(__sv_string(payload?.tool_format))
+  const is_text_tool_format = format == "text" || format == "json"
+  const should_enforce_text_protocol = is_text_tool_format && __sv_has_non_structural_tools(payload)
+  const parse_errors = if should_enforce_text_protocol {
     __sv_string_list(payload?.tool_parse_errors)
   } else {
     []
@@ -581,17 +581,17 @@ fn __sv_tool_calls_well_formed(payload) {
   // that was pure stray prose). Genuine `parse_errors` (a call that failed to
   // parse) and `schema_violations` (a parsed call with bad args) still veto
   // regardless, because those represent broken calls, not wrapper noise.
-  let has_dispatchable_calls = len(__sv_list(payload?.tool_calls)) > 0
-  let protocol_violations = if should_enforce_text_protocol && !has_dispatchable_calls {
+  const has_dispatchable_calls = len(__sv_list(payload?.tool_calls)) > 0
+  const protocol_violations = if should_enforce_text_protocol && !has_dispatchable_calls {
     __sv_string_list(payload?.protocol_violations)
   } else {
     []
   }
-  let schema_violations = __sv_tool_schema_violations(payload)
+  const schema_violations = __sv_tool_schema_violations(payload)
   if len(parse_errors) == 0 && len(protocol_violations) == 0 && len(schema_violations) == 0 {
     return nil
   }
-  let details = __sv_join_messages(protocol_violations + parse_errors + schema_violations)
+  const details = __sv_join_messages(parse_errors + schema_violations + protocol_violations)
   return {
     rule: "tool_calls_well_formed",
     diagnostic: "Assistant emitted malformed tool calls: " + details,
@@ -606,11 +606,11 @@ fn __sv_output_token_cap_with_zero_calls(payload) {
   if len(__sv_list(payload?.tool_calls)) > 0 {
     return nil
   }
-  let max_output_tokens = to_int(payload?.max_output_tokens) ?? 0
+  const max_output_tokens = to_int(payload?.max_output_tokens) ?? 0
   if max_output_tokens <= 0 {
     return nil
   }
-  let output_tokens = to_int(payload?.output_tokens) ?? 0
+  const output_tokens = to_int(payload?.output_tokens) ?? 0
   if output_tokens * 100 < max_output_tokens * 95 {
     return nil
   }
@@ -656,7 +656,7 @@ fn __sv_emit_decision(
 }
 
 fn __sv_pass_result(call, configured, skipped = false, reason = nil, extra = nil) {
-  let result = {configured: configured, vetoed: false, skipped: skipped, reason: reason}
+  const result = {configured: configured, vetoed: false, skipped: skipped, reason: reason}
   let merged = if type_of(extra) == "dict" {
     result + extra
   } else {
@@ -703,7 +703,7 @@ fn __sv_veto_result(call, cfg, verdict) {
 }
 
 fn __sv_rule_verdict(payload, cfg, rule_cfg) {
-  let rule = __sv_string(rule_cfg?.name)
+  const rule = __sv_string(rule_cfg?.name)
   if rule == "non_empty_when_writes_expected" {
     return __sv_non_empty_when_writes_expected(payload)
   }
@@ -720,16 +720,16 @@ fn __sv_rule_verdict(payload, cfg, rule_cfg) {
 }
 
 fn __sv_handle_turn(call, cfg) {
-  let payload = __sv_dict(call?.tool_args)
-  let session_id = __sv_string(payload?.session_id ?? call?.turn?.session_id)
-  let iteration = to_int(payload?.iteration ?? call?.turn?.iteration) ?? 0
-  let attempts = to_int(payload?.attempts) ?? 0
+  const payload = __sv_dict(call?.tool_args)
+  const session_id = __sv_string(payload?.session_id ?? call?.turn?.session_id)
+  const iteration = to_int(payload?.iteration ?? call?.turn?.iteration) ?? 0
+  const attempts = to_int(payload?.attempts) ?? 0
   if attempts >= cfg.max_attempts {
     __sv_emit_decision(session_id, iteration, cfg, nil, attempts, false, true, "max_attempts_reached")
     return __sv_pass_result(call, true, true, "max_attempts_reached")
   }
   for rule_cfg in cfg.rules {
-    let verdict = __sv_rule_verdict(payload, cfg, rule_cfg)
+    const verdict = __sv_rule_verdict(payload, cfg, rule_cfg)
     if verdict != nil {
       if rule_cfg?.warn_only ?? false {
         __sv_emit_decision(session_id, iteration, cfg, verdict, attempts, false, false, "warn_only")
@@ -775,7 +775,7 @@ fn __sv_handle_turn(call, cfg) {
  * @example: with_structural_validator({on_failure: "regenerate_with_feedback"})
  */
 pub fn with_structural_validator(opts = nil) {
-  let cfg = __sv_validate_opts(opts)
+  const cfg = __sv_validate_opts(opts)
   return { call, next ->
     if call?.tool_name != __sv_tool_name() {
       return next(call)
