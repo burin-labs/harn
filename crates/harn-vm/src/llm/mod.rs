@@ -15,6 +15,7 @@ pub(crate) mod agent_observe;
 mod agent_runtime;
 pub(crate) mod agent_session_host;
 mod agent_session_transcript;
+mod agent_terminal_class;
 mod agent_tools;
 pub mod api;
 pub(crate) mod autonomy_budget;

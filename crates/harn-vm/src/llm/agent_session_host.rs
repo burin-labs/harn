@@ -21,6 +21,9 @@ use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+use super::agent_terminal_class::{
+    agent_terminal_class, agent_turn_made_no_llm_call, session_status_indicates_error,
+};
 use super::cost::calculate_cost_for_provider_with_cache;
 use super::permissions;
 use super::tools::{
@@ -615,339 +618,6 @@ async fn check_autonomy_budget(
     }
 }
 
-fn session_status_indicates_error(final_status: &str) -> bool {
-    matches!(
-        final_status,
-        "error" | "failed" | "provider_error" | "verify_exhausted" | "verify_capped" | "stuck"
-    )
-}
-
-/// Detect a model-less agent turn: the loop finalized a *completed* turn
-/// (empty status or `done`) but never actually called the provider. We
-/// treat "no iterations AND no tokens recorded for this session" as the
-/// signal, since any real provider round-trip increments iterations and
-/// records token usage.
-///
-/// Only the success-completion statuses qualify. Intentional non-terminal
-/// states — `suspended`, `blocked`, `paused`, `cancelled`, waitpoints — and
-/// already-errored turns legitimately finalize with zero iterations and must
-/// be left alone; otherwise we would turn an intentional pause into a
-/// spurious failure.
-fn agent_turn_made_no_llm_call(
-    final_status: &str,
-    has_terminal_error: bool,
-    iterations: i64,
-    input_tokens: i64,
-    output_tokens: i64,
-) -> bool {
-    let is_success_completion = final_status.is_empty() || final_status == "done";
-    !has_terminal_error
-        && is_success_completion
-        && iterations == 0
-        && input_tokens == 0
-        && output_tokens == 0
-}
-
-fn agent_terminal_class(
-    final_status: &str,
-    stop_reason: &str,
-    terminal_error: Option<&serde_json::Value>,
-) -> Option<&'static str> {
-    if terminal_error.is_none() && !session_status_indicates_error(final_status) {
-        return None;
-    }
-    if let Some(error) = terminal_error {
-        if let Some(class) = agent_terminal_class_from_structured_error(error) {
-            return Some(class);
-        }
-        if let Some(class) = agent_terminal_class_from_legacy_text(error) {
-            return Some(class);
-        }
-    }
-    if terminal_status_signal_matches(final_status, stop_reason, |signal| {
-        matches!(
-            signal,
-            "context_overflow"
-                | "no_llm_call"
-                | "provider_misconfigured"
-                | "provider_not_configured"
-                | "rate_limit"
-                | "rate_limited"
-                | "timeout"
-                | "timed_out"
-                | "deadline_exceeded"
-                | "tool_policy_rejected"
-                | "tool_rejected"
-                | "permission_denied"
-                | "policy_denied"
-                | "agent_loop_protocol_failure"
-        )
-    }) {
-        return terminal_class_from_exact_signal(final_status)
-            .or_else(|| terminal_class_from_exact_signal(stop_reason));
-    }
-    Some("generic_throw")
-}
-
-fn agent_terminal_class_from_structured_error(error: &serde_json::Value) -> Option<&'static str> {
-    if terminal_error_signal_matches(error, |signal| {
-        terminal_signal_contains_any(signal, &["context_overflow"])
-    }) {
-        return Some("context_overflow");
-    }
-    if terminal_error_signal_matches(error, |signal| {
-        terminal_signal_contains_any(signal, &["no_llm_call"])
-            || terminal_signal_contains_any(
-                signal,
-                &[
-                    "provider_misconfigured",
-                    "provider_not_configured",
-                    "model_not_configured",
-                    "missing_api_key",
-                    "missing api key",
-                    "unauthorized",
-                    "authentication",
-                    "credential",
-                ],
-            )
-    }) {
-        return Some("provider_misconfigured");
-    }
-    if terminal_error_signal_matches(error, |signal| {
-        terminal_signal_contains_any(signal, &["rate_limit", "rate limit", "rate_limited"])
-            || signal == "429"
-    }) {
-        return Some("rate_limited");
-    }
-    if terminal_error_signal_matches(error, |signal| {
-        terminal_signal_contains_any(signal, &["timeout", "timed out", "deadline_exceeded"])
-    }) {
-        return Some("timeout");
-    }
-    if terminal_error_signal_matches(error, |signal| {
-        terminal_signal_contains_any(
-            signal,
-            &[
-                "tool_policy_rejected",
-                "tool_rejected",
-                "permission_denied",
-                "policy_denied",
-                "execution_policy",
-                "exceeds execution policy",
-            ],
-        )
-    }) {
-        return Some("tool_policy_rejected");
-    }
-    if terminal_error_signal_matches(error, |signal| {
-        signal == "-32601"
-            || terminal_signal_contains_any(
-                signal,
-                &[
-                    "host_bridge_unimplemented",
-                    "method_not_found",
-                    "not_implemented",
-                    "not implemented",
-                ],
-            )
-    }) {
-        return Some("host_bridge_unimplemented");
-    }
-    if terminal_error_signal_matches(error, |signal| {
-        terminal_signal_contains_any(
-            signal,
-            &[
-                "agent_loop_protocol_failure",
-                "invalid_request",
-                "missing_tool_name",
-                "missing tool_name",
-                "empty_tool_name",
-                "empty tool name",
-                "tool_caller",
-            ],
-        )
-    }) || terminal_error_has_after_tool_result_format(error)
-    {
-        return Some("agent_loop_protocol_failure");
-    }
-    None
-}
-
-fn agent_terminal_class_from_legacy_text(error: &serde_json::Value) -> Option<&'static str> {
-    if terminal_error_legacy_text_matches(error, |text| {
-        terminal_signal_contains_any(text, &["context_overflow"])
-    }) {
-        return Some("context_overflow");
-    }
-    if terminal_error_legacy_text_matches(error, |text| {
-        terminal_signal_contains_any(text, &["no_llm_call"])
-            || (terminal_signal_contains_any(
-                text,
-                &[
-                    "not configured",
-                    "no llm",
-                    "no model",
-                    "missing api key",
-                    "api key",
-                    "credential",
-                    "unauthorized",
-                    "authentication",
-                ],
-            ) && terminal_signal_contains_any(
-                text,
-                &["llm", "model", "provider", "key", "credential"],
-            ))
-    }) {
-        return Some("provider_misconfigured");
-    }
-    if terminal_error_legacy_text_matches(error, |text| {
-        terminal_signal_contains_any(text, &["rate_limit", "rate limit", "rate_limited", " 429 "])
-    }) {
-        return Some("rate_limited");
-    }
-    if terminal_error_legacy_text_matches(error, |text| {
-        terminal_signal_contains_any(text, &["timeout", "timed out", "deadline_exceeded"])
-    }) {
-        return Some("timeout");
-    }
-    if terminal_error_legacy_text_matches(error, |text| {
-        terminal_signal_contains_any(
-            text,
-            &[
-                "tool_rejected",
-                "permission_denied",
-                "policy_denied",
-                "exceeds execution policy",
-                "bridged builtin",
-            ],
-        )
-    }) {
-        return Some("tool_policy_rejected");
-    }
-    if terminal_error_legacy_text_matches(error, |text| {
-        terminal_signal_contains_any(
-            text,
-            &[
-                "-32601",
-                "host bridge tool",
-                "not implemented by burinhostresponder",
-            ],
-        )
-    }) {
-        return Some("host_bridge_unimplemented");
-    }
-    if terminal_error_legacy_text_matches(error, |text| {
-        terminal_signal_contains_any(
-            text,
-            &[
-                "invalid_request",
-                "missing tool_name",
-                "missing `tool_name`",
-                "empty tool name",
-                "empty_tool_name",
-                "tool_caller",
-                "agent_loop:",
-                "session/prompt error",
-            ],
-        )
-    }) {
-        return Some("agent_loop_protocol_failure");
-    }
-    None
-}
-
-fn terminal_class_from_exact_signal(signal: &str) -> Option<&'static str> {
-    match signal {
-        "context_overflow" => Some("context_overflow"),
-        "no_llm_call" | "provider_misconfigured" | "provider_not_configured" => {
-            Some("provider_misconfigured")
-        }
-        "rate_limit" | "rate_limited" => Some("rate_limited"),
-        "timeout" | "timed_out" | "deadline_exceeded" => Some("timeout"),
-        "tool_policy_rejected" | "tool_rejected" | "permission_denied" | "policy_denied" => {
-            Some("tool_policy_rejected")
-        }
-        "agent_loop_protocol_failure" => Some("agent_loop_protocol_failure"),
-        _ => None,
-    }
-}
-
-fn terminal_error_signal_matches(
-    error: &serde_json::Value,
-    predicate: impl Fn(&str) -> bool,
-) -> bool {
-    const STRUCTURED_KEYS: &[&str] = &[
-        "category",
-        "error_category",
-        "reason",
-        "code",
-        "kind",
-        "phase",
-        "status",
-    ];
-    terminal_error_key_matches(error, STRUCTURED_KEYS, predicate)
-}
-
-fn terminal_error_legacy_text_matches(
-    error: &serde_json::Value,
-    predicate: impl Fn(&str) -> bool,
-) -> bool {
-    terminal_error_key_matches(error, &["message", "error"], predicate)
-}
-
-fn terminal_error_key_matches(
-    error: &serde_json::Value,
-    keys: &[&str],
-    predicate: impl Fn(&str) -> bool,
-) -> bool {
-    keys.iter().any(|key| {
-        error
-            .get(*key)
-            .and_then(terminal_signal_value)
-            .is_some_and(|signal| predicate(&signal))
-    })
-}
-
-fn terminal_status_signal_matches(
-    final_status: &str,
-    stop_reason: &str,
-    predicate: impl Fn(&str) -> bool,
-) -> bool {
-    [final_status, stop_reason]
-        .into_iter()
-        .filter(|signal| !signal.is_empty())
-        .any(predicate)
-}
-
-fn terminal_signal_value(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(value) => Some(value.to_ascii_lowercase()),
-        serde_json::Value::Number(value) => Some(value.to_string()),
-        _ => None,
-    }
-}
-
-fn terminal_signal_contains_any(signal: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| signal.contains(needle))
-}
-
-fn terminal_error_has_after_tool_result_format(error: &serde_json::Value) -> bool {
-    error
-        .get("tool_format")
-        .is_some_and(|value| !value.is_null())
-        && error
-            .get("after_tool_result")
-            .is_some_and(terminal_bool_signal)
-}
-
-fn terminal_bool_signal(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Bool(value) => *value,
-        serde_json::Value::String(value) => value.eq_ignore_ascii_case("true"),
-        _ => false,
-    }
-}
-
 fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) -> VmValue {
     let transcript_json = crate::agent_sessions::transcript(session_id)
         .as_ref()
@@ -1166,6 +836,24 @@ async fn host_agent_session_finalize(
         .and_then(last_assistant_text)
         .unwrap_or_default();
 
+    // Classify the terminal condition once, into a typed outcome the host reads
+    // instead of substring-matching the raw status (harn#4568). Additive: the
+    // raw `final_status` / `stop_reason` / `terminal_class` fields are unchanged.
+    // The lossless `reason` carries the raw stop reason (or the canonical status
+    // when the loop sealed no stop reason).
+    let terminal_outcome = crate::agent_events::AgentTerminalOutcome::new(
+        crate::agent_events::classify_agent_terminal(
+            &canonical_status,
+            &stop_reason,
+            terminal_error.is_some(),
+            terminal_class,
+        ),
+        if stop_reason.is_empty() {
+            canonical_status.clone()
+        } else {
+            stop_reason.clone()
+        },
+    );
     let trace_summary = super::trace::agent_trace_summary();
     let result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
@@ -1173,6 +861,7 @@ async fn host_agent_session_finalize(
         "stop_reason": stop_reason,
         "acp_stop_reason": acp_stop_reason,
         "terminal_class": terminal_class,
+        "terminal": terminal_outcome.to_json(),
         "error": terminal_error,
         "text": visible_text,
         "visible_text": visible_text,
