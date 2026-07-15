@@ -8,6 +8,10 @@ pub(crate) fn run(args: ProviderToolProbeAuditArgs) {
             .into_iter()
             .map(|probe_case| probe_case.tool_probe_case())
             .collect(),
+        args.request_profiles
+            .into_iter()
+            .map(|profile| profile.tool_probe_request_profile())
+            .collect(),
         args.mode.tool_probe_modes(),
     );
     if args.json {
@@ -26,10 +30,11 @@ pub(crate) fn run(args: ProviderToolProbeAuditArgs) {
         if report.validation_fail_count > 0 {
             for failure in report.failures.iter().take(10) {
                 println!(
-                    "- {}:{} {} {}: {}",
+                    "- {}:{} {} {} {}: {}",
                     failure.provider,
                     failure.model,
                     failure.probe_case,
+                    failure.request_profile,
                     failure.mode,
                     failure.issues.join("; ")
                 );

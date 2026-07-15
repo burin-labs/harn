@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 
 use super::{
     probe_tool_registry, ToolConformanceRequestValidation, ToolConformanceRequestValidationStatus,
-    ToolProbeCase, ToolProbeMode, TOOL_PROBE_TOOL_NAME,
+    ToolProbeCase, ToolProbeMode, ToolProbeRequestProfile, TOOL_PROBE_TOOL_NAME,
 };
 use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
 use crate::llm::capabilities::WireDialect;
@@ -13,9 +13,11 @@ pub(super) fn probe_request_body(
     model: &str,
     mode: ToolProbeMode,
     probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
     marker: &str,
 ) -> Result<Value, String> {
-    let payload = probe_request_payload(provider, model, mode, probe_case, marker)?;
+    let payload =
+        probe_request_payload(provider, model, mode, probe_case, request_profile, marker)?;
     Ok(provider_compatible_probe_request_body(&payload))
 }
 
@@ -24,6 +26,7 @@ pub(super) fn probe_request_payload(
     model: &str,
     mode: ToolProbeMode,
     probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
     marker: &str,
 ) -> Result<LlmRequestPayload, String> {
     let model_defaults = llm_config::model_params_for_route(provider, model);
@@ -35,7 +38,7 @@ pub(super) fn probe_request_payload(
     let native_tools =
         crate::llm::tools::vm_tools_to_native(&probe_tool_registry(), provider, model)
             .expect("tool probe registry is static and should convert to native tools");
-    let tool_choice = if crate::llm::provider::provider_uses_ollama_messages(provider, model) {
+    let mut tool_choice = if crate::llm::provider::provider_uses_ollama_messages(provider, model) {
         None
     } else {
         Some(json!({
@@ -43,6 +46,9 @@ pub(super) fn probe_request_payload(
             "function": {"name": TOOL_PROBE_TOOL_NAME}
         }))
     };
+    if request_profile == ToolProbeRequestProfile::ParameterEdges && tool_choice.is_some() {
+        tool_choice = Some(json!("required"));
+    }
     let caps = crate::llm::capabilities::lookup(provider, model);
     let thinking = crate::llm::helpers::resolve_catalog_thinking_config(
         &model_defaults,
@@ -52,7 +58,7 @@ pub(super) fn probe_request_payload(
         true,
     )
     .map_err(|error| error.to_string())?;
-    Ok(LlmRequestPayload {
+    let mut payload = LlmRequestPayload {
         provider: provider.to_string(),
         model: model.to_string(),
         region: None,
@@ -98,7 +104,24 @@ pub(super) fn probe_request_payload(
         session_id: None,
         reminder_lifecycle: Vec::new(),
         cli_llm_mock_scope: None,
-    })
+    };
+    apply_request_profile(&mut payload, request_profile);
+    Ok(payload)
+}
+
+fn apply_request_profile(
+    payload: &mut LlmRequestPayload,
+    request_profile: ToolProbeRequestProfile,
+) {
+    match request_profile {
+        ToolProbeRequestProfile::CatalogDefault => {}
+        ToolProbeRequestProfile::ParameterEdges => {
+            payload.max_tokens = 1;
+            payload.temperature = Some(2.0);
+            payload.top_p = Some(1.0);
+            payload.top_k = Some(1);
+        }
+    }
 }
 
 fn probe_prompt(probe_case: ToolProbeCase, marker: &str) -> String {
@@ -137,19 +160,21 @@ fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value 
 pub(super) fn validate_probe_request_body(
     provider: &str,
     model: &str,
+    request_profile: ToolProbeRequestProfile,
     body: &Value,
 ) -> ToolConformanceRequestValidation {
     let caps = crate::llm::capabilities::lookup(provider, model);
     let dialect = request_validation_dialect(provider, &caps);
     let mut issues = Vec::new();
     match dialect.as_str() {
-        "anthropic" => validate_anthropic_probe_request(body, &mut issues),
+        "anthropic" => validate_anthropic_probe_request(body, request_profile, &mut issues),
         "bedrock" => validate_bedrock_probe_request(body, &mut issues),
-        "gemini" | "vertex" => validate_gemini_probe_request(body, &mut issues),
+        "gemini" | "vertex" => validate_gemini_probe_request(body, request_profile, &mut issues),
         "ollama" => validate_ollama_probe_request(body, &mut issues),
         "openai_compat" => validate_openai_compat_probe_request(body, &caps, &mut issues),
         _ => issues.push(format!("unsupported validation dialect `{dialect}`")),
     }
+    validate_generation_parameter_ranges(body, &dialect, &mut issues);
     ToolConformanceRequestValidation {
         dialect,
         status: if issues.is_empty() {
@@ -210,10 +235,11 @@ fn validate_openai_compat_tool_choice(
         return;
     }
     if let Some(mode) = tool_choice.as_str() {
-        if caps
-            .allowed_tool_choice_modes
-            .iter()
-            .any(|allowed| allowed == mode)
+        if caps.allowed_tool_choice_modes.is_empty()
+            || caps
+                .allowed_tool_choice_modes
+                .iter()
+                .any(|allowed| allowed == mode)
         {
             return;
         }
@@ -231,7 +257,11 @@ fn validate_openai_compat_tool_choice(
     );
 }
 
-fn validate_anthropic_probe_request(body: &Value, issues: &mut Vec<String>) {
+fn validate_anthropic_probe_request(
+    body: &Value,
+    request_profile: ToolProbeRequestProfile,
+    issues: &mut Vec<String>,
+) {
     require_array(body, "/messages", issues);
     require_string_eq(
         body,
@@ -253,23 +283,40 @@ fn validate_anthropic_probe_request(body: &Value, issues: &mut Vec<String>) {
         "Anthropic tool declaration",
         issues,
     );
-    require_string_eq(
-        body,
-        "/tool_choice/type",
-        "tool",
-        "Anthropic tool_choice.type",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/tool_choice/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Anthropic tool_choice.name",
-        issues,
-    );
+    match request_profile {
+        ToolProbeRequestProfile::CatalogDefault => {
+            require_string_eq(
+                body,
+                "/tool_choice/type",
+                "tool",
+                "Anthropic tool_choice.type",
+                issues,
+            );
+            require_string_eq(
+                body,
+                "/tool_choice/name",
+                TOOL_PROBE_TOOL_NAME,
+                "Anthropic tool_choice.name",
+                issues,
+            );
+        }
+        ToolProbeRequestProfile::ParameterEdges => {
+            require_string_eq(
+                body,
+                "/tool_choice/type",
+                "any",
+                "Anthropic parameter-edge tool_choice.type",
+                issues,
+            );
+        }
+    }
 }
 
-fn validate_gemini_probe_request(body: &Value, issues: &mut Vec<String>) {
+fn validate_gemini_probe_request(
+    body: &Value,
+    request_profile: ToolProbeRequestProfile,
+    issues: &mut Vec<String>,
+) {
     require_array(body, "/contents", issues);
     require_string_eq(
         body,
@@ -292,13 +339,15 @@ fn validate_gemini_probe_request(body: &Value, issues: &mut Vec<String>) {
         "Gemini toolConfig mode",
         issues,
     );
-    require_array_contains_string(
-        body,
-        "/toolConfig/functionCallingConfig/allowedFunctionNames",
-        TOOL_PROBE_TOOL_NAME,
-        "Gemini allowedFunctionNames",
-        issues,
-    );
+    if request_profile == ToolProbeRequestProfile::CatalogDefault {
+        require_array_contains_string(
+            body,
+            "/toolConfig/functionCallingConfig/allowedFunctionNames",
+            TOOL_PROBE_TOOL_NAME,
+            "Gemini allowedFunctionNames",
+            issues,
+        );
+    }
     reject_present(body, "/tool_choice", "Gemini request", issues);
 }
 
@@ -393,6 +442,69 @@ fn reject_present(body: &Value, pointer: &str, label: &str, issues: &mut Vec<Str
     }
 }
 
+fn validate_generation_parameter_ranges(body: &Value, dialect: &str, issues: &mut Vec<String>) {
+    match dialect {
+        "gemini" | "vertex" => {
+            require_optional_number_range(body, "/generationConfig/temperature", 0.0, 2.0, issues);
+            require_optional_number_range(body, "/generationConfig/topP", 0.0, 1.0, issues);
+            require_optional_integer_min(body, "/generationConfig/topK", 1, issues);
+            require_optional_integer_min(body, "/generationConfig/maxOutputTokens", 1, issues);
+        }
+        "bedrock" => {
+            require_optional_number_range(body, "/inferenceConfig/temperature", 0.0, 2.0, issues);
+            require_optional_number_range(body, "/inferenceConfig/topP", 0.0, 1.0, issues);
+            require_optional_integer_min(body, "/inferenceConfig/maxTokens", 1, issues);
+        }
+        "ollama" => {
+            require_optional_number_range(body, "/temperature", 0.0, 2.0, issues);
+            require_optional_number_range(body, "/top_p", 0.0, 1.0, issues);
+            require_optional_integer_min(body, "/max_tokens", 1, issues);
+            require_optional_integer_min(body, "/options/num_predict", 1, issues);
+        }
+        _ => {
+            require_optional_number_range(body, "/temperature", 0.0, 2.0, issues);
+            require_optional_number_range(body, "/top_p", 0.0, 1.0, issues);
+            require_optional_integer_min(body, "/top_k", 1, issues);
+            require_optional_integer_min(body, "/max_tokens", 1, issues);
+            require_optional_integer_min(body, "/max_completion_tokens", 1, issues);
+        }
+    }
+}
+
+fn require_optional_number_range(
+    body: &Value,
+    pointer: &str,
+    min: f64,
+    max: f64,
+    issues: &mut Vec<String>,
+) {
+    let Some(value) = body.pointer(pointer) else {
+        return;
+    };
+    let Some(number) = value.as_f64() else {
+        issues.push(format!("{pointer} must be a number when present"));
+        return;
+    };
+    if !number.is_finite() || number < min || number > max {
+        issues.push(format!(
+            "{pointer} must be finite and within [{min}, {max}], got {number}"
+        ));
+    }
+}
+
+fn require_optional_integer_min(body: &Value, pointer: &str, min: i64, issues: &mut Vec<String>) {
+    let Some(value) = body.pointer(pointer) else {
+        return;
+    };
+    let Some(number) = value.as_i64() else {
+        issues.push(format!("{pointer} must be an integer when present"));
+        return;
+    };
+    if number < min {
+        issues.push(format!("{pointer} must be >= {min}, got {number}"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,6 +526,7 @@ mod tests {
             "accounts/fireworks/models/gpt-oss-120b",
             ToolProbeMode::NonStreaming,
             super::super::ToolProbeCase::SingleToolCall,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
             super::super::DEFAULT_TOOL_PROBE_MARKER,
         )
         .expect("GPT-OSS probe payload");
