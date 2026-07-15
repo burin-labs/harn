@@ -49,6 +49,8 @@ pub type ProviderToolProbeCampaignReport = {
   behavior_count: int,
   cell_count: int,
   summary: dict,
+  runner_summary: dict,
+  executable_gap: dict,
   spend: dict,
   routes: list<ProviderToolProbeRoute>,
   behaviors: list<ProviderToolProbeBehavior>,
@@ -487,8 +489,11 @@ fn __planned_cell(
   behavior: ProviderToolProbeBehavior,
   mode: string,
   format: string,
+  harn_bin: string,
+  repeat: int,
+  timeout_secs: int,
 ) -> ProviderToolProbeCell {
-  return __base_cell(
+  const cell = __base_cell(
     route,
     behavior,
     mode,
@@ -501,18 +506,32 @@ fn __planned_cell(
     },
     {},
   )
+  if behavior.runner == "provider_tool_probe" {
+    return cell + {command: __tool_probe_command(harn_bin, route, mode, repeat, timeout_secs)}
+  }
+  return cell
 }
 
 pub fn provider_tool_probe_campaign_planned_cells(
   routes: list<ProviderToolProbeRoute>,
   behaviors: list<ProviderToolProbeBehavior>,
 ) -> list<ProviderToolProbeCell> {
+  return provider_tool_probe_campaign_planned_cells_with_options(routes, behaviors, "harn", 1, 60)
+}
+
+pub fn provider_tool_probe_campaign_planned_cells_with_options(
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  harn_bin: string,
+  repeat: int,
+  timeout_secs: int,
+) -> list<ProviderToolProbeCell> {
   let cells: list<ProviderToolProbeCell> = []
   for route in routes {
     for behavior in behaviors {
       for mode in behavior.modes {
         for format in behavior.tool_formats {
-          cells = cells + [__planned_cell(route, behavior, mode, format)]
+          cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
         }
       }
     }
@@ -701,7 +720,7 @@ fn __live_cells(
       if behavior.runner != "provider_tool_probe" {
         for mode in behavior.modes {
           for format in behavior.tool_formats {
-            cells = cells + [__planned_cell(route, behavior, mode, format)]
+            cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
           }
         }
         continue
@@ -721,6 +740,56 @@ fn __summary(cells: list<ProviderToolProbeCell>) -> dict {
     summary = summary + {[cell.status]: (summary[cell.status] ?? 0) + 1}
   }
   return summary
+}
+
+fn __runner_summary(cells: list<ProviderToolProbeCell>) -> dict {
+  let summary: dict = {}
+  for cell in cells {
+    const current = summary[cell.runner] ?? {total: 0, pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
+    summary = summary
+      + {
+      [cell.runner]: current
+        + {total: (current.total ?? 0) + 1, [cell.status]: (current[cell.status] ?? 0) + 1},
+    }
+  }
+  return summary
+}
+
+fn __increment_key(counts: dict, key: string) -> dict {
+  return counts + {[key]: (counts[key] ?? 0) + 1}
+}
+
+fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {
+  let executable_cells = 0
+  let executable_commands = 0
+  let missing_runner = 0
+  let missing_runner_by_behavior: dict = {}
+  let executable_cells_by_provider: dict = {}
+  let executable_commands_by_provider: dict = {}
+  for cell in cells {
+    if cell.status != "planned" {
+      continue
+    }
+    if cell.runner == "provider_tool_probe" {
+      executable_cells = executable_cells + 1
+      executable_cells_by_provider = __increment_key(executable_cells_by_provider, cell.provider)
+      if cell.tool_format == "native" {
+        executable_commands = executable_commands + 1
+        executable_commands_by_provider = __increment_key(executable_commands_by_provider, cell.provider)
+      }
+    } else {
+      missing_runner = missing_runner + 1
+      missing_runner_by_behavior = __increment_key(missing_runner_by_behavior, cell.behavior)
+    }
+  }
+  return {
+    executable_cells: executable_cells,
+    executable_commands: executable_commands,
+    missing_runner: missing_runner,
+    missing_runner_by_behavior: missing_runner_by_behavior,
+    executable_cells_by_provider: executable_cells_by_provider,
+    executable_commands_by_provider: executable_commands_by_provider,
+  }
 }
 
 fn __estimated_spend(
@@ -765,6 +834,8 @@ pub fn provider_tool_probe_campaign_report(
     behavior_count: len(behaviors),
     cell_count: len(cells),
     summary: __summary(cells),
+    runner_summary: __runner_summary(cells),
+    executable_gap: __executable_gap(cells),
     spend: __estimated_spend(live, routes, behaviors, repeat),
     routes: routes,
     behaviors: behaviors,
@@ -805,6 +876,8 @@ pub fn provider_tool_probe_campaign_markdown(report: ProviderToolProbeCampaignRe
   out = out + "- Behaviors: " + to_string(report.behavior_count) + "\n"
   out = out + "- Cells: " + to_string(report.cell_count) + "\n"
   out = out + "- Summary: `" + json_stringify(report.summary) + "`\n"
+  out = out + "- Runner summary: `" + json_stringify(report.runner_summary) + "`\n"
+  out = out + "- Executable gap: `" + json_stringify(report.executable_gap) + "`\n"
   out = out + "- Spend: `" + json_stringify(report.spend) + "`\n\n"
   out = out + "| Status | Provider | Model | Behavior | Mode | Tool format | Reason |\n"
   out = out + "| --- | --- | --- | --- | --- | --- | --- |\n"
@@ -987,7 +1060,13 @@ fn main(harness: Harness) {
   const cells = if live {
     __live_cells(harness, routes, behaviors, harn_bin, env, repeat, timeout_secs, output_dir)
   } else {
-    provider_tool_probe_campaign_planned_cells(routes, behaviors)
+    provider_tool_probe_campaign_planned_cells_with_options(
+      routes,
+      behaviors,
+      harn_bin,
+      repeat,
+      timeout_secs,
+    )
   }
   const report = provider_tool_probe_campaign_report(
     routes,

@@ -177,6 +177,50 @@ pipeline test_provider_tool_probe_campaign_planned_cells_cover_route_behavior_fo
   assert_eq(len(cells), 3)
   assert_eq(cells[0]?.status, "planned")
   assert_eq(cells[0]?.catalog?.tools, provider_capabilities("ollama", "gemma4:e4b")?.tools)
+  assert_eq(
+    cells[0]?.command,
+    [
+      "harn",
+      "provider",
+      "tool-probe",
+      "ollama",
+      "--model",
+      "gemma4:e4b",
+      "--mode",
+      "non-streaming",
+      "--repeat",
+      "1",
+      "--timeout-secs",
+      "60",
+      "--json",
+    ],
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_planned_cells_include_custom_command_recipe(task) {
+  const routes = provider_tool_probe_campaign_routes(["fireworks:accounts/fireworks/models/gpt-oss-120b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_streaming"])
+  const cells = provider_tool_probe_campaign_planned_cells_with_options(routes, behaviors, "./harn", 5, 12)
+  assert_eq(len(cells), 3)
+  assert_eq(
+    cells[0]?.command,
+    [
+      "./harn",
+      "provider",
+      "tool-probe",
+      "fireworks",
+      "--model",
+      "accounts/fireworks/models/gpt-oss-120b",
+      "--mode",
+      "streaming",
+      "--repeat",
+      "5",
+      "--timeout-secs",
+      "12",
+      "--json",
+    ],
+  )
 }
 
 @test
@@ -190,6 +234,23 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(task) {
   assert_eq(report.summary.pass, 0)
   assert_eq(report.cell_count, 3)
   assert_eq(report.spend.executable_probe_count, 1)
+  assert_eq(report.runner_summary.provider_tool_probe.total, 3)
+  assert_eq(report.executable_gap.executable_cells, 3)
+  assert_eq(report.executable_gap.executable_commands, 1)
+  assert_eq(report.executable_gap.missing_runner, 0)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_report_counts_missing_runners(task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["parallel_tool_calls"])
+  const cells = provider_tool_probe_campaign_planned_cells(routes, behaviors)
+  const report = provider_tool_probe_campaign_report(routes, behaviors, cells, false, false, ".out", 1)
+  assert_eq(report.runner_summary.planned_agent_loop.total, 3)
+  assert_eq(report.executable_gap.executable_cells, 0)
+  assert_eq(report.executable_gap.executable_commands, 0)
+  assert_eq(report.executable_gap.missing_runner, 3)
+  assert_eq(report.executable_gap.missing_runner_by_behavior.parallel_tool_calls, 3)
 }
 
 @test
