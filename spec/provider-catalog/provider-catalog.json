@@ -12752,15 +12752,17 @@
         ]
       },
       "tool_support": {
-        "native": false,
-        "text": true,
+        "native": true,
+        "text": false,
+        "preferred_format": "native",
+        "parity": "native_only",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "format_kw",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
@@ -12784,7 +12786,8 @@
       ],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "structured_output"
       ],
       "family": "llama",
       "lineage": "llama",
@@ -25668,9 +25671,11 @@
       "label": "Llama 3.2",
       "family": "llama",
       "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
         "streaming",
-        "structured_output_mode:none",
-        "text_tools",
+        "structured_output",
+        "structured_output_mode:native_json",
         "tools"
       ]
     },
