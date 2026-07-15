@@ -162,7 +162,7 @@ async fn aggregate_provider_probe(args: &ProviderProbeArgs) -> ProviderProbe {
     }
 }
 
-pub(crate) async fn run_provider_tool_probe(args: ProviderToolProbeArgs) {
+pub(crate) async fn run_tool_probe(args: ProviderToolProbeArgs) {
     let exit_code = dispatch_provider_tool_probe(args).await;
     if exit_code != 0 {
         process::exit(exit_code);

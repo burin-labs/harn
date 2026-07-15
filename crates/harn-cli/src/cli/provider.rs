@@ -25,6 +25,10 @@ pub(crate) enum ProviderCommand {
     Probe(ProviderProbeArgs),
     /// Run one-tool provider conformance and classify native/text fallback.
     ToolProbe(ProviderToolProbeArgs),
+    /// Render and validate every catalogued provider tool-probe request shape
+    /// without calling providers.
+    #[command(name = "tool-probe-audit")]
+    ToolProbeAudit(ProviderToolProbeAuditArgs),
     /// Aggregate saved tool-probe reports into a provider/model scorecard.
     ToolScorecard(ProviderToolScorecardArgs),
     /// Classify prompt-cache conformance from a saved repeat-run usage fixture:
@@ -254,6 +258,28 @@ pub(crate) struct ProviderToolProbeArgs {
     pub timeout_secs: u64,
     /// Emit JSON. Defaults to true because evals and setup scripts consume
     /// the structured conformance report.
+    #[arg(
+        long,
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        action = ArgAction::Set
+    )]
+    pub json: bool,
+}
+
+/// Offline full-catalog request-shape audit for tool probes.
+#[derive(Debug, Args)]
+pub(crate) struct ProviderToolProbeAuditArgs {
+    /// Probe only one transport mode instead of both.
+    #[arg(long, value_enum, default_value_t = ProviderToolProbeModeArg::Both)]
+    pub mode: ProviderToolProbeModeArg,
+    /// Restrict the audit to one or more fixed micro-cases. Omit to run every
+    /// request-rendered case.
+    #[arg(long = "case", value_enum)]
+    pub probe_cases: Vec<ProviderToolProbeCaseArg>,
+    /// Emit JSON. Defaults to true because CI and catalog reviews consume the
+    /// structured audit report.
     #[arg(
         long,
         default_value_t = true,
