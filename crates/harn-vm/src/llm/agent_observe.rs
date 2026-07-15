@@ -519,7 +519,7 @@ fn record_governor_call_outcome(
             // evidence as a billed empty response; lone empties on healthy
             // providers still classify as served/no-signal here and are owned
             // by the bounded empty-completion retry path.
-            let committed_nothing = llm_result_committed_nothing(result);
+            let committed_nothing = result.committed_nothing_usable();
             if let Some(signal) = ThrottleSignal::classify(
                 None,
                 "",
@@ -844,17 +844,20 @@ fn can_degrade_stream_transport(opts: &super::api::LlmCallOptions) -> bool {
         && !crate::llm::provider::provider_uses_ollama_messages(&opts.provider, &opts.model)
 }
 
-/// A wire-level "success" that carries nothing at all: zero output tokens, no
-/// text, no thinking, no tool calls, and no server-side tool-search activity.
-/// Observed live (OpenRouter): a provider stall that ends with an empty 200
-/// flows back into the agent loop as an empty assistant turn the loop has to
-/// burn an iteration recovering from. Treated as a transient provider hiccup
-/// and retried in [`observed_llm_call`].
+/// A wire-level "success" that carries nothing the agent loop can act on: no
+/// visible text (whitespace-only counts as empty), no thinking, no tool calls,
+/// and no server-side tool-search activity. Covers both the zero-token provider
+/// stall (an empty 200 — observed live on OpenRouter) and a whitespace-only or
+/// echoed-stop-sequence completion that billed tokens but committed nothing
+/// usable (harn#4744): keying on trimmed content instead of `output_tokens == 0`
+/// is what closes that hole. Either way the loop would burn an iteration
+/// recovering from an empty assistant turn, so it is treated as a transient
+/// provider hiccup and retried in [`observed_llm_call`].
 ///
 /// Token-cap truncations (`stop_reason` length/max_tokens) are excluded — a
 /// deterministic cap would just re-truncate on every retry, mirroring the
 /// `done_reason == "length"` carve-out on the Ollama NDJSON path.
-fn is_zero_token_empty_completion(result: &super::api::LlmResult) -> bool {
+fn is_empty_unproductive_completion(result: &super::api::LlmResult) -> bool {
     let truncated = matches!(
         result
             .stop_reason
@@ -869,12 +872,7 @@ fn is_zero_token_empty_completion(result: &super::api::LlmResult) -> bool {
             Some("tool_search_query") | Some("tool_search_result")
         )
     });
-    result.output_tokens == 0
-        && result.text.is_empty()
-        && result.tool_calls.is_empty()
-        && result.thinking.as_deref().unwrap_or("").is_empty()
-        && !truncated
-        && !has_tool_search_block
+    result.committed_nothing_usable() && !truncated && !has_tool_search_block
 }
 
 /// A wire-level "success" whose `stop_reason` reports a provider *error* yet
@@ -882,7 +880,7 @@ fn is_zero_token_empty_completion(result: &super::api::LlmResult) -> bool {
 /// a generation comes back with `stop_reason == "error"` after only narrating
 /// an intended tool call in its text/thinking ("We need to make edit to create
 /// tests/...test.cpp...") but with ZERO parsed tool calls. Unlike
-/// [`is_zero_token_empty_completion`], the reasoning channel is non-empty, so
+/// [`is_empty_unproductive_completion`], the reasoning channel is non-empty, so
 /// the zero-token predicate misses it — yet the loop still has no action to run
 /// and would otherwise advance on a broken turn (and reply with a generic
 /// no-progress nag that never tells the model its turn errored). Treated as a
@@ -911,23 +909,13 @@ fn is_errored_actionless_completion(result: &super::api::LlmResult) -> bool {
     result.tool_calls.is_empty() && !has_tool_search_block
 }
 
-fn llm_result_committed_nothing(result: &super::api::LlmResult) -> bool {
-    result.text.is_empty()
-        && result.tool_calls.is_empty()
-        && result
-            .thinking
-            .as_deref()
-            .map(str::is_empty)
-            .unwrap_or(true)
-}
-
 /// Unproductive `Ok` generations the agent loop should retry rather than
 /// advance on: the zero-token empty completion (provider stall) and the
 /// errored-but-actionless completion (`stop_reason == "error"` with no
 /// dispatchable tool call). Both leave the loop with no action to run, so
 /// advancing burns an iteration on a broken turn.
 fn is_retryable_unproductive_completion(result: &super::api::LlmResult) -> bool {
-    is_zero_token_empty_completion(result) || is_errored_actionless_completion(result)
+    is_empty_unproductive_completion(result) || is_errored_actionless_completion(result)
 }
 
 /// The crate-internal LLM *simulators* — `fake` (scripted streams) and `mock`
@@ -949,7 +937,7 @@ fn terminal_unproductive_completion_failover_error(
         return None;
     }
 
-    if is_zero_token_empty_completion(result) {
+    if is_empty_unproductive_completion(result) {
         let detail = format!(
             "returned completion_tokens={} and delivered no content, thinking, or tool calls",
             result.output_tokens
@@ -1000,7 +988,7 @@ fn terminal_unproductive_completion_failure(
         attempt_count,
         Some(duration_ms),
     )?;
-    let reason = if is_zero_token_empty_completion(result) {
+    let reason = if is_empty_unproductive_completion(result) {
         UnproductiveCompletionReason::EmptyGeneration
     } else {
         UnproductiveCompletionReason::UnproductiveCompletion
@@ -2515,7 +2503,7 @@ pub(crate) async fn observed_llm_call(
                 if is_retryable_unproductive_completion(&result)
                     && !crate::llm::providers::is_internal_simulator(&opts.provider)
                 {
-                    let reason = if is_zero_token_empty_completion(&result) {
+                    let reason = if is_empty_unproductive_completion(&result) {
                         UnproductiveCompletionReason::EmptyGeneration
                     } else {
                         UnproductiveCompletionReason::UnproductiveCompletion
@@ -4525,33 +4513,43 @@ mod empty_completion_retry_tests {
     }
 
     #[test]
-    fn zero_token_empty_completion_predicate_edges() {
-        assert!(is_zero_token_empty_completion(&empty_result()));
+    fn empty_unproductive_completion_predicate_edges() {
+        assert!(is_empty_unproductive_completion(&empty_result()));
 
         // Token-cap truncation is deterministic — not a retryable hiccup.
         let mut truncated = empty_result();
         truncated.stop_reason = Some("length".to_string());
-        assert!(!is_zero_token_empty_completion(&truncated));
+        assert!(!is_empty_unproductive_completion(&truncated));
         let mut truncated_upper = empty_result();
         truncated_upper.stop_reason = Some("MAX_TOKENS".to_string());
-        assert!(!is_zero_token_empty_completion(&truncated_upper));
+        assert!(!is_empty_unproductive_completion(&truncated_upper));
 
-        // Any delivered payload disqualifies.
+        // Real visible content, thinking, a tool call, or a server-side
+        // tool-search block all disqualify — the loop has something to act on.
         let mut with_text = empty_result();
         with_text.text = "hi".to_string();
-        assert!(!is_zero_token_empty_completion(&with_text));
-        let mut with_tokens = empty_result();
-        with_tokens.output_tokens = 3;
-        assert!(!is_zero_token_empty_completion(&with_tokens));
+        assert!(!is_empty_unproductive_completion(&with_text));
         let mut with_thinking = empty_result();
         with_thinking.thinking = Some("hmm".to_string());
-        assert!(!is_zero_token_empty_completion(&with_thinking));
+        assert!(!is_empty_unproductive_completion(&with_thinking));
         let mut with_tool_call = empty_result();
         with_tool_call.tool_calls = vec![serde_json::json!({"id": "t1", "name": "look"})];
-        assert!(!is_zero_token_empty_completion(&with_tool_call));
+        assert!(!is_empty_unproductive_completion(&with_tool_call));
         let mut with_tool_search = empty_result();
         with_tool_search.blocks = vec![serde_json::json!({"type": "tool_search_query"})];
-        assert!(!is_zero_token_empty_completion(&with_tool_search));
+        assert!(!is_empty_unproductive_completion(&with_tool_search));
+
+        // harn#4744: billed tokens with no usable content — a whitespace-only or
+        // echoed-stop-sequence completion — is unproductive, not a real serve.
+        // The old `output_tokens == 0` gate let these slip through and book as
+        // served with no retry.
+        let mut billed_empty = empty_result();
+        billed_empty.output_tokens = 3;
+        assert!(is_empty_unproductive_completion(&billed_empty));
+        let mut whitespace_only = empty_result();
+        whitespace_only.text = "  \n\t".to_string();
+        whitespace_only.output_tokens = 5;
+        assert!(is_empty_unproductive_completion(&whitespace_only));
     }
 
     #[test]
@@ -4564,7 +4562,7 @@ mod empty_completion_retry_tests {
         narrated.text = "We need to make edit to create tests/foo_test.cpp".to_string();
         narrated.output_tokens = 42;
         assert!(is_errored_actionless_completion(&narrated));
-        assert!(!is_zero_token_empty_completion(&narrated));
+        assert!(!is_empty_unproductive_completion(&narrated));
         assert!(is_retryable_unproductive_completion(&narrated));
 
         // Case-insensitive on the stop reason.
