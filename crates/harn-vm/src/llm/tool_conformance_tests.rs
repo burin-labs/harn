@@ -68,6 +68,11 @@ fn request_report_materializes_large_string_case_without_provider_call() {
     assert_eq!(report.requests[0].mode, ToolProbeMode::NonStreaming);
     assert_eq!(report.requests[1].mode, ToolProbeMode::Streaming);
     assert_eq!(
+        report.requests[0].validation.status,
+        ToolConformanceRequestValidationStatus::Pass
+    );
+    assert_eq!(report.requests[0].validation.dialect, "openai_compat");
+    assert_eq!(
         report.requests[0].request_body["tools"][0]["type"],
         "function"
     );
@@ -120,6 +125,13 @@ fn probe_request_body_uses_anthropic_tool_dialect() {
         json!({"type": "tool", "name": TOOL_PROBE_TOOL_NAME}),
         "Anthropic rejects OpenAI-shaped tool_choice objects"
     );
+
+    let validation = validate_probe_request_body("anthropic", "claude-sonnet-4-6", &body);
+    assert_eq!(
+        validation.status,
+        ToolConformanceRequestValidationStatus::Pass
+    );
+    assert_eq!(validation.dialect, "anthropic");
 }
 
 #[test]
@@ -139,6 +151,39 @@ fn probe_request_body_preserves_openai_tool_dialect() {
         body["tool_choice"],
         json!({"type": "function", "function": {"name": TOOL_PROBE_TOOL_NAME}})
     );
+
+    let validation = validate_probe_request_body("openai", "gpt-5.4-mini", &body);
+    assert_eq!(
+        validation.status,
+        ToolConformanceRequestValidationStatus::Pass
+    );
+    assert_eq!(validation.dialect, "openai_compat");
+}
+
+#[test]
+fn probe_request_body_accepts_openai_compat_allowed_scalar_tool_choice() {
+    let body = probe_request_body(
+        "openrouter",
+        "moonshotai/kimi-k2.7-code",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::SingleToolCall,
+        DEFAULT_TOOL_PROBE_MARKER,
+    )
+    .expect("OpenRouter Kimi probe body");
+
+    assert_eq!(body["tools"][0]["type"], "function");
+    assert_eq!(body["tools"][0]["function"]["name"], TOOL_PROBE_TOOL_NAME);
+    assert_eq!(
+        body["tool_choice"], "auto",
+        "catalog constrains this route to scalar auto/none tool_choice modes"
+    );
+
+    let validation = validate_probe_request_body("openrouter", "moonshotai/kimi-k2.7-code", &body);
+    assert_eq!(
+        validation.status,
+        ToolConformanceRequestValidationStatus::Pass
+    );
+    assert_eq!(validation.dialect, "openai_compat");
 }
 
 #[test]
@@ -159,6 +204,68 @@ fn probe_request_body_maps_gemini_tool_choice_to_tool_config() {
     assert_eq!(
         body["toolConfig"]["functionCallingConfig"]["allowedFunctionNames"],
         json!([TOOL_PROBE_TOOL_NAME])
+    );
+
+    let validation = validate_probe_request_body("gemini", "gemini-2.5-pro", &body);
+    assert_eq!(
+        validation.status,
+        ToolConformanceRequestValidationStatus::Pass
+    );
+    assert_eq!(validation.dialect, "gemini");
+}
+
+#[test]
+fn probe_request_body_validates_ollama_tool_dialect_without_tool_choice() {
+    let body = probe_request_body(
+        "ollama",
+        "gemma4:26b",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::SingleToolCall,
+        DEFAULT_TOOL_PROBE_MARKER,
+    )
+    .expect("Ollama probe body");
+
+    assert_eq!(body["tools"][0]["type"], "function");
+    assert_eq!(body["tools"][0]["function"]["name"], TOOL_PROBE_TOOL_NAME);
+    assert!(body.get("tool_choice").is_none());
+
+    let validation = validate_probe_request_body("ollama", "gemma4:26b", &body);
+    assert_eq!(
+        validation.status,
+        ToolConformanceRequestValidationStatus::Pass
+    );
+    assert_eq!(validation.dialect, "ollama");
+}
+
+#[test]
+fn request_validation_reports_provider_dialect_mismatches() {
+    let body = json!({
+        "messages": [{"role": "user", "content": "call the tool"}],
+        "tools": [{"name": TOOL_PROBE_TOOL_NAME, "input_schema": {"type": "object"}}],
+        "toolConfig": {"functionCallingConfig": {"mode": "ANY"}}
+    });
+
+    let validation = validate_probe_request_body("openai", "gpt-5.4-mini", &body);
+    assert_eq!(
+        validation.status,
+        ToolConformanceRequestValidationStatus::Fail
+    );
+    assert_eq!(validation.dialect, "openai_compat");
+    assert!(
+        validation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("tool type")),
+        "{:?}",
+        validation.issues
+    );
+    assert!(
+        validation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("must not include /toolConfig")),
+        "{:?}",
+        validation.issues
     );
 }
 
