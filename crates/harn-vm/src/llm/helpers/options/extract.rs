@@ -394,6 +394,21 @@ pub(crate) fn extract_llm_options(
     {
         return Err(unsupported_option_error("tools", &provider, &model));
     }
+    // harn#4743: in the text tool-call lane the model emits its call inside
+    // `<tool_call>…</tool_call>` in visible content. With no stop sequence the
+    // provider keeps generating past the terminator and fabricates further
+    // tool-call blocks and prose the loop discards — pure wasted output (one
+    // observed completion burned ~8k tokens on a 41-block fake transcript).
+    // Injecting the terminator(s) as stop sequences ends the completion at the
+    // first complete call; the parser already recovers a complete body whose
+    // close tag the stop consumed.
+    let stop = resolve_stop_sequences(
+        &options,
+        stop,
+        &tool_format,
+        caps.stop_supported,
+        tools_val.is_some(),
+    );
     let mut native_tools = if tool_format == "native" {
         if let Some(tools) = &tools_val {
             Some(vm_tools_to_native(tools, &provider, &model)?)
@@ -912,6 +927,157 @@ pub(super) fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
         {
             warn("prompt_cache_ttl");
         }
+    }
+}
+
+/// Provider stop-sequence count cap. OpenAI and Anthropic both reject more than
+/// four stop sequences, so a merged list is bounded to the tightest common
+/// limit. The tool-call terminators lead the list, so enabling the text-lane
+/// stop always keeps them within the cap even when the caller already supplied
+/// stops.
+const MAX_STOP_SEQUENCES: usize = 4;
+
+/// Resolve the final `stop` list for one LLM call, injecting the text tool-call
+/// terminator(s) for the text tool-call lane (harn#4743).
+///
+/// The injection is opt-in per call (`stop_at_tool_call`, armed by the host for
+/// a measured rollout) and only applies when the route honors stop sequences
+/// (`stop_supported` — a route that 400s on stop extras like xAI/Grok is never
+/// sent one), the call actually carries tools, and the resolved lane is a text
+/// channel (`text`/`json`). Otherwise the caller-supplied `stop` passes through
+/// unchanged.
+fn resolve_stop_sequences(
+    options: &Option<crate::value::DictMap>,
+    caller_stop: Option<Vec<String>>,
+    tool_format: &str,
+    stop_supported: bool,
+    has_tools: bool,
+) -> Option<Vec<String>> {
+    let opted_in = opt_bool(options, "stop_at_tool_call");
+    let text_lane = crate::llm_config::tool_format_channel(tool_format)
+        == Some(crate::llm_config::ToolFormatChannel::Text);
+    if opted_in && stop_supported && has_tools && text_lane {
+        Some(merge_stop_with_tool_terminators(caller_stop))
+    } else {
+        caller_stop
+    }
+}
+
+/// Merge the text tool-call terminators into a caller-supplied `stop` list. The
+/// terminators lead (they are the functional stop the feature guarantees),
+/// caller entries follow, duplicates are dropped, and the result is capped at
+/// [`MAX_STOP_SEQUENCES`]. Stop order is semantically irrelevant to every
+/// provider (any match ends generation), so leading with the terminators is
+/// safe.
+fn merge_stop_with_tool_terminators(caller_stop: Option<Vec<String>>) -> Vec<String> {
+    let mut merged: Vec<String> = crate::llm::tools::text_tool_call_tag_pairs()
+        .iter()
+        .map(|(_, close)| (*close).to_string())
+        .collect();
+    for entry in caller_stop.into_iter().flatten() {
+        if !merged.contains(&entry) {
+            merged.push(entry);
+        }
+    }
+    merged.truncate(MAX_STOP_SEQUENCES);
+    merged
+}
+
+#[cfg(test)]
+mod stop_sequence_tests {
+    use super::{merge_stop_with_tool_terminators, resolve_stop_sequences, MAX_STOP_SEQUENCES};
+    use crate::llm::tools::{TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_CLOSE_COMPACT};
+    use crate::value::{DictMap, VmDictExt, VmValue};
+
+    fn opts_flag(value: bool) -> Option<DictMap> {
+        let mut dict = DictMap::new();
+        dict.put("stop_at_tool_call", VmValue::Bool(value));
+        Some(dict)
+    }
+
+    fn terminators() -> Vec<String> {
+        vec![
+            TEXT_TOOL_CALL_CLOSE.to_string(),
+            TEXT_TOOL_CALL_CLOSE_COMPACT.to_string(),
+        ]
+    }
+
+    #[test]
+    fn merge_leads_with_terminators_and_dedupes() {
+        assert_eq!(merge_stop_with_tool_terminators(None), terminators());
+        // A caller stop that already names the primary terminator must not
+        // duplicate it; distinct caller entries follow the terminators.
+        let merged = merge_stop_with_tool_terminators(Some(vec![
+            TEXT_TOOL_CALL_CLOSE.to_string(),
+            "STOP".to_string(),
+        ]));
+        assert_eq!(
+            merged,
+            vec![
+                TEXT_TOOL_CALL_CLOSE.to_string(),
+                TEXT_TOOL_CALL_CLOSE_COMPACT.to_string(),
+                "STOP".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_caps_at_provider_limit_keeping_terminators() {
+        let merged = merge_stop_with_tool_terminators(Some(vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+        ]));
+        assert_eq!(merged.len(), MAX_STOP_SEQUENCES);
+        // The functional terminators survive the cap; caller overflow is dropped.
+        assert_eq!(merged[0], TEXT_TOOL_CALL_CLOSE);
+        assert_eq!(merged[1], TEXT_TOOL_CALL_CLOSE_COMPACT);
+    }
+
+    #[test]
+    fn injects_terminators_for_text_lane_when_opted_in() {
+        assert_eq!(
+            resolve_stop_sequences(&opts_flag(true), None, "text", true, true),
+            Some(terminators()),
+        );
+        // `json` is also a text-channel format.
+        assert_eq!(
+            resolve_stop_sequences(&opts_flag(true), None, "json", true, true),
+            Some(terminators()),
+        );
+    }
+
+    #[test]
+    fn passes_caller_stop_through_when_not_opted_in() {
+        let caller = Some(vec!["DONE".to_string()]);
+        assert_eq!(
+            resolve_stop_sequences(&opts_flag(false), caller.clone(), "text", true, true),
+            caller,
+        );
+        assert_eq!(
+            resolve_stop_sequences(&None, None, "text", true, true),
+            None,
+        );
+    }
+
+    #[test]
+    fn does_not_inject_outside_the_gated_conditions() {
+        // Native lane: the terminator is not part of the wire, so never inject.
+        assert_eq!(
+            resolve_stop_sequences(&opts_flag(true), None, "native", true, true),
+            None,
+        );
+        // Route rejects stop extras (e.g. xAI/Grok): never inject.
+        assert_eq!(
+            resolve_stop_sequences(&opts_flag(true), None, "text", false, true),
+            None,
+        );
+        // No tools on the call: nothing to terminate.
+        assert_eq!(
+            resolve_stop_sequences(&opts_flag(true), None, "text", true, false),
+            None,
+        );
     }
 }
 
