@@ -12,6 +12,9 @@ mod schema;
 mod tests;
 mod transport;
 
+use crate::transport::{
+    read_jsonrpc_stdio_frame, write_jsonrpc_stdio_message, JsonRpcStdioFrameStyle,
+};
 use schema::{
     build_call_request, derived_server_name, paged_result, parse_error_response, request_key,
     tool_call_error, tool_call_success, tool_entry,
@@ -43,7 +46,6 @@ use harn_vm::mcp_protocol::{
     McpProtocolMode, DRAFT_PROTOCOL_VERSION,
 };
 use serde_json::{json, Value as JsonValue};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -277,33 +279,25 @@ impl McpServer {
 
     pub async fn run_stdio(self: Arc<Self>) -> Result<(), String> {
         let session = SharedSession::new();
-        let stdin = BufReader::new(tokio::io::stdin());
-        let mut lines = stdin.lines();
-        let mut stdout = tokio::io::stdout();
+        let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
         let (tx, mut rx) = mpsc::unbounded_channel::<JsonValue>();
+        let output_style = Arc::new(Mutex::new(JsonRpcStdioFrameStyle::default()));
+        let writer_style = output_style.clone();
 
         let writer = tokio::spawn(async move {
+            let mut stdout = tokio::io::stdout();
             while let Some(message) = rx.recv().await {
-                let mut encoded =
-                    serde_json::to_string(&message).map_err(|error| error.to_string())?;
-                encoded.push('\n');
-                stdout
-                    .write_all(encoded.as_bytes())
-                    .await
-                    .map_err(|error| error.to_string())?;
-                stdout.flush().await.map_err(|error| error.to_string())?;
+                let style = *writer_style.lock().expect("stdio frame style poisoned");
+                write_jsonrpc_stdio_message(&mut stdout, &message, style).await?;
             }
             Ok::<(), String>(())
         });
 
         eprintln!("[harn] MCP workflow server ready on stdio");
 
-        while let Ok(Some(line)) = lines.next_line().await {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let request = match serde_json::from_str::<JsonValue>(trimmed) {
+        while let Some(frame) = read_jsonrpc_stdio_frame(&mut stdin).await? {
+            *output_style.lock().expect("stdio frame style poisoned") = frame.style;
+            let request = match frame.parse_json() {
                 Ok(value) => value,
                 Err(error) => {
                     let _ = tx.send(parse_error_response(&error.to_string()));
@@ -313,7 +307,7 @@ impl McpServer {
             let auth = AuthRequest {
                 method: "STDIO".to_string(),
                 path: String::new(),
-                body: line.into_bytes(),
+                body: frame.body,
                 headers: BTreeMap::new(),
                 ..AuthRequest::default()
             };
