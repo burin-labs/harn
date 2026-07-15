@@ -1,7 +1,6 @@
 // Most tests in this file run the orchestrator in-process via
-// [`OrchestratorHarness`]. A handful of subprocess assertions (process
-// exit code semantics, raw stderr scraping) remain `#[ignore]`d
-// pending the slow E2E/smoke lane in issue #1069.
+// [`OrchestratorHarness`]. Process exit, signal, and raw stderr contracts live
+// in the `orchestrator_cli_e2e` integration target.
 //
 // `harn_state_lock` returns a `std::sync::MutexGuard`, which is held
 // across `.await` points in tests that read the on-disk event log
@@ -363,10 +362,6 @@ fn seed_legacy_inbox_records(temp: &TempDir) {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
-
-#[ignore = "asserts on raw orchestrator stderr — moves to slow E2E/smoke job (issue #1069)"]
-#[test]
-fn orchestrator_serve_starts_and_shuts_down_cleanly() {}
 
 // Regression coverage for harn#325: graceful shutdown should let an in-flight
 // a2a-push dispatch finish within the configured shutdown window and emit the
@@ -1001,10 +996,6 @@ pub fn on_task(event: TriggerEvent) -> string {
         "outbox count mismatch"
     );
 }
-
-#[ignore = "uses std::process::exit(86) for crash simulation — moves to slow E2E/smoke job (issue #1069)"]
-#[test]
-fn restart_surfaces_stranded_envelopes_and_recover_replays_them_explicitly() {}
 
 #[ignore = "asserts on subprocess stdout for `harn orchestrator fire`/`queue ls`/`queue drain` — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
