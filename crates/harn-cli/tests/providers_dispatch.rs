@@ -379,14 +379,18 @@ fn provider_tool_probe_audit_validates_catalog_requests_in_process() {
         "tool-probe audit JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
-    assert_eq!(harn_value["schema_version"], 1);
+    assert_eq!(harn_value["schema_version"], 2);
+    assert_eq!(
+        harn_value["request_profiles"],
+        serde_json::json!(["catalog_default", "parameter_edges"])
+    );
     assert_eq!(harn_value["validation_fail_count"], 0);
     assert_eq!(
         harn_value["validation_pass_count"],
         harn_value["request_count"]
     );
     assert!(
-        harn_value["request_count"].as_u64().unwrap_or_default() >= 80,
+        harn_value["request_count"].as_u64().unwrap_or_default() >= 160,
         "audit covered too few request combinations: {}",
         harn.stdout
     );

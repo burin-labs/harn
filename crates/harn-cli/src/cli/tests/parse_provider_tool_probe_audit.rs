@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli::provider::ProviderToolProbeRequestProfileArg;
 
 #[test]
 fn test_parses_provider_tool_probe_audit_args() {
@@ -10,6 +11,8 @@ fn test_parses_provider_tool_probe_audit_args() {
         "streaming",
         "--case",
         "large_string_argument",
+        "--request-profile",
+        "parameter_edges",
         "--json=false",
     ]);
     let Command::Provider(provider) = cli.command.unwrap() else {
@@ -23,6 +26,11 @@ fn test_parses_provider_tool_probe_audit_args() {
     assert!(matches!(
         args.probe_cases[0],
         ProviderToolProbeCaseArg::LargeStringArgument
+    ));
+    assert_eq!(args.request_profiles.len(), 1);
+    assert!(matches!(
+        args.request_profiles[0],
+        ProviderToolProbeRequestProfileArg::ParameterEdges
     ));
     assert!(!args.json);
 }

@@ -7,10 +7,12 @@ use crate::cli::{ProvidersMatrixArgs, ProvidersRecommendArgs, ProvidersRefreshAr
 mod artifacts;
 mod build;
 mod tool_probe_audit;
+mod tool_probe_request;
 
 pub(crate) use artifacts::{run_export, run_validate};
 pub(crate) use build::run_generate;
 pub(crate) use tool_probe_audit::run as run_audit;
+pub(crate) use tool_probe_request::render as render_tool_probe_request;
 
 pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), String> {
     if !args.script.exists() {

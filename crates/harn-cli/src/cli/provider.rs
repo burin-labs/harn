@@ -240,6 +240,11 @@ pub(crate) struct ProviderToolProbeArgs {
     /// Select the fixed micro-case to probe.
     #[arg(long = "case", value_enum, default_value_t = ProviderToolProbeCaseArg::SingleToolCall)]
     pub probe_case: ProviderToolProbeCaseArg,
+    /// Select the provider request-profile to render for --dry-run-request.
+    /// Non-default profiles are offline request-audit surfaces, not live
+    /// conformance probes.
+    #[arg(long = "request-profile", value_enum, default_value_t = ProviderToolProbeRequestProfileArg::CatalogDefault)]
+    pub request_profile: ProviderToolProbeRequestProfileArg,
     /// Override the marker, or marker seed for structured multi-line cases.
     #[arg(long, default_value = harn_vm::llm::tool_conformance::DEFAULT_TOOL_PROBE_MARKER)]
     pub marker: String,
@@ -278,6 +283,10 @@ pub(crate) struct ProviderToolProbeAuditArgs {
     /// request-rendered case.
     #[arg(long = "case", value_enum)]
     pub probe_cases: Vec<ProviderToolProbeCaseArg>,
+    /// Restrict the audit to one or more request profiles. Omit to run every
+    /// offline request profile.
+    #[arg(long = "request-profile", value_enum)]
+    pub request_profiles: Vec<ProviderToolProbeRequestProfileArg>,
     /// Emit JSON. Defaults to true because CI and catalog reviews consume the
     /// structured audit report.
     #[arg(
@@ -358,6 +367,29 @@ pub(crate) enum ProviderToolProbeCaseArg {
     LargeStringArgument,
 }
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq, Eq)]
+pub(crate) enum ProviderToolProbeRequestProfileArg {
+    #[value(name = "catalog_default", alias = "catalog-default")]
+    CatalogDefault,
+    #[value(name = "parameter_edges", alias = "parameter-edges")]
+    ParameterEdges,
+}
+
+impl ProviderToolProbeRequestProfileArg {
+    pub(crate) fn tool_probe_request_profile(
+        self,
+    ) -> harn_vm::llm::tool_conformance::ToolProbeRequestProfile {
+        match self {
+            Self::CatalogDefault => {
+                harn_vm::llm::tool_conformance::ToolProbeRequestProfile::CatalogDefault
+            }
+            Self::ParameterEdges => {
+                harn_vm::llm::tool_conformance::ToolProbeRequestProfile::ParameterEdges
+            }
+        }
+    }
+}
+
 impl ProviderToolProbeCaseArg {
     pub(crate) fn tool_probe_case(self) -> harn_vm::llm::tool_conformance::ToolProbeCase {
         match self {
@@ -370,6 +402,19 @@ impl ProviderToolProbeCaseArg {
 }
 
 impl ProviderToolProbeArgs {
+    pub(crate) fn live_request_profile_error(&self) -> Option<&'static str> {
+        if self.dry_run_request
+            || self.request_profile == ProviderToolProbeRequestProfileArg::CatalogDefault
+        {
+            None
+        } else {
+            Some(
+                "error: --request-profile is only supported with --dry-run-request; \
+                 live tool probes use catalog_default",
+            )
+        }
+    }
+
     pub(crate) fn tool_conformance_probe_options(
         &self,
     ) -> harn_vm::llm::tool_conformance::ToolConformanceProbeOptions {

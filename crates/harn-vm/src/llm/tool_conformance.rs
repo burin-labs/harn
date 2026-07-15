@@ -18,8 +18,8 @@ mod request;
 use request::{probe_request_body, validate_probe_request_body};
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
-pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 2;
-pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 1;
+pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 3;
+pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 2;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
 pub const DEFAULT_TOOL_PROBE_MARKER: &str = "harn_tool_probe_marker";
 
@@ -74,6 +74,27 @@ pub enum ToolProbeCase {
     LargeStringArgument,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolProbeRequestProfile {
+    #[default]
+    CatalogDefault,
+    ParameterEdges,
+}
+
+impl ToolProbeRequestProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CatalogDefault => "catalog_default",
+            Self::ParameterEdges => "parameter_edges",
+        }
+    }
+
+    pub fn catalog_request_audit_profiles() -> Vec<Self> {
+        vec![Self::CatalogDefault, Self::ParameterEdges]
+    }
+}
+
 impl ToolProbeCase {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -105,6 +126,8 @@ pub struct ToolConformanceRequestReport {
     pub base_url: Option<String>,
     #[serde(default)]
     pub probe_case: ToolProbeCase,
+    #[serde(default)]
+    pub request_profile: ToolProbeRequestProfile,
     pub tool_name: String,
     pub marker: String,
     pub expected_value: String,
@@ -132,6 +155,7 @@ pub struct ToolConformanceRequestAuditReport {
     pub catalog_model_count: usize,
     pub route_count: usize,
     pub probe_cases: Vec<String>,
+    pub request_profiles: Vec<String>,
     pub modes: Vec<String>,
     pub request_count: usize,
     pub validation_pass_count: usize,
@@ -158,6 +182,7 @@ pub struct ToolConformanceRequestAuditFailure {
     pub provider: String,
     pub model: String,
     pub probe_case: String,
+    pub request_profile: String,
     pub mode: String,
     pub dialect: String,
     pub issues: Vec<String>,
@@ -402,6 +427,7 @@ pub fn tool_conformance_request_report(
     base_url: Option<String>,
     modes: Vec<ToolProbeMode>,
     probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
     marker: impl Into<String>,
 ) -> Result<ToolConformanceRequestReport, String> {
     let provider = provider.into();
@@ -410,11 +436,22 @@ pub fn tool_conformance_request_report(
     let expected_value = probe_case.expected_value(&marker);
     let mut requests = Vec::new();
     for mode in normalized_modes(&modes) {
-        let request_body =
-            probe_request_body(&provider, &model, mode, probe_case, &expected_value)?;
+        let request_body = probe_request_body(
+            &provider,
+            &model,
+            mode,
+            probe_case,
+            request_profile,
+            &expected_value,
+        )?;
         requests.push(ToolConformanceRequestCase {
             mode,
-            validation: validate_probe_request_body(&provider, &model, &request_body),
+            validation: validate_probe_request_body(
+                &provider,
+                &model,
+                request_profile,
+                &request_body,
+            ),
             request_body,
         });
     }
@@ -424,6 +461,7 @@ pub fn tool_conformance_request_report(
         model,
         base_url,
         probe_case,
+        request_profile,
         tool_name: TOOL_PROBE_TOOL_NAME.to_string(),
         marker,
         expected_value,
@@ -437,10 +475,18 @@ pub fn tool_conformance_request_report_json(
     base_url: Option<String>,
     modes: Vec<ToolProbeMode>,
     probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
     marker: impl Into<String>,
 ) -> Result<String, String> {
-    let report =
-        tool_conformance_request_report(provider, model, base_url, modes, probe_case, marker)?;
+    let report = tool_conformance_request_report(
+        provider,
+        model,
+        base_url,
+        modes,
+        probe_case,
+        request_profile,
+        marker,
+    )?;
     serde_json::to_string_pretty(&report).map_err(|error| {
         format!("internal error: failed to render tool-probe request report: {error}")
     })
@@ -448,6 +494,7 @@ pub fn tool_conformance_request_report_json(
 
 pub fn tool_conformance_request_catalog_audit(
     probe_cases: Vec<ToolProbeCase>,
+    request_profiles: Vec<ToolProbeRequestProfile>,
     modes: Vec<ToolProbeMode>,
 ) -> ToolConformanceRequestAuditReport {
     let probe_cases = if probe_cases.is_empty() {
@@ -456,6 +503,11 @@ pub fn tool_conformance_request_catalog_audit(
         probe_cases
     };
     let modes = normalized_modes(&modes);
+    let request_profiles = if request_profiles.is_empty() {
+        ToolProbeRequestProfile::catalog_request_audit_profiles()
+    } else {
+        normalized_request_profiles(&request_profiles)
+    };
     let entries = llm_config::model_catalog_entries();
     let mut request_count = 0usize;
     let mut validation_pass_count = 0usize;
@@ -475,54 +527,59 @@ pub fn tool_conformance_request_catalog_audit(
             dialect_counts: BTreeMap::new(),
         };
         for probe_case in &probe_cases {
-            for mode in &modes {
-                route.request_count += 1;
-                request_count += 1;
-                *provider_counts.entry(model.provider.clone()).or_insert(0) += 1;
-                match tool_conformance_request_report(
-                    model.provider.clone(),
-                    model_id.clone(),
-                    None,
-                    vec![*mode],
-                    *probe_case,
-                    DEFAULT_TOOL_PROBE_MARKER,
-                ) {
-                    Ok(report) => {
-                        for request in report.requests {
-                            let dialect = request.validation.dialect.clone();
-                            *dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
-                            *route.dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
-                            match request.validation.status {
-                                ToolConformanceRequestValidationStatus::Pass => {
-                                    route.validation_pass_count += 1;
-                                    validation_pass_count += 1;
-                                }
-                                ToolConformanceRequestValidationStatus::Fail => {
-                                    route.validation_fail_count += 1;
-                                    validation_fail_count += 1;
-                                    failures.push(ToolConformanceRequestAuditFailure {
-                                        provider: model.provider.clone(),
-                                        model: model_id.clone(),
-                                        probe_case: probe_case.as_str().to_string(),
-                                        mode: mode.as_str().to_string(),
-                                        dialect,
-                                        issues: request.validation.issues,
-                                    });
+            for request_profile in &request_profiles {
+                for mode in &modes {
+                    route.request_count += 1;
+                    request_count += 1;
+                    *provider_counts.entry(model.provider.clone()).or_insert(0) += 1;
+                    match tool_conformance_request_report(
+                        model.provider.clone(),
+                        model_id.clone(),
+                        None,
+                        vec![*mode],
+                        *probe_case,
+                        *request_profile,
+                        DEFAULT_TOOL_PROBE_MARKER,
+                    ) {
+                        Ok(report) => {
+                            for request in report.requests {
+                                let dialect = request.validation.dialect.clone();
+                                *dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
+                                *route.dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
+                                match request.validation.status {
+                                    ToolConformanceRequestValidationStatus::Pass => {
+                                        route.validation_pass_count += 1;
+                                        validation_pass_count += 1;
+                                    }
+                                    ToolConformanceRequestValidationStatus::Fail => {
+                                        route.validation_fail_count += 1;
+                                        validation_fail_count += 1;
+                                        failures.push(ToolConformanceRequestAuditFailure {
+                                            provider: model.provider.clone(),
+                                            model: model_id.clone(),
+                                            probe_case: probe_case.as_str().to_string(),
+                                            request_profile: request_profile.as_str().to_string(),
+                                            mode: mode.as_str().to_string(),
+                                            dialect,
+                                            issues: request.validation.issues,
+                                        });
+                                    }
                                 }
                             }
                         }
-                    }
-                    Err(error) => {
-                        route.validation_fail_count += 1;
-                        validation_fail_count += 1;
-                        failures.push(ToolConformanceRequestAuditFailure {
-                            provider: model.provider.clone(),
-                            model: model_id.clone(),
-                            probe_case: probe_case.as_str().to_string(),
-                            mode: mode.as_str().to_string(),
-                            dialect: "request_build".to_string(),
-                            issues: vec![error],
-                        });
+                        Err(error) => {
+                            route.validation_fail_count += 1;
+                            validation_fail_count += 1;
+                            failures.push(ToolConformanceRequestAuditFailure {
+                                provider: model.provider.clone(),
+                                model: model_id.clone(),
+                                probe_case: probe_case.as_str().to_string(),
+                                request_profile: request_profile.as_str().to_string(),
+                                mode: mode.as_str().to_string(),
+                                dialect: "request_build".to_string(),
+                                issues: vec![error],
+                            });
+                        }
                     }
                 }
             }
@@ -537,6 +594,10 @@ pub fn tool_conformance_request_catalog_audit(
         probe_cases: probe_cases
             .into_iter()
             .map(|probe_case| probe_case.as_str().to_string())
+            .collect(),
+        request_profiles: request_profiles
+            .into_iter()
+            .map(|request_profile| request_profile.as_str().to_string())
             .collect(),
         modes: modes
             .into_iter()
@@ -572,6 +633,21 @@ fn normalized_modes(modes: &[ToolProbeMode]) -> Vec<ToolProbeMode> {
     for mode in modes {
         if !out.contains(mode) {
             out.push(*mode);
+        }
+    }
+    out
+}
+
+fn normalized_request_profiles(
+    profiles: &[ToolProbeRequestProfile],
+) -> Vec<ToolProbeRequestProfile> {
+    if profiles.is_empty() {
+        return ToolProbeRequestProfile::catalog_request_audit_profiles();
+    }
+    let mut out = Vec::new();
+    for profile in profiles {
+        if !out.contains(profile) {
+            out.push(*profile);
         }
     }
     out
@@ -711,7 +787,14 @@ async fn execute_live_probe_case(
             );
         }
     };
-    let body = match probe_request_body(provider, model, mode, probe_case, marker) {
+    let body = match probe_request_body(
+        provider,
+        model,
+        mode,
+        probe_case,
+        ToolProbeRequestProfile::CatalogDefault,
+        marker,
+    ) {
         Ok(body) => body,
         Err(message) => {
             return ToolConformanceCase::transport_error(

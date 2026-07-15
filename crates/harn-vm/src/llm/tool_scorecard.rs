@@ -574,7 +574,7 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["temperature", "max_tokens", "tool_choice"],
-            execution: missing_case_runner("parameter_edge_runner_not_yet_available"),
+            execution: executable_parameter_edges_request_case(provider, model_id),
         },
     ]
 }
@@ -618,6 +618,38 @@ fn executable_tool_probe_case(
             artifact_segment(provider),
             artifact_segment(model),
             probe_case_id
+        )),
+    }
+}
+
+fn executable_parameter_edges_request_case(
+    provider: &str,
+    model: &str,
+) -> ToolScorecardPlanCaseExecution {
+    ToolScorecardPlanCaseExecution {
+        status: "executable",
+        runner: "provider_tool_probe_request",
+        reason: "harn provider tool-probe --dry-run-request renders and validates provider-specific parameter-edge request bodies without provider calls",
+        command: Some(vec![
+            "harn".to_string(),
+            "provider".to_string(),
+            "tool-probe".to_string(),
+            provider.to_string(),
+            "--model".to_string(),
+            model.to_string(),
+            "--mode".to_string(),
+            "both".to_string(),
+            "--case".to_string(),
+            "single_tool_call".to_string(),
+            "--request-profile".to_string(),
+            "parameter_edges".to_string(),
+            "--dry-run-request".to_string(),
+            "--json".to_string(),
+        ]),
+        artifact_hint: Some(format!(
+            "tool-probe-request-{}-{}-parameter_edges.json",
+            artifact_segment(provider),
+            artifact_segment(model)
         )),
     }
 }
@@ -1196,6 +1228,35 @@ mod tests {
                 "1".to_string(),
                 "--timeout-secs".to_string(),
                 "120".to_string(),
+                "--json".to_string(),
+            ]
+        );
+        let parameter_edges_case = plan.routes[0]
+            .cases
+            .iter()
+            .find(|case| case.id == "parameter_edges")
+            .expect("parameter edges case");
+        assert_eq!(parameter_edges_case.execution.status, "executable");
+        assert_eq!(
+            parameter_edges_case.execution.runner,
+            "provider_tool_probe_request"
+        );
+        assert_eq!(
+            parameter_edges_case.execution.command.as_ref().unwrap(),
+            &vec![
+                "harn".to_string(),
+                "provider".to_string(),
+                "tool-probe".to_string(),
+                "anthropic".to_string(),
+                "--model".to_string(),
+                "claude-sonnet-5".to_string(),
+                "--mode".to_string(),
+                "both".to_string(),
+                "--case".to_string(),
+                "single_tool_call".to_string(),
+                "--request-profile".to_string(),
+                "parameter_edges".to_string(),
+                "--dry-run-request".to_string(),
                 "--json".to_string(),
             ]
         );

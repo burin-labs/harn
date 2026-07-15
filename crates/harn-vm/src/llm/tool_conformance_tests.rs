@@ -29,6 +29,7 @@ fn probe_payload_applies_provider_qualified_model_defaults() {
         "wire-model",
         ToolProbeMode::NonStreaming,
         ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
         DEFAULT_TOOL_PROBE_MARKER,
     )
     .expect("probe payload");
@@ -49,6 +50,7 @@ fn request_report_materializes_large_string_case_without_provider_call() {
         None,
         vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming],
         ToolProbeCase::LargeStringArgument,
+        ToolProbeRequestProfile::CatalogDefault,
         "case-seed",
     )
     .expect("request report");
@@ -101,6 +103,7 @@ fn request_report_materializes_large_string_case_without_provider_call() {
 fn request_catalog_audit_validates_every_catalog_route_in_process() {
     let report = tool_conformance_request_catalog_audit(
         ToolProbeCase::catalog_request_audit_cases(),
+        ToolProbeRequestProfile::catalog_request_audit_profiles(),
         vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming],
     );
 
@@ -115,10 +118,14 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
     );
     assert_eq!(report.route_count, report.catalog_model_count);
     assert_eq!(report.probe_cases.len(), 2);
+    assert_eq!(report.request_profiles.len(), 2);
     assert_eq!(report.modes.len(), 2);
     assert_eq!(
         report.request_count,
-        report.route_count * report.probe_cases.len() * report.modes.len()
+        report.route_count
+            * report.probe_cases.len()
+            * report.request_profiles.len()
+            * report.modes.len()
     );
     assert_eq!(report.validation_fail_count, 0, "{:#?}", report.failures);
     assert_eq!(report.validation_pass_count, report.request_count);
@@ -133,6 +140,7 @@ fn probe_request_body_uses_anthropic_tool_dialect() {
         "claude-sonnet-4-6",
         ToolProbeMode::NonStreaming,
         ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
         DEFAULT_TOOL_PROBE_MARKER,
     )
     .expect("Anthropic probe body");
@@ -155,7 +163,12 @@ fn probe_request_body_uses_anthropic_tool_dialect() {
         "Anthropic rejects OpenAI-shaped tool_choice objects"
     );
 
-    let validation = validate_probe_request_body("anthropic", "claude-sonnet-4-6", &body);
+    let validation = validate_probe_request_body(
+        "anthropic",
+        "claude-sonnet-4-6",
+        ToolProbeRequestProfile::CatalogDefault,
+        &body,
+    );
     assert_eq!(
         validation.status,
         ToolConformanceRequestValidationStatus::Pass
@@ -170,6 +183,7 @@ fn probe_request_body_preserves_openai_tool_dialect() {
         "gpt-5.4-mini",
         ToolProbeMode::NonStreaming,
         ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
         DEFAULT_TOOL_PROBE_MARKER,
     )
     .expect("OpenAI probe body");
@@ -181,7 +195,12 @@ fn probe_request_body_preserves_openai_tool_dialect() {
         json!({"type": "function", "function": {"name": TOOL_PROBE_TOOL_NAME}})
     );
 
-    let validation = validate_probe_request_body("openai", "gpt-5.4-mini", &body);
+    let validation = validate_probe_request_body(
+        "openai",
+        "gpt-5.4-mini",
+        ToolProbeRequestProfile::CatalogDefault,
+        &body,
+    );
     assert_eq!(
         validation.status,
         ToolConformanceRequestValidationStatus::Pass
@@ -196,6 +215,7 @@ fn probe_request_body_accepts_openai_compat_allowed_scalar_tool_choice() {
         "moonshotai/kimi-k2.7-code",
         ToolProbeMode::NonStreaming,
         ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
         DEFAULT_TOOL_PROBE_MARKER,
     )
     .expect("OpenRouter Kimi probe body");
@@ -207,10 +227,51 @@ fn probe_request_body_accepts_openai_compat_allowed_scalar_tool_choice() {
         "catalog constrains this route to scalar auto/none tool_choice modes"
     );
 
-    let validation = validate_probe_request_body("openrouter", "moonshotai/kimi-k2.7-code", &body);
+    let validation = validate_probe_request_body(
+        "openrouter",
+        "moonshotai/kimi-k2.7-code",
+        ToolProbeRequestProfile::CatalogDefault,
+        &body,
+    );
     assert_eq!(
         validation.status,
         ToolConformanceRequestValidationStatus::Pass
+    );
+    assert_eq!(validation.dialect, "openai_compat");
+}
+
+#[test]
+fn probe_request_body_accepts_unrestricted_parameter_edge_tool_choice() {
+    let body = probe_request_body(
+        "fireworks",
+        "accounts/fireworks/models/gpt-oss-120b",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::ParameterEdges,
+        DEFAULT_TOOL_PROBE_MARKER,
+    )
+    .expect("Fireworks parameter-edge probe body");
+
+    assert_eq!(body["tools"][0]["type"], "function");
+    assert_eq!(body["tools"][0]["function"]["name"], TOOL_PROBE_TOOL_NAME);
+    assert_eq!(
+        body["tool_choice"], "required",
+        "empty allowed_tool_choice_modes means unrestricted OpenAI-compatible scalar modes"
+    );
+    assert_eq!(body["temperature"], 2.0);
+    assert_eq!(body["max_tokens"], 1);
+
+    let validation = validate_probe_request_body(
+        "fireworks",
+        "accounts/fireworks/models/gpt-oss-120b",
+        ToolProbeRequestProfile::ParameterEdges,
+        &body,
+    );
+    assert_eq!(
+        validation.status,
+        ToolConformanceRequestValidationStatus::Pass,
+        "{:?}",
+        validation.issues
     );
     assert_eq!(validation.dialect, "openai_compat");
 }
@@ -222,6 +283,7 @@ fn probe_request_body_maps_gemini_tool_choice_to_tool_config() {
         "gemini-2.5-pro",
         ToolProbeMode::NonStreaming,
         ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
         DEFAULT_TOOL_PROBE_MARKER,
     )
     .expect("Gemini probe body");
@@ -235,7 +297,12 @@ fn probe_request_body_maps_gemini_tool_choice_to_tool_config() {
         json!([TOOL_PROBE_TOOL_NAME])
     );
 
-    let validation = validate_probe_request_body("gemini", "gemini-2.5-pro", &body);
+    let validation = validate_probe_request_body(
+        "gemini",
+        "gemini-2.5-pro",
+        ToolProbeRequestProfile::CatalogDefault,
+        &body,
+    );
     assert_eq!(
         validation.status,
         ToolConformanceRequestValidationStatus::Pass
@@ -250,6 +317,7 @@ fn probe_request_body_validates_ollama_tool_dialect_without_tool_choice() {
         "gemma4:26b",
         ToolProbeMode::NonStreaming,
         ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
         DEFAULT_TOOL_PROBE_MARKER,
     )
     .expect("Ollama probe body");
@@ -258,7 +326,12 @@ fn probe_request_body_validates_ollama_tool_dialect_without_tool_choice() {
     assert_eq!(body["tools"][0]["function"]["name"], TOOL_PROBE_TOOL_NAME);
     assert!(body.get("tool_choice").is_none());
 
-    let validation = validate_probe_request_body("ollama", "gemma4:26b", &body);
+    let validation = validate_probe_request_body(
+        "ollama",
+        "gemma4:26b",
+        ToolProbeRequestProfile::CatalogDefault,
+        &body,
+    );
     assert_eq!(
         validation.status,
         ToolConformanceRequestValidationStatus::Pass
@@ -274,7 +347,12 @@ fn request_validation_reports_provider_dialect_mismatches() {
         "toolConfig": {"functionCallingConfig": {"mode": "ANY"}}
     });
 
-    let validation = validate_probe_request_body("openai", "gpt-5.4-mini", &body);
+    let validation = validate_probe_request_body(
+        "openai",
+        "gpt-5.4-mini",
+        ToolProbeRequestProfile::CatalogDefault,
+        &body,
+    );
     assert_eq!(
         validation.status,
         ToolConformanceRequestValidationStatus::Fail
