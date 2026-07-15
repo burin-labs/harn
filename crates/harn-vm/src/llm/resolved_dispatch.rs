@@ -143,13 +143,10 @@ impl DispatchOutcome {
     /// transient-recovered flake; a clean first-attempt serve is `served`.
     pub(crate) fn from_result(result: &super::api::LlmResult, empty_retries: usize) -> Self {
         let content_len = result.text.len();
-        let committed_nothing = result.text.is_empty()
-            && result.tool_calls.is_empty()
-            && result
-                .thinking
-                .as_deref()
-                .map(str::is_empty)
-                .unwrap_or(true);
+        // Trim-based: a whitespace-only / echoed-stop-sequence completion that
+        // billed tokens committed nothing usable and must book as an empty
+        // completion, not `served` (harn#4744). Shared with the retry predicate.
+        let committed_nothing = result.committed_nothing_usable();
         if committed_nothing && result.output_tokens > 0 {
             return DispatchOutcome::EmptyCompletionTerminal {
                 completion_tokens: result.output_tokens,

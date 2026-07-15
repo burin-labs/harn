@@ -128,6 +128,23 @@ pub(crate) struct LlmResult {
     pub telemetry: ProviderTelemetry,
 }
 
+impl LlmResult {
+    /// True when the completion carries nothing the agent loop can act on: no
+    /// visible text (whitespace-only counts as empty), no tool calls, and no
+    /// thinking. This is the single definition of "committed nothing usable"
+    /// shared by the dispatch-outcome booking (`resolved_dispatch`) and the
+    /// empty-completion retry (`agent_observe`), so a whitespace-only or
+    /// echoed-stop-sequence completion cannot book as `served` in one place
+    /// while the retry misses it in another (harn#4744). Trimming is what
+    /// distinguishes this from a raw `text.is_empty()`: a provider that bills
+    /// tokens for whitespace still committed nothing usable.
+    pub(crate) fn committed_nothing_usable(&self) -> bool {
+        self.text.trim().is_empty()
+            && self.tool_calls.is_empty()
+            && self.thinking.as_deref().unwrap_or("").trim().is_empty()
+    }
+}
+
 fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
     let cache_hit_ratio = crate::llm::cost::cache_hit_ratio(
         result.input_tokens,
@@ -540,6 +557,31 @@ mod cache_supported_serde_tests {
             "tools".to_string(),
             VmValue::List(std::sync::Arc::new(vec![tool])),
         )]))
+    }
+
+    #[test]
+    fn committed_nothing_usable_trims_whitespace() {
+        // harn#4744: empty AND whitespace-only completions committed nothing the
+        // loop can use — trimming is what catches the whitespace / echoed-stop
+        // case a raw `text.is_empty()` would miss. (mock_completion_response
+        // always synthesizes non-empty text, so override it for the empty cases.)
+        let mut empty = mock_completion_response("x", None);
+        empty.text = String::new();
+        assert!(empty.committed_nothing_usable());
+        let mut whitespace = mock_completion_response("x", None);
+        whitespace.text = "   \n\t".to_string();
+        assert!(whitespace.committed_nothing_usable());
+
+        // Real visible content, a tool call, or thinking all count as usable.
+        assert!(!mock_completion_response("hello", None).committed_nothing_usable());
+        let mut with_tool = mock_completion_response("x", None);
+        with_tool.text = String::new();
+        with_tool.tool_calls = vec![serde_json::json!({"id": "t1", "name": "run"})];
+        assert!(!with_tool.committed_nothing_usable());
+        let mut with_thinking = mock_completion_response("x", None);
+        with_thinking.text = String::new();
+        with_thinking.thinking = Some("reasoning".to_string());
+        assert!(!with_thinking.committed_nothing_usable());
     }
 
     #[test]
