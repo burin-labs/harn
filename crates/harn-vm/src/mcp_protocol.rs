@@ -8,6 +8,10 @@ pub const PROTOCOL_VERSION: &str = "2025-11-25";
 /// Harn uses for [`PROTOCOL_VERSION`]. Kept for clients such as Codex that
 /// still negotiate this released version.
 pub const LEGACY_2025_06_18_PROTOCOL_VERSION: &str = "2025-06-18";
+/// Original public MCP protocol version. It uses the same basic initialize /
+/// initialized lifecycle shape Harn needs for stdio tool servers, so keep it as
+/// a legacy compatibility profile for clients pinned to the first release.
+pub const LEGACY_2024_11_05_PROTOCOL_VERSION: &str = "2024-11-05";
 /// RC profile published alongside the stable version. Both clients and
 /// servers opt into this profile per request; the runtime never assumes
 /// a connection is RC-only unless the client signals it via metadata or
@@ -150,6 +154,7 @@ pub fn supported_protocol_versions() -> &'static [&'static str] {
         DRAFT_PROTOCOL_VERSION,
         PROTOCOL_VERSION,
         LEGACY_2025_06_18_PROTOCOL_VERSION,
+        LEGACY_2024_11_05_PROTOCOL_VERSION,
     ]
 }
 
