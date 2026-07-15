@@ -94,6 +94,8 @@ a subprocess).
 Subprocess-spawning binary surface tests: CLI invocation, signal handling, MCP
 server launch, real `ProcessHandle` smoke, orchestrator drain/replay, etc. Uses
 the nextest `e2e` profile, which targets `package(harn-cli) and kind(test)`.
+The target passes `--run-ignored all`, so tests marked `#[ignore]` because they
+are slow binary-surface coverage still run in this suite.
 Runs on:
 
 - Schedule: nightly at 3 AM UTC (`.github/workflows/e2e.yml`)

@@ -63,11 +63,15 @@ async fn notion_webhook_handshake_is_captured_and_reported_by_doctor() {
     );
     let stdout = String::from_utf8_lossy(&doctor.stdout);
     assert!(
-        stdout.contains("WARN  notion:notion-pages"),
+        stdout.contains("OK  trigger:notion-pages"),
         "stdout={stdout}"
     );
     assert!(
-        stdout.contains("captured verification_token=secret_notion_test_token"),
+        stdout.contains("webhook via notion handler=local state=active"),
+        "stdout={stdout}"
+    );
+    assert!(
+        stdout.contains("OK  event log") && stdout.contains("events.sqlite"),
         "stdout={stdout}"
     );
 }

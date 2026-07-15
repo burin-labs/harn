@@ -172,7 +172,7 @@ for expected in \
   './scripts/cargo_with_worktree_build_dir.sh fmt --all -- --check' \
   './scripts/cargo_with_worktree_build_dir.sh clippy --workspace --all-targets -- -D warnings' \
   './scripts/cargo_with_worktree_build_dir.sh test --workspace' \
-  './scripts/cargo_with_worktree_build_dir.sh nextest run --workspace --profile e2e' \
+  './scripts/cargo_with_worktree_build_dir.sh nextest run --workspace --profile e2e --run-ignored all' \
   './scripts/cargo_with_worktree_build_dir.sh build --release -p harn-cli --bin harn' \
   './scripts/cargo_with_worktree_build_dir.sh test -p harn-mcp-rc-compat --tests' \
   './scripts/cargo_with_worktree_build_dir.sh test -p harn-cli --lib mcp_rc_compat_tests' \
