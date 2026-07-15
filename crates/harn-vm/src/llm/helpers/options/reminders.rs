@@ -184,7 +184,35 @@ pub(super) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<Sy
     if invalid_count > 0 {
         crate::agent_sessions::prune_invalid_reminder_events(session_id);
     }
+    dedupe_by_key_newest_wins(reminders)
+}
+
+/// Collapse reminders that share a `dedupe_key` down to the newest occurrence,
+/// preserving first-seen order. `inject_reminder` already dedupes on the WRITE
+/// path, but a reminder event can enter the transcript through paths that don't
+/// (e.g. `preserve_on_compact` re-attachment after a compaction that rebuilds
+/// the event list). This read-boundary dedup is the single choke point through
+/// which every pending reminder flows into rendering and the `reminder_emitted`
+/// event, so enforcing it here guarantees at most one emission per `dedupe_key`
+/// per iteration regardless of how the duplicate arose. Reminders without a
+/// `dedupe_key` are independent and always retained.
+fn dedupe_by_key_newest_wins(reminders: Vec<SystemReminder>) -> Vec<SystemReminder> {
+    let mut newest_index_for_key: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
+    for (index, reminder) in reminders.iter().enumerate() {
+        if let Some(key) = reminder.dedupe_key.as_deref() {
+            newest_index_for_key.insert(key, index);
+        }
+    }
     reminders
+        .iter()
+        .enumerate()
+        .filter(|(index, reminder)| match reminder.dedupe_key.as_deref() {
+            Some(key) => newest_index_for_key.get(key) == Some(index),
+            None => true,
+        })
+        .map(|(_, reminder)| reminder.clone())
+        .collect()
 }
 
 pub(super) fn prepend_content_blocks(
@@ -319,4 +347,38 @@ pub(super) fn apply_rendered_reminder_messages(
         }
     }
     prefix
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::helpers::ReminderSource;
+
+    fn reminder(body: &str, dedupe_key: Option<&str>) -> SystemReminder {
+        let mut reminder = SystemReminder::new(body, ReminderSource::StdlibProvider, 0);
+        reminder.dedupe_key = dedupe_key.map(str::to_string);
+        reminder
+    }
+
+    /// harn#4731 defect #3: two reminders sharing a `dedupe_key` (e.g. a recap
+    /// re-attached across a compaction) must render/emit at most once per
+    /// iteration. Newest wins; first-seen order is preserved.
+    #[test]
+    fn dedup_keeps_newest_per_key_and_preserves_order() {
+        let input = vec![
+            reminder("recap v1", Some("post_compact_recap")),
+            reminder("workspace anchor", Some("workspace_anchor")),
+            reminder("recap v2", Some("post_compact_recap")),
+            reminder("ad hoc", None),
+            reminder("ad hoc two", None),
+        ];
+        let out = dedupe_by_key_newest_wins(input);
+        let bodies: Vec<&str> = out.iter().map(|r| r.body.as_str()).collect();
+        // One recap (the newest), in the position of its newest occurrence;
+        // keyless reminders all survive.
+        assert_eq!(
+            bodies,
+            vec!["workspace anchor", "recap v2", "ad hoc", "ad hoc two"]
+        );
+    }
 }

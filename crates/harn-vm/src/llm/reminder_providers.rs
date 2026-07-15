@@ -242,8 +242,16 @@ impl ReminderProvider for PostCompactRecapProvider {
         let mut reminder = provider_reminder(body, POST_COMPACT_RECAP_ID, ctx);
         reminder.tags = vec!["recap".to_string()];
         reminder.dedupe_key = Some(POST_COMPACT_RECAP_ID.to_string());
-        reminder.ttl_turns = Some(2);
-        reminder.preserve_on_compact = false;
+        // The recap is the ONLY surviving memory of everything just archived, so
+        // it must be durable: `ttl_turns = None` never expires by TTL, and
+        // `preserve_on_compact = true` carries it across the next compaction's
+        // reminder lifecycle. The stable `dedupe_key` means each fresh recap
+        // REPLACES the prior one on inject (see `agent_sessions::inject_reminder`),
+        // so a durable recap updates in place rather than accumulating. Letting
+        // it expire (the old `ttl_turns = 2`) is what erased the evidence behind
+        // the model's earlier fixes and drove fix -> revert oscillation.
+        reminder.ttl_turns = None;
+        reminder.preserve_on_compact = true;
         Some(reminder)
     }
 }
@@ -1997,6 +2005,30 @@ mod tests {
         // The steer must outlive a context compaction, otherwise a long
         // session silently reverts to freeform edits after the first squash.
         assert!(spec.preserve_on_compact);
+    }
+
+    /// harn#4731 defect #1: the post-compaction recap must be durable. If it
+    /// expires (the old `ttl_turns = 2`) the model loses the only surviving
+    /// memory of everything archived two turns later. `ttl_turns = None` plus
+    /// `preserve_on_compact = true` keep it alive for the life of the session.
+    #[test]
+    fn post_compact_recap_is_durable() {
+        let spec = PostCompactRecapProvider
+            .evaluate(&ctx(
+                HookEvent::PostCompact,
+                json!({"archived_messages": 5, "summary": "did things"}),
+                JsonValue::Null,
+            ))
+            .expect("recap fires when messages were archived");
+        assert_eq!(spec.dedupe_key.as_deref(), Some(POST_COMPACT_RECAP_ID));
+        assert_eq!(
+            spec.ttl_turns, None,
+            "recap must not expire by TTL — it is the only memory of the archived window"
+        );
+        assert!(
+            spec.preserve_on_compact,
+            "recap must survive the next compaction"
+        );
     }
 
     #[test]

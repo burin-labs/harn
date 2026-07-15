@@ -576,6 +576,11 @@ pub enum AgentEvent {
         instruction_source: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         compaction_policy: Option<serde_json::Value>,
+        /// Observation-mask recap receipt (harn#4731): `{recap_bytes,
+        /// budget_bytes, kept_results_count, dropped_count,
+        /// carried_prior_recap}`. Absent for non-masking strategies.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        recap: Option<serde_json::Value>,
     },
     /// Emitted whenever `transcript_project` derives a model-visible
     /// prefix from the immutable raw transcript. Hosts that render a

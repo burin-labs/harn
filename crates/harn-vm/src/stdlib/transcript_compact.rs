@@ -35,6 +35,7 @@ struct TranscriptCompactOptions {
     summary: Option<String>,
     custom_compactor: Option<VmValue>,
     policy: CompactionPolicy,
+    recap_budget_bytes: usize,
 }
 
 async fn compact_transcript_impl(
@@ -56,6 +57,7 @@ async fn compact_transcript_impl(
         custom_compactor: parsed_options.custom_compactor.clone(),
         policy: parsed_options.policy.clone(),
         policy_strategy: compact_strategy_name(&parsed_options.strategy).to_string(),
+        recap_budget_bytes: parsed_options.recap_budget_bytes,
         ..Default::default()
     };
     if let Some(target_tokens) = parsed_options.target_tokens {
@@ -154,6 +156,7 @@ fn parse_options(
             options,
             "transcript_compact",
         )?,
+        recap_budget_bytes: crate::orchestration::AutoCompactConfig::default().recap_budget_bytes,
     };
     if let Some(value) = options
         .and_then(|dict| {
@@ -188,6 +191,17 @@ fn parse_options(
             ));
         }
         parsed.target_tokens = Some(value as usize);
+    }
+    if let Some(value) = options
+        .and_then(|dict| dict.get("recap_budget_bytes"))
+        .and_then(|value| value.as_int())
+    {
+        if value < 0 {
+            return Err(VmError::Runtime(
+                "transcript_compact: recap_budget_bytes must be >= 0".into(),
+            ));
+        }
+        parsed.recap_budget_bytes = value as usize;
     }
     parsed.summarize_prompt = options
         .and_then(|dict| dict.get("summarize_prompt"))

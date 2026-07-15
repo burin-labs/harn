@@ -646,6 +646,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 instruction_mode,
                 instruction_source,
                 compaction_policy,
+                recap,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "transcript_compacted",
@@ -693,6 +694,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 }
                 if let Some(compaction_policy) = compaction_policy {
                     harn_meta.insert("compactionPolicy".to_string(), compaction_policy.clone());
+                }
+                if let Some(recap) = recap {
+                    harn_meta.insert("recap".to_string(), recap.clone());
                 }
                 merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({

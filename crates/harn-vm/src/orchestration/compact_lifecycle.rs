@@ -242,14 +242,20 @@ pub struct CompactionOutcome {
     /// `metadata` block ready to attach to the persisted transcript
     /// `"compaction"` event. Includes policy fields + reminder counts.
     pub event_metadata: JsonValue,
+    /// Observation-mask recap receipt, `None` for non-masking strategies.
+    pub recap_metrics: Option<super::RecapMetrics>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TranscriptCompactedEventMetrics {
     pub archived_messages: usize,
     pub estimated_tokens_before: usize,
     pub estimated_tokens_after: usize,
     pub snapshot_asset_id: Option<String>,
+    /// Observation-mask recap receipt: `{recap_bytes, budget_bytes,
+    /// kept_results_count, dropped_count, carried_prior_recap}`. `None` for the
+    /// LLM/truncate/custom strategies, which do not spend a recap budget.
+    pub recap: Option<JsonValue>,
 }
 
 /// Reminder-lifecycle bookkeeping produced before the compaction runs and
@@ -345,6 +351,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
     };
     let engine_strategy = compact_result.strategy;
     let raw_summary = compact_result.summary;
+    let recap_metrics = compact_result.recap_metrics;
     let summary = lifecycle.summary_override.clone().unwrap_or(raw_summary);
 
     if fires_hooks {
@@ -372,6 +379,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         estimated_tokens_before,
         estimated_tokens_after,
         snapshot_asset_id: snapshot_asset_id.clone(),
+        recap: recap_metrics.map(super::RecapMetrics::to_json),
     };
 
     let event_metadata = build_event_metadata(
@@ -435,6 +443,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         strategy: engine_strategy,
         policy_strategy: config.policy_strategy.clone(),
         event_metadata,
+        recap_metrics,
     }))
 }
 
@@ -464,6 +473,7 @@ pub async fn emit_transcript_compacted_event(
             instruction_mode: Some(config.policy.instruction_mode().to_string()),
             instruction_source: config.policy.instruction_source().map(str::to_string),
             compaction_policy: config.policy.metadata_json(),
+            recap: metrics.recap,
         },
     )
     .await;
@@ -492,6 +502,7 @@ pub fn emit_transcript_compacted_event_sync(
         instruction_mode: Some(policy.instruction_mode().to_string()),
         instruction_source: policy.instruction_source().map(str::to_string),
         compaction_policy: policy.metadata_json(),
+        recap: metrics.recap,
     });
 }
 
@@ -670,6 +681,9 @@ fn build_event_metadata(
     if let Some(map) = metadata.as_object_mut() {
         for (key, value) in compaction_policy_metadata_fields(&config.policy) {
             map.insert(key.to_string(), value);
+        }
+        if let Some(recap) = metrics.recap.clone() {
+            map.insert("recap".to_string(), recap);
         }
     }
     metadata

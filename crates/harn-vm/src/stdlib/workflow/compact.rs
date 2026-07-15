@@ -152,6 +152,14 @@ pub(super) async fn transcript_auto_compact_builtin(
     }
     if let Some(v) = options
         .as_ref()
+        .and_then(|o| o.get("recap_budget_bytes"))
+        .map(|v| non_negative_usize(v, "transcript_auto_compact", "recap_budget_bytes"))
+        .transpose()?
+    {
+        config.recap_budget_bytes = v;
+    }
+    if let Some(v) = options
+        .as_ref()
         .and_then(|o| o.get("keep_last"))
         .map(|v| non_negative_usize(v, "transcript_auto_compact", "keep_last"))
         .transpose()?

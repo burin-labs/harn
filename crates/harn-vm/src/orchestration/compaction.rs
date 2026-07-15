@@ -468,6 +468,14 @@ pub struct AutoCompactConfig {
     /// becoming part of the compacted transcript unless `scope` explicitly
     /// asks for model-visible policy text.
     pub policy: CompactionPolicy,
+    /// Upper bound (bytes) on the observation-mask recap body, excluding the
+    /// bounded pinned snapshots and the single carried-forward prior recap.
+    /// The budget is spent newest-first on load-bearing observations (verify /
+    /// test / build results and the errors that preceded edits) rather than on
+    /// verbatim assistant call replay, so a long session cannot inject an
+    /// unbounded (and compounding) recap at the exact moment context pressure
+    /// forced compaction.
+    pub recap_budget_bytes: usize,
 }
 
 impl Default for AutoCompactConfig {
@@ -488,7 +496,39 @@ impl Default for AutoCompactConfig {
             policy_strategy: compact_strategy_name(&CompactStrategy::ObservationMask).to_string(),
             fallback_strategy: None,
             policy: CompactionPolicy::default(),
+            recap_budget_bytes: DEFAULT_RECAP_BUDGET_BYTES,
         }
+    }
+}
+
+/// Default byte budget for an observation-mask recap body (~4k tokens). Chosen
+/// well below the multi-tens-of-KB recaps that motivated the bound: large
+/// enough to carry the load-bearing observations across a compaction, small
+/// enough that re-injecting it never re-creates the pressure that forced the
+/// compaction.
+pub const DEFAULT_RECAP_BUDGET_BYTES: usize = 16_000;
+
+/// Observability metrics for a single observation-mask recap. Surfaced on the
+/// `TranscriptCompacted` receipt so recap behavior (budget spend, how many
+/// results survived, how much was dropped) is visible in the event stream.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RecapMetrics {
+    pub recap_bytes: usize,
+    pub budget_bytes: usize,
+    pub kept_results_count: usize,
+    pub dropped_count: usize,
+    pub carried_prior_recap: bool,
+}
+
+impl RecapMetrics {
+    pub fn to_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "recap_bytes": self.recap_bytes,
+            "budget_bytes": self.budget_bytes,
+            "kept_results_count": self.kept_results_count,
+            "dropped_count": self.dropped_count,
+            "carried_prior_recap": self.carried_prior_recap,
+        })
     }
 }
 
@@ -1085,32 +1125,147 @@ fn default_mask_tool_result(role: &str, content: &str) -> String {
     }
 }
 
+/// Stable marker on the first line of every observation-mask recap. A prior
+/// recap re-enters the archive window on a later compaction as an ordinary
+/// `{role: "user"}` message; matching this sentinel lets the next compaction
+/// carry it forward once (bounded) instead of re-expanding and re-masking it —
+/// the "recap of a recap = the same recap, updated" contract that stops recaps
+/// from compounding across compactions.
+pub(crate) const RECAP_HEADER_SENTINEL: &str = "via observation masking]";
+
+/// Byte cap on a single carried-forward prior recap. Bounds the compound-growth
+/// term independently of the per-message budget so a chain of compactions
+/// converges instead of accreting.
+const PRIOR_RECAP_CARRY_CAP: usize = 6_000;
+
+/// Byte cap on the preview kept for an archived assistant turn. Assistant turns
+/// carry the *calls* the model issued, not what it *learned*; keeping only a
+/// short preview spends the recap budget on tool results (the observations)
+/// rather than replaying verbatim call syntax.
+const ASSISTANT_PREVIEW_CHARS: usize = 240;
+
+/// Whether a message body is a previous observation-mask recap.
+fn is_prior_recap(content: &str) -> bool {
+    content.contains(RECAP_HEADER_SENTINEL)
+}
+
+/// Render one archived assistant turn as a bounded preview. Short turns pass
+/// through; long turns keep a head slice plus a masked-marker tail so the drop
+/// is visible in the same vocabulary as [`default_mask_tool_result`].
+fn assistant_preview(content: &str) -> String {
+    if content.len() <= ASSISTANT_PREVIEW_CHARS {
+        return format!("[assistant] {content}");
+    }
+    let head = snap_to_line_end(content, ASSISTANT_PREVIEW_CHARS);
+    let dropped = content.len().saturating_sub(head.len());
+    format!("[assistant] {head}... [assistant turn truncated, {dropped} chars masked]")
+}
+
+/// Collapse runs of byte-identical consecutive lines into a single line with an
+/// `(xN)` suffix. Turns repetitive call/read sequences ("looked at X 4 times")
+/// into a count instead of N verbatim copies.
+fn collapse_repeats(lines: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut run = 0usize;
+    for line in lines {
+        if out
+            .last()
+            .is_some_and(|prev| strip_repeat_suffix(prev) == line)
+        {
+            run += 1;
+            let base =
+                strip_repeat_suffix(out.last().expect("run implies a last line")).to_string();
+            *out.last_mut().expect("run implies a last line") = format!("{base} (x{})", run + 1);
+        } else {
+            run = 0;
+            out.push(line);
+        }
+    }
+    out
+}
+
+fn strip_repeat_suffix(line: &str) -> &str {
+    line.rfind(" (x")
+        .filter(|_| line.ends_with(')'))
+        .map(|idx| &line[..idx])
+        .unwrap_or(line)
+}
+
 /// Deterministic observation-mask compaction.
 #[cfg(test)]
 pub(crate) fn observation_mask_compaction(
     old_messages: &[serde_json::Value],
     archived_count: usize,
 ) -> String {
-    observation_mask_compaction_with_callback(old_messages, archived_count, None)
+    observation_mask_compaction_with_callback(
+        old_messages,
+        archived_count,
+        None,
+        DEFAULT_RECAP_BUDGET_BYTES,
+    )
+    .0
 }
 
+/// Test-only accessor exposing the recap body together with its
+/// [`RecapMetrics`] and taking an explicit byte budget.
+#[cfg(test)]
+pub(crate) fn observation_mask_compaction_for_test(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    budget_bytes: usize,
+) -> (String, RecapMetrics) {
+    observation_mask_compaction_with_callback(old_messages, archived_count, None, budget_bytes)
+}
+
+/// Build the observation-mask recap body under `budget_bytes`.
+///
+/// Contract (harn#4731):
+///   - A single header line names how many messages were archived.
+///   - The most-recent *prior* recap in the archive window is carried forward
+///     once, bounded to [`PRIOR_RECAP_CARRY_CAP`], and never re-expanded, so
+///     recaps do not compound across successive compactions.
+///   - The remaining budget is spent NEWEST-first on load-bearing observations
+///     (tool results — verify/test/build outcomes and the errors that preceded
+///     edits, preserved by [`default_mask_tool_result`]) rather than on verbatim
+///     assistant call replay, which is reduced to a short preview.
+///   - Pinned `[no-compact]` grounding is always kept (already bounded to
+///     [`MAX_PINNED_SEGMENTS`]).
+///   - Overflow past the budget is dropped and summarized in one trailing
+///     masked-marker line; repetitive identical lines collapse to `(xN)`.
 fn observation_mask_compaction_with_callback(
     old_messages: &[serde_json::Value],
     archived_count: usize,
     mask_results: Option<&[Option<String>]>,
-) -> String {
-    let mut parts = Vec::new();
-    parts.push(format!(
-        "[auto-compacted {archived_count} older messages via observation masking]"
-    ));
-    // Pin the agent's most-recent live grounding: any archived body carrying
-    // the host's `[no-compact]` marker (the current file view / edited window)
-    // survives masking verbatim, bounded to the latest MAX_PINNED_SEGMENTS so a
-    // long session's stale snapshots still compact.
+    budget_bytes: usize,
+) -> (String, RecapMetrics) {
+    let header =
+        format!("[auto-compacted {archived_count} older messages via observation masking]");
     let pinned = latest_pinned_indices(old_messages.iter(), |msg| {
         msg.get("content").and_then(|v| v.as_str())
     });
-    for (idx, msg) in old_messages.iter().enumerate() {
+    // Carry forward only the single most-recent prior recap; older recaps in the
+    // window are already folded into it and compact as ordinary text.
+    let prior_recap_idx = old_messages
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, msg)| {
+            msg.get("content")
+                .and_then(|v| v.as_str())
+                .is_some_and(is_prior_recap)
+        })
+        .map(|(idx, _)| idx);
+
+    let mut metrics = RecapMetrics {
+        budget_bytes,
+        ..RecapMetrics::default()
+    };
+    // Render newest-first so the budget lands on the most decision-relevant tail;
+    // reverse to chronological order for output.
+    let mut rendered_rev: Vec<String> = Vec::new();
+    let mut used = header.len();
+
+    for (idx, msg) in old_messages.iter().enumerate().rev() {
         let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
         let content = msg
             .get("content")
@@ -1119,23 +1274,54 @@ fn observation_mask_compaction_with_callback(
         if content.is_empty() {
             continue;
         }
+
+        if Some(idx) == prior_recap_idx {
+            let carried = snap_to_line_end(content, PRIOR_RECAP_CARRY_CAP);
+            rendered_rev.push(format!("[prior recap] {carried}"));
+            metrics.carried_prior_recap = true;
+            continue;
+        }
+
+        // Pinned grounding is unconditional (and already bounded).
         if pinned.contains(&idx) {
-            parts.push(format!("[{role}] {content}"));
+            rendered_rev.push(format!("[{role}] {content}"));
             continue;
         }
-        if role == "assistant" {
-            parts.push(format!("[assistant] {content}"));
-            continue;
-        }
-        if content_should_preserve(content) {
-            parts.push(format!("[{role}] {content}"));
+
+        let (line, is_result) = if role == "assistant" {
+            (assistant_preview(content), false)
+        } else if content_should_preserve(content) {
+            (format!("[{role}] {content}"), true)
         } else if let Some(Some(custom)) = mask_results.and_then(|r| r.get(idx)) {
-            parts.push(custom.clone());
+            (custom.clone(), true)
         } else {
-            parts.push(default_mask_tool_result(role, content));
+            (default_mask_tool_result(role, content), true)
+        };
+
+        if used + line.len() + 1 > budget_bytes {
+            metrics.dropped_count += 1;
+            continue;
         }
+        used += line.len() + 1;
+        if is_result {
+            metrics.kept_results_count += 1;
+        }
+        rendered_rev.push(line);
     }
-    parts.join("\n")
+
+    let mut body: Vec<String> = rendered_rev.into_iter().rev().collect();
+    body = collapse_repeats(body);
+    let mut parts = vec![header];
+    parts.append(&mut body);
+    if metrics.dropped_count > 0 {
+        parts.push(format!(
+            "[{} older message(s) dropped to fit recap budget]",
+            metrics.dropped_count
+        ));
+    }
+    let summary = parts.join("\n");
+    metrics.recap_bytes = summary.len();
+    (summary, metrics)
 }
 
 /// Invoke the mask_callback to get per-message custom masks.
@@ -1267,10 +1453,16 @@ struct CompactionStrategyInputs<'a> {
     mask_callback: Option<&'a VmValue>,
     summarize_prompt: Option<&'a str>,
     policy: &'a CompactionPolicy,
+    recap_budget_bytes: usize,
 }
 
-/// Apply a single compaction strategy to a list of archived messages.
-async fn apply_compaction_strategy(input: CompactionStrategyInputs<'_>) -> Result<String, VmError> {
+/// Apply a single compaction strategy to a list of archived messages. Returns
+/// the summary text plus [`RecapMetrics`] for the observation-mask strategy
+/// (the only strategy that spends a recap budget); other strategies return
+/// `None`.
+async fn apply_compaction_strategy(
+    input: CompactionStrategyInputs<'_>,
+) -> Result<(String, Option<RecapMetrics>), VmError> {
     let CompactionStrategyInputs {
         strategy,
         old_messages,
@@ -1281,51 +1473,54 @@ async fn apply_compaction_strategy(input: CompactionStrategyInputs<'_>) -> Resul
         mask_callback,
         summarize_prompt,
         policy,
+        recap_budget_bytes,
         ctx,
     } = input;
     match strategy {
-        CompactStrategy::Truncate => Ok(truncate_compaction_summary(old_messages, archived_count)),
-        CompactStrategy::Llm => {
-            llm_compaction_summary(
-                old_messages,
-                archived_count,
-                llm_opts.ok_or_else(|| {
-                    VmError::Runtime(
-                        "LLM transcript compaction requires active LLM call options".to_string(),
-                    )
-                })?,
-                summarize_prompt,
-                policy,
-            )
-            .await
-        }
-        CompactStrategy::Custom => {
-            custom_compaction_summary(
-                ctx,
-                old_messages,
-                archived_count,
-                custom_compactor.ok_or_else(|| {
-                    VmError::Runtime(
-                        "compact_callback is required when compact_strategy is 'custom'"
-                            .to_string(),
-                    )
-                })?,
-                custom_compactor_reminders,
-                policy,
-            )
-            .await
-        }
+        CompactStrategy::Truncate => Ok((
+            truncate_compaction_summary(old_messages, archived_count),
+            None,
+        )),
+        CompactStrategy::Llm => llm_compaction_summary(
+            old_messages,
+            archived_count,
+            llm_opts.ok_or_else(|| {
+                VmError::Runtime(
+                    "LLM transcript compaction requires active LLM call options".to_string(),
+                )
+            })?,
+            summarize_prompt,
+            policy,
+        )
+        .await
+        .map(|summary| (summary, None)),
+        CompactStrategy::Custom => custom_compaction_summary(
+            ctx,
+            old_messages,
+            archived_count,
+            custom_compactor.ok_or_else(|| {
+                VmError::Runtime(
+                    "compact_callback is required when compact_strategy is 'custom'".to_string(),
+                )
+            })?,
+            custom_compactor_reminders,
+            policy,
+        )
+        .await
+        .map(|summary| (summary, None)),
         CompactStrategy::ObservationMask => {
             let mask_results = if let Some(cb) = mask_callback {
                 Some(invoke_mask_callback(ctx, cb, old_messages).await?)
             } else {
                 None
             };
-            Ok(observation_mask_compaction_with_callback(
+            let (summary, metrics) = observation_mask_compaction_with_callback(
                 old_messages,
                 archived_count,
                 mask_results.as_deref(),
-            ))
+                recap_budget_bytes,
+            );
+            Ok((summary, Some(metrics)))
         }
     }
 }
@@ -1333,9 +1528,9 @@ async fn apply_compaction_strategy(input: CompactionStrategyInputs<'_>) -> Resul
 async fn apply_compaction_strategy_with_fallback(
     input: CompactionStrategyInputs<'_>,
     fallback_strategy: Option<&CompactStrategy>,
-) -> Result<(String, CompactStrategy), VmError> {
+) -> Result<(String, CompactStrategy, Option<RecapMetrics>), VmError> {
     match apply_compaction_strategy(input).await {
-        Ok(summary) => Ok((summary, input.strategy.clone())),
+        Ok((summary, metrics)) => Ok((summary, input.strategy.clone(), metrics)),
         Err(primary_error) => {
             let Some(fallback) = fallback_strategy.filter(|fallback| *fallback != input.strategy)
             else {
@@ -1347,7 +1542,7 @@ async fn apply_compaction_strategy_with_fallback(
             };
             apply_compaction_strategy(fallback_input)
                 .await
-                .map(|summary| (summary, fallback.clone()))
+                .map(|(summary, metrics)| (summary, fallback.clone(), metrics))
         }
     }
 }
@@ -1355,6 +1550,7 @@ async fn apply_compaction_strategy_with_fallback(
 pub(crate) struct AutoCompactResult {
     pub summary: String,
     pub strategy: CompactStrategy,
+    pub recap_metrics: Option<RecapMetrics>,
 }
 
 /// Auto-compact a message list in place using two-tier compaction.
@@ -1432,7 +1628,7 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
     // intact.
     clamp_tool_outputs(ctx, messages, config).await?;
 
-    let (mut summary, mut strategy) = apply_compaction_strategy_with_fallback(
+    let (mut summary, mut strategy, mut recap_metrics) = apply_compaction_strategy_with_fallback(
         CompactionStrategyInputs {
             ctx,
             strategy: &config.compact_strategy,
@@ -1444,6 +1640,7 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
             mask_callback: config.mask_callback.as_ref(),
             summarize_prompt: config.summarize_prompt.as_deref(),
             policy: &config.policy,
+            recap_budget_bytes: config.recap_budget_bytes,
         },
         config.fallback_strategy.as_ref(),
     )
@@ -1459,7 +1656,7 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
                 "role": "user",
                 "content": summary,
             })];
-            let (hard_limit_summary, hard_limit_strategy) =
+            let (hard_limit_summary, hard_limit_strategy, hard_limit_metrics) =
                 apply_compaction_strategy_with_fallback(
                     CompactionStrategyInputs {
                         ctx,
@@ -1472,12 +1669,16 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
                         mask_callback: None,
                         summarize_prompt: config.summarize_prompt.as_deref(),
                         policy: &config.policy,
+                        recap_budget_bytes: config.recap_budget_bytes,
                     },
                     config.fallback_strategy.as_ref(),
                 )
                 .await?;
             summary = hard_limit_summary;
             strategy = hard_limit_strategy;
+            // Tier-2 re-summarized the tier-1 recap; its metrics (if any)
+            // describe the delivered body, so they supersede tier-1's.
+            recap_metrics = hard_limit_metrics.or(recap_metrics);
         }
     }
 
@@ -1493,7 +1694,11 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
             "content": summary,
         }),
     );
-    Ok(Some(AutoCompactResult { summary, strategy }))
+    Ok(Some(AutoCompactResult {
+        summary,
+        strategy,
+        recap_metrics,
+    }))
 }
 
 /// Auto-compact a message list in place using two-tier compaction.
