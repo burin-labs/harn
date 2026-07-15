@@ -13,6 +13,10 @@ pub(crate) struct DoctorArgs {
     /// because probes add network round-trips.
     #[arg(long)]
     pub check_providers: bool,
+    /// Deprecated no-op. `harn doctor` stays offline unless
+    /// `--check-providers` is supplied.
+    #[arg(long, conflicts_with = "check_providers")]
+    pub no_network: bool,
     /// Actively `cargo check --target <triple>` every Rustup-installed
     /// target plus the canonical Linux/macOS/Windows/WASM triples. Off
     /// by default because each probe spawns Cargo.

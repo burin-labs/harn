@@ -300,6 +300,8 @@ has no deterministic equivalent — you have two options:
 Real subprocess tests — those that spawn `harn` as a child process, send signals,
 or read real file output — belong in files ending `_e2e.rs` or under the
 `crates/harn-cli/tests/` tree that is excluded from the sub-second nextest profile.
+The slow `make test-e2e` target runs that profile with `--run-ignored all`, so
+`#[ignore]` is only an opt-out from the fast suite, not from E2E coverage.
 
 These tests are subject to different rules:
 

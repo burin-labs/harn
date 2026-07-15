@@ -151,7 +151,21 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
         }),
     );
     assert_eq!(init["result"]["agentCapabilities"]["loadSession"], true);
-    assert_eq!(init["result"]["authMethods"], json!([]));
+    assert_eq!(
+        init["result"]["authMethods"],
+        json!([{
+            "id": "none",
+            "type": "agent",
+            "name": "Local (no authentication)",
+            "description": "Connect without credentials. The agent runs locally and accepts the session as an anonymous principal.",
+            "_meta": {
+                "harn": {
+                    "scheme": "none",
+                    "challenge": { "type": "none" }
+                }
+            }
+        }])
+    );
     assert_eq!(
         init["result"]["agentCapabilities"]["mcpCapabilities"],
         json!({
@@ -159,19 +173,22 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
             "sse": true,
         })
     );
-    assert_eq!(
-        init["result"]["agentCapabilities"]["sessionCapabilities"],
-        json!({
-            "close": {},
-            "list": {},
-            "resume": {},
-            "restoreToolCall": {},
-            "cancelToolCall": {},
-        })
-    );
-    assert!(init["result"]["agentCapabilities"]["sessionCapabilities"]
-        .get("fork")
-        .is_none());
+    let session_capabilities = init["result"]["agentCapabilities"]["sessionCapabilities"]
+        .as_object()
+        .expect("sessionCapabilities object");
+    for capability in [
+        "close",
+        "list",
+        "resume",
+        "restoreToolCall",
+        "cancelToolCall",
+    ] {
+        assert!(
+            session_capabilities.contains_key(capability),
+            "missing session capability {capability}: {session_capabilities:?}"
+        );
+    }
+    assert!(!session_capabilities.contains_key("fork"));
 
     let (_, created) = send_request(
         &mut stdin,

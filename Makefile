@@ -124,7 +124,7 @@ test-affected:
 # Runs on schedule (nightly), manually, and on PRs with the `e2e` label.
 # Requires cargo-nextest (no plain `cargo test` fallback for profile support).
 test-e2e:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run --workspace --profile e2e
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run --workspace --profile e2e --run-ignored all
 
 # Run the baseline Cargo workspace test command explicitly.
 test-cargo:

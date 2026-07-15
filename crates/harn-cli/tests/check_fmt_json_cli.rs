@@ -103,14 +103,15 @@ fn check_json_reports_success_and_diagnostics() {
 #[test]
 fn check_reports_bytecode_compile_errors_not_just_type_errors() {
     // `harn check` is a "will this run?" gate: it must catch errors the type
-    // checker does not model but that stop `harn run`. A nested list pattern in
-    // a `match` arm type-checks clean yet fails bytecode compilation, so it
-    // must surface here as a HARN-CMP-001 diagnostic and a failed check.
+    // checker does not model but that stop `harn run`. Interpolation holes are
+    // parsed from string literals during bytecode compilation, so malformed
+    // interpolation must surface here as a HARN-CMP-001 diagnostic and a failed
+    // check.
     let temp = tempfile::TempDir::new().expect("tempdir");
     let script = temp.path().join("main.harn");
     std::fs::write(
         &script,
-        "pipeline main(task) {\n  const xs = [[1, 2]]\n  return match xs {\n    [[a, b]] -> { a + b }\n    _ -> { 0 }\n  }\n}\n",
+        "pipeline main(task) {\n  return \"value ${1 2}\"\n}\n",
     )
     .expect("write script");
 

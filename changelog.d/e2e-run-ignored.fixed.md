@@ -1,0 +1,2 @@
+- Run ignored Harn CLI binary-surface tests in the slow E2E suite.
+- Keep `harn doctor --no-network` as an offline-compatible no-op.
