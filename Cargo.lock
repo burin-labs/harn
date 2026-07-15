@@ -3089,6 +3089,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-cli-aot-gen"
+version = "0.10.18"
+dependencies = [
+ "harn-stdlib",
+ "harn-vm",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "harn-clock"
 version = "0.10.18"
 dependencies = [

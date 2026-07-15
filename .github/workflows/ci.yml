@@ -550,6 +550,7 @@ jobs:
       # that keeps scripts/generated_artifacts.toml in agreement with the
       # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the
       # warm HARN_BIN; pure shell/Python guards stay cheap either way.
+      - run: make check-cli-aot
       - run: make check-receipt-structs
       - run: make check-docs-links
       - run: make check-tree-sitter-keywords

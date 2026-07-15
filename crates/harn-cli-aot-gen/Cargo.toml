@@ -1,0 +1,20 @@
+[package]
+name = "harn-cli-aot-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Repository generator for committed Harn CLI bytecode artifacts"
+publish = false
+
+[dependencies]
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.18" }
+harn-vm = { path = "../harn-vm", version = "=0.10.18", features = ["otel"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+
+[lints]
+workspace = true

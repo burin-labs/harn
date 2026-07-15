@@ -1,20 +1,16 @@
 //! AOT-compiled bytecode for embedded CLI scripts (G7 / harn#2300).
 //!
-//! The build script (`build.rs`) walks [`harn_stdlib::STDLIB_CLI_SCRIPTS`]
-//! at compile time, calls `harn_vm::compile_source` on each script, and
-//! emits a cache-format `.harnbc` artifact under `$OUT_DIR/cli-bytecode/`.
-//! The generated table is `include!`d here so each entry is a static
-//! `&[u8]` baked into the binary — no I/O, no allocation at lookup time.
+//! `harn-cli-aot-gen` compiles [`harn_stdlib::STDLIB_CLI_SCRIPTS`] into
+//! committed cache-format `.harnbc` artifacts. `build.rs` verifies their
+//! source, artifact, release, and compiler fingerprints. The committed table
+//! included here keeps each entry a static `&[u8]` baked into the binary.
 //!
 //! ## Why this lives in `harn-cli` and not `harn-stdlib`
 //!
-//! The spec for G7 sketches the table living in `harn-stdlib`, but
-//! `harn-vm` (which owns the compiler) already depends on `harn-stdlib`,
-//! so a build-time dep from `harn-stdlib` to `harn-vm` would cycle. The
-//! split-gen-crate workaround (Option A in the issue body) trades one
-//! cycle for an extra workspace member with no real upside since
-//! `harn-cli` is the sole consumer of the lookup. Embedding here keeps
-//! the workspace tree flat and the wiring under one crate.
+//! The generator is a repository-only workspace crate because `harn-vm`
+//! (which owns the compiler) already depends on `harn-stdlib`. Keeping it out
+//! of `harn-cli`'s build dependencies avoids both a dependency cycle and the
+//! resolver-v2 duplicate VM compilation that motivated harn#4665.
 //!
 //! ## How dispatch consumes the table
 //!
@@ -28,7 +24,7 @@
 //! header rejects the artifact and the loader falls back to source — no
 //! crash, no special handling.
 
-include!(concat!(env!("OUT_DIR"), "/cli_bytecode_table.rs"));
+include!("../generated/cli_bytecode_table.rs");
 
 /// Look up the precompiled bytecode for an embedded CLI script by its
 /// registered name (the same name passed to
@@ -46,17 +42,11 @@ mod tests {
     use super::*;
 
     /// Every script registered in `harn-stdlib` should have an AOT
-    /// artifact emitted unless `HARN_SKIP_AOT_CLI_BUILD` was set during
-    /// `cargo build` (e.g. in a hermetic CI environment) or the build
-    /// script recorded an explicit script-level skip reason. Treat the
-    /// whole-build skip as test-skipped rather than failed.
+    /// committed artifact unless the manifest records an explicit
+    /// script-level skip reason.
     #[test]
     fn every_cli_script_has_non_empty_bytecode_when_aot_enabled() {
-        if STDLIB_CLI_SCRIPT_BYTECODE.is_empty() {
-            // Build was run with HARN_SKIP_AOT_CLI_BUILD=1; nothing to
-            // verify here.
-            return;
-        }
+        assert!(!STDLIB_CLI_SCRIPT_BYTECODE.is_empty());
         for script in harn_stdlib::STDLIB_CLI_SCRIPTS {
             if STDLIB_CLI_SCRIPT_BYTECODE_SKIPPED
                 .iter()
@@ -88,9 +78,6 @@ mod tests {
     /// and table/file mismatches in the generated `include_bytes!`.
     #[test]
     fn every_emitted_artifact_starts_with_cache_magic() {
-        if STDLIB_CLI_SCRIPT_BYTECODE.is_empty() {
-            return;
-        }
         for (name, bytes) in STDLIB_CLI_SCRIPT_BYTECODE {
             assert!(
                 bytes.len() >= harn_vm::bytecode_cache::MAGIC.len(),
