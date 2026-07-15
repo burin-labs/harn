@@ -2773,6 +2773,7 @@ fn eval_pack_stats_row(
         case_fingerprint: case.case_fingerprint.clone(),
         harness_config_fingerprint: harness_config_fingerprint.to_string(),
         group,
+        metadata: case.metadata.clone(),
         split,
         trials: trials.len(),
         passes: reliability.passes,

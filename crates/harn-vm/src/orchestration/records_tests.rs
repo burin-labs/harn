@@ -272,6 +272,7 @@ holdout = ["fail-case"]
 id = "pass-case"
 run = "pass.json"
 rubrics = ["status"]
+metadata = { language = "rust", task_family = "test" }
 
 [[cases]]
 id = "fail-case"
@@ -304,6 +305,8 @@ expected = "completed"
     assert_eq!(report.cases[0].split.as_deref(), Some("tune"));
     assert_eq!(report.cases[0].reliability.status, "all-pass");
     assert_eq!(report.cases[0].stats_row.passes, 3);
+    assert_eq!(report.cases[0].stats_row.metadata["language"], "rust");
+    assert_eq!(report.stats_rows[0].metadata["task_family"], "test");
     assert_eq!(report.cases[1].split.as_deref(), Some("holdout"));
     assert_eq!(report.cases[1].reliability.status, "all-fail");
     assert_eq!(report.cases[1].stats_row.fails, 3);

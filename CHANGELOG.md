@@ -13,6 +13,9 @@ keeps condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- Eval-pack statistics rows now retain case metadata, and `std/eval/stats`
+  exposes `axis_breakdown` for deterministic language, task, platform, and
+  other pack-defined breakdowns with explicit unclassified coverage.
 - Resolve the `grok-code-fast-1` alias to xAI's coding model (short `grok-code`/`grok-code-fast` already worked).
 - Added a Hugging Face router catalog row and aliases for Qwen3-Coder 480B A35B.
 - **Filesystem builtins.** Added `append_file_locked` / `harness.fs.append_locked`

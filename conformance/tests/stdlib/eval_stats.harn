@@ -54,6 +54,24 @@ pipeline test(task) {
   assert_eq(realized_trial_cost_usd(0.42, false), 0.42)
   assert_eq(realized_trial_cost_usd(nil, true), nil)
   assert_eq(worst_group(rows), {group: "rust", pass_rate: 0.0, cases: 2})
+  const language_rows = [
+    row("rs-a", "legacy", 4, 4, 0, 0, 1.0) + {metadata: {language: "rust"}},
+    row("py-a", "legacy", 2, 4, 0, 1, 2.0) + {language: "python", metadata: {language: "ignored"}},
+    row("missing", "legacy", 0, 4, 4, 0, 0.0) + {metadata: {language: ["rust"]}},
+  ]
+  const languages = axis_breakdown(language_rows, "language")
+  assert_eq(languages.axis, "language")
+  assert_eq(languages.cases, 3)
+  assert_eq(languages.classified_cases, 2)
+  assert_eq(languages.missing_cases, ["missing"])
+  assert_eq(languages.groups.map({ group -> group.value }), ["python", "rust"])
+  assert_eq(languages.groups[0].macro_pass_at_1, 0.5)
+  assert_eq(languages.groups[0].timeout_rate, 0.25)
+  assert_eq(languages.groups[1].cost_per_solved_usd, 1.0)
+  assert_eq(languages.worst.value, "python")
+  const no_axes = axis_breakdown([], "language")
+  assert_eq(no_axes.groups, [])
+  assert_eq(no_axes.worst, nil)
   const aggregate = aggregate_trials(
     "agg-a",
     [
