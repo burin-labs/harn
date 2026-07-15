@@ -157,7 +157,7 @@ impl BedrockProvider {
             timestamp: Utc::now(),
         })
         .map_err(|error| vm_err(format!("bedrock request signing failed: {error}")))?;
-        let mut req = crate::llm::shared_blocking_client()
+        let mut req = crate::llm::blocking_client_for_base_url(&base_url)
             .post(url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")

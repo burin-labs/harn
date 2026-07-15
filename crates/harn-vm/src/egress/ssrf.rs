@@ -15,6 +15,7 @@
 //! caller's `check_url` pre-check resolved a host to a public IP, the actual
 //! connection can only be made to an address the guard re-validated here.
 
+use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
@@ -35,6 +36,27 @@ pub fn is_disallowed_ip(ip: IpAddr, allow_loopback: bool) -> bool {
     match ip {
         IpAddr::V4(v4) => is_disallowed_ipv4(v4, allow_loopback),
         IpAddr::V6(v6) => is_disallowed_ipv6(v6, allow_loopback),
+    }
+}
+
+/// True when a configured provider endpoint may intentionally target `ip`.
+///
+/// This is narrower than the generic SSRF hatch: configured LLM endpoints may
+/// live on loopback or a private LAN, but link-local/cloud-metadata, multicast,
+/// unspecified, documentation, and other reserved ranges remain blocked.
+pub fn is_configured_provider_local_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private(),
+        IpAddr::V6(v6) => {
+            if v6.is_loopback() {
+                return true;
+            }
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return v4.is_loopback() || v4.is_private();
+            }
+            let segments = v6.segments();
+            (segments[0] & 0xfe00) == 0xfc00
+        }
     }
 }
 
@@ -143,6 +165,7 @@ pub struct GuardedResolver {
     /// `block_private:off`, so it must not start blocking private ranges.
     block_private: bool,
     allow_loopback: bool,
+    allow_private_for_hosts: BTreeSet<String>,
     /// NetPolicy deny CIDR/IP nets; any resolved address inside one is dropped.
     deny_nets: Vec<IpNet>,
     inner: Arc<dyn InnerResolver>,
@@ -153,6 +176,7 @@ impl std::fmt::Debug for GuardedResolver {
         f.debug_struct("GuardedResolver")
             .field("block_private", &self.block_private)
             .field("allow_loopback", &self.allow_loopback)
+            .field("allow_private_for_hosts", &self.allow_private_for_hosts)
             .field("deny_nets", &self.deny_nets)
             .finish_non_exhaustive()
     }
@@ -165,6 +189,7 @@ impl GuardedResolver {
         Self {
             block_private: true,
             allow_loopback,
+            allow_private_for_hosts: BTreeSet::new(),
             deny_nets: Vec::new(),
             inner: Arc::new(GaiInnerResolver),
         }
@@ -176,9 +201,22 @@ impl GuardedResolver {
     /// [`super::current_resolved_ip_rules`] and
     /// [`super::current_ssrf_client_settings`].
     pub fn with_policy(block_private: bool, allow_loopback: bool, rules: &ResolvedIpRules) -> Self {
+        Self::with_policy_and_private_host_allowlist(block_private, allow_loopback, rules, &[])
+    }
+
+    /// Build a guard that also allows exact configured-provider hostnames to
+    /// resolve to loopback/private-LAN addresses. Deny CIDRs still win, and
+    /// metadata/link-local/reserved addresses remain blocked.
+    pub fn with_policy_and_private_host_allowlist(
+        block_private: bool,
+        allow_loopback: bool,
+        rules: &ResolvedIpRules,
+        allow_private_for_hosts: &[String],
+    ) -> Self {
         Self {
             block_private,
             allow_loopback,
+            allow_private_for_hosts: normalize_host_allowlist(allow_private_for_hosts),
             deny_nets: rules.deny.clone(),
             inner: Arc::new(GaiInnerResolver),
         }
@@ -189,6 +227,7 @@ impl GuardedResolver {
         Self {
             block_private: true,
             allow_loopback,
+            allow_private_for_hosts: BTreeSet::new(),
             deny_nets: Vec::new(),
             inner,
         }
@@ -204,10 +243,23 @@ impl GuardedResolver {
         Self {
             block_private,
             allow_loopback,
+            allow_private_for_hosts: BTreeSet::new(),
             deny_nets,
             inner,
         }
     }
+}
+
+fn normalize_host_allowlist(hosts: &[String]) -> BTreeSet<String> {
+    hosts
+        .iter()
+        .filter_map(|host| normalize_host(host))
+        .collect()
+}
+
+fn normalize_host(host: &str) -> Option<String> {
+    let normalized = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 /// Error returned when DNS resolution yields only disallowed addresses.
@@ -237,6 +289,7 @@ impl Resolve for GuardedResolver {
         let host = name.as_str().to_string();
         let block_private = self.block_private;
         let allow_loopback = self.allow_loopback;
+        let allow_private_for_hosts = self.allow_private_for_hosts.clone();
         let deny_nets = self.deny_nets.clone();
         let inner = self.inner.clone();
         Box::pin(async move {
@@ -248,6 +301,8 @@ impl Resolve for GuardedResolver {
                 .await
                 .map_err(|join_err| Box::new(join_err) as BoxError)?;
             let resolved = lookup.map_err(|io_err| Box::new(io_err) as BoxError)?;
+            let private_allowed_for_host =
+                normalize_host(&host).is_some_and(|host| allow_private_for_hosts.contains(&host));
             // Resolve-once-and-pin: filter the SAME address set reqwest will
             // connect to through both the SSRF private-range block and the
             // NetPolicy deny nets. No second resolution happens between here and
@@ -257,7 +312,11 @@ impl Resolve for GuardedResolver {
                 .into_iter()
                 .filter(|addr| {
                     let ip = addr.ip();
-                    let ssrf_blocked = block_private && is_disallowed_ip(ip, allow_loopback);
+                    let provider_local_allowed =
+                        private_allowed_for_host && is_configured_provider_local_ip(ip);
+                    let ssrf_blocked = block_private
+                        && is_disallowed_ip(ip, allow_loopback)
+                        && !provider_local_allowed;
                     let deny_blocked = deny_nets.iter().any(|net| net.contains(&ip));
                     !ssrf_blocked && !deny_blocked
                 })
@@ -475,6 +534,71 @@ mod tests {
             deny_nets,
             Arc::new(StubResolver { addrs }),
         )
+    }
+
+    fn stub_with_private_host_allow(allow_hosts: &[String], addrs: &[&str]) -> GuardedResolver {
+        let addrs = addrs
+            .iter()
+            .map(|s| SocketAddr::new(s.parse().unwrap(), 0))
+            .collect();
+        GuardedResolver {
+            block_private: true,
+            allow_loopback: false,
+            allow_private_for_hosts: normalize_host_allowlist(allow_hosts),
+            deny_nets: Vec::new(),
+            inner: Arc::new(StubResolver { addrs }),
+        }
+    }
+
+    async fn resolve_named_host(
+        resolver: &GuardedResolver,
+        host: &str,
+    ) -> Result<Vec<SocketAddr>, String> {
+        let name: Name = host.parse().unwrap();
+        resolver
+            .resolve(name)
+            .await
+            .map(|addrs| addrs.collect())
+            .map_err(|e| e.to_string())
+    }
+
+    #[tokio::test]
+    async fn guarded_resolver_private_host_allowlist_allows_configured_local_endpoint() {
+        let resolver = stub_with_private_host_allow(
+            &[String::from("tornadough.local")],
+            &["127.0.0.1", "192.168.86.250", "fc00::1"],
+        );
+        let addrs = resolve_named_host(&resolver, "tornadough.local")
+            .await
+            .expect("configured provider host may resolve to local inference addresses");
+        let ips: Vec<IpAddr> = addrs.into_iter().map(|addr| addr.ip()).collect();
+        assert!(ips.contains(&v4("127.0.0.1")));
+        assert!(ips.contains(&v4("192.168.86.250")));
+        assert!(ips.contains(&v4("fc00::1")));
+    }
+
+    #[tokio::test]
+    async fn guarded_resolver_private_host_allowlist_is_exact_host_only() {
+        let resolver =
+            stub_with_private_host_allow(&[String::from("tornadough.local")], &["192.168.86.250"]);
+        let err = resolve_named_host(&resolver, "other.local")
+            .await
+            .expect_err("non-configured hosts remain SSRF-guarded");
+        assert!(err.contains("other.local"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn guarded_resolver_private_host_allowlist_still_blocks_metadata() {
+        let resolver =
+            stub_with_private_host_allow(&[String::from("tornadough.local")], &["169.254.169.254"]);
+        let err = resolve_named_host(&resolver, "tornadough.local")
+            .await
+            .expect_err("metadata endpoint stays blocked");
+        assert!(err.contains("tornadough.local"), "{err}");
+        assert!(
+            !err.contains("169.254.169.254"),
+            "must not leak address: {err}"
+        );
     }
 
     #[tokio::test]

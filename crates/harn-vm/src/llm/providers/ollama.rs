@@ -219,9 +219,9 @@ impl OllamaProvider {
             .and_then(|provider| provider.completion_endpoint.as_deref())
             .unwrap_or("/api/generate");
         let client = if request.stream {
-            crate::llm::shared_streaming_client().clone()
+            crate::llm::streaming_client_for_base_url(&base_url)
         } else {
-            crate::llm::shared_blocking_client().clone()
+            crate::llm::blocking_client_for_base_url(&base_url)
         };
         let req = client
             .post(format!("{base_url}{endpoint}"))

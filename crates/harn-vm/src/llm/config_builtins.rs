@@ -799,7 +799,7 @@ async fn llm_healthcheck_builtin(
         &provider_name,
         super::ProviderHealthcheckOptions {
             api_key,
-            client: Some(super::shared_utility_client().clone()),
+            client: None,
         },
     )
     .await;

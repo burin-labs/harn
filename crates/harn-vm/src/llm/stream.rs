@@ -12,9 +12,9 @@ pub(crate) async fn vm_stream_llm(
 
     let provider = &opts.provider;
     super::ensure_real_llm_allowed(provider)?;
-    let client = super::shared_streaming_client().clone();
 
     let resolved = ResolvedProvider::resolve(provider);
+    let client = super::streaming_client_for_base_url(&resolved.base_url);
     let is_anthropic = super::provider::provider_uses_anthropic_messages(provider, &opts.model);
     let wire_model = crate::llm_config::wire_model_id(&opts.model);
 

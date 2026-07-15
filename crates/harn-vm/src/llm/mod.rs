@@ -69,25 +69,10 @@ mod trace_builtins;
 pub(crate) mod transcript_seed;
 mod transcript_stats;
 
-use std::sync::OnceLock;
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
 
 pub(crate) use call::snapshot_in_flight_llm_calls;
-
-/// Streaming client: no overall request timeout (per-chunk idle timeout
-/// handles stalls), connection pooling and TLS session reuse.
-pub(crate) fn shared_streaming_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        crate::egress::install_ssrf_guard(client_builder_for_tests(
-            reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(30))
-                .redirect(crate::egress::redirect_policy("llm_streaming_redirect", 10))
-                .pool_max_idle_per_host(4),
-        ))
-        .build()
-        .expect("LLM streaming HTTP client configuration should be valid")
-    })
-}
 
 /// Non-streaming client: 120s request timeout, connection pooling.
 pub(crate) fn shared_blocking_client() -> &'static reqwest::Client {
@@ -120,6 +105,82 @@ pub(crate) fn shared_utility_client() -> &'static reqwest::Client {
         .build()
         .expect("LLM utility HTTP client configuration should be valid")
     })
+}
+
+pub(crate) fn streaming_client_for_base_url(base_url: &str) -> reqwest::Client {
+    static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
+    cached_client_for_base_url(
+        "streaming",
+        base_url,
+        &CLIENTS,
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .redirect(crate::egress::redirect_policy("llm_streaming_redirect", 10))
+            .pool_max_idle_per_host(4),
+    )
+}
+
+pub(crate) fn blocking_client_for_base_url(base_url: &str) -> reqwest::Client {
+    static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
+    cached_client_for_base_url(
+        "blocking",
+        base_url,
+        &CLIENTS,
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_mins(2))
+            .redirect(crate::egress::redirect_policy("llm_blocking_redirect", 10))
+            .pool_max_idle_per_host(4),
+    )
+}
+
+pub(crate) fn utility_client_for_base_url(base_url: &str) -> reqwest::Client {
+    static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
+    cached_client_for_base_url(
+        "utility",
+        base_url,
+        &CLIENTS,
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(15))
+            .redirect(crate::egress::redirect_policy("llm_utility_redirect", 10))
+            .pool_max_idle_per_host(2),
+    )
+}
+
+fn cached_client_for_base_url(
+    kind: &str,
+    base_url: &str,
+    cache: &OnceLock<Mutex<BTreeMap<String, reqwest::Client>>>,
+    builder: reqwest::ClientBuilder,
+) -> reqwest::Client {
+    let allow_hosts = crate::egress::configured_provider_private_allow_host(base_url)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let key = format!(
+        "{kind};{}",
+        crate::egress::ssrf_client_cache_key(&allow_hosts)
+    );
+    let clients = cache.get_or_init(|| Mutex::new(BTreeMap::new()));
+    if let Some(client) = clients
+        .lock()
+        .expect("LLM client cache poisoned")
+        .get(&key)
+        .cloned()
+    {
+        return client;
+    }
+    let client = crate::egress::install_ssrf_guard_with_private_host_allowlist(
+        client_builder_for_tests(builder),
+        &allow_hosts,
+    )
+    .build()
+    .expect("LLM HTTP client configuration should be valid");
+    clients
+        .lock()
+        .expect("LLM client cache poisoned")
+        .insert(key, client.clone());
+    client
 }
 
 #[cfg(test)]

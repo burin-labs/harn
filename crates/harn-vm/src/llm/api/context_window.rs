@@ -91,7 +91,7 @@ fn known_model_context_window(model: &str) -> Option<usize> {
 /// Fetch context window from Ollama's `/api/show` endpoint.
 /// Returns the num_ctx from model parameters, or the default 2048 if not set.
 async fn fetch_ollama_context_window(model: &str, base_url: &str) -> Option<usize> {
-    let client = crate::llm::shared_utility_client();
+    let client = crate::llm::utility_client_for_base_url(base_url);
     let url = format!("{}/api/show", base_url.trim_end_matches('/'));
     let body = serde_json::json!({"name": model});
     // Ollama is typically local — tight per-request timeout so we fail
@@ -128,7 +128,7 @@ async fn fetch_openai_compatible_context_window(
     base_url: &str,
 ) -> Option<usize> {
     let pdef = crate::llm_config::provider_config(provider);
-    let client = crate::llm::shared_utility_client();
+    let client = crate::llm::utility_client_for_base_url(base_url);
     let url = pdef
         .as_ref()
         .and_then(|def| crate::llm::readiness::build_models_url(def).ok())

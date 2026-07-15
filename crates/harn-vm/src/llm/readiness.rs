@@ -164,7 +164,7 @@ pub async fn probe_provider_readiness_with_options(
             None => (None, None),
         });
 
-    let client = super::shared_utility_client();
+    let client = super::utility_client_for_base_url(&base_url);
     let api_key = options
         .api_key_override
         .filter(|value| !value.trim().is_empty())

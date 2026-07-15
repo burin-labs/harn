@@ -93,7 +93,7 @@ impl AzureOpenAiProvider {
         let auth = Self::resolve_auth(&request.api_key)?;
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
-        let mut req = crate::llm::shared_blocking_client()
+        let mut req = crate::llm::blocking_client_for_base_url(&url)
             .post(url)
             .header("Content-Type", "application/json")
             .timeout(std::time::Duration::from_secs(request.resolve_timeout()))

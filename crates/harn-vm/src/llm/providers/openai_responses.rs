@@ -49,7 +49,7 @@ impl OpenAiResponsesProvider {
             RESPONSES_ENDPOINT
         }
         .to_string();
-        let client = crate::llm::shared_blocking_client().clone();
+        let client = crate::llm::blocking_client_for_base_url(&resolved.base_url);
         let req = client
             .post(resolved.url())
             .header("Content-Type", "application/json")
