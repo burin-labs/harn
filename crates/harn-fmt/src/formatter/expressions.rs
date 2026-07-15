@@ -352,9 +352,10 @@ impl Formatter<'_> {
                         throws.as_ref(),
                         body,
                         indent,
+                        node.span.line,
                     )
                 } else {
-                    self.format_arrow_closure(params, body, indent)
+                    self.format_arrow_closure(params, body, indent, node.span.line)
                 }
             }
             Node::EnumConstruct {
@@ -382,9 +383,15 @@ impl Formatter<'_> {
                 );
                 format!("{struct_name} {{{items}}}")
             }
-            Node::DeferStmt { body } => self.format_block_expr("defer {", body, indent),
-            Node::SpawnExpr { body } => self.format_block_expr("spawn {", body, indent),
-            Node::ScopeBlock { body } => self.format_block_expr("scope {", body, indent),
+            Node::DeferStmt { body } => {
+                self.format_block_expr("defer {", body, indent, node.span.line)
+            }
+            Node::SpawnExpr { body } => {
+                self.format_block_expr("spawn {", body, indent, node.span.line)
+            }
+            Node::ScopeBlock { body } => {
+                self.format_block_expr("scope {", body, indent, node.span.line)
+            }
             Node::YieldExpr { value } => {
                 if let Some(val) = value {
                     format!("yield {}", self.format_expr(val, indent))
@@ -407,13 +414,23 @@ impl Formatter<'_> {
             }
             Node::BreakStmt => "break".to_string(),
             Node::ContinueStmt => "continue".to_string(),
-            Node::Block(stmts) => self.format_block_expr("{", stmts, indent),
+            Node::Block(stmts) => self.format_block_expr("{", stmts, indent, node.span.line),
             Node::MatchExpr { value, arms } => {
                 let val = self.format_expr(value, indent);
                 let mut result = format!("match {val} {{\n");
                 let arm_indent = indent + 1;
+                let mut arm_from_line = node.span.line;
                 for arm in arms {
                     let indent_str = "  ".repeat(arm_indent);
+                    // An arm's own leading comments, above its pattern. Nothing
+                    // else claims these: the arm BODY is bounded at the pattern
+                    // precisely so a comment about the arm is not dragged inside
+                    // it, which leaves them for the arm itself to render here.
+                    result.push_str(&self.render_comments_in_range(
+                        arm_from_line + 1,
+                        arm.pattern.span.line,
+                        arm_indent,
+                    ));
                     let pattern = self.format_expr(&arm.pattern, arm_indent);
                     let guard_str = if let Some(ref guard) = arm.guard {
                         format!(" if {}", self.format_expr(guard, arm_indent))
@@ -436,10 +453,22 @@ impl Formatter<'_> {
                     } else {
                         result.push_str(&indent_str);
                         result.push_str(&format!("{pattern}{guard_str} -> {{\n"));
-                        result.push_str(&self.format_body_string(&arm.body, arm_indent + 1));
+                        // Bound at the arm's own pattern, not the `match`: a comment
+                        // ABOVE the pattern documents the arm, not its first statement.
+                        result.push_str(&self.format_body_string(
+                            &arm.body,
+                            arm_indent + 1,
+                            arm.pattern.span.end_line,
+                        ));
                         result.push_str(&indent_str);
                         result.push_str("}\n");
                     }
+                    // The next arm's leading comments start after this one ends.
+                    arm_from_line = arm
+                        .body
+                        .last()
+                        .map(|n| n.span.end_line)
+                        .unwrap_or(arm.pattern.span.end_line);
                 }
                 let close = "  ".repeat(indent);
                 result.push_str(&close);
@@ -451,7 +480,12 @@ impl Formatter<'_> {
                 else_body,
             } => {
                 let cond = self.format_expr(condition, indent);
-                self.format_block_expr(&format!("guard {cond} else {{"), else_body, indent)
+                self.format_block_expr(
+                    &format!("guard {cond} else {{"),
+                    else_body,
+                    indent,
+                    node.span.line,
+                )
             }
             Node::RequireStmt { condition, message } => {
                 let cond = self.format_expr(condition, indent);
@@ -463,14 +497,14 @@ impl Formatter<'_> {
             }
             Node::DeadlineBlock { duration, body } => {
                 let dur = self.format_expr(duration, indent);
-                self.format_block_expr(&format!("deadline {dur} {{"), body, indent)
+                self.format_block_expr(&format!("deadline {dur} {{"), body, indent, node.span.line)
             }
             Node::MutexBlock { key, body } => match key {
                 Some(key_expr) => {
                     let k = self.format_expr(key_expr, indent);
-                    self.format_block_expr(&format!("mutex({k}) {{"), body, indent)
+                    self.format_block_expr(&format!("mutex({k}) {{"), body, indent, node.span.line)
                 }
-                None => self.format_block_expr("mutex {", body, indent),
+                None => self.format_block_expr("mutex {", body, indent, node.span.line),
             },
             Node::IfElse {
                 condition,
@@ -480,7 +514,7 @@ impl Formatter<'_> {
                 let cond = self.format_expr(condition, indent);
                 let inner = indent + 1;
                 let mut result = format!("if {cond} {{\n");
-                result.push_str(&self.format_body_string(then_body, inner));
+                result.push_str(&self.format_body_string(then_body, inner, node.span.line));
                 let close = "  ".repeat(indent);
                 if let Some(eb) = else_body {
                     // Render `else if` as a single chain when the else
@@ -493,7 +527,11 @@ impl Formatter<'_> {
                     } else {
                         result.push_str(&close);
                         result.push_str("} else {\n");
-                        result.push_str(&self.format_body_string(eb, inner));
+                        result.push_str(&self.format_body_string(
+                            eb,
+                            inner,
+                            Self::block_from_line_after(then_body, node.span.line),
+                        ));
                         result.push_str(&close);
                         result.push('}');
                     }
@@ -510,15 +548,20 @@ impl Formatter<'_> {
             } => {
                 let pat = format_pattern(pattern);
                 let iter_str = self.format_expr(iterable, indent);
-                self.format_block_expr(&format!("for {pat} in {iter_str} {{"), body, indent)
+                self.format_block_expr(
+                    &format!("for {pat} in {iter_str} {{"),
+                    body,
+                    indent,
+                    node.span.line,
+                )
             }
             Node::WhileLoop { condition, body } => {
                 let cond = self.format_expr(condition, indent);
-                self.format_block_expr(&format!("while {cond} {{"), body, indent)
+                self.format_block_expr(&format!("while {cond} {{"), body, indent, node.span.line)
             }
             Node::Retry { count, body } => {
                 let cnt = self.format_expr(count, indent);
-                self.format_block_expr(&format!("retry {cnt} {{"), body, indent)
+                self.format_block_expr(&format!("retry {cnt} {{"), body, indent, node.span.line)
             }
             Node::CostRoute { options, body } => {
                 let inner = indent + 1;
@@ -532,7 +575,7 @@ impl Formatter<'_> {
                 if !options.is_empty() && !body.is_empty() {
                     result.push('\n');
                 }
-                result.push_str(&self.format_body_string(body, inner));
+                result.push_str(&self.format_body_string(body, inner, node.span.line));
                 result.push_str(&close);
                 result.push('}');
                 result
@@ -548,23 +591,31 @@ impl Formatter<'_> {
                 let inner = indent + 1;
                 let close = "  ".repeat(indent);
                 let mut result = String::from("try {\n");
-                result.push_str(&self.format_body_string(body, inner));
+                result.push_str(&self.format_body_string(body, inner, node.span.line));
                 if *has_catch {
                     let catch_param = format_catch_param(error_var, error_type);
                     result.push_str(&close);
                     result.push_str(&format!("}} catch{catch_param} {{\n"));
-                    result.push_str(&self.format_body_string(catch_body, inner));
+                    result.push_str(&self.format_body_string(
+                        catch_body,
+                        inner,
+                        Self::block_from_line_after(body, node.span.line),
+                    ));
                 }
                 if let Some(fb) = finally_body {
                     result.push_str(&close);
                     result.push_str("} finally {\n");
-                    result.push_str(&self.format_body_string(fb, inner));
+                    result.push_str(&self.format_body_string(
+                        fb,
+                        inner,
+                        Self::block_from_line_after(catch_body, node.span.line),
+                    ));
                 }
                 result.push_str(&close);
                 result.push('}');
                 result
             }
-            Node::TryExpr { body } => self.format_block_expr("try {", body, indent),
+            Node::TryExpr { body } => self.format_block_expr("try {", body, indent, node.span.line),
             Node::Parallel {
                 mode,
                 expr,
@@ -592,7 +643,7 @@ impl Formatter<'_> {
                 } else {
                     format!("{keyword} {e}{options_clause} {{")
                 };
-                let mut formatted = self.format_block_expr(&opening, body, indent);
+                let mut formatted = self.format_block_expr(&opening, body, indent, node.span.line);
                 if matches!(mode, ParallelMode::EachStream) {
                     formatted.push_str(" as stream");
                 }
@@ -627,7 +678,7 @@ impl Formatter<'_> {
                     where_clauses,
                     indent,
                 );
-                self.format_block_expr(&format!("{sig} {{"), body, indent)
+                self.format_block_expr(&format!("{sig} {{"), body, indent, node.span.line)
             }
             Node::ToolDecl {
                 name,
@@ -661,6 +712,7 @@ impl Formatter<'_> {
                     &format!("{pub_prefix}tool {name}({params_str}){ret}{throws_str} {{"),
                     &effective_body,
                     indent,
+                    node.span.line,
                 )
             }
             Node::SkillDecl {
@@ -746,20 +798,24 @@ impl Formatter<'_> {
                 for case in cases {
                     let ch = self.format_expr(&case.channel, case_indent);
                     result.push_str(&format!("{case_pad}{} from {ch} {{\n", case.variable));
-                    result.push_str(&self.format_body_string(&case.body, body_indent));
+                    result.push_str(&self.format_body_string(
+                        &case.body,
+                        body_indent,
+                        case.channel.span.end_line,
+                    ));
                     result.push_str(&case_pad);
                     result.push_str("}\n");
                 }
                 if let Some((dur, body)) = timeout {
                     let d = self.format_expr(dur, case_indent);
                     result.push_str(&format!("{case_pad}timeout {d} {{\n"));
-                    result.push_str(&self.format_body_string(body, body_indent));
+                    result.push_str(&self.format_body_string(body, body_indent, dur.span.end_line));
                     result.push_str(&case_pad);
                     result.push_str("}\n");
                 }
                 if let Some(body) = default_body {
                     result.push_str(&format!("{case_pad}default {{\n"));
-                    result.push_str(&self.format_body_string(body, body_indent));
+                    result.push_str(&self.format_body_string(body, body_indent, node.span.line));
                     result.push_str(&case_pad);
                     result.push_str("}\n");
                 }
@@ -794,9 +850,18 @@ impl Formatter<'_> {
         }
     }
 
-    fn format_arrow_closure(&self, params: &[TypedParam], body: &[SNode], indent: usize) -> String {
+    fn format_arrow_closure(
+        &self,
+        params: &[TypedParam],
+        body: &[SNode],
+        indent: usize,
+        block_from_line: usize,
+    ) -> String {
         let params_str = format_typed_params(params);
-        if body.len() == 1 && is_simple_expr(&body[0]) {
+        if body.len() == 1
+            && is_simple_expr(&body[0])
+            && !self.body_carries_comment(body, block_from_line)
+        {
             let expr = self.format_expr(&body[0], indent);
             if params.is_empty() {
                 format!("{{ -> {expr} }}")
@@ -809,7 +874,7 @@ impl Formatter<'_> {
             } else {
                 format!("{{ {params_str} ->")
             };
-            self.format_block_expr(&opening, body, indent)
+            self.format_block_expr(&opening, body, indent, block_from_line)
         }
     }
 
@@ -820,6 +885,7 @@ impl Formatter<'_> {
         throws: Option<&TypeExpr>,
         body: &[SNode],
         indent: usize,
+        block_from_line: usize,
     ) -> String {
         let params_str = format_typed_params(params);
         let return_str = return_type
@@ -828,7 +894,10 @@ impl Formatter<'_> {
         let throws_str = throws
             .map(|ty| format!(" throws {}", format_type_expr(ty)))
             .unwrap_or_default();
-        if body.len() == 1 && is_simple_expr(&body[0]) {
+        if body.len() == 1
+            && is_simple_expr(&body[0])
+            && !self.body_carries_comment(body, block_from_line)
+        {
             let expr = self.format_expr(&body[0], indent);
             format!("fn({params_str}){return_str}{throws_str} {{ {expr} }}")
         } else {
@@ -836,6 +905,7 @@ impl Formatter<'_> {
                 &format!("fn({params_str}){return_str}{throws_str} {{"),
                 body,
                 indent,
+                block_from_line,
             )
         }
     }

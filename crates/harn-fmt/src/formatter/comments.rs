@@ -8,11 +8,31 @@ impl Formatter<'_> {
     /// them and no non-doc-comment line interleaved) and rendered as a
     /// canonical `/** */` block.
     pub(crate) fn emit_comments_for_line(&mut self, line: usize) {
+        let indent_cols = self.indent * 2;
+        for rendered in self.comment_lines_for_line(line, indent_cols) {
+            self.writeln(&rendered);
+        }
+    }
+
+    /// Render the comments anchored to `line` into finished output lines (no
+    /// indent applied) and mark them claimed. Returns empty when the line has
+    /// no comments or they were already claimed.
+    ///
+    /// This is the single source of truth for how a comment is rendered.
+    /// `emit_comments_for_line` writes the result straight to `self.output`;
+    /// the `&self` string-building paths (`format_body_string`) splice it into
+    /// their own buffer. Both must render identically — a comment's shape must
+    /// not depend on whether its block happens to sit in statement or
+    /// expression position.
+    ///
+    /// `indent_cols` is the column the caller will place these at; it only
+    /// affects whether a one-line doc block fits the compact `/** x */` form.
+    pub(crate) fn comment_lines_for_line(&self, line: usize, indent_cols: usize) -> Vec<String> {
         if self.emitted_lines.borrow().contains(&line) {
-            return;
+            return Vec::new();
         }
         let Some(comments) = self.comments.get(&line).cloned() else {
-            return;
+            return Vec::new();
         };
         let first_is_doc = comments.first().is_some_and(|c| c.is_doc);
         if first_is_doc {
@@ -79,24 +99,26 @@ impl Formatter<'_> {
                     emitted.insert(*l);
                 }
             }
-            self.emit_doc_block(&body_lines);
-            return;
+            return self.doc_block_lines(&body_lines, indent_cols);
         }
         self.emitted_lines.borrow_mut().insert(line);
-        for c in &comments {
-            if c.is_block {
-                self.writeln(&format!("/*{}*/", c.text));
-            } else {
-                self.writeln(&format!("//{}", c.text));
-            }
-        }
+        comments
+            .iter()
+            .map(|c| {
+                if c.is_block {
+                    format!("/*{}*/", c.text)
+                } else {
+                    format!("//{}", c.text)
+                }
+            })
+            .collect()
     }
 
-    /// Emit a canonical `/** */` doc block from the given body lines.
-    /// If the block is a single non-empty line and the compact form fits
-    /// within `line_width`, emit `<indent>/** <text> */`. Otherwise emit the
-    /// multi-line JSDoc-style form with vertical-aligned stars.
-    pub(crate) fn emit_doc_block(&mut self, body_lines: &[String]) {
+    /// The lines of a canonical `/** */` doc block, rendered for a caller that
+    /// will place them at `indent_cols`. If the block is a single non-empty
+    /// line and the compact form fits `line_width`, that is `/** <text> */`;
+    /// otherwise the multi-line JSDoc-style form with vertical-aligned stars.
+    pub(crate) fn doc_block_lines(&self, body_lines: &[String], indent_cols: usize) -> Vec<String> {
         let mut start = 0;
         while start < body_lines.len() && body_lines[start].trim().is_empty() {
             start += 1;
@@ -107,39 +129,79 @@ impl Formatter<'_> {
         }
         let trimmed: Vec<String> = body_lines[start..end].to_vec();
         if trimmed.is_empty() {
-            self.writeln("/** */");
-            return;
+            return vec!["/** */".to_string()];
         }
         if trimmed.len() == 1 {
             let only = trimmed[0].trim();
             let compact = format!("/** {only} */");
-            let indent_cols = self.indent * 2;
             if indent_cols + compact.len() <= self.line_width {
-                self.writeln(&compact);
-                return;
+                return vec![compact];
             }
         }
-        self.writeln("/**");
+        let mut lines = vec!["/**".to_string()];
         for line in &trimmed {
             if line.trim().is_empty() {
-                self.writeln(" *");
+                lines.push(" *".to_string());
             } else {
-                self.writeln(&format!(" * {}", line.trim_end()));
+                lines.push(format!(" * {}", line.trim_end()));
             }
         }
-        self.writeln(" */");
+        lines.push(" */".to_string());
+        lines
+    }
+
+    /// The source lines in `[from, to)` carrying comments nothing has claimed
+    /// yet. The single scan every claim/render/emit path shares.
+    pub(crate) fn unclaimed_comment_lines_in_range(&self, from: usize, to: usize) -> Vec<usize> {
+        let emitted = self.emitted_lines.borrow();
+        self.comments
+            .keys()
+            .filter(|&&l| l >= from && l < to && !emitted.contains(&l))
+            .copied()
+            .collect()
+    }
+
+    /// Whether any comment in `[from, to)` is still unclaimed.
+    ///
+    /// Non-consuming, because callers use it to DECIDE a layout before
+    /// rendering it: a construct with a compact single-line form has nowhere to
+    /// put a comment, so carrying one must force the block form. Choosing the
+    /// compact form first and discovering the comment afterwards is how a
+    /// comment ends up with no home and escapes to the next declaration.
+    pub(crate) fn has_unclaimed_comments_in_range(&self, from: usize, to: usize) -> bool {
+        !self.unclaimed_comment_lines_in_range(from, to).is_empty()
+    }
+
+    /// Render the unclaimed standalone comments in `[from, to)` at
+    /// `indent_level`, as finished output lines each ending in `\n`.
+    ///
+    /// The `&self` counterpart of `emit_comments_in_range`, for the
+    /// string-building block paths. A block that never calls this does not
+    /// merely lose its comments: they stay unclaimed, and the next top-level
+    /// item's leading-comment sweep adopts them, so they resurface above an
+    /// unrelated declaration where they are simply false.
+    pub(crate) fn render_comments_in_range(
+        &self,
+        from: usize,
+        to: usize,
+        indent_level: usize,
+    ) -> String {
+        let lines = self.unclaimed_comment_lines_in_range(from, to);
+        let indent_str = "  ".repeat(indent_level);
+        let mut out = String::new();
+        for line in lines {
+            for rendered in self.comment_lines_for_line(line, indent_level * 2) {
+                out.push_str(&indent_str);
+                out.push_str(&rendered);
+                out.push('\n');
+            }
+        }
+        out
     }
 
     /// Emit any standalone comments whose line is between `from` and `to` (exclusive).
     pub(crate) fn emit_comments_in_range(&mut self, from: usize, to: usize) {
-        let lines: Vec<usize> = {
-            let emitted = self.emitted_lines.borrow();
-            self.comments
-                .keys()
-                .filter(|&&l| l >= from && l < to && !emitted.contains(&l))
-                .copied()
-                .collect()
-        };
+        let lines = self.unclaimed_comment_lines_in_range(from, to);
         for line in lines {
             self.emit_comments_for_line(line);
         }
@@ -153,14 +215,7 @@ impl Formatter<'_> {
     /// range — callers use this to ensure exactly one blank line follows the
     /// last header before the next item.
     pub(crate) fn emit_top_level_comments_in_range(&mut self, from: usize, to: usize) -> bool {
-        let lines: Vec<usize> = {
-            let emitted = self.emitted_lines.borrow();
-            self.comments
-                .keys()
-                .filter(|&&l| l >= from && l < to && !emitted.contains(&l))
-                .copied()
-                .collect()
-        };
+        let lines = self.unclaimed_comment_lines_in_range(from, to);
         let mut any_section_header = false;
         let mut idx = 0;
         while idx < lines.len() {
@@ -289,14 +344,7 @@ impl Formatter<'_> {
     /// comment sitting between chain segments stays anchored above the
     /// segment below it instead of being orphaned to the end of the program.
     pub(super) fn claim_leading_comments_in_range(&self, from: usize, to: usize) -> Vec<String> {
-        let lines: Vec<usize> = {
-            let emitted = self.emitted_lines.borrow();
-            self.comments
-                .keys()
-                .filter(|&&l| l >= from && l < to && !emitted.contains(&l))
-                .copied()
-                .collect()
-        };
+        let lines = self.unclaimed_comment_lines_in_range(from, to);
         let mut out = Vec::new();
         for line in lines {
             let Some(cs) = self.comments.get(&line) else {

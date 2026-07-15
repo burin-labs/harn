@@ -91,11 +91,43 @@ impl<'a> Formatter<'a> {
     }
 
     /// Inner lines of a block — does NOT include opening/closing braces.
-    /// Trailing same-line comments on each statement are preserved inline.
-    pub(super) fn format_body_string(&self, body: &[SNode], indent_level: usize) -> String {
+    /// Trailing same-line comments on each statement are preserved inline, and
+    /// standalone comments between statements are claimed here.
+    ///
+    /// `block_from_line` is the line the block opens on, so the comments
+    /// leading the FIRST statement can be told apart from the ones that belong
+    /// to whatever precedes the block. Callers with several bodies on one node
+    /// (`try`/`catch`/`finally`, `if`/`else`) may pass the enclosing node's
+    /// line for each: claiming is ordered and idempotent, so each block takes
+    /// only what the blocks before it left behind.
+    pub(super) fn format_body_string(
+        &self,
+        body: &[SNode],
+        indent_level: usize,
+        block_from_line: usize,
+    ) -> String {
         let mut out = String::new();
         let indent_str = "  ".repeat(indent_level);
-        for n in body {
+        for (i, n) in body.iter().enumerate() {
+            // A synthesized node (`Spanned::dummy`, e.g. the `description(...)`
+            // a tool decl splices in) has a zero span: it sits at no source
+            // line, so it anchors no comments and cannot bound a range. Walk
+            // back to the nearest node that really came from the source, or
+            // fall back to the block itself — never to line 0, which would
+            // claim every unclaimed comment in the file above this point.
+            if n.span.line != 0 {
+                let range_start = body[..i]
+                    .iter()
+                    .rev()
+                    .find(|p| p.span.end_line != 0)
+                    .map(|p| p.span.end_line + 1)
+                    .unwrap_or(block_from_line + 1);
+                out.push_str(&self.render_comments_in_range(
+                    range_start,
+                    n.span.line,
+                    indent_level,
+                ));
+            }
             let expr = self.format_expr_or_stmt(n, indent_level);
             out.push_str(&indent_str);
             out.push_str(&expr);
@@ -108,10 +140,41 @@ impl<'a> Formatter<'a> {
         out
     }
 
-    pub(super) fn format_block_expr(&self, opening: &str, body: &[SNode], indent: usize) -> String {
-        let inner = self.format_body_string(body, indent + 1);
+    pub(super) fn format_block_expr(
+        &self,
+        opening: &str,
+        body: &[SNode],
+        indent: usize,
+        block_from_line: usize,
+    ) -> String {
+        let inner = self.format_body_string(body, indent + 1, block_from_line);
         let close = "  ".repeat(indent);
         format!("{opening}\n{inner}{close}}}")
+    }
+
+    /// Whether `body` has a standalone comment above its first statement that
+    /// nothing has claimed. A construct with a compact single-line form
+    /// (`{ x -> x + 1 }`) has nowhere to put one, so it must fall back to the
+    /// block form rather than render a layout the comment cannot live in.
+    pub(super) fn body_carries_comment(&self, body: &[SNode], block_from_line: usize) -> bool {
+        body.first().is_some_and(|first| {
+            first.span.line != 0
+                && self.has_unclaimed_comments_in_range(block_from_line + 1, first.span.line)
+        })
+    }
+
+    /// The line a SECOND-or-later block of the same construct (`else`, `catch`,
+    /// `finally`) can start claiming comments from: everything up to the end of
+    /// the preceding block already belongs to it. Falls back to `default_line`
+    /// when the preceding block is empty or ends in a synthesized (zero-span)
+    /// node that names no source line.
+    pub(super) fn block_from_line_after(preceding: &[SNode], default_line: usize) -> usize {
+        preceding
+            .iter()
+            .rev()
+            .find(|n| n.span.end_line != 0)
+            .map(|n| n.span.end_line)
+            .unwrap_or(default_line)
     }
 
     /// Render a comma-separated sequence at logical depth `indent`. When the
