@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use harn_vm::llm::capabilities::CapabilitiesFile;
 use harn_vm::llm_config::ProvidersConfig;
+use harn_vm::provider_catalog::ProviderCatalogArtifact;
 use serde_json::json;
 
 use crate::cli::{ProvidersExportArgs, ProvidersValidateArgs};
@@ -19,30 +20,15 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
         overlay.config.as_ref(),
         capabilities.as_ref(),
     );
-    let logical = harn_vm::provider_catalog::validate_artifact(&artifact);
-    let mut warnings = logical.warnings.clone();
-    warnings.extend(overlay.diagnostics.clone());
-    let schema = harn_vm::provider_catalog::schema_value();
-    let artifact_value = serde_json::to_value(&artifact)
-        .map_err(|error| format!("failed to serialize provider catalog: {error}"))?;
-    let mut schema_errors = Vec::new();
-    validate_against_schema(&schema, &artifact_value, &mut schema_errors)?;
-    let mut drift = Vec::new();
-    if args.check_artifacts {
-        drift = artifact_drift(
-            &args.artifact_dir,
-            overlay.config.as_ref(),
-            capabilities.as_ref(),
-        )?;
-    }
-
+    let validation = validate_artifact_contract(&artifact)?;
+    let mut warnings = validation.warnings;
+    warnings.extend(overlay.diagnostics);
     if args.json {
         let payload = json!({
-            "valid": logical.errors.is_empty() && schema_errors.is_empty() && drift.is_empty(),
-            "errors": logical.errors,
+            "valid": validation.errors.is_empty() && validation.schema_errors.is_empty(),
+            "errors": validation.errors,
             "warnings": warnings,
-            "schema_errors": schema_errors,
-            "artifact_drift": drift,
+            "schema_errors": validation.schema_errors,
         });
         println!(
             "{}",
@@ -53,21 +39,18 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
         for warning in &warnings {
             eprintln!("warning: {warning}");
         }
-        for error in &logical.errors {
+        for error in &validation.errors {
             eprintln!("error: {error}");
         }
-        for error in &schema_errors {
+        for error in &validation.schema_errors {
             eprintln!("error: {error}");
         }
-        for path in &drift {
-            eprintln!("error: generated artifact is stale or missing: {path}");
-        }
-        if logical.errors.is_empty() && schema_errors.is_empty() && drift.is_empty() {
+        if validation.errors.is_empty() && validation.schema_errors.is_empty() {
             println!("provider catalog validation OK");
         }
     }
 
-    if logical.errors.is_empty() && schema_errors.is_empty() && drift.is_empty() {
+    if validation.errors.is_empty() && validation.schema_errors.is_empty() {
         Ok(())
     } else {
         Err("provider catalog validation failed".to_string())
@@ -75,6 +58,13 @@ pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
 }
 
 pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
+    if args.overlay.is_none() && args.capabilities_overlay.is_none() {
+        return Err(
+            "provider catalog export requires --overlay or --capabilities-overlay; \
+             use `harn provider catalog generate` for checked-in catalog artifacts"
+                .to_string(),
+        );
+    }
     let overlay = load_overlay(args.overlay.as_deref())?;
     let capabilities = load_capabilities_overlay(args.capabilities_overlay.as_deref())?;
     for warning in &overlay.diagnostics {
@@ -182,19 +172,50 @@ fn validate_against_schema(
     Ok(())
 }
 
-struct GeneratedArtifact {
-    relative_path: &'static str,
-    body: String,
+pub(crate) struct ArtifactValidation {
+    pub(crate) errors: Vec<String>,
+    pub(crate) warnings: Vec<String>,
+    pub(crate) schema_errors: Vec<String>,
+}
+
+pub(crate) fn validate_artifact_contract(
+    artifact: &ProviderCatalogArtifact,
+) -> Result<ArtifactValidation, String> {
+    let logical = harn_vm::provider_catalog::validate_artifact(artifact);
+    let schema = harn_vm::provider_catalog::schema_value();
+    let artifact_value = serde_json::to_value(artifact)
+        .map_err(|error| format!("failed to serialize provider catalog: {error}"))?;
+    let mut schema_errors = Vec::new();
+    validate_against_schema(&schema, &artifact_value, &mut schema_errors)?;
+    Ok(ArtifactValidation {
+        errors: logical.errors,
+        warnings: logical.warnings,
+        schema_errors,
+    })
+}
+
+pub(crate) struct GeneratedArtifact {
+    pub(crate) relative_path: &'static str,
+    pub(crate) body: String,
 }
 
 fn generated_artifacts(
     overlay: Option<&ProvidersConfig>,
     capabilities: Option<&CapabilitiesFile>,
 ) -> Result<Vec<GeneratedArtifact>, String> {
+    generated_artifacts_from_artifact(&harn_vm::provider_catalog::artifact_embedded(
+        overlay,
+        capabilities,
+    ))
+}
+
+pub(crate) fn generated_artifacts_from_artifact(
+    artifact: &ProviderCatalogArtifact,
+) -> Result<Vec<GeneratedArtifact>, String> {
     Ok(vec![
         GeneratedArtifact {
             relative_path: "provider-catalog.json",
-            body: harn_vm::provider_catalog::artifact_json_embedded(overlay, capabilities)
+            body: artifact_json(artifact)
                 .map_err(|error| format!("failed to generate catalog JSON: {error}"))?,
         },
         GeneratedArtifact {
@@ -208,18 +229,17 @@ fn generated_artifacts(
         },
         GeneratedArtifact {
             relative_path: "HarnProviderCatalog.swift",
-            body: harn_vm::provider_catalog::swift_binding_embedded(overlay, capabilities)
+            body: harn_vm::provider_catalog::swift_binding()
                 .map_err(|error| format!("failed to generate Swift binding: {error}"))?,
         },
     ])
 }
 
-fn artifact_drift(
-    dir: &Path,
-    overlay: Option<&ProvidersConfig>,
-    capabilities: Option<&CapabilitiesFile>,
-) -> Result<Vec<String>, String> {
-    artifact_drift_from(dir, &generated_artifacts(overlay, capabilities)?)
+fn artifact_json(artifact: &ProviderCatalogArtifact) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(artifact).map(|mut text| {
+        text.push('\n');
+        text
+    })
 }
 
 fn artifact_drift_from(dir: &Path, artifacts: &[GeneratedArtifact]) -> Result<Vec<String>, String> {
@@ -232,6 +252,13 @@ fn artifact_drift_from(dir: &Path, artifacts: &[GeneratedArtifact]) -> Result<Ve
         }
     }
     Ok(drift)
+}
+
+pub(crate) fn artifact_drift_from_generated(
+    dir: &Path,
+    artifacts: &[GeneratedArtifact],
+) -> Result<Vec<String>, String> {
+    artifact_drift_from(dir, artifacts)
 }
 
 #[cfg(test)]

@@ -194,45 +194,13 @@ pre_commit = false
 pre_push = false
 
 [[artifact]]
-id = "provider-config"
-description = "Generated embedded provider/model TOML snapshot, built from small catalog source fragments."
-gen = "gen-provider-config"
-check = "check-provider-config"
-outputs = ["crates/harn-vm/src/llm/providers.toml"]
-sources = [
-  "crates/harn-vm/src/llm/catalog_sources/",
-  "crates/harn-cli/src/cli/providers.rs",
-  "crates/harn-cli/src/commands/providers.rs",
-  "crates/harn-vm/src/llm_config.rs",
-]
-ci = false
-make_all = true
-pre_commit = false
-pre_push = false
-
-[[artifact]]
-id = "provider-capabilities"
-description = "Generated embedded provider capability TOML snapshot, built from small capability source fragments."
-gen = "gen-provider-capabilities"
-check = "check-provider-capabilities"
-outputs = ["crates/harn-vm/src/llm/capabilities.toml"]
-sources = [
-  "crates/harn-vm/src/llm/capability_sources/",
-  "crates/harn-cli/src/cli/providers.rs",
-  "crates/harn-cli/src/commands/providers.rs",
-  "crates/harn-vm/src/llm/capabilities.rs",
-]
-ci = false
-make_all = true
-pre_commit = false
-pre_push = false
-
-[[artifact]]
 id = "provider-catalog"
-description = "Checked-in provider/model catalog JSON + schema + downstream type bindings, exported from the live ProviderCatalog."
+description = "Checked-in provider/model catalog TOML, capability TOML, JSON, schema, and downstream type bindings generated from one source-fragment graph."
 gen = "gen-provider-catalog"
 check = "check-provider-catalog"
 outputs = [
+  "crates/harn-vm/src/llm/providers.toml",
+  "crates/harn-vm/src/llm/capabilities.toml",
   "spec/provider-catalog/provider-catalog.json",
   "spec/provider-catalog/provider-catalog.schema.json",
   "spec/provider-catalog/harn-provider-catalog.d.ts",
@@ -240,10 +208,11 @@ outputs = [
 ]
 sources = [
   "crates/harn-vm/src/llm/catalog_sources/",
-  "crates/harn-vm/src/llm/providers.toml",
   "crates/harn-vm/src/llm/capability_sources/",
-  "crates/harn-vm/src/llm/capabilities.toml",
+  "crates/harn-cli/src/cli/providers.rs",
+  "crates/harn-cli/src/commands/providers.rs",
   "crates/harn-vm/src/llm_config.rs",
+  "crates/harn-vm/src/llm/capabilities.rs",
   "crates/harn-vm/src/provider_catalog.rs",
 ]
 ci = true

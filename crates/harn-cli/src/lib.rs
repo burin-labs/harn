@@ -825,15 +825,8 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                         command_error(&error);
                     }
                 }
-                ProviderCatalogCommand::BuildConfig(build_config) => {
-                    if let Err(error) = commands::providers::run_build_config(&build_config) {
-                        command_error(&error);
-                    }
-                }
-                ProviderCatalogCommand::BuildCapabilities(build_capabilities) => {
-                    if let Err(error) =
-                        commands::providers::run_build_capabilities(&build_capabilities)
-                    {
+                ProviderCatalogCommand::Generate(generate) => {
+                    if let Err(error) = commands::providers::run_generate(&generate) {
                         command_error(&error);
                     }
                 }

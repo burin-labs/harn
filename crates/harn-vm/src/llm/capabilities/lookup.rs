@@ -1,9 +1,4 @@
-//! Lookup and user-override facade.
-//!
-//! Owns the thread-local project override slot and the built-in matrix cache,
-//! the override installation/parse entry points, and the public [`lookup`]
-//! functions that resolve a `(provider, model)` pair to a [`Capabilities`]
-//! value via the resolution engine in `super::rule`.
+//! Lookup and user-override facade: owns override slots and public lookup helpers.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -16,16 +11,10 @@ use super::rule::lookup_with;
 use super::BUILTIN_TOML;
 
 thread_local! {
-    /// Per-thread user overrides installed by the CLI at startup. Kept
-    /// thread-local (not process-static) to match the rest of the VM
-    /// state model — the VM is !Send and each VM thread owns its own
-    /// configuration.
+    /// Per-thread user overrides installed by CLI bootstrap.
     pub(super) static USER_OVERRIDES: RefCell<Option<CapabilitiesFile>> = const { RefCell::new(None) };
 }
 
-/// Lazily-parsed built-in rules. The `include_str!` content is a static
-/// constant; parsing it once per process is safe and free of ordering
-/// hazards.
 static BUILTIN: OnceLock<CapabilitiesFile> = OnceLock::new();
 
 pub(super) fn builtin() -> &'static CapabilitiesFile {
@@ -148,7 +137,17 @@ pub fn lookup_with_user_overrides(
     model: &str,
     user_overrides: Option<&CapabilitiesFile>,
 ) -> Capabilities {
-    let mut caps = lookup_with(provider, model, builtin(), user_overrides);
+    finish_lookup(
+        provider,
+        lookup_with(provider, model, builtin(), user_overrides),
+    )
+}
+
+pub fn lookup_with_base_file(provider: &str, model: &str, base: &CapabilitiesFile) -> Capabilities {
+    finish_lookup(provider, lookup_with(provider, model, base, None))
+}
+
+fn finish_lookup(provider: &str, mut caps: Capabilities) -> Capabilities {
     if provider != "openai" && provider != "mock" {
         caps.responses_api = false;
         caps.chat_completions_unsupported = false;

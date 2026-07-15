@@ -5,13 +5,13 @@ catalog. The runtime embeds `../providers.toml`, which is generated from this
 directory by:
 
 ```sh
-harn provider catalog build-config
-harn provider catalog export
+harn provider catalog generate
 ```
 
-Use `harn provider catalog build-config --check` to verify that `../providers.toml`
-matches the fragments. Direct edits to `../providers.toml` are invalid because
-the next generation pass will overwrite them.
+Use `harn provider catalog generate --check` to verify that `../providers.toml`
+and every checked-in provider catalog projection match the fragments. Direct
+edits to `../providers.toml` are invalid because the next generation pass will
+overwrite them.
 
 Fragments use the same `ProvidersConfig` schema as user overrides and package
 manifest `[llm]` sections. File names are sorted lexicographically, so keep

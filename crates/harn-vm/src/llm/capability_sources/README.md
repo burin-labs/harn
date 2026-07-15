@@ -5,13 +5,13 @@ capability matrix. The runtime embeds `../capabilities.toml`, which is generated
 from this directory by:
 
 ```sh
-harn provider catalog build-capabilities
+harn provider catalog generate
 ```
 
-Use `harn provider catalog build-capabilities --check` to verify that
-`../capabilities.toml` matches the fragments. Direct edits to
-`../capabilities.toml` are invalid because the next generation pass will
-overwrite them.
+Use `harn provider catalog generate --check` to verify that
+`../capabilities.toml` and every checked-in provider catalog projection match
+the fragments. Direct edits to `../capabilities.toml` are invalid because the
+next generation pass will overwrite them.
 
 Fragments use the same `CapabilitiesFile` schema as `[capabilities]` project and
 package overlays. File names are sorted lexicographically; keep numeric prefixes

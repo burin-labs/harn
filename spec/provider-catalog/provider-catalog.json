@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "schema": "https://harnlang.com/schemas/provider-catalog.v5.json",
-  "generated_by": "harn provider catalog export",
+  "generated_by": "harn provider catalog generate",
   "providers": [
     {
       "id": "anthropic",
