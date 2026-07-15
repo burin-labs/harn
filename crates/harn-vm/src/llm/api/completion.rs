@@ -66,7 +66,6 @@ async fn vm_call_completion_openai_style(
     suffix: Option<&str>,
 ) -> Result<LlmResult, VmError> {
     let llm_timeout = opts.resolve_timeout();
-    let client = crate::llm::shared_blocking_client().clone();
 
     let pdef = crate::llm_config::provider_config(&opts.provider);
     let base_url = pdef
@@ -77,6 +76,7 @@ async fn vm_call_completion_openai_style(
         .as_ref()
         .and_then(|p| p.completion_endpoint.as_deref())
         .unwrap_or("/completions");
+    let client = crate::llm::blocking_client_for_base_url(&base_url);
 
     let wire_model = crate::llm_config::wire_model_id(&opts.model);
     let mut body = serde_json::json!({
@@ -175,7 +175,6 @@ async fn vm_call_completion_ollama(
     suffix: Option<&str>,
 ) -> Result<LlmResult, VmError> {
     let llm_timeout = opts.resolve_timeout();
-    let client = crate::llm::shared_blocking_client().clone();
     let pdef = crate::llm_config::provider_config(&opts.provider);
     let base_url = pdef
         .as_ref()
@@ -185,6 +184,7 @@ async fn vm_call_completion_ollama(
         .as_ref()
         .and_then(|p| p.completion_endpoint.as_deref())
         .unwrap_or("/api/generate");
+    let client = crate::llm::blocking_client_for_base_url(&base_url);
 
     let mut options = serde_json::Map::new();
     if let Some(temp) = opts.temperature {

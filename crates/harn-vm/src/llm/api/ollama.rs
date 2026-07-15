@@ -194,7 +194,7 @@ pub async fn warm_ollama_model_with_settings(
 ) -> Result<(), String> {
     let base_url = resolve_ollama_base_url(base_url);
     let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
-    let response = crate::llm::shared_utility_client()
+    let response = crate::llm::utility_client_for_base_url(&base_url)
         .post(url)
         .header("Content-Type", "application/json")
         .json(&settings.warmup_body(model))
@@ -381,7 +381,7 @@ pub async fn ollama_readiness(options: OllamaReadinessOptions) -> OllamaReadines
     };
     result.tags_url = tags_url.clone();
 
-    let client = crate::llm::shared_utility_client();
+    let client = crate::llm::utility_client_for_base_url(&base_url);
     let response = match client
         .get(tags_url.clone())
         .timeout(options.tags_timeout)
@@ -584,7 +584,7 @@ pub async fn fetch_ollama_loaded_runners(
     timeout: Duration,
 ) -> Result<Vec<OllamaLoadedRunner>, String> {
     let url = ollama_endpoint_url(base_url, "/api/ps")?;
-    let response = crate::llm::shared_utility_client()
+    let response = crate::llm::utility_client_for_base_url(base_url)
         .get(&url)
         .timeout(timeout)
         .send()
@@ -689,7 +689,7 @@ async fn ollama_warmup(
         body["keep_alive"] = value;
     }
 
-    let client = crate::llm::shared_blocking_client();
+    let client = crate::llm::blocking_client_for_base_url(base_url);
     let response = match client
         .post(url.clone())
         .header("Content-Type", "application/json")

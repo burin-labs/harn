@@ -163,7 +163,7 @@ impl VertexProvider {
         let token = Self::bearer_token(&request.api_key).await?;
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
-        let response = crate::llm::shared_blocking_client()
+        let response = crate::llm::blocking_client_for_base_url(&url)
             .post(url)
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {token}"))

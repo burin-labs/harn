@@ -226,7 +226,7 @@ impl GeminiProvider {
         let wire_model = crate::llm_config::wire_model_id(&request.model);
         let model = wire_model.strip_prefix("models/").unwrap_or(&wire_model);
         let url = format!("{base_url}/v1beta/models/{model}:generateContent");
-        let client = crate::llm::shared_blocking_client().clone();
+        let client = crate::llm::blocking_client_for_base_url(&base_url);
         let req = client
             .post(url)
             .header("Content-Type", "application/json")

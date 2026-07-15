@@ -15,8 +15,13 @@ use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+mod provider_allow;
 pub mod ssrf;
 
+pub use provider_allow::{
+    configured_provider_private_allow_host, install_ssrf_guard_with_private_host_allowlist,
+    ssrf_client_cache_key,
+};
 pub use ssrf::{is_disallowed_ip, GuardedResolver};
 
 pub const HARN_EGRESS_ALLOW_ENV: &str = "HARN_EGRESS_ALLOW";
@@ -538,17 +543,7 @@ pub fn current_resolved_ip_rules() -> ResolvedIpRules {
 /// is honored, so a caller that has opted into loopback (or a local model whose
 /// URL is a literal `127.0.0.1`, which never hits the resolver) keeps working.
 pub fn install_ssrf_guard(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
-    let (block_private, allow_loopback) = current_ssrf_client_settings();
-    let rules = current_resolved_ip_rules();
-    if block_private || !rules.deny.is_empty() {
-        builder.dns_resolver(std::sync::Arc::new(GuardedResolver::with_policy(
-            block_private,
-            allow_loopback,
-            &rules,
-        )))
-    } else {
-        builder
-    }
+    install_ssrf_guard_with_private_host_allowlist(builder, &[])
 }
 
 /// Resolve the effective SSRF mode + loopback hatch given the (optional)

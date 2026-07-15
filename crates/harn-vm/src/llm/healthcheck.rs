@@ -99,15 +99,19 @@ pub async fn run_provider_healthcheck_with_options(
 
     let url = build_healthcheck_url(&def, healthcheck);
     let method = Method::from_bytes(healthcheck.method.as_bytes()).unwrap_or(Method::GET);
+    let base_url = crate::llm_config::resolve_base_url(&def);
     let client = match options.client {
         Some(client) => client,
-        None => match crate::egress::install_ssrf_guard(
+        None => match crate::egress::install_ssrf_guard_with_private_host_allowlist(
             reqwest::Client::builder()
                 .timeout(Duration::from_secs(DEFAULT_HEALTHCHECK_TIMEOUT_SECS))
                 .redirect(crate::egress::redirect_policy(
                     "llm_healthcheck_redirect",
                     5,
                 )),
+            &crate::egress::configured_provider_private_allow_host(&base_url)
+                .into_iter()
+                .collect::<Vec<_>>(),
         )
         .build()
         {
