@@ -31,6 +31,16 @@ printf '%s\n' "$*" >> "$FAKE_HARN_RECORD"
 BIN
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
     ;;
+  "run --quiet --bin harn -- __internal-executable-path")
+    mkdir -p "${CARGO_TARGET_DIR:?}/debug"
+    cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$FAKE_HARN_RECORD"
+BIN
+    chmod +x "$CARGO_TARGET_DIR/debug/harn"
+    printf '%s\n' "$CARGO_TARGET_DIR/debug/harn"
+    ;;
   "metadata --format-version=1 --no-deps")
     python3 - <<'PY'
 import json
@@ -175,18 +185,8 @@ RUSTC_WRAPPER=sccache \
   PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/check_no_rust_prompt_prose.sh"
 
-if [[ "$(grep -c '^args=build --quiet --bin harn$' "$record")" -ne 1 ]]; then
-  echo "check_no_rust_prompt_prose did not build harn exactly once" >&2
-  cat "$record" >&2
-  exit 1
-fi
-if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
-  echo "check_no_rust_prompt_prose did not clear RUSTC_WRAPPER" >&2
-  cat "$record" >&2
-  exit 1
-fi
-if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record"; then
-  echo "check_no_rust_prompt_prose did not clear CARGO_BUILD_RUSTC_WRAPPER" >&2
+if [[ "$(grep -c '^args=run --quiet --bin harn -- __internal-executable-path$' "$record")" -ne 1 ]]; then
+  echo "check_no_rust_prompt_prose did not resolve harn through cargo run exactly once" >&2
   cat "$record" >&2
   exit 1
 fi

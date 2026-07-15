@@ -2,8 +2,6 @@
 set -eu
 
 script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd -P)
-# shellcheck source=scripts/lib/cargo_env.sh
-. "$script_dir/lib/cargo_env.sh"
 
 resolve_harn_bin() {
   if [ -n "${HARN_BIN:-}" ]; then
@@ -11,15 +9,7 @@ resolve_harn_bin() {
     return
   fi
 
-  harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
-  RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER= cargo build --quiet --bin harn
-  target_dir="$(cargo metadata --format-version=1 --no-deps \
-    | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
-  suffix=""
-  case "$(uname -s)" in
-    Windows_NT|MINGW*|MSYS*|CYGWIN*) suffix=".exe" ;;
-  esac
-  printf '%s/debug/harn%s\n' "$target_dir" "$suffix"
+  "$script_dir/harn_bin.sh" --print
 }
 
 harn_bin="$(resolve_harn_bin)"
