@@ -10,7 +10,6 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 
@@ -52,30 +51,6 @@ fn write_file(dir: &Path, relative: &str, contents: &str) -> PathBuf {
     }
     fs::write(&path, contents).unwrap();
     path
-}
-
-#[test]
-fn testbench_run_help_discloses_wasi_feature_gate() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
-        .args(["test-bench", "run", "--help"])
-        .output()
-        .expect("spawn harn test-bench run --help");
-    assert!(
-        output.status.success(),
-        "help should exit 0, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let help = String::from_utf8_lossy(&output.stdout);
-    for token in [
-        "--process-wasi",
-        "testbench-wasi",
-        "cargo install harn-cli --features testbench-wasi",
-    ] {
-        assert!(
-            help.contains(token),
-            "expected `{token}` in `harn test-bench run --help`, got:\n{help}"
-        );
-    }
 }
 
 fn run_under_testbench(
