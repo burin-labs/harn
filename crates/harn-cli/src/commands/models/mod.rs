@@ -5,6 +5,7 @@ pub(crate) mod install;
 pub(crate) mod list;
 pub(crate) mod lora;
 pub(crate) mod recommend;
+mod recommend_sources;
 pub(crate) mod test;
 
 use crate::cli::{ModelsArgs, ModelsCommand};

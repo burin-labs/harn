@@ -6,6 +6,11 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use crate::{cli::ModelsInstallArgs, net};
 
 pub(crate) async fn run(args: ModelsInstallArgs) {
+    if let Some(plan) = gguf_setup_plan_for_selector(&args.model) {
+        print_setup_plan(&plan);
+        return;
+    }
+
     let resolved = harn_vm::llm_config::resolve_model_info(&args.model);
     if resolved.provider != "ollama" {
         if let Some(plan) = setup_plan_for(&args.model, &resolved.provider, &resolved.id) {
@@ -136,6 +141,63 @@ fn setup_plan_for(selector: &str, provider: &str, model_id: &str) -> Option<Setu
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GgufSelector {
+    repo_id: String,
+    quant: Option<String>,
+}
+
+fn gguf_setup_plan_for_selector(selector: &str) -> Option<SetupPlan> {
+    parse_hf_gguf_selector(selector).map(|source| llamacpp_hf_setup_plan(selector, &source))
+}
+
+fn parse_hf_gguf_selector(selector: &str) -> Option<GgufSelector> {
+    let trimmed = selector.trim();
+    let stripped = trimmed.strip_prefix("hf:").unwrap_or(trimmed);
+    let (repo_id, quant) = split_repo_quant(stripped);
+    let mut parts = repo_id.split('/');
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    if owner.is_empty() || repo.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    let repo_lower = repo.to_ascii_lowercase();
+    if !repo_lower.ends_with("-gguf") && !repo_lower.contains("-gguf-") {
+        return None;
+    }
+    Some(GgufSelector {
+        repo_id: repo_id.to_string(),
+        quant: quant.map(str::to_string),
+    })
+}
+
+fn split_repo_quant(selector: &str) -> (&str, Option<&str>) {
+    if let Some((repo, quant)) = selector.rsplit_once(':') {
+        if !repo.is_empty() && !quant.is_empty() && !quant.contains('/') {
+            return (repo, Some(quant));
+        }
+    }
+    (selector, None)
+}
+
+fn llamacpp_hf_setup_plan(selector: &str, source: &GgufSelector) -> SetupPlan {
+    let hf_repo = match &source.quant {
+        Some(quant) => format!("{}:{quant}", source.repo_id),
+        None => source.repo_id.clone(),
+    };
+    SetupPlan {
+        title: "llama.cpp setup",
+        steps: vec![
+            llamacpp_install_step(),
+            format!(
+                "Launch llama-server: `llama-server --hf-repo {hf_repo} --alias {selector} --host 0.0.0.0 --port 8001 --ctx-size 65536 --n-gpu-layers auto --cache-type-k q8_0 --cache-type-v q8_0 --cache-ram 0 --jinja`"
+            ),
+            "Export endpoint: `export LLAMACPP_BASE_URL=http://127.0.0.1:8001`".to_string(),
+            format!("Verify: `harn provider ready llamacpp --model {selector}`"),
+        ],
+    }
+}
+
 fn llamacpp_setup_plan(selector: &str, model_id: &str) -> SetupPlan {
     let model_path = if model_id.contains("qwen3.6") {
         "$HOME/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
@@ -239,6 +301,31 @@ mod tests {
             .iter()
             .any(|step| step.contains("harn provider ready llamacpp")));
         assert!(plan.steps.iter().any(|step| step.contains("--ctx 65536")));
+    }
+
+    #[test]
+    fn gguf_hf_repo_selectors_use_llamacpp_setup_plan() {
+        let plan = gguf_setup_plan_for_selector("unsloth/Qwen3.6-35B-A3B-GGUF")
+            .expect("GGUF Hugging Face repo should be local llama.cpp");
+        assert_eq!(plan.title, "llama.cpp setup");
+        assert!(plan
+            .steps
+            .iter()
+            .any(|step| step.contains("--hf-repo unsloth/Qwen3.6-35B-A3B-GGUF")));
+        assert!(plan
+            .steps
+            .iter()
+            .any(|step| step.contains("harn provider ready llamacpp")));
+    }
+
+    #[test]
+    fn gguf_hf_repo_quant_suffix_is_preserved() {
+        let plan = gguf_setup_plan_for_selector("unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_XL")
+            .expect("GGUF selector with quant should be local llama.cpp");
+        assert!(plan
+            .steps
+            .iter()
+            .any(|step| step.contains("--hf-repo unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_XL")));
     }
 
     #[test]
