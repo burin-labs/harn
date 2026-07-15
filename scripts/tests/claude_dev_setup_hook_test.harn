@@ -1,0 +1,17 @@
+import "../claude_dev_setup_hook.harn"
+
+@test
+pipeline test_claude_dev_setup_cwd_accepts_only_string_cwd(task) {
+  assert_eq(claude_dev_setup_cwd(r#"{"cwd":"/tmp/project"}"#), "/tmp/project")
+  assert_eq(claude_dev_setup_cwd(r#"{"cwd":42}"#), "")
+  assert_eq(claude_dev_setup_cwd(r#"["/tmp/project"]"#), "")
+  assert_eq(claude_dev_setup_cwd("not-json"), "")
+}
+
+@test
+pipeline test_claude_dev_setup_context_round_trips_json_escaping(task) {
+  const message = "Project \"setup\" completed.\nLog: /tmp/a b/setup.log"
+  const parsed = json_parse(claude_dev_setup_context(message))
+  assert_eq(parsed?.hookSpecificOutput?.hookEventName, "SessionStart")
+  assert_eq(parsed?.hookSpecificOutput?.additionalContext, message)
+}
