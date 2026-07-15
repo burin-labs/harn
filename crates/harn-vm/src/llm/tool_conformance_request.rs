@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use super::{probe_tool_registry, ToolProbeMode, TOOL_PROBE_TOOL_NAME};
+use super::{probe_tool_registry, ToolProbeCase, ToolProbeMode, TOOL_PROBE_TOOL_NAME};
 use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
 use crate::llm::capabilities::WireDialect;
 use crate::llm_config;
@@ -9,9 +9,10 @@ pub(super) fn probe_request_body(
     provider: &str,
     model: &str,
     mode: ToolProbeMode,
+    probe_case: ToolProbeCase,
     marker: &str,
 ) -> Result<Value, String> {
-    let payload = probe_request_payload(provider, model, mode, marker)?;
+    let payload = probe_request_payload(provider, model, mode, probe_case, marker)?;
     Ok(provider_compatible_probe_request_body(&payload))
 }
 
@@ -19,6 +20,7 @@ pub(super) fn probe_request_payload(
     provider: &str,
     model: &str,
     mode: ToolProbeMode,
+    probe_case: ToolProbeCase,
     marker: &str,
 ) -> Result<LlmRequestPayload, String> {
     let model_defaults = llm_config::model_params_for_route(provider, model);
@@ -26,9 +28,7 @@ pub(super) fn probe_request_payload(
         |key: &str| -> Option<f64> { model_defaults.get(key).and_then(toml::Value::as_float) };
     let default_int =
         |key: &str| -> Option<i64> { model_defaults.get(key).and_then(toml::Value::as_integer) };
-    let prompt = format!(
-        "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once with value {marker:?}. Do not answer in prose."
-    );
+    let prompt = probe_prompt(probe_case, marker);
     let native_tools =
         crate::llm::tools::vm_tools_to_native(&probe_tool_registry(), provider, model)
             .expect("tool probe registry is static and should convert to native tools");
@@ -98,6 +98,17 @@ pub(super) fn probe_request_payload(
     })
 }
 
+fn probe_prompt(probe_case: ToolProbeCase, marker: &str) -> String {
+    match probe_case {
+        ToolProbeCase::SingleToolCall => format!(
+            "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once with value {marker:?}. Do not answer in prose."
+        ),
+        ToolProbeCase::LargeStringArgument => format!(
+            "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once. The value argument must exactly equal this string, preserving newlines and escapes: {marker:?}. Do not answer in prose."
+        ),
+    }
+}
+
 fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value {
     match payload.provider.as_str() {
         "azure_openai" => {
@@ -140,6 +151,7 @@ mod tests {
             "fireworks",
             "accounts/fireworks/models/gpt-oss-120b",
             ToolProbeMode::NonStreaming,
+            super::super::ToolProbeCase::SingleToolCall,
             super::super::DEFAULT_TOOL_PROBE_MARKER,
         )
         .expect("GPT-OSS probe payload");

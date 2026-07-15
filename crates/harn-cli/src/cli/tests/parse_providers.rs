@@ -1450,7 +1450,6 @@ fn test_parses_provider_ready_args() {
         "http://127.0.0.1:8002",
         "--json",
     ]);
-
     let Command::Provider(provider) = cli.command.unwrap() else {
         panic!("expected provider command");
     };
@@ -1475,7 +1474,6 @@ fn test_parses_provider_probe_args() {
         "--base-url",
         "http://127.0.0.1:11434",
     ]);
-
     let Command::Provider(provider) = cli.command.unwrap() else {
         panic!("expected provider command");
     };
@@ -1485,8 +1483,6 @@ fn test_parses_provider_probe_args() {
     assert_eq!(args.provider, "ollama");
     assert_eq!(args.model.as_deref(), Some("devstral-small-2"));
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
-    // The probe is meant for eval pipelines; JSON output is the default
-    // surface so an aggregator doesn't have to opt in.
     assert!(args.json);
 }
 
@@ -1503,6 +1499,8 @@ fn test_parses_provider_tool_probe_args() {
         "http://127.0.0.1:11434",
         "--mode",
         "non-streaming",
+        "--case",
+        "large_string_argument",
         "--marker",
         "marker",
         "--repeat",
@@ -1510,7 +1508,6 @@ fn test_parses_provider_tool_probe_args() {
         "--response-fixture",
         "fixture.json",
     ]);
-
     let Command::Provider(provider) = cli.command.unwrap() else {
         panic!("expected provider command");
     };
@@ -1521,9 +1518,14 @@ fn test_parses_provider_tool_probe_args() {
     assert_eq!(args.model, "devstral-small-2");
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
     assert!(matches!(args.mode, ProviderToolProbeModeArg::NonStreaming));
+    assert!(matches!(
+        args.probe_case,
+        ProviderToolProbeCaseArg::LargeStringArgument
+    ));
     assert_eq!(args.marker, "marker");
     assert_eq!(args.repeat, 5);
     assert_eq!(args.response_fixture, Some(PathBuf::from("fixture.json")));
+    assert!(!args.dry_run_request);
     assert!(args.json);
 }
 
@@ -1539,7 +1541,6 @@ fn test_parses_provider_tool_scorecard_args() {
         "fireworks.json",
         "--json=false",
     ]);
-
     let Command::Provider(provider) = cli.command.unwrap() else {
         panic!("expected provider command");
     };
@@ -1571,7 +1572,6 @@ fn test_parses_provider_tool_scorecard_plan_args() {
         "anthropic:claude-sonnet-5",
         "--include-batch-manifest",
     ]);
-
     let Command::Provider(provider) = cli.command.unwrap() else {
         panic!("expected provider command");
     };

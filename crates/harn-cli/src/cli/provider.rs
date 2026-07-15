@@ -233,15 +233,22 @@ pub(crate) struct ProviderToolProbeArgs {
     /// Probe only one transport mode instead of both.
     #[arg(long, value_enum, default_value_t = ProviderToolProbeModeArg::Both)]
     pub mode: ProviderToolProbeModeArg,
-    /// Override the marker the model must echo through the tool call.
+    /// Select the fixed micro-case to probe.
+    #[arg(long = "case", value_enum, default_value_t = ProviderToolProbeCaseArg::SingleToolCall)]
+    pub probe_case: ProviderToolProbeCaseArg,
+    /// Override the marker, or marker seed for structured multi-line cases.
     #[arg(long, default_value = harn_vm::llm::tool_conformance::DEFAULT_TOOL_PROBE_MARKER)]
     pub marker: String,
     /// Repeat each live probe mode N times.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=100))]
     pub repeat: u16,
     /// Classify a saved provider response body instead of making a live request.
-    #[arg(long = "response-fixture")]
+    #[arg(long = "response-fixture", conflicts_with = "dry_run_request")]
     pub response_fixture: Option<PathBuf>,
+    /// Print the provider-compatible request body and exit without calling the
+    /// provider. Useful for catalog/request-shape audits during cooldowns.
+    #[arg(long = "dry-run-request")]
+    pub dry_run_request: bool,
     /// Request timeout in seconds for each live probe case.
     #[arg(long, default_value_t = 120)]
     pub timeout_secs: u64,
@@ -304,6 +311,54 @@ pub(crate) enum ProviderToolProbeModeArg {
     Both,
     NonStreaming,
     Streaming,
+}
+
+impl ProviderToolProbeModeArg {
+    pub(crate) fn tool_probe_modes(self) -> Vec<harn_vm::llm::tool_conformance::ToolProbeMode> {
+        use harn_vm::llm::tool_conformance::ToolProbeMode;
+        match self {
+            Self::Both => vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming],
+            Self::NonStreaming => vec![ToolProbeMode::NonStreaming],
+            Self::Streaming => vec![ToolProbeMode::Streaming],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub(crate) enum ProviderToolProbeCaseArg {
+    #[value(name = "single_tool_call", alias = "single-tool-call")]
+    SingleToolCall,
+    #[value(name = "large_string_argument", alias = "large-string-argument")]
+    LargeStringArgument,
+}
+
+impl ProviderToolProbeCaseArg {
+    pub(crate) fn tool_probe_case(self) -> harn_vm::llm::tool_conformance::ToolProbeCase {
+        match self {
+            Self::SingleToolCall => harn_vm::llm::tool_conformance::ToolProbeCase::SingleToolCall,
+            Self::LargeStringArgument => {
+                harn_vm::llm::tool_conformance::ToolProbeCase::LargeStringArgument
+            }
+        }
+    }
+}
+
+impl ProviderToolProbeArgs {
+    pub(crate) fn tool_conformance_probe_options(
+        &self,
+    ) -> harn_vm::llm::tool_conformance::ToolConformanceProbeOptions {
+        let mut options = harn_vm::llm::tool_conformance::ToolConformanceProbeOptions::new(
+            self.provider.clone(),
+            self.model.clone(),
+        );
+        options.base_url = self.base_url.clone();
+        options.modes = self.mode.tool_probe_modes();
+        options.probe_case = self.probe_case.tool_probe_case();
+        options.marker = self.marker.clone();
+        options.repeat = usize::from(self.repeat);
+        options.timeout_secs = self.timeout_secs;
+        options
+    }
 }
 
 /// Surface for `harn provider cache-probe`: classify a saved repeat-run

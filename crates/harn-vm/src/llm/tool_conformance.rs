@@ -16,10 +16,9 @@ use crate::value::VmValue;
 #[path = "tool_conformance_request.rs"]
 mod request;
 use request::probe_request_body;
-#[cfg(test)]
-use request::probe_request_payload;
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
+pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 1;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
 pub const DEFAULT_TOOL_PROBE_MARKER: &str = "harn_tool_probe_marker";
 
@@ -29,6 +28,7 @@ pub struct ToolConformanceProbeOptions {
     pub model: String,
     pub base_url: Option<String>,
     pub modes: Vec<ToolProbeMode>,
+    pub probe_case: ToolProbeCase,
     pub marker: String,
     pub repeat: usize,
     pub timeout_secs: u64,
@@ -41,6 +41,7 @@ impl ToolConformanceProbeOptions {
             model: model.into(),
             base_url: None,
             modes: vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming],
+            probe_case: ToolProbeCase::SingleToolCall,
             marker: DEFAULT_TOOL_PROBE_MARKER.to_string(),
             repeat: 1,
             timeout_secs: 120,
@@ -62,6 +63,53 @@ impl ToolProbeMode {
             Self::Streaming => "streaming",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolProbeCase {
+    #[default]
+    SingleToolCall,
+    LargeStringArgument,
+}
+
+impl ToolProbeCase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SingleToolCall => "single_tool_call",
+            Self::LargeStringArgument => "large_string_argument",
+        }
+    }
+
+    fn expected_value(self, marker: &str) -> String {
+        match self {
+            Self::SingleToolCall => marker.to_string(),
+            Self::LargeStringArgument => format!(
+                "marker={marker}\nquoted=\"value\"\njson={{\"marker\":{marker:?},\"nested\":[1,true]}}\nheredoc=<<EOF\n{marker}\nEOF\nunicode=\\u{{2603}}\\u{{1F680}}\nend"
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestReport {
+    pub schema_version: u32,
+    pub provider: String,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub probe_case: ToolProbeCase,
+    pub tool_name: String,
+    pub marker: String,
+    pub expected_value: String,
+    pub requests: Vec<ToolConformanceRequestCase>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestCase {
+    pub mode: ToolProbeMode,
+    pub request_body: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,8 +168,12 @@ pub struct ToolConformanceReport {
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    #[serde(default)]
+    pub probe_case: ToolProbeCase,
     pub tool_name: String,
     pub marker: String,
+    #[serde(default)]
+    pub expected_value: String,
     pub cases: Vec<ToolConformanceCase>,
     pub tool_calling: ToolCallingConformanceSummary,
 }
@@ -214,6 +266,7 @@ pub async fn run_tool_conformance_probe(
     });
     let mut cases = Vec::new();
     let modes = normalized_modes(&options.modes);
+    let expected_value = options.probe_case.expected_value(&options.marker);
     for _ in 0..options.repeat.max(1) {
         for mode in &modes {
             cases.push(
@@ -222,14 +275,23 @@ pub async fn run_tool_conformance_probe(
                     &model_id,
                     base_url.as_deref(),
                     *mode,
-                    &options.marker,
+                    options.probe_case,
+                    &expected_value,
                     options.timeout_secs,
                 )
                 .await,
             );
         }
     }
-    report_from_cases(provider, model_id, base_url, options.marker, cases)
+    report_from_cases(
+        provider,
+        model_id,
+        base_url,
+        options.probe_case,
+        options.marker,
+        expected_value,
+        cases,
+    )
 }
 
 fn resolved_probe_model_id(selector: &str) -> String {
@@ -243,10 +305,84 @@ pub fn classify_tool_conformance_fixture(
     marker: impl Into<String>,
     raw: &str,
 ) -> ToolConformanceReport {
+    classify_tool_conformance_fixture_for_case(
+        provider,
+        model,
+        mode,
+        ToolProbeCase::SingleToolCall,
+        marker,
+        raw,
+    )
+}
+
+pub fn classify_tool_conformance_fixture_for_case(
+    provider: impl Into<String>,
+    model: impl Into<String>,
+    mode: ToolProbeMode,
+    probe_case: ToolProbeCase,
+    marker: impl Into<String>,
+    raw: &str,
+) -> ToolConformanceReport {
     let marker = marker.into();
+    let expected_value = probe_case.expected_value(&marker);
     let response = serde_json::from_str::<Value>(raw).unwrap_or_else(|_| json!({ "content": raw }));
-    let case = classify_tool_probe_response(mode, &response, &marker, None, None);
-    report_from_cases(provider.into(), model.into(), None, marker, vec![case])
+    let case = classify_tool_probe_response(mode, &response, &expected_value, None, None);
+    report_from_cases(
+        provider.into(),
+        model.into(),
+        None,
+        probe_case,
+        marker,
+        expected_value,
+        vec![case],
+    )
+}
+
+pub fn tool_conformance_request_report(
+    provider: impl Into<String>,
+    model: impl Into<String>,
+    base_url: Option<String>,
+    modes: Vec<ToolProbeMode>,
+    probe_case: ToolProbeCase,
+    marker: impl Into<String>,
+) -> Result<ToolConformanceRequestReport, String> {
+    let provider = provider.into();
+    let model = model.into();
+    let marker = marker.into();
+    let expected_value = probe_case.expected_value(&marker);
+    let mut requests = Vec::new();
+    for mode in normalized_modes(&modes) {
+        requests.push(ToolConformanceRequestCase {
+            mode,
+            request_body: probe_request_body(&provider, &model, mode, probe_case, &expected_value)?,
+        });
+    }
+    Ok(ToolConformanceRequestReport {
+        schema_version: TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION,
+        provider,
+        model,
+        base_url,
+        probe_case,
+        tool_name: TOOL_PROBE_TOOL_NAME.to_string(),
+        marker,
+        expected_value,
+        requests,
+    })
+}
+
+pub fn tool_conformance_request_report_json(
+    provider: impl Into<String>,
+    model: impl Into<String>,
+    base_url: Option<String>,
+    modes: Vec<ToolProbeMode>,
+    probe_case: ToolProbeCase,
+    marker: impl Into<String>,
+) -> Result<String, String> {
+    let report =
+        tool_conformance_request_report(provider, model, base_url, modes, probe_case, marker)?;
+    serde_json::to_string_pretty(&report).map_err(|error| {
+        format!("internal error: failed to render tool-probe request report: {error}")
+    })
 }
 
 pub fn report_satisfies_required_probe(report: &ToolConformanceReport, requirement: &str) -> bool {
@@ -278,7 +414,9 @@ fn report_from_cases(
     provider: String,
     model: String,
     base_url: Option<String>,
+    probe_case: ToolProbeCase,
     marker: String,
+    expected_value: String,
     cases: Vec<ToolConformanceCase>,
 ) -> ToolConformanceReport {
     let summary = summarize_cases(&cases);
@@ -287,8 +425,10 @@ fn report_from_cases(
         provider,
         model,
         base_url,
+        probe_case,
         tool_name: TOOL_PROBE_TOOL_NAME.to_string(),
         marker,
+        expected_value,
         cases,
         tool_calling: summary,
     }
@@ -377,6 +517,7 @@ async fn execute_live_probe_case(
     model: &str,
     base_url: Option<&str>,
     mode: ToolProbeMode,
+    probe_case: ToolProbeCase,
     marker: &str,
     timeout_secs: u64,
 ) -> ToolConformanceCase {
@@ -403,7 +544,7 @@ async fn execute_live_probe_case(
             );
         }
     };
-    let body = match probe_request_body(provider, model, mode, marker) {
+    let body = match probe_request_body(provider, model, mode, probe_case, marker) {
         Ok(body) => body,
         Err(message) => {
             return ToolConformanceCase::transport_error(
@@ -1015,480 +1156,5 @@ fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn probe_resolves_catalog_key_to_provider_wire_model() {
-        let resolved = llm_config::resolve_model_info("baseten-glm-5.2");
-        assert_eq!(resolved_probe_model_id(&resolved.id), "zai-org/GLM-5.2");
-    }
-
-    #[test]
-    fn probe_payload_applies_provider_qualified_model_defaults() {
-        let _guard = crate::llm::env_guard();
-        let mut overlay = llm_config::ProvidersConfig::default();
-        overlay.model_defaults.insert(
-            "probe-provider/wire-model".to_string(),
-            BTreeMap::from_iter([
-                ("max_tokens".to_string(), toml::Value::Integer(321)),
-                ("temperature".to_string(), toml::Value::Float(1.0)),
-                ("top_p".to_string(), toml::Value::Float(0.9)),
-                ("top_k".to_string(), toml::Value::Integer(40)),
-            ]),
-        );
-        llm_config::set_user_overrides(Some(overlay));
-
-        let payload = probe_request_payload(
-            "probe-provider",
-            "wire-model",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-        )
-        .expect("probe payload");
-
-        assert_eq!(payload.max_tokens, 321);
-        assert_eq!(payload.temperature, Some(1.0));
-        assert_eq!(payload.top_p, Some(0.9));
-        assert_eq!(payload.top_k, Some(40));
-
-        llm_config::clear_user_overrides();
-    }
-
-    #[test]
-    fn probe_request_body_uses_anthropic_tool_dialect() {
-        let body = probe_request_body(
-            "anthropic",
-            "claude-sonnet-4-6",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-        )
-        .expect("Anthropic probe body");
-
-        assert_eq!(
-            body["tools"][0]["name"], TOOL_PROBE_TOOL_NAME,
-            "Anthropic tools use root-level names, not OpenAI function wrappers"
-        );
-        assert!(
-            body["tools"][0].get("function").is_none(),
-            "probe must not send OpenAI function-wrapper tools to Anthropic"
-        );
-        assert_eq!(
-            body["tools"][0]["input_schema"]["properties"]["value"]["type"],
-            "string"
-        );
-        assert_eq!(
-            body["tool_choice"],
-            json!({"type": "tool", "name": TOOL_PROBE_TOOL_NAME}),
-            "Anthropic rejects OpenAI-shaped tool_choice objects"
-        );
-    }
-
-    #[test]
-    fn probe_request_body_preserves_openai_tool_dialect() {
-        let body = probe_request_body(
-            "openai",
-            "gpt-5.4-mini",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-        )
-        .expect("OpenAI probe body");
-
-        assert_eq!(body["tools"][0]["type"], "function");
-        assert_eq!(body["tools"][0]["function"]["name"], TOOL_PROBE_TOOL_NAME);
-        assert_eq!(
-            body["tool_choice"],
-            json!({"type": "function", "function": {"name": TOOL_PROBE_TOOL_NAME}})
-        );
-    }
-
-    #[test]
-    fn probe_request_body_maps_gemini_tool_choice_to_tool_config() {
-        let body = probe_request_body(
-            "gemini",
-            "gemini-2.5-pro",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-        )
-        .expect("Gemini probe body");
-        assert_eq!(
-            body["tools"][0]["functionDeclarations"][0]["name"],
-            TOOL_PROBE_TOOL_NAME
-        );
-        assert_eq!(body["toolConfig"]["functionCallingConfig"]["mode"], "ANY");
-        assert_eq!(
-            body["toolConfig"]["functionCallingConfig"]["allowedFunctionNames"],
-            json!([TOOL_PROBE_TOOL_NAME])
-        );
-    }
-
-    #[test]
-    fn tool_conformance_report_accepts_compact_empty_diagnostics() {
-        let report: ToolConformanceReport = serde_json::from_str(
-            concat!(
-                r#"{"schema_version":1,"provider":"groq","model":"openai/gpt-oss-120b","#,
-                r#""tool_name":"echo_marker","marker":"harn_tool_probe_marker","cases":["#,
-                r#"{"mode":"non_streaming","ok":true,"classification":"structured_native_tool_call","#,
-                r#""fallback_mode":"native","native_tool_call_count":1,"text_tool_call_count":0}],"#,
-                r#""tool_calling":{"native":"pass","text":"unknown","streaming_native":"unknown","fallback_mode":"native"}}"#,
-            ),
-        )
-        .expect("compact v1 reports should deserialize");
-
-        assert!(report.cases[0].parser_errors.is_empty());
-        assert!(report.cases[0].protocol_violations.is_empty());
-
-        let serialized = serde_json::to_value(&report).expect("serialize report");
-        assert!(
-            serialized["cases"][0].get("parser_errors").is_none(),
-            "empty parser diagnostics stay compact on write"
-        );
-        assert!(
-            serialized["cases"][0].get("protocol_violations").is_none(),
-            "empty protocol diagnostics stay compact on write"
-        );
-    }
-
-    #[test]
-    fn classify_openai_native_tool_call_as_pass() {
-        let report = classify_tool_conformance_fixture(
-            "local",
-            "model",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"echo_marker","arguments":"{\"value\":\"harn_tool_probe_marker\"}"}}]}}]}"#,
-        );
-        assert_eq!(report.tool_calling.native, ToolProbeStatus::Pass);
-        assert_eq!(
-            report.tool_calling.fallback_mode,
-            ToolProbeFallbackMode::Native
-        );
-        assert_eq!(
-            report.cases[0].classification,
-            ToolProbeClassification::StructuredNativeToolCall
-        );
-    }
-
-    #[test]
-    fn classify_anthropic_tool_use_as_native_pass() {
-        let report = classify_tool_conformance_fixture(
-            "anthropic",
-            "claude-sonnet-4-6",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"content":[{"type":"tool_use","id":"toolu_1","name":"echo_marker","input":{"value":"harn_tool_probe_marker"}}],"stop_reason":"tool_use"}"#,
-        );
-
-        assert_eq!(report.tool_calling.native, ToolProbeStatus::Pass);
-        assert_eq!(
-            report.tool_calling.fallback_mode,
-            ToolProbeFallbackMode::Native
-        );
-        assert_eq!(
-            report.cases[0].classification,
-            ToolProbeClassification::StructuredNativeToolCall
-        );
-    }
-
-    #[test]
-    fn classify_native_tool_call_with_text_call_in_name_as_pass() {
-        let report = classify_tool_conformance_fixture(
-            "zai",
-            "glm-5",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"echo_marker({ value: \"harn_tool_probe_marker\" })</arg_value>","arguments":"{}"}}]}}]}"#,
-        );
-
-        assert_eq!(report.tool_calling.native, ToolProbeStatus::Pass);
-        assert_eq!(
-            report.tool_calling.fallback_mode,
-            ToolProbeFallbackMode::Native
-        );
-        assert_eq!(
-            report.cases[0].classification,
-            ToolProbeClassification::StructuredNativeToolCall
-        );
-    }
-
-    #[test]
-    fn classify_partial_text_call_in_native_name_as_malformed() {
-        let report = classify_tool_conformance_fixture(
-            "zai",
-            "glm-5",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"echo_marker({ value: <<EOF","arguments":"{"}}]}}]}"#,
-        );
-
-        assert_eq!(report.tool_calling.native, ToolProbeStatus::Fail);
-        assert_eq!(
-            report.cases[0].classification,
-            ToolProbeClassification::MalformedJsonArguments
-        );
-    }
-
-    #[test]
-    fn classify_gemma_raw_json_tool_call_content_as_text_fallback() {
-        let report = classify_tool_conformance_fixture(
-            "ollama",
-            "gemma4:26b",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"message":{"content":"<tool_call>{\"name\":\"echo_marker\",\"arguments\":{\"value\":\"harn_tool_probe_marker\"}}</tool_call>"}}"#,
-        );
-        assert_eq!(report.tool_calling.native, ToolProbeStatus::Fail);
-        assert_eq!(report.tool_calling.text, ToolProbeStatus::Pass);
-        assert_eq!(
-            report.tool_calling.fallback_mode,
-            ToolProbeFallbackMode::Text
-        );
-        assert_eq!(
-            report.cases[0].classification,
-            ToolProbeClassification::ParseableHarnTextToolCall
-        );
-    }
-
-    #[test]
-    fn classify_qwen_call_colon_marker_as_text_fallback() {
-        let report = classify_tool_conformance_fixture(
-            "llamacpp",
-            "qwen",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"content":"call:echo_marker{ value: \"harn_tool_probe_marker\" }"}"#,
-        );
-        assert_eq!(report.tool_calling.text, ToolProbeStatus::Pass);
-        assert_eq!(
-            report.tool_calling.fallback_mode,
-            ToolProbeFallbackMode::Text
-        );
-    }
-
-    #[test]
-    fn structured_reasoning_tool_text_does_not_satisfy_probe() {
-        let report = classify_tool_conformance_fixture(
-            "local",
-            "model",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"choices":[{"message":{"content":[{"type":"reasoning","text":"<tool_call>{\"name\":\"echo_marker\",\"arguments\":{\"value\":\"harn_tool_probe_marker\"}}</tool_call>"}]}}]}"#,
-        );
-
-        assert_ne!(report.tool_calling.text, ToolProbeStatus::Pass);
-        assert_eq!(
-            report.tool_calling.fallback_mode,
-            ToolProbeFallbackMode::Disabled
-        );
-        assert!(!report_satisfies_required_probe(&report, "tool_probe"));
-    }
-
-    #[test]
-    fn reasoning_field_tool_text_does_not_satisfy_probe() {
-        let report = classify_tool_conformance_fixture(
-            "local",
-            "model",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"choices":[{"message":{"content":"","reasoning":{"content":"call:echo_marker{ value: \"harn_tool_probe_marker\" }"}}}]}"#,
-        );
-
-        assert_ne!(report.tool_calling.text, ToolProbeStatus::Pass);
-        assert_eq!(
-            report.tool_calling.fallback_mode,
-            ToolProbeFallbackMode::Disabled
-        );
-        assert!(!report_satisfies_required_probe(&report, "tool_probe"));
-    }
-
-    #[test]
-    fn classify_prose_only_as_disabled() {
-        let report = classify_tool_conformance_fixture(
-            "ollama",
-            "gemma4:26b",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"message":{"content":"The comment has been added. I will now verify it."}}"#,
-        );
-        assert_eq!(
-            report.tool_calling.fallback_mode,
-            ToolProbeFallbackMode::Disabled
-        );
-        assert_eq!(
-            report.cases[0].classification,
-            ToolProbeClassification::ProseOnlyNonTool
-        );
-        assert_eq!(
-            report.cases[0].failure_reason.as_deref(),
-            Some("no_executable_tool_call")
-        );
-    }
-
-    #[test]
-    fn prose_only_response_does_not_satisfy_required_tool_probe() {
-        let report = classify_tool_conformance_fixture(
-            "anthropic",
-            "claude-sonnet-4-6",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"content":[{"type":"text","text":"I can call echo_marker with that value."}],"stop_reason":"end_turn"}"#,
-        );
-
-        assert_eq!(
-            report.cases[0].classification,
-            ToolProbeClassification::ProseOnlyNonTool
-        );
-        assert!(!report_satisfies_required_probe(&report, "tool_probe"));
-        assert_eq!(
-            report.tool_calling.fallback_mode,
-            ToolProbeFallbackMode::Disabled
-        );
-    }
-
-    #[test]
-    fn aggregates_openai_streaming_tool_call_deltas() {
-        let raw = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"echo_marker\",\"arguments\":\"{\\\"value\\\":\"}}]}}]}\n\
-                   data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"harn_tool_probe_marker\\\"}\"}}]}}]}\n\
-                   data: [DONE]\n";
-        let response = aggregate_stream_text(raw, "local");
-        let case = classify_tool_probe_response(
-            ToolProbeMode::Streaming,
-            &response,
-            DEFAULT_TOOL_PROBE_MARKER,
-            None,
-            None,
-        );
-        assert!(case.ok, "{case:?}");
-        assert_eq!(
-            case.classification,
-            ToolProbeClassification::StructuredNativeToolCall
-        );
-    }
-
-    #[test]
-    fn aggregates_anthropic_streaming_tool_use_deltas() {
-        let raw = "event: message_start\n\
-                   data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\
-                   event: content_block_start\n\
-                   data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"echo_marker\",\"input\":{}}}\n\
-                   event: content_block_delta\n\
-                   data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"value\\\":\"}}\n\
-                   event: content_block_delta\n\
-                   data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"harn_tool_probe_marker\\\"}\"}}\n\
-                   event: message_delta\n\
-                   data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\
-                   event: message_stop\n\
-                   data: {\"type\":\"message_stop\"}\n";
-        let response = aggregate_stream_text(raw, "anthropic");
-        let case = classify_tool_probe_response(
-            ToolProbeMode::Streaming,
-            &response,
-            DEFAULT_TOOL_PROBE_MARKER,
-            None,
-            None,
-        );
-        assert!(case.ok, "{case:?}");
-        assert_eq!(
-            case.classification,
-            ToolProbeClassification::StructuredNativeToolCall
-        );
-    }
-
-    #[test]
-    fn report_satisfies_tool_probe_when_text_fallback_passes() {
-        let report = classify_tool_conformance_fixture(
-            "llamacpp",
-            "qwen",
-            ToolProbeMode::NonStreaming,
-            DEFAULT_TOOL_PROBE_MARKER,
-            r#"{"content":"echo_marker({ value: \"harn_tool_probe_marker\" })"}"#,
-        );
-        assert!(report_satisfies_required_probe(&report, "tool_probe"));
-        assert!(!report_satisfies_required_probe(
-            &report,
-            "native_tool_probe"
-        ));
-    }
-
-    #[test]
-    fn summary_requires_every_repeated_native_case_to_pass() {
-        let summary = summarize_cases(&[
-            probe_case(
-                ToolProbeMode::NonStreaming,
-                true,
-                ToolProbeClassification::StructuredNativeToolCall,
-            ),
-            probe_case(
-                ToolProbeMode::NonStreaming,
-                false,
-                ToolProbeClassification::ProseOnlyNonTool,
-            ),
-        ]);
-        assert_eq!(summary.native, ToolProbeStatus::Fail);
-        assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Disabled);
-    }
-
-    #[test]
-    fn summary_requires_every_repeated_text_case_to_pass() {
-        let summary = summarize_cases(&[
-            probe_case(
-                ToolProbeMode::NonStreaming,
-                true,
-                ToolProbeClassification::ParseableHarnTextToolCall,
-            ),
-            probe_case(
-                ToolProbeMode::NonStreaming,
-                false,
-                ToolProbeClassification::MalformedJsonArguments,
-            ),
-        ]);
-        assert_eq!(summary.native, ToolProbeStatus::Fail);
-        assert_eq!(summary.text, ToolProbeStatus::Fail);
-        assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Disabled);
-    }
-
-    #[test]
-    fn summary_preserves_nonstreaming_text_fallback_when_streaming_fails() {
-        let summary = summarize_cases(&[
-            probe_case(
-                ToolProbeMode::NonStreaming,
-                true,
-                ToolProbeClassification::ParseableHarnTextToolCall,
-            ),
-            probe_case(
-                ToolProbeMode::Streaming,
-                false,
-                ToolProbeClassification::ProseOnlyNonTool,
-            ),
-        ]);
-        assert_eq!(summary.native, ToolProbeStatus::Fail);
-        assert_eq!(summary.streaming_native, ToolProbeStatus::Fail);
-        assert_eq!(summary.text, ToolProbeStatus::Pass);
-        assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Text);
-    }
-
-    fn probe_case(
-        mode: ToolProbeMode,
-        ok: bool,
-        classification: ToolProbeClassification,
-    ) -> ToolConformanceCase {
-        let native_tool_call_count =
-            usize::from(classification == ToolProbeClassification::StructuredNativeToolCall);
-        let text_tool_call_count =
-            usize::from(classification == ToolProbeClassification::ParseableHarnTextToolCall);
-        ToolConformanceCase {
-            mode,
-            ok,
-            classification,
-            fallback_mode: ToolProbeFallbackMode::Disabled,
-            failure_reason: None,
-            http_status: None,
-            elapsed_ms: None,
-            native_tool_call_count,
-            text_tool_call_count,
-            parser_errors: Vec::new(),
-            protocol_violations: Vec::new(),
-            content_sample: None,
-        }
-    }
-}
+#[path = "tool_conformance_tests.rs"]
+mod tests;
