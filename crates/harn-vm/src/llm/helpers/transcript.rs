@@ -22,6 +22,8 @@ pub(crate) const REMINDER_DEDUPED_EVENT_KIND: &str = "transcript.reminder.dedupe
 pub(crate) const REMINDER_EXPIRED_EVENT_KIND: &str = "transcript.reminder.expired";
 pub(crate) const REMINDER_DROPPED_EVENT_KIND: &str = "transcript.reminder.dropped";
 pub(crate) const REMINDER_INHERITED_EVENT_KIND: &str = "transcript.reminder.inherited";
+pub(crate) const REMINDER_ITERATION_SUMMARY_EVENT_KIND: &str =
+    "transcript.reminder.iteration_summary";
 pub(crate) const REMINDER_PROVIDER_EVALUATED_EVENT_KIND: &str =
     "transcript.reminder.provider_evaluated";
 pub(crate) const SUSPENSION_EVENT_KIND: &str = "suspension";

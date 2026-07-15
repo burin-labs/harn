@@ -290,6 +290,8 @@ pub(crate) struct ReminderLifecycleEmission {
     pub source: String,
     pub role_hint: String,
     pub rendered_role: String,
+    pub body_bytes: usize,
+    pub rendered_bytes: usize,
     pub ttl_turns: Option<i64>,
     pub propagate: String,
     pub originating_agent_id: Option<String>,
@@ -306,6 +308,8 @@ impl ReminderLifecycleEmission {
             "source": &self.source,
             "role_hint": &self.role_hint,
             "rendered_role": &self.rendered_role,
+            "body_bytes": self.body_bytes,
+            "rendered_bytes": self.rendered_bytes,
             "ttl_turns": &self.ttl_turns,
             "propagate": &self.propagate,
             "originating_agent_id": &self.originating_agent_id,
@@ -691,6 +695,7 @@ impl LlmRequestPayload {
         for reminder in &self.reminder_lifecycle {
             reminder.emit();
         }
+        crate::llm::reminder_iteration::emit_reminder_iteration_summary(&self.reminder_lifecycle);
     }
 }
 

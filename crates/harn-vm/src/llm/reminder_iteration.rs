@@ -1,13 +1,16 @@
 //! Per-iteration reminder budgeting, delta emission, and receipts.
 
+use std::collections::BTreeMap;
+
 use serde_json::Value as JsonValue;
 
+use crate::llm::api::ReminderLifecycleEmission;
 use crate::orchestration::ReminderSpec;
 use crate::value::VmError;
 
 const DEFAULT_REMINDER_ITERATION_BUDGET_BYTES: usize = 16 * 1024;
 const MIN_REMINDER_ITERATION_BUDGET_BYTES: usize = 256;
-const REMINDER_BODY_HASH_TAG_PREFIX: &str = "body_sha256:";
+pub(crate) const REMINDER_BODY_HASH_TAG_PREFIX: &str = "body_sha256:";
 
 pub(crate) struct ReminderIterationState {
     reports: Vec<JsonValue>,
@@ -54,6 +57,102 @@ impl ReminderIterationState {
             "used_body_bytes": self.used_body_bytes,
         })
     }
+}
+
+#[derive(Default)]
+struct ReminderSummaryBucket {
+    count: usize,
+    body_bytes: usize,
+    rendered_bytes: usize,
+}
+
+impl ReminderSummaryBucket {
+    fn observe(&mut self, reminder: &ReminderLifecycleEmission) {
+        self.count += 1;
+        self.body_bytes += reminder.body_bytes;
+        self.rendered_bytes += reminder.rendered_bytes;
+    }
+
+    fn to_json(&self, key_name: &str, key: &str) -> JsonValue {
+        serde_json::json!({
+            key_name: key,
+            "count": self.count,
+            "body_bytes": self.body_bytes,
+            "rendered_bytes": self.rendered_bytes,
+        })
+    }
+}
+
+pub(crate) fn emit_reminder_iteration_summary(reminders: &[ReminderLifecycleEmission]) {
+    let Some(payload) = reminder_iteration_summary_payload(reminders) else {
+        return;
+    };
+    crate::llm::helpers::emit_reminder_lifecycle_event(
+        crate::llm::helpers::REMINDER_ITERATION_SUMMARY_EVENT_KIND,
+        payload,
+    );
+}
+
+fn reminder_iteration_summary_payload(
+    reminders: &[ReminderLifecycleEmission],
+) -> Option<JsonValue> {
+    if reminders.is_empty() {
+        return None;
+    }
+    let mut by_tag: BTreeMap<String, ReminderSummaryBucket> = BTreeMap::new();
+    let mut by_source: BTreeMap<String, ReminderSummaryBucket> = BTreeMap::new();
+    let mut by_rendered_role: BTreeMap<String, ReminderSummaryBucket> = BTreeMap::new();
+    let mut total = ReminderSummaryBucket::default();
+    let mut untagged_count = 0usize;
+    let mut max_body_bytes = 0usize;
+    let mut max_rendered_bytes = 0usize;
+    for reminder in reminders {
+        total.observe(reminder);
+        max_body_bytes = max_body_bytes.max(reminder.body_bytes);
+        max_rendered_bytes = max_rendered_bytes.max(reminder.rendered_bytes);
+        if reminder.tags.is_empty() {
+            untagged_count += 1;
+        }
+        for tag in &reminder.tags {
+            if tag.starts_with(REMINDER_BODY_HASH_TAG_PREFIX) {
+                continue;
+            }
+            by_tag.entry(tag.clone()).or_default().observe(reminder);
+        }
+        by_source
+            .entry(reminder.source.clone())
+            .or_default()
+            .observe(reminder);
+        by_rendered_role
+            .entry(reminder.rendered_role.clone())
+            .or_default()
+            .observe(reminder);
+    }
+    Some(serde_json::json!({
+        "session_id": reminders.iter().find_map(|reminder| reminder.session_id.clone()),
+        "turn_number": reminders[0].turn_number,
+        "count": total.count,
+        "body_bytes": total.body_bytes,
+        "rendered_bytes": total.rendered_bytes,
+        "max_body_bytes": max_body_bytes,
+        "max_rendered_bytes": max_rendered_bytes,
+        "untagged_count": untagged_count,
+        "by_tag": summary_map_to_json(by_tag, "tag"),
+        "by_source": summary_map_to_json(by_source, "source"),
+        "by_rendered_role": summary_map_to_json(by_rendered_role, "rendered_role"),
+    }))
+}
+
+fn summary_map_to_json(
+    buckets: BTreeMap<String, ReminderSummaryBucket>,
+    key_name: &str,
+) -> JsonValue {
+    JsonValue::Array(
+        buckets
+            .into_iter()
+            .map(|(key, bucket)| bucket.to_json(key_name, &key))
+            .collect(),
+    )
 }
 
 struct PreparedReminder {
@@ -232,4 +331,80 @@ fn json_i64(value: &JsonValue, key: &str) -> Option<i64> {
         JsonValue::String(value) => value.parse::<i64>().ok(),
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reminder_emission(
+        tags: &[&str],
+        body_bytes: usize,
+        rendered_bytes: usize,
+        source: &str,
+        rendered_role: &str,
+    ) -> ReminderLifecycleEmission {
+        ReminderLifecycleEmission {
+            session_id: Some("session-1".to_string()),
+            turn_number: 7,
+            reminder_id: format!("reminder-{body_bytes}-{rendered_bytes}"),
+            tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+            body: "x".repeat(body_bytes),
+            dedupe_key: None,
+            source: source.to_string(),
+            role_hint: "system".to_string(),
+            rendered_role: rendered_role.to_string(),
+            body_bytes,
+            rendered_bytes,
+            ttl_turns: Some(1),
+            propagate: "session".to_string(),
+            originating_agent_id: None,
+        }
+    }
+
+    #[test]
+    fn reminder_iteration_summary_rolls_up_bytes_by_tag_source_and_role() {
+        let payload = reminder_iteration_summary_payload(&[
+            reminder_emission(
+                &["workspace", "standing", "body_sha256:ignored"],
+                10,
+                30,
+                "stdlib_provider",
+                "user",
+            ),
+            reminder_emission(&["workspace"], 5, 20, "stdlib_provider", "user"),
+            reminder_emission(&[], 7, 9, "bridge", "developer"),
+        ])
+        .expect("summary payload");
+
+        assert_eq!(payload["session_id"], "session-1");
+        assert_eq!(payload["turn_number"], 7);
+        assert_eq!(payload["count"], 3);
+        assert_eq!(payload["body_bytes"], 22);
+        assert_eq!(payload["rendered_bytes"], 59);
+        assert_eq!(payload["max_body_bytes"], 10);
+        assert_eq!(payload["max_rendered_bytes"], 30);
+        assert_eq!(payload["untagged_count"], 1);
+        assert_eq!(
+            payload["by_tag"],
+            serde_json::json!([
+                {"tag": "standing", "count": 1, "body_bytes": 10, "rendered_bytes": 30},
+                {"tag": "workspace", "count": 2, "body_bytes": 15, "rendered_bytes": 50},
+            ])
+        );
+        assert_eq!(
+            payload["by_source"],
+            serde_json::json!([
+                {"source": "bridge", "count": 1, "body_bytes": 7, "rendered_bytes": 9},
+                {"source": "stdlib_provider", "count": 2, "body_bytes": 15, "rendered_bytes": 50},
+            ])
+        );
+        assert_eq!(
+            payload["by_rendered_role"],
+            serde_json::json!([
+                {"rendered_role": "developer", "count": 1, "body_bytes": 7, "rendered_bytes": 9},
+                {"rendered_role": "user", "count": 2, "body_bytes": 15, "rendered_bytes": 50},
+            ])
+        );
+    }
 }

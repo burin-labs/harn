@@ -9,6 +9,12 @@ transcript.reminder.fired
 true
 4
 developer
+transcript.reminder.iteration_summary
+true
+4
+1
+stdlib_provider
+developer
 transcript.reminder.dropped
 true
 bad-reminder
