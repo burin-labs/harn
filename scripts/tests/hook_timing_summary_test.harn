@@ -1,0 +1,77 @@
+import "../hook_timing_summary.harn"
+
+const SAMPLE_LOG = """
+{"ts":"2026-07-15T05:31:25Z","repo":"harn4745-recap-fixture-codex0","hook":"pre-push","duration_ms":405030,"exit_code":0,"commit_sha":"4f8387","host":"mac"}
+not json
+{"ts":"2026-07-15T05:24:28Z","repo":"harn4745-recap-fixture-codex0","hook":"pre-commit","duration_ms":1054,"exit_code":0}
+{"ts":"2026-07-15T05:13:57Z","repo":"harn-affected-global-fastpath-codex1","hook":"pre-push","duration_ms":848,"exit_code":0}
+{"repo":"missing-duration","hook":"pre-push"}
+"""
+
+@test
+pipeline test_default_hook_timing_path(task) {
+  assert_eq(default_hook_timing_path("/Users/example"), "/Users/example/.burin/hook-timings.ndjson")
+  assert_eq(default_hook_timing_path(""), ".burin/hook-timings.ndjson")
+}
+
+@test
+pipeline test_parse_hook_timing_text_skips_invalid_rows(task) {
+  const report = parse_hook_timing_text(SAMPLE_LOG)
+  assert_eq(report.events.count, 3)
+  assert_eq(report.invalid_lines, 2)
+  assert_eq(report.events[0]?.repo, "harn4745-recap-fixture-codex0")
+  assert_eq(report.events[0]?.duration_ms, 405030)
+  assert_eq(report.events[0]?.exit_code, 0)
+}
+
+@test
+pipeline test_summarize_hook_timings_aggregates_and_sorts_by_total(task) {
+  const parsed = parse_hook_timing_text(
+    """
+{"repo":"slow","hook":"pre-push","duration_ms":100}
+{"repo":"slow","hook":"pre-push","duration_ms":300}
+{"repo":"fast","hook":"pre-commit","duration_ms":250}
+""",
+  )
+  const groups = summarize_hook_timings(parsed.events)
+  assert_eq(groups.count, 2)
+  assert_eq(
+    groups[0],
+    {repo: "slow", hook: "pre-push", count: 2, total_ms: 400, max_ms: 300, avg_ms: 200},
+  )
+  assert_eq(groups[1]?.repo, "fast")
+}
+
+@test
+pipeline test_slowest_hook_timings_honors_limit(task) {
+  const parsed = parse_hook_timing_text(SAMPLE_LOG)
+  const slowest = slowest_hook_timings(parsed.events, 2)
+  assert_eq(slowest.map({ event -> event.duration_ms }).to_list(), [405030, 1054])
+}
+
+@test
+pipeline test_filter_hook_timings_combines_repo_hook_and_min_duration(task) {
+  const parsed = parse_hook_timing_text(SAMPLE_LOG)
+  const filtered = filter_hook_timings(parsed.events, {repo: "harn4745", hook: "pre-push", min_ms: 1000})
+  assert_eq(filtered.count, 1)
+  assert_eq(filtered[0]?.duration_ms, 405030)
+}
+
+@test
+pipeline test_render_hook_timing_report_contains_actionable_sections(task) {
+  const parsed = parse_hook_timing_text(SAMPLE_LOG)
+  const rendered = render_hook_timing_report(
+    {
+      input: "fixture.ndjson",
+      filters: {repo: "harn4745", hook: "pre-push", min_ms: 1000},
+      events: parsed.events,
+      groups: summarize_hook_timings(parsed.events),
+      invalid_lines: parsed.invalid_lines,
+    },
+    1,
+  )
+  assert_eq(rendered.contains("slowest invocations:"), true)
+  assert_eq(rendered.contains("aggregate by repo/hook:"), true)
+  assert_eq(rendered.contains("harn4745-recap-fixture-codex0 pre-push: 405030ms"), true)
+  assert_eq(rendered.contains("invalid_lines: 2"), true)
+}
