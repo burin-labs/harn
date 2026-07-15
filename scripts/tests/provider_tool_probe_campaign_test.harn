@@ -16,6 +16,27 @@ pipeline test_provider_tool_probe_campaign_parses_explicit_routes(task) {
 }
 
 @test
+pipeline test_provider_tool_probe_campaign_cli_collects_repeated_routes_and_behaviors(task) {
+  const parsed = provider_tool_probe_campaign_parse_args(
+    [
+      "--route",
+      "fireworks:accounts/fireworks/models/gpt-oss-120b",
+      "--route",
+      "groq:openai/gpt-oss-120b",
+      "--behavior",
+      "tool_calling_non_streaming",
+      "--behavior",
+      "tool_calling_streaming",
+    ],
+  )
+  assert_eq(
+    parsed.route,
+    ["fireworks:accounts/fireworks/models/gpt-oss-120b", "groq:openai/gpt-oss-120b"],
+  )
+  assert_eq(parsed.behavior, ["tool_calling_non_streaming", "tool_calling_streaming"])
+}
+
+@test
 pipeline test_provider_tool_probe_campaign_rejects_malformed_routes(task) {
   const routes = provider_tool_probe_campaign_routes(["missing-separator", "openai:", ":model", "ollama:gemma4:e4b"])
   assert_eq(len(routes), 1)

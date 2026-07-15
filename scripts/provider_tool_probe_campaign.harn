@@ -828,8 +828,8 @@ fn __ensure_dir(harness: Harness, path: string) {
 
 fn __arg_spec() -> list {
   return [
-    {kind: "option", name: "route", flags: ["--route"], repeat: true, default: []},
-    {kind: "option", name: "behavior", flags: ["--behavior"], repeat: true, default: []},
+    {kind: "option", name: "route", flags: ["--route"], multi: true, default: []},
+    {kind: "option", name: "behavior", flags: ["--behavior"], multi: true, default: []},
     {kind: "option", name: "mode", flags: ["--mode"], default: "both"},
     {kind: "option", name: "repeat", flags: ["--repeat"], parse: "int", default: 1},
     {kind: "option", name: "timeout_secs", flags: ["--timeout-secs"], parse: "int", default: 60},
@@ -842,8 +842,12 @@ fn __arg_spec() -> list {
   ]
 }
 
+pub fn provider_tool_probe_campaign_parse_args(args: list<string>) -> dict {
+  return parse_args(args, __arg_spec())
+}
+
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, __arg_spec())
+  const parsed = provider_tool_probe_campaign_parse_args(argv)
   if parsed?._help ?? false {
     harness.stdio
       .println(
