@@ -1,3 +1,4 @@
+import { AgentLoopOptions } from "std/agent/options"
 import { with_llm_script } from "std/testing"
 
 fn lookup_tools() {
@@ -29,20 +30,17 @@ pipeline main() {
     ],
     { ->
       const transcript_dir = path_join(harness.fs.temp_dir(), "harn-agent-loop-provider-error-" + uuid())
-      const result = agent_loop(
-        "Inspect evidence and finish.",
-        nil,
-        {
-          provider: "mock",
-          model: "qwen-local",
-          tools: lookup_tools(),
-          tool_format: "native",
-          loop_until_done: true,
-          max_iterations: 4,
-          require_successful_tools: ["missing_tool"],
-          llm_transcript_dir: transcript_dir,
-        },
-      )
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        model: "qwen-local",
+        tools: lookup_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 4,
+        require_successful_tools: ["missing_tool"],
+        llm_transcript_dir: transcript_dir,
+      }
+      const result = agent_loop("Inspect evidence and finish.", nil, opts)
       __io_println(result.status)
       __io_println(result.stop_reason)
       __io_println(result.error.category)
@@ -60,6 +58,9 @@ pipeline main() {
       __io_println(contains(sidecar, "\"type\":\"provider_call_error\""))
       __io_println(contains(sidecar, "\"category\":\"generic\""))
       __io_println(contains(sidecar, "\"reason\":\"invalid_request\""))
+      __io_println(contains(sidecar, "\"type\":\"agent_session_finalized\""))
+      __io_println(contains(sidecar, "\"terminal\":true"))
+      __io_println(contains(sidecar, "\"final_status\":\"provider_error\""))
     },
   )
 }
