@@ -1,4 +1,4 @@
-import { safe_parse } from "std/json"
+import { JsonParseFailure } from "std/json"
 import "std/path"
 import { evaluator_model, provider_name, render_csv, render_facts } from "common.harn"
 
@@ -34,11 +34,13 @@ pub fn semantic_eval_mode() {
 
 /** Load and parse a JSON file or throw with context. */
 pub fn load_json_file(path) {
-  const parsed = safe_parse(harness.fs.read_text(path))
-  guard parsed != nil else {
-    throw "Failed to parse JSON file: ${path}"
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(harness.fs.read_text(path))
   }
-  return parsed
+  if is_err(parsed) {
+    throw "Failed to parse JSON file: ${path}: " + unwrap_err(parsed).message
+  }
+  return unwrap(parsed)
 }
 
 /** Remove the Harn done sentinel from a text block. */

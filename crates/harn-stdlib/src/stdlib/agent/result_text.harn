@@ -1,0 +1,20 @@
+/**
+ * workflow_result_text.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_result_text(result) {
+  const raw = if type_of(result) == "string" {
+    result
+  } else {
+    result?.visible_text ?? result?.text ?? result?.result?.text ?? ""
+  }
+  if raw == nil || raw == "" {
+    return ""
+  }
+  if type_of(raw) == "string" {
+    return raw
+  }
+  return json_stringify(raw)
+}

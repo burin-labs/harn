@@ -1,0 +1,20 @@
+/**
+ * Returns the host-backed edit capability manifest in the stable std/edit shape.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_capabilities(params = nil) {
+  const raw = hostlib_ast_capabilities(params ?? {})
+  const payload = raw ?? {}
+  return {
+    ok: (payload?.result ?? "") == "ok",
+    result: payload?.result ?? "ok",
+    fallback_suggestion: payload?.fallback_suggestion,
+    languages: payload?.languages ?? [],
+    details: payload?.details,
+    errors: [],
+    warnings: [],
+    provenance: {module: "std/edit", helper: "edit_capabilities", caller: params?.provenance},
+  }
+}

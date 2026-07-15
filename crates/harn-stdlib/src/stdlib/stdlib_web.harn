@@ -1,6 +1,6 @@
 // std/web — deterministic HTTP-backed source ingest and extraction helpers.
 import { cache_get, cache_put } from "std/cache"
-import { safe_parse } from "std/json"
+import { JsonParseFailure } from "std/json"
 
 fn __web_header(headers, name) {
   const wanted = lowercase(name)
@@ -449,7 +449,14 @@ fn __web_search_api(query, opts, backend) {
     fetch_options = fetch_options + {headers: __web_search_merge_headers(fetch_options?.headers, api.headers)}
   }
   const fetched = web_fetch(api.url, fetch_options)
-  const parsed = safe_parse(fetched.body)
+  const parsed_result: Result<unknown, JsonParseFailure> = try {
+    json_parse(fetched.body)
+  }
+  const parsed = if is_ok(parsed_result) {
+    unwrap(parsed_result)
+  } else {
+    nil
+  }
   const items = __web_search_path_get(parsed, api?.results_path ?? "results", [])
   const raw_results = if type_of(items) == "list" {
     items

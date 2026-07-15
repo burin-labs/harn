@@ -1,0 +1,43 @@
+fn __edit_content_hash(text) {
+  return "sha256:" + sha256(text ?? "")
+}
+
+/**
+ * Computes the shared edit content hash for refactoring helpers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_refactor_content_hash(text) {
+  return __edit_content_hash(text)
+}
+
+/**
+ * Computes the shared edit content hash for patch helpers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_patch_content_hash(text) {
+  return __edit_content_hash(text)
+}
+
+/**
+ * Computes the shared edit content hash for safe patch helpers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_safe_patch_content_hash(text) {
+  return __edit_content_hash(text)
+}
+
+/**
+ * Computes the shared edit content hash for fast-apply helpers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_fast_apply_content_hash(text) {
+  return __edit_content_hash(text)
+}

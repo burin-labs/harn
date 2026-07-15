@@ -434,7 +434,7 @@ Repair-pass semantics:
 - Production agent pipelines that need raw-text retention, attempt
   counts, and an optional repair pass on malformed JSON:
   `llm_call_structured_result` — replaces the
-  `llm_call → response.data → safe_parse → json_extract → repair →
+  `llm_call → response.data → try { json_parse(...) } → json_extract → repair →
   schema_check` chain that downstream callers would otherwise
   hand-roll.
 

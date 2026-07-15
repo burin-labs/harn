@@ -54,7 +54,7 @@
  * worker's rotated access/refresh token instead of spending a second
  * refresh grant.
  */
-import { merge } from "std/json"
+import { JsonParseFailure, merge } from "std/json"
 import {
   token_exchange_capability,
   token_exchange_grant_type,
@@ -313,33 +313,34 @@ fn __post_token_request(
   const body = __form_body(pairs)
   const response = harness.net.post(token_url, body, {headers: headers})
   if !(response?.ok ?? false) {
-    const parsed = __safe_json_parse(response?.body ?? "")
-    const detail = (parsed?.error_description ?? parsed?.error ?? "token endpoint returned status ")
+    const parsed: Result<unknown, JsonParseFailure> = try {
+      json_parse(response?.body ?? "")
+    }
+    const error_body = if is_ok(parsed) && type_of(unwrap(parsed)) == "dict" {
+      unwrap(parsed)
+    } else {
+      {}
+    }
+    const detail = (error_body?.error_description ?? error_body?.error ?? "token endpoint returned status ")
       + to_string(response?.status ?? 0)
     throw "std/oauth/client: token request failed: " + to_string(detail)
   }
-  const parsed = __safe_json_parse(response?.body ?? "")
-  if parsed == nil {
-    throw "std/oauth/client: token endpoint did not return JSON"
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(response?.body ?? "")
   }
-  const access = parsed?.access_token
+  if is_err(parsed) {
+    throw "std/oauth/client: token endpoint did not return valid JSON: " + unwrap_err(parsed).message
+  }
+  const parsed_body = unwrap(parsed)
+  if type_of(parsed_body) != "dict" {
+    throw "std/oauth/client: token endpoint returned non-object JSON"
+  }
+  const access = parsed_body?.access_token
   if access == nil || to_string(access) == "" {
-    const err_msg = parsed?.error_description ?? parsed?.error ?? "missing access_token"
+    const err_msg = parsed_body?.error_description ?? parsed_body?.error ?? "missing access_token"
     throw "std/oauth/client: token response invalid: " + to_string(err_msg)
   }
-  return parsed
-}
-
-fn __safe_json_parse(text) {
-  const s = to_string(text ?? "")
-  if s == "" {
-    return nil
-  }
-  try {
-    return json_parse(s)
-  } catch (_err) {
-    return nil
-  }
+  return parsed_body
 }
 
 fn __build_token_set(parsed, scopes, issued_at, prev_refresh) {

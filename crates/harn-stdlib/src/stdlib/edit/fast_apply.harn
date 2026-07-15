@@ -1,0 +1,413 @@
+import { diff_summary, unified_diff } from "std/diff"
+import { edit_fast_apply_content_hash } from "std/edit/internal"
+import { edit_check_lazy_truncation } from "std/edit/patch"
+import {
+  edit_dry_run,
+  edit_lifecycle_forward_options,
+  edit_safe_text_patch,
+} from "std/edit/safe_patch"
+import { JsonParseFailure } from "std/json"
+
+fn __edit_fast_apply_schema() {
+  return {
+    type: "object",
+    required: ["content"],
+    properties: {
+      content: {
+        type: "string",
+        description: "The complete updated file content. Do not include markdown fences or commentary.",
+      },
+      summary: {type: "string"},
+    },
+  }
+}
+
+fn __edit_fast_apply_system() {
+  return "You are Harn's fast-apply merge model. Apply the requested edit to the supplied file bytes and return JSON only. The `content` field must contain the complete updated file content, including all unchanged lines. Do not explain the edit, omit code, use placeholders, or wrap the file in markdown fences."
+}
+
+fn __edit_fast_apply_prompt(path, before_hash, intent, before) {
+  return "Path: ${path}\nPreimage: ${before_hash}\n\nEdit intent:\n${intent}\n\nCurrent file content follows. Return the complete updated file content in JSON field `content`.\n\n```text\n${before}\n```"
+}
+
+fn __edit_fast_apply_content_candidate(content, source) {
+  if type_of(content) == "string" {
+    return {ok: true, content: content, source: source}
+  }
+  return {
+    ok: false,
+    error: {
+      code: "invalid_content_type",
+      message: "merge model response `" + source + "` must be a string, got " + type_of(content),
+    },
+  }
+}
+
+fn __edit_fast_apply_content(response) {
+  const data = response?.data
+  if data?.content != nil {
+    return __edit_fast_apply_content_candidate(data.content, "data.content")
+  }
+  if data?.updated_content != nil {
+    return __edit_fast_apply_content_candidate(data.updated_content, "data.updated_content")
+  }
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(response?.text ?? "")
+  }
+  if is_ok(parsed) && unwrap(parsed)?.content != nil {
+    return __edit_fast_apply_content_candidate(unwrap(parsed).content, "text.json.content")
+  }
+  return {
+    ok: false,
+    error: {code: "missing_content", message: "merge model response did not include `content`"},
+  }
+}
+
+fn __edit_fast_apply_validate(path, proposed, params) {
+  const opts = params ?? {}
+  const should_validate = opts?.validate_syntax ?? true
+  if !should_validate {
+    return {ok: true, skipped: true, reason: "disabled", errors: []}
+  }
+  const raw = try {
+    hostlib_ast_parse_errors({path: path, content: proposed, language: opts?.language})
+  }
+  if is_err(raw) {
+    return {ok: true, skipped: true, reason: to_string(unwrap_err(raw)), errors: []}
+  }
+  const parsed = unwrap(raw)
+  const supported = parsed?.supported ?? true
+  if !supported {
+    return {ok: true, skipped: true, reason: "unsupported_language", errors: []}
+  }
+  const had_errors = parsed?.had_errors ?? false
+  return {
+    ok: !had_errors,
+    skipped: false,
+    result: if had_errors {
+      "syntax_error"
+    } else {
+      "ok"
+    },
+    errors: parsed?.errors ?? [],
+    top_level_decl_count: parsed?.top_level_decl_count,
+  }
+}
+
+fn __edit_fast_apply_preview(path, before, after) {
+  const dry = edit_dry_run({plan: [{op: "safe_text_patch", path: path, old_text: before, new_text: after}]})
+  if dry.ok {
+    return dry
+  }
+  if before != "" && before != after {
+    return dry
+  }
+  const stat = diff_summary(before, after)
+  return {
+    ok: true,
+    result: "ok",
+    fallback_preview: true,
+    per_file_unified_diff: [
+      {
+        path: path,
+        diff: unified_diff(before, after, {path: path}),
+        lines_added: stat.insertions,
+        lines_removed: stat.deletions,
+      },
+    ],
+    summary: {
+      files_touched: 1,
+      lines_added: stat.insertions,
+      lines_removed: stat.deletions,
+      ops_applied: 1,
+      ops_rejected: 0,
+    },
+    ops: [],
+    errors: dry.errors ?? [],
+    warnings: dry.warnings ?? [],
+  }
+}
+
+fn __edit_fast_apply_telemetry(result, dry_run, validation_rejected) {
+  return {
+    apply_path: "fast_apply",
+    requested: 1,
+    llm_calls: 1,
+    success: if result == "applied" || result == "no_op" {
+      1
+    } else {
+      0
+    },
+    applied: if result == "applied" {
+      1
+    } else {
+      0
+    },
+    no_op: if result == "no_op" {
+      1
+    } else {
+      0
+    },
+    validation_rejected: validation_rejected,
+    rejected: if result != "applied" && result != "no_op" {
+      1
+    } else {
+      0
+    },
+    dry_run: if dry_run {
+      1
+    } else {
+      0
+    },
+  }
+}
+
+fn __edit_fast_apply_result(ctx, fields = nil) {
+  const extra = fields ?? {}
+  const {result = "applied", validation_rejected = 0} = extra ?? {}
+  const base = {
+    ok: result == "applied" || result == "no_op",
+    applied: result == "applied" || result == "no_op",
+    result: result,
+    dry_run: ctx.dry_run,
+    path: ctx.path,
+    before_sha256: ctx.before_hash,
+    after_sha256: extra?.after_sha256 ?? ctx.before_hash,
+    current_hash: extra?.current_hash ?? ctx.before_hash,
+    expected_hash: ctx.before_hash,
+    preview: extra?.preview,
+    per_file_unified_diff: extra?.per_file_unified_diff ?? [],
+    dry_run_bundle: extra?.dry_run_bundle,
+    validation: extra?.validation,
+    llm: extra?.llm,
+    errors: extra?.errors ?? [],
+    warnings: extra?.warnings ?? [],
+    telemetry: __edit_fast_apply_telemetry(result, ctx.dry_run, validation_rejected),
+    provenance: {
+      module: "std/edit",
+      helper: "edit_fast_apply",
+      path: ctx.path,
+      before_sha256: ctx.before_hash,
+      after_sha256: extra?.after_sha256 ?? ctx.before_hash,
+      caller: ctx.options?.provenance,
+    },
+  }
+  return base.merge(extra)
+}
+
+/**
+ * Apply a natural-language edit intent by delegating byte synthesis to the
+ * configured merge model role, then committing only through dry-run preview,
+ * syntax validation, and hash-guarded `edit_safe_text_patch`.
+ *
+ * Params:
+ *
+ * - `path`: file to edit.
+ * - `intent` / `edit_intent` / `instruction`: natural-language edit request.
+ * - `model_role`: LLM role to resolve through the normal routing layer
+ *   (default `"merge"`; `[model_roles.merge]`, `HARN_LLM_MERGE_*`, and
+ *   `HARN_LLM_FAST_APPLY_*` apply).
+ * - `llm_options`: extra `llm_call` options. Explicit options win over role
+ *   defaults.
+ * - `dry_run`: return the preview diff without writing.
+ * - `validate_syntax`: default true; rejects parse errors for supported
+ *   Tree-Sitter languages and skips validation for unsupported paths.
+ *
+ * @effects: [host, fs, llm.call]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: edit_fast_apply({path: "src/lib.rs", intent: "Rename alpha to beta"})
+ */
+pub fn edit_fast_apply(params) {
+  const opts = params ?? {}
+  const path = opts?.path ?? ""
+  const intent = opts?.intent ?? opts?.edit_intent ?? opts?.instruction ?? ""
+  const invalid_ctx = {
+    path: path,
+    before_hash: edit_fast_apply_content_hash(""),
+    dry_run: opts?.dry_run ?? false,
+    options: opts,
+  }
+  if trim(path) == "" {
+    return __edit_fast_apply_result(
+      invalid_ctx,
+      {
+        result: "invalid_params",
+        errors: [{code: "invalid_params", message: "edit_fast_apply requires a non-empty path"}],
+      },
+    )
+  }
+  if trim(intent) == "" {
+    return __edit_fast_apply_result(
+      invalid_ctx,
+      {
+        result: "invalid_params",
+        errors: [{code: "invalid_params", message: "edit_fast_apply requires a non-empty intent"}],
+      },
+    )
+  }
+  const read = hostlib_fs_read_text({path: path, session_id: opts?.session_id})
+  const before = read?.content ?? ""
+  const before_hash = read?.sha256 ?? edit_fast_apply_content_hash(before)
+  const ctx = {path: path, before_hash: before_hash, dry_run: opts?.dry_run ?? false, options: opts}
+  let llm_opts = opts?.llm_options ?? {}
+  if opts?.max_tokens != nil {
+    llm_opts = llm_opts.merge({max_tokens: opts.max_tokens})
+  }
+  if opts?.temperature != nil {
+    llm_opts = llm_opts.merge({temperature: opts.temperature})
+  }
+  llm_opts = llm_opts
+    .merge(
+    {
+      model_role: opts?.model_role ?? llm_opts?.model_role ?? "merge",
+      output_schema: __edit_fast_apply_schema(),
+      output_validation: "error",
+      schema_retries: opts?.schema_retries ?? llm_opts?.schema_retries ?? 1,
+      stream: false,
+      session_id: opts?.session_id ?? llm_opts?.session_id,
+    },
+  )
+  const response_result = try {
+    llm_call(
+      __edit_fast_apply_prompt(path, before_hash, intent, before),
+      __edit_fast_apply_system(),
+      llm_opts,
+    )
+  }
+  if is_err(response_result) {
+    const err = unwrap_err(response_result)
+    const result = if err?.category == "schema_validation" {
+      "llm_invalid_output"
+    } else {
+      "llm_call_failed"
+    }
+    return __edit_fast_apply_result(
+      ctx,
+      {
+        result: result,
+        errors: [{code: err?.category ?? result, message: err?.message ?? to_string(err), detail: err}],
+      },
+    )
+  }
+  const response = unwrap(response_result)
+  const extracted = __edit_fast_apply_content(response)
+  if !extracted.ok {
+    return __edit_fast_apply_result(
+      ctx,
+      {
+        result: "llm_invalid_output",
+        errors: [extracted.error],
+        llm: {provider: response?.provider, model: response?.model},
+      },
+    )
+  }
+  const proposed = extracted.content
+  const lazy = edit_check_lazy_truncation(before, proposed, opts?.lazy_truncation)
+  if !lazy.ok {
+    return __edit_fast_apply_result(
+      ctx,
+      {
+        result: "lazy_truncation",
+        errors: [{code: lazy.error_code, message: lazy.message}],
+        validation: lazy,
+      },
+    )
+  }
+  const validation = __edit_fast_apply_validate(path, proposed, opts)
+  if !validation.ok {
+    return __edit_fast_apply_result(
+      ctx,
+      {
+        result: "syntax_error",
+        validation: validation,
+        validation_rejected: 1,
+        errors: validation.errors,
+        llm: {provider: response?.provider, model: response?.model, content_source: extracted.source},
+      },
+    )
+  }
+  const preview = __edit_fast_apply_preview(path, before, proposed)
+  if !preview.ok {
+    return __edit_fast_apply_result(
+      ctx,
+      {
+        result: "dry_run_rejected",
+        dry_run_bundle: preview,
+        errors: preview.errors
+          ?? [{code: "dry_run_rejected", message: "edit_dry_run rejected the proposed content"}],
+        llm: {provider: response?.provider, model: response?.model, content_source: extracted.source},
+      },
+    )
+  }
+  const diff = preview.per_file_unified_diff
+  const result_kind = if before == proposed {
+    "no_op"
+  } else {
+    "applied"
+  }
+  if ctx.dry_run {
+    return __edit_fast_apply_result(
+      ctx,
+      {
+        result: result_kind,
+        preview: proposed,
+        after_sha256: edit_fast_apply_content_hash(proposed),
+        per_file_unified_diff: diff,
+        dry_run_bundle: preview,
+        validation: validation,
+        llm: {provider: response?.provider, model: response?.model, content_source: extracted.source},
+      },
+    )
+  }
+  const commit = edit_safe_text_patch(
+    {
+      path: path,
+      expected_hash: before_hash,
+      session_id: opts?.session_id,
+      hunks: [
+        {
+          old_text: before,
+          new_text: proposed,
+          options: {
+            allow_empty_old_text: true,
+            allow_noop: true,
+            allow_lazy_placeholders: false,
+            max_growth_bytes: opts?.max_growth_bytes,
+          },
+        },
+      ],
+      match_options: {allow_empty_old_text: true, allow_noop: true, allow_lazy_placeholders: false},
+    }.merge(edit_lifecycle_forward_options(opts)),
+  )
+  return __edit_fast_apply_result(
+    ctx,
+    {
+      result: commit.result,
+      ok: commit.ok,
+      applied: commit.applied,
+      after_sha256: commit.after_sha256,
+      current_hash: commit.current_hash,
+      preview: proposed,
+      per_file_unified_diff: diff,
+      dry_run_bundle: preview,
+      validation: validation,
+      errors: commit.errors,
+      warnings: commit.warnings,
+      llm: {provider: response?.provider, model: response?.model, content_source: extracted.source},
+      safe_text_patch: commit,
+    },
+  )
+}
+
+/**
+ * Convenience wrapper for `edit_fast_apply({path, intent, ...})`.
+ *
+ * @effects: [host, fs, llm.call]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: fast_apply("src/lib.rs", "Rename alpha to beta")
+ */
+pub fn fast_apply(path, edit_intent, options = nil) {
+  return edit_fast_apply((options ?? {}).merge({path: path, intent: edit_intent}))
+}

@@ -609,7 +609,7 @@ JSON utility patterns:
 | Function | Description |
 |---|---|
 | `pretty(value)` | Pretty-print a value as indented JSON |
-| `safe_parse(text)` | Safely parse JSON, returning nil on failure instead of throwing |
+| `JsonParseFailure` | Closed error contract returned by bare `try { json_parse(text) }` when JSON is malformed or over-depth; valid JSON `null` is `Ok(nil)` |
 | `stream_validator(schema)` | Incrementally validate JSON string or bytes chunks against a schema; `feed(chunk)` returns `Pending`, `Valid`, or `Invalid({reason, path})`, and `value()` returns the parsed JSON once valid |
 | `stream_validate_create(schema)` / `stream_validate_chunk(handle, chunk)` / `stream_validate_finalize(handle)` | Standalone partial-JSON validation: each call returns a plain-dict verdict `{verdict: "pending"\|"valid"\|"invalid", reason?, path?}` so streaming agents (SSE chunks, WebSocket frames) can dispatch on string verdicts without pattern-matching enum variants. `stream_validate()` returns a namespace record exposing the same trio as `create`/`chunk`/`finalize` keys |
 | `merge<V>(a: dict<string, V>, b: dict<string, V>)` | Shallow-merge two dicts (keys in b override); preserves the value type |
@@ -619,7 +619,8 @@ JSON utility patterns:
 ```harn
 import "std/json"
 
-const data = safe_parse("{\"x\": 1}")   // {x: 1}, or nil on bad input
+const parsed: Result<unknown, JsonParseFailure> = try { json_parse("{\"x\": 1}") }
+const data = parsed?   // {x: 1}; malformed JSON propagates Err
 const validator = stream_validator({type: "dict", required: ["x"], properties: {x: {type: "int"}}})
 const status = validator.feed("{\"x\": 1}")  // JsonStreamStatus.Valid
 const parsed = validator.value()             // {x: 1}

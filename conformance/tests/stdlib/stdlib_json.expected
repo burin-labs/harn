@@ -1,6 +1,11 @@
 test
 42
+true
 nil
+true
+malformed
+true
+recursion_limit
 1
 3
 4
