@@ -36,6 +36,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_generated_registry.harn` | `make check-generated-registry` + pre-push hook | Registry/Makefile/workflow generated-artifact guard. |
 | `check_python_boundary.harn` | `make check-python-boundary` + audit gate | Ratchets Python usage to explicit bootstrap/platform/generated/fixture reasons. |
 | `affected-crates.harn` | `make test-affected` + `ci.yml` Rust lanes | Canonical PR fast-feedback crate selector. The CI bootstrap path mirrors it in `scripts/ci/affected_crate_args.sh` so package selection can happen before compiling the Harn CLI. |
+| `nextest_filters_from_paths.harn` | `scripts/nextest_filters_from_paths.sh` + flake-detection workflow | Maps touched Rust paths to nextest binary/package filters while preserving integration-test-binary semantics. The shell file is only a workflow-compatible launcher. |
 | `bench_cli_cold_start.harn` | `scripts/bench_cli_cold_start.sh` + `cli-cold-start-budget.yml` | Cold-start benchmark controller; isolates measured Harn subprocesses with `env -i` so controller runtime state cannot leak into the timed child. |
 | `verify_tree_sitter_parse.harn` | `release_gate.sh` grammar audit | Regenerates/builds the tree-sitter grammar when stale, sweeps positive `.harn` sources, and preserves strict/non-strict failure policy. |
 | `check_burin_protocol_bindings.harn` | `make check-burin-protocol-artifacts` | Cross-repo Swift/TypeScript protocol artifact drift check against a Burin checkout. |
@@ -87,9 +88,8 @@ risks release/build reliability:
 `verify_crate_packages.sh`, `dev_setup.sh`, `sign_local_macos.sh`,
 `generate_sdk_clients.sh`, `prune_stale_targets.sh`, `bench_*.sh`,
 `smoke_installed_binary.sh`, `stress_subprocess_tests.sh`,
-`nextest_filters_from_paths.sh`, `measure_lean_embedding.sh`,
-`build_docs_site.sh`, `configure_merge_drivers.sh`, `ensure_portal_deps.sh`,
-`portal_demo.sh`, `demo_local_a2a_dispatch.sh`, `install.sh`,
+`measure_lean_embedding.sh`, `build_docs_site.sh`, `configure_merge_drivers.sh`,
+`ensure_portal_deps.sh`, `portal_demo.sh`, `demo_local_a2a_dispatch.sh`, `install.sh`,
 `.githooks/*`, `.github/scripts/*.sh`.
 
 ## Toolchain groundwork landed for this cutover

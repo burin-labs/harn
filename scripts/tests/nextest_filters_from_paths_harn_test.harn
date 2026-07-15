@@ -1,0 +1,96 @@
+import { with_temp_dir } from "std/testing"
+import "../nextest_filters_from_paths.harn"
+
+const PACKAGES = [{dir: "crates/harn-cli", name: "harn-cli"}, {dir: "crates/harn-vm", name: "harn-vm"}]
+
+fn mkdirs(path: string) -> nil {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
+    "/"
+  } else {
+    ""
+  }
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    current = if current == "" || current == "/" {
+      current + part
+    } else {
+      path_join(current, part)
+    }
+    if !harness.fs.exists(current) {
+      harness.fs.mkdir(current)
+    }
+  }
+  return nil
+}
+
+fn write_text(root: string, rel: string, text: string) -> nil {
+  const path = path_join(root, rel)
+  mkdirs(dirname(path) ?? root)
+  harness.fs.write_text(path, text)
+  return nil
+}
+
+@test
+pipeline test_workspace_packages_from_metadata_uses_cargo_workspace_members(task) {
+  const meta = {
+    workspace_members: ["id-cli", "id-vm"],
+    packages: [
+      {id: "id-cli", name: "harn-cli", manifest_path: "/repo/crates/harn-cli/Cargo.toml"},
+      {id: "id-vm", name: "harn-vm", manifest_path: "/repo/crates/harn-vm/Cargo.toml"},
+      {id: "id-excluded", name: "xtask", manifest_path: "/repo/xtask/Cargo.toml"},
+    ],
+  }
+  assert_eq(
+    workspace_packages_from_metadata(meta, "/repo"),
+    [{dir: "crates/harn-cli", name: "harn-cli"}, {dir: "crates/harn-vm", name: "harn-vm"}],
+  )
+}
+
+@test
+pipeline test_filter_for_paths_preserves_binary_and_package_mapping(task) {
+  with_temp_dir(
+    { root ->
+      write_text(root, "crates/harn-cli/tests/orchestrator_http.rs", "")
+      assert_eq(
+        filter_for_path("crates/harn-cli/tests/orchestrator_http/admin.rs", PACKAGES, root),
+        "binary(orchestrator_http)",
+      )
+      assert_eq(
+        filter_for_path("crates/harn-cli/tests/test_util/process.rs", PACKAGES, root),
+        "package(harn-cli)",
+      )
+      assert_eq(
+        filter_for_path("crates/harn-cli/tests/orchestrator_http.rs", PACKAGES, root),
+        "binary(orchestrator_http)",
+      )
+      assert_eq(filter_for_path("./crates/harn-vm/src/lib.rs", PACKAGES, root), "package(harn-vm)")
+      assert_eq(filter_for_path("README.md", PACKAGES, root), nil)
+      assert_eq(filter_for_path("crates/excluded/src/lib.rs", PACKAGES, root), nil)
+    },
+  )
+}
+
+@test
+pipeline test_nextest_filter_for_paths_dedupes_in_order(task) {
+  with_temp_dir(
+    { root ->
+      write_text(root, "crates/harn-cli/tests/orchestrator_http.rs", "")
+      assert_eq(
+        nextest_filter_for_paths(
+          [
+            "crates/harn-cli/tests/orchestrator_http/admin.rs",
+            "crates/harn-cli/tests/test_util/process.rs",
+            "crates/harn-vm/src/flow/slice.rs",
+            "./crates/harn-vm/src/lib.rs",
+          ],
+          PACKAGES,
+          root,
+        ),
+        "binary(orchestrator_http) or package(harn-cli) or package(harn-vm)",
+      )
+    },
+  )
+}

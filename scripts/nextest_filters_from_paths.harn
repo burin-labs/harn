@@ -1,0 +1,175 @@
+import { parse_args } from "std/cli"
+
+type WorkspacePackage = {dir: string, name: string}
+
+fn command_stdout(cmd: string, args: list<string>) -> string {
+  const result = harness.process.spawn_captured({cmd: cmd, args: args})
+  if result.exit_code != 0 {
+    throw cmd + " " + args.join(" ") + " failed:\n" + result.stderr
+  }
+  return result.stdout
+}
+
+fn repo_root() -> string {
+  return command_stdout("git", ["rev-parse", "--show-toplevel"]).trim()
+}
+
+fn rel_path(path: string, root: string) -> string {
+  const normalized = replace(path_normalize(path), "\\", "/")
+  const normalized_root = replace(path_normalize(root), "\\", "/")
+  const prefix = normalized_root + "/"
+  if normalized == normalized_root {
+    return "."
+  }
+  if normalized.starts_with(prefix) {
+    return normalized[len(prefix):]
+  }
+  return normalized
+}
+
+fn normalize_input_path(path: string) -> string {
+  let normalized = replace(path_normalize(path), "\\", "/")
+  while normalized.starts_with("./") {
+    normalized = normalized[2:]
+  }
+  return normalized
+}
+
+pub fn workspace_packages_from_metadata(meta: dict, root: string) -> list<WorkspacePackage> {
+  const members = meta?.workspace_members ?? []
+  let member_ids: list<string> = []
+  for member in members {
+    member_ids = member_ids + [to_string(member)]
+  }
+  let packages: list<WorkspacePackage> = []
+  for package in meta?.packages ?? [] {
+    const id = to_string(package.id)
+    if !member_ids.contains(id) {
+      continue
+    }
+    const name = to_string(package.name)
+    const manifest_path = to_string(package.manifest_path)
+    if name == "" || manifest_path == "" {
+      continue
+    }
+    packages = packages + [{dir: rel_path(dirname(manifest_path) ?? ".", root), name: name}]
+  }
+  return packages.sort_by({ package -> package.dir })
+}
+
+fn load_workspace_packages(root: string) -> list<WorkspacePackage> {
+  const raw = command_stdout(
+    "cargo",
+    ["metadata", "--no-deps", "--format-version", "1", "--manifest-path", path_join(root, "Cargo.toml")],
+  )
+  return workspace_packages_from_metadata(json_parse(raw), root)
+}
+
+pub fn package_for_crate_dir(crate_dir: string, packages: list<WorkspacePackage>) -> string? {
+  for package in packages {
+    if package.dir == crate_dir {
+      return package.name
+    }
+  }
+  return nil
+}
+
+fn add_filter(filters: list<string>, filter: string) -> list<string> {
+  if filters.contains(filter) {
+    return filters
+  }
+  return filters + [filter]
+}
+
+pub fn filter_for_path(raw_path: string, packages: list<WorkspacePackage>, root: string) -> string? {
+  const path = normalize_input_path(raw_path)
+  if path == "" || !path.ends_with(".rs") {
+    return nil
+  }
+  const top_level = regex_captures(r"^crates/([^/]+)/tests/([^/]+)\.rs$", path)
+  if top_level.count > 0 {
+    const groups = top_level[0].groups
+    const crate_dir = "crates/" + to_string(groups[0])
+    const package = package_for_crate_dir(crate_dir, packages)
+    if package == nil {
+      return nil
+    }
+    return "binary(" + to_string(groups[1]) + ")"
+  }
+  const nested = regex_captures(r"^crates/([^/]+)/tests/([^/]+)/", path)
+  if nested.count > 0 {
+    const groups = nested[0].groups
+    const crate_dir = "crates/" + to_string(groups[0])
+    const dir = to_string(groups[1])
+    const package = package_for_crate_dir(crate_dir, packages)
+    if package == nil {
+      return nil
+    }
+    if harness.fs.exists(path_join(root, crate_dir, "tests", dir + ".rs")) {
+      return "binary(" + dir + ")"
+    }
+    return "package(" + package + ")"
+  }
+  const crate_match = regex_captures(r"^crates/([^/]+)/", path)
+  if crate_match.count > 0 {
+    const package = package_for_crate_dir("crates/" + to_string(crate_match[0].groups[0]), packages)
+    if package == nil {
+      return nil
+    }
+    return "package(" + package + ")"
+  }
+  return nil
+}
+
+pub fn nextest_filter_for_paths(paths: list<string>, packages: list<WorkspacePackage>, root: string) -> string {
+  let filters: list<string> = []
+  for path in paths {
+    const filter = filter_for_path(path, packages, root)
+    if filter != nil {
+      filters = add_filter(filters, filter)
+    }
+  }
+  return filters.join(" or ")
+}
+
+fn arg_spec() -> list {
+  return [{kind: "option", name: "root", flags: ["--root"], parse: "string", default: ""}]
+}
+
+fn main(harness: Harness) {
+  const parsed = parse_args(argv, arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio
+      .println(
+      "usage: harn run scripts/nextest_filters_from_paths.harn -- [--root PATH] [file ...]",
+    )
+    return nil
+  }
+  if len(parsed?._errors ?? []) > 0 {
+    harness.stdio.eprintln(join(parsed?._errors ?? [], "\n"))
+    exit(2)
+  }
+  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    harness.stdio.eprintln(join(errors, "\n"))
+    exit(2)
+  }
+  const paths = parsed?._positional ?? []
+  if paths.count == 0 {
+    return nil
+  }
+  const root = if to_string(parsed?.root ?? "") == "" {
+    repo_root()
+  } else {
+    path_normalize(to_string(parsed?.root ?? ""))
+  }
+  const filter = nextest_filter_for_paths(
+    paths.map({ path -> to_string(path) }).to_list(),
+    load_workspace_packages(root),
+    root,
+  )
+  if filter != "" {
+    harness.stdio.println(filter)
+  }
+  return nil
+}

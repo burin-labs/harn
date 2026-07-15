@@ -62,24 +62,12 @@ fake_bin="$tmp_root/bin"
 mkdir -p "$fake_bin"
 cat > "$fake_bin/python3" <<'SH'
 #!/usr/bin/env bash
-echo "fake python failure" >&2
+echo "fake python should not run" >&2
 exit 42
 SH
 chmod +x "$fake_bin/python3"
 
-if PATH="$fake_bin:$PATH" \
-  "$filter_script" "crates/harn-vm/src/flow/slice.rs" \
-  > "$tmp_root/stdout.txt" \
-  2> "$tmp_root/stderr.txt"
-then
-  echo "expected workspace discovery failure to fail the helper" >&2
-  exit 1
-fi
-
-if [[ -s "$tmp_root/stdout.txt" ]]; then
-  echo "expected no stdout on workspace discovery failure" >&2
-  cat "$tmp_root/stdout.txt" >&2
-  exit 1
-fi
-
-grep -q "failed to discover Cargo workspace packages" "$tmp_root/stderr.txt"
+PATH="$fake_bin:$PATH" \
+  assert_filter \
+  "package(harn-vm)" \
+  "crates/harn-vm/src/flow/slice.rs"
