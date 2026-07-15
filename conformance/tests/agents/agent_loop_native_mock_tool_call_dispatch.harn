@@ -1,0 +1,67 @@
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+/**
+ * Regression: a native `tool_format` model whose scripted mock returns a
+ * provider-native `tool_calls` response must DISPATCH that call — run the tool
+ * and continue the loop — not treat it as an end-of-turn text completion.
+ *
+ * This mirrors a downstream host test (a `--llm-mock` fixture returning
+ * `tool_calls` under a native-tools model) that observed zero tool-call events
+ * and a premature `end_turn`. The Rust mock/serialization/dispatch layers are
+ * verified sound in isolation; this exercises the full stdlib agent loop with a
+ * native tool_format, the layer those unit tests do not reach.
+ *
+ * Dispatch proxy: when the native call is dispatched the loop makes a SECOND
+ * LLM call (after running the tool); a dropped native call ends the turn after
+ * ONE call.
+ */
+fn probe_tools() {
+  const tools = tool_registry()
+  return tool_define(
+    tools,
+    "record_choice",
+    "Record the chosen output format exactly once",
+    {
+      handler: { args -> return {accepted: true, choice: args?.choice ?? "unknown"} },
+      parameters: {choice: {type: "string", description: "the chosen output format"}},
+      returns: {type: "object"},
+      annotations: {kind: "record", side_effect_level: "read_only"},
+    },
+  )
+}
+
+pipeline main() {
+  provider_capabilities_install(
+    """
+[[provider.testcatalog]]
+model_match = "native-fixture-*"
+native_tools = true
+preferred_tool_format = "native"
+""",
+  )
+  defer {
+    provider_capabilities_clear()
+  }
+  with_llm_script(
+    [llm_tool_call("record_choice", {choice: "json"}), llm_text("Recorded.\n\n<done>##DONE##</done>")],
+    { ->
+      const result = agent_loop(
+        "Choose an output format and call record_choice.",
+        "You are an agent.",
+        {
+          provider: "testcatalog",
+          model: "native-fixture-route",
+          tools: probe_tools(),
+          tool_format: "native",
+          allowed_tools: ["record_choice"],
+          max_iterations: 3,
+          session_id: "native-mock-dispatch-" + uuid(),
+        },
+      )
+      const calls = llm_mock_calls()
+      __io_println(len(calls) >= 2)
+      __io_println(result.status)
+    },
+  )
+}
+// The native tool call must dispatch, so the loop makes a SECOND call.
