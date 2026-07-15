@@ -1,19 +1,37 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value as JsonValue;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{broadcast, mpsc};
 
 use super::types::{ConnectionState, McpOrchestratorService};
+use harn_serve::transport::{
+    read_jsonrpc_stdio_frame, write_jsonrpc_stdio_message, JsonRpcStdioFrameStyle,
+};
 
 pub(super) async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
-    let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
+    let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
     let mut session = ConnectionState::default();
     let mut list_notifications = service.subscribe_list_notifications();
     let mut resource_notifications = service.subscribe_resource_notifications();
     let mut task_notifications = service.subscribe_task_notifications();
     let mut log_notifications = service.subscribe_log_notifications();
+    let (in_tx, mut in_rx) = mpsc::unbounded_channel();
+    let input_reader = tokio::spawn(async move {
+        loop {
+            match read_jsonrpc_stdio_frame(&mut stdin).await {
+                Ok(Some(frame)) => {
+                    if in_tx.send(Ok(frame)).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let _ = in_tx.send(Err(error));
+                    break;
+                }
+            }
+        }
+    });
 
     // Single mpsc fan-in for everything we write to stdout: per-request
     // responses, broadcast notifications, and progress updates emitted
@@ -23,10 +41,16 @@ pub(super) async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<()
     // ProgressBus can hand its sender to handle_tools_call without a
     // separate channel per request.
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<JsonValue>();
+    let output_style = Arc::new(Mutex::new(JsonRpcStdioFrameStyle::default()));
+    let writer_style = output_style.clone();
     let writer = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
         while let Some(message) = out_rx.recv().await {
-            if write_stdio_json(&mut stdout, &message).await.is_err() {
+            let style = *writer_style.lock().expect("stdio frame style poisoned");
+            if write_jsonrpc_stdio_message(&mut stdout, &message, style)
+                .await
+                .is_err()
+            {
                 break;
             }
         }
@@ -39,15 +63,13 @@ pub(super) async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<()
 
     loop {
         tokio::select! {
-            line = lines.next_line() => {
-                let Some(line) = line.map_err(|error| format!("stdin read failed: {error}"))? else {
+            frame = in_rx.recv() => {
+                let Some(frame) = frame else {
                     break;
                 };
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let request: JsonValue = match serde_json::from_str(trimmed) {
+                let frame = frame?;
+                *output_style.lock().expect("stdio frame style poisoned") = frame.style;
+                let request: JsonValue = match frame.parse_json() {
                     Ok(value) => value,
                     Err(_) => continue,
                 };
@@ -103,19 +125,7 @@ pub(super) async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<()
     drop(_bus_guard);
     drop(out_tx);
     let _ = writer.await;
+    input_reader.abort();
+    let _ = input_reader.await;
     Ok(())
-}
-
-async fn write_stdio_json(stdout: &mut tokio::io::Stdout, value: &JsonValue) -> Result<(), String> {
-    let mut encoded =
-        serde_json::to_string(value).map_err(|error| format!("serialize error: {error}"))?;
-    encoded.push('\n');
-    stdout
-        .write_all(encoded.as_bytes())
-        .await
-        .map_err(|error| format!("stdout write failed: {error}"))?;
-    stdout
-        .flush()
-        .await
-        .map_err(|error| format!("stdout flush failed: {error}"))
 }

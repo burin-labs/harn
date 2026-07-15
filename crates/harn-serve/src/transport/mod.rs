@@ -30,8 +30,13 @@ use tower_http::compression::{CompressionLayer, Predicate};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 mod etag;
+mod jsonrpc_stdio;
 
 pub use etag::compute_strong_etag;
+pub use jsonrpc_stdio::{
+    read_jsonrpc_stdio_frame, write_jsonrpc_stdio_message, JsonRpcStdioFrame,
+    JsonRpcStdioFrameStyle,
+};
 
 /// Handler-set marker that opts the response out of compression. The
 /// custom [`Predicate`] honours it; an outer middleware strips the

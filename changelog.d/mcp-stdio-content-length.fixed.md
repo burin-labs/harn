@@ -1,0 +1,1 @@
+- MCP stdio servers now accept standard `Content-Length` framed JSON-RPC while preserving newline-delimited clients.
