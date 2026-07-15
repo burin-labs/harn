@@ -163,6 +163,79 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
   return selected
 }
 
+fn __provider_meta_by_id(catalog: dict) -> dict {
+  let providers = {}
+  for provider in catalog.providers ?? [] {
+    const id = trim(to_string(provider.id ?? provider.name ?? ""))
+    if id != "" {
+      providers = providers + {[id]: provider}
+    }
+  }
+  return providers
+}
+
+fn __route_is_local(provider: string, meta: dict) -> bool {
+  const classification = to_string(meta.classification ?? "")
+  if classification == "local" {
+    return true
+  }
+  return provider == "local" || provider == "ollama" || provider == "llamacpp" || provider == "mlx"
+}
+
+fn __has_string(values, target: string) -> bool {
+  if type_of(values) != "list" {
+    return false
+  }
+  for value in values {
+    if to_string(value) == target {
+      return true
+    }
+  }
+  return false
+}
+
+fn __catalog_model_is_cheap(model: dict, local: bool) -> bool {
+  if local {
+    return true
+  }
+  if __has_string(model.strengths, "cheap") || __has_string(model.quality_tags, "cheap") {
+    return true
+  }
+  const input = to_float(model.pricing?.input_per_mtok) ?? 999999.0
+  const output = to_float(model.pricing?.output_per_mtok) ?? 999999.0
+  return input <= 1.0 && output <= 5.0
+}
+
+pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+  const providers = __provider_meta_by_id(catalog)
+  let routes: list<ProviderToolProbeRoute> = []
+  for model in catalog.models ?? [] {
+    const provider = trim(to_string(model.provider ?? ""))
+    const model_id = trim(to_string(model.id ?? ""))
+    if provider == "" || model_id == "" {
+      continue
+    }
+    const meta = providers[provider] ?? {}
+    const local = __route_is_local(provider, meta)
+    const cheap = __catalog_model_is_cheap(model, local)
+    if !include_expensive && !cheap {
+      continue
+    }
+    routes = routes
+      + [
+      {
+        id: __slug(provider + "-" + model_id),
+        provider: provider,
+        model: model_id,
+        env_keys: __as_string_list(meta.auth?.env ?? meta.auth_envs),
+        local: local,
+        cheap: cheap,
+      },
+    ]
+  }
+  return routes
+}
+
 pub fn provider_tool_probe_campaign_modes(mode: string) -> list<string> {
   if mode == "both" {
     return ["non-streaming", "streaming"]
@@ -837,6 +910,7 @@ fn __arg_spec() -> list {
     {kind: "option", name: "env_file", flags: ["--env-file"], default: ""},
     {kind: "option", name: "output_dir", flags: ["--output-dir"], default: DEFAULT_OUTPUT_DIR},
     {kind: "flag", name: "include_expensive", flags: ["--include-expensive"]},
+    {kind: "flag", name: "catalog_routes", flags: ["--catalog-routes"]},
     {kind: "flag", name: "live", flags: ["--live"]},
     {kind: "flag", name: "markdown", flags: ["--markdown"]},
   ]
@@ -851,7 +925,7 @@ fn main(harness: Harness) {
   if parsed?._help ?? false {
     harness.stdio
       .println(
-      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--include-expensive] [--live] [--markdown]",
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--include-expensive] [--live] [--markdown]",
     )
     return nil
   }
@@ -860,8 +934,15 @@ fn main(harness: Harness) {
     exit(2)
   }
   const include_expensive = parsed?.include_expensive ?? false
+  const catalog_routes = parsed?.catalog_routes ?? false
   const route_specs = __as_string_list(parsed?.route)
-  const routes = if len(route_specs) == 0 {
+  if catalog_routes && len(route_specs) > 0 {
+    harness.stdio.eprintln("--catalog-routes cannot be combined with --route")
+    exit(2)
+  }
+  const routes = if catalog_routes {
+    provider_tool_probe_campaign_catalog_routes(llm_provider_catalog(), include_expensive)
+  } else if len(route_specs) == 0 {
     provider_tool_probe_campaign_default_routes(include_expensive)
   } else {
     provider_tool_probe_campaign_routes(route_specs)

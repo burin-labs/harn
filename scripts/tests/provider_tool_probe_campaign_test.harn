@@ -66,6 +66,80 @@ pipeline test_provider_tool_probe_campaign_include_expensive_adds_xai(task) {
 }
 
 @test
+pipeline test_provider_tool_probe_campaign_catalog_routes_use_catalog_metadata(task) {
+  const catalog = {
+    providers: [
+      {id: "anthropic", classification: "hosted", auth: {env: ["ANTHROPIC_API_KEY"], required: true}},
+      {id: "ollama", classification: "local", auth: {env: [], required: false}},
+    ],
+    models: [
+      {
+        provider: "anthropic",
+        id: "claude-sonnet-fixture",
+        strengths: ["coding"],
+        pricing: {input_per_mtok: 3.0, output_per_mtok: 15.0},
+      },
+      {provider: "ollama", id: "local-fixture", strengths: [], pricing: {}},
+    ],
+  }
+  const cheap = provider_tool_probe_campaign_catalog_routes(catalog, false)
+  assert_eq(len(cheap), 1)
+  assert_eq(cheap[0]?.provider, "ollama")
+  assert_eq(cheap[0]?.local, true)
+  assert_eq(cheap[0]?.cheap, true)
+  const all = provider_tool_probe_campaign_catalog_routes(catalog, true)
+  assert_eq(len(all), 2)
+  const anthropic = all.filter({ route -> route.provider == "anthropic" }).to_list()[0]
+  assert_eq(anthropic.env_keys, ["ANTHROPIC_API_KEY"])
+  assert_eq(anthropic.local, false)
+  assert_eq(anthropic.cheap, false)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_catalog_routes_keep_cheap_hosted_models(task) {
+  const catalog = {
+    providers: [{id: "fireworks", classification: "hosted", auth: {env: ["FIREWORKS_API_KEY"]}}],
+    models: [
+      {
+        provider: "fireworks",
+        id: "cheap-fixture",
+        strengths: ["speed"],
+        pricing: {input_per_mtok: 0.5, output_per_mtok: 2.0},
+      },
+      {
+        provider: "fireworks",
+        id: "expensive-fixture",
+        strengths: ["frontier"],
+        pricing: {input_per_mtok: 20.0, output_per_mtok: 60.0},
+      },
+    ],
+  }
+  const routes = provider_tool_probe_campaign_catalog_routes(catalog, false)
+  assert_eq(len(routes), 1)
+  assert_eq(routes[0]?.model, "cheap-fixture")
+  assert_eq(routes[0]?.env_keys, ["FIREWORKS_API_KEY"])
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_catalog_routes_accept_runtime_catalog_shape(task) {
+  const catalog = {
+    providers: [{name: "anthropic", classification: "hosted", auth_envs: ["ANTHROPIC_API_KEY"]}],
+    models: [
+      {
+        provider: "anthropic",
+        id: "claude-haiku-fixture",
+        strengths: ["cheap"],
+        pricing: {input_per_mtok: 0.8, output_per_mtok: 4.0},
+      },
+    ],
+  }
+  const routes = provider_tool_probe_campaign_catalog_routes(catalog, false)
+  assert_eq(len(routes), 1)
+  assert_eq(routes[0]?.provider, "anthropic")
+  assert_eq(routes[0]?.env_keys, ["ANTHROPIC_API_KEY"])
+}
+
+@test
 pipeline test_provider_tool_probe_campaign_modes_expand_both(task) {
   assert_eq(provider_tool_probe_campaign_modes("both"), ["non-streaming", "streaming"])
   assert_eq(provider_tool_probe_campaign_modes("streaming"), ["streaming"])
@@ -127,6 +201,13 @@ pipeline test_provider_tool_probe_campaign_dotenv_parser_does_not_require_shell(
   assert_eq(env.MOONSHOT_API_KEY, "moon")
   assert_eq(env.EMPTY, "")
   assert_eq(env.BAD, nil)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(task) {
+  const parsed = provider_tool_probe_campaign_parse_args(["--catalog-routes", "--include-expensive"])
+  assert_eq(parsed.catalog_routes, true)
+  assert_eq(parsed.include_expensive, true)
 }
 
 @test
