@@ -150,9 +150,9 @@ pub struct ToolConformanceCase {
     pub elapsed_ms: Option<u64>,
     pub native_tool_call_count: usize,
     pub text_tool_call_count: usize,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parser_errors: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub protocol_violations: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_sample: Option<String>,
@@ -1119,6 +1119,33 @@ mod tests {
         assert_eq!(
             body["toolConfig"]["functionCallingConfig"]["allowedFunctionNames"],
             json!([TOOL_PROBE_TOOL_NAME])
+        );
+    }
+
+    #[test]
+    fn tool_conformance_report_accepts_compact_empty_diagnostics() {
+        let report: ToolConformanceReport = serde_json::from_str(
+            concat!(
+                r#"{"schema_version":1,"provider":"groq","model":"openai/gpt-oss-120b","#,
+                r#""tool_name":"echo_marker","marker":"harn_tool_probe_marker","cases":["#,
+                r#"{"mode":"non_streaming","ok":true,"classification":"structured_native_tool_call","#,
+                r#""fallback_mode":"native","native_tool_call_count":1,"text_tool_call_count":0}],"#,
+                r#""tool_calling":{"native":"pass","text":"unknown","streaming_native":"unknown","fallback_mode":"native"}}"#,
+            ),
+        )
+        .expect("compact v1 reports should deserialize");
+
+        assert!(report.cases[0].parser_errors.is_empty());
+        assert!(report.cases[0].protocol_violations.is_empty());
+
+        let serialized = serde_json::to_value(&report).expect("serialize report");
+        assert!(
+            serialized["cases"][0].get("parser_errors").is_none(),
+            "empty parser diagnostics stay compact on write"
+        );
+        assert!(
+            serialized["cases"][0].get("protocol_violations").is_none(),
+            "empty protocol diagnostics stay compact on write"
         );
     }
 

@@ -16,7 +16,7 @@ use super::tool_conformance::{
     ToolConformanceCase, ToolConformanceReport, ToolProbeClassification, ToolProbeFallbackMode,
 };
 
-pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 2;
+pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 3;
 pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,9 +67,30 @@ pub struct ToolScorecardRoute {
     pub recommended_tool_mode: &'static str,
     pub observed_wire_dialects: Vec<&'static str>,
     pub classification_counts: BTreeMap<&'static str, usize>,
+    pub mode_evidence: Vec<ToolScorecardModeEvidence>,
     pub issues: Vec<&'static str>,
     pub catalog_mismatches: Vec<ToolScorecardCatalogMismatch>,
     pub suggested_catalog_updates: Vec<ToolScorecardCatalogUpdate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardModeEvidence {
+    pub mode: &'static str,
+    pub case_count: usize,
+    pub successful_cases: usize,
+    pub parseable_tool_call_cases: usize,
+    pub native_tool_call_cases: usize,
+    pub text_tool_call_cases: usize,
+    pub actionless_cases: usize,
+    pub empty_completion_cases: usize,
+    pub malformed_argument_cases: usize,
+    pub http_error_cases: usize,
+    pub transport_error_cases: usize,
+    pub pass_rate: f64,
+    pub recommended_tool_mode: &'static str,
+    pub status: &'static str,
+    pub classification_counts: BTreeMap<&'static str, usize>,
+    pub issues: Vec<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -167,6 +188,64 @@ struct RouteAccumulator {
     model: String,
     report_count: usize,
     cases: Vec<ToolConformanceCase>,
+}
+
+#[derive(Debug, Default)]
+struct CaseStats {
+    case_count: usize,
+    successful_cases: usize,
+    parseable_tool_call_cases: usize,
+    native_tool_call_cases: usize,
+    text_tool_call_cases: usize,
+    actionless_cases: usize,
+    empty_completion_cases: usize,
+    malformed_argument_cases: usize,
+    http_error_cases: usize,
+    transport_error_cases: usize,
+    classification_counts: BTreeMap<&'static str, usize>,
+    observed_wire_dialects: BTreeSet<&'static str>,
+}
+
+impl CaseStats {
+    fn record(&mut self, case: &ToolConformanceCase) {
+        self.case_count += 1;
+        *self
+            .classification_counts
+            .entry(classification_key(&case.classification))
+            .or_insert(0) += 1;
+        self.observed_wire_dialects
+            .insert(wire_dialect_key(&case.classification));
+        if case.ok {
+            self.successful_cases += 1;
+        }
+        match case.classification {
+            ToolProbeClassification::StructuredNativeToolCall => {
+                self.parseable_tool_call_cases += 1;
+                self.native_tool_call_cases += 1;
+            }
+            ToolProbeClassification::ParseableHarnTextToolCall => {
+                self.parseable_tool_call_cases += 1;
+                self.text_tool_call_cases += 1;
+            }
+            ToolProbeClassification::ProseOnlyNonTool => {
+                self.actionless_cases += 1;
+            }
+            ToolProbeClassification::EmptySilent => {
+                self.actionless_cases += 1;
+                self.empty_completion_cases += 1;
+            }
+            ToolProbeClassification::MalformedJsonArguments => {
+                self.malformed_argument_cases += 1;
+            }
+            ToolProbeClassification::HttpError => {
+                self.http_error_cases += 1;
+            }
+            ToolProbeClassification::TransportError => {
+                self.transport_error_cases += 1;
+            }
+            ToolProbeClassification::RawModelToolTag => {}
+        }
+    }
 }
 
 pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolScorecardReport {
@@ -311,16 +390,15 @@ pub fn tool_scorecard_plan_from_catalog(
 fn catalog_claims_by_route() -> BTreeMap<(String, String), ToolScorecardCatalogClaim> {
     let artifact = crate::provider_catalog::artifact();
     let provider_by_id = providers_by_id(&artifact.providers);
-    artifact
-        .models
-        .iter()
-        .map(|model| {
-            (
-                (model.provider.clone(), model.id.clone()),
-                catalog_claim_for_model(model, &provider_by_id),
-            )
-        })
-        .collect()
+    let mut claims = BTreeMap::new();
+    for model in &artifact.models {
+        let claim = catalog_claim_for_model(model, &provider_by_id);
+        claims.insert((model.provider.clone(), model.id.clone()), claim.clone());
+        if let Some(wire_model) = model.wire_model.as_ref() {
+            claims.insert((model.provider.clone(), wire_model.clone()), claim);
+        }
+    }
+    claims
 }
 
 fn providers_by_id(providers: &[CatalogProvider]) -> BTreeMap<&str, &CatalogProvider> {
@@ -469,74 +547,46 @@ fn score_route(
     acc: RouteAccumulator,
     catalog_claim: Option<ToolScorecardCatalogClaim>,
 ) -> ToolScorecardRoute {
-    let case_count = acc.cases.len();
-    let mut successful_cases = 0;
-    let mut parseable_tool_call_cases = 0;
-    let mut native_tool_call_cases = 0;
-    let mut text_tool_call_cases = 0;
-    let mut actionless_cases = 0;
-    let mut empty_completion_cases = 0;
-    let mut malformed_argument_cases = 0;
-    let mut http_error_cases = 0;
-    let mut transport_error_cases = 0;
-    let mut observed_wire_dialects = BTreeSet::new();
-    let mut classification_counts = BTreeMap::new();
+    let mut stats = CaseStats::default();
+    let mut stats_by_mode: BTreeMap<&'static str, CaseStats> = BTreeMap::new();
 
     for case in &acc.cases {
-        *classification_counts
-            .entry(classification_key(&case.classification))
-            .or_insert(0) += 1;
-        observed_wire_dialects.insert(wire_dialect_key(&case.classification));
-        if case.ok {
-            successful_cases += 1;
-        }
-        match case.classification {
-            ToolProbeClassification::StructuredNativeToolCall => {
-                parseable_tool_call_cases += 1;
-                native_tool_call_cases += 1;
-            }
-            ToolProbeClassification::ParseableHarnTextToolCall => {
-                parseable_tool_call_cases += 1;
-                text_tool_call_cases += 1;
-            }
-            ToolProbeClassification::ProseOnlyNonTool => {
-                actionless_cases += 1;
-            }
-            ToolProbeClassification::EmptySilent => {
-                actionless_cases += 1;
-                empty_completion_cases += 1;
-            }
-            ToolProbeClassification::MalformedJsonArguments => {
-                malformed_argument_cases += 1;
-            }
-            ToolProbeClassification::HttpError => {
-                http_error_cases += 1;
-            }
-            ToolProbeClassification::TransportError => {
-                transport_error_cases += 1;
-            }
-            ToolProbeClassification::RawModelToolTag => {}
-        }
+        stats.record(case);
+        stats_by_mode
+            .entry(case.mode.as_str())
+            .or_default()
+            .record(case);
     }
 
-    let pass_rate = rate(successful_cases, case_count);
-    let parseable_tool_call_rate = rate(parseable_tool_call_cases, case_count);
-    let empty_completion_rate = rate(empty_completion_cases, case_count);
-    let actionless_rate = rate(actionless_cases, case_count);
+    let case_count = stats.case_count;
+    let pass_rate = rate(stats.successful_cases, case_count);
+    let parseable_tool_call_rate = rate(stats.parseable_tool_call_cases, case_count);
+    let empty_completion_rate = rate(stats.empty_completion_cases, case_count);
+    let actionless_rate = rate(stats.actionless_cases, case_count);
     let quality_score = ((pass_rate * 100.0).round() as u16).min(100);
-    let recommended_tool_mode = recommended_tool_mode(native_tool_call_cases, text_tool_call_cases);
+    let recommended_tool_mode =
+        recommended_tool_mode(stats.native_tool_call_cases, stats.text_tool_call_cases);
     let (catalog_mismatches, suggested_catalog_updates) =
         catalog_drift(&catalog_claim, recommended_tool_mode);
     let issues = route_issues(
         case_count,
-        successful_cases,
+        stats.successful_cases,
         recommended_tool_mode,
-        actionless_cases,
-        malformed_argument_cases,
-        http_error_cases,
-        transport_error_cases,
+        stats.actionless_cases,
+        stats.malformed_argument_cases,
+        stats.http_error_cases,
+        stats.transport_error_cases,
     );
-    let status = route_status(recommended_tool_mode, successful_cases, case_count, &issues);
+    let status = route_status(
+        recommended_tool_mode,
+        stats.successful_cases,
+        case_count,
+        &issues,
+    );
+    let mode_evidence = stats_by_mode
+        .into_iter()
+        .map(|(mode, mode_stats)| mode_evidence(mode, mode_stats))
+        .collect();
 
     ToolScorecardRoute {
         provider: acc.provider,
@@ -544,15 +594,15 @@ fn score_route(
         catalog_claim,
         report_count: acc.report_count,
         case_count,
-        successful_cases,
-        parseable_tool_call_cases,
-        native_tool_call_cases,
-        text_tool_call_cases,
-        actionless_cases,
-        empty_completion_cases,
-        malformed_argument_cases,
-        http_error_cases,
-        transport_error_cases,
+        successful_cases: stats.successful_cases,
+        parseable_tool_call_cases: stats.parseable_tool_call_cases,
+        native_tool_call_cases: stats.native_tool_call_cases,
+        text_tool_call_cases: stats.text_tool_call_cases,
+        actionless_cases: stats.actionless_cases,
+        empty_completion_cases: stats.empty_completion_cases,
+        malformed_argument_cases: stats.malformed_argument_cases,
+        http_error_cases: stats.http_error_cases,
+        transport_error_cases: stats.transport_error_cases,
         pass_rate,
         parseable_tool_call_rate,
         empty_completion_rate,
@@ -560,11 +610,51 @@ fn score_route(
         quality_score,
         status,
         recommended_tool_mode,
-        observed_wire_dialects: observed_wire_dialects.into_iter().collect(),
-        classification_counts,
+        observed_wire_dialects: stats.observed_wire_dialects.into_iter().collect(),
+        classification_counts: stats.classification_counts,
+        mode_evidence,
         issues,
         catalog_mismatches,
         suggested_catalog_updates,
+    }
+}
+
+fn mode_evidence(mode: &'static str, stats: CaseStats) -> ToolScorecardModeEvidence {
+    let pass_rate = rate(stats.successful_cases, stats.case_count);
+    let recommended_tool_mode =
+        recommended_tool_mode(stats.native_tool_call_cases, stats.text_tool_call_cases);
+    let issues = route_issues(
+        stats.case_count,
+        stats.successful_cases,
+        recommended_tool_mode,
+        stats.actionless_cases,
+        stats.malformed_argument_cases,
+        stats.http_error_cases,
+        stats.transport_error_cases,
+    );
+    let status = route_status(
+        recommended_tool_mode,
+        stats.successful_cases,
+        stats.case_count,
+        &issues,
+    );
+    ToolScorecardModeEvidence {
+        mode,
+        case_count: stats.case_count,
+        successful_cases: stats.successful_cases,
+        parseable_tool_call_cases: stats.parseable_tool_call_cases,
+        native_tool_call_cases: stats.native_tool_call_cases,
+        text_tool_call_cases: stats.text_tool_call_cases,
+        actionless_cases: stats.actionless_cases,
+        empty_completion_cases: stats.empty_completion_cases,
+        malformed_argument_cases: stats.malformed_argument_cases,
+        http_error_cases: stats.http_error_cases,
+        transport_error_cases: stats.transport_error_cases,
+        pass_rate,
+        recommended_tool_mode,
+        status,
+        classification_counts: stats.classification_counts,
+        issues,
     }
 }
 
@@ -835,6 +925,62 @@ mod tests {
     }
 
     #[test]
+    fn scorecard_matches_catalog_claims_by_wire_model() {
+        let scorecard = scorecard_from_tool_reports(vec![report(
+            "nvidia",
+            "openai/gpt-oss-120b",
+            vec![case(
+                ToolProbeClassification::StructuredNativeToolCall,
+                true,
+            )],
+        )]);
+
+        let route = &scorecard.routes[0];
+        assert_eq!(route.provider, "nvidia");
+        assert_eq!(route.model, "openai/gpt-oss-120b");
+        assert!(route.catalog_claim.is_some());
+        assert!(route
+            .catalog_mismatches
+            .iter()
+            .all(|mismatch| mismatch.code != "route_missing_from_catalog"));
+    }
+
+    #[test]
+    fn scorecard_splits_evidence_by_transport_mode() {
+        let scorecard = scorecard_from_tool_reports(vec![report(
+            "deepinfra",
+            "openai/gpt-oss-120b",
+            vec![
+                case_with_mode(
+                    ToolProbeMode::NonStreaming,
+                    ToolProbeClassification::EmptySilent,
+                    false,
+                ),
+                case_with_mode(
+                    ToolProbeMode::Streaming,
+                    ToolProbeClassification::StructuredNativeToolCall,
+                    true,
+                ),
+            ],
+        )]);
+
+        let route = &scorecard.routes[0];
+        assert_eq!(route.quality_score, 50);
+        assert_eq!(route.status, "warn");
+        assert_eq!(route.recommended_tool_mode, "native");
+        assert_eq!(route.mode_evidence.len(), 2);
+        assert_eq!(route.mode_evidence[0].mode, "non_streaming");
+        assert_eq!(route.mode_evidence[0].status, "fail");
+        assert_eq!(
+            route.mode_evidence[0].issues,
+            vec!["tool_calling_disabled", "empty_or_actionless_completion"]
+        );
+        assert_eq!(route.mode_evidence[1].mode, "streaming");
+        assert_eq!(route.mode_evidence[1].status, "pass");
+        assert_eq!(route.mode_evidence[1].recommended_tool_mode, "native");
+    }
+
+    #[test]
     fn scorecard_does_not_suggest_catalog_disable_without_positive_evidence() {
         let scorecard = scorecard_from_tool_reports(vec![report(
             "anthropic",
@@ -934,8 +1080,16 @@ mod tests {
     }
 
     fn case(classification: ToolProbeClassification, ok: bool) -> ToolConformanceCase {
+        case_with_mode(ToolProbeMode::NonStreaming, classification, ok)
+    }
+
+    fn case_with_mode(
+        mode: ToolProbeMode,
+        classification: ToolProbeClassification,
+        ok: bool,
+    ) -> ToolConformanceCase {
         ToolConformanceCase {
-            mode: ToolProbeMode::NonStreaming,
+            mode,
             ok,
             classification,
             fallback_mode: ToolProbeFallbackMode::Native,
