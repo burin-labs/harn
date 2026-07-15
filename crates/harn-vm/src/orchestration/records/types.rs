@@ -736,6 +736,7 @@ pub struct EvalPackStatsRow {
     pub case_fingerprint: String,
     pub harness_config_fingerprint: String,
     pub group: String,
+    pub metadata: BTreeMap<String, serde_json::Value>,
     pub split: Option<String>,
     pub trials: usize,
     pub passes: usize,

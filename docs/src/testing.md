@@ -467,6 +467,21 @@ context-pack suggestion assertions, and cost/latency/token/stage thresholds.
 prompt-version metadata for hosted or explicit judge runners; a blocking
 `llm-judge` rubric fails locally rather than being silently skipped.
 
+Case `metadata` is preserved on the report's `stats_rows`, so packs can define
+their own scalar taxonomy without extending the manifest schema. Use
+`axis_breakdown` from `std/eval/stats` to measure each value while making
+unclassified cases explicit:
+
+```harn
+import "std/eval/stats"
+
+const by_language = axis_breakdown(report.stats_rows, "language")
+```
+
+The breakdown composes macro pass@1, reliability, skip rate, timeout rate, and
+cost per solved. It does not impose a product-specific threshold; the pack or
+gate consuming the report owns that policy.
+
 Eval packs can also include persona timeout ladders. A `[[ladders]]`
 entry runs the same persona fixture across every configured
 `model-routes` / `timeout-tiers` combination, writes per-tier JSONL

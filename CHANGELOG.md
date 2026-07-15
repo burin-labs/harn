@@ -9,6 +9,14 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- Eval-pack statistics rows now retain case metadata, and `std/eval/stats`
+  exposes `axis_breakdown` for deterministic language, task, platform, and
+  other pack-defined breakdowns with explicit unclassified coverage.
+
 ## v0.10.18
 
 ### Added

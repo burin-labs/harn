@@ -3,6 +3,39 @@
  *
  * Import with: import "std/eval/stats"
  */
+type EvalReliabilityBreakdown = {
+  all_pass: float,
+  flaky: float,
+  all_fail: float,
+  no_decision: float,
+  cases: int,
+  all_pass_cases: int,
+  flaky_cases: int,
+  all_fail_cases: int,
+  no_decision_cases: int,
+  decided_cases: int,
+}
+
+type EvalAxisGroup = {
+  value: string,
+  cases: int,
+  macro_pass_at_1: float,
+  reliability: EvalReliabilityBreakdown,
+  skip_rate: float,
+  timeout_rate: float,
+  cost_per_solved_usd: float?,
+}
+
+type EvalAxisBreakdown = {
+  axis: string,
+  groups: list<EvalAxisGroup>,
+  worst: EvalAxisGroup?,
+  cases: int,
+  classified_cases: int,
+  missing_cases: list<string>,
+  missing_count: int,
+}
+
 fn __float(value) -> float {
   return to_float(value) ?? 0.0
 }
@@ -178,6 +211,21 @@ fn __row_group(row: dict) -> string {
     return explicit
   }
   return __group_prefix(__row_case_name(row))
+}
+
+fn __row_axis_value(row: dict, axis: string) -> string? {
+  let value = row[axis]
+  if value == nil && type_of(row?.metadata) == "dict" {
+    value = row.metadata[axis]
+  }
+  if type_of(value) != "string" {
+    return nil
+  }
+  const normalized = trim(value)
+  if normalized == "" {
+    return nil
+  }
+  return normalized
 }
 
 fn __row_total_cost_usd(row: dict) -> float {
@@ -476,7 +524,7 @@ pub fn macro_pass_at_1(rows: list) -> float {
  * @errors: []
  * @example: reliability_breakdown([{passes: 1, trials: 1, skips: 0}])
  */
-pub fn reliability_breakdown(rows: list) -> dict {
+pub fn reliability_breakdown(rows: list) -> EvalReliabilityBreakdown {
   const n = len(rows)
   if n == 0 {
     return {
@@ -718,6 +766,69 @@ pub fn worst_group(rows: list) -> dict {
       worst_rate
     },
     cases: worst_cases,
+  }
+}
+
+fn __axis_group(value: string, rows: list) -> EvalAxisGroup {
+  return {
+    value: value,
+    cases: len(rows),
+    macro_pass_at_1: macro_pass_at_1(rows),
+    reliability: reliability_breakdown(rows),
+    skip_rate: skip_rate(rows),
+    timeout_rate: timeout_rate(rows),
+    cost_per_solved_usd: cost_per_solved(rows),
+  }
+}
+
+/**
+ * Break eval rows down by a named scalar metadata axis.
+ *
+ * Top-level row fields take precedence over `row.metadata` for compatibility
+ * with existing ledgers. Missing, empty, or non-string values are reported as
+ * coverage gaps instead of being coerced into a group. Group metrics compose
+ * the existing eval statistics helpers and group ordering is deterministic.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: axis_breakdown([{name: "a", passes: 1, trials: 1, metadata: {language: "rust"}}], "language")
+ */
+pub fn axis_breakdown(rows: list, axis: string) -> EvalAxisBreakdown {
+  let grouped_rows: dict = {}
+  let missing_cases: list<string> = []
+  let missing_count = 0
+  for row in rows {
+    const value = __row_axis_value(row, axis)
+    if value == nil {
+      missing_count = missing_count + 1
+      const name = __row_case_name(row)
+      if !contains(missing_cases, name) {
+        missing_cases = missing_cases + [name]
+      }
+      continue
+    }
+    grouped_rows = grouped_rows + {[value]: (grouped_rows[value] ?? []) + [row]}
+  }
+  let groups: list<EvalAxisGroup> = []
+  for value in grouped_rows.keys().sort() {
+    groups = groups + [__axis_group(value, grouped_rows[value])]
+  }
+  let worst: EvalAxisGroup? = nil
+  let worst_rate = 2.0
+  for group in groups {
+    if group.macro_pass_at_1 < worst_rate {
+      worst = group
+      worst_rate = group.macro_pass_at_1
+    }
+  }
+  return {
+    axis: axis,
+    groups: groups,
+    worst: worst,
+    cases: len(rows),
+    classified_cases: len(rows) - missing_count,
+    missing_cases: missing_cases,
+    missing_count: missing_count,
   }
 }
 
