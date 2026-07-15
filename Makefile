@@ -347,6 +347,7 @@ test-pr-gate-scripts:
 	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
+	./scripts/tests/audit_gates_parallel_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
