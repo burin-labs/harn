@@ -160,6 +160,32 @@ mcp_notes = [
 ]
 
 [[entry]]
+id = "huggingface"
+catalog_provider = "huggingface"
+display_name = "Hugging Face Inference Providers"
+endpoint_style = "OpenAI-compatible chat completions through the HF router"
+recommended_model = "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+recommended_selector = "huggingface-qwen3-coder"
+recommended_tool_format = "native"
+usage_confidence = "medium"
+recommended_options = [
+  'provider = "huggingface"',
+  'model = "huggingface-qwen3-coder"',
+  'tool_format = "native"',
+]
+notes = [
+  "The Hugging Face router uses the OpenAI-compatible chat completions API and supports tools and streaming for chat-completion models.",
+  "Qwen3-Coder 480B A35B is the recommended HF router coding row because its model card publishes native 262K context, agentic coding focus, and a function-call-oriented format.",
+]
+caveats = [
+  "Router availability, latency, and pricing depend on the selected upstream provider; run readiness and tool probes before promoting a route into production defaults.",
+  "Do not infer reasoning controls from other Qwen rows: this Qwen3-Coder model card says the model is non-thinking.",
+]
+mcp_notes = [
+  "MCP tools are rendered as OpenAI-compatible tool definitions on this route.",
+]
+
+[[entry]]
 id = "local"
 catalog_provider = "local"
 display_name = "OpenAI-compatible local server"

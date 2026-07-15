@@ -124,4 +124,28 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn huggingface_qwen3_coder_aliases_resolve_through_live_resolver() {
+        for selector in ["huggingface-qwen3-coder", "hf-qwen3-coder"] {
+            let model = resolve_model_info(selector);
+            assert_eq!(
+                (
+                    model.id.as_str(),
+                    model.provider.as_str(),
+                    model.alias.as_deref(),
+                    model.tool_format.as_str(),
+                    model.tier.as_str(),
+                ),
+                (
+                    "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+                    "huggingface",
+                    Some(selector),
+                    "native",
+                    "frontier",
+                ),
+                "selector: {selector}",
+            );
+        }
+    }
 }

@@ -8922,6 +8922,90 @@
       }
     },
     {
+      "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+      "name": "Qwen3-Coder 480B A35B Instruct (Hugging Face Router)",
+      "provider": "huggingface",
+      "aliases": [
+        "hf-qwen3-coder",
+        "huggingface-qwen3-coder"
+      ],
+      "context_window": 262144,
+      "logical_model": "qwen3-coder-480b-a35b",
+      "equivalence_group": "qwen3-coder-480b-a35b",
+      "served_variant": "huggingface-router",
+      "wire_model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 480.0,
+        "active_parameter_count_b": 35.0,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "last_verified": "2026-07-15"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
       "id": "mercury-2",
       "name": "Mercury 2",
       "provider": "inception",
@@ -22717,6 +22801,18 @@
       "provider": "anthropic"
     },
     {
+      "name": "hf-qwen3-coder",
+      "model_id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+      "provider": "huggingface",
+      "tool_format": "native"
+    },
+    {
+      "name": "huggingface-qwen3-coder",
+      "model_id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+      "provider": "huggingface",
+      "tool_format": "native"
+    },
+    {
       "name": "kat-coder-pro-v2",
       "model_id": "kwaipilot/kat-coder-pro-v2",
       "provider": "openrouter"
@@ -24686,6 +24782,23 @@
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "huggingface",
+      "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+      "base_url": "https://router.huggingface.co/v1",
+      "secret_env": "HF_TOKEN",
+      "label": "Qwen3-Coder 480B A35B Instruct (Hugging Face Router)",
+      "family": "qwen",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:delimited",
         "text_tools",
         "tools"
       ]
