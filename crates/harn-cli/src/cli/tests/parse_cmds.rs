@@ -160,6 +160,28 @@ fn test_parses_run_llm_mock_flags() {
 }
 
 #[test]
+fn test_test_bench_run_help_discloses_wasi_feature_gate() {
+    let mut command = Cli::command();
+    let help = command
+        .find_subcommand_mut("test-bench")
+        .and_then(|test_bench| test_bench.find_subcommand_mut("run"))
+        .expect("test-bench run subcommand exists")
+        .render_help()
+        .to_string();
+
+    for token in [
+        "--process-wasi",
+        "testbench-wasi",
+        "cargo install harn-cli --features testbench-wasi",
+    ] {
+        assert!(
+            help.contains(token),
+            "expected `{token}` in `harn test-bench run --help`, got:\n{help}"
+        );
+    }
+}
+
+#[test]
 fn test_parses_run_summary_flags() {
     let cli = Cli::parse_from([
         "harn",
