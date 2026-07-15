@@ -16,9 +16,32 @@ use super::debug::DebugHook;
 use super::modules::LoadedModule;
 use super::VmBuiltinMetadata;
 
-pub(crate) type LazyCallableExports = Arc<BTreeMap<String, Arc<VmClosure>>>;
+/// A lazy callable's resolved export set together with the module graph that
+/// was loaded to produce it.
+///
+/// The exported closures — and every function they can transitively reach
+/// through imports — hold only `Weak`s into their home module's function
+/// registry and module state. The child VM that first loaded the graph is
+/// normally their sole strong owner (via its `module_cache`), and it dies once
+/// the hook fire completes. A later child VM that hits this cache never
+/// re-imports the graph, so a transitively imported callee's sibling `pub fn`
+/// would fall through name resolution to host-bridge dispatch (`Undefined
+/// builtin`). Retaining the complete loaded graph here for the cache entry's
+/// lifetime keeps every transitively reachable registry and module state
+/// upgradeable at call time, for every fire — not just the first.
+pub(crate) struct ResolvedLazyCallable {
+    pub(crate) exports: BTreeMap<String, Arc<VmClosure>>,
+    /// Intentionally unread: retained solely to keep the loaded module graph's
+    /// function registries and module states alive for this cache entry (the
+    /// same liveness role [`crate::value::RetainedModuleScope`] plays for a
+    /// single retained closure, generalized across the whole import graph).
+    #[allow(dead_code)]
+    pub(crate) retained_module_graph: Arc<BTreeMap<PathBuf, LoadedModule>>,
+}
+
+pub(crate) type LazyCallableResolution = Arc<ResolvedLazyCallable>;
 pub(crate) type LazyCallableModuleCache =
-    Arc<VmMutex<BTreeMap<PathBuf, Arc<tokio::sync::OnceCell<LazyCallableExports>>>>>;
+    Arc<VmMutex<BTreeMap<PathBuf, Arc<tokio::sync::OnceCell<LazyCallableResolution>>>>>;
 
 /// RAII guard that starts a tracing span on creation and ends it on drop.
 pub(crate) struct ScopeSpan(u64);

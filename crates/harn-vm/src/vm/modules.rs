@@ -151,24 +151,34 @@ impl Vm {
                             .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new())),
                     )
                 };
-                let exports = resolution
+                let resolved = resolution
                     .get_or_try_init(|| async {
                         let exports = self.load_module_exports(&module_path).await?;
-                        Ok::<_, VmError>(Arc::new(
-                            exports
-                                .into_iter()
-                                .map(|(name, closure)| (name, closure.retained_for_host_registry()))
-                                .collect(),
-                        ))
+                        let exports = exports
+                            .into_iter()
+                            .map(|(name, closure)| (name, closure.retained_for_host_registry()))
+                            .collect();
+                        // Pin the complete module graph loaded above so that a
+                        // handler's transitively imported callees keep their
+                        // home-module registries/state alive for later child
+                        // VMs that hit this cache without re-importing.
+                        Ok::<_, VmError>(Arc::new(crate::vm::state::ResolvedLazyCallable {
+                            exports,
+                            retained_module_graph: Arc::clone(&self.module_cache),
+                        }))
                     })
                     .await?;
-                exports.get(&lazy.function_name).cloned().ok_or_else(|| {
-                    VmError::Runtime(format!(
-                        "function '{}' is not exported by module '{}'",
-                        lazy.function_name,
-                        lazy.module_path.display()
-                    ))
-                })
+                resolved
+                    .exports
+                    .get(&lazy.function_name)
+                    .cloned()
+                    .ok_or_else(|| {
+                        VmError::Runtime(format!(
+                            "function '{}' is not exported by module '{}'",
+                            lazy.function_name,
+                            lazy.module_path.display()
+                        ))
+                    })
             }
         }
     }
