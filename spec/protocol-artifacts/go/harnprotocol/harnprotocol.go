@@ -255,6 +255,7 @@ var HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
 	"timeout",
 	"network",
 	"cancelled",
+	"abandoned_at_loop_exit",
 	"unknown",
 }
 

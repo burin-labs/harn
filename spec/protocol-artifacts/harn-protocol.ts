@@ -208,6 +208,7 @@ export const HARN_TOOL_CALL_ERROR_CATEGORIES = [
   "timeout",
   "network",
   "cancelled",
+  "abandoned_at_loop_exit",
   "unknown",
 ] as const
 export type HarnToolCallErrorCategory = (typeof HARN_TOOL_CALL_ERROR_CATEGORIES)[number]

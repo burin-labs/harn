@@ -1122,7 +1122,7 @@ async fn host_agent_session_finalize(
     // Fire registered native session-end hooks (e.g. cancelling orphaned
     // long-running handles) after the session has been removed from
     // the active map so hooks observe a fully-quiesced session.
-    super::agent_runtime::fire_session_end_hooks(&session_id);
+    super::agent_runtime::fire_session_end_hooks(&session_id, canonical_status != "suspended");
 
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or(session.tool_mode);
     let acp_stop_reason = canonical_acp_stop_reason(

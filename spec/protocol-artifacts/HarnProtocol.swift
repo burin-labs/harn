@@ -352,6 +352,7 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
     case timeout = "timeout"
     case network = "network"
     case cancelled = "cancelled"
+    case abandonedAtLoopExit = "abandoned_at_loop_exit"
     case unknown = "unknown"
 
     public static let allCases: [Self] = [
@@ -365,6 +366,7 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
         "timeout",
         "network",
         "cancelled",
+        "abandoned_at_loop_exit",
         "unknown",
     ].map { Self(rawValue: $0)! }
 }

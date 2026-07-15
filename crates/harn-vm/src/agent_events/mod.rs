@@ -33,6 +33,8 @@ mod tool;
 mod worker;
 
 #[cfg(test)]
+mod from_host_tests;
+#[cfg(test)]
 mod tests;
 
 pub use agent::AgentEvent;
