@@ -17,7 +17,7 @@ use chrono::{NaiveDate, Utc};
 pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 5;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
     "https://harnlang.com/schemas/provider-catalog.v5.json";
-pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog export";
+pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
 pub const HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV: &str = "HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED";
@@ -220,25 +220,11 @@ pub fn artifact() -> ProviderCatalogArtifact {
     artifact_from_config(&config, CatalogCapabilityOverrides::CurrentThread)
 }
 
-/// Build the catalog artifact hermetically: from the compiled-in embedded
-/// provider config and embedded capability matrix only, ignoring the
-/// developer's `~/.config/harn/providers.toml`, environment overrides
-/// (`HARN_PROVIDERS_CONFIG`, `HARN_DEFAULT_PROVIDER`, `HARN_LLM_*`), the
-/// process runtime-catalog overlay, and any thread-local user overrides.
-///
-/// This is what `harn provider catalog export` / `provider catalog validate
-/// --check-artifacts` use so the checked-in `spec/provider-catalog/*` artifacts
-/// are a pure function of the source tree. Do NOT use this for live runtime
-/// catalog presentation — use [`artifact`] / [`artifact_with_overrides`] there,
-/// which legitimately reflect the host's configuration.
-///
-/// `explicit_overlay` is an optional declared overlay (e.g. a `--overlay` file
-/// named on the command line); it is reproducible input, not ambient machine
-/// state, so it is merged on top of the embedded base while staying hermetic.
-/// `explicit_capabilities` is the matching declared capability overlay (e.g. a
-/// `--capabilities-overlay` file): without one, only the built-in capability
-/// matrix is consulted — never the thread-local capability user-overrides the
-/// CLI may have installed.
+/// Build from embedded TOML plus explicit CLI overlays only. Checked-in
+/// generation uses [`artifact_from_config_and_capabilities`] so source
+/// fragments, not the running binary, are authoritative. Runtime presentation
+/// uses [`artifact`] / [`artifact_with_overrides`] because host configuration is
+/// legitimate there.
 pub fn artifact_embedded(
     explicit_overlay: Option<&llm_config::ProvidersConfig>,
     explicit_capabilities: Option<&llm::capabilities::CapabilitiesFile>,
@@ -248,6 +234,13 @@ pub fn artifact_embedded(
         &config,
         CatalogCapabilityOverrides::Explicit(explicit_capabilities),
     )
+}
+
+pub fn artifact_from_config_and_capabilities(
+    config: &llm_config::ProvidersConfig,
+    capabilities: &llm::capabilities::CapabilitiesFile,
+) -> ProviderCatalogArtifact {
+    artifact_from_config(config, CatalogCapabilityOverrides::SourceBase(capabilities))
 }
 
 /// Build a catalog artifact for a runtime that has captured explicit provider
@@ -268,6 +261,7 @@ pub fn artifact_with_overrides(
 enum CatalogCapabilityOverrides<'a> {
     CurrentThread,
     Explicit(Option<&'a llm::capabilities::CapabilitiesFile>),
+    SourceBase(&'a llm::capabilities::CapabilitiesFile),
 }
 
 fn artifact_from_config(
@@ -543,6 +537,9 @@ fn catalog_model(
         }
         CatalogCapabilityOverrides::Explicit(overrides) => {
             llm::capabilities::lookup_with_user_overrides(&model.provider, &id, overrides)
+        }
+        CatalogCapabilityOverrides::SourceBase(base) => {
+            llm::capabilities::lookup_with_base_file(&model.provider, &id, base)
         }
     };
     let structured_output = caps

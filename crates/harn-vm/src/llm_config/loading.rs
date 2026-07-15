@@ -434,7 +434,7 @@ fn dirs_or_home() -> Option<String> {
 }
 
 /// Embedded copy of generated `llm/providers.toml`, built from
-/// `llm/catalog_sources/**/*.toml` by `harn provider catalog build-config`.
+/// `llm/catalog_sources/**/*.toml` by `harn provider catalog generate`.
 /// Edit the fragments, not this generated snapshot or this string.
 const EMBEDDED_PROVIDERS_TOML: &str = include_str!("../llm/providers.toml");
 

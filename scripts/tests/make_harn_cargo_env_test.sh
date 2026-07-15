@@ -187,20 +187,18 @@ make -C "$repo_root" -n \
   HARN_BIN="$fake_harn" > "$make_provider_targets"
 
 provider_resolutions=$(grep -Fc './scripts/harn_bin.sh --print' "$make_provider_targets")
-if [ "$provider_resolutions" -ne 6 ]; then
+if [ "$provider_resolutions" -ne 4 ]; then
   echo "provider composed targets should resolve HARN_BIN once per recipe, got $provider_resolutions" >&2
   cat "$make_provider_targets" >&2
   exit 1
 fi
 
 for expected in \
-  '"$harn_bin" provider catalog build-config;' \
-  '"$harn_bin" provider catalog export' \
-  '"$harn_bin" provider catalog build-config --check;' \
-  '"$harn_bin" provider catalog validate --check-artifacts' \
-  '"$harn_bin" provider catalog build-capabilities;' \
+  'env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog generate' \
+  'env HARN_BIN="'"$fake_harn"'" ./scripts/harn_bin.sh -- provider catalog generate --check' \
+  '"$harn_bin" provider catalog generate;' \
   '"$harn_bin" provider catalog support' \
-  '"$harn_bin" provider catalog build-capabilities --check;' \
+  '"$harn_bin" provider catalog generate --check;' \
   '"$harn_bin" provider catalog support --check' \
   '"$harn_bin" provider catalog matrix' \
   '"$harn_bin" provider catalog matrix --check'
@@ -216,10 +214,4 @@ if grep -Eq 'make.*gen-provider-(config|capabilities)' "$make_provider_targets";
   cat "$make_provider_targets" >&2
   exit 1
 fi
-if grep -Fq './scripts/harn_bin.sh -- provider catalog' "$make_provider_targets"; then
-  echo "provider composed targets still route provider subcommands through the wrapper" >&2
-  cat "$make_provider_targets" >&2
-  exit 1
-fi
-
 echo "make_harn_cargo_env_test: ok"

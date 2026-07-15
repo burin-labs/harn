@@ -1308,25 +1308,14 @@ fn test_parses_providers_refresh_args() {
 
 #[test]
 fn test_parses_providers_validate_args() {
-    let ProviderCatalogCommand::Validate(args) = parse_provider_catalog(&[
-        "validate",
-        "--overlay",
-        "providers.local.toml",
-        "--check-artifacts",
-        "--artifact-dir",
-        "spec/provider-catalog",
-        "--json",
-    ]) else {
+    let ProviderCatalogCommand::Validate(args) =
+        parse_provider_catalog(&["validate", "--overlay", "providers.local.toml", "--json"])
+    else {
         panic!("expected provider catalog validate command");
     };
     assert_eq!(
         args.overlay.as_deref(),
         Some(std::path::Path::new("providers.local.toml"))
-    );
-    assert!(args.check_artifacts);
-    assert_eq!(
-        args.artifact_dir,
-        std::path::PathBuf::from("spec/provider-catalog")
     );
     assert!(args.json);
 }
@@ -1343,45 +1332,40 @@ fn test_parses_providers_export_args() {
 }
 
 #[test]
-fn test_parses_providers_build_config_args() {
-    let ProviderCatalogCommand::BuildConfig(args) = parse_provider_catalog(&[
-        "build-config",
+fn test_parses_providers_generate_args() {
+    let ProviderCatalogCommand::Generate(args) = parse_provider_catalog(&[
+        "generate",
         "--source-dir",
         "tmp/catalog_sources",
-        "--output",
+        "--capability-source-dir",
+        "tmp/capability_sources",
+        "--providers-output",
         "tmp/providers.toml",
+        "--capabilities-output",
+        "tmp/capabilities.toml",
+        "--artifact-dir",
+        "tmp/catalog",
         "--check",
     ]) else {
-        panic!("expected provider catalog build-config command");
+        panic!("expected provider catalog generate command");
     };
     assert_eq!(
         args.source_dir,
         std::path::PathBuf::from("tmp/catalog_sources")
     );
-    assert_eq!(args.output, std::path::PathBuf::from("tmp/providers.toml"));
-    assert!(args.check);
-}
-
-#[test]
-fn test_parses_providers_build_capabilities_args() {
-    let ProviderCatalogCommand::BuildCapabilities(args) = parse_provider_catalog(&[
-        "build-capabilities",
-        "--source-dir",
-        "tmp/capability_sources",
-        "--output",
-        "tmp/capabilities.toml",
-        "--check",
-    ]) else {
-        panic!("expected provider catalog build-capabilities command");
-    };
     assert_eq!(
-        args.source_dir,
+        args.capability_source_dir,
         std::path::PathBuf::from("tmp/capability_sources")
     );
     assert_eq!(
-        args.output,
+        args.providers_output,
+        std::path::PathBuf::from("tmp/providers.toml")
+    );
+    assert_eq!(
+        args.capabilities_output,
         std::path::PathBuf::from("tmp/capabilities.toml")
     );
+    assert_eq!(args.artifact_dir, std::path::PathBuf::from("tmp/catalog"));
     assert!(args.check);
 }
 

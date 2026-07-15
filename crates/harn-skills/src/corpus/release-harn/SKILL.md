@@ -134,8 +134,7 @@ is a published-version concern, not a developer-loop concern.
 
 - The release bump compiles: `cargo check --workspace`.
 - Conformance still passes: `make conformance`.
-- Catalog artifacts are in sync: `harn provider catalog validate
-  --check-artifacts`.
+- Catalog artifacts are in sync: `harn provider catalog generate --check`.
 - The CHANGELOG entry is non-empty and cites the issue / PR numbers
   the release contains.
 - `Cargo.toml` workspace `version` matches the PR title's `vX.Y.Z`.

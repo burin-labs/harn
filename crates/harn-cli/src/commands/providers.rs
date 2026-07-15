@@ -8,7 +8,7 @@ mod artifacts;
 mod build;
 
 pub(crate) use artifacts::{run_export, run_validate};
-pub(crate) use build::{run_build_capabilities, run_build_config};
+pub(crate) use build::run_generate;
 
 pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), String> {
     if !args.script.exists() {

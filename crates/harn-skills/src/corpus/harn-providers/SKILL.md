@@ -92,8 +92,8 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 
 - Refresh provider observations with fixtures: `harn provider catalog refresh --check`.
 - Refresh provider observations live: `harn provider catalog refresh --live`.
-- Regenerate catalog artifacts: `harn provider catalog export`.
-- Validate catalog artifacts: `harn provider catalog validate --check-artifacts`.
+- Regenerate catalog artifacts: `harn provider catalog generate`.
+- Validate catalog artifacts: `harn provider catalog generate --check`.
 - Regenerate capability matrix docs: `harn provider catalog matrix`.
 - Validate capability matrix docs: `harn provider catalog matrix --check`.
 
