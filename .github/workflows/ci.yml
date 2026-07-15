@@ -404,7 +404,8 @@ jobs:
       # and non-metadata `push` to main we run the WHOLE workspace
       # unconditionally. Global changes (Cargo.lock,
       # .cargo/, toolchain, this workflow) auto-fall-back to the full
-      # workspace inside `scripts/affected-crates.harn`.
+      # workspace inside the buildless `scripts/ci/affected_crate_args.sh`
+      # bootstrap selector.
       - name: Run affected-crate tests (PR fast feedback)
         if: matrix.kind == 'test' && github.event_name == 'pull_request'
         env:

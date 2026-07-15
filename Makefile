@@ -104,7 +104,9 @@ test:
 # `pull_request` CI for fast feedback (#2663). The merge queue runs the FULL
 # `make test` instead — see `.github/workflows/ci.yml`.
 # A global/workspace-level change (Cargo.lock, .cargo/, toolchain, etc.)
-# falls back to the full workspace automatically. Requires cargo-nextest.
+# falls back to the full workspace automatically. Requires cargo-nextest. The
+# selector is intentionally buildless so PR CI can choose packages before
+# compiling the Harn CLI.
 AFFECTED_BASE ?= origin/main
 test-affected:
 	@command -v cargo-nextest >/dev/null 2>&1 || { \
