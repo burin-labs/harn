@@ -317,6 +317,7 @@ run_ship_prepare() {
   git -C "$release_root" reset --hard --quiet HEAD
   : > "$record_make"
   : > "$record_ship"
+  env -u HARN_BIN \
   HARN_RELEASE_ROOT="$release_root" \
   HARN_RELEASE_HARNESS=1 \
   HARN_RELEASE_GATE_SCRIPT="$ship_gate" \

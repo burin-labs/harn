@@ -52,6 +52,7 @@ set -euo pipefail
 printf 'harn %s\n' "$*" >> "${FAKE_CARGO_RECORD:?FAKE_CARGO_RECORD is required}"
 SH
 chmod +x "$fake_bin/harn"
+export HARN_BIN="$fake_bin/harn"
 
 cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash

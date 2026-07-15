@@ -39,6 +39,8 @@ esac
 SH
 chmod +x "$fake_bin/cargo"
 
+unset HARN_BIN
+
 CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   GITHUB_ENV="$github_env" \

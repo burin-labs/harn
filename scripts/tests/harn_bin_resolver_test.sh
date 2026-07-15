@@ -64,6 +64,8 @@ esac
 SH
 chmod +x "$fake_cargo_bin/cargo"
 
+unset HARN_BIN
+
 CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   PATH="$fake_cargo_bin:$PATH" \

@@ -55,6 +55,7 @@ PY
 esac
 SH
 chmod +x "$fake_bin/cargo"
+unset HARN_BIN
 
 hook_repo="$tmp_root/hook-repo"
 mkdir -p "$hook_repo/.githooks" "$hook_repo/scripts/lib"

@@ -10,6 +10,7 @@ harn_bin="${HARN_BIN:-}"
 mode="loop"
 startup_runs="${HARN_BENCH_STARTUP_RUNS:-5}"
 profile_json_dir="${HARN_BENCH_PROFILE_JSON_DIR:-}"
+startup_helper="$repo_root/scripts/bench_vm_startup.harn"
 
 usage() {
   cat <<'EOF'
@@ -49,6 +50,9 @@ Environment:
   HARN_BENCH_FIXTURES_DIR   Override fixture directory
   HARN_BENCH_PROFILE_JSON_DIR
                             Default --profile-json-dir
+  HARN_BENCH_HELPER_BIN     Harn binary used to run the startup timing helper
+  HARN_BENCH_HELPER_CACHE_DIR
+                            Cache directory for the startup timing helper
   CARGO_TARGET_DIR          Cargo target directory for release builds
 EOF
 }
@@ -178,56 +182,17 @@ extract_metric() {
   sed -nE "s/.*${key} ([0-9]+([.][0-9]+)?) ms.*/\\1/p" <<<"$line"
 }
 
-# Time a single end-to-end `harn run` invocation and print elapsed
-# milliseconds to stdout. Falls through to `python3 -c` because
-# `/usr/bin/time -p` does not exist on every host the bench runs on and
-# `date +%N` is missing on macOS. `python3` is a soft dep of the dev
-# workflow.
-time_run_ms() {
+measure_startup_runs() {
   local fixture="$1"
-  python3 - "$harn_bin" "$fixture" <<'PY'
-import os, subprocess, sys, time
-binary, fixture = sys.argv[1], sys.argv[2]
-start = time.perf_counter()
-result = subprocess.run(
-    [binary, "run", fixture],
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.PIPE,
-    env={**os.environ},
-)
-elapsed_ms = (time.perf_counter() - start) * 1000.0
-if result.returncode != 0:
-    sys.stderr.write(result.stderr.decode("utf-8", errors="replace"))
-    sys.exit(result.returncode)
-print(f"{elapsed_ms:.3f}")
-PY
-}
-
-# Aggregate `time_run_ms` across $startup_runs invocations and print
-# `min avg max` triple in milliseconds.
-aggregate_runs() {
-  local fixture="$1"
-  python3 - "$harn_bin" "$fixture" "$startup_runs" <<'PY'
-import os, subprocess, sys, time
-binary, fixture, runs = sys.argv[1], sys.argv[2], int(sys.argv[3])
-samples = []
-for _ in range(runs):
-    start = time.perf_counter()
-    result = subprocess.run(
-        [binary, "run", fixture],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        env={**os.environ},
-    )
-    elapsed_ms = (time.perf_counter() - start) * 1000.0
-    if result.returncode != 0:
-        sys.stderr.write(result.stderr.decode("utf-8", errors="replace"))
-        sys.exit(result.returncode)
-    samples.append(elapsed_ms)
-mn, mx = min(samples), max(samples)
-avg = sum(samples) / len(samples)
-print(f"{mn:.3f} {avg:.3f} {mx:.3f}")
-PY
+  local runs="$2"
+  local helper_cache_dir="${HARN_BENCH_HELPER_CACHE_DIR:-$repo_root/target/harn-bench-helper-cache}"
+  local helper_bin="${HARN_BENCH_HELPER_BIN:-$harn_bin}"
+  mkdir -p "$helper_cache_dir"
+  HARN_CACHE_DIR="$helper_cache_dir" "$helper_bin" run "$startup_helper" -- \
+    --harn-bin "$harn_bin" \
+    --fixture "$fixture" \
+    --runs "$runs" \
+    --cache-dir "$bench_cache_dir"
 }
 
 clear_cache_dir() {
@@ -281,16 +246,6 @@ if [[ "$mode" == "loop" ]]; then
   exit 0
 fi
 
-# Cold/warm-start mode. Drives `harn run` end-to-end and times the full
-# CLI invocation, capturing parse + typecheck + compile + bytecode-load +
-# VM startup. We rely on a process-local cache directory so that the
-# benchmark can wipe the cache between runs without touching the user's
-# real ~/.cache.
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "error: cold/warm-start modes require python3 in PATH" >&2
-  exit 2
-fi
-
 bench_cache_dir="${HARN_BENCH_CACHE_DIR:-$repo_root/target/harn-bench-cache}"
 export HARN_CACHE_DIR="$bench_cache_dir"
 mkdir -p "$bench_cache_dir"
@@ -310,7 +265,7 @@ for fixture in "${fixtures[@]}"; do
       for ((i = 0; i < startup_runs; i++)); do
         clear_cache_dir
         mkdir -p "$bench_cache_dir"
-        elapsed_ms="$(time_run_ms "$fixture")"
+        read -r elapsed_ms _avg _max < <(measure_startup_runs "$fixture" 1)
         if [[ -z "${total_min}" ]] || awk "BEGIN{exit !($elapsed_ms < $total_min)}"; then
           total_min="$elapsed_ms"
         fi
@@ -328,7 +283,7 @@ for fixture in "${fixtures[@]}"; do
       clear_cache_dir
       mkdir -p "$bench_cache_dir"
       "$harn_bin" run "$fixture" >/dev/null
-      read -r mn avg mx < <(aggregate_runs "$fixture")
+      read -r mn avg mx < <(measure_startup_runs "$fixture" "$startup_runs")
       ;;
   esac
 
