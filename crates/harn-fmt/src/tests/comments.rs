@@ -750,24 +750,29 @@ fn comment_after_the_last_statement_of_a_loop_stays_in_the_loop() {
     );
 }
 
-/// A body with a SIBLING after it (`then` before an `else`, `try` before its
-/// `catch`) still loses its trailing comment to that sibling. The fix that
-/// works everywhere else cannot reach here: the boundary is the `} else {`
-/// line, and the AST records a span for the whole `if` node but none for the
-/// individual blocks, so there is no line to bound the flush with. Bounding
-/// with the node's end would sweep the else's OWN leading comments backwards
-/// into the then — trading one misplacement for another.
+/// KNOWN DEFECT, pinned deliberately: a body with a SIBLING after it (`then`
+/// before an `else`, `try` before its `catch`) still loses its trailing comment
+/// to that sibling. The tail flush cannot reach here — the boundary is the
+/// `} else {` line, and the AST records a span for the whole `if` node but none
+/// for the individual blocks, so there is no line to bound with. Bounding with
+/// the node's end would sweep the else's OWN leading comments backwards into
+/// the then, trading one misplacement for another.
 ///
-/// Tracked in #4797. Un-ignore once blocks carry their own spans.
+/// This asserts what the formatter does TODAY rather than what it should do, so
+/// the behaviour is visible and a fix has to update a failing test instead of
+/// changing comment placement silently. Invert it — the comment belongs before
+/// `} else {` — once blocks carry spans (#4806).
 #[test]
-#[ignore = "needs block spans in the AST — see #4797"]
-fn comment_after_the_last_statement_of_a_then_branch_stays_in_the_then() {
+fn comment_after_a_then_branch_is_currently_dragged_into_the_else() {
     let source = "fn h() -> int {\n  if a {\n    b()\n    // TAIL_THEN\n  } else {\n    c()\n  }\n  return 1\n}\n";
     let formatted = format_source(source).unwrap();
-    let comment = formatted.find("// TAIL_THEN").expect("comment vanished");
+    let comment = formatted
+        .find("// TAIL_THEN")
+        .expect("the comment must still exist somewhere, even when misplaced");
     let else_kw = formatted.find("} else {").expect("no else");
     assert!(
-        comment < else_kw,
-        "the then-branch's trailing comment was dragged into the else:\n{formatted}"
+        comment > else_kw,
+        "the then-branch's trailing comment is expected to land in the else until #4806; \
+         if it now stays put, invert this assertion:\n{formatted}"
     );
 }
