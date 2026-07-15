@@ -117,7 +117,7 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
         report.catalog_model_count
     );
     assert_eq!(report.route_count, report.catalog_model_count);
-    assert_eq!(report.probe_cases.len(), 2);
+    assert_eq!(report.probe_cases.len(), 5);
     assert_eq!(report.request_profiles.len(), 2);
     assert_eq!(report.modes.len(), 2);
     assert_eq!(
@@ -131,6 +131,38 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
     assert_eq!(report.validation_pass_count, report.request_count);
     assert!(report.dialect_counts.contains_key("openai_compat"));
     assert!(report.dialect_counts.contains_key("anthropic"));
+}
+
+#[test]
+fn no_tool_request_case_omits_tool_declarations() {
+    let body = probe_request_body(
+        "openai",
+        "gpt-5.4-mini",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::NoToolAnswerOrRefusal,
+        ToolProbeRequestProfile::CatalogDefault,
+        "direct_answer:case",
+    )
+    .expect("no-tool probe body");
+
+    assert!(body.get("tools").is_none(), "{body}");
+    assert!(body.get("tool_choice").is_none(), "{body}");
+    let prompt = body["messages"][0]["content"].as_str().unwrap();
+    assert!(prompt.contains("direct_answer:case"), "{prompt}");
+
+    let validation = validate_probe_request_body(
+        "openai",
+        "gpt-5.4-mini",
+        ToolProbeCase::NoToolAnswerOrRefusal,
+        ToolProbeRequestProfile::CatalogDefault,
+        &body,
+    );
+    assert_eq!(
+        validation.status,
+        ToolConformanceRequestValidationStatus::Pass,
+        "{:?}",
+        validation.issues
+    );
 }
 
 #[test]
@@ -166,6 +198,7 @@ fn probe_request_body_uses_anthropic_tool_dialect() {
     let validation = validate_probe_request_body(
         "anthropic",
         "claude-sonnet-4-6",
+        ToolProbeCase::SingleToolCall,
         ToolProbeRequestProfile::CatalogDefault,
         &body,
     );
@@ -198,6 +231,7 @@ fn probe_request_body_preserves_openai_tool_dialect() {
     let validation = validate_probe_request_body(
         "openai",
         "gpt-5.4-mini",
+        ToolProbeCase::SingleToolCall,
         ToolProbeRequestProfile::CatalogDefault,
         &body,
     );
@@ -230,6 +264,7 @@ fn probe_request_body_accepts_openai_compat_allowed_scalar_tool_choice() {
     let validation = validate_probe_request_body(
         "openrouter",
         "moonshotai/kimi-k2.7-code",
+        ToolProbeCase::SingleToolCall,
         ToolProbeRequestProfile::CatalogDefault,
         &body,
     );
@@ -264,6 +299,7 @@ fn probe_request_body_accepts_unrestricted_parameter_edge_tool_choice() {
     let validation = validate_probe_request_body(
         "fireworks",
         "accounts/fireworks/models/gpt-oss-120b",
+        ToolProbeCase::SingleToolCall,
         ToolProbeRequestProfile::ParameterEdges,
         &body,
     );
@@ -300,6 +336,7 @@ fn probe_request_body_maps_gemini_tool_choice_to_tool_config() {
     let validation = validate_probe_request_body(
         "gemini",
         "gemini-2.5-pro",
+        ToolProbeCase::SingleToolCall,
         ToolProbeRequestProfile::CatalogDefault,
         &body,
     );
@@ -329,6 +366,7 @@ fn probe_request_body_validates_ollama_tool_dialect_without_tool_choice() {
     let validation = validate_probe_request_body(
         "ollama",
         "gemma4:26b",
+        ToolProbeCase::SingleToolCall,
         ToolProbeRequestProfile::CatalogDefault,
         &body,
     );
@@ -350,6 +388,7 @@ fn request_validation_reports_provider_dialect_mismatches() {
     let validation = validate_probe_request_body(
         "openai",
         "gpt-5.4-mini",
+        ToolProbeCase::SingleToolCall,
         ToolProbeRequestProfile::CatalogDefault,
         &body,
     );
@@ -600,6 +639,64 @@ fn prose_only_response_does_not_satisfy_required_tool_probe() {
 }
 
 #[test]
+fn no_tool_fixture_passes_without_tool_calls() {
+    let report = classify_tool_conformance_fixture_for_case(
+        "openai",
+        "gpt-5.4-mini",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::NoToolAnswerOrRefusal,
+        "case",
+        r#"{"choices":[{"message":{"content":"direct_answer:case"}}]}"#,
+    );
+
+    assert!(report.cases[0].ok, "{:?}", report.cases[0]);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::DirectAnswerNoTool
+    );
+}
+
+#[test]
+fn done_sentinel_fixture_passes_only_as_text() {
+    let report = classify_tool_conformance_fixture_for_case(
+        "anthropic",
+        "claude-sonnet-5",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::DoneSentinel,
+        "##DONE##",
+        r#"{"content":[{"type":"text","text":"<done>##DONE##</done>"}]}"#,
+    );
+
+    assert!(report.cases[0].ok, "{:?}", report.cases[0]);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::DoneSentinel
+    );
+}
+
+#[test]
+fn unavailable_tool_fixture_fails_on_spurious_tool_call() {
+    let report = classify_tool_conformance_fixture_for_case(
+        "local",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::UnavailableToolRepair,
+        "case",
+        r#"{"choices":[{"message":{"tool_calls":[{"type":"function","function":{"name":"echo_marker","arguments":"{\"value\":\"case\"}"}}]}}]}"#,
+    );
+
+    assert!(!report.cases[0].ok, "{:?}", report.cases[0]);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::RawModelToolTag
+    );
+    assert_eq!(
+        report.cases[0].failure_reason.as_deref(),
+        Some("unexpected_tool_call")
+    );
+}
+
+#[test]
 fn aggregates_openai_streaming_tool_call_deltas() {
     let raw = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"echo_marker\",\"arguments\":\"{\\\"value\\\":\"}}]}}]}\n\
                    data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"harn_tool_probe_marker\\\"}\"}}]}}]}\n\
@@ -608,6 +705,7 @@ fn aggregates_openai_streaming_tool_call_deltas() {
     let case = classify_tool_probe_response(
         ToolProbeMode::Streaming,
         &response,
+        ToolProbeCase::SingleToolCall,
         DEFAULT_TOOL_PROBE_MARKER,
         None,
         None,
@@ -637,6 +735,7 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
     let case = classify_tool_probe_response(
         ToolProbeMode::Streaming,
         &response,
+        ToolProbeCase::SingleToolCall,
         DEFAULT_TOOL_PROBE_MARKER,
         None,
         None,

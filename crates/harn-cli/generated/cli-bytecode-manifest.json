@@ -264,10 +264,10 @@
     {
       "name": "providers/tool_probe",
       "source_path": "../harn-stdlib/src/stdlib/cli/providers/tool_probe.harn",
-      "source_sha256": "38779b49f03bde6426f3be7e0798eed8502cb1a7dcc05f67551937fb22594d43",
+      "source_sha256": "ea622d9b98ae905a7ce0d73c171ad0ff6b1a357afb7b6a6138c41f342639689d",
       "artifact": {
         "path": "generated/cli-bytecode/providers-tool_probe.harnbc",
-        "sha256": "99f67096f6794cca7253c9f8623b246b8da860214c072f903be62b2be04635a7"
+        "sha256": "a01e9f8b2f85e898eb7998ec520f53b0e34370d6669f61969e957f97e50fb0d7"
       }
     },
     {

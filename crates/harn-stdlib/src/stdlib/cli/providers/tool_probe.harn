@@ -83,7 +83,26 @@ fn __classification_debug(value: string) -> string {
   if value == "transport_error" {
     return "TransportError"
   }
+  if value == "direct_answer_no_tool" {
+    return "DirectAnswerNoTool"
+  }
+  if value == "unavailable_tool_repair" {
+    return "UnavailableToolRepair"
+  }
+  if value == "done_sentinel" {
+    return "DoneSentinel"
+  }
   return value
+}
+
+fn __any_case_ok(report: dict) -> bool {
+  const cases = __safe_list(report["cases"])
+  for c in cases {
+    if type_of(c) == "dict" && __safe_bool(c["ok"], false) {
+      return true
+    }
+  }
+  return false
 }
 
 fn __render_human(report: dict) -> string {
@@ -153,19 +172,20 @@ fn main(harness: Harness) -> int {
     }
     harness.stdio.println(trimmed)
   }
-  // Compute exit code from the raw bytes via a quick parse — the
-  // float-preservation concern doesn't apply to the `fallback_mode`
-  // string field.
+  // Compute exit code from the raw bytes via a quick parse. Tool
+  // transport probes still pass by producing a usable tool channel, but
+  // behavioral probes such as no-tool answer/refusal and done-sentinel
+  // intentionally have fallback=disabled when they succeed.
   const probe = try {
     json_parse(raw)
   } catch (_) {
     nil
   }
   if type_of(probe) == "dict" {
-    const tc = __safe_dict(probe["tool_calling"])
-    const fallback = __safe_string(tc["fallback_mode"], "")
-    if fallback == "disabled" {
-      return 1
+    return if __any_case_ok(probe) {
+      0
+    } else {
+      1
     }
   }
   return 0

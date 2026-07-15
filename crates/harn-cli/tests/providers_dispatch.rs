@@ -265,6 +265,42 @@ fn provider_tool_probe_fixture_human_is_byte_identical_across_runs() {
 }
 
 #[test]
+fn provider_tool_probe_no_tool_fixture_success_exits_zero() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let fixture = dir.path().join("done.json");
+    std::fs::write(
+        &fixture,
+        r#"{"choices":[{"message":{"content":"<done>##DONE##</done>"}}]}"#,
+    )
+    .expect("write done fixture");
+    let path = fixture.to_string_lossy().into_owned();
+    let harn = run(
+        &[
+            "provider",
+            "tool-probe",
+            "mock",
+            "--model",
+            "mock",
+            "--mode",
+            "non-streaming",
+            "--case",
+            "done_sentinel",
+            "--marker",
+            "##DONE##",
+            "--response-fixture",
+            path.as_str(),
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
+    let value = parse_json(&harn.stdout, "done fixture");
+    assert_eq!(value["cases"][0]["ok"], true);
+    assert_eq!(value["cases"][0]["classification"], "done_sentinel");
+    assert_eq!(value["tool_calling"]["fallback_mode"], "disabled");
+}
+
+#[test]
 fn provider_tool_probe_fixture_rejects_repeat() {
     let dir = tempfile::tempdir().expect("create tempdir");
     let fixture = dir.path().join("response.json");
@@ -329,7 +365,7 @@ fn provider_tool_probe_dry_run_request_large_case_is_offline_and_deterministic()
         "tool-probe dry-run JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
-    assert_eq!(harn_value["schema_version"], 2);
+    assert_eq!(harn_value["schema_version"], 3);
     assert_eq!(harn_value["probe_case"], "large_string_argument");
     assert!(
         harn_value["expected_value"]
@@ -806,6 +842,32 @@ fn provider_tool_scorecard_plan_json_includes_fixed_micro_case_matrix() {
             "--json"
         ])
     );
+    let done_case = cases
+        .iter()
+        .find(|case| case["id"] == "done_sentinel")
+        .expect("done sentinel case");
+    assert_eq!(done_case["execution"]["status"], "executable");
+    assert_eq!(done_case["execution"]["runner"], "provider_tool_probe");
+    assert_eq!(
+        done_case["execution"]["command"],
+        serde_json::json!([
+            "harn",
+            "provider",
+            "tool-probe",
+            "anthropic",
+            "--model",
+            "claude-sonnet-5",
+            "--mode",
+            "both",
+            "--case",
+            "done_sentinel",
+            "--repeat",
+            "1",
+            "--timeout-secs",
+            "120",
+            "--json"
+        ])
+    );
     assert!(
         cases
             .iter()
@@ -856,7 +918,7 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
         harn.stdout
     );
     assert!(
-        harn.stdout.contains("executable=2 missing_runner=6"),
+        harn.stdout.contains("executable=6 missing_runner=2"),
         "execution summary missing from human output: {}",
         harn.stdout
     );
@@ -934,7 +996,7 @@ fn provider_tool_scorecard_json_reports_catalog_mismatches() {
 
     assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    assert_eq!(harn_value["schema_version"], 2);
+    assert_eq!(harn_value["schema_version"], 3);
     let route = &harn_value["routes"][0];
     assert_eq!(route["provider"], provider);
     assert_eq!(route["model"], model);
@@ -1048,7 +1110,7 @@ fn provider_tool_scorecard_json_reports_unknown_catalog_route() {
 
     assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    assert_eq!(harn_value["schema_version"], 2);
+    assert_eq!(harn_value["schema_version"], 3);
     let route = &harn_value["routes"][0];
     assert!(route["catalog_claim"].is_null());
     assert_eq!(

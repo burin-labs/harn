@@ -184,14 +184,13 @@ async fn dispatch_provider_tool_probe(args: ProviderToolProbeArgs) -> i32 {
             return 1;
         }
     };
-    let fallback_disabled = report.tool_calling.fallback_mode
-        == harn_vm::llm::tool_conformance::ToolProbeFallbackMode::Disabled;
+    let probe_failed = !report.cases.iter().any(|case| case.ok);
     let render_exit =
         dispatch_provider_report(TOOL_PROBE_REPORT_DISPATCH, args.json, &report).await;
     if render_exit != 0 {
         return render_exit;
     }
-    i32::from(fallback_disabled)
+    i32::from(probe_failed)
 }
 
 async fn aggregate_tool_conformance_report(

@@ -365,6 +365,15 @@ pub(crate) enum ProviderToolProbeCaseArg {
     SingleToolCall,
     #[value(name = "large_string_argument", alias = "large-string-argument")]
     LargeStringArgument,
+    #[value(
+        name = "no_tool_answer_or_refusal",
+        alias = "no-tool-answer-or-refusal"
+    )]
+    NoToolAnswerOrRefusal,
+    #[value(name = "unavailable_tool_repair", alias = "unavailable-tool-repair")]
+    UnavailableToolRepair,
+    #[value(name = "done_sentinel", alias = "done-sentinel")]
+    DoneSentinel,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq, Eq)]
@@ -397,6 +406,13 @@ impl ProviderToolProbeCaseArg {
             Self::LargeStringArgument => {
                 harn_vm::llm::tool_conformance::ToolProbeCase::LargeStringArgument
             }
+            Self::NoToolAnswerOrRefusal => {
+                harn_vm::llm::tool_conformance::ToolProbeCase::NoToolAnswerOrRefusal
+            }
+            Self::UnavailableToolRepair => {
+                harn_vm::llm::tool_conformance::ToolProbeCase::UnavailableToolRepair
+            }
+            Self::DoneSentinel => harn_vm::llm::tool_conformance::ToolProbeCase::DoneSentinel,
         }
     }
 }

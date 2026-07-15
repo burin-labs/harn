@@ -35,16 +35,23 @@ pub(super) fn probe_request_payload(
     let default_int =
         |key: &str| -> Option<i64> { model_defaults.get(key).and_then(toml::Value::as_integer) };
     let prompt = probe_prompt(probe_case, marker);
-    let native_tools =
-        crate::llm::tools::vm_tools_to_native(&probe_tool_registry(), provider, model)
-            .expect("tool probe registry is static and should convert to native tools");
-    let mut tool_choice = if crate::llm::provider::provider_uses_ollama_messages(provider, model) {
-        None
+    let native_tools = if probe_case.requires_probe_tool() {
+        Some(
+            crate::llm::tools::vm_tools_to_native(&probe_tool_registry(), provider, model)
+                .expect("tool probe registry is static and should convert to native tools"),
+        )
     } else {
+        None
+    };
+    let mut tool_choice = if probe_case.requires_probe_tool()
+        && !crate::llm::provider::provider_uses_ollama_messages(provider, model)
+    {
         Some(json!({
             "type": "function",
             "function": {"name": TOOL_PROBE_TOOL_NAME}
         }))
+    } else {
+        None
     };
     if request_profile == ToolProbeRequestProfile::ParameterEdges && tool_choice.is_some() {
         tool_choice = Some(json!("required"));
@@ -85,7 +92,7 @@ pub(super) fn probe_request_payload(
         thinking,
         anthropic_beta_features: Vec::new(),
         vision: false,
-        native_tools: Some(native_tools),
+        native_tools,
         provider_tools: Vec::new(),
         tool_choice,
         cache: false,
@@ -132,6 +139,15 @@ fn probe_prompt(probe_case: ToolProbeCase, marker: &str) -> String {
         ToolProbeCase::LargeStringArgument => format!(
             "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once. The value argument must exactly equal this string, preserving newlines and escapes: {marker:?}. Do not answer in prose."
         ),
+        ToolProbeCase::NoToolAnswerOrRefusal => format!(
+            "Do not call any tool. Reply with the exact text {marker:?} and nothing else."
+        ),
+        ToolProbeCase::UnavailableToolRepair => format!(
+            "The user requested a web_search tool, but no such tool is available in this session. Do not call any tool. Reply with the exact text {marker:?} and nothing else."
+        ),
+        ToolProbeCase::DoneSentinel => {
+            format!("Do not call any tool. Emit the exact completion sentinel {marker:?}.")
+        }
     }
 }
 
@@ -160,6 +176,7 @@ fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value 
 pub(super) fn validate_probe_request_body(
     provider: &str,
     model: &str,
+    probe_case: ToolProbeCase,
     request_profile: ToolProbeRequestProfile,
     body: &Value,
 ) -> ToolConformanceRequestValidation {
@@ -167,11 +184,17 @@ pub(super) fn validate_probe_request_body(
     let dialect = request_validation_dialect(provider, &caps);
     let mut issues = Vec::new();
     match dialect.as_str() {
-        "anthropic" => validate_anthropic_probe_request(body, request_profile, &mut issues),
-        "bedrock" => validate_bedrock_probe_request(body, &mut issues),
-        "gemini" | "vertex" => validate_gemini_probe_request(body, request_profile, &mut issues),
-        "ollama" => validate_ollama_probe_request(body, &mut issues),
-        "openai_compat" => validate_openai_compat_probe_request(body, &caps, &mut issues),
+        "anthropic" => {
+            validate_anthropic_probe_request(body, probe_case, request_profile, &mut issues);
+        }
+        "bedrock" => validate_bedrock_probe_request(body, probe_case, &mut issues),
+        "gemini" | "vertex" => {
+            validate_gemini_probe_request(body, probe_case, request_profile, &mut issues);
+        }
+        "ollama" => validate_ollama_probe_request(body, probe_case, &mut issues),
+        "openai_compat" => {
+            validate_openai_compat_probe_request(body, probe_case, &caps, &mut issues);
+        }
         _ => issues.push(format!("unsupported validation dialect `{dialect}`")),
     }
     validate_generation_parameter_ranges(body, &dialect, &mut issues);
@@ -206,10 +229,21 @@ fn request_validation_dialect(
 
 fn validate_openai_compat_probe_request(
     body: &Value,
+    probe_case: ToolProbeCase,
     caps: &crate::llm::capabilities::Capabilities,
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
+    if !probe_case.requires_probe_tool() {
+        reject_present(body, "/tools", "OpenAI-compatible no-tool request", issues);
+        reject_present(
+            body,
+            "/tool_choice",
+            "OpenAI-compatible no-tool request",
+            issues,
+        );
+        return;
+    }
     require_openai_function_tool(body, "/tools/0", issues);
     validate_openai_compat_tool_choice(body, caps, issues);
     reject_present(body, "/toolConfig", "OpenAI-compatible request", issues);
@@ -259,10 +293,16 @@ fn validate_openai_compat_tool_choice(
 
 fn validate_anthropic_probe_request(
     body: &Value,
+    probe_case: ToolProbeCase,
     request_profile: ToolProbeRequestProfile,
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
+    if !probe_case.requires_probe_tool() {
+        reject_present(body, "/tools", "Anthropic no-tool request", issues);
+        reject_present(body, "/tool_choice", "Anthropic no-tool request", issues);
+        return;
+    }
     require_string_eq(
         body,
         "/tools/0/name",
@@ -314,10 +354,16 @@ fn validate_anthropic_probe_request(
 
 fn validate_gemini_probe_request(
     body: &Value,
+    probe_case: ToolProbeCase,
     request_profile: ToolProbeRequestProfile,
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/contents", issues);
+    if !probe_case.requires_probe_tool() {
+        reject_present(body, "/tools", "Gemini no-tool request", issues);
+        reject_present(body, "/toolConfig", "Gemini no-tool request", issues);
+        return;
+    }
     require_string_eq(
         body,
         "/tools/0/functionDeclarations/0/name",
@@ -351,8 +397,16 @@ fn validate_gemini_probe_request(
     reject_present(body, "/tool_choice", "Gemini request", issues);
 }
 
-fn validate_bedrock_probe_request(body: &Value, issues: &mut Vec<String>) {
+fn validate_bedrock_probe_request(
+    body: &Value,
+    probe_case: ToolProbeCase,
+    issues: &mut Vec<String>,
+) {
     require_array(body, "/messages", issues);
+    if !probe_case.requires_probe_tool() {
+        reject_present(body, "/toolConfig", "Bedrock no-tool request", issues);
+        return;
+    }
     require_string_eq(
         body,
         "/toolConfig/tools/0/toolSpec/name",
@@ -370,8 +424,17 @@ fn validate_bedrock_probe_request(body: &Value, issues: &mut Vec<String>) {
     reject_present(body, "/tool_choice", "Bedrock request", issues);
 }
 
-fn validate_ollama_probe_request(body: &Value, issues: &mut Vec<String>) {
+fn validate_ollama_probe_request(
+    body: &Value,
+    probe_case: ToolProbeCase,
+    issues: &mut Vec<String>,
+) {
     require_array(body, "/messages", issues);
+    if !probe_case.requires_probe_tool() {
+        reject_present(body, "/tools", "Ollama no-tool request", issues);
+        reject_present(body, "/tool_choice", "Ollama no-tool request", issues);
+        return;
+    }
     require_openai_function_tool(body, "/tools/0", issues);
     reject_present(body, "/tool_choice", "Ollama request", issues);
 }
