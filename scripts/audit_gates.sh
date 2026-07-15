@@ -7,17 +7,18 @@
 # yet they ran one after another — and with `HARN_BIN` unset each `cargo run`
 # also re-walked cargo's build graph on every invocation.
 #
-# This mirrors the proven shape of `release_gate.sh audit`:
-#   1. Build the harn CLI ONCE up front (the serial long pole) and run the
-#      conformance suite.
-#   2. Export HARN_BIN so no downstream gate pays a cargo staleness check.
-#   3. Hand the independent gates to `make -j` — GNU make already IS a bounded
-#      worker pool with failure collection. `-k` keeps going after a failing
-#      gate so the run reports EVERY gate's verdict, not just the first.
+# This mirrors the proven shape of `release_gate.sh audit` while avoiding a
+# serial conformance-then-audit tail:
+#   1. Build the harn CLI ONCE up front.
+#   2. Export HARN_BIN so conformance and every downstream gate reuse it.
+#   3. Run the conformance suite and the independent `make -j` audit gates in
+#      parallel. GNU make already IS a bounded worker pool with failure
+#      collection; `-k` keeps going after a failing gate so the run reports
+#      EVERY gate's verdict, not just the first.
 #
-# Serial wall-clock was `conformance + sum(tail gates)`; parallel wall-clock is
-# `conformance + max(tail gate)` modulo the `-j` cap, collapsing the tail from
-# a sum to roughly its longest single gate.
+# Serial wall-clock was `warm build + conformance + max(tail gate)`; parallel
+# wall-clock is `warm build + max(conformance, tail gates)` modulo the `-j`
+# cap.
 #
 # Usage: scripts/audit_gates.sh
 #   HARN_BIN                 pre-built binary to reuse (skips the warm build)
@@ -29,8 +30,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 # Independent gates that reuse the warm harn binary, run concurrently under
-# `make -j`. `conformance` is handled separately below: it defines the warm
-# binary and runs the conformance suite, so it must complete first.
+# `make -j`. `conformance` is handled separately below so its failure can still
+# be reported as the conformance failure rather than hidden inside a make fanout.
 GATES=(
   test-agent-scripts
   protocol-conformance
@@ -75,24 +76,22 @@ esac
 
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 
-# ── Phase 1: warm build + conformance suite (the serial long pole). ──
+# Resolve and export the warm binary so conformance and every downstream gate
+# skip cargo staleness checks.
 started="$(date +%s)"
-echo "=== conformance (warm build + conformance suite) ==="
-make conformance
-echo "ok: conformance ($(( $(date +%s) - started ))s)"
-
-# Resolve and export the warm binary so no downstream gate re-runs cargo.
+echo "=== harn cli warm build ==="
 if [ -z "${HARN_BIN:-}" ]; then
   HARN_BIN="$("$SCRIPT_DIR/harn_bin.sh" --print)"
 fi
 if [ ! -x "$HARN_BIN" ]; then
-  echo "error: conformance completed but HARN_BIN is not executable: $HARN_BIN" >&2
+  echo "error: HARN_BIN is not executable: $HARN_BIN" >&2
   exit 1
 fi
 export HARN_BIN
 echo "ok: harn-bin ($HARN_BIN)"
+echo "ok: harn warm build ($(( $(date +%s) - started ))s)"
 
-# ── Phase 2: independent gates via make -j (bounded worker pool). ──
+# ── Parallel phase: conformance + independent gates. ──
 # `-k` (keep-going) runs every gate even when one fails, then make exits
 # non-zero — so CI sees the full verdict set, not just the first failure.
 # `-O` (--output-sync) groups each gate's output so parallel logs don't
@@ -102,13 +101,42 @@ output_sync=""
 if make --help 2>&1 | grep -q -- "--output-sync"; then
   output_sync="-Otarget"
 fi
-echo "=== audit gates (make -j$concurrency -k${output_sync:+ $output_sync}, HARN_BIN warm) ==="
-gate_started="$(date +%s)"
-if make -j"$concurrency" -k ${output_sync} "${GATES[@]}"; then
-  echo "ok: audit gates ($(( $(date +%s) - gate_started ))s)"
-  echo "=== all audit gates passed ==="
+
+audit_status=0
+(
+  echo "=== audit gates (make -j$concurrency -k${output_sync:+ $output_sync}, HARN_BIN warm) ==="
+  gate_started="$(date +%s)"
+  if make -j"$concurrency" -k ${output_sync} "${GATES[@]}"; then
+    echo "ok: audit gates ($(( $(date +%s) - gate_started ))s)"
+    echo "=== all audit gates passed ==="
+  else
+    status=$?
+    echo "FAIL: one or more audit gates failed ($(( $(date +%s) - gate_started ))s)" >&2
+    exit "$status"
+  fi
+) &
+audit_pid=$!
+
+conformance_status=0
+conformance_started="$(date +%s)"
+echo "=== conformance (HARN_BIN warm) ==="
+if make conformance; then
+  echo "ok: conformance ($(( $(date +%s) - conformance_started ))s)"
 else
-  status=$?
-  echo "FAIL: one or more audit gates failed ($(( $(date +%s) - gate_started ))s)" >&2
-  exit "$status"
+  conformance_status=$?
+  echo "FAIL: conformance failed ($(( $(date +%s) - conformance_started ))s)" >&2
 fi
+
+if wait "$audit_pid"; then
+  audit_status=0
+else
+  audit_status=$?
+fi
+
+if [ "$conformance_status" -ne 0 ]; then
+  exit "$conformance_status"
+fi
+if [ "$audit_status" -ne 0 ]; then
+  exit "$audit_status"
+fi
+echo "=== conformance and audit gates passed ==="
