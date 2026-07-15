@@ -701,3 +701,73 @@ fn synthesized_zero_span_body_node_does_not_swallow_earlier_comments() {
         "a comment was dragged into the tool body:\n{formatted}"
     );
 }
+
+/// A comment written after the last statement of a body has nothing to its
+/// right to attach to, so before the tail flush it stayed unclaimed and the
+/// top-level sweep adopted it onto the NEXT declaration — where it silently
+/// described unrelated code.
+#[test]
+fn comment_after_the_last_statement_stays_in_the_function() {
+    assert_comment_stays_in_block(
+        "fn g() -> int {\n  const y = 2\n  return y\n  // TAIL\n}\n\nfn later() -> int {\n  return 3\n}\n",
+        "// TAIL",
+        "}",
+    );
+}
+
+#[test]
+fn comment_after_the_last_statement_of_an_else_stays_in_the_else() {
+    let source = "fn h() -> int {\n  if a {\n    b()\n  } else {\n    c()\n    // TAIL_ELSE\n  }\n  return 1\n}\n";
+    let formatted = format_source(source).unwrap();
+    let comment = formatted.find("// TAIL_ELSE").expect("comment vanished");
+    let ret = formatted.find("return 1").expect("no return");
+    assert!(
+        comment < ret,
+        "the else's trailing comment escaped its block:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn comment_after_the_last_statement_of_a_finally_stays_in_the_finally() {
+    let source = "fn t() -> int {\n  try {\n    x()\n  } finally {\n    z()\n    // TAIL_FINALLY\n  }\n  return 2\n}\n";
+    let formatted = format_source(source).unwrap();
+    let comment = formatted.find("// TAIL_FINALLY").expect("comment vanished");
+    let ret = formatted.find("return 2").expect("no return");
+    assert!(
+        comment < ret,
+        "the finally's trailing comment escaped its block:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn comment_after_the_last_statement_of_a_loop_stays_in_the_loop() {
+    assert_comment_stays_in_block(
+        "fn g() -> int {\n  for x in xs {\n    use(x)\n    // TAIL_LOOP\n  }\n  return 1\n}\n",
+        "// TAIL_LOOP",
+        "  }",
+    );
+}
+
+/// A body with a SIBLING after it (`then` before an `else`, `try` before its
+/// `catch`) still loses its trailing comment to that sibling. The fix that
+/// works everywhere else cannot reach here: the boundary is the `} else {`
+/// line, and the AST records a span for the whole `if` node but none for the
+/// individual blocks, so there is no line to bound the flush with. Bounding
+/// with the node's end would sweep the else's OWN leading comments backwards
+/// into the then — trading one misplacement for another.
+///
+/// Tracked in #4797. Un-ignore once blocks carry their own spans.
+#[test]
+#[ignore = "needs block spans in the AST — see #4797"]
+fn comment_after_the_last_statement_of_a_then_branch_stays_in_the_then() {
+    let source = "fn h() -> int {\n  if a {\n    b()\n    // TAIL_THEN\n  } else {\n    c()\n  }\n  return 1\n}\n";
+    let formatted = format_source(source).unwrap();
+    let comment = formatted.find("// TAIL_THEN").expect("comment vanished");
+    let else_kw = formatted.find("} else {").expect("no else");
+    assert!(
+        comment < else_kw,
+        "the then-branch's trailing comment was dragged into the else:\n{formatted}"
+    );
+}
