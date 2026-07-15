@@ -10,6 +10,7 @@ use harn_lexer::Lexer;
 
 use super::{DiagnosticSeverity, TypeChecker, TypeDiagnostic};
 
+mod acp_ambient_globals;
 mod coalesce;
 mod exhaustiveness;
 mod imports;

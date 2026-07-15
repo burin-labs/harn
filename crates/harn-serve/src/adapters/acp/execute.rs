@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use harn_parser::acp_ambient_globals::AcpAmbientGlobal;
+
 use super::{builtins, AcpBridge, AcpRuntimeConfigurator};
 
 pub(super) struct PromptGlobals<'a> {
@@ -134,26 +136,33 @@ pub(super) async fn execute_chunk(
     };
 
     vm.set_harness(harn_vm::Harness::real());
-    vm.set_global(
-        "prompt",
-        harn_vm::VmValue::String(arcstr::ArcStr::from(prompt.text)),
-    );
-    vm.set_global(
-        "prompt_content",
-        harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.content.to_vec())),
-    );
-    vm.set_global(
-        "prompt_messages",
-        harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.messages.to_vec())),
-    );
-    vm.set_global(
-        "cwd",
-        harn_vm::VmValue::String(arcstr::ArcStr::from(setup.cwd.to_string_lossy().as_ref())),
-    );
-
-    let mcp_globals = load_host_mcp_clients(host_bridge.clone()).await;
-    if !mcp_globals.is_empty() {
-        vm.set_global("mcp", harn_vm::VmValue::dict(mcp_globals));
+    // Bind the ACP session-prompt ambient globals from the single source of
+    // truth the type-checker whitelist also consumes (`harn_parser`), so a
+    // global bound here can never be one `harn check` rejects. The exhaustive
+    // match makes adding a global a deliberate, checked change on both sides.
+    let mut mcp_globals = load_host_mcp_clients(host_bridge.clone()).await;
+    for global in AcpAmbientGlobal::ALL {
+        let value = match global {
+            AcpAmbientGlobal::Prompt => harn_vm::VmValue::String(arcstr::ArcStr::from(prompt.text)),
+            AcpAmbientGlobal::PromptContent => {
+                harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.content.to_vec()))
+            }
+            AcpAmbientGlobal::PromptMessages => {
+                harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.messages.to_vec()))
+            }
+            AcpAmbientGlobal::Cwd => {
+                harn_vm::VmValue::String(arcstr::ArcStr::from(setup.cwd.to_string_lossy().as_ref()))
+            }
+            AcpAmbientGlobal::Mcp => {
+                // Only bind `mcp` when a host actually supplied MCP clients; an
+                // empty map is left unbound, preserving prior behavior.
+                if mcp_globals.is_empty() {
+                    continue;
+                }
+                harn_vm::VmValue::dict(std::mem::take(&mut mcp_globals))
+            }
+        };
+        vm.set_global(global.name(), value);
     }
 
     builtins::register_acp_builtins(&mut vm, bridge.clone()).await;
