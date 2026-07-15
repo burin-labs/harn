@@ -343,6 +343,10 @@ pub(crate) fn build_record(
         "wire_format": wire_format_for(&opts.provider, &opts.model),
         "thinking": thinking_json(&opts.thinking),
         "tool_format": effective_tool_format,
+        // The resolved stop list actually sent to the provider, so a
+        // missing/dropped text tool-call terminator (harn#4743) is observable
+        // per call rather than inferred from the transcript.
+        "stop": opts.stop,
         "base_url_host": base_url_host(&opts.provider),
         "provenance": provenance.to_json(),
         "outcome": outcome.to_json(),
