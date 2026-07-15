@@ -2109,3 +2109,182 @@ fn test_raw_string_with_quote_never_emits_bare_delimiter() {
     );
     assert_roundtrip(source);
 }
+
+/// The line a comment lands on, relative to the line matching `anchor`.
+/// Panics with the whole rendering when either marker is missing, so a failure
+/// shows what actually happened rather than just an index.
+fn assert_comment_stays_in_block(source: &str, comment: &str, closing_anchor: &str) {
+    let formatted = format_source(source).unwrap();
+    let comment_line = formatted
+        .lines()
+        .position(|l| l.contains(comment))
+        .unwrap_or_else(|| panic!("comment vanished entirely:\n{formatted}"));
+    let anchor_line = formatted
+        .lines()
+        .position(|l| l.contains(closing_anchor))
+        .unwrap_or_else(|| panic!("anchor `{closing_anchor}` missing:\n{formatted}"));
+    assert!(
+        comment_line < anchor_line,
+        "comment escaped its block (line {comment_line} vs anchor {anchor_line}):\n{formatted}"
+    );
+}
+
+// A block in EXPRESSION position (bound to a value) used to render through a
+// path that only claimed trailing comments, so a standalone comment inside it
+// stayed unclaimed — and the next top-level item's leading-comment sweep then
+// adopted it, moving it out of the function and onto an unrelated declaration
+// where it was simply false.
+#[test]
+fn comment_in_catch_block_stays_in_the_catch_block() {
+    assert_comment_stays_in_block(
+        "fn risky() -> int { return 1 }\n\
+         fn caller() -> dict {\n\
+           const result = try {\n\
+             risky()\n\
+           } catch (err) {\n\
+             // BELONGS TO THE CATCH\n\
+             {available: false}\n\
+           }\n\
+           return result\n\
+         }\n\
+         fn unrelated() -> int { return 2 }\n",
+        "BELONGS TO THE CATCH",
+        "fn unrelated",
+    );
+}
+
+#[test]
+fn comment_in_try_body_stays_in_the_try_body() {
+    assert_comment_stays_in_block(
+        "fn risky() -> int { return 1 }\n\
+         fn caller() -> int {\n\
+           const result = try {\n\
+             // BELONGS TO THE TRY\n\
+             risky()\n\
+           } catch (err) {\n\
+             0\n\
+           }\n\
+           return result\n\
+         }\n\
+         fn unrelated() -> int { return 2 }\n",
+        "BELONGS TO THE TRY",
+        "fn unrelated",
+    );
+}
+
+#[test]
+fn comment_in_value_position_else_stays_in_the_else() {
+    assert_comment_stays_in_block(
+        "fn caller(flag: bool) -> dict {\n\
+           const result = if flag {\n\
+             {a: 1}\n\
+           } else {\n\
+             // BELONGS TO THE ELSE\n\
+             {a: 2}\n\
+           }\n\
+           return result\n\
+         }\n\
+         fn unrelated() -> int { return 2 }\n",
+        "BELONGS TO THE ELSE",
+        "fn unrelated",
+    );
+}
+
+// Not only the comment adjacent to a trailing bare expression: a comment above
+// an ordinary statement inside an expression-position block escaped too.
+#[test]
+fn comment_above_a_statement_in_a_catch_block_stays_put() {
+    assert_comment_stays_in_block(
+        "fn risky() -> int { return 1 }\n\
+         fn caller() -> dict {\n\
+           const result = try {\n\
+             risky()\n\
+           } catch (err) {\n\
+             // BELONGS TO THE CATCH\n\
+             const fallback = {a: 1}\n\
+             fallback\n\
+           }\n\
+           return result\n\
+         }\n\
+         fn unrelated() -> int { return 2 }\n",
+        "BELONGS TO THE CATCH",
+        "fn unrelated",
+    );
+}
+
+#[test]
+fn comment_in_a_closure_body_stays_in_the_closure() {
+    assert_comment_stays_in_block(
+        "fn caller(items: list) -> list {\n\
+           return items.map({ item ->\n\
+             // BELONGS TO THE CLOSURE\n\
+             item + 1\n\
+           })\n\
+         }\n\
+         fn unrelated() -> int { return 2 }\n",
+        "BELONGS TO THE CLOSURE",
+        "fn unrelated",
+    );
+}
+
+// A comment ABOVE a match arm documents the arm, so it must not be sucked into
+// the arm's body — the bound for an arm is its own pattern, not the `match`.
+#[test]
+fn comment_above_a_match_arm_stays_above_the_arm() {
+    let formatted = format_source(
+        "fn caller(x: int) -> int {\n\
+           return match x {\n\
+             // ABOUT THE FIRST ARM\n\
+             1 -> {\n\
+               let y = 1\n\
+               y\n\
+             }\n\
+             _ -> { 0 }\n\
+           }\n\
+         }\n",
+    )
+    .unwrap();
+    let comment_line = formatted
+        .lines()
+        .position(|l| l.contains("ABOUT THE FIRST ARM"))
+        .unwrap_or_else(|| panic!("comment vanished:\n{formatted}"));
+    let arm_line = formatted
+        .lines()
+        .position(|l| l.contains("1 -> {"))
+        .unwrap_or_else(|| panic!("arm missing:\n{formatted}"));
+    assert!(
+        comment_line < arm_line,
+        "the arm's comment did not stay above its arm — it was either pulled inside \
+         the body or evicted from the match entirely:\n{formatted}"
+    );
+}
+
+// A tool decl splices a synthesized zero-span `description(...)` node into its
+// body. A zero span names no source line, so it must not anchor a comment range
+// — treating its `end_line` of 0 as a bound would claim every unclaimed comment
+// in the file above the decl.
+#[test]
+fn synthesized_zero_span_body_node_does_not_swallow_earlier_comments() {
+    let formatted = format_source(
+        "// ABOUT THE FIRST FUNCTION\n\
+         fn first() -> int { return 1 }\n\
+         \n\
+         pub tool probe(x: int) -> int {\n\
+           \"describe me\"\n\
+           return x\n\
+         }\n",
+    )
+    .unwrap();
+    let comment_line = formatted
+        .lines()
+        .position(|l| l.contains("ABOUT THE FIRST FUNCTION"))
+        .unwrap_or_else(|| panic!("comment vanished:\n{formatted}"));
+    let first_fn_line = formatted
+        .lines()
+        .position(|l| l.contains("fn first"))
+        .unwrap_or_else(|| panic!("fn first missing:\n{formatted}"));
+    assert!(
+        comment_line < first_fn_line,
+        "a comment was dragged into the tool body:\n{formatted}"
+    );
+}

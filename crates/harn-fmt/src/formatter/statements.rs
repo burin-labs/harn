@@ -21,7 +21,7 @@ impl Formatter<'_> {
                 let inner = indent_level + 1;
                 let close = "  ".repeat(indent_level);
                 let mut result = format!("if {cond} {{\n");
-                result.push_str(&self.format_body_string(then_body, inner));
+                result.push_str(&self.format_body_string(then_body, inner, node.span.line));
                 if let Some(eb) = else_body {
                     // `else if` chain: flatten back instead of producing
                     // a nested `else { if ... }` block.
@@ -32,7 +32,11 @@ impl Formatter<'_> {
                     } else {
                         result.push_str(&close);
                         result.push_str("} else {\n");
-                        result.push_str(&self.format_body_string(eb, inner));
+                        result.push_str(&self.format_body_string(
+                            eb,
+                            inner,
+                            Self::block_from_line_after(then_body, node.span.line),
+                        ));
                         result.push_str(&close);
                         result.push('}');
                     }
@@ -49,11 +53,21 @@ impl Formatter<'_> {
             } => {
                 let pat = format_pattern(pattern);
                 let iter_str = self.format_expr(iterable, indent_level);
-                self.format_block_expr(&format!("for {pat} in {iter_str} {{"), body, indent_level)
+                self.format_block_expr(
+                    &format!("for {pat} in {iter_str} {{"),
+                    body,
+                    indent_level,
+                    node.span.line,
+                )
             }
             Node::WhileLoop { condition, body } => {
                 let cond = self.format_expr(condition, indent_level);
-                self.format_block_expr(&format!("while {cond} {{"), body, indent_level)
+                self.format_block_expr(
+                    &format!("while {cond} {{"),
+                    body,
+                    indent_level,
+                    node.span.line,
+                )
             }
             Node::FnDecl {
                 name,
@@ -82,7 +96,7 @@ impl Formatter<'_> {
                     where_clauses,
                     indent_level,
                 );
-                self.format_block_expr(&format!("{sig} {{"), body, indent_level)
+                self.format_block_expr(&format!("{sig} {{"), body, indent_level, node.span.line)
             }
             Node::ToolDecl {
                 name,
@@ -116,6 +130,7 @@ impl Formatter<'_> {
                     &format!("{pub_prefix}tool {name}({params_str}){ret}{throws_str} {{"),
                     &effective_body,
                     indent_level,
+                    node.span.line,
                 )
             }
             Node::SkillDecl {
@@ -165,11 +180,15 @@ impl Formatter<'_> {
                     inner.push_str(&expr_str);
                     inner.push('\n');
                 }
-                inner.push_str(&self.format_body_string(body, indent_level + 1));
+                inner.push_str(&self.format_body_string(body, indent_level + 1, node.span.line));
                 if let Some(summary_body) = summarize {
                     inner.push_str(&item_indent);
                     inner.push_str("summarize {\n");
-                    inner.push_str(&self.format_body_string(summary_body, indent_level + 2));
+                    inner.push_str(&self.format_body_string(
+                        summary_body,
+                        indent_level + 2,
+                        Self::block_from_line_after(body, node.span.line),
+                    ));
                     inner.push_str(&item_indent);
                     inner.push_str("}\n");
                 }
@@ -208,17 +227,25 @@ impl Formatter<'_> {
                 let inner = indent_level + 1;
                 let close = "  ".repeat(indent_level);
                 let mut result = String::from("try {\n");
-                result.push_str(&self.format_body_string(body, inner));
+                result.push_str(&self.format_body_string(body, inner, node.span.line));
                 if *has_catch {
                     let catch_param = format_catch_param(error_var, error_type);
                     result.push_str(&close);
                     result.push_str(&format!("}} catch{catch_param} {{\n"));
-                    result.push_str(&self.format_body_string(catch_body, inner));
+                    result.push_str(&self.format_body_string(
+                        catch_body,
+                        inner,
+                        Self::block_from_line_after(body, node.span.line),
+                    ));
                 }
                 if let Some(fb) = finally_body {
                     result.push_str(&close);
                     result.push_str("} finally {\n");
-                    result.push_str(&self.format_body_string(fb, inner));
+                    result.push_str(&self.format_body_string(
+                        fb,
+                        inner,
+                        Self::block_from_line_after(catch_body, node.span.line),
+                    ));
                 }
                 result.push_str(&close);
                 result.push('}');
