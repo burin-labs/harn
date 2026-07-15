@@ -323,6 +323,9 @@ fn compact_transcript_for_budget(
                 estimated_tokens_before: outcome.estimated_tokens_before,
                 estimated_tokens_after: outcome.estimated_tokens_after,
                 snapshot_asset_id: outcome.snapshot_asset_id,
+                recap: outcome
+                    .recap_metrics
+                    .map(crate::orchestration::RecapMetrics::to_json),
             },
         });
     }

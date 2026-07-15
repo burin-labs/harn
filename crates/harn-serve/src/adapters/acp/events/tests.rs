@@ -225,6 +225,7 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
                 "instruction_mode": "extend",
                 "instruction_source": "host"
             })),
+            recap: None,
         },
         AgentEvent::TranscriptProjected {
             session_id: "session-1".to_string(),
@@ -1495,6 +1496,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             instruction_mode: None,
             instruction_source: None,
             compaction_policy: None,
+            recap: None,
         },
         AgentEvent::TranscriptProjected {
             session_id: "session-1".to_string(),

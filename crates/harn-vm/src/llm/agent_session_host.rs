@@ -2895,6 +2895,7 @@ fn host_agent_record_compaction_builtin(
         instruction_mode,
         instruction_source,
         compaction_policy,
+        recap: None,
     });
     Ok(VmValue::Nil)
 }
