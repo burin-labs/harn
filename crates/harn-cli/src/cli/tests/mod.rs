@@ -24,5 +24,6 @@ mod parse_cmds;
 mod parse_core;
 mod parse_orchestration;
 mod parse_packaging;
+mod parse_provider_tool_probe_audit;
 mod parse_providers;
 mod parse_serve;
