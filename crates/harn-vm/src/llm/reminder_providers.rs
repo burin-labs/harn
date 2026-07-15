@@ -9,6 +9,7 @@ use serde_json::Value as JsonValue;
 use harn_parser::diagnostic_codes::Code;
 
 use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
+use crate::llm::reminder_iteration::ReminderIterationState;
 use crate::orchestration::{HookEffect, HookEvent, ReminderSpec};
 use crate::value::{VmClosure, VmError};
 
@@ -1312,10 +1313,10 @@ pub async fn evaluate_and_inject(
     let user_providers = USER_PROVIDERS.with(|providers| providers.borrow().clone());
     let enabled = enabled_provider_ids(&ctx.options, &user_providers);
     if enabled.is_empty() {
-        return Ok(serde_json::json!({"reports": [], "fired_count": 0}));
+        return Ok(ReminderIterationState::new(&ctx.options).into_json());
     }
 
-    let mut reports = Vec::new();
+    let mut iteration_state = ReminderIterationState::new(&ctx.options);
     for provider in canonical_providers() {
         if !enabled.contains(provider.id()) || !subscribes_to(provider.subscribes_to(), event) {
             continue;
@@ -1323,7 +1324,7 @@ pub async fn evaluate_and_inject(
         let reminder = provider.evaluate(&ctx);
         emit_provider_evaluated(&ctx, provider.id(), reminder.is_some(), None);
         if let Some(reminder) = reminder {
-            reports.push(inject_report(session_id, provider.id(), reminder)?);
+            iteration_state.inject(session_id, provider.id(), reminder)?;
         }
     }
 
@@ -1336,7 +1337,7 @@ pub async fn evaluate_and_inject(
             Ok(reminders) => {
                 emit_provider_evaluated(&ctx, &provider.id, !reminders.is_empty(), None);
                 for reminder in reminders {
-                    reports.push(inject_report(session_id, &provider.id, reminder)?);
+                    iteration_state.inject(session_id, &provider.id, reminder)?;
                 }
             }
             Err(error) => {
@@ -1346,10 +1347,7 @@ pub async fn evaluate_and_inject(
         }
     }
 
-    Ok(serde_json::json!({
-        "fired_count": reports.len(),
-        "reports": reports,
-    }))
+    Ok(iteration_state.into_json())
 }
 
 /// Compass (B.9, #2521): steer the agent loop toward the
@@ -1568,20 +1566,6 @@ async fn evaluate_vm_provider(
         }
     }
     Ok(reminders)
-}
-
-fn inject_report(
-    session_id: &str,
-    provider_id: &str,
-    reminder: ReminderSpec,
-) -> Result<JsonValue, VmError> {
-    let report =
-        crate::agent_sessions::inject_reminder(session_id, reminder).map_err(VmError::Runtime)?;
-    Ok(serde_json::json!({
-        "provider": provider_id,
-        "reminder_id": report.reminder_id,
-        "deduped_count": report.deduped_count,
-    }))
 }
 
 fn emit_provider_evaluated(
