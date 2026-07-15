@@ -29,6 +29,7 @@ pub fn compiler_inputs(manifest_dir: &Path) -> Vec<CompilerInput> {
     }
 
     for (file_name, logical_path) in [
+        ("bytecode_cache.rs", "harn-vm/src/bytecode_cache.rs"),
         ("chunk.rs", "harn-vm/src/chunk.rs"),
         ("module_artifact.rs", "harn-vm/src/module_artifact.rs"),
     ] {
@@ -61,11 +62,29 @@ pub fn fingerprint_inputs(inputs: &[CompilerInput]) -> String {
         hasher.update(input.logical_path.as_bytes());
         hasher.update([0u8]);
         if let Ok(bytes) = std::fs::read(&input.disk_path) {
-            hasher.update(&bytes);
+            hasher.update(canonical_source_bytes(&bytes));
         }
     }
     let digest = hasher.finalize();
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+pub fn canonical_source_bytes(bytes: &[u8]) -> Vec<u8> {
+    let mut normalized = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                normalized.push(b'\n');
+                if bytes.get(index + 1) == Some(&b'\n') {
+                    index += 1;
+                }
+            }
+            byte => normalized.push(byte),
+        }
+        index += 1;
+    }
+    normalized
 }
 
 fn collect_rs_files(root: &Path, logical_prefix: &str, out: &mut Vec<CompilerInput>) {

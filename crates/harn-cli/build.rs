@@ -10,10 +10,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const CLI_AOT_SKIPLIST: &[(&str, &str)] = &[(
-    "codemod",
-    "uses host-gated rules_apply/rules_fold paths that are intentionally runtime-only",
-)];
+#[path = "build_support/cli_aot_manifest.rs"]
+#[allow(dead_code)]
+mod cli_aot_manifest;
+#[path = "../harn-vm/build_support/codegen_fingerprint.rs"]
+#[allow(dead_code)]
+mod codegen_fingerprint;
+
+const CLI_AOT_MANIFEST: &str = "generated/cli-bytecode-manifest.json";
+const CLI_BYTECODE_MAGIC: &[u8; 8] = b"HARNBC\0\0";
 
 fn main() {
     ensure_git_hooks_installed();
@@ -199,136 +204,77 @@ fn ensure_git_hooks_installed() {
         .status();
 }
 
-/// AOT-compile every embedded CLI script into the on-disk bytecode-cache
-/// artifact the runtime loader already understands (header + bincode
-/// payload, identical to what `harn precompile` writes). Each artifact is
-/// written under `$OUT_DIR/cli-bytecode/` and registered in a generated
-/// `cli_bytecode_table.rs` that `harn-cli` includes at compile time.
-///
-/// This is part of G7 (harn#2300) under the CLI self-host epic
-/// (harn#2293). Cold-start cost for ported subcommands drops because
-/// the runtime can skip parse + typecheck + compile entirely — at
-/// dispatch time the wedge drops the embedded `.harnbc` next to the
-/// temp source and the existing `bytecode_cache::load` path picks it up.
-///
-/// A compile failure here would block the whole build; that's
-/// intentional. The CLI scripts are versioned in this repo, so a
-/// regression in any of them needs to surface at build time rather than
-/// silently degrade cold-start. If a future script can't be statically
-/// compiled (e.g. relies on runtime-only typing), it should be added to
-/// `BYTECODE_SKIPLIST` below with a reason.
+/// Validate and embed the committed CLI bytecode artifacts. Compilation is a
+/// repository generation step, never build-script work: keeping harn-vm out of
+/// `[build-dependencies]` prevents Cargo resolver v2 from compiling the VM once
+/// for the host graph and again for the runtime graph on every cold build.
 fn emit_cli_script_bytecode() {
-    use harn_vm::bytecode_cache::{serialize_chunk_artifact, CacheKey};
-    use harn_vm::compile_source;
-
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    let bytecode_dir = out_dir.join("cli-bytecode");
-    fs::create_dir_all(&bytecode_dir).expect("create cli-bytecode dir");
-
-    // Rebuild whenever any embedded CLI script changes. CARGO_MANIFEST_DIR
-    // is the harn-cli crate, but the scripts live in ../harn-stdlib/src/
-    // stdlib/cli/. Recursing the directory listing keeps the watch list
-    // accurate as the script set grows.
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let cli_scripts_dir = manifest_dir
-        .join("..")
-        .join("harn-stdlib")
-        .join("src")
-        .join("stdlib")
-        .join("cli");
-    emit_rerun_if_changed_recursive(&cli_scripts_dir);
-    // Watch the stdlib lib.rs too because that's where script registration
-    // lives — adding/removing entries from STDLIB_CLI_SCRIPTS must rerun
-    // this build script even if no `.harn` file changed.
-    let stdlib_lib = manifest_dir
-        .join("..")
-        .join("harn-stdlib")
-        .join("src")
-        .join("lib.rs");
-    println!("cargo:rerun-if-changed={}", stdlib_lib.display());
-    // Opt-out for hermetic builds that can't tolerate any compile-time
-    // bytecode generation (e.g. cross-compiling in a sandbox without
-    // enough memory). When unset (the default) we always emit.
-    println!("cargo:rerun-if-env-changed=HARN_SKIP_AOT_CLI_BUILD");
+    let manifest_path = manifest_dir.join(CLI_AOT_MANIFEST);
+    println!("cargo:rerun-if-changed={}", manifest_path.display());
+    let manifest = cli_aot_manifest::read_manifest(&manifest_path).unwrap_or_else(|error| {
+        panic!("invalid CLI AOT manifest: {error}; run `make gen-cli-aot`");
+    });
+    let package_version = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    assert_eq!(
+        manifest.harn_version, package_version,
+        "CLI AOT artifacts target Harn {}; expected {package_version}; run `make gen-cli-aot`",
+        manifest.harn_version
+    );
 
-    let table_path = out_dir.join("cli_bytecode_table.rs");
-
-    if std::env::var_os("HARN_SKIP_AOT_CLI_BUILD").is_some() {
-        // Emit an empty table so `include!` still works. Dispatch falls
-        // back to source compilation transparently.
-        write_table(&table_path, &[], &[]);
-        return;
+    let vm_manifest_dir = manifest_dir
+        .parent()
+        .expect("harn-cli manifest dir has a parent")
+        .join("harn-vm");
+    let compiler_inputs = codegen_fingerprint::compiler_inputs(&vm_manifest_dir);
+    for input in &compiler_inputs {
+        println!("cargo:rerun-if-changed={}", input.disk_path.display());
     }
-
-    // Windows hits STATUS_STACK_OVERFLOW invoking `compile_source` from
-    // the build-script default thread (8 MiB on Linux/macOS, ~1 MiB on
-    // Windows). The compiler's recursive walks need more headroom than
-    // the default Windows stack provides, and the build script runs
-    // before `RUST_MIN_STACK` can take effect. Skip AOT on Windows —
-    // dispatch falls back to source compilation transparently and the
-    // first-run bytecode cache (HARN_BYTECODE_CACHE) still kicks in.
-    // Re-enable when the compiler hot path is rewritten to be
-    // iteration-bounded, or when a spawn-thread-with-stack-size shim
-    // wraps `compile_source` in this build script.
-    if cfg!(target_os = "windows") {
-        write_table(&table_path, &[], &[]);
-        return;
+    for root in codegen_fingerprint::watch_roots(&vm_manifest_dir) {
+        println!("cargo:rerun-if-changed={}", root.display());
     }
+    let compiler_fingerprint = codegen_fingerprint::fingerprint_inputs(&compiler_inputs);
+    assert_eq!(
+        manifest.compiler_fingerprint, compiler_fingerprint,
+        "CLI AOT compiler fingerprint is stale; run `make gen-cli-aot`"
+    );
 
-    let mut entries: Vec<(String, String)> = Vec::new();
-    let mut skipped: Vec<(String, String)> = Vec::new();
-    for script in harn_stdlib::STDLIB_CLI_SCRIPTS {
-        let name = script.name;
-        let source = script.source;
-        let safe = safe_filename(name);
+    for script in &manifest.scripts {
+        let source_path = resolve_manifest_path(&manifest_dir, &script.source_path, true);
+        println!("cargo:rerun-if-changed={}", source_path.display());
+        let source_sha256 = cli_aot_manifest::sha256_source_file(&source_path)
+            .unwrap_or_else(|error| panic!("validate CLI AOT source: {error}"));
+        assert_eq!(
+            script.source_sha256, source_sha256,
+            "CLI AOT source `{}` is stale; run `make gen-cli-aot`",
+            script.name
+        );
 
-        if let Some(reason) = cli_aot_skip_reason(name) {
-            skipped.push((name.to_string(), reason.to_string()));
-            continue;
-        }
-
-        let chunk = match compile_source(source) {
-            Ok(chunk) => chunk,
-            Err(err) => panic!(
-                "AOT compile failed for CLI script `{name}`: {err}\n\
-                 (this is a build-time failure; the script must compile cleanly \
-                 or be guarded with a skiplist entry in build.rs)"
-            ),
-        };
-
-        // Build a key against a synthetic source path. The runtime loader
-        // recomputes the key from the tempfile path at dispatch time, but
-        // the import-graph hash for these scripts is over zero user
-        // imports (they only import std/*), and the source hash is over
-        // content alone — so the build-time and runtime keys match by
-        // construction. A future script that grows user imports would
-        // break this assumption and silently fall back to source; that's
-        // acceptable since dispatch already handles miss gracefully.
-        let synthetic_path = bytecode_dir.join(format!("{safe}.harn"));
-        let key = CacheKey::from_source(&synthetic_path, source);
-        let buf = serialize_chunk_artifact(&key, &chunk).unwrap_or_else(|err| {
-            panic!("serialize bytecode for CLI script `{name}` failed: {err}");
-        });
-
-        let dest = bytecode_dir.join(format!("{safe}.harnbc"));
-        fs::write(&dest, &buf).unwrap_or_else(|err| {
-            panic!(
-                "write bytecode for CLI script `{name}` to {}: {err}",
-                dest.display()
+        if let Some(artifact) = &script.artifact {
+            assert!(
+                artifact.path.starts_with("generated/cli-bytecode/"),
+                "CLI AOT artifact `{}` must live under generated/cli-bytecode/",
+                artifact.path
             );
-        });
-
-        entries.push((name.to_string(), dest.to_string_lossy().into_owned()));
+            let artifact_path = resolve_manifest_path(&manifest_dir, &artifact.path, false);
+            println!("cargo:rerun-if-changed={}", artifact_path.display());
+            let bytes = fs::read(&artifact_path).unwrap_or_else(|error| {
+                panic!("read CLI AOT artifact {}: {error}", artifact_path.display());
+            });
+            assert!(
+                bytes.starts_with(CLI_BYTECODE_MAGIC),
+                "CLI AOT artifact `{}` has an invalid bytecode header",
+                script.name
+            );
+            assert_eq!(
+                artifact.sha256,
+                cli_aot_manifest::sha256_bytes(&bytes),
+                "CLI AOT artifact `{}` is stale; run `make gen-cli-aot`",
+                script.name
+            );
+        }
     }
-
-    write_table(&table_path, &entries, &skipped);
-}
-
-fn cli_aot_skip_reason(name: &str) -> Option<&'static str> {
-    CLI_AOT_SKIPLIST
-        .iter()
-        .find_map(|(script, reason)| (*script == name).then_some(*reason))
 }
 
 /// Embed every demo *sibling* file (anything under `assets/demo/<id>/` other
@@ -405,38 +351,32 @@ fn write_demo_assets_table(path: &Path, entries: &[(String, String)]) {
     fs::write(path, body).expect("write demo_assets_table.rs");
 }
 
-/// Tempfiles produced by the dispatch wedge use a single-segment name
-/// derived from the script id with `/` → `-`. Mirror that here so the
-/// build-time and runtime sources agree on filename layout (the actual
-/// content addressing happens via the key inside the artifact header).
-fn safe_filename(name: &str) -> String {
-    name.replace('/', "-")
-}
-
-fn write_table(path: &Path, entries: &[(String, String)], skipped: &[(String, String)]) {
-    let mut body = String::new();
-    body.push_str("// @generated by build.rs (harn#2300, G7 AOT bytecode embedding).\n");
-    body.push_str("// Do not edit by hand. Rerun `cargo build -p harn-cli` to regenerate.\n");
-    body.push_str("pub(crate) const STDLIB_CLI_SCRIPT_BYTECODE: &[(&str, &[u8])] = &[\n");
-    for (name, file_path) in entries {
-        body.push_str("    (\"");
-        body.push_str(&escape_str(name));
-        body.push_str("\", include_bytes!(\"");
-        body.push_str(&escape_str(file_path));
-        body.push_str("\")),\n");
-    }
-    body.push_str("];\n");
-    body.push_str("#[allow(dead_code)]\n");
-    body.push_str("pub(crate) const STDLIB_CLI_SCRIPT_BYTECODE_SKIPPED: &[(&str, &str)] = &[\n");
-    for (name, reason) in skipped {
-        body.push_str("    (\"");
-        body.push_str(&escape_str(name));
-        body.push_str("\", \"");
-        body.push_str(&escape_str(reason));
-        body.push_str("\"),\n");
-    }
-    body.push_str("];\n");
-    fs::write(path, body).expect("write cli_bytecode_table.rs");
+fn resolve_manifest_path(manifest_dir: &Path, relative: &str, allow_crates_root: bool) -> PathBuf {
+    let relative = Path::new(relative);
+    assert!(
+        !relative.is_absolute(),
+        "CLI AOT manifest path must be relative: {}",
+        relative.display()
+    );
+    let path = manifest_dir.join(relative);
+    let canonical = path.canonicalize().unwrap_or_else(|error| {
+        panic!("resolve CLI AOT path {}: {error}", path.display());
+    });
+    let allowed_root = if allow_crates_root {
+        manifest_dir.parent().expect("harn-cli is under crates/")
+    } else {
+        manifest_dir
+    };
+    let allowed_root = allowed_root
+        .canonicalize()
+        .expect("resolve CLI AOT allowed root");
+    assert!(
+        canonical.starts_with(&allowed_root),
+        "CLI AOT manifest path escapes {}: {}",
+        allowed_root.display(),
+        canonical.display()
+    );
+    canonical
 }
 
 fn escape_str(s: &str) -> String {

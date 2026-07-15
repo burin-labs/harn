@@ -197,6 +197,18 @@ fi
 
 hook_write_staged_files "$changed"
 
+if hook_paths_match "$changed" "$HOOK_CLI_AOT_PATTERN"; then
+  echo "=== Pre-commit: syncing committed CLI AOT artifacts ==="
+  make -s gen-cli-aot
+  git add crates/harn-cli/generated/cli-bytecode-manifest.json \
+    crates/harn-cli/generated/cli_bytecode_table.rs \
+    crates/harn-cli/generated/cli-bytecode
+  echo "    CLI AOT artifacts OK."
+  hook_write_staged_files "$changed"
+else
+  echo "=== Pre-commit: skipping CLI AOT sync (no compiler/CLI source changes) ==="
+fi
+
 if hook_paths_need_highlight "$changed" --cached; then
   echo "=== Pre-commit: syncing generated highlight keywords ==="
   # Highlight keywords mirror the branch lexer plus globally-registered

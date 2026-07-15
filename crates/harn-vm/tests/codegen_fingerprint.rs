@@ -40,6 +40,22 @@ fn codegen_fingerprint_changes_when_input_content_changes() {
 }
 
 #[test]
+fn codegen_fingerprint_is_line_ending_stable() {
+    let left = tempfile::tempdir().unwrap();
+    let right = tempfile::tempdir().unwrap();
+    seed_compiler_sources(left.path(), "fn compile() {\n    return;\n}\n");
+    seed_compiler_sources(right.path(), "fn compile() {\r\n    return;\r\n}\r\n");
+
+    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm")));
+    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm")));
+
+    assert_eq!(
+        left_hash, right_hash,
+        "LF and CRLF checkouts must produce the same compiler fingerprint"
+    );
+}
+
+#[test]
 fn codegen_fingerprint_tracks_module_artifact_compilation() {
     let left = tempfile::tempdir().unwrap();
     let right = tempfile::tempdir().unwrap();

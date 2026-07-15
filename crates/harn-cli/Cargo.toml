@@ -24,6 +24,8 @@ include = [
     "src/**/*",
     "data/**/*",
     "assets/**/*",
+    "build_support/**/*",
+    "generated/**/*",
     "build.rs",
     "Cargo.toml",
     "portal-dist/**/*",
@@ -130,23 +132,12 @@ arcstr = { version = "1", features = ["serde", "std"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# Build-time dependencies for the AOT bytecode embedding step (G7 / harn#2300).
-# `build.rs` reuses the runtime compiler + cache-artifact encoder to emit a
-# `.harnbc` for every script in `harn_stdlib::STDLIB_CLI_SCRIPTS`; the
-# resulting bytes are embedded via `include_bytes!` and made discoverable
-# through `harn_cli::cli_bytecode::find_cli_script_bytecode`. Both crates are
-# downstream of `harn-cli` only via runtime deps, so no cycle is introduced.
-#
-# Feature flags here mirror the runtime `[dependencies]` `harn-vm` entry on
-# purpose: resolver=2 isolates build- and runtime-dep feature sets, and a
-# divergent set would compile `harn-vm` twice with different cfgs. Keeping
-# the lists in sync lets Cargo dedupe and keeps clippy diagnostics aligned
-# across the two compile units. The build script never needs testbench-wasi
-# (it only compiles/encodes bytecode), so wasmtime stays out of this compile
-# unit; the optional `testbench-wasi` feature only toggles the runtime dep.
+# The build script validates and embeds committed CLI AOT artifacts. Compilation
+# happens in the normal dependency graph through `harn-cli-aot-gen`, keeping
+# harn-vm out of Cargo's resolver-isolated build-dependency graph.
 [build-dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.18", features = ["otel"] }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.18" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.11"
 
 [features]
