@@ -179,4 +179,47 @@ if ! grep -Fq "xargs -0 env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- fmt
   exit 1
 fi
 
+make_provider_targets="$tmp_root/make-provider-targets.txt"
+make -C "$repo_root" -n \
+  gen-provider-catalog check-provider-catalog \
+  gen-provider-support check-provider-support \
+  gen-provider-matrix check-provider-matrix \
+  HARN_BIN="$fake_harn" > "$make_provider_targets"
+
+provider_resolutions=$(grep -Fc './scripts/harn_bin.sh --print' "$make_provider_targets")
+if [ "$provider_resolutions" -ne 6 ]; then
+  echo "provider composed targets should resolve HARN_BIN once per recipe, got $provider_resolutions" >&2
+  cat "$make_provider_targets" >&2
+  exit 1
+fi
+
+for expected in \
+  '"$harn_bin" provider catalog build-config;' \
+  '"$harn_bin" provider catalog export' \
+  '"$harn_bin" provider catalog build-config --check;' \
+  '"$harn_bin" provider catalog validate --check-artifacts' \
+  '"$harn_bin" provider catalog build-capabilities;' \
+  '"$harn_bin" provider catalog support' \
+  '"$harn_bin" provider catalog build-capabilities --check;' \
+  '"$harn_bin" provider catalog support --check' \
+  '"$harn_bin" provider catalog matrix' \
+  '"$harn_bin" provider catalog matrix --check'
+do
+  if ! grep -Fq "$expected" "$make_provider_targets"; then
+    echo "provider composed target did not reuse the resolved harn binary: $expected" >&2
+    cat "$make_provider_targets" >&2
+    exit 1
+  fi
+done
+if grep -Eq 'make.*gen-provider-(config|capabilities)' "$make_provider_targets"; then
+  echo "provider composed targets still recurse through sub-targets" >&2
+  cat "$make_provider_targets" >&2
+  exit 1
+fi
+if grep -Fq './scripts/harn_bin.sh -- provider catalog' "$make_provider_targets"; then
+  echo "provider composed targets still route provider subcommands through the wrapper" >&2
+  cat "$make_provider_targets" >&2
+  exit 1
+fi
+
 echo "make_harn_cargo_env_test: ok"
