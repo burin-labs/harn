@@ -162,16 +162,21 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             },
         )?;
         if let Some(wait_ms) = background_after_ms.filter(|wait_ms| *wait_ms > 0) {
-            if let Some(progress) =
-                wait_for_initial_background_feedback(&session_id, &info.handle_id, wait_ms)
-            {
-                return Ok(progress);
+            // Wait for an initial progress entry first (this also lets in-flight
+            // output settle before we snapshot), then build the snapshot as the
+            // single owner of the background-after response shape — it carries
+            // every schema-required key. When a progress entry landed, overlay
+            // its live fields onto the snapshot rather than returning the raw
+            // inbox payload, which omits required keys such as `pid`,
+            // `timed_out`, `output_sha256`, `sandbox`, and `audit_id`.
+            let feedback =
+                wait_for_initial_background_feedback(&session_id, &info.handle_id, wait_ms);
+            let mut response =
+                initial_background_snapshot(&info, wait_ms, progress_max_inline_bytes);
+            if let Some(feedback) = feedback {
+                overlay_progress_feedback(&mut response, feedback);
             }
-            return Ok(initial_background_snapshot(
-                &info,
-                wait_ms,
-                progress_max_inline_bytes,
-            ));
+            return Ok(VmValue::dict(response));
         }
         return Ok(info.into_handle_response());
     }
@@ -192,11 +197,18 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     Ok(proc::build_response(outcome, None, policy_context))
 }
 
+/// An initial background-progress inbox entry selected for a handle: the parsed
+/// progress payload plus the inbox entry's feedback kind.
+struct InitialBackgroundFeedback {
+    payload: harn_vm::value::DictMap,
+    kind: String,
+}
+
 fn wait_for_initial_background_feedback(
     session_id: &str,
     handle_id: &str,
     wait_ms: u64,
-) -> Option<VmValue> {
+) -> Option<InitialBackgroundFeedback> {
     let timeout = Duration::from_millis(wait_ms);
     if !harn_vm::orchestration::agent_inbox::wait_sync(session_id, timeout) {
         return None;
@@ -211,15 +223,14 @@ fn wait_for_initial_background_feedback(
             .and_then(serde_json::Value::as_str)
             == Some(handle_id);
         if matches_handle && selected.is_none() {
-            if let Some(mut payload) = parsed {
-                if let Some(object) = payload.as_object_mut() {
-                    object.insert(
-                        "feedback_kind".to_string(),
-                        serde_json::Value::String(entry.kind.clone()),
-                    );
+            if let Some(payload) = parsed {
+                if let VmValue::Dict(map) = harn_vm::json_to_vm_value(&payload) {
+                    selected = Some(InitialBackgroundFeedback {
+                        payload: (*map).clone(),
+                        kind: entry.kind.clone(),
+                    });
+                    continue;
                 }
-                selected = Some(harn_vm::json_to_vm_value(&payload));
-                continue;
             }
         }
         kept.push(entry);
@@ -230,11 +241,28 @@ fn wait_for_initial_background_feedback(
     selected
 }
 
+/// Overlay a selected progress payload's live fields onto the canonical
+/// snapshot response. Progress values win for every key they carry (status,
+/// stdout, stderr, duration_ms, byte_count, line_count, ended_at, exit_code,
+/// signal, snapshot_binding, ...); keys absent from the payload keep the
+/// snapshot's schema-required values. `feedback_kind` becomes the inbox entry's
+/// kind, replacing the snapshot-only `tool_progress` literal.
+fn overlay_progress_feedback(
+    response: &mut harn_vm::value::DictMap,
+    feedback: InitialBackgroundFeedback,
+) {
+    let InitialBackgroundFeedback { payload, kind } = feedback;
+    for (key, value) in payload.iter() {
+        response.insert(key.clone(), value.clone());
+    }
+    response.put_str("feedback_kind", kind);
+}
+
 fn initial_background_snapshot(
     info: &super::long_running::LongRunningHandleInfo,
     wait_ms: u64,
     max_inline_bytes: usize,
-) -> VmValue {
+) -> harn_vm::value::DictMap {
     let artifacts = super::proc::planned_artifact_paths(&info.command_id);
     let stdout = std::fs::read(&artifacts.stdout_path).unwrap_or_default();
     let stderr = std::fs::read(&artifacts.stderr_path).unwrap_or_default();
@@ -276,7 +304,7 @@ fn initial_background_snapshot(
         harn_vm::value::intern_key("line_count"),
         VmValue::Int(line_count as i64),
     );
-    VmValue::dict(response)
+    response
 }
 
 fn parse_sandbox_scope(map: &harn_vm::value::DictMap) -> Result<ProcessSandboxScope, HostlibError> {

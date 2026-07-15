@@ -1,0 +1,1 @@
+- Background `run_command` responses now satisfy the closed host response schema when initial progress is returned.

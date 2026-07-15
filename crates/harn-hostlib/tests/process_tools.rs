@@ -1105,6 +1105,101 @@ fn run_command_background_after_requeues_unrelated_feedback_without_restamping()
 }
 
 #[test]
+fn run_command_background_after_snapshot_satisfies_response_schema() {
+    // Falsifier for the closed run_command response schema on the
+    // background-after SNAPSHOT path (no initial progress feedback arrives).
+    // Before the single-owner fix this response carried `feedback_kind`, a key
+    // the closed schema did not declare, so validating it against the schema
+    // the registry enforces for background dispatches was rejected.
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "test-run-command-background-after-snapshot-schema",
+    ));
+    let mut config = MockProcessConfig::running();
+    config.stdout = b"started\n".to_vec();
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("background_after_ms".into(), VmValue::Int(50));
+    req.insert("progress_max_inline_bytes".into(), VmValue::Int(200));
+    req.insert(
+        "snapshot_binding".into(),
+        VmValue::dict(snapshot_binding_fixture()),
+    );
+    let resp_value = call("hostlib_tools_run_command", req).unwrap();
+    assert_response_matches_schema("run_command", &resp_value);
+
+    let resp = require_dict(resp_value);
+    assert_eq!(require_str(&resp, "status"), "running");
+    assert_eq!(require_str(&resp, "feedback_kind"), "tool_progress");
+    assert_snapshot_binding(&resp);
+
+    let handle_id = require_str(&resp, "handle_id");
+    let completion_rx = register_completion_notifier(&handle_id);
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(require_bool(&cancel_resp, "cancelled"));
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
+}
+
+#[test]
+fn run_command_background_after_progress_overlay_satisfies_response_schema() {
+    // Falsifier for the background-after OVERLAY path: an initial progress
+    // feedback entry lands within the wait window. Before the single-owner fix
+    // this path returned the raw agent-inbox progress payload, which omits
+    // schema-required keys (pid, timed_out, output_sha256, sandbox, audit_id),
+    // so schema validation rejected it. The fix overlays the progress payload
+    // onto the canonical snapshot response instead.
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "test-run-command-background-after-overlay-schema",
+    ));
+    let mut config = MockProcessConfig::running();
+    config.stdout = b"tick\n".to_vec();
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
+    // A tiny progress interval guarantees a matching progress entry lands well
+    // before this generous wait budget elapses, so the overlay branch runs.
+    let wait_ms: i64 = 2000;
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("background_after_ms".into(), VmValue::Int(wait_ms));
+    req.insert("progress_interval_ms".into(), VmValue::Int(1));
+    req.insert("progress_max_inline_bytes".into(), VmValue::Int(200));
+    req.insert(
+        "snapshot_binding".into(),
+        VmValue::dict(snapshot_binding_fixture()),
+    );
+    let resp_value = call("hostlib_tools_run_command", req).unwrap();
+    assert_response_matches_schema("run_command", &resp_value);
+
+    let resp = require_dict(resp_value);
+    assert_eq!(require_str(&resp, "status"), "running");
+    assert_eq!(require_str(&resp, "feedback_kind"), "tool_progress");
+    assert_snapshot_binding(&resp);
+    // The overlay carries the progress payload's real elapsed duration, which
+    // is strictly below the full wait budget the snapshot-only path reports.
+    // This confirms the progress payload — not the bare snapshot — produced
+    // this response.
+    assert!(
+        require_int(&resp, "duration_ms") < wait_ms,
+        "expected progress-overlay duration below the wait budget"
+    );
+
+    let handle_id = require_str(&resp, "handle_id");
+    let completion_rx = register_completion_notifier(&handle_id);
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(require_bool(&cancel_resp, "cancelled"));
+    if let Some(rx) = completion_rx {
+        let _ = rx.recv();
+    }
+}
+
+#[test]
 fn run_command_long_running_feedback_fires_after_exit() {
     // Use a process-unique session id so parallel tests don't interfere.
     let session_id = format!(
