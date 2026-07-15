@@ -1,0 +1,75 @@
+import "../publish_plan.harn"
+
+const META = {
+  workspace_members: ["id-gamma", "id-private", "id-custom-registry", "id-alpha", "id-beta"],
+  packages: [
+    {
+      id: "id-gamma",
+      name: "gamma",
+      version: "1.2.3",
+      publish: nil,
+      dependencies: [{name: "beta", source: nil}, {name: "alpha", source: nil}],
+    },
+    {id: "id-private", name: "private-helper", version: "1.2.3", publish: [], dependencies: []},
+    {
+      id: "id-custom-registry",
+      name: "custom-registry-helper",
+      version: "1.2.3",
+      publish: ["internal"],
+      dependencies: [],
+    },
+    {id: "id-alpha", name: "alpha", version: "1.2.3", publish: nil, dependencies: []},
+    {
+      id: "id-beta",
+      name: "beta",
+      version: "1.2.3",
+      publish: nil,
+      dependencies: [{name: "alpha", source: nil}],
+    },
+    {id: "id-external", name: "external", version: "9.9.9", dependencies: []},
+  ],
+}
+
+fn assert_throws_contains(body, fragment: string) -> nil {
+  let error_text = ""
+  try {
+    body()
+  } catch (e) {
+    error_text = to_string(e)
+  }
+  require error_text != "", "expected closure to throw"
+  require error_text.contains(fragment), "expected error to contain " + fragment + ", got: " + error_text
+  return nil
+}
+
+@test
+pipeline test_publish_plan_filters_private_packages_and_orders_dependencies(task) {
+  assert_eq(
+    publish_plan_rows(META),
+    ["version\t1.2.3", "crate\talpha", "crate\tbeta", "crate\tgamma"],
+  )
+}
+
+@test
+pipeline test_publish_plan_fails_closed_for_version_drift(task) {
+  const packages = publish_plan_packages_from_metadata(
+    META
+      + {
+      packages: [
+        {id: "id-alpha", name: "alpha", version: "1.2.3", publish: nil, dependencies: []},
+        {id: "id-beta", name: "beta", version: "2.0.0", publish: nil, dependencies: []},
+      ],
+      workspace_members: ["id-alpha", "id-beta"],
+    },
+  )
+  assert_throws_contains({ -> publish_plan_version(packages) }, "multiple versions")
+}
+
+@test
+pipeline test_publish_plan_fails_closed_for_dependency_cycle(task) {
+  const packages = [
+    {deps: ["beta"], name: "alpha", version: "1.2.3"},
+    {deps: ["alpha"], name: "beta", version: "1.2.3"},
+  ]
+  assert_throws_contains({ -> publish_plan_order(packages) }, "dependency cycle")
+}

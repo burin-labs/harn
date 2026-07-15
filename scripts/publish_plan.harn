@@ -1,0 +1,171 @@
+import { parse_args } from "std/cli"
+
+type PublishPlanPackage = {deps: list<string>, name: string, version: string}
+
+type PublishVisitState = {ordered: list<string>, visited: list<string>, visiting: list<string>}
+
+fn workspace_member_ids(meta: dict) -> list<string> {
+  return (meta?.workspace_members ?? []).map({ id -> to_string(id) }).to_list()
+}
+
+fn require_string(value, field: string) -> string {
+  const out = to_string(value ?? "")
+  if out == "" {
+    throw "cargo metadata is missing " + field
+  }
+  return out
+}
+
+fn ensure_no_tabs(value: string, field: string) -> nil {
+  if value.contains("\t") || value.contains("\n") {
+    throw field + " contains a tab or newline, cannot render shell row safely"
+  }
+  return nil
+}
+
+fn package_names(packages: list<PublishPlanPackage>) -> list<string> {
+  return packages.map({ package -> package.name }).to_list()
+}
+
+fn find_package(packages: list<PublishPlanPackage>, name: string) -> PublishPlanPackage {
+  for package in packages {
+    if package.name == name {
+      return package
+    }
+  }
+  throw "publish plan references unknown workspace package: " + name
+}
+
+fn package_is_crates_io_publishable(package: dict) -> bool {
+  const publish = package?.publish
+  if publish == nil {
+    return true
+  }
+  if type_of(publish) != "list" {
+    throw "cargo metadata packages[].publish must be null or a list"
+  }
+  return (publish ?? []).map({ registry -> to_string(registry) }).to_list().contains("crates-io")
+}
+
+pub fn publish_plan_packages_from_metadata(meta: dict) -> list<PublishPlanPackage> {
+  const members = workspace_member_ids(meta)
+  let names: list<string> = []
+  let packages: list<PublishPlanPackage> = []
+  for package in meta?.packages ?? [] {
+    const id = to_string(package?.id ?? "")
+    if !members.contains(id) {
+      continue
+    }
+    if !package_is_crates_io_publishable(package) {
+      continue
+    }
+    const name = require_string(package?.name, "packages[].name")
+    if names.contains(name) {
+      throw "cargo metadata contains duplicate workspace package name: " + name
+    }
+    names = names + [name]
+    const version = require_string(package?.version, "packages[].version")
+    packages = packages + [{deps: [], name: name, version: version}]
+  }
+  const publish_names = package_names(packages)
+  let out: list<PublishPlanPackage> = []
+  for package in meta?.packages ?? [] {
+    const name = to_string(package?.name ?? "")
+    if !publish_names.contains(name) {
+      continue
+    }
+    let deps: list<string> = []
+    for dep in package?.dependencies ?? [] {
+      const dep_name = to_string(dep?.name ?? "")
+      if dep?.source == nil && publish_names.contains(dep_name) {
+        deps = deps + [dep_name]
+      }
+    }
+    const existing = find_package(packages, name)
+    out = out + [{deps: deps.sort(), name: existing.name, version: existing.version}]
+  }
+  return out.sort_by({ package -> package.name })
+}
+
+pub fn publish_plan_version(packages: list<PublishPlanPackage>) -> string {
+  if len(packages) == 0 {
+    throw "cargo metadata contains no publishable workspace packages"
+  }
+  const version = require_string(packages[0]?.version, "packages[0].version")
+  for package in packages {
+    if package.version != version {
+      throw "publishable workspace packages use multiple versions: " + version + " and "
+        + package.version
+    }
+  }
+  return version
+}
+
+fn visit_package(
+  name: string,
+  packages: list<PublishPlanPackage>,
+  visiting: list<string>,
+  visited: list<string>,
+  ordered: list<string>,
+) -> PublishVisitState {
+  if visited.contains(name) {
+    return {ordered: ordered, visited: visited, visiting: visiting}
+  }
+  if visiting.contains(name) {
+    throw "workspace publish dependency cycle includes: " + name
+  }
+  const package = find_package(packages, name)
+  let state: PublishVisitState = {ordered: ordered, visited: visited, visiting: visiting + [name]}
+  for dep in package.deps {
+    state = visit_package(dep, packages, state.visiting, state.visited, state.ordered)
+  }
+  const next_visiting = (state.visiting ?? []).filter({ item -> item != name }).to_list()
+  const next_visited = (state.visited ?? []) + [name]
+  const next_ordered = (state.ordered ?? []) + [name]
+  return {ordered: next_ordered, visited: next_visited, visiting: next_visiting}
+}
+
+pub fn publish_plan_order(packages: list<PublishPlanPackage>) -> list<string> {
+  let state: PublishVisitState = {ordered: [], visited: [], visiting: []}
+  for package in packages {
+    state = visit_package(package.name, packages, state.visiting, state.visited, state.ordered)
+  }
+  return state.ordered
+}
+
+pub fn publish_plan_rows(meta: dict) -> list<string> {
+  const packages = publish_plan_packages_from_metadata(meta)
+  const version = publish_plan_version(packages)
+  ensure_no_tabs(version, "workspace version")
+  let rows = ["version\t" + version]
+  for name in publish_plan_order(packages) {
+    ensure_no_tabs(name, "package name")
+    rows = rows + ["crate\t" + name]
+  }
+  return rows
+}
+
+fn arg_spec() -> list {
+  return [{kind: "option", name: "metadata", flags: ["--metadata"], parse: "string", default: ""}]
+}
+
+fn main(harness: Harness) {
+  const parsed = parse_args(argv, arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio.println("usage: harn run scripts/publish_plan.harn -- --metadata PATH")
+    return nil
+  }
+  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    harness.stdio.eprintln(join(errors, "\n"))
+    exit(2)
+  }
+  const metadata_path = to_string(parsed?.metadata ?? "")
+  if metadata_path == "" {
+    harness.stdio.eprintln("error: --metadata is required")
+    exit(2)
+  }
+  const meta = json_parse(harness.fs.read_text(metadata_path))
+  harness.stdio.println(join(publish_plan_rows(meta), "\n"))
+  return nil
+}

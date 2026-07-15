@@ -87,55 +87,27 @@ MAX_ATTEMPTS=3
 ALREADY_PUBLISHED_PATTERN='already exists on crates\.io index|crate version .* is already uploaded'
 RETRYABLE_PATTERN="429|Too Many Requests|unexpected cargo internal error|packages remain in plan|${ALREADY_PUBLISHED_PATTERN}|timeout while waiting for published dependencies|timed out waiting for"
 
-workspace_publish_crates() {
-  cargo metadata --format-version 1 --no-deps | python3 -c '
-import json
-import sys
-
-meta = json.load(sys.stdin)
-workspace = set(meta.get("workspace_members", []))
-packages = [
-    pkg
-    for pkg in meta.get("packages", [])
-    if pkg.get("id") in workspace
-    and (pkg.get("publish") is None or "crates-io" in pkg.get("publish", []))
-]
-by_name = {pkg["name"]: pkg for pkg in packages}
-deps = {
-    pkg["name"]: sorted(
-        {
-            dep["name"]
-            for dep in pkg.get("dependencies", [])
-            if dep.get("source") is None and dep.get("name") in by_name
-        }
-    )
-    for pkg in packages
+build_publish_plan_rows() {
+  local metadata_dir
+  local metadata_file
+  local status=0
+  metadata_dir=".harn/tmp"
+  mkdir -p "$metadata_dir"
+  metadata_file="$(mktemp "$metadata_dir/harn-publish-metadata.XXXXXX")"
+  cargo metadata --format-version 1 --no-deps >"$metadata_file" || status=$?
+  if [[ $status -eq 0 ]]; then
+    ./scripts/harn_bin.sh -- run ./scripts/publish_plan.harn -- --metadata "$metadata_file" || status=$?
+  fi
+  rm -f "$metadata_file"
+  return "$status"
 }
 
-visiting = set()
-visited = set()
-ordered = []
+workspace_publish_crates() {
+  awk -F '\t' '$1 == "crate" { print $2 }' <<<"$PUBLISH_PLAN_ROWS"
+}
 
-
-def visit(name):
-    if name in visited:
-        return
-    if name in visiting:
-        cycle = " -> ".join(sorted(visiting | {name}))
-        raise SystemExit(f"workspace publish dependency cycle: {cycle}")
-    visiting.add(name)
-    for dep in deps[name]:
-        visit(dep)
-    visiting.remove(name)
-    visited.add(name)
-    ordered.append(name)
-
-
-for name in sorted(by_name):
-    visit(name)
-
-print("\n".join(ordered))
-'
+publish_version_from_plan_rows() {
+  awk -F '\t' '$1 == "version" { print $2; exit }' <<<"$PUBLISH_PLAN_ROWS"
 }
 
 publish_output_means_already_published() {
@@ -254,8 +226,8 @@ attempt_per_crate_publish() {
   return 0
 }
 
-CURRENT_VERSION="$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['packages'][0]['version'])" 2>/dev/null || echo "?")"
+PUBLISH_PLAN_ROWS="$(build_publish_plan_rows)"
+CURRENT_VERSION="$(publish_version_from_plan_rows)"
 echo "Publishing workspace at version $CURRENT_VERSION"
 echo ""
 
