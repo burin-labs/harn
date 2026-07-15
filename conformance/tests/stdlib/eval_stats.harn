@@ -58,12 +58,14 @@ pipeline test(task) {
     row("rs-a", "legacy", 4, 4, 0, 0, 1.0) + {metadata: {language: "rust"}},
     row("py-a", "legacy", 2, 4, 0, 1, 2.0) + {language: "python", metadata: {language: "ignored"}},
     row("missing", "legacy", 0, 4, 4, 0, 0.0) + {metadata: {language: ["rust"]}},
+    row("missing", "legacy", 0, 4, 4, 0, 0.0),
   ]
   const languages = axis_breakdown(language_rows, "language")
   assert_eq(languages.axis, "language")
-  assert_eq(languages.cases, 3)
+  assert_eq(languages.cases, 4)
   assert_eq(languages.classified_cases, 2)
   assert_eq(languages.missing_cases, ["missing"])
+  assert_eq(languages.missing_count, 2)
   assert_eq(languages.groups.map({ group -> group.value }), ["python", "rust"])
   assert_eq(languages.groups[0]?.macro_pass_at_1, 0.5)
   assert_eq(languages.groups[0]?.timeout_rate, 0.25)

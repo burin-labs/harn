@@ -796,9 +796,11 @@ fn __axis_group(value: string, rows: list) -> EvalAxisGroup {
 pub fn axis_breakdown(rows: list, axis: string) -> EvalAxisBreakdown {
   let grouped_rows: dict = {}
   let missing_cases: list<string> = []
+  let missing_count = 0
   for row in rows {
     const value = __row_axis_value(row, axis)
     if value == nil {
+      missing_count = missing_count + 1
       const name = __row_case_name(row)
       if !contains(missing_cases, name) {
         missing_cases = missing_cases + [name]
@@ -824,9 +826,9 @@ pub fn axis_breakdown(rows: list, axis: string) -> EvalAxisBreakdown {
     groups: groups,
     worst: worst,
     cases: len(rows),
-    classified_cases: len(rows) - len(missing_cases),
+    classified_cases: len(rows) - missing_count,
     missing_cases: missing_cases,
-    missing_count: len(missing_cases),
+    missing_count: missing_count,
   }
 }
 
