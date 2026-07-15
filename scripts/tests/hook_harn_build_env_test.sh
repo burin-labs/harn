@@ -97,6 +97,49 @@ if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record"; then
 fi
 
 : > "$record"
+stale_harn_bin="$tmp_root/stale-harn"
+touch "$stale_harn_bin"
+(
+  cd "$hook_repo"
+  # shellcheck source=/dev/null
+  . ./.githooks/lib.sh
+  export HARN_BIN="$stale_harn_bin"
+  RUSTC_WRAPPER=sccache \
+    CARGO_BUILD_RUSTC_WRAPPER=sccache \
+    CARGO_TARGET_DIR="$target_dir" \
+    FAKE_CARGO_RECORD="$record" \
+    PATH="$fake_bin:$PATH" \
+    hook_export_fresh_worktree_harn_bin
+  printf '%s\n' "$HARN_BIN" > "$tmp_root/fresh-hook-harn-path.txt"
+)
+
+if [[ "$(cat "$tmp_root/fresh-hook-harn-path.txt")" != "$target_dir/debug/harn" ]]; then
+  echo "hook_export_fresh_worktree_harn_bin did not ignore the stale HARN_BIN" >&2
+  cat "$tmp_root/fresh-hook-harn-path.txt" >&2
+  exit 1
+fi
+if ! grep -Fxq "args=build --quiet --bin harn" "$record"; then
+  echo "hook_export_fresh_worktree_harn_bin did not build a fresh harn binary" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
+  echo "hook_export_fresh_worktree_harn_bin did not reuse CARGO_TARGET_DIR for Cargo intermediates" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
+  echo "hook_export_fresh_worktree_harn_bin did not clear RUSTC_WRAPPER" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record"; then
+  echo "hook_export_fresh_worktree_harn_bin did not clear CARGO_BUILD_RUSTC_WRAPPER" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+: > "$record"
 custom_build_dir="$tmp_root/custom build dir"
 (
   cd "$hook_repo"
