@@ -611,6 +611,16 @@ provider = "openrouter"
 id = "qwen/qwen3-coder-next"
 provider = "openrouter"
 
+[aliases."huggingface-qwen3-coder"]
+id = "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+provider = "huggingface"
+tool_format = "native"
+
+[aliases."hf-qwen3-coder"]
+id = "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+provider = "huggingface"
+tool_format = "native"
+
 [aliases."openrouter-qwen3.5-397b"]
 id = "qwen/qwen3.5-397b-a17b"
 provider = "openrouter"

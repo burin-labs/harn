@@ -999,24 +999,24 @@
     },
     {
       "id": "huggingface",
-      "display_name": "Huggingface",
+      "display_name": "Hugging Face Inference Providers",
       "catalog_provider": "huggingface",
-      "endpoint_style": "OpenAI-compatible chat completions",
+      "endpoint_style": "OpenAI-compatible chat completions through the HF router",
       "classification": "hosted",
       "auth_env": [
         "HF_TOKEN",
         "HUGGINGFACE_API_KEY"
       ],
       "recommended": {
-        "selector": "huggingface:qwen/qwen3.6*",
+        "selector": "huggingface-qwen3-coder",
         "provider": "huggingface",
-        "model": "qwen/qwen3.6*",
-        "display_name": null,
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "display_name": "Qwen3-Coder 480B A35B Instruct (Hugging Face Router)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"huggingface\"",
-          "tool_format = \"native\"",
-          "structured_output_mode = \"delimited\""
+          "model = \"huggingface-qwen3-coder\"",
+          "tool_format = \"native\""
         ]
       },
       "capabilities": {
@@ -1027,15 +1027,12 @@
         "structured_output_transport": "native",
         "structured_output_mode": "delimited",
         "streaming": true,
-        "reasoning_knobs": [
-          "disable_directive:/no_think",
-          "enabled"
-        ],
+        "reasoning_knobs": [],
         "prompt_or_context_cache": false,
         "batch_api": false,
         "batch_discount_percent": null,
         "serving_tiers": [],
-        "usage_accounting_confidence": "provider_default"
+        "usage_accounting_confidence": "medium"
       },
       "empirical": {
         "status": "not_recorded",
@@ -1048,9 +1045,17 @@
         "native_text_parity": null,
         "evidence": []
       },
-      "notes": [],
-      "caveats": [],
-      "mcp_notes": [],
+      "notes": [
+        "The Hugging Face router uses the OpenAI-compatible chat completions API and supports tools and streaming for chat-completion models.",
+        "Qwen3-Coder 480B A35B is the recommended HF router coding row because its model card publishes native 262K context, agentic coding focus, and a function-call-oriented format."
+      ],
+      "caveats": [
+        "Router availability, latency, and pricing depend on the selected upstream provider; run readiness and tool probes before promoting a route into production defaults.",
+        "Do not infer reasoning controls from other Qwen rows: this Qwen3-Coder model card says the model is non-thinking."
+      ],
+      "mcp_notes": [
+        "MCP tools are rendered as OpenAI-compatible tool definitions on this route."
+      ],
       "local_setup_notes": []
     },
     {

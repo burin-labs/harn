@@ -1600,6 +1600,16 @@ provider = "openrouter"
 id = "qwen/qwen3-coder-next"
 provider = "openrouter"
 
+[aliases."huggingface-qwen3-coder"]
+id = "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+provider = "huggingface"
+tool_format = "native"
+
+[aliases."hf-qwen3-coder"]
+id = "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+provider = "huggingface"
+tool_format = "native"
+
 [aliases."openrouter-qwen3.5-397b"]
 id = "qwen/qwen3.5-397b-a17b"
 provider = "openrouter"
@@ -3627,6 +3637,27 @@ capabilities = ["streaming", "tools", "vision", "thinking", "structured_output"]
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "speed"]
+
+# --- source: 60-models/85-huggingface-router.toml ---
+# Hugging Face Inference Providers router rows. The router is
+# OpenAI-compatible, but availability and pricing can vary by selected
+# upstream provider, so these rows encode stable model identity/capability
+# metadata rather than a route-specific rate card.
+
+[models."Qwen/Qwen3-Coder-480B-A35B-Instruct"]
+name = "Qwen3-Coder 480B A35B Instruct (Hugging Face Router)"
+provider = "huggingface"
+wire_model = "Qwen/Qwen3-Coder-480B-A35B-Instruct"
+context_window = 262144
+logical_model = "qwen3-coder-480b-a35b"
+equivalence_group = "qwen3-coder-480b-a35b"
+served_variant = "huggingface-router"
+api_dialect = "openai_chat"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+architecture = { parameter_count_b = 480.0, active_parameter_count_b = 35.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct", last_verified = "2026-07-15" }
 
 # --- source: 60-models/90-hosted-gemma-cohere-xai-groq.toml ---
 # Gemma 4 — hosted (Apache 2.0, multimodal text+image, 256K context, native

@@ -28,7 +28,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
 | `Github Models` | OpenAI-compatible chat completions | `github_models` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Groq` | OpenAI-compatible chat completions | `groq:llama-3.1-8b-instant` | `native` | yes | yes | `native` / `native_json` | none | no | Yes (50%) | none | `high` | `not_recorded` |
-| `Huggingface` | OpenAI-compatible chat completions | `huggingface:qwen/qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `provider_default` | `not_recorded` |
+| `Hugging Face Inference Providers` | OpenAI-compatible chat completions through the HF router | `huggingface-qwen3-coder` | `native` | yes | yes | `native` / `delimited` | none | no | No | none | `medium` | `not_recorded` |
 | `Hunyuan` | OpenAI-compatible chat completions | `hunyuan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Hyperbolic` | OpenAI-compatible chat completions | `hyperbolic` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Inception` | OpenAI-compatible chat completions | `inception:mercury-2` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
@@ -138,6 +138,33 @@ Caveats:
 MCP notes:
 
 - MCP tools are regular Harn runtime tools before they become Gemini function declarations.
+
+### Hugging Face Inference Providers
+
+- catalog provider: `huggingface`
+- recommended route: `huggingface-qwen3-coder` (`Qwen/Qwen3-Coder-480B-A35B-Instruct`)
+- endpoint style: OpenAI-compatible chat completions through the HF router
+- recommended Harn options:
+
+```toml
+provider = "huggingface"
+model = "huggingface-qwen3-coder"
+tool_format = "native"
+```
+
+Notes:
+
+- The Hugging Face router uses the OpenAI-compatible chat completions API and supports tools and streaming for chat-completion models.
+- Qwen3-Coder 480B A35B is the recommended HF router coding row because its model card publishes native 262K context, agentic coding focus, and a function-call-oriented format.
+
+Caveats:
+
+- Router availability, latency, and pricing depend on the selected upstream provider; run readiness and tool probes before promoting a route into production defaults.
+- Do not infer reasoning controls from other Qwen rows: this Qwen3-Coder model card says the model is non-thinking.
+
+MCP notes:
+
+- MCP tools are rendered as OpenAI-compatible tool definitions on this route.
 
 ### Inception
 

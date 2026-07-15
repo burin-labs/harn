@@ -334,6 +334,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `groq` | `llama-3.1-8b-instant` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `llama-3.3-70b-versatile` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `qwen/qwen3.6-27b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `huggingface` | `Qwen/Qwen3-Coder-480B-A35B-Instruct` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `inception` | `mercury-2` | `native` | `unknown` | - | - | - | - | - | catalog note: Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet. |
 | `inception` | `mercury-coder-small` | `native` | `unknown` | - | - | - | - | - | catalog note: Mercury Coder Small supports tool use on the OpenAI-compatible API; structured object generation was not documented as GA in the source pass. |
 | `llamacpp` | `qwen3.6-35b-a3b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
