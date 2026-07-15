@@ -22,7 +22,11 @@ set -euo pipefail
 } >> "$FAKE_CARGO_RECORD"
 case "$*" in
   "metadata --format-version=1 --no-deps")
-    printf '{"target_directory":"%s"}\n' "$FAKE_METADATA_TARGET_DIR"
+    if [[ -n "${FAKE_METADATA_JSON:-}" ]]; then
+      printf '%s\n' "$FAKE_METADATA_JSON"
+    else
+      printf '{"target_directory":"%s"}\n' "$FAKE_METADATA_TARGET_DIR"
+    fi
     ;;
   run\ *)
     ;;
@@ -97,6 +101,32 @@ if ! grep -Fxq "CARGO_TARGET_DIR=$metadata_target_dir" "$record"; then
 fi
 if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$metadata_target_dir" "$record"; then
   echo "wrapper did not reuse metadata target_directory for Cargo intermediates" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+: > "$record"
+set +e
+PATH="$fake_bin:$PATH" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_METADATA_JSON='{"packages":[]}' \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" run --quiet --bin harn -- fmt --check \
+  > "$tmp_root/missing-target-stdout.txt" \
+  2> "$tmp_root/missing-target-stderr.txt"
+missing_target_status=$?
+set -e
+if [[ "$missing_target_status" -eq 0 ]]; then
+  echo "wrapper accepted cargo metadata without target_directory" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fq "cargo metadata did not report a simple target_directory" "$tmp_root/missing-target-stderr.txt"; then
+  echo "wrapper did not explain missing target_directory" >&2
+  cat "$tmp_root/missing-target-stderr.txt" >&2
+  exit 1
+fi
+if grep -Fxq "args=run --quiet --bin harn -- fmt --check" "$record"; then
+  echo "wrapper ran cargo after malformed metadata" >&2
   cat "$record" >&2
   exit 1
 fi
