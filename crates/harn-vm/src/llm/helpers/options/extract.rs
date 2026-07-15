@@ -128,7 +128,16 @@ pub(crate) fn extract_llm_options(
             model = first.model.clone();
         }
     }
-    let api_key = resolve_api_key(&provider)?;
+    let api_key = if routing_policy
+        .as_ref()
+        .is_some_and(|policy| policy.chain.len() > 1)
+        || !route_fallbacks.is_empty()
+        || !fallback_chain.is_empty()
+    {
+        String::new()
+    } else {
+        resolve_api_key(&provider)?
+    };
     let caps = crate::llm::capabilities::lookup(&provider, &model);
     let mut api_mode = parse_api_mode_option(options.as_ref())?;
     if enforce_responses_provider_gate(api_mode, &provider) {

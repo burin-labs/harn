@@ -18,6 +18,8 @@ mod agent_session_transcript;
 mod agent_terminal_class;
 mod agent_tools;
 pub mod api;
+#[cfg(test)]
+mod api_routing_credentials_tests;
 pub(crate) mod autonomy_budget;
 pub(crate) mod cache;
 pub mod cache_conformance;
