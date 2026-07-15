@@ -355,6 +355,7 @@ test-pr-gate-scripts:
 	./scripts/tests/harn_bin_resolver_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/claude_dev_setup_once_test.sh
+	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh
