@@ -2,21 +2,7 @@
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
-if [[ -z "${HARN_BIN:-}" ]]; then
-  TARGET_DIR="$(
-    cargo metadata --no-deps --format-version 1 |
-      python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])'
-  )"
-  HARN_BIN="$TARGET_DIR/debug/harn"
-fi
-
-if [[ ! -x "$HARN_BIN" ]]; then
-  cargo build --quiet --bin harn
-fi
-if [[ ! -x "$HARN_BIN" ]]; then
-  echo "Built harn binary was not found at $HARN_BIN" >&2
-  exit 1
-fi
+HARN_BIN="$("$ROOT/scripts/harn_bin.sh" --print)"
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/harn-local-a2a-demo.XXXXXX")"
 LOG="$TMP_DIR/receiver.log"
