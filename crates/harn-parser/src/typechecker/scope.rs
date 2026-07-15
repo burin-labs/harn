@@ -256,6 +256,16 @@ impl TypeScope {
         ] {
             scope.define_var(name, Some(TypeExpr::Named("dict".into())));
         }
+        // Globals the ACP session executor binds before running a pipeline
+        // (`prompt`, `prompt_content`, `prompt_messages`, `cwd`, `mcp`). Derived
+        // from the single source of truth the executor also consumes so the
+        // whitelist can never miss a global that exists at runtime.
+        for global in crate::acp_ambient_globals::AcpAmbientGlobal::ALL {
+            scope.define_var(
+                global.name(),
+                Some(TypeExpr::Named(global.checker_type().into())),
+            );
+        }
         scope
     }
 
