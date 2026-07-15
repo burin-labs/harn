@@ -186,6 +186,70 @@ fn function_body_extracts_arrow_function_via_lexical_declaration() {
 }
 
 #[test]
+fn function_body_extracts_scala_expression_body_precisely() {
+    let registry = ast_registry();
+    let path = fixture_path("scala/source.scala");
+    let payload = dict(&[
+        ("path", vstring(path.to_string_lossy().as_ref())),
+        ("function_name", vstring("shout")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_function_body", payload);
+
+    assert!(bool_value(&dict_field(&result, "found")));
+    assert!(bool_value(&dict_field(&result, "declaration_found")));
+    assert_eq!(
+        string_value(&dict_field(&result, "isolation_status")),
+        "isolated"
+    );
+    assert_eq!(
+        string_value(&dict_field(&result, "body_text")),
+        "s.toUpperCase"
+    );
+    assert_eq!(int_value(&dict_field(&result, "start_line")), 13);
+    assert_eq!(int_value(&dict_field(&result, "end_line")), 13);
+    assert_eq!(int_value(&dict_field(&result, "start_col")), 31);
+    assert_eq!(int_value(&dict_field(&result, "end_col")), 44);
+}
+
+#[test]
+fn function_body_returns_declaration_fallback_when_body_is_not_isolated() {
+    let registry = ast_registry();
+    let path = fixture_path("scala/source.scala");
+    let payload = dict(&[
+        ("path", vstring(path.to_string_lossy().as_ref())),
+        ("function_name", vstring("speak")),
+        ("container", vstring("Speaker")),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_function_body", payload);
+
+    assert!(!bool_value(&dict_field(&result, "found")));
+    assert!(bool_value(&dict_field(&result, "declaration_found")));
+    assert_eq!(
+        string_value(&dict_field(&result, "isolation_status")),
+        "declaration_fallback"
+    );
+    assert_eq!(
+        string_value(&dict_field(&result, "isolation_reason")),
+        "body_not_isolated"
+    );
+    assert_eq!(
+        string_value(&dict_field(&result, "declaration_node_kind")),
+        "function_declaration"
+    );
+    assert_eq!(int_value(&dict_field(&result, "declaration_start_line")), 2);
+    assert_eq!(int_value(&dict_field(&result, "declaration_end_line")), 2);
+    assert_eq!(
+        string_value(&dict_field(&result, "fallback_action")),
+        "replace_range"
+    );
+    assert!(
+        string_value(&dict_field(&result, "retarget_instruction")).contains("L2-L2"),
+        "instruction was {:?}",
+        dict_field(&result, "retarget_instruction")
+    );
+}
+
+#[test]
 fn function_body_falls_back_to_path_when_source_omitted() {
     let registry = ast_registry();
     let path = fixture_path("rust/source.rs");
@@ -311,6 +375,42 @@ fn function_bodies_reports_missing_names() {
     };
     assert!(bodies.contains_key("a"));
     assert!(!bodies.contains_key("ghost"));
+    let missing = list_value(&dict_field(&result, "missing"));
+    let missing_names: Vec<String> = missing.iter().map(string_value).collect();
+    assert_eq!(missing_names, vec!["ghost"]);
+}
+
+#[test]
+fn function_bodies_separates_declaration_fallbacks_from_missing_names() {
+    let registry = ast_registry();
+    let path = fixture_path("scala/source.scala");
+    let payload = dict(&[
+        ("path", vstring(path.to_string_lossy().as_ref())),
+        ("container", vstring("Speaker")),
+        ("names", name_list(&["speak", "ghost"])),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_function_bodies", payload);
+
+    let bodies = match dict_field(&result, "bodies") {
+        VmValue::Dict(d) => d,
+        other => panic!("expected dict, got {other:?}"),
+    };
+    assert!(!bodies.contains_key("speak"));
+
+    let fallbacks = match dict_field(&result, "fallback_declarations") {
+        VmValue::Dict(d) => d,
+        other => panic!("expected dict, got {other:?}"),
+    };
+    let fallback = fallbacks.get("speak").expect("missing speak fallback");
+    assert_eq!(
+        string_value(&dict_field(fallback, "fallback_action")),
+        "replace_range"
+    );
+    assert_eq!(
+        string_value(&dict_field(fallback, "declaration_node_kind")),
+        "function_declaration"
+    );
+
     let missing = list_value(&dict_field(&result, "missing"));
     let missing_names: Vec<String> = missing.iter().map(string_value).collect();
     assert_eq!(missing_names, vec!["ghost"]);

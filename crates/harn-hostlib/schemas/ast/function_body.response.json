@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/ast/function_body.response.json",
   "title": "ast.function_body response",
-  "description": "One extracted function body. All line coordinates are 1-based. (Note: the symbols / outline / parse_file responses are 0-based — this is the documented exception.) When the function isn't found, `found` is false and the line/text fields are zero/empty.",
+  "description": "One extracted function body. All line coordinates are 1-based. (Note: the symbols / outline / parse_file responses are 0-based — this is the documented exception.) When the function isn't found, `found` is false and the line/text fields are zero/empty. When a matching declaration exists but the body cannot be isolated, `found` remains false and the declaration/fallback fields tell callers how to retarget to a line-range edit.",
   "type": "object",
   "properties": {
     "path": { "type": ["string", "null"] },
@@ -12,6 +12,16 @@
     "body_text": { "type": "string" },
     "start_line": { "type": "integer", "minimum": 0 },
     "end_line": { "type": "integer", "minimum": 0 },
+    "start_col": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0-based UTF-8 byte column where the body starts, or 0 when no body was isolated."
+    },
+    "end_col": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0-based UTF-8 byte column where the body ends, or 0 when no body was isolated."
+    },
     "brace_based": {
       "type": "boolean",
       "description": "True for every language except Python so callers can branch on indentation-based vs. brace-based body shapes."
@@ -20,6 +30,41 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Field names extracted from `return { ... }` literals in the body, used by APIContractExtractor to infer response shapes."
+    },
+    "declaration_found": {
+      "type": "boolean",
+      "description": "True when a matching declaration was found, even if its body could not be isolated."
+    },
+    "declaration_start_line": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "1-based inclusive declaration start line, or 0 when no declaration was found."
+    },
+    "declaration_end_line": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "1-based inclusive declaration end line, or 0 when no declaration was found."
+    },
+    "declaration_node_kind": {
+      "type": "string",
+      "description": "Tree-sitter node kind for the matching declaration."
+    },
+    "isolation_status": {
+      "type": "string",
+      "enum": ["isolated", "declaration_fallback", "not_found"]
+    },
+    "isolation_reason": {
+      "type": "string",
+      "description": "Typed reason for the isolation status."
+    },
+    "fallback_action": {
+      "type": ["string", "null"],
+      "enum": ["replace_range", null],
+      "description": "Actionable fallback for callers when body isolation fails."
+    },
+    "retarget_instruction": {
+      "type": "string",
+      "description": "Human-facing one-step retarget instruction for edit tools."
     }
   },
   "required": [
@@ -30,8 +75,18 @@
     "body_text",
     "start_line",
     "end_line",
+    "start_col",
+    "end_col",
     "brace_based",
-    "return_object_fields"
+    "return_object_fields",
+    "declaration_found",
+    "declaration_start_line",
+    "declaration_end_line",
+    "declaration_node_kind",
+    "isolation_status",
+    "isolation_reason",
+    "fallback_action",
+    "retarget_instruction"
   ],
   "additionalProperties": false
 }
