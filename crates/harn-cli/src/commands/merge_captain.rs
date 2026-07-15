@@ -22,6 +22,10 @@ use crate::cli::{
 };
 
 pub(crate) fn run_driver(args: &MergeCaptainRunArgs) -> i32 {
+    run_driver_with_run_root(args, default_run_dir())
+}
+
+fn run_driver_with_run_root(args: &MergeCaptainRunArgs, run_root: PathBuf) -> i32 {
     let backend = match resolve_backend(args) {
         Ok(backend) => backend,
         Err(message) => {
@@ -42,7 +46,7 @@ pub(crate) fn run_driver(args: &MergeCaptainRunArgs) -> i32 {
         timeout_tier: args.timeout_tier.clone(),
         transcript_out: args.transcript_out.as_deref().map(PathBuf::from),
         receipt_out: args.receipt_out.as_deref().map(PathBuf::from),
-        run_root: default_run_dir(),
+        run_root,
         max_sweeps: args.max_sweeps,
         watch_backoff_ms: args.watch_backoff_ms,
         stream_stdout,
@@ -485,7 +489,10 @@ fn print_json_value<T: serde::Serialize>(value: &T) {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::load_ladder_manifest_for_cli;
+    use harn_vm::orchestration::{MergeCaptainRunReceipt, MergeCaptainRunSummary};
+
+    use super::{load_ladder_manifest_for_cli, run_driver_with_run_root};
+    use crate::cli::{MergeCaptainBackendKind, MergeCaptainRunArgs};
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -498,6 +505,76 @@ mod tests {
 
     fn write_pack(path: &Path, body: &str) {
         std::fs::write(path, body).unwrap();
+    }
+
+    fn run_args(
+        backend: MergeCaptainBackendKind,
+        backend_arg: PathBuf,
+        artifact_dir: &Path,
+    ) -> MergeCaptainRunArgs {
+        MergeCaptainRunArgs {
+            backend,
+            backend_arg: Some(backend_arg.display().to_string()),
+            once: true,
+            watch: false,
+            model_route: Some("mock/value".to_string()),
+            timeout_tier: Some("smoke".to_string()),
+            transcript_out: Some(artifact_dir.join("event_log.jsonl").display().to_string()),
+            receipt_out: Some(artifact_dir.join("receipt.json").display().to_string()),
+            summary_out: Some(artifact_dir.join("summary.json").display().to_string()),
+            max_sweeps: 1,
+            watch_backoff_ms: 0,
+            no_stdout: true,
+        }
+    }
+
+    fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> T {
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn run_mock_writes_typed_receipt_and_summary() {
+        let temp = tempfile::tempdir().unwrap();
+        let args = run_args(
+            MergeCaptainBackendKind::Mock,
+            repo_root().join("examples/merge_captain/playground_3repos"),
+            temp.path(),
+        );
+
+        let exit_code = run_driver_with_run_root(&args, temp.path().join("runs"));
+
+        assert_eq!(exit_code, 0);
+        assert!(temp.path().join("event_log.jsonl").exists());
+        let receipt: MergeCaptainRunReceipt = read_json(&temp.path().join("receipt.json"));
+        assert_eq!(receipt.type_name, "merge_captain_run_receipt");
+        assert_eq!(receipt.scenario.as_deref(), Some("green_pr"));
+        assert_eq!(receipt.model_route.as_deref(), Some("mock/value"));
+        assert_eq!(receipt.timeout_tier.as_deref(), Some("smoke"));
+        assert!(receipt.pass);
+
+        let summary: MergeCaptainRunSummary = read_json(&temp.path().join("summary.json"));
+        assert_eq!(summary.type_name, "merge_captain_run_summary");
+        assert_eq!(summary.backend, "mock");
+        assert_eq!(summary.scenario.as_deref(), Some("green_pr"));
+        assert!(!summary.prs_touched.is_empty());
+        assert!(summary.pass);
+    }
+
+    #[test]
+    fn run_replay_maps_oracle_failure_to_nonzero_exit() {
+        let temp = tempfile::tempdir().unwrap();
+        let args = run_args(
+            MergeCaptainBackendKind::Replay,
+            repo_root().join("examples/personas/merge_captain/transcripts/bad_unsafe_merge.jsonl"),
+            temp.path(),
+        );
+
+        let exit_code = run_driver_with_run_root(&args, temp.path().join("runs"));
+
+        assert_eq!(exit_code, 1);
+        let summary: MergeCaptainRunSummary = read_json(&temp.path().join("summary.json"));
+        assert!(!summary.pass);
+        assert!(summary.oracle_error_findings > 0);
     }
 
     #[test]
