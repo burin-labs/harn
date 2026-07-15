@@ -13,6 +13,7 @@ use super::harmony::{
     consume_tool_call_line as consume_harmony_tool_call_line,
     is_corrupted_tool_call_close_fragment,
 };
+use super::reserved::recover_malformed_call_opener;
 use super::syntax::{
     collapse_blank_lines, find_close_tag, ident_length, match_block, match_tool_call_block,
     parse_ts_call_from, preview_str, render_canonical_call, skip_heredoc_body, strip_thinking_tags,
@@ -88,6 +89,28 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         let adjacent_to_block = last_block_end > 0
             && cursor >= last_block_end
             && src[last_block_end..cursor].chars().all(char::is_whitespace);
+
+        // A `reserved_tool_call_token` model can truncate its `[[CALL]]` wire
+        // opener to `[[CALL]` (one bracket short). `wire_to_canonical` only maps
+        // the exact `[[CALL]]`, so the stub survives here as literal text and,
+        // starting with `[`, would be swept into assistant prose by the non-`<`
+        // run handler below — hiding a likely-lost action (harn#4486). Reaching
+        // this branch means `cursor` is a genuine top-level position (any
+        // `<tool_call>` block, other protocol block, heredoc body, or bare-call
+        // run has already been consumed as a unit), so a `[[CALL]` here is a
+        // structural opener, not argument/heredoc/prose text.
+        if let Some(after) = recover_malformed_call_opener(
+            src,
+            cursor,
+            tools_val,
+            &mut calls,
+            &mut errors,
+            &mut canonical_parts,
+        ) {
+            cursor = after;
+            last_block_end = after;
+            continue;
+        }
 
         // Skip past `<<TAG ... TAG` heredoc bodies inline so a bare
         // `name({ key: <<EOF ... EOF })` survives the chunker.
@@ -1079,7 +1102,7 @@ fn try_parse_angle_wrapped_call(
 /// This detects an output truncated mid-tool-call (the model hit its
 /// `max_tokens` cap while streaming a large argument), so the caller can emit
 /// a precise diagnostic instead of shredding the partial call into stray text.
-fn unclosed_tool_call_open(src: &str, cursor: usize) -> Option<usize> {
+pub(super) fn unclosed_tool_call_open(src: &str, cursor: usize) -> Option<usize> {
     let rest = &src[cursor..];
     let (open, close) = if rest.starts_with(&format!("<{TEXT_TOOL_CALL_TAG}>")) {
         (
@@ -1190,7 +1213,7 @@ fn recover_complete_bare_call_body(
 /// Best-effort recovery of the tool name from a truncated `<tool_call>` body:
 /// the leading `name(` of an unterminated call, when `name` is a registered
 /// tool. Used only for a clearer truncation diagnostic — never to dispatch.
-fn leading_call_name(body: &str, tools_val: Option<&VmValue>) -> Option<String> {
+pub(super) fn leading_call_name(body: &str, tools_val: Option<&VmValue>) -> Option<String> {
     let trimmed = body.trim_start();
     let name_len = ident_length(trimmed.as_bytes())?;
     if name_len == 0 || trimmed.as_bytes().get(name_len) != Some(&b'(') {
@@ -1201,7 +1224,7 @@ fn leading_call_name(body: &str, tools_val: Option<&VmValue>) -> Option<String> 
     known.contains(name).then(|| name.to_string())
 }
 
-fn is_top_level_tag_position(src: &str, cursor: usize) -> bool {
+pub(super) fn is_top_level_tag_position(src: &str, cursor: usize) -> bool {
     let line_start = src[..cursor].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
     src[line_start..cursor]
         .chars()
@@ -1221,7 +1244,7 @@ fn is_top_level_tag_position(src: &str, cursor: usize) -> bool {
 /// in the response: the open fence with no close had no business swallowing a
 /// later real block. Requiring a matching close ahead makes an unbalanced
 /// *trailing* fence harmless while keeping closed example fences skipped.
-fn inside_markdown_fence(src: &str, cursor: usize) -> bool {
+pub(super) fn inside_markdown_fence(src: &str, cursor: usize) -> bool {
     // Walk fence markers left to right, toggling parity. We only care whether
     // the fence that is open *at* the cursor is later closed.
     let mut open_before_cursor = false;
@@ -1396,7 +1419,7 @@ fn response_protocol_fragment_tag(fragment: &str) -> Option<&'static str> {
 
 /// Parse a single `<tool_call>` body. Expects exactly one bare
 /// `name({ ... })` expression (possibly with surrounding whitespace).
-fn parse_single_tool_call(
+pub(super) fn parse_single_tool_call(
     body: &str,
     tools_val: Option<&VmValue>,
 ) -> Result<serde_json::Value, String> {

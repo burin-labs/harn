@@ -9,6 +9,7 @@ mod bare;
 mod fenced_json;
 mod harmony;
 mod native_json;
+mod reserved;
 mod streaming;
 mod syntax;
 mod tagged;
