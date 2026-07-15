@@ -91,6 +91,20 @@ fn __join_case_ids(values: list, fallback: string) -> string {
   return out
 }
 
+fn __case_execution_count(values: list, status: string) -> int {
+  let count = 0
+  for value in values {
+    if type_of(value) != "dict" {
+      continue
+    }
+    const execution = __safe_dict(value["execution"])
+    if __safe_string(execution["status"], "") == status {
+      count = count + 1
+    }
+  }
+  return count
+}
+
 fn __join_dict_field(values: list, key: string, fallback: string) -> string {
   let out = ""
   let first = true
@@ -266,6 +280,10 @@ fn __render_plan_human(report: dict) -> string {
       + to_string(__safe_bool(claim["supports_parallel_tool_calls"], false))
       + " batch="
       + to_string(__safe_bool(claim["batch_api"], false))
+      + " executable="
+      + to_string(__case_execution_count(cases, "executable"))
+      + " missing_runner="
+      + to_string(__case_execution_count(cases, "missing_runner"))
       + " cases="
       + __join_case_ids(cases, "-")
       + "\n"
@@ -289,8 +307,9 @@ fn __render_plan_markdown(report: dict) -> string {
     + "` (schema "
     + to_string(__safe_int(catalog["schema_version"], 0))
     + ")\n\n"
-  out = out + "| Provider | Model | Preferred | Parity | Native | Text | Parallel | Batch | Cases |\n"
-  out = out + "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+  out = out
+    + "| Provider | Model | Preferred | Parity | Native | Text | Parallel | Batch | Executable | Missing runner | Cases |\n"
+  out = out + "| --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- |\n"
   const routes = __safe_list(report["routes"])
   for route in routes {
     if type_of(route) != "dict" {
@@ -314,6 +333,10 @@ fn __render_plan_markdown(report: dict) -> string {
       + to_string(__safe_bool(claim["supports_parallel_tool_calls"], false))
       + " | "
       + to_string(__safe_bool(claim["batch_api"], false))
+      + " | "
+      + to_string(__case_execution_count(cases, "executable"))
+      + " | "
+      + to_string(__case_execution_count(cases, "missing_runner"))
       + " | "
       + __join_case_ids(cases, "-")
       + " |\n"

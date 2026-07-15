@@ -634,6 +634,33 @@ fn provider_tool_scorecard_plan_json_includes_fixed_micro_case_matrix() {
         "single tool case missing: {}",
         harn.stdout
     );
+    let single_tool_case = cases
+        .iter()
+        .find(|case| case["id"] == "single_tool_call")
+        .expect("single tool case");
+    assert_eq!(single_tool_case["execution"]["status"], "executable");
+    assert_eq!(
+        single_tool_case["execution"]["runner"],
+        "provider_tool_probe"
+    );
+    assert_eq!(
+        single_tool_case["execution"]["command"],
+        serde_json::json!([
+            "harn",
+            "provider",
+            "tool-probe",
+            "anthropic",
+            "--model",
+            "claude-sonnet-5",
+            "--mode",
+            "both",
+            "--repeat",
+            "1",
+            "--timeout-secs",
+            "120",
+            "--json"
+        ])
+    );
     assert!(
         cases
             .iter()
@@ -641,6 +668,12 @@ fn provider_tool_scorecard_plan_json_includes_fixed_micro_case_matrix() {
         "multi-turn follow-up case missing: {}",
         harn.stdout
     );
+    let followup_case = cases
+        .iter()
+        .find(|case| case["id"] == "tool_result_followup")
+        .expect("follow-up case");
+    assert_eq!(followup_case["execution"]["status"], "missing_runner");
+    assert!(followup_case["execution"].get("command").is_none());
 }
 
 #[test]
@@ -677,6 +710,11 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
         "plan cases missing from human output: {}",
         harn.stdout
     );
+    assert!(
+        harn.stdout.contains("executable=1 missing_runner=7"),
+        "execution summary missing from human output: {}",
+        harn.stdout
+    );
 }
 
 #[test]
@@ -711,6 +749,11 @@ fn provider_tool_scorecard_plan_markdown_is_byte_identical_across_runs() {
     assert!(
         harn.stdout.contains("| Provider | Model | Preferred |"),
         "markdown table missing: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("| Executable | Missing runner |"),
+        "execution columns missing from markdown output: {}",
         harn.stdout
     );
     assert!(
