@@ -1174,8 +1174,10 @@ mod tests {
             provider: provider.to_string(),
             model: model.to_string(),
             base_url: None,
+            probe_case: crate::llm::tool_conformance::ToolProbeCase::SingleToolCall,
             tool_name: "echo_marker".to_string(),
             marker: "marker".to_string(),
+            expected_value: "marker".to_string(),
             cases,
             tool_calling: ToolCallingConformanceSummary {
                 native: ToolProbeStatus::Unknown,

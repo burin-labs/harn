@@ -1,11 +1,7 @@
 //! `harn provider probe` — one-shot machine-readable provider snapshot.
 //!
-//! Combines provider readiness (`/v1/models` or equivalent) with the
-//! runtime-state details that local engines surface separately (Ollama's
-//! `/api/ps` shows VRAM, size, expiry, and on newer builds the context
-//! window the model was loaded with). Output is a structured envelope so
-//! eval pipelines decode it with the same shape they use for per-call
-//! `provider_telemetry`.
+//! Combines provider readiness with local runtime-state details in a
+//! structured envelope eval pipelines decode alongside per-call telemetry.
 //!
 //! ## .harn dispatch
 //!
@@ -20,8 +16,7 @@ use harn_vm::llm_config;
 use serde::Serialize;
 
 use crate::cli::{
-    ProviderCacheProbeArgs, ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolProbeModeArg,
-    ProviderToolScorecardArgs,
+    ProviderCacheProbeArgs, ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolScorecardArgs,
 };
 use crate::commands::local::runtime::{fetch_ollama_ps, LoadedModel, LOCAL_PROVIDERS};
 use crate::commands::provider_report::{dispatch_provider_report, ProviderReportDispatch};
@@ -175,6 +170,9 @@ pub(crate) async fn run_provider_tool_probe(args: ProviderToolProbeArgs) {
 }
 
 async fn dispatch_provider_tool_probe(args: ProviderToolProbeArgs) -> i32 {
+    if args.dry_run_request {
+        return dispatch_provider_tool_probe_request_dry_run(&args);
+    }
     let report = match aggregate_tool_conformance_report(&args).await {
         Ok(report) => report,
         Err(error) => {
@@ -206,28 +204,44 @@ async fn aggregate_tool_conformance_report(
         let raw = std::fs::read_to_string(path)
             .map_err(|error| format!("error: failed to read {}: {error}", path.display()))?;
         Ok(
-            harn_vm::llm::tool_conformance::classify_tool_conformance_fixture(
+            harn_vm::llm::tool_conformance::classify_tool_conformance_fixture_for_case(
                 args.provider.clone(),
                 args.model.clone(),
-                modes_for_arg(args.mode)
+                args.mode
+                    .tool_probe_modes()
                     .into_iter()
                     .next()
                     .unwrap_or(harn_vm::llm::tool_conformance::ToolProbeMode::NonStreaming),
+                args.probe_case.tool_probe_case(),
                 args.marker.clone(),
                 &raw,
             ),
         )
     } else {
-        let mut options = harn_vm::llm::tool_conformance::ToolConformanceProbeOptions::new(
-            args.provider.clone(),
-            args.model.clone(),
-        );
-        options.base_url = args.base_url.clone();
-        options.modes = modes_for_arg(args.mode);
-        options.marker = args.marker.clone();
-        options.repeat = usize::from(args.repeat);
-        options.timeout_secs = args.timeout_secs;
-        Ok(harn_vm::llm::tool_conformance::run_tool_conformance_probe(options).await)
+        Ok(harn_vm::llm::tool_conformance::run_tool_conformance_probe(
+            args.tool_conformance_probe_options(),
+        )
+        .await)
+    }
+}
+
+fn dispatch_provider_tool_probe_request_dry_run(args: &ProviderToolProbeArgs) -> i32 {
+    match harn_vm::llm::tool_conformance::tool_conformance_request_report_json(
+        args.provider.clone(),
+        args.model.clone(),
+        args.base_url.clone(),
+        args.mode.tool_probe_modes(),
+        args.probe_case.tool_probe_case(),
+        args.marker.clone(),
+    ) {
+        Ok(json) => {
+            println!("{json}");
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
     }
 }
 
@@ -337,17 +351,4 @@ async fn dispatch_provider_cache_probe(args: ProviderCacheProbeArgs) -> i32 {
     // A supported route that never caches, or contradictory provider fields, is
     // a real conformance failure; a non-cache provider is not.
     i32::from(dogfood_failure)
-}
-
-fn modes_for_arg(
-    mode: ProviderToolProbeModeArg,
-) -> Vec<harn_vm::llm::tool_conformance::ToolProbeMode> {
-    use harn_vm::llm::tool_conformance::ToolProbeMode;
-    match mode {
-        ProviderToolProbeModeArg::Both => {
-            vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming]
-        }
-        ProviderToolProbeModeArg::NonStreaming => vec![ToolProbeMode::NonStreaming],
-        ProviderToolProbeModeArg::Streaming => vec![ToolProbeMode::Streaming],
-    }
 }
