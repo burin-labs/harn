@@ -19,6 +19,7 @@ use request::probe_request_body;
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
 pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 2;
+pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 1;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
 pub const DEFAULT_TOOL_PROBE_MARKER: &str = "harn_tool_probe_marker";
 
@@ -81,6 +82,10 @@ impl ToolProbeCase {
         }
     }
 
+    pub fn catalog_request_audit_cases() -> Vec<Self> {
+        vec![Self::SingleToolCall, Self::LargeStringArgument]
+    }
+
     fn expected_value(self, marker: &str) -> String {
         match self {
             Self::SingleToolCall => marker.to_string(),
@@ -118,6 +123,43 @@ pub struct ToolConformanceRequestValidation {
     pub dialect: String,
     pub status: ToolConformanceRequestValidationStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestAuditReport {
+    pub schema_version: u32,
+    pub catalog_model_count: usize,
+    pub route_count: usize,
+    pub probe_cases: Vec<String>,
+    pub modes: Vec<String>,
+    pub request_count: usize,
+    pub validation_pass_count: usize,
+    pub validation_fail_count: usize,
+    pub dialect_counts: BTreeMap<String, usize>,
+    pub provider_counts: BTreeMap<String, usize>,
+    pub routes: Vec<ToolConformanceRequestAuditRoute>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<ToolConformanceRequestAuditFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestAuditRoute {
+    pub provider: String,
+    pub model: String,
+    pub request_count: usize,
+    pub validation_pass_count: usize,
+    pub validation_fail_count: usize,
+    pub dialect_counts: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestAuditFailure {
+    pub provider: String,
+    pub model: String,
+    pub probe_case: String,
+    pub mode: String,
+    pub dialect: String,
     pub issues: Vec<String>,
 }
 
@@ -661,6 +703,112 @@ pub fn tool_conformance_request_report_json(
     serde_json::to_string_pretty(&report).map_err(|error| {
         format!("internal error: failed to render tool-probe request report: {error}")
     })
+}
+
+pub fn tool_conformance_request_catalog_audit(
+    probe_cases: Vec<ToolProbeCase>,
+    modes: Vec<ToolProbeMode>,
+) -> ToolConformanceRequestAuditReport {
+    let probe_cases = if probe_cases.is_empty() {
+        ToolProbeCase::catalog_request_audit_cases()
+    } else {
+        probe_cases
+    };
+    let modes = normalized_modes(&modes);
+    let entries = llm_config::model_catalog_entries();
+    let mut request_count = 0usize;
+    let mut validation_pass_count = 0usize;
+    let mut validation_fail_count = 0usize;
+    let mut dialect_counts = BTreeMap::new();
+    let mut provider_counts = BTreeMap::new();
+    let mut routes = Vec::new();
+    let mut failures = Vec::new();
+
+    for (model_id, model) in &entries {
+        let mut route = ToolConformanceRequestAuditRoute {
+            provider: model.provider.clone(),
+            model: model_id.clone(),
+            request_count: 0,
+            validation_pass_count: 0,
+            validation_fail_count: 0,
+            dialect_counts: BTreeMap::new(),
+        };
+        for probe_case in &probe_cases {
+            for mode in &modes {
+                route.request_count += 1;
+                request_count += 1;
+                *provider_counts.entry(model.provider.clone()).or_insert(0) += 1;
+                match tool_conformance_request_report(
+                    model.provider.clone(),
+                    model_id.clone(),
+                    None,
+                    vec![*mode],
+                    *probe_case,
+                    DEFAULT_TOOL_PROBE_MARKER,
+                ) {
+                    Ok(report) => {
+                        for request in report.requests {
+                            let dialect = request.validation.dialect.clone();
+                            *dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
+                            *route.dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
+                            match request.validation.status {
+                                ToolConformanceRequestValidationStatus::Pass => {
+                                    route.validation_pass_count += 1;
+                                    validation_pass_count += 1;
+                                }
+                                ToolConformanceRequestValidationStatus::Fail => {
+                                    route.validation_fail_count += 1;
+                                    validation_fail_count += 1;
+                                    failures.push(ToolConformanceRequestAuditFailure {
+                                        provider: model.provider.clone(),
+                                        model: model_id.clone(),
+                                        probe_case: probe_case.as_str().to_string(),
+                                        mode: mode.as_str().to_string(),
+                                        dialect,
+                                        issues: request.validation.issues,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        route.validation_fail_count += 1;
+                        validation_fail_count += 1;
+                        failures.push(ToolConformanceRequestAuditFailure {
+                            provider: model.provider.clone(),
+                            model: model_id.clone(),
+                            probe_case: probe_case.as_str().to_string(),
+                            mode: mode.as_str().to_string(),
+                            dialect: "request_build".to_string(),
+                            issues: vec![error],
+                        });
+                    }
+                }
+            }
+        }
+        routes.push(route);
+    }
+
+    ToolConformanceRequestAuditReport {
+        schema_version: TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION,
+        catalog_model_count: entries.len(),
+        route_count: routes.len(),
+        probe_cases: probe_cases
+            .into_iter()
+            .map(|probe_case| probe_case.as_str().to_string())
+            .collect(),
+        modes: modes
+            .into_iter()
+            .map(|mode| mode.as_str().to_string())
+            .collect(),
+        request_count,
+        validation_pass_count,
+        validation_fail_count,
+        dialect_counts,
+        provider_counts,
+        routes,
+        failures,
+    }
 }
 
 pub fn report_satisfies_required_probe(report: &ToolConformanceReport, requirement: &str) -> bool {

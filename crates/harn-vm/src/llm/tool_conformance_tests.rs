@@ -98,6 +98,35 @@ fn request_report_materializes_large_string_case_without_provider_call() {
 }
 
 #[test]
+fn request_catalog_audit_validates_every_catalog_route_in_process() {
+    let report = tool_conformance_request_catalog_audit(
+        ToolProbeCase::catalog_request_audit_cases(),
+        vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming],
+    );
+
+    assert_eq!(
+        report.schema_version,
+        TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION
+    );
+    assert!(
+        report.catalog_model_count >= 20,
+        "catalog unexpectedly tiny: {}",
+        report.catalog_model_count
+    );
+    assert_eq!(report.route_count, report.catalog_model_count);
+    assert_eq!(report.probe_cases.len(), 2);
+    assert_eq!(report.modes.len(), 2);
+    assert_eq!(
+        report.request_count,
+        report.route_count * report.probe_cases.len() * report.modes.len()
+    );
+    assert_eq!(report.validation_fail_count, 0, "{:#?}", report.failures);
+    assert_eq!(report.validation_pass_count, report.request_count);
+    assert!(report.dialect_counts.contains_key("openai_compat"));
+    assert!(report.dialect_counts.contains_key("anthropic"));
+}
+
+#[test]
 fn probe_request_body_uses_anthropic_tool_dialect() {
     let body = probe_request_body(
         "anthropic",
