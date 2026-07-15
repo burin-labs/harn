@@ -1,0 +1,322 @@
+import { parse_args } from "std/cli"
+
+type HookTimingEvent = {
+  ts: string?,
+  repo: string,
+  hook: string,
+  duration_ms: int,
+  exit_code: int?,
+  commit_sha: string?,
+  host: string?,
+}
+
+type HookTimingGroup = {
+  repo: string,
+  hook: string,
+  count: int,
+  total_ms: int,
+  max_ms: int,
+  avg_ms: int,
+}
+
+type HookTimingParseReport = {events: list<HookTimingEvent>, invalid_lines: int}
+
+type HookTimingFilters = {repo: string, hook: string, min_ms: int}
+
+type HookTimingReport = {
+  input: string,
+  filters: HookTimingFilters,
+  events: list<HookTimingEvent>,
+  groups: list<HookTimingGroup>,
+  invalid_lines: int,
+}
+
+fn usage() -> string {
+  return join(
+    [
+      "usage: harn run scripts/hook_timing_summary.harn -- [--input PATH] [--limit N] [--repo TEXT] [--hook NAME] [--min-ms N] [--json]",
+      "",
+      "Summarizes ~/.burin/hook-timings.ndjson so slow local hook/build paths are visible.",
+      "Use harn run --no-sandbox when reading the default ~/.burin log from outside the repo sandbox.",
+    ],
+    "\n",
+  )
+}
+
+pub fn default_hook_timing_path(home: string) -> string {
+  if home == "" {
+    return ".burin/hook-timings.ndjson"
+  }
+  return path_join(home, ".burin/hook-timings.ndjson")
+}
+
+pub fn hook_timing_event_from_json(value) -> HookTimingEvent? {
+  const repo = to_string(value?.repo ?? "")
+  const hook = to_string(value?.hook ?? "")
+  const duration_ms = to_int(value?.duration_ms)
+  if repo == "" || hook == "" || duration_ms == nil {
+    return nil
+  }
+  const ts = if value?.ts == nil {
+    nil
+  } else {
+    to_string(value?.ts)
+  }
+  const commit_sha = if value?.commit_sha == nil {
+    nil
+  } else {
+    to_string(value?.commit_sha)
+  }
+  const host = if value?.host == nil {
+    nil
+  } else {
+    to_string(value?.host)
+  }
+  const event: HookTimingEvent = {
+    repo: repo,
+    hook: hook,
+    duration_ms: duration_ms,
+    ts: ts,
+    exit_code: to_int(value?.exit_code),
+    commit_sha: commit_sha,
+    host: host,
+  }
+  return event
+}
+
+pub fn parse_hook_timing_text(text: string) -> HookTimingParseReport {
+  let events: list<HookTimingEvent> = []
+  let invalid_lines = 0
+  for line in text.lines() {
+    const trimmed = line.trim()
+    if trimmed == "" {
+      continue
+    }
+    const parsed = try {
+      json_parse(trimmed)
+    } catch (_) {
+      nil
+    }
+    const event = if parsed == nil {
+      nil
+    } else {
+      hook_timing_event_from_json(parsed)
+    }
+    if event == nil {
+      invalid_lines = invalid_lines + 1
+    } else {
+      events = events + [event]
+    }
+  }
+  return {events: events, invalid_lines: invalid_lines}
+}
+
+fn rounded_average(total: int, count: int) -> int {
+  if count <= 0 {
+    return 0
+  }
+  return to_int(round((to_float(total) ?? 0.0) / (to_float(count) ?? 1.0))) ?? 0
+}
+
+pub fn summarize_hook_timings(events: list<HookTimingEvent>) -> list<HookTimingGroup> {
+  let by_key = {}
+  for event in events {
+    const key = json_stringify([event.repo, event.hook])
+    const previous = by_key[key]
+    if previous == nil {
+      by_key = by_key
+        + {
+        [key]: {
+          repo: event.repo,
+          hook: event.hook,
+          count: 1,
+          total_ms: event.duration_ms,
+          max_ms: event.duration_ms,
+        },
+      }
+    } else {
+      by_key = by_key
+        + {
+        [key]: {
+          repo: previous.repo,
+          hook: previous.hook,
+          count: previous.count + 1,
+          total_ms: previous.total_ms + event.duration_ms,
+          max_ms: if event.duration_ms > previous.max_ms {
+            event.duration_ms
+          } else {
+            previous.max_ms
+          },
+        },
+      }
+    }
+  }
+  let groups: list<HookTimingGroup> = []
+  for entry in by_key {
+    const value = entry.value
+    groups = groups
+      + [
+      {
+        repo: value.repo,
+        hook: value.hook,
+        count: value.count,
+        total_ms: value.total_ms,
+        max_ms: value.max_ms,
+        avg_ms: rounded_average(value.total_ms, value.count),
+      },
+    ]
+  }
+  return groups.sort_by({ group -> 0 - group.total_ms })
+}
+
+pub fn slowest_hook_timings(events: list<HookTimingEvent>, limit: int) -> list<HookTimingEvent> {
+  const sorted = events.sort_by({ event -> 0 - event.duration_ms })
+  if limit <= 0 || sorted.count <= limit {
+    return sorted
+  }
+  return sorted.slice(0, limit)
+}
+
+pub fn filter_hook_timings(events: list<HookTimingEvent>, filters: HookTimingFilters) -> list<HookTimingEvent> {
+  let out: list<HookTimingEvent> = []
+  for event in events {
+    if filters.repo != "" && !event.repo.contains(filters.repo) {
+      continue
+    }
+    if filters.hook != "" && event.hook != filters.hook {
+      continue
+    }
+    if filters.min_ms > 0 && event.duration_ms < filters.min_ms {
+      continue
+    }
+    out = out + [event]
+  }
+  return out
+}
+
+fn render_group(group: HookTimingGroup) -> string {
+  return "- " + group.repo + " " + group.hook + ": total=" + to_string(group.total_ms) + "ms"
+    + " count="
+    + to_string(group.count)
+    + " max="
+    + to_string(group.max_ms)
+    + "ms"
+    + " avg="
+    + to_string(group.avg_ms)
+    + "ms"
+}
+
+fn render_event(event: HookTimingEvent) -> string {
+  let line = "- " + event.repo + " " + event.hook + ": " + to_string(event.duration_ms) + "ms"
+  if event.exit_code != nil {
+    line = line + " exit=" + to_string(event.exit_code)
+  }
+  if event.ts != nil {
+    line = line + " ts=" + event.ts
+  }
+  return line
+}
+
+pub fn render_hook_timing_report(report: HookTimingReport, limit: int) -> string {
+  let lines = [
+    "hook timing summary",
+    "===================",
+    "input: " + report.input,
+    "events: " + to_string(report.events.count),
+    "invalid_lines: " + to_string(report.invalid_lines),
+    "filters: repo="
+      + if report.filters.repo == "" {
+      "*"
+    } else {
+      report.filters.repo
+    }
+      + " hook="
+      + if report.filters.hook == "" {
+      "*"
+    } else {
+      report.filters.hook
+    }
+      + " min_ms="
+      + to_string(report.filters.min_ms),
+    "",
+    "slowest invocations:",
+  ]
+  const slowest = slowest_hook_timings(report.events, limit)
+  if slowest.count == 0 {
+    lines = lines + ["- none"]
+  } else {
+    for event in slowest {
+      lines = lines + [render_event(event)]
+    }
+  }
+  lines = lines + ["", "aggregate by repo/hook:"]
+  const groups = if limit <= 0 || report.groups.count <= limit {
+    report.groups
+  } else {
+    report.groups.slice(0, limit)
+  }
+  if groups.count == 0 {
+    lines = lines + ["- none"]
+  } else {
+    for group in groups {
+      lines = lines + [render_group(group)]
+    }
+  }
+  return join(lines, "\n")
+}
+
+fn arg_spec() -> list {
+  return [
+    {kind: "option", name: "input", flags: ["--input"], parse: "string", default: ""},
+    {kind: "option", name: "limit", flags: ["--limit"], parse: "int", default: 10},
+    {kind: "option", name: "repo", flags: ["--repo"], parse: "string", default: ""},
+    {kind: "option", name: "hook", flags: ["--hook"], parse: "string", default: ""},
+    {kind: "option", name: "min_ms", flags: ["--min-ms"], parse: "int", default: 0},
+    {kind: "flag", name: "json", flags: ["--json"], default: false},
+  ]
+}
+
+fn main(harness: Harness) {
+  const parsed = parse_args(argv, arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio.println(usage())
+    return nil
+  }
+  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
+    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    harness.stdio.eprintln(join(errors, "\n"))
+    harness.stdio.eprintln("")
+    harness.stdio.eprintln(usage())
+    exit(2)
+  }
+  const input = if to_string(parsed?.input ?? "") == "" {
+    default_hook_timing_path(harness.env.get("HOME") ?? "")
+  } else {
+    to_string(parsed?.input)
+  }
+  const limit = to_int(parsed?.limit) ?? 10
+  if !harness.fs.exists(input) {
+    harness.stdio.eprintln("hook timing log not found: " + input)
+    exit(1)
+  }
+  const parsed_log = parse_hook_timing_text(harness.fs.read_text(input))
+  const filters: HookTimingFilters = {
+    repo: to_string(parsed?.repo ?? ""),
+    hook: to_string(parsed?.hook ?? ""),
+    min_ms: to_int(parsed?.min_ms) ?? 0,
+  }
+  const events = filter_hook_timings(parsed_log.events, filters)
+  const report: HookTimingReport = {
+    input: input,
+    filters: filters,
+    events: events,
+    groups: summarize_hook_timings(events),
+    invalid_lines: parsed_log.invalid_lines,
+  }
+  if parsed?.json ?? false {
+    harness.stdio.println(json_stringify_pretty(report))
+  } else {
+    harness.stdio.println(render_hook_timing_report(report, limit))
+  }
+  return nil
+}
