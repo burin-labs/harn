@@ -13,7 +13,13 @@ real_git=$(command -v git)
 
 git init --bare --quiet "$origin"
 git init --quiet "$work"
-mkdir -p "$fake_bin" "$work/.githooks" "$work/crates/harn-lint/src" "$work/crates/harn-other/src"
+mkdir -p \
+  "$fake_bin" \
+  "$work/.githooks" \
+  "$work/crates/harn-lint/src" \
+  "$work/crates/harn-other/src" \
+  "$work/crates/harn-vm/src/llm/capability_sources/20-providers" \
+  "$work/spec/provider-catalog"
 
 cat > "$fake_bin/cargo" <<'SH'
 #!/usr/bin/env bash
@@ -40,6 +46,13 @@ exit 0
 SH
 chmod +x "$fake_bin/gh"
 
+cat > "$fake_bin/harn" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'harn %s\n' "$*" >> "${FAKE_CARGO_RECORD:?FAKE_CARGO_RECORD is required}"
+SH
+chmod +x "$fake_bin/harn"
+
 cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -54,7 +67,7 @@ chmod +x "$work/.githooks/pre-commit" "$work/.githooks/pre-push"
 
 cat > "$work/Cargo.toml" <<'TOML'
 [workspace]
-members = ["crates/harn-lint", "crates/harn-other"]
+members = ["crates/harn-lint", "crates/harn-other", "crates/harn-vm"]
 resolver = "2"
 TOML
 cat > "$work/crates/harn-lint/Cargo.toml" <<'TOML'
@@ -69,9 +82,18 @@ name = "harn-other"
 version = "0.0.0"
 edition = "2021"
 TOML
+cat > "$work/crates/harn-vm/Cargo.toml" <<'TOML'
+[package]
+name = "harn-vm"
+version = "0.0.0"
+edition = "2021"
+TOML
 printf 'pub mod obsolete;\npub fn base() {}\n' > "$work/crates/harn-lint/src/lib.rs"
 printf 'pub fn removable() {}\n' > "$work/crates/harn-lint/src/obsolete.rs"
 printf 'pub fn other() {}\n' > "$work/crates/harn-other/src/lib.rs"
+printf 'base = true\n' > "$work/crates/harn-vm/src/llm/capabilities.toml"
+printf 'base = true\n' > "$work/crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml"
+printf '{}\n' > "$work/spec/provider-catalog/provider-catalog.json"
 
 git -C "$work" config user.email "test@example.com"
 git -C "$work" config user.name "Test User"
@@ -151,6 +173,42 @@ make test
 EOF
 if ! diff -u "$tmp_root/expected-full-pre-push.txt" "$record"; then
   echo "full-test pre-push should preserve lint coverage before running the full suite" >&2
+  exit 1
+fi
+
+git -C "$work" checkout --quiet -B provider-catalog-feature origin/main
+printf 'base = false\n' > "$work/crates/harn-vm/src/llm/capabilities.toml"
+printf 'native_tools = true\n' > "$work/crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml"
+printf '{"models":[]}\n' > "$work/spec/provider-catalog/provider-catalog.json"
+git -C "$work" add \
+  crates/harn-vm/src/llm/capabilities.toml \
+  crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml \
+  spec/provider-catalog/provider-catalog.json
+git -C "$work" commit --quiet --no-verify -m "update provider catalog data"
+provider_catalog_sha=$(git -C "$work" rev-parse HEAD)
+
+: > "$record"
+(
+  cd "$work"
+  printf 'refs/heads/provider-catalog-feature %s refs/heads/provider-catalog-feature %s\n' \
+    "$provider_catalog_sha" "$remote_sha" \
+    | CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
+      CARGO_TARGET_DIR="$tmp_root/target" \
+      FAKE_CARGO_RECORD="$record" \
+      HOOK_TIMING_LOG_DIR="$tmp_root/timings" \
+      PATH="$fake_bin:$PATH" \
+      REAL_GIT="$real_git" \
+      ./.githooks/pre-push origin "$origin" >/dev/null
+)
+
+cat > "$tmp_root/expected-provider-catalog-pre-push.txt" <<'EOF'
+make -s check-provider-catalog
+make -s check-provider-matrix
+make -s check-provider-support
+harn provider capabilities audit
+EOF
+if ! diff -u "$tmp_root/expected-provider-catalog-pre-push.txt" "$record"; then
+  echo "provider catalog data-only pre-push should run catalog checks without Cargo" >&2
   exit 1
 fi
 
@@ -246,6 +304,19 @@ printf 'scripts/tool.sh\n' > "$tmp_root/non-crate-files.txt"
 run_helper "$tmp_root/non-crate-files.txt"
 if [[ -s "$record" ]]; then
   echo "non-crate changes should not invoke Cargo" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+cat > "$tmp_root/provider-catalog-files.txt" <<'EOF'
+crates/harn-vm/src/llm/capabilities.toml
+crates/harn-vm/src/llm/capability_sources/20-providers/20-local-ollama.toml
+spec/provider-catalog/provider-catalog.json
+EOF
+: > "$record"
+run_helper "$tmp_root/provider-catalog-files.txt"
+if [[ -s "$record" ]]; then
+  echo "provider catalog data-only changes should not invoke Cargo" >&2
   cat "$record" >&2
   exit 1
 fi
