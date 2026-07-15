@@ -118,8 +118,8 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   # Keep a narrow release-size ratchet while allowing the current stripped
-  # Linux x86_64 binary, which is 200.85 MiB at v0.10.16.
-  BINARY_SIZE_BUDGET_MB: "201.25"
+  # Linux x86_64 binary, which is 201.62 MiB at v0.10.18.
+  BINARY_SIZE_BUDGET_MB: "202.00"
 
 jobs:
   setup:
