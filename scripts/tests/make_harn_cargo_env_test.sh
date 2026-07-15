@@ -22,11 +22,7 @@ set -euo pipefail
 } >> "$FAKE_CARGO_RECORD"
 case "$*" in
   "metadata --format-version=1 --no-deps")
-    python3 - <<'PY'
-import json
-import os
-print(json.dumps({"target_directory": os.environ["FAKE_METADATA_TARGET_DIR"]}))
-PY
+    printf '{"target_directory":"%s"}\n' "$FAKE_METADATA_TARGET_DIR"
     ;;
   run\ *)
     ;;
@@ -37,6 +33,13 @@ PY
 esac
 SH
 chmod +x "$fake_bin/cargo"
+
+cat > "$fake_bin/python3" <<'SH'
+#!/usr/bin/env bash
+echo "python3 must not run" >&2
+exit 42
+SH
+chmod +x "$fake_bin/python3"
 
 PATH="$fake_bin:$PATH" \
   CARGO_TARGET_DIR="$target_dir" \
