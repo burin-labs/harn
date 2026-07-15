@@ -18,12 +18,14 @@ use serde_json::json;
 
 use crate::value::{ErrorCategory, VmError, VmValue};
 
-use super::api::{LlmCallOptions, LlmRoutePolicy};
+use super::api::LlmCallOptions;
 use super::cost::{calculate_cost_for_provider, peek_total_cost, LlmBudgetEnvelope};
 use super::routing_verifier::{
     build_refine_nudge, parse_escalate_on, run_verifier, verifiers_summary, Verifier,
     VerifierSignal,
 };
+
+mod auth;
 
 /// Marker key set by `routing_policy(...)` to distinguish a validated
 /// routing config dict from a stray dict the user happened to pass.
@@ -1482,49 +1484,6 @@ fn budget_overrun_snapshot(
     }
 }
 
-/// Effective per-link options: start from the base options, swap in
-/// provider/model/timeout, and overlay the policy budget so per-call
-/// preflight enforces it.
-fn link_options(
-    base: &LlmCallOptions,
-    policy: &RoutingPolicyConfig,
-    link: &ChainLink,
-) -> LlmCallOptions {
-    let mut opts = base.clone();
-    opts.provider = link.provider.clone();
-    opts.model = link.model.clone();
-    opts.region = link.region.clone();
-    opts.api_key = String::new();
-    opts.route_policy = LlmRoutePolicy::Always(format!("{}:{}", link.provider, link.model));
-    opts.fallback_chain = Vec::new();
-    opts.route_fallbacks = Vec::new();
-    opts.routing_decision = None;
-    // The executor owns chain dispatch; per-link calls must not recurse
-    // back through `execute_llm_call`'s routing dispatch.
-    opts.routing_policy = None;
-    if let Some(timeout_ms) = link.timeout_ms.or(policy.failover.on_timeout_ms) {
-        let secs = (timeout_ms / 1000).max(1);
-        opts.timeout = Some(secs);
-    }
-    if let Some(envelope) = policy.budget.envelope() {
-        let mut merged = opts.budget.clone().unwrap_or_default();
-        if envelope.max_cost_usd.is_some() {
-            merged.max_cost_usd = envelope.max_cost_usd;
-        }
-        if envelope.total_budget_usd.is_some() {
-            merged.total_budget_usd = envelope.total_budget_usd;
-        }
-        opts.budget = Some(merged);
-    }
-    if let Ok(key) = super::resolve_api_key(&link.provider) {
-        opts.api_key = key;
-    }
-    if let Some(overrides) = link.overrides.as_ref() {
-        apply_ladder_step_overrides(&mut opts, overrides);
-    }
-    opts
-}
-
 /// Per-step generation-parameter overrides honored by a `models:` ladder
 /// step's `options` dict. Kept deliberately small: these are the scalar
 /// knobs a per-rung override sensibly tweaks (a stronger rung may want more
@@ -1956,8 +1915,33 @@ pub(crate) async fn execute_with_routing(
     let mut idx = 0usize;
     while idx < policy.chain.len() && attempts_used < max_attempts {
         let link = policy.chain[idx].clone();
-        let opts = link_options(&base_opts, policy, &link);
         let link_label = link.display_label();
+        let attempt_no = attempts_used + 1;
+        let opts = match auth::link_options_with_auth(&base_opts, policy, &link) {
+            Ok(opts) => opts,
+            Err(snapshot) => {
+                let mut meta = serde_json::Map::new();
+                meta.insert("policy".to_string(), json!(policy.label.clone()));
+                meta.insert("attempt".to_string(), json!(attempt_no));
+                meta.insert("provider".to_string(), json!(link.provider.clone()));
+                meta.insert("model".to_string(), json!(link.model.clone()));
+                meta.insert("link_label".to_string(), json!(link_label.clone()));
+                meta.insert("reason".to_string(), json!("missing_credentials"));
+                emit_routing_event(&dispatch, "route_unavailable", meta);
+
+                trace.attempts.push(auth::skipped_attempt_record(
+                    attempt_no,
+                    &link,
+                    &link_label,
+                    snapshot.clone(),
+                ));
+                last_snapshot = Some(snapshot);
+                terminal_was_failover_eligible = true;
+                attempts_used += 1;
+                idx += 1;
+                continue;
+            }
+        };
 
         let mut local_attempts: Vec<RoutingAttempt> = Vec::new();
         match check_link_budget(
@@ -1985,7 +1969,6 @@ pub(crate) async fn execute_with_routing(
         }
         trace.attempts.extend(local_attempts);
 
-        let attempt_no = attempts_used + 1;
         let start = std::time::Instant::now();
         let mut attempt_meta = serde_json::Map::new();
         attempt_meta.insert("policy".to_string(), json!(policy.label.clone()));
@@ -2004,28 +1987,32 @@ pub(crate) async fn execute_with_routing(
         let race_outcome = if let Some(race_after) = race_after_ms {
             if idx + 1 < policy.chain.len() && attempts_used + 2 <= max_attempts {
                 let backup_link = policy.chain[idx + 1].clone();
-                let backup_opts = link_options(&base_opts, policy, &backup_link);
-                let backup_label = backup_link.display_label();
-                // Do not stream deltas from racing attempts: the loser may
-                // emit text before the winner is known. Callers that need an
-                // observational stream still receive the selected result text
-                // through their non-streaming fallback after routing resolves.
-                Some(
-                    run_race(
-                        &dispatch,
-                        policy,
-                        attempts_used,
-                        &link,
-                        &link_label,
-                        &opts,
-                        bridge,
-                        race_after,
-                        primary_timeout_ms,
-                        backup_label,
-                        backup_opts,
-                    )
-                    .await,
-                )
+                match auth::link_options_with_auth(&base_opts, policy, &backup_link) {
+                    Ok(backup_opts) => {
+                        let backup_label = backup_link.display_label();
+                        // Do not stream deltas from racing attempts: the loser may
+                        // emit text before the winner is known. Callers that need an
+                        // observational stream still receive the selected result text
+                        // through their non-streaming fallback after routing resolves.
+                        Some(
+                            run_race(
+                                &dispatch,
+                                policy,
+                                attempts_used,
+                                &link,
+                                &link_label,
+                                &opts,
+                                bridge,
+                                race_after,
+                                primary_timeout_ms,
+                                backup_label,
+                                backup_opts,
+                            )
+                            .await,
+                        )
+                    }
+                    Err(_) => None,
+                }
             } else {
                 None
             }
@@ -2906,9 +2893,9 @@ mod tests {
         // link_options threads the region into the per-link call options;
         // the region-less link resolves to None (env fallback).
         let base = crate::llm::api::options::base_opts("bedrock");
-        let with_region = link_options(&base, &policy, &policy.chain[0]);
+        let with_region = auth::link_options(&base, &policy, &policy.chain[0]);
         assert_eq!(with_region.region.as_deref(), Some("eu-west-1"));
-        let without_region = link_options(&base, &policy, &policy.chain[1]);
+        let without_region = auth::link_options(&base, &policy, &policy.chain[1]);
         assert_eq!(without_region.region, None);
     }
 
@@ -3183,7 +3170,7 @@ mod tests {
         // The override is applied over the base options at link-dispatch time.
         let mut base = policy_base_opts();
         base.max_tokens = 16384;
-        let linked = link_options(&base, &policy, &policy.chain[0]);
+        let linked = auth::link_options(&base, &policy, &policy.chain[0]);
         assert_eq!(linked.max_tokens, 256);
         assert_eq!(linked.temperature, Some(0.0));
     }

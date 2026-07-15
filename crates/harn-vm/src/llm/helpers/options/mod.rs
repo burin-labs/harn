@@ -29,6 +29,8 @@ mod reminder_render_tests;
 #[cfg(test)]
 mod resolve_timeout_secs_tests;
 #[cfg(test)]
+mod routing_credential_tests;
+#[cfg(test)]
 mod routing_tests;
 
 // Shared imports re-exported across the whole `options` subtree so each
