@@ -11,10 +11,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::llm_config::{self, ProviderDef};
-use crate::value::VmValue;
 
+#[path = "tool_conformance_helpers.rs"]
+mod helpers;
 #[path = "tool_conformance_request.rs"]
 mod request;
+pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
 use request::{probe_request_body, validate_probe_request_body};
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
@@ -71,6 +73,7 @@ impl ToolProbeMode {
 pub enum ToolProbeCase {
     #[default]
     SingleToolCall,
+    ParallelToolCalls,
     LargeStringArgument,
     NoToolAnswerOrRefusal,
     UnavailableToolRepair,
@@ -102,6 +105,7 @@ impl ToolProbeCase {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SingleToolCall => "single_tool_call",
+            Self::ParallelToolCalls => "parallel_tool_calls",
             Self::LargeStringArgument => "large_string_argument",
             Self::NoToolAnswerOrRefusal => "no_tool_answer_or_refusal",
             Self::UnavailableToolRepair => "unavailable_tool_repair",
@@ -112,6 +116,7 @@ impl ToolProbeCase {
     pub fn catalog_request_audit_cases() -> Vec<Self> {
         vec![
             Self::SingleToolCall,
+            Self::ParallelToolCalls,
             Self::LargeStringArgument,
             Self::NoToolAnswerOrRefusal,
             Self::UnavailableToolRepair,
@@ -122,6 +127,7 @@ impl ToolProbeCase {
     fn expected_value(self, marker: &str) -> String {
         match self {
             Self::SingleToolCall => marker.to_string(),
+            Self::ParallelToolCalls => marker.to_string(),
             Self::LargeStringArgument => format!(
                 "marker={marker}\nquoted=\"value\"\njson={{\"marker\":{marker:?},\"nested\":[1,true]}}\nheredoc=<<EOF\n{marker}\nEOF\nunicode=\\u{{2603}}\\u{{1F680}}\nend"
             ),
@@ -132,7 +138,10 @@ impl ToolProbeCase {
     }
 
     fn requires_probe_tool(self) -> bool {
-        matches!(self, Self::SingleToolCall | Self::LargeStringArgument)
+        matches!(
+            self,
+            Self::SingleToolCall | Self::ParallelToolCalls | Self::LargeStringArgument
+        )
     }
 }
 
@@ -893,6 +902,16 @@ async fn execute_live_probe_case(
 /// `TOOL_PROBE_TOOL_NAME` tool with `args.value == marker`). Shared by the
 /// tagged and fenced-JSON text-channel parse attempts.
 fn probe_marker_present(calls: &[Value], marker: &str) -> bool {
+    probe_values_present(calls, &[marker.to_string()])
+}
+
+fn probe_values_present(calls: &[Value], expected_values: &[String]) -> bool {
+    expected_values
+        .iter()
+        .all(|expected| probe_value_count(calls, expected) > 0)
+}
+
+fn probe_value_count(calls: &[Value], marker: &str) -> usize {
     calls.iter().any(|call| {
         call.get("name").and_then(Value::as_str) == Some(TOOL_PROBE_TOOL_NAME)
             && call
@@ -900,7 +919,17 @@ fn probe_marker_present(calls: &[Value], marker: &str) -> bool {
                 .and_then(|args| args.get("value"))
                 .and_then(Value::as_str)
                 == Some(marker)
-    })
+    }) as usize
+}
+
+fn expected_tool_values(probe_case: ToolProbeCase, expected_value: &str) -> Vec<String> {
+    match probe_case {
+        ToolProbeCase::ParallelToolCalls => vec![
+            format!("{expected_value}:first"),
+            format!("{expected_value}:second"),
+        ],
+        _ => vec![expected_value.to_string()],
+    }
 }
 
 fn classify_tool_probe_response(
@@ -914,32 +943,41 @@ fn classify_tool_probe_response(
     let native = extract_native_tool_calls(response);
     let native_count = native.len();
     let mut malformed_native = false;
+    let expected_tool_values = expected_tool_values(probe_case, expected_value);
+    let mut native_probe_calls = Vec::new();
     for call in &native {
         if call.name == TOOL_PROBE_TOOL_NAME {
             match &call.arguments {
-                Some(Value::Object(map))
-                    if probe_case.requires_probe_tool()
-                        && map.get("value").and_then(Value::as_str) == Some(expected_value) =>
-                {
-                    return ToolConformanceCase {
-                        mode,
-                        ok: true,
-                        classification: ToolProbeClassification::StructuredNativeToolCall,
-                        fallback_mode: ToolProbeFallbackMode::Native,
-                        failure_reason: None,
-                        http_status,
-                        elapsed_ms,
-                        native_tool_call_count: native_count,
-                        text_tool_call_count: 0,
-                        parser_errors: Vec::new(),
-                        protocol_violations: Vec::new(),
-                        content_sample: content_sample(response),
-                    };
+                Some(Value::Object(map)) => {
+                    if let Some(value) = map.get("value").and_then(Value::as_str) {
+                        native_probe_calls.push(value.to_string());
+                    }
                 }
-                Some(Value::Object(_)) => {}
                 _ => malformed_native = true,
             }
         }
+    }
+    let native_pass = probe_case.requires_probe_tool()
+        && expected_tool_values
+            .iter()
+            .all(|expected| native_probe_calls.contains(expected))
+        && (probe_case != ToolProbeCase::ParallelToolCalls
+            || (native_probe_calls.len() == expected_tool_values.len() && !malformed_native));
+    if native_pass {
+        return ToolConformanceCase {
+            mode,
+            ok: true,
+            classification: ToolProbeClassification::StructuredNativeToolCall,
+            fallback_mode: ToolProbeFallbackMode::Native,
+            failure_reason: None,
+            http_status,
+            elapsed_ms,
+            native_tool_call_count: native_count,
+            text_tool_call_count: 0,
+            parser_errors: Vec::new(),
+            protocol_violations: Vec::new(),
+            content_sample: content_sample(response),
+        };
     }
 
     let content = extract_content(response);
@@ -967,7 +1005,12 @@ fn classify_tool_probe_response(
             (http_status, elapsed_ms),
         );
     }
-    let text_pass = probe_marker_present(&parsed.calls, expected_value);
+    let text_pass = if probe_case == ToolProbeCase::ParallelToolCalls {
+        probe_values_present(&parsed.calls, &expected_tool_values)
+            && parsed.calls.len() == expected_tool_values.len()
+    } else {
+        probe_marker_present(&parsed.calls, expected_value)
+    };
     if text_pass {
         return ToolConformanceCase {
             mode,
@@ -1253,199 +1296,6 @@ fn field_is_private_reasoning(field: &str) -> bool {
             | "thinking"
             | "thinking_summary"
     )
-}
-
-fn aggregate_stream_text(text: &str, _provider: &str) -> Value {
-    let mut content = String::new();
-    let mut calls: BTreeMap<String, PartialStreamCall> = BTreeMap::new();
-    let mut frames = Vec::new();
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let payload = line.strip_prefix("data:").map(str::trim).unwrap_or(line);
-        if payload == "[DONE]" {
-            continue;
-        }
-        let Ok(frame) = serde_json::from_str::<Value>(payload) else {
-            continue;
-        };
-        collect_stream_content_and_calls(&frame, &mut content, &mut calls);
-        frames.push(frame);
-    }
-    let tool_calls: Vec<Value> = calls
-        .into_values()
-        .map(|call| {
-            json!({
-                "id": call.id.unwrap_or_else(|| "stream_tool".to_string()),
-                "type": "function",
-                "function": {
-                    "name": call.name.unwrap_or_default(),
-                    "arguments": call.arguments,
-                }
-            })
-        })
-        .collect();
-    json!({
-        "content": content,
-        "tool_calls": tool_calls,
-        "frames": frames,
-    })
-}
-
-#[derive(Debug, Default)]
-struct PartialStreamCall {
-    id: Option<String>,
-    name: Option<String>,
-    arguments: String,
-}
-
-fn collect_stream_content_and_calls(
-    frame: &Value,
-    content: &mut String,
-    calls: &mut BTreeMap<String, PartialStreamCall>,
-) {
-    collect_anthropic_stream_content_and_calls(frame, content, calls);
-    if let Some(text) = frame
-        .pointer("/message/content")
-        .or_else(|| frame.pointer("/choices/0/delta/content"))
-        .or_else(|| frame.pointer("/choices/0/message/content"))
-        .or_else(|| frame.get("response"))
-        .and_then(Value::as_str)
-    {
-        content.push_str(text);
-    }
-    for item in frame
-        .pointer("/message/tool_calls")
-        .or_else(|| frame.pointer("/choices/0/delta/tool_calls"))
-        .or_else(|| frame.pointer("/choices/0/message/tool_calls"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let key = item
-            .get("index")
-            .and_then(Value::as_u64)
-            .map(|index| index.to_string())
-            .or_else(|| item.get("id").and_then(Value::as_str).map(str::to_string))
-            .unwrap_or_else(|| calls.len().to_string());
-        let slot = calls.entry(key).or_default();
-        if let Some(id) = item.get("id").and_then(Value::as_str) {
-            slot.id = Some(id.to_string());
-        }
-        if let Some(name) = item
-            .pointer("/function/name")
-            .or_else(|| item.get("name"))
-            .and_then(Value::as_str)
-        {
-            slot.name = Some(name.to_string());
-        }
-        if let Some(arguments) = item
-            .pointer("/function/arguments")
-            .or_else(|| item.get("arguments"))
-        {
-            match arguments {
-                Value::String(delta) => slot.arguments.push_str(delta),
-                Value::Object(_) => slot.arguments = arguments.to_string(),
-                _ => {}
-            }
-        }
-    }
-}
-
-fn collect_anthropic_stream_content_and_calls(
-    frame: &Value,
-    content: &mut String,
-    calls: &mut BTreeMap<String, PartialStreamCall>,
-) {
-    match frame.get("type").and_then(Value::as_str) {
-        Some("content_block_start") => {
-            let Some(block) = frame.get("content_block") else {
-                return;
-            };
-            if block.get("type").and_then(Value::as_str) == Some("text") {
-                if let Some(text) = block.get("text").and_then(Value::as_str) {
-                    content.push_str(text);
-                }
-                return;
-            }
-            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
-                return;
-            }
-            let key = frame
-                .get("index")
-                .and_then(Value::as_u64)
-                .map(|index| index.to_string())
-                .unwrap_or_else(|| calls.len().to_string());
-            let slot = calls.entry(key).or_default();
-            if let Some(id) = block.get("id").and_then(Value::as_str) {
-                slot.id = Some(id.to_string());
-            }
-            if let Some(name) = block.get("name").and_then(Value::as_str) {
-                slot.name = Some(name.to_string());
-            }
-            if let Some(input) = block.get("input").filter(|input| !input.is_null()) {
-                if !(input.is_object() && input.as_object().is_some_and(|object| object.is_empty()))
-                {
-                    slot.arguments = input.to_string();
-                }
-            }
-        }
-        Some("content_block_delta") => {
-            let key = frame
-                .get("index")
-                .and_then(Value::as_u64)
-                .map(|index| index.to_string())
-                .unwrap_or_else(|| calls.len().to_string());
-            let Some(delta) = frame.get("delta") else {
-                return;
-            };
-            match delta.get("type").and_then(Value::as_str) {
-                Some("text_delta") => {
-                    if let Some(text) = delta.get("text").and_then(Value::as_str) {
-                        content.push_str(text);
-                    }
-                }
-                Some("input_json_delta") => {
-                    if let Some(partial) = delta.get("partial_json").and_then(Value::as_str) {
-                        calls.entry(key).or_default().arguments.push_str(partial);
-                    }
-                }
-                _ => {}
-            }
-        }
-        _ => {}
-    }
-}
-
-fn probe_tool_registry() -> VmValue {
-    let mut value_param = BTreeMap::new();
-    value_param.insert("type".to_string(), vm_str("string"));
-    value_param.insert(
-        "description".to_string(),
-        vm_str("The marker value to echo."),
-    );
-    let mut params = BTreeMap::new();
-    params.insert("value".to_string(), VmValue::dict(value_param));
-    let tool = vm_dict(&[
-        ("name", vm_str(TOOL_PROBE_TOOL_NAME)),
-        ("description", vm_str("Echo the probe marker exactly.")),
-        ("parameters", VmValue::dict(params)),
-    ]);
-    vm_dict(&[("tools", VmValue::List(std::sync::Arc::new(vec![tool])))])
-}
-
-fn vm_str(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
-}
-
-fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    let mut map = BTreeMap::new();
-    for (key, value) in pairs {
-        map.insert((*key).to_string(), value.clone());
-    }
-    VmValue::dict(map)
 }
 
 fn has_raw_model_tool_tag(content: &str) -> bool {

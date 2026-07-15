@@ -136,6 +136,18 @@ fn probe_prompt(probe_case: ToolProbeCase, marker: &str) -> String {
         ToolProbeCase::SingleToolCall => format!(
             "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once with value {marker:?}. Do not answer in prose."
         ),
+        ToolProbeCase::ParallelToolCalls => {
+            let first = format!("{marker}:first");
+            let second = format!("{marker}:second");
+            [
+                format!("Call the {TOOL_PROBE_TOOL_NAME} tool exactly twice."),
+                "The calls must be in the same assistant response.".to_string(),
+                format!("The first call's value argument must exactly equal {first:?}."),
+                format!("The second call's value argument must exactly equal {second:?}."),
+                "Do not answer in prose.".to_string(),
+            ]
+            .join(" ")
+        }
         ToolProbeCase::LargeStringArgument => format!(
             "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once. The value argument must exactly equal this string, preserving newlines and escapes: {marker:?}. Do not answer in prose."
         ),
