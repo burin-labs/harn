@@ -712,6 +712,37 @@ fn provider_tool_scorecard_plan_json_includes_fixed_micro_case_matrix() {
             "claude-sonnet-5",
             "--mode",
             "both",
+            "--case",
+            "single_tool_call",
+            "--repeat",
+            "1",
+            "--timeout-secs",
+            "120",
+            "--json"
+        ])
+    );
+    let large_string_case = cases
+        .iter()
+        .find(|case| case["id"] == "large_string_argument")
+        .expect("large string case");
+    assert_eq!(large_string_case["execution"]["status"], "executable");
+    assert_eq!(
+        large_string_case["execution"]["runner"],
+        "provider_tool_probe"
+    );
+    assert_eq!(
+        large_string_case["execution"]["command"],
+        serde_json::json!([
+            "harn",
+            "provider",
+            "tool-probe",
+            "anthropic",
+            "--model",
+            "claude-sonnet-5",
+            "--mode",
+            "both",
+            "--case",
+            "large_string_argument",
             "--repeat",
             "1",
             "--timeout-secs",
@@ -769,7 +800,7 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
         harn.stdout
     );
     assert!(
-        harn.stdout.contains("executable=1 missing_runner=7"),
+        harn.stdout.contains("executable=2 missing_runner=6"),
         "execution summary missing from human output: {}",
         harn.stdout
     );

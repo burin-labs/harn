@@ -13,7 +13,8 @@ use serde::Serialize;
 use crate::provider_catalog::{CatalogModel, CatalogProvider};
 
 use super::tool_conformance::{
-    ToolConformanceCase, ToolConformanceReport, ToolProbeClassification, ToolProbeFallbackMode,
+    ToolConformanceCase, ToolConformanceReport, ToolProbeCase, ToolProbeClassification,
+    ToolProbeFallbackMode,
 };
 
 pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 3;
@@ -493,7 +494,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["tool_choice", "json_arguments", "wire_dialect"],
-            execution: executable_tool_probe_case(provider, model_id),
+            execution: executable_tool_probe_case(
+                provider,
+                model_id,
+                ToolProbeCase::SingleToolCall,
+            ),
         },
         ToolScorecardPlanCase {
             id: "parallel_tool_calls",
@@ -513,7 +518,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["byte_fidelity", "escaping", "unicode"],
-            execution: missing_case_runner("provider_tool_probe_uses_fixed_marker_only"),
+            execution: executable_tool_probe_case(
+                provider,
+                model_id,
+                ToolProbeCase::LargeStringArgument,
+            ),
         },
         ToolScorecardPlanCase {
             id: "tool_result_followup",
@@ -570,12 +579,23 @@ fn fixed_micro_cases_for_route(
     ]
 }
 
-fn executable_tool_probe_case(provider: &str, model: &str) -> ToolScorecardPlanCaseExecution {
+fn executable_tool_probe_case(
+    provider: &str,
+    model: &str,
+    probe_case: ToolProbeCase,
+) -> ToolScorecardPlanCaseExecution {
+    let probe_case_id = probe_case.as_str();
     ToolScorecardPlanCaseExecution {
         status: "executable",
         runner: "provider_tool_probe",
-        reason:
-            "harn provider tool-probe executes the single echo_marker tool-call transport probe",
+        reason: match probe_case {
+            ToolProbeCase::SingleToolCall => {
+                "harn provider tool-probe executes the single echo_marker tool-call transport probe"
+            }
+            ToolProbeCase::LargeStringArgument => {
+                "harn provider tool-probe executes the large string argument byte-fidelity probe"
+            }
+        },
         command: Some(vec![
             "harn".to_string(),
             "provider".to_string(),
@@ -585,6 +605,8 @@ fn executable_tool_probe_case(provider: &str, model: &str) -> ToolScorecardPlanC
             model.to_string(),
             "--mode".to_string(),
             "both".to_string(),
+            "--case".to_string(),
+            probe_case_id.to_string(),
             "--repeat".to_string(),
             "1".to_string(),
             "--timeout-secs".to_string(),
@@ -592,9 +614,10 @@ fn executable_tool_probe_case(provider: &str, model: &str) -> ToolScorecardPlanC
             "--json".to_string(),
         ]),
         artifact_hint: Some(format!(
-            "tool-probe-{}-{}-single_tool_call.json",
+            "tool-probe-{}-{}-{}.json",
             artifact_segment(provider),
-            artifact_segment(model)
+            artifact_segment(model),
+            probe_case_id
         )),
     }
 }
@@ -1140,6 +1163,35 @@ mod tests {
                 "claude-sonnet-5".to_string(),
                 "--mode".to_string(),
                 "both".to_string(),
+                "--case".to_string(),
+                "single_tool_call".to_string(),
+                "--repeat".to_string(),
+                "1".to_string(),
+                "--timeout-secs".to_string(),
+                "120".to_string(),
+                "--json".to_string(),
+            ]
+        );
+        let large_string_case = plan.routes[0]
+            .cases
+            .iter()
+            .find(|case| case.id == "large_string_argument")
+            .expect("large string case");
+        assert_eq!(large_string_case.execution.status, "executable");
+        assert_eq!(large_string_case.execution.runner, "provider_tool_probe");
+        assert_eq!(
+            large_string_case.execution.command.as_ref().unwrap(),
+            &vec![
+                "harn".to_string(),
+                "provider".to_string(),
+                "tool-probe".to_string(),
+                "anthropic".to_string(),
+                "--model".to_string(),
+                "claude-sonnet-5".to_string(),
+                "--mode".to_string(),
+                "both".to_string(),
+                "--case".to_string(),
+                "large_string_argument".to_string(),
                 "--repeat".to_string(),
                 "1".to_string(),
                 "--timeout-secs".to_string(),
