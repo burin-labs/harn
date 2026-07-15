@@ -29,6 +29,7 @@ mod from_host;
 mod host_injection;
 mod registry;
 mod sinks;
+mod terminal;
 mod tool;
 mod worker;
 
@@ -50,6 +51,7 @@ pub use registry::{
     session_has_external_sink, unregister_wildcard_sink, WildcardSinkHandle,
 };
 pub use sinks::{AgentEventSink, EventLogSink, JsonlEventSink, MultiSink, PersistedAgentEvent};
+pub use terminal::{classify_agent_terminal, AgentTerminalKind, AgentTerminalOutcome};
 pub use tool::{
     DenialGate, ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
 };
