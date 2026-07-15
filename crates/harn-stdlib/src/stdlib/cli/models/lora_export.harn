@@ -38,6 +38,7 @@ fn __render_human(harness: Harness, report: dict) {
   const batch_ready = safe_dict(evidence["batch_ready"])
   const output = safe_dict(report["output"])
   const stats = safe_dict(report["stats"])
+  const behavior_strata = safe_dict(stats["behavior_strata"])
   const warnings = safe_list(report["warnings"])
   const errors = safe_list(report["errors"])
   const base_id = safe_string(base["id"], "")
@@ -132,6 +133,13 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_int_string(stats["tool_calls"], "0")
       + " tool_results="
       + safe_int_string(stats["tool_results"], "0"),
+  )
+  harness.stdio
+    .println(
+    "  behavior strata: source="
+      + json_stringify(safe_dict(behavior_strata["source"]))
+      + " emitted="
+      + json_stringify(safe_dict(behavior_strata["emitted"])),
   )
   print_list(harness, "warnings", warnings)
   print_list(harness, "errors", errors)

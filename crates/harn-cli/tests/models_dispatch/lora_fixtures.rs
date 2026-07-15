@@ -190,13 +190,14 @@ pub(super) fn write_lora_probe_summary_with_trials(
 
 pub(super) fn write_lora_corpus_fixture() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let record = serde_json::json!({
+    let sequential = serde_json::json!({
         "id": "tiny-read",
         "language": "rust",
         "task_type": "explain",
         "eval_name": "tiny-read",
         "model": "manual",
         "metadata": {
+            "behavior_class": "valid_tool_call",
             "verification": "PASS"
         },
         "messages": [
@@ -222,6 +223,89 @@ pub(super) fn write_lora_corpus_fixture() -> tempfile::TempDir {
             }
         ]
     });
+    let parallel = serde_json::json!({
+        "id": "parallel-results",
+        "language": "rust",
+        "task_type": "test",
+        "eval_name": "parallel-results",
+        "model": "manual",
+        "metadata": {
+            "behavior_classes": ["valid_tool_call", "parallel_tool_call"],
+            "tool_format": "json",
+            "verification": "PASS"
+        },
+        "messages": [
+            {"role": "system", "content": "Available tools: read, run"},
+            {"role": "user", "content": "Inspect and test src/lib.rs."},
+            {
+                "role": "assistant",
+                "content": "<tool_call>\n{\"name\":\"read\",\"arguments\":{\"path\":\"src/lib.rs\"}}\n</tool_call>\n\n<tool_call>\n{\"name\":\"run\",\"arguments\":{\"command\":\"cargo test\"}}\n</tool_call>\n"
+            },
+            {
+                "role": "user",
+                "content": "[result of read]\npub fn add() {}\n[end of read result]\n\n[result of run]\n1 passed\n[end of run result]"
+            },
+            {
+                "role": "assistant",
+                "content": "The file was inspected and tests pass.\n<done>##DONE##</done>"
+            }
+        ]
+    });
+    let no_tool = serde_json::json!({
+        "id": "direct-answer",
+        "language": "rust",
+        "task_type": "question",
+        "eval_name": "direct-answer",
+        "model": "manual",
+        "metadata": {
+            "behavior_class": "no_tool_answer",
+            "tool_format": "json",
+            "verification": "PASS"
+        },
+        "messages": [
+            {"role": "system", "content": "Available tools: read, run"},
+            {"role": "user", "content": "Reply with the number of letters in rust."},
+            {"role": "assistant", "content": "The word rust has 4 letters.\n<done>##DONE##</done>"}
+        ]
+    });
+    let unavailable = serde_json::json!({
+        "id": "unavailable-tool",
+        "language": "rust",
+        "task_type": "repair",
+        "eval_name": "unavailable-tool",
+        "model": "manual",
+        "metadata": {
+            "behavior_class": "unavailable_tool_repair",
+            "tool_format": "json",
+            "verification": "PASS"
+        },
+        "messages": [
+            {"role": "system", "content": "Available tools: read, run"},
+            {"role": "user", "content": "Use web_search to check docs."},
+            {"role": "assistant", "content": "web_search is not available in this session; I will use the workspace tools instead if needed.\n<done>##DONE##</done>"}
+        ]
+    });
+    let continuation = serde_json::json!({
+        "id": "multi-turn",
+        "language": "rust",
+        "task_type": "test",
+        "eval_name": "multi-turn",
+        "model": "manual",
+        "metadata": {
+            "behavior_classes": ["valid_tool_call", "multi_turn_continuation"],
+            "tool_format": "json",
+            "verification": "PASS"
+        },
+        "messages": [
+            {"role": "system", "content": "Available tools: read, run"},
+            {"role": "user", "content": "Inspect then run tests."},
+            {"role": "assistant", "content": "<tool_call>\n{\"name\":\"read\",\"arguments\":{\"path\":\"src/lib.rs\"}}\n</tool_call>\n"},
+            {"role": "user", "content": "[result of read]\npub fn add() {}\n[end of read result]"},
+            {"role": "assistant", "content": "<tool_call>\n{\"name\":\"run\",\"arguments\":{\"command\":\"cargo test\"}}\n</tool_call>\n"},
+            {"role": "user", "content": "[result of run]\n1 passed\n[end of run result]"},
+            {"role": "assistant", "content": "Tests pass.\n<done>##DONE##</done>"}
+        ]
+    });
     let context_row = serde_json::json!({
         "id": "source-context",
         "eval_name": "source-context",
@@ -232,7 +316,15 @@ pub(super) fn write_lora_corpus_fixture() -> tempfile::TempDir {
     });
     fs::write(
         tmp.path().join("burin-tool-calling-corpus.jsonl"),
-        serde_json::to_string(&record).expect("serialize record")
+        serde_json::to_string(&sequential).expect("serialize sequential")
+            + "\n"
+            + &serde_json::to_string(&parallel).expect("serialize parallel")
+            + "\n"
+            + &serde_json::to_string(&no_tool).expect("serialize no-tool")
+            + "\n"
+            + &serde_json::to_string(&unavailable).expect("serialize unavailable")
+            + "\n"
+            + &serde_json::to_string(&continuation).expect("serialize continuation")
             + "\n"
             + &serde_json::to_string(&context_row).expect("serialize context row")
             + "\n",
@@ -241,34 +333,29 @@ pub(super) fn write_lora_corpus_fixture() -> tempfile::TempDir {
     tmp
 }
 
-pub(super) fn write_lora_grouped_result_corpus_fixture() -> tempfile::TempDir {
+pub(super) fn write_lora_generic_placeholder_corpus_fixture() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().expect("tempdir");
     let record = serde_json::json!({
-        "id": "grouped-results",
+        "id": "generic-placeholder-results",
         "language": "rust",
         "task_type": "test",
-        "eval_name": "grouped-results",
+        "eval_name": "generic-placeholder-results",
         "model": "manual",
         "metadata": {
+            "behavior_classes": ["valid_tool_call", "parallel_tool_call"],
             "tool_format": "json",
             "verification": "PASS"
         },
         "messages": [
-            {
-                "role": "system",
-                "content": "Available tools: read, run"
-            },
-            {
-                "role": "user",
-                "content": "Inspect and test src/lib.rs."
-            },
+            {"role": "system", "content": "Available tools: read, run"},
+            {"role": "user", "content": "Inspect and test src/lib.rs."},
             {
                 "role": "assistant",
                 "content": "<tool_call>\n{\"name\":\"read\",\"arguments\":{\"path\":\"src/lib.rs\"}}\n</tool_call>\n\n<tool_call>\n{\"name\":\"run\",\"arguments\":{\"command\":\"cargo test\"}}\n</tool_call>\n"
             },
             {
                 "role": "user",
-                "content": "[result of read src/lib.rs]\npub fn add() {}\n[end of read result]\n\n[result of run]\n1 passed\n[end of run result]"
+                "content": "[tool results applied; continuing]"
             }
         ]
     });
