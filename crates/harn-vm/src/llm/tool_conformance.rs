@@ -21,7 +21,7 @@ use request::{probe_request_body, validate_probe_request_body};
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
 pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 3;
-pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 2;
+pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 3;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
 pub const DEFAULT_TOOL_PROBE_MARKER: &str = "harn_tool_probe_marker";
 
@@ -129,6 +129,15 @@ impl ToolProbeCase {
         ]
     }
 
+    pub fn is_live_applicable(self, provider: &str, model: &str) -> bool {
+        match self {
+            Self::SignedThinkingToolResultFollowup => {
+                crate::llm::tool_scorecard::signed_thinking_tool_history_supported(provider, model)
+            }
+            _ => true,
+        }
+    }
+
     fn expected_value(self, marker: &str) -> String {
         match self {
             Self::SingleToolCall => marker.to_string(),
@@ -205,11 +214,14 @@ pub struct ToolConformanceRequestAuditReport {
     pub request_count: usize,
     pub validation_pass_count: usize,
     pub validation_fail_count: usize,
+    pub not_applicable_count: usize,
     pub dialect_counts: BTreeMap<String, usize>,
     pub provider_counts: BTreeMap<String, usize>,
     pub routes: Vec<ToolConformanceRequestAuditRoute>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<ToolConformanceRequestAuditFailure>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_applicable: Vec<ToolConformanceRequestAuditNotApplicable>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,6 +231,7 @@ pub struct ToolConformanceRequestAuditRoute {
     pub request_count: usize,
     pub validation_pass_count: usize,
     pub validation_fail_count: usize,
+    pub not_applicable_count: usize,
     pub dialect_counts: BTreeMap<String, usize>,
 }
 
@@ -233,11 +246,23 @@ pub struct ToolConformanceRequestAuditFailure {
     pub issues: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestAuditNotApplicable {
+    pub provider: String,
+    pub model: String,
+    pub probe_case: String,
+    pub request_profile: String,
+    pub mode: String,
+    pub dialect: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolConformanceRequestValidationStatus {
     Pass,
     Fail,
+    NotApplicable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -562,10 +587,12 @@ pub fn tool_conformance_request_catalog_audit(
     let mut request_count = 0usize;
     let mut validation_pass_count = 0usize;
     let mut validation_fail_count = 0usize;
+    let mut not_applicable_count = 0usize;
     let mut dialect_counts = BTreeMap::new();
     let mut provider_counts = BTreeMap::new();
     let mut routes = Vec::new();
     let mut failures = Vec::new();
+    let mut not_applicable = Vec::new();
 
     for (model_id, model) in &entries {
         let mut route = ToolConformanceRequestAuditRoute {
@@ -574,6 +601,7 @@ pub fn tool_conformance_request_catalog_audit(
             request_count: 0,
             validation_pass_count: 0,
             validation_fail_count: 0,
+            not_applicable_count: 0,
             dialect_counts: BTreeMap::new(),
         };
         for probe_case in &probe_cases {
@@ -613,6 +641,31 @@ pub fn tool_conformance_request_catalog_audit(
                                             dialect,
                                             issues: request.validation.issues,
                                         });
+                                    }
+                                    ToolConformanceRequestValidationStatus::NotApplicable => {
+                                        route.not_applicable_count += 1;
+                                        not_applicable_count += 1;
+                                        not_applicable.push(
+                                            ToolConformanceRequestAuditNotApplicable {
+                                                provider: model.provider.clone(),
+                                                model: model_id.clone(),
+                                                probe_case: probe_case.as_str().to_string(),
+                                                request_profile: request_profile
+                                                    .as_str()
+                                                    .to_string(),
+                                                mode: mode.as_str().to_string(),
+                                                dialect,
+                                                reason: request
+                                                    .validation
+                                                    .issues
+                                                    .first()
+                                                    .cloned()
+                                                    .unwrap_or_else(|| {
+                                                        "probe case is not applicable to this route"
+                                                            .to_string()
+                                                    }),
+                                            },
+                                        );
                                     }
                                 }
                             }
@@ -656,10 +709,12 @@ pub fn tool_conformance_request_catalog_audit(
         request_count,
         validation_pass_count,
         validation_fail_count,
+        not_applicable_count,
         dialect_counts,
         provider_counts,
         routes,
         failures,
+        not_applicable,
     }
 }
 

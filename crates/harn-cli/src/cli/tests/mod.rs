@@ -5,7 +5,9 @@ pub(crate) use clap::{CommandFactory, Parser};
 pub(crate) use std::path::PathBuf;
 pub(crate) use std::time::Duration as StdDuration;
 
-pub(crate) use super::provider::{ProviderToolProbeCaseArg, ProviderToolProbeModeArg};
+pub(crate) use super::provider::{
+    ProviderDispatchAuditVariantArg, ProviderToolProbeCaseArg, ProviderToolProbeModeArg,
+};
 pub(crate) use super::{
     CanonCommand, CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
     ConnectorCommand, CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand,
@@ -24,6 +26,7 @@ mod parse_cmds;
 mod parse_core;
 mod parse_orchestration;
 mod parse_packaging;
+mod parse_provider_dispatch_audit;
 mod parse_provider_tool_probe_audit;
 mod parse_providers;
 mod parse_serve;

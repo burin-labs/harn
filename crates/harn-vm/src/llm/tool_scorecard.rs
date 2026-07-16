@@ -623,7 +623,7 @@ fn fixed_micro_cases_for_route(
     ]
 }
 
-fn signed_thinking_tool_history_supported(provider: &str, model: &str) -> bool {
+pub(crate) fn signed_thinking_tool_history_supported(provider: &str, model: &str) -> bool {
     let caps = crate::llm::capabilities::lookup(provider, model);
     let thinking_capable = !caps.thinking_modes.is_empty()
         || caps.interleaved_thinking_supported

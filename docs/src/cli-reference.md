@@ -1265,6 +1265,83 @@ harn provider capabilities audit --json
 harn provider capabilities promote-from-eval .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml
 ```
 
+## harn provider dispatch-explain
+
+Explain the resolved provider dispatch configuration for one provider/model
+route without making a network call. This is useful when checking why a route
+uses a specific wire format, tool-call format, base URL host, or thinking-mode
+setting.
+
+```bash
+harn provider dispatch-explain anthropic claude-sonnet-5 --json
+harn provider dispatch-explain openrouter anthropic/claude-sonnet-4.5 --thinking --tool-format native
+```
+
+## harn provider dispatch-audit
+
+Audit deterministic dispatch resolution across catalog routes and
+tool-format/thinking variants without making provider calls. The default matrix
+checks `default`, `thinking`, `native`, `text`, and `json` variants for every
+catalog route and emits a JSON report suitable for CI or provider catalog
+review. JSON output uses `schema_version: 3` and includes the audited catalog's
+Blake3 hash plus provider, model, and route counts so downstream live-probe
+results can be tied to the exact catalog universe they measured.
+It also reports `unrouted_providers`: catalog providers with zero route rows,
+including a typed reason, so credentialed or configured providers that cannot
+enter route-level live probes are visible as catalog-quality work rather than
+silently absent from the empirical matrix.
+
+Pass `--include-tool-probe-plan` to include a post-freeze live-probe execution
+manifest for the selected routes. The manifest uses stable IDs tied to the
+catalog hash and structured `argv` arrays rather than shell strings, so
+automation can run the probes without re-parsing command text. The plan starts
+with `readiness_commands`: one `harn provider ready --model ... --json`
+preflight per selected route, with its own stable `id`, `argv`, and
+`output_path`. Tool-probe commands then carry an explicit `request_profile`, a
+runnable `argv`, and an `output_path` under the same catalog-hash-derived
+`output_dir` so live receipts can be resumed and tied back to the exact audit
+plan. Readiness and tool-probe commands both carry catalogued `secret_envs` key
+names when the route accepts credentials through one or more environment
+variables; secret values are never included. The filenames include the command id
+prefix as well as readable route/case slugs so lossy path sanitization cannot
+collide distinct probe commands; override the directory with
+`--tool-probe-output-dir` when staging a named run. The manifest also includes a
+`matrix` summary; `provider_model_count` and `route_count` are the empirical
+provider/model breadth, while bare `model_count` is only the unique model-name
+count, and `readiness_command_count` is the expected preflight receipt count.
+The manifest also lists `live_request_profiles` and
+`excluded_request_profiles`: live `tool-probe` commands intentionally use
+`catalog_default`, while
+`parameter_edges` remains covered by offline `provider tool-probe-audit` request
+validation because non-default request profiles are dry-run only. The
+default plan also records `excluded_cases`; it covers the broad live tool-probe
+cases except signed-thinking by default. Add
+`--tool-probe-case signed_thinking_tool_result_followup` when auditing that
+provider-specific dialect explicitly. Explicit signed-thinking cases are still
+filtered per route; unsupported routes are reported under
+`not_applicable_commands` with the skipped route, case, request profile, and
+mode instead of emitted as invalid live commands. A route can therefore have a
+readiness command and zero tool-probe commands when the selected live case is
+not applicable to that route.
+
+`--route provider:model` is fail-closed: malformed route filters and well-formed
+filters that match no catalog route both produce a non-zero audit report, so a
+typo cannot silently yield an empty live-probe plan.
+`--provider` filters are fail-closed too: unknown provider ids and providers
+with zero routing routes produce typed failures instead of a generic empty
+report. `--model` and `--capability` are repeatable route filters for focused
+provider/model/capability sweeps. They also fail closed when the requested model
+or capability matches no selected catalog route.
+
+```bash
+harn provider dispatch-audit
+harn provider dispatch-audit --provider anthropic --provider gemini
+harn provider dispatch-audit --provider anthropic --model claude-sonnet-5 --capability tools
+harn provider dispatch-audit --route anthropic:claude-sonnet-5 --variant native
+harn provider dispatch-audit --provider anthropic --include-tool-probe-plan --tool-probe-repeat 3
+harn provider dispatch-audit --provider openrouter --include-tool-probe-plan --tool-probe-output-dir .harn-runs/provider-live-probes/openrouter-smoke
+```
+
 ## harn provider probe
 
 Snapshot a provider's readiness and local loaded-model state as JSON. For
