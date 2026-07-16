@@ -237,7 +237,8 @@ run_docs_audit() {
 run_generated_audit() {
   time_phase "language-spec drift" make check-language-spec
   time_phase "highlight drift" make check-highlight
-  time_phase "protocol artifact drift" make check-protocol-artifacts
+  time_phase "protocol artifact drift" \
+    make check-protocol-artifacts HARN_PROTOCOL_ARTIFACT_VERSION="$(current_version)"
   time_phase "connector schema drift" make check-connector-schemas
   time_phase "session bundle schema drift" make check-session-bundle-schema
   time_phase "run-view fixture drift" make check-run-view-fixtures
