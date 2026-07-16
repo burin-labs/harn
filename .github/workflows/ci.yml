@@ -651,17 +651,6 @@ jobs:
           set -euo pipefail
           run_windows=false
 
-          # Single source of truth for the Windows-relevant path set, shared by
-          # the pull_request and push code paths so they can never drift.
-          # harn-hostlib is the deterministic-tools surface: it emits paths,
-          # spawns processes, and hits the filesystem, so it carries
-          # Windows-specific separator / path / process behavior. #3914 shipped
-          # a Windows-only path-separator break here that skipped this gate
-          # (hostlib was absent from the pattern) and only surfaced on the
-          # main-push backstop. Route the whole crate — the windows job's
-          # nextest filter already builds+tests `package(harn-hostlib)`.
-          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|crates/harn-terminal/.*|\.github/release-runner-policy\.json|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_runner_matrix|release_smoke|smoke_installed_binary)\.sh)$'
-
           # Pick the diff base per event. push diffs against the previous tip;
           # pull_request diffs against the PR base. merge_group leaves
           # run_windows=false (the merge queue never path-gates the platform
@@ -685,12 +674,24 @@ jobs:
               echo "windows: git diff against $diff_base failed; running Windows smoke defensively."
               run_windows=true
             else
+              ci_diff="$RUNNER_TEMP/windows-ci-workflow.diff"
+              : > "$ci_diff"
+              if grep -Fxq ".github/workflows/ci.yml" "$RUNNER_TEMP/windows-changed-files.txt"; then
+                if ! git diff --unified=0 "$diff_base" HEAD -- .github/workflows/ci.yml > "$ci_diff" 2>/dev/null; then
+                  echo "windows: ci.yml diff against $diff_base failed; running Windows smoke defensively."
+                  run_windows=true
+                fi
+              fi
               cat "$RUNNER_TEMP/windows-changed-files.txt"
-              if [[ ( "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ) || "$EVENT_NAME" == "push" ]] \
-                && [[ "$(./scripts/ci_release_metadata_only.sh "$RUNNER_TEMP/windows-changed-files.txt")" == "true" ]]; then
-                echo "windows: release metadata-only $EVENT_NAME; skipping Windows smoke."
-              elif grep -E -q "$windows_pattern" "$RUNNER_TEMP/windows-changed-files.txt"; then
-                run_windows=true
+              if [[ "$run_windows" != "true" ]]; then
+                run_windows="$(
+                  ./scripts/native_platform_ci_plan.sh \
+                    --platform windows \
+                    --event "$EVENT_NAME" \
+                    --head-ref "$PR_HEAD_REF" \
+                    --changed-files "$RUNNER_TEMP/windows-changed-files.txt" \
+                    --ci-diff "$ci_diff"
+                )"
               fi
             fi
           fi
@@ -886,18 +887,6 @@ jobs:
           set -euo pipefail
           run_macos=false
 
-          # Single source of truth for the macOS-relevant path set, shared by
-          # the pull_request and push code paths so they can never drift.
-          # Route on the files that carry `#[cfg(target_os = "macos")]`
-          # (or `cfg(any(macos, windows))`) code. Linux PR lanes never
-          # compile these paths, so a stray unused import / dead_code /
-          # deprecation only surfaces on a Mac — historically at release
-          # `prepare` time under `-D warnings`. Keep this list in sync with
-          # `grep -rl 'target_os = "macos"' crates/` plus the workflow
-          # itself and the Cargo graph roots. When in doubt, the daily
-          # macos-nightly.yml backstop covers the rest.
-          macos_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-terminal/.*|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/release-runner-policy\.json|\.github/workflows/(ci|macos-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_runner_matrix|release_smoke|smoke_installed_binary)\.sh)$'
-
           # Pick the diff base per event. push diffs against the previous tip;
           # pull_request diffs against the PR base. merge_group leaves
           # run_macos=false (the merge queue never path-gates the platform plan
@@ -921,12 +910,24 @@ jobs:
               echo "macos: git diff against $diff_base failed; running macOS check defensively."
               run_macos=true
             else
+              ci_diff="$RUNNER_TEMP/macos-ci-workflow.diff"
+              : > "$ci_diff"
+              if grep -Fxq ".github/workflows/ci.yml" "$RUNNER_TEMP/macos-changed-files.txt"; then
+                if ! git diff --unified=0 "$diff_base" HEAD -- .github/workflows/ci.yml > "$ci_diff" 2>/dev/null; then
+                  echo "macos: ci.yml diff against $diff_base failed; running macOS check defensively."
+                  run_macos=true
+                fi
+              fi
               cat "$RUNNER_TEMP/macos-changed-files.txt"
-              if [[ ( "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ) || "$EVENT_NAME" == "push" ]] \
-                && [[ "$(./scripts/ci_release_metadata_only.sh "$RUNNER_TEMP/macos-changed-files.txt")" == "true" ]]; then
-                echo "macos: release metadata-only $EVENT_NAME; skipping macOS check."
-              elif grep -E -q "$macos_pattern" "$RUNNER_TEMP/macos-changed-files.txt"; then
-                run_macos=true
+              if [[ "$run_macos" != "true" ]]; then
+                run_macos="$(
+                  ./scripts/native_platform_ci_plan.sh \
+                    --platform macos \
+                    --event "$EVENT_NAME" \
+                    --head-ref "$PR_HEAD_REF" \
+                    --changed-files "$RUNNER_TEMP/macos-changed-files.txt" \
+                    --ci-diff "$ci_diff"
+                )"
               fi
             fi
           fi

@@ -341,6 +341,7 @@ test-agent-scripts:
 test-pr-gate-scripts:
 	./scripts/tests/ci_docs_only_test.sh
 	./scripts/tests/ci_release_metadata_only_test.sh
+	./scripts/tests/native_platform_ci_plan_test.sh
 	./scripts/tests/ci_merge_group_proof_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
