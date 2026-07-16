@@ -9,13 +9,136 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.19
 
 ### Added
 
 - Eval-pack statistics rows now retain case metadata, and `std/eval/stats`
   exposes `axis_breakdown` for deterministic language, task, platform, and
   other pack-defined breakdowns with explicit unclassified coverage.
+
+- Added coverage for the mock provider's native tool-call path: unit tests that
+  the CLI mock install/match/build path and the result-to-assistant-envelope path
+  surface a fixture's native `tool_calls`, plus a conformance test that a native
+  `tool_format` agent loop dispatches a scripted native tool call.
+- Add `harn serve test`, a versioned stdio JSON-RPC worker that reuses
+  prepared test artifacts across caller-owned runs while keeping test runtime
+  state isolated.
+- Extend `harn provider tool-probe` and provider scorecard plans with executable
+  no-tool answer, unavailable-tool repair, and done-sentinel fixed cases.
+- Add a provider tool-probe campaign mode that derives route matrices from the
+  runtime provider catalog for broad post-cooldown catalog audits.
+- Added an executable provider tool-probe case for parallel tool calls.
+- **Provider tool-probe audits now cover request profiles (#4192).** `harn
+  provider tool-probe-audit` validates both catalog-default and
+  parameter-edge request shapes offline, and `harn provider tool-probe
+  --dry-run-request` can render a selected profile without making a provider
+  call.
+- Add an offline provider scorecard probe for signed thinking/tool-result history replay.
+
+### Changed
+
+- CLI builds now embed committed, fingerprinted standard-library bytecode artifacts
+  instead of compiling the Harn VM a second time in the Cargo build-script graph.
+- Move VM benchmark startup timing from embedded Python to Harn.
+- **Reminder providers now report and control per-iteration reminder bytes
+  (#4732).** Reminder injection now emits byte/hash receipts, compresses
+  unchanged repeat reminders to a small delta pointer, and skips lower-priority
+  reminder bodies once the configured per-iteration reminder budget is spent.
+- **Reminder lifecycle telemetry now emits one per-request byte summary
+  (#4732).** `transcript.reminder.iteration_summary` rolls reminder counts and
+  body/rendered bytes up by tag, source, and rendered role.
+- **User test suites now reuse prepared module bytecode across isolated cases
+  (#4801).** Fresh VMs still replay module initialization into independent
+  closures and state, while repeated imports skip deserialization and bytecode
+  hydration through a bounded, explicitly scoped cache.
+- Removed the Python dependency from the Cargo environment wrapper used by
+  local Make targets.
+- Move packaged Rust include-path validation from embedded Python to a Harn helper.
+- Keep immutable prepared module artifacts warm across `harn test --watch`
+  reruns while preserving fresh VM and module state for every test case.
+- Provider tool-probe campaign dry runs now report executable runner gaps and emit concrete command recipes for
+  provider-tool-probe cells.
+- Unified provider catalog artifact generation behind `harn provider catalog generate`, deriving checked-in TOML and
+  schema artifacts from one typed source graph.
+- Provider tool-probe dry-run reports now include provider-aware request-shape validation receipts.
+- `harn provider tool-scorecard --plan-from-catalog` now emits executable
+  `provider tool-probe --case large_string_argument` recipes for large string
+  byte-fidelity rows.
+- Added `harn provider tool-probe-audit` for offline, in-process validation of tool-probe
+  request shapes across the full provider catalog.
+- `harn provider tool-probe` can now render offline request-body receipts for
+  fixed probe cases, including a multiline large-string argument case.
+- Disclose the `testbench-wasi` feature requirement in `harn test-bench run --help` for `--process-wasi`.
+- `harn provider tool-scorecard --plan-from-catalog` now reports per-case
+  execution metadata, including concrete `harn provider tool-probe` command
+  recipes for rows that are executable today and typed missing-runner reasons for
+  remaining scorecard cases.
+
+### Fixed
+
+- Moved the flake-detection nextest filter policy from embedded Python into a Harn helper.
+- LoRA corpus export and preflight now fail closed unless typed behavior strata
+  cover tool-call, no-tool, unavailable-tool-repair, parallel-call, and multi-turn
+  continuation examples, preventing overcalling-only adapter datasets.
+- **AST function body extraction now returns precise body spans and typed
+  fallbacks (#4748).** Same-line expression bodies are sliced by exact AST node
+  range with column coordinates, and declarations whose bodies cannot be
+  isolated return a `replace_range` retarget receipt instead of masquerading as
+  missing symbols.
+- `harn fmt` no longer moves a comment out of the block it was written in. A
+  comment inside a block used as an expression — a `try`/`catch` bound to a
+  value, an `if`/`else` used as a value, a closure body such as
+  `.map({ item -> ... })` — was lifted out of the enclosing function and
+  re-attached to the next top-level declaration, where it then documented
+  unrelated code. Comments above a `match` arm now stay above the arm as well.
+- `harn fmt` no longer moves a comment written after the last statement of a
+  block out of that block. Nothing claimed such a comment, so it was flushed
+  onto the next top-level declaration, where it silently described unrelated
+  code. This affected ordinary function and pipeline bodies, not just blocks
+  used as expressions. A body whose block ends where its node ends — a
+  function, a loop, a `scope`, an `else`, a `finally` — now keeps its trailing
+  comment. A body with a sibling after it (a `then` before an `else`, a `try`
+  before its `catch`) still loses one to that sibling; the AST records no span
+  for an individual block, so there is no `} else {` line to bound the flush
+  with. That case is tracked in #4806.
+- Restored real-process orchestrator startup, shutdown, crash, and
+  stranded-envelope recovery contracts to the slow E2E suite, and replaced
+  ignored Merge Captain subprocess tests with typed in-process command coverage.
+- Import resolution no longer acquires a package generation snapshot before
+  checking whether the import is a standard-library or relative-path import. Those
+  two shapes cover the overwhelming majority of imports and can never be answered
+  by a package, but each was paying an ancestor walk, a file lock and a pointer
+  parse whose result was then discarded. Manifest-heavy suites were the worst hit:
+  per-test module setup ran roughly 5x its former cost, and downstream test runs
+  with a per-test timeout could exceed it purely on this overhead.
+- **Claude dev setup hook JSON handling now runs through Harn (#4696).** The
+  startup hook no longer embeds Python for hook input parsing or SessionStart
+  context rendering, while avoiding implicit Harn rebuilds during bootstrap.
+- Removed embedded Python from Harn script launchers by routing worktree
+  binary resolution through the shared Cargo-backed Harn resolver.
+- Move crate-package verification metadata selection from embedded Python to Harn.
+- Move release publish metadata planning out of embedded Python and into a typed
+  Harn helper used by `scripts/publish.sh`.
+- `harn check` no longer reports `HARN-NAM-001` (unresolved value identifier) for
+  the ambient globals the ACP session executor binds before running a pipeline
+  (`prompt`, `prompt_content`, `prompt_messages`, `cwd`, `mcp`). The type
+  checker's ambient-root whitelist and the executor's global bindings now derive
+  from one source of truth (`harn_parser::acp_ambient_globals`), so a global the
+  executor injects can never be one the checker rejects.
+- Run ignored Harn CLI binary-surface tests in the slow E2E suite.
+- Keep `harn doctor --no-network` as an offline-compatible no-op.
+- MCP stdio servers now accept standard `Content-Length` framed JSON-RPC while preserving newline-delimited clients.
+- Declare the preferred native tool format for the Ollama Llama 3.2 catalog route.
+- Avoid compiling Rust during pre-push for provider-catalog data-only changes.
+- Keep release protocol-artifact audits pinned to the bumped workspace version when reusing the pre-bump Harn binary.
+- Release preparation now regenerates and audits CLI AOT artifacts after version
+  bumps, preventing stale generated bytecode manifests from failing release binary
+  builds.
+- Routing chains now skip credentialless links and continue to later configured providers instead of
+  failing during option extraction.
+- Fixed supervisor shutdown so `supervisor_stop` does not leave not-yet-started
+  child tasks in a pending state under load.
 
 ## v0.10.18
 
