@@ -59,6 +59,7 @@ impl EventRedactor for IdentityClobberingRedactor {
 #[derive(Clone)]
 struct SwitchableRedactor {
     enabled: Arc<AtomicBool>,
+    clobber_identity: bool,
 }
 
 impl EventRedactor for SwitchableRedactor {
@@ -75,7 +76,11 @@ impl EventRedactor for SwitchableRedactor {
         if !self.enabled.load(Ordering::SeqCst) {
             return headers.clone();
         }
-        TestRedactor.redact_headers(headers)
+        let mut headers = TestRedactor.redact_headers(headers);
+        if self.clobber_identity {
+            headers.insert("run_id".to_string(), "[redacted]".to_string());
+        }
+        headers
     }
 }
 
@@ -914,12 +919,14 @@ async fn redaction_hook_scrubs_payload_on_append() {
 }
 
 #[tokio::test]
-async fn read_reapplies_redaction_to_stored_data_without_clobbering_identity() {
+async fn retrieval_reapplies_redaction_to_stored_data_and_marks_projection() {
     let enabled = Arc::new(AtomicBool::new(false));
     let hooks = StoreHooks {
         redaction: Some(Arc::new(SwitchableRedactor {
             enabled: Arc::clone(&enabled),
+            clobber_identity: false,
         })),
+        event_signer: Some(dummy_signer(9)),
         ..Default::default()
     };
     run_with_hooks(hooks, |store| {
@@ -945,6 +952,9 @@ async fn read_reapplies_redaction_to_stored_data_without_clobbering_identity() {
             let stored = store.append(&meta.id, event).await.expect("append");
             assert_eq!(stored.payload["api_key"], "sensitive");
             assert_eq!(stored.headers["authorization"], "Bearer sensitive");
+            assert!(stored.signed_by.is_some());
+            let raw_snapshot = store.snapshot(&meta.id).await.expect("raw snapshot");
+            store.close(&meta.id).await.expect("close");
 
             enabled.store(true, Ordering::SeqCst);
             let page = store
@@ -955,6 +965,96 @@ async fn read_reapplies_redaction_to_stored_data_without_clobbering_identity() {
             assert_eq!(page.events[0].payload["api_key"], "[redacted]");
             assert_eq!(page.events[0].headers["authorization"], "[redacted]");
             assert_eq!(page.events[0].headers["run_id"], "run-1");
+            assert!(page.events[0].is_redacted_projection());
+            assert_eq!(page.events[0].source_record_hash(), stored.record_hash);
+            assert!(page.events[0].signed_by.is_none());
+            let verify_error = verify_event(&page.events[0], &dummy_signer(9).verifying_key())
+                .expect_err("projection must not authenticate as canonical bytes");
+            assert!(matches!(verify_error, VerifyError::InvalidShape(_)));
+
+            let forked = store
+                .fork(&meta.id, 1, Some("redacted-child".to_string()))
+                .await
+                .expect("fork");
+            let child_page = store
+                .read(&forked.child_session_id, ReadRange::default())
+                .await
+                .expect("read child");
+            assert_eq!(child_page.events[0].payload["api_key"], "[redacted]");
+            assert_eq!(child_page.events[0].headers["authorization"], "[redacted]");
+            assert!(!child_page.events[0].is_redacted_projection());
+            assert!(store
+                .verify(&forked.child_session_id)
+                .await
+                .expect("verify child")
+                .failures
+                .is_empty());
+
+            let replayed_raw = store.replay(&raw_snapshot.id).await.expect("replay raw");
+            assert_eq!(replayed_raw.events[0], page.events[0]);
+
+            let protected_snapshot = store.snapshot(&meta.id).await.expect("protected snapshot");
+            assert_eq!(protected_snapshot.events[0], page.events[0]);
+            let projected_root = chain_root_hash(&protected_snapshot.events);
+            assert_eq!(
+                Some(projected_root.as_str()),
+                protected_snapshot.session.chain_root_hash.as_deref()
+            );
+            let verifying_key = dummy_signer(9).verifying_key();
+            let (signed, failures) = verify_event_chain(
+                &protected_snapshot.events,
+                Some(&verifying_key),
+                Some(&verifying_key),
+            );
+            assert_eq!(signed, 1, "the unchanged receipt remains valid");
+            assert_eq!(failures.len(), 1);
+            assert!(failures[0].1.contains("redacted projection"));
+            let replayed_protected = store
+                .replay(&protected_snapshot.id)
+                .await
+                .expect("replay protected");
+            assert_eq!(replayed_protected.events[0], page.events[0]);
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn read_rejects_a_policy_that_clobbers_stored_identity() {
+    let enabled = Arc::new(AtomicBool::new(false));
+    let hooks = StoreHooks {
+        redaction: Some(Arc::new(SwitchableRedactor {
+            enabled: Arc::clone(&enabled),
+            clobber_identity: true,
+        })),
+        ..Default::default()
+    };
+    run_with_hooks(hooks, |store| {
+        let enabled = Arc::clone(&enabled);
+        async move {
+            enabled.store(false, Ordering::SeqCst);
+            let meta = store
+                .create(CreateSession::default())
+                .await
+                .expect("create");
+            let identity = EventIdentity::new()
+                .with(EventIdentityField::RunId, "run-1")
+                .expect("run id");
+            let event = AppendEvent::new(SessionEventKind::Message, json!({"text": "ok"}))
+                .with_identity(&identity)
+                .expect("stamp identity");
+            store.append(&meta.id, event).await.expect("append");
+
+            enabled.store(true, Ordering::SeqCst);
+            let error = store
+                .read(&meta.id, ReadRange::default())
+                .await
+                .expect_err("identity clobber must fail");
+
+            assert!(matches!(error, StoreError::Backend(_)));
+            assert!(error
+                .to_string()
+                .contains("redaction policy changed producer identity"));
         }
     })
     .await;

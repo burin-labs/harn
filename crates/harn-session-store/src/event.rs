@@ -154,14 +154,15 @@ pub struct StoredEvent {
     pub ts: String,
     /// Hash of the canonical event bytes (sha256), prefixed with the
     /// algorithm. Forms the chain links: each event's hash is folded
-    /// into the next event's `prev_hash`.
+    /// into the next event's `prev_hash`. A confidentiality projection
+    /// uses `redacted:<canonical-source-hash>` and cannot be authenticated
+    /// as the original row.
     pub record_hash: String,
     /// Hash of the previous event's `record_hash`, or `None` for the
     /// genesis event.
     pub prev_hash: Option<String>,
-    /// Detached signature over `record_hash`. `None` until the session
-    /// is closed and the [`crate::signing::SessionSigner`]
-    /// finalises the chain receipt.
+    /// Detached signature over the canonical event or receipt root. Cleared
+    /// when a retrieval hook returns a redacted projection.
     pub signed_by: Option<EventSignature>,
 }
 
@@ -171,6 +172,28 @@ impl StoredEvent {
         &self,
     ) -> Result<crate::identity::EventIdentity, crate::identity::EventIdentityError> {
         crate::identity::EventIdentity::from_headers(&self.headers)
+    }
+
+    /// Whether this event is a confidentiality projection rather than the
+    /// signed canonical row. Projections retain the source hash after the
+    /// `redacted:` prefix but intentionally clear `signed_by`.
+    pub fn is_redacted_projection(&self) -> bool {
+        self.record_hash.starts_with("redacted:")
+    }
+
+    /// Canonical source hash for a redacted projection, or this event's own
+    /// record hash when no projection was required.
+    pub fn source_record_hash(&self) -> &str {
+        self.record_hash
+            .strip_prefix("redacted:")
+            .unwrap_or(&self.record_hash)
+    }
+
+    pub(crate) fn mark_redacted_projection(&mut self) {
+        if !self.is_redacted_projection() {
+            self.record_hash = format!("redacted:{}", self.record_hash);
+        }
+        self.signed_by = None;
     }
 }
 

@@ -11,7 +11,9 @@ use uuid::Uuid;
 
 use super::event::{now_ms_and_rfc3339, AppendEvent, EventId, SessionEventKind, StoredEvent};
 use super::memory_helpers::{meta_for_create, validate_open};
-use super::redaction::{prepare_append_event, redact_stored_events};
+use super::redaction::{
+    prepare_append_event, prepare_stored_events_for_persistence, redact_stored_events,
+};
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
     verify_session_chain,
@@ -285,12 +287,13 @@ impl SessionStore for MemorySessionStore {
         child_meta.closed_at = None;
         child_meta.closed_at_ms = None;
         child_meta.soft_deleted_at_ms = None;
-        let parent_events: Vec<StoredEvent> = parent
+        let mut parent_events: Vec<StoredEvent> = parent
             .events
             .iter()
             .filter(|event| event.event_id <= at_event_id)
             .cloned()
             .collect();
+        prepare_stored_events_for_persistence(&self.hooks, &mut parent_events)?;
         let copied_events = re_anchor_events(&parent_events, &new_id);
         let copied_event_count = copied_events.len();
         child_meta.event_count = copied_event_count;
@@ -359,10 +362,12 @@ impl SessionStore for MemorySessionStore {
             .get(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
         let (ms, text) = now_ms_and_rfc3339();
+        let mut events = record.events.clone();
+        redact_stored_events(&self.hooks, &mut events)?;
         let snapshot = Snapshot {
             id: SnapshotId(format!("snap-{}", Uuid::now_v7())),
             session: record.meta.clone(),
-            events: record.events.clone(),
+            events,
             captured_at_ms: ms,
             captured_at: text,
         };
@@ -374,11 +379,13 @@ impl SessionStore for MemorySessionStore {
 
     async fn replay(&self, snapshot_id: &SnapshotId) -> StoreResult<Snapshot> {
         let guard = lock(&self.inner);
-        guard
+        let mut snapshot = guard
             .snapshots
             .get(&snapshot_id.0)
             .cloned()
-            .ok_or_else(|| StoreError::NotFound(snapshot_id.0.clone()))
+            .ok_or_else(|| StoreError::NotFound(snapshot_id.0.clone()))?;
+        redact_stored_events(&self.hooks, &mut snapshot.events)?;
+        Ok(snapshot)
     }
 
     async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {
