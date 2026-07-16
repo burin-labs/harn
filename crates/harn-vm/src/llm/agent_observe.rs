@@ -14,11 +14,10 @@
 //!
 //! Event types:
 //!
-//! - `system_prompt` `{content, hash}` — emitted once when a new system
-//!   prompt takes effect. Dedup'd via a rolling hash so consecutive
-//!   identical prompts are not re-emitted.
-//! - `tool_schemas` `{schemas, hash}` — same shape for the tool schema
-//!   list; each request re-uses the last-emitted set.
+//! - `system_prompt` `{content, hash, content_hash}` — deduped prompt;
+//!   `content_hash` is stable redacted `blake3:`.
+//! - `tool_schemas` `{schemas, hash, content_hash}` — deduped schemas with a
+//!   stable redacted `blake3:` content hash.
 //! - `message` `{role, content, iteration?}` — single message appended to
 //!   the visible conversation. Emitted every time a message lands in the
 //!   transcript (user task, nudge, assistant reply, tool result, host
@@ -29,12 +28,10 @@
 //!   decision was attached to the call (model/provider selection,
 //!   fallback chain, and the considered alternatives).
 //! - `provider_call_request` core `{call_id, iteration, model, provider,
-//!   max_tokens, temperature, tool_choice, tool_format,
-//!   context_token_breakdown}` — slim metadata for a single model call.
-//!   No `messages`, `system`, or `tool_schemas` fields; those are
-//!   reconstructable from prior events. Also carries diagnostics
-//!   `{thinking, native_tool_count, message_count, structural_experiment,
-//!   route_policy, fallback_chain, routing_decision}`.
+//!   max_tokens, temperature, tool_choice, tool_format, context_token_breakdown}` —
+//!   slim metadata for a single model call.
+//!   No `messages`, `system`, or `tool_schemas` fields; those are reconstructable.
+//!   `served_context` carries stable redacted prompt/schema/tool hashes.
 //!   Set `HARN_LLM_TRANSCRIPT_VERBOSE=1` to include a `request_snapshot`
 //!   object with the exact system prompt, message list, and tool schemas
 //!   attached to each request for debugging provider-context issues.
@@ -79,6 +76,7 @@ use super::trace::{trace_llm_call, LlmTraceEntry};
 use super::agent_tools::next_call_id;
 
 mod raw_tool_receipts;
+mod served_context_receipts;
 
 thread_local! {
     /// Last-emitted hash for the current transcript's system prompt and
@@ -162,7 +160,6 @@ fn hash_str(value: &str) -> u64 {
 }
 
 fn hash_json(value: &serde_json::Value) -> u64 {
-    // Dedup only needs intra-process stability; built-in key ordering is fine.
     let encoded = serde_json::to_string(value).unwrap_or_default();
     hash_str(&encoded)
 }
@@ -1482,6 +1479,7 @@ pub(crate) fn append_llm_observability_entry(
 fn emit_system_prompt_if_changed(system: Option<&str>) {
     let content = system.unwrap_or("");
     let current = hash_str(content);
+    let content_hash = served_context_receipts::stable_redacted_string_hash(content);
     let changed = LAST_SYSTEM_PROMPT_HASH.with(|cell| {
         let mut slot = cell.borrow_mut();
         if slot.as_ref() == Some(&current) {
@@ -1499,6 +1497,7 @@ fn emit_system_prompt_if_changed(system: Option<&str>) {
         "timestamp": chrono_now(),
         "span_id": crate::tracing::current_span_id(),
         "hash": current,
+        "content_hash": content_hash,
         "content": content,
     }));
 }
@@ -1506,6 +1505,7 @@ fn emit_system_prompt_if_changed(system: Option<&str>) {
 fn emit_tool_schemas_if_changed(schemas: &[crate::llm::tools::ToolSchema]) {
     let value = serde_json::to_value(schemas).unwrap_or(serde_json::Value::Null);
     let current = hash_json(&value);
+    let content_hash = served_context_receipts::stable_redacted_json_hash(&value);
     let changed = LAST_TOOL_SCHEMAS_HASH.with(|cell| {
         let mut slot = cell.borrow_mut();
         if slot.as_ref() == Some(&current) {
@@ -1523,6 +1523,7 @@ fn emit_tool_schemas_if_changed(schemas: &[crate::llm::tools::ToolSchema]) {
         "timestamp": chrono_now(),
         "span_id": crate::tracing::current_span_id(),
         "hash": current,
+        "content_hash": content_hash,
         "schemas": value,
     }));
 }
@@ -1533,8 +1534,6 @@ pub(super) fn dump_llm_request(
     tool_format: &str,
     opts: &super::api::LlmCallOptions,
 ) {
-    // Emit system prompt + schemas as dedup'd events so they don't
-    // repeat on every request.
     emit_system_prompt_if_changed(opts.system.as_deref());
     let tool_schemas =
         crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
@@ -1609,6 +1608,7 @@ pub(super) fn dump_llm_request(
         "tool_format": tool_format,
         "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
         "message_count": opts.messages.len(),
+        "served_context": served_context_receipts::served_context_receipt(opts, &tool_schemas),
         "context_token_breakdown": context_token_breakdown,
         "structural_experiment": structural_experiment,
         "route_policy": opts.route_policy.as_label(),
