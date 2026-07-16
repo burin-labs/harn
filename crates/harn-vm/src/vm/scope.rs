@@ -94,6 +94,27 @@ impl Vm {
         None
     }
 
+    pub(crate) fn resolve_named_value(&self, name: &str) -> Option<VmValue> {
+        if let Some(value) = self.active_local_slot_value(name) {
+            return Some(value);
+        }
+        if let Some(value) = self.env.get(name) {
+            return Some(value);
+        }
+        if let Some(value) = self
+            .frames
+            .last()
+            .and_then(|frame| frame.module_state.as_ref())
+            .and_then(|state| state.lock().get(name))
+        {
+            return Some(value);
+        }
+        if let Some(value) = self.globals.get(name) {
+            return Some(value.clone());
+        }
+        None
+    }
+
     fn prepare_closure_local_slots(
         &self,
         closure: &VmClosure,

@@ -316,7 +316,7 @@ impl super::super::Vm {
         }
     }
 
-    async fn call_user_closure(
+    pub(in crate::vm) async fn call_user_closure(
         &mut self,
         closure: Arc<VmClosure>,
         args: Vec<VmValue>,
@@ -554,7 +554,10 @@ impl super::super::Vm {
             .ok_or_else(|| VmError::Runtime("call argument stack underflow".to_string()))
     }
 
-    fn take_stack_args_from(&mut self, args_start: usize) -> Result<Vec<VmValue>, VmError> {
+    pub(in crate::vm) fn take_stack_args_from(
+        &mut self,
+        args_start: usize,
+    ) -> Result<Vec<VmValue>, VmError> {
         if args_start > self.stack.len() {
             return Err(VmError::Runtime(
                 "call argument stack underflow".to_string(),
@@ -563,7 +566,7 @@ impl super::super::Vm {
         Ok(self.stack.drain(args_start..).collect())
     }
 
-    fn is_special_name(name: &str) -> bool {
+    pub(in crate::vm::ops) fn is_special_name(name: &str) -> bool {
         matches!(
             name,
             "await"
@@ -577,7 +580,7 @@ impl super::super::Vm {
         )
     }
 
-    async fn try_call_special_name(
+    pub(in crate::vm::ops) async fn try_call_special_name(
         &mut self,
         name: &str,
         args: &[VmValue],
@@ -770,79 +773,6 @@ impl super::super::Vm {
         Ok(false)
     }
 
-    async fn call_named_value(
-        &mut self,
-        name: &str,
-        args: Vec<VmValue>,
-        direct_id: Option<BuiltinId>,
-    ) -> Result<(), VmError> {
-        if self.try_call_special_name(name, &args).await? {
-            return Ok(());
-        }
-        if let Some(closure) = self.resolve_named_closure(name) {
-            self.call_user_closure(closure, args).await?;
-        } else {
-            let result = if let Some(id) = direct_id {
-                self.call_builtin_id_or_name(id, name, args).await?
-            } else {
-                self.call_named_builtin(name, args).await?
-            };
-            self.stack.push(result);
-        }
-        Ok(())
-    }
-
-    async fn call_named_value_from_stack_args(
-        &mut self,
-        name: &str,
-        args_start: usize,
-        stack_truncate_to: usize,
-        direct_id: Option<BuiltinId>,
-    ) -> Result<(), VmError> {
-        if stack_truncate_to > args_start || args_start > self.stack.len() {
-            return Err(VmError::Runtime(
-                "invalid call argument stack range".to_string(),
-            ));
-        }
-
-        if Self::is_special_name(name) {
-            let args = self.take_stack_args_from(args_start)?;
-            self.stack.truncate(stack_truncate_to);
-            return self.call_named_value(name, args, direct_id).await;
-        }
-
-        if let Some(closure) = self.resolve_named_closure(name) {
-            if closure.func.is_generator
-                || crate::step_runtime::step_definition_for_function(&closure.func.name).is_some()
-            {
-                let args = self.take_stack_args_from(args_start)?;
-                self.stack.truncate(stack_truncate_to);
-                self.call_user_closure(closure, args).await?;
-            } else {
-                self.push_closure_frame_from_stack_args(&closure, args_start, stack_truncate_to)?;
-            }
-            return Ok(());
-        }
-
-        if let Some(result) =
-            self.try_call_sync_builtin_id_or_name_from_stack_args(direct_id, name, args_start)
-        {
-            self.stack.truncate(stack_truncate_to);
-            self.stack.push(result?);
-            return Ok(());
-        }
-
-        let args = self.take_stack_args_from(args_start)?;
-        self.stack.truncate(stack_truncate_to);
-        let result = if let Some(id) = direct_id {
-            self.call_builtin_id_or_name(id, name, args).await?
-        } else {
-            self.call_named_builtin(name, args).await?
-        };
-        self.stack.push(result);
-        Ok(())
-    }
-
     /// Sync fast path for `Op::Call`. Peeks the callee before touching
     /// `ip`; regular user closures can enter a new frame directly from the
     /// existing stack argument slice. Anything that needs async handling
@@ -992,16 +922,22 @@ impl super::super::Vm {
                     .await?;
             }
             VmValue::Closure(closure) => {
-                if closure.func.is_generator
-                    || crate::step_runtime::step_definition_for_function(&closure.func.name)
-                        .is_some()
-                {
-                    let args = self.take_stack_args_from(args_start)?;
-                    self.stack.truncate(callee_idx);
-                    self.call_user_closure(closure, args).await?;
-                } else {
-                    self.push_closure_frame_from_stack_args(&closure, args_start, callee_idx)?;
-                }
+                self.call_user_closure_from_stack_args(closure, args_start, callee_idx)
+                    .await?;
+            }
+            VmValue::Dict(registry) => {
+                let closure = match crate::vm::tool_callable::require_single_harn_tool_handler(
+                    &registry,
+                    || format!("Cannot call {}", VmValue::Dict(registry.clone()).display()),
+                ) {
+                    Ok(closure) => closure,
+                    Err(error) => {
+                        self.stack.truncate(callee_idx);
+                        return Err(error);
+                    }
+                };
+                self.call_user_closure_from_stack_args(closure, args_start, callee_idx)
+                    .await?;
             }
             VmValue::BuiltinRef(name) => {
                 self.call_named_value_from_stack_args(&name, args_start, callee_idx, None)
@@ -1036,6 +972,13 @@ impl super::super::Vm {
                 self.call_named_value(&name, args, None).await?;
             }
             VmValue::Closure(closure) => {
+                self.call_user_closure(closure, args).await?;
+            }
+            VmValue::Dict(registry) => {
+                let closure =
+                    crate::vm::tool_callable::require_single_harn_tool_handler(&registry, || {
+                        format!("Cannot call {}", VmValue::Dict(registry.clone()).display())
+                    })?;
                 self.call_user_closure(closure, args).await?;
             }
             VmValue::BuiltinRef(name) => {
@@ -1101,17 +1044,19 @@ impl super::super::Vm {
             Some(closure) => closure,
             None => match self.resolve_named_closure(name) {
                 Some(closure) => closure,
-                // Not a user closure, so this bare call targets a builtin.
-                // Most builtins are synchronous; dispatch them right here on
-                // the sync path instead of bailing to
-                // `execute_call_builtin_async`, which would spin up the async
-                // state machine and re-run `resolve_named_closure` (a second
-                // local-slot scan + env walk + module mutexes) only to reach
-                // the same builtin. Async builtins return `None` and still take
-                // the async path. Resolution semantics are unchanged: a user
-                // `fn` of the same name is still found by `resolve_named_closure`
-                // above and wins over the builtin.
-                None => return self.try_dispatch_sync_builtin_inline(name, argc),
+                None => match crate::vm::tool_callable::resolve_named_single_harn_tool_handler(
+                    self, name,
+                ) {
+                    Ok(Some(closure)) => closure,
+                    // Not a user closure or single-tool registry, so this
+                    // bare call targets a builtin. Most builtins are
+                    // synchronous; dispatch them right here on the sync path
+                    // instead of bailing to `execute_call_builtin_async`.
+                    Ok(None) => {
+                        return self.try_dispatch_sync_builtin_inline(name, argc);
+                    }
+                    Err(_) => return None,
+                },
             },
         };
         if !Self::direct_call_cacheable(&closure) {
@@ -1422,7 +1367,27 @@ impl super::super::Vm {
 
         let resolved_closure = match &callee {
             VmValue::Closure(cl) => Some(Arc::clone(cl)),
-            VmValue::String(name) => self.resolve_named_closure(name),
+            VmValue::String(name) => match self.resolve_named_closure(name) {
+                Some(closure) => Some(closure),
+                None => match crate::vm::tool_callable::resolve_named_single_harn_tool_handler(
+                    self, name,
+                ) {
+                    Ok(closure) => closure,
+                    Err(error) => {
+                        self.stack.truncate(callee_idx);
+                        return Err(error);
+                    }
+                },
+            },
+            VmValue::Dict(registry) => {
+                match crate::vm::tool_callable::single_harn_tool_handler(registry) {
+                    Ok(closure) => closure,
+                    Err(error) => {
+                        self.stack.truncate(callee_idx);
+                        return Err(error);
+                    }
+                }
+            }
             _ => None,
         };
 
@@ -1829,18 +1794,30 @@ impl super::super::Vm {
         let args_start = self.stack_arg_start(1)?;
         match callable {
             VmValue::Closure(closure) => {
-                if closure.func.is_generator
-                    || crate::step_runtime::step_definition_for_function(&closure.func.name)
-                        .is_some()
-                {
-                    let args = self.take_stack_args_from(args_start)?;
-                    self.call_user_closure(closure, args).await?;
-                } else {
-                    self.push_closure_frame_from_stack_args(&closure, args_start, args_start)?;
-                }
+                self.call_user_closure_from_stack_args(closure, args_start, args_start)
+                    .await?;
             }
             VmValue::String(name) => {
                 self.call_named_value_from_stack_args(&name, args_start, args_start, None)
+                    .await?;
+            }
+            VmValue::Dict(registry) => {
+                let closure = match crate::vm::tool_callable::require_single_harn_tool_handler(
+                    &registry,
+                    || {
+                        format!(
+                            "cannot pipe into {}",
+                            VmValue::Dict(registry.clone()).type_name()
+                        )
+                    },
+                ) {
+                    Ok(closure) => closure,
+                    Err(error) => {
+                        self.stack.truncate(args_start);
+                        return Err(error);
+                    }
+                };
+                self.call_user_closure_from_stack_args(closure, args_start, args_start)
                     .await?;
             }
             VmValue::BuiltinRef(name) => {

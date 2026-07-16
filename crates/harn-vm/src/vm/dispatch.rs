@@ -368,6 +368,13 @@ impl Vm {
     ) -> Result<VmValue, VmError> {
         match callable {
             VmValue::Closure(closure) => self.call_closure_args(closure, args).await,
+            VmValue::Dict(registry) => {
+                let handler =
+                    crate::vm::tool_callable::require_single_harn_tool_handler(registry, || {
+                        "expected callable, got dict".to_string()
+                    })?;
+                self.call_closure_args(&handler, args).await
+            }
             VmValue::BuiltinRef(name) => {
                 if !crate::autonomy::needs_async_side_effect_enforcement(name) {
                     if let Some(result) = self.call_sync_builtin_by_ref_args(name, &args) {
@@ -405,7 +412,7 @@ impl Vm {
         matches!(
             v,
             VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
-        )
+        ) || crate::vm::tool_callable::is_single_harn_tool_registry_value(v)
     }
 
     /// Public wrapper for `call_closure`, used by the MCP server to invoke
