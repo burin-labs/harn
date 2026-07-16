@@ -301,8 +301,9 @@ async fn collect_manifest_triggers_with_mode(
             },
             TriggerHandlerUri::Worker { queue } => CollectedTriggerHandler::Worker { queue },
             TriggerHandlerUri::Persona { name } => {
-                let binding = persona_runtime_binding_for_handler(extensions, trigger, &name)?;
-                CollectedTriggerHandler::Persona { binding }
+                let (binding, callable) =
+                    persona_runtime_handler_for_trigger(extensions, trigger, &name)?;
+                CollectedTriggerHandler::Persona { binding, callable }
             }
             TriggerHandlerUri::EvalPack { target } => {
                 let manifest = eval_pack_manifest_for_handler(trigger, &target)?;
@@ -615,11 +616,11 @@ pub(crate) async fn collect_trigger_flow_control(
     Ok(flow)
 }
 
-fn persona_runtime_binding_for_handler(
+fn persona_runtime_handler_for_trigger(
     extensions: &RuntimeExtensions,
     trigger: &ResolvedTriggerConfig,
     name: &str,
-) -> Result<harn_vm::PersonaRuntimeBinding, PackageError> {
+) -> Result<(harn_vm::PersonaRuntimeBinding, harn_vm::VmCallable), PackageError> {
     let Some(manifest) = extensions.root_manifest.as_ref() else {
         return Err(trigger_error(
             trigger,
@@ -636,7 +637,13 @@ fn persona_runtime_binding_for_handler(
             format!("handler persona://{name} does not match a declared persona"),
         ));
     };
-    Ok(persona_runtime_binding(name, persona))
+    let manifest_dir = extensions
+        .root_manifest_dir
+        .as_deref()
+        .unwrap_or(trigger.manifest_dir.as_path());
+    let callable = persona_runtime_callable(name, persona, manifest_dir)
+        .map_err(|error| trigger_error(trigger, error.to_string()))?;
+    Ok((persona_runtime_binding(name, persona), callable))
 }
 
 fn eval_pack_manifest_for_handler(
@@ -879,9 +886,10 @@ pub fn manifest_trigger_binding_spec(
                 "queue": queue,
             }),
         ),
-        CollectedTriggerHandler::Persona { binding } => (
+        CollectedTriggerHandler::Persona { binding, callable } => (
             harn_vm::TriggerHandlerSpec::Persona {
                 binding: binding.clone(),
+                callable,
             },
             serde_json::json!({
                 "kind": "persona",
@@ -1113,11 +1121,12 @@ pub fn collect_persona_trigger_binding_specs(
             }
             bindings.push(persona_trigger_binding_spec(
                 &resolved.manifest_path,
+                &resolved.manifest_dir,
                 &name,
                 provider,
                 kind,
                 &persona,
-            ));
+            )?);
         }
     }
     Ok(bindings)
@@ -1125,15 +1134,18 @@ pub fn collect_persona_trigger_binding_specs(
 
 fn persona_trigger_binding_spec(
     manifest_path: &Path,
+    manifest_dir: &Path,
     name: &str,
     provider: &str,
     kind: &str,
     persona: &PersonaManifestEntry,
-) -> harn_vm::TriggerBindingSpec {
+) -> Result<harn_vm::TriggerBindingSpec, PackageError> {
     let runtime_binding = persona_runtime_binding(name, persona);
+    let callable = persona_runtime_callable(name, persona, manifest_dir)?;
     let id = format!("persona.{name}.{provider}.{kind}");
     let handler = harn_vm::TriggerHandlerSpec::Persona {
         binding: runtime_binding.clone(),
+        callable,
     };
     let fingerprint = serde_json::to_string(&serde_json::json!({
         "id": &id,
@@ -1149,7 +1161,7 @@ fn persona_trigger_binding_spec(
     }))
     .unwrap_or_else(|_| format!("{id}:{provider}:{kind}:{name}"));
 
-    harn_vm::TriggerBindingSpec {
+    Ok(harn_vm::TriggerBindingSpec {
         id,
         source: harn_vm::TriggerBindingSource::Manifest,
         kind: kind.to_string(),
@@ -1178,7 +1190,32 @@ fn persona_trigger_binding_spec(
         manifest_path: Some(manifest_path.to_path_buf()),
         package_name: None,
         definition_fingerprint: fingerprint,
+    })
+}
+
+fn persona_runtime_callable(
+    name: &str,
+    persona: &PersonaManifestEntry,
+    manifest_dir: &Path,
+) -> Result<harn_vm::VmCallable, PackageError> {
+    let entry_workflow = persona.entry_workflow.as_deref().ok_or_else(|| {
+        PackageError::Manifest(format!("persona '{name}' is missing entry_workflow"))
+    })?;
+    let (module_path, function_name) = entry_workflow.split_once('#').ok_or_else(|| {
+        PackageError::Manifest(format!(
+            "persona '{name}' entry_workflow must be <module.harn>#<function>"
+        ))
+    })?;
+    if !module_path.ends_with(".harn") || !valid_identifier(function_name) {
+        return Err(PackageError::Manifest(format!(
+            "persona '{name}' entry_workflow must be <module.harn>#<function>"
+        )));
     }
+    let module_path = safe_package_relative_path(manifest_dir, module_path)?;
+    Ok(harn_vm::VmCallable::Lazy(harn_vm::LazyVmCallable::new(
+        module_path,
+        function_name,
+    )))
 }
 
 fn persona_autonomy_to_vm(value: PersonaAutonomyTier) -> harn_vm::AutonomyTier {

@@ -55,7 +55,7 @@ pub(super) fn handler_json(handler: &CollectedTriggerHandler) -> JsonValue {
             "kind": "worker",
             "queue": queue,
         }),
-        CollectedTriggerHandler::Persona { binding } => json!({
+        CollectedTriggerHandler::Persona { binding, .. } => json!({
             "kind": "persona",
             "name": binding.name,
             "entry_workflow": binding.entry_workflow,

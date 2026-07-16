@@ -879,7 +879,70 @@ budget = { daily_usd = 2.0 }
     assert_eq!(bindings[0].provider.as_str(), "github");
     assert_eq!(bindings[0].kind, "pr_opened");
     assert_eq!(bindings[0].handler.kind(), "persona");
+    assert!(matches!(
+        &bindings[0].handler,
+        harn_vm::TriggerHandlerSpec::Persona {
+            callable: harn_vm::VmCallable::Lazy(_),
+            ..
+        }
+    ));
     assert_eq!(bindings[0].daily_cost_usd, Some(2.0));
+}
+
+#[test]
+fn persona_triggers_reject_malformed_entry_workflow_coordinates() {
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_trigger_project(
+        tmp.path(),
+        r#"
+[[personas]]
+name = "merge_captain"
+description = "Owns PR readiness."
+entry_workflow = "workflows/merge_captain.harn"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "required"
+triggers = ["github.pr_opened"]
+"#,
+        None,
+    );
+    let extensions = load_runtime_extensions(&harn_file);
+    let error = collect_persona_trigger_binding_specs(&extensions)
+        .expect_err("invalid entry workflow should fail collection");
+
+    assert!(
+        error
+            .to_string()
+            .contains("entry_workflow must be <module.harn>#<function>"),
+        "{error}"
+    );
+}
+
+#[test]
+fn persona_triggers_reject_entry_workflow_path_escape() {
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_trigger_project(
+        tmp.path(),
+        r#"
+[[personas]]
+name = "merge_captain"
+description = "Owns PR readiness."
+entry_workflow = "../outside.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "required"
+triggers = ["github.pr_opened"]
+"#,
+        None,
+    );
+    let extensions = load_runtime_extensions(&harn_file);
+    let error = collect_persona_trigger_binding_specs(&extensions)
+        .expect_err("entry workflow path escape should fail collection");
+
+    assert!(
+        error.to_string().contains("escapes package root"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -990,7 +1053,10 @@ secrets = { signing_secret = "github/webhook-secret" }
     assert_eq!(collected.len(), 1);
     assert!(matches!(
         &collected[0].handler,
-        CollectedTriggerHandler::Persona { binding } if binding.name == "merge_captain"
+        CollectedTriggerHandler::Persona {
+            binding,
+            callable: harn_vm::VmCallable::Lazy(_),
+        } if binding.name == "merge_captain"
             && binding.entry_workflow == "workflows/merge_captain.harn#run"
     ));
 }

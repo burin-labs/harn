@@ -150,6 +150,7 @@ pub enum TriggerHandlerSpec {
     },
     Persona {
         binding: crate::PersonaRuntimeBinding,
+        callable: crate::value::VmCallable,
     },
     EvalPack {
         target: String,
@@ -288,7 +289,7 @@ impl std::fmt::Debug for TriggerHandlerSpec {
                 .field("allow_cleartext", allow_cleartext)
                 .finish(),
             Self::Worker { queue } => f.debug_struct("Worker").field("queue", queue).finish(),
-            Self::Persona { binding } => f
+            Self::Persona { binding, .. } => f
                 .debug_struct("Persona")
                 .field("name", &binding.name)
                 .finish(),

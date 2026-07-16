@@ -250,7 +250,7 @@ impl From<&TriggerHandlerSpec> for DispatchUri {
             TriggerHandlerSpec::Worker { queue } => Self::Worker {
                 queue: queue.clone(),
             },
-            TriggerHandlerSpec::Persona { binding } => Self::Persona {
+            TriggerHandlerSpec::Persona { binding, .. } => Self::Persona {
                 name: binding.name.clone(),
             },
             TriggerHandlerSpec::EvalPack {

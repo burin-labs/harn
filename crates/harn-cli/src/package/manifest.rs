@@ -1367,6 +1367,7 @@ pub enum CollectedTriggerHandler {
     },
     Persona {
         binding: harn_vm::PersonaRuntimeBinding,
+        callable: harn_vm::VmCallable,
     },
     EvalPack {
         target: String,

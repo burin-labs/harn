@@ -233,6 +233,8 @@ pub struct PersonaRunReceipt {
     pub queued: bool,
     pub error: Option<String>,
     pub budget_receipt_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -249,6 +251,21 @@ pub struct PersonaRunCost {
     pub frontier_escalations: i64,
     #[serde(default)]
     pub metadata: serde_json::Value,
+}
+
+pub(crate) enum PersonaRunAdmission {
+    Admitted(PersonaRunContext),
+    Terminal(PersonaRunReceipt),
+}
+
+pub(crate) struct PersonaRunContext {
+    envelope: PersonaTriggerEnvelope,
+    cost: PersonaRunCost,
+    lease: PersonaLease,
+    run_id: Uuid,
+    budget_receipt_id: String,
+    value_metadata: serde_json::Value,
+    pre_queue: Vec<QueueEntry>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -824,6 +841,23 @@ pub async fn fire_trigger(
     cost: PersonaRunCost,
     now_ms: i64,
 ) -> Result<PersonaRunReceipt, String> {
+    match begin_persona_trigger(log, binding, provider, kind, metadata, cost, now_ms).await? {
+        PersonaRunAdmission::Admitted(context) => {
+            complete_persona_run(log, binding, context, None, now_ms).await
+        }
+        PersonaRunAdmission::Terminal(receipt) => Ok(receipt),
+    }
+}
+
+pub(crate) async fn begin_persona_trigger(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    provider: &str,
+    kind: &str,
+    metadata: BTreeMap<String, String>,
+    cost: PersonaRunCost,
+    now_ms: i64,
+) -> Result<PersonaRunAdmission, String> {
     let envelope = normalize_trigger_envelope(provider, kind, metadata, now_ms);
     append_persona_event(
         log,
@@ -833,7 +867,7 @@ pub async fn fire_trigger(
         now_ms,
     )
     .await?;
-    run_for_envelope(log, binding, envelope, cost, now_ms).await
+    begin_for_envelope(log, binding, envelope, cost, now_ms).await
 }
 
 pub async fn record_persona_spend(
@@ -1035,21 +1069,22 @@ async fn run_for_envelope(
     cost: PersonaRunCost,
     now_ms: i64,
 ) -> Result<PersonaRunReceipt, String> {
-    let pre_queue = queue_snapshot(log, binding, now_ms).await?;
-    let receipt = run_for_envelope_inner(log, binding, envelope, cost, now_ms).await?;
-    let post_queue = queue_snapshot(log, binding, now_ms).await?;
-    emit_queue_position_supervision(log, binding, &pre_queue, &post_queue, now_ms).await?;
-    emit_receipt_supervision(log, binding, &receipt, now_ms).await?;
-    Ok(receipt)
+    match begin_for_envelope(log, binding, envelope, cost, now_ms).await? {
+        PersonaRunAdmission::Admitted(context) => {
+            complete_persona_run(log, binding, context, None, now_ms).await
+        }
+        PersonaRunAdmission::Terminal(receipt) => Ok(receipt),
+    }
 }
 
-async fn run_for_envelope_inner(
+async fn begin_for_envelope(
     log: &Arc<AnyEventLog>,
     binding: &PersonaRuntimeBinding,
     envelope: PersonaTriggerEnvelope,
     cost: PersonaRunCost,
     now_ms: i64,
-) -> Result<PersonaRunReceipt, String> {
+) -> Result<PersonaRunAdmission, String> {
+    let pre_queue = queue_snapshot(log, binding, now_ms).await?;
     let status = persona_status(log, binding, now_ms).await?;
     match status.state {
         PersonaLifecycleState::Paused => {
@@ -1066,7 +1101,7 @@ async fn run_for_envelope_inner(
                 now_ms,
             )
             .await?;
-            return Ok(PersonaRunReceipt {
+            let receipt = PersonaRunReceipt {
                 status: "queued".to_string(),
                 persona: binding.name.clone(),
                 run_id: None,
@@ -1075,7 +1110,9 @@ async fn run_for_envelope_inner(
                 queued: true,
                 error: None,
                 budget_receipt_id: None,
-            });
+                result: None,
+            };
+            return terminal_persona_admission(log, binding, &pre_queue, receipt, now_ms).await;
         }
         PersonaLifecycleState::Disabled => {
             append_persona_event(
@@ -1090,7 +1127,7 @@ async fn run_for_envelope_inner(
                 now_ms,
             )
             .await?;
-            return Ok(PersonaRunReceipt {
+            let receipt = PersonaRunReceipt {
                 status: "dead_lettered".to_string(),
                 persona: binding.name.clone(),
                 run_id: None,
@@ -1099,13 +1136,15 @@ async fn run_for_envelope_inner(
                 queued: false,
                 error: Some("persona is disabled".to_string()),
                 budget_receipt_id: None,
-            });
+                result: None,
+            };
+            return terminal_persona_admission(log, binding, &pre_queue, receipt, now_ms).await;
         }
         _ => {}
     }
 
     if let Err(error) = enforce_budget(log, binding, &cost, now_ms).await {
-        return Ok(PersonaRunReceipt {
+        let receipt = PersonaRunReceipt {
             status: "budget_exhausted".to_string(),
             persona: binding.name.clone(),
             run_id: None,
@@ -1114,7 +1153,9 @@ async fn run_for_envelope_inner(
             queued: false,
             error: Some(error),
             budget_receipt_id: None,
-        });
+            result: None,
+        };
+        return terminal_persona_admission(log, binding, &pre_queue, receipt, now_ms).await;
     }
 
     if work_completed(log, &binding.name, &envelope.subject_key).await? {
@@ -1130,7 +1171,7 @@ async fn run_for_envelope_inner(
             now_ms,
         )
         .await?;
-        return Ok(PersonaRunReceipt {
+        let receipt = PersonaRunReceipt {
             status: "duplicate".to_string(),
             persona: binding.name.clone(),
             run_id: None,
@@ -1139,7 +1180,9 @@ async fn run_for_envelope_inner(
             queued: false,
             error: None,
             budget_receipt_id: None,
-        });
+            result: None,
+        };
+        return terminal_persona_admission(log, binding, &pre_queue, receipt, now_ms).await;
     }
 
     let Some(lease) = acquire_lease(
@@ -1152,7 +1195,7 @@ async fn run_for_envelope_inner(
     )
     .await?
     else {
-        return Ok(PersonaRunReceipt {
+        let receipt = PersonaRunReceipt {
             status: "lease_busy".to_string(),
             persona: binding.name.clone(),
             run_id: None,
@@ -1161,7 +1204,9 @@ async fn run_for_envelope_inner(
             queued: false,
             error: Some("active lease already owns persona work".to_string()),
             budget_receipt_id: None,
-        });
+            result: None,
+        };
+        return terminal_persona_admission(log, binding, &pre_queue, receipt, now_ms).await;
     };
 
     let run_id = Uuid::now_v7();
@@ -1194,6 +1239,33 @@ async fn run_for_envelope_inner(
     .await?;
     let budget_receipt_id =
         append_budget_record(log, &binding.name, &cost, Some(&lease.id), now_ms).await?;
+    Ok(PersonaRunAdmission::Admitted(PersonaRunContext {
+        envelope,
+        cost,
+        lease,
+        run_id,
+        budget_receipt_id,
+        value_metadata,
+        pre_queue,
+    }))
+}
+
+pub(crate) async fn complete_persona_run(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    context: PersonaRunContext,
+    result: Option<serde_json::Value>,
+    now_ms: i64,
+) -> Result<PersonaRunReceipt, String> {
+    let PersonaRunContext {
+        envelope,
+        cost,
+        lease,
+        run_id,
+        budget_receipt_id,
+        value_metadata,
+        pre_queue,
+    } = context;
     if cost.avoided_cost_usd > 0.0 || cost.deterministic_steps > 0 {
         emit_persona_value_event(
             log,
@@ -1276,7 +1348,7 @@ async fn run_for_envelope_inner(
         now_ms,
     )
     .await?;
-    Ok(PersonaRunReceipt {
+    let receipt = PersonaRunReceipt {
         status: "completed".to_string(),
         persona: binding.name.clone(),
         run_id: Some(run_id),
@@ -1285,7 +1357,90 @@ async fn run_for_envelope_inner(
         queued: false,
         error: None,
         budget_receipt_id: Some(budget_receipt_id),
-    })
+        result,
+    };
+    finish_persona_receipt(log, binding, &pre_queue, receipt, now_ms).await
+}
+
+pub(crate) async fn fail_persona_run(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    context: PersonaRunContext,
+    error: &str,
+    now_ms: i64,
+) -> Result<PersonaRunReceipt, String> {
+    let PersonaRunContext {
+        envelope,
+        lease,
+        run_id,
+        budget_receipt_id,
+        pre_queue,
+        ..
+    } = context;
+    append_persona_event(
+        log,
+        &binding.name,
+        "persona.lease.released",
+        json!({
+            "id": lease.id,
+            "work_key": envelope.subject_key,
+            "released_at_ms": now_ms,
+        }),
+        now_ms,
+    )
+    .await?;
+    append_persona_event(
+        log,
+        &binding.name,
+        "persona.run.failed",
+        json!({
+            "work_key": envelope.subject_key,
+            "run_id": run_id,
+            "failed_at_ms": now_ms,
+            "entry_workflow": binding.entry_workflow,
+            "lease_id": lease.id,
+            "error": error,
+        }),
+        now_ms,
+    )
+    .await?;
+    let receipt = PersonaRunReceipt {
+        status: "failed".to_string(),
+        persona: binding.name.clone(),
+        run_id: Some(run_id),
+        work_key: envelope.subject_key,
+        lease: Some(lease),
+        queued: false,
+        error: Some(error.to_string()),
+        budget_receipt_id: Some(budget_receipt_id),
+        result: None,
+    };
+    finish_persona_receipt(log, binding, &pre_queue, receipt, now_ms).await
+}
+
+async fn terminal_persona_admission(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    pre_queue: &[QueueEntry],
+    receipt: PersonaRunReceipt,
+    now_ms: i64,
+) -> Result<PersonaRunAdmission, String> {
+    finish_persona_receipt(log, binding, pre_queue, receipt, now_ms)
+        .await
+        .map(PersonaRunAdmission::Terminal)
+}
+
+async fn finish_persona_receipt(
+    log: &Arc<AnyEventLog>,
+    binding: &PersonaRuntimeBinding,
+    pre_queue: &[QueueEntry],
+    receipt: PersonaRunReceipt,
+    now_ms: i64,
+) -> Result<PersonaRunReceipt, String> {
+    let post_queue = queue_snapshot(log, binding, now_ms).await?;
+    emit_queue_position_supervision(log, binding, pre_queue, &post_queue, now_ms).await?;
+    emit_receipt_supervision(log, binding, &receipt, now_ms).await?;
+    Ok(receipt)
 }
 
 async fn acquire_lease(
