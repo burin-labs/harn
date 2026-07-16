@@ -44,6 +44,14 @@ const CACHE_BUDGET_JOB = "cache_budget"
 
 const CACHE_BUDGET_SCRIPT = "./scripts/report_ci_cache_budget.sh"
 
+const CLI_COLD_START_WORKFLOW = "cli-cold-start-budget.yml"
+
+const CLI_COLD_START_JOB = "cold-start-budget"
+
+const CLI_COLD_START_BUILD_STEP = "Build release harn"
+
+const CLI_COLD_START_JOB_IF = "(github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))"
+
 fn policy_schema() {
   return schema_closed_object(
     {
@@ -218,11 +226,58 @@ fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
   return errors
 }
 
+fn step_by_name(steps: list, name: string) {
+  const matches = steps.filter({ step -> trim(step?.name ?? "") == name }).to_list()
+  if len(matches) == 0 {
+    return nil
+  }
+  return matches[0]
+}
+
+fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
+  const workflow = workflows[CLI_COLD_START_WORKFLOW]
+  if workflow == nil {
+    return ["${CLI_COLD_START_WORKFLOW} must define the advisory CLI cold-start budget"]
+  }
+  let errors: list<string> = []
+  if workflow?.["on"]?.pull_request != nil {
+    errors = errors
+      + ["${CLI_COLD_START_WORKFLOW} must not run release-build cold-start benchmarks on pull_request"]
+  }
+  if len(workflow?.["on"]?.schedule ?? []) == 0 {
+    errors = errors + ["${CLI_COLD_START_WORKFLOW} must keep a scheduled main-branch advisory run"]
+  }
+  const job = workflow?.jobs?.[CLI_COLD_START_JOB]
+  if job == nil {
+    return errors + ["${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must define the cold-start job"]
+  }
+  if trim(job?.if ?? "") != CLI_COLD_START_JOB_IF {
+    errors = errors
+      + ["${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must skip release manual refs"]
+  }
+  if job?.["timeout-minutes"] != 25 {
+    errors = errors
+      + ["${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must cap total runtime at 25 minutes"]
+  }
+  const build_step = step_by_name(job?.steps ?? [], CLI_COLD_START_BUILD_STEP)
+  if build_step == nil {
+    errors = errors
+      + ["${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must build the release harn binary explicitly"]
+  } else if build_step?.["timeout-minutes"] != 20 {
+    errors = errors
+      + [
+      "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} release build step must cap runtime at 20 minutes",
+    ]
+  }
+  return errors
+}
+
 /** Return every policy violation without stopping at the first workflow. */
 pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workflows: dict) -> list<string> {
   let errors = cache_action_errors(policy, action)
     + node_cache_action_errors(node_action)
     + cache_budget_reporter_errors(workflows)
+    + cli_cold_start_budget_errors(workflows)
   let observed_writers: list<string> = []
   for workflow in workflows.keys().sort() {
     const document = workflows[workflow]
