@@ -1,0 +1,106 @@
+import { ci_sccache_policy_errors } from "../check_ci_cache_policy"
+
+fn gha_expression(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+fn sccache_action() {
+  return {
+    runs: {
+      steps: [
+        {
+          uses: "useblacksmith/stickydisk@5b350170ae4ef55b536b548ef5f5896e76a6b54f",
+          if: "inputs.sticky == 'true'",
+          "continue-on-error": true,
+          with: {
+            key: gha_expression("github.repository") + gha_expression("inputs.cache-key"),
+            path: "~/.cache/sccache",
+          },
+        },
+        {uses: "mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696"},
+        {uses: "./.github/actions/configure-cargo-sccache"},
+      ],
+    },
+  }
+}
+
+fn persistent_job(runner: string, cache_key: string) {
+  return {
+    "runs-on": runner,
+    steps: [
+      {
+        uses: "./.github/actions/sccache",
+        with: {"cache-key": cache_key, sticky: gha_expression("vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'")},
+      },
+      {uses: "./.github/actions/rust-cache", if: "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'"},
+      {run: "./scripts/ci/finalize_sccache.sh", if: "always()"},
+    ],
+  }
+}
+
+fn workflow() {
+  const disable = "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'"
+  const rust = persistent_job(
+    gha_expression(disable + " && 'ubuntu-latest' || matrix.runner"),
+    gha_expression("matrix.cache_key"),
+  )
+  const jobs = gha_expression(disable + " && '2' || '4'")
+  return {
+    jobs: {
+      "package-audit": persistent_job(
+        gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'"),
+        "package-audit",
+      ),
+      "rust-builds": {
+        ...rust,
+        strategy: {
+          matrix: {
+            include: [
+              {runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
+              {runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-test"},
+              {runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-audit"},
+            ],
+          },
+        },
+        steps: rust.steps
+          + [
+          {name: "Run affected-crate tests (PR fast feedback)", env: {CARGO_BUILD_JOBS: jobs}},
+          {
+            name: "Run full test suite (merge queue + non-metadata push backstop)",
+            env: {CARGO_BUILD_JOBS: jobs},
+          },
+        ],
+      },
+      "audit-scripts": persistent_job(
+        gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
+        "audit-scripts",
+      ),
+    },
+  }
+}
+
+@test
+pipeline test_accepts_pinned_lane_local_sticky_cache_with_kill_switch(task) {
+  assert_eq(ci_sccache_policy_errors(sccache_action(), workflow()), [])
+}
+
+@test
+pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(task) {
+  const invalid_action = {runs: {steps: [{uses: "useblacksmith/stickydisk@v1", with: {key: "shared", path: "target"}}]}}
+  const invalid_workflow = {
+    jobs: {
+      "package-audit": {"runs-on": "ubuntu-latest", steps: []},
+      "rust-builds": {"runs-on": "ubuntu-latest", steps: []},
+      "audit-scripts": {"runs-on": "ubuntu-latest", steps: []},
+      surprise: {steps: [{uses: "./.github/actions/sccache"}]},
+    },
+  }
+  const errors = ci_sccache_policy_errors(invalid_action, invalid_workflow)
+  assert(
+    errors.contains(".github/actions/sccache/action.yml must use exactly one pinned sticky-disk action"),
+  )
+  assert(
+    errors.contains("ci.yml:package-audit must retain rust-cache only on the GitHub-hosted fallback"),
+  )
+  assert(errors.contains("ci.yml:surprise uses persistent sccache without a lane policy"))
+}

@@ -26,6 +26,16 @@ const ACTION_PATH = ".github/actions/rust-cache/action.yml"
 
 const NODE_ACTION_PATH = ".github/actions/node-cache/action.yml"
 
+const SCCACHE_ACTION_PATH = ".github/actions/sccache/action.yml"
+
+const SCCACHE_ACTION = "./.github/actions/sccache"
+
+const STICKY_DISK_PREFIX = "useblacksmith/stickydisk@"
+
+const STICKY_DISK_PIN = "useblacksmith/stickydisk@5b350170ae4ef55b536b548ef5f5896e76a6b54f"
+
+const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
+
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
 const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
@@ -296,6 +306,102 @@ fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
   return errors
 }
 
+fn matching_steps(job, uses: string) -> list {
+  return (job?.steps ?? []).filter({ step -> step_uses(step) == uses }).to_list()
+}
+
+fn persistent_sccache_job_errors(workflow, job_name: string, expected_runner: string) -> list<string> {
+  const job = workflow?.jobs?.[job_name]
+  if job == nil {
+    return ["ci.yml:${job_name} must define the persistent sccache lane"]
+  }
+  let errors: list<string> = []
+  const runner = trim(job?.["runs-on"] ?? "")
+  if !contains(runner, BLACKSMITH_DISABLE_VAR) || !contains(runner, expected_runner) {
+    errors = errors
+      + ["ci.yml:${job_name} must use ${expected_runner} behind ${BLACKSMITH_DISABLE_VAR}"]
+  }
+  const caches = matching_steps(job, SCCACHE_ACTION)
+  if len(caches) != 1 {
+    errors = errors + ["ci.yml:${job_name} must configure ${SCCACHE_ACTION} exactly once"]
+  } else if !contains(trim(caches[0]?.with?.sticky ?? ""), BLACKSMITH_DISABLE_VAR) {
+    errors = errors + ["ci.yml:${job_name} sticky cache must follow ${BLACKSMITH_DISABLE_VAR}"]
+  }
+  const fallback = matching_steps(job, "./.github/actions/rust-cache")
+  if len(fallback) != 1
+    || trim(fallback[0]?.if ?? "") != "vars.${BLACKSMITH_DISABLE_VAR} == 'true'" {
+    errors = errors
+      + ["ci.yml:${job_name} must retain rust-cache only on the GitHub-hosted fallback"]
+  }
+  const finalizers = (job?.steps ?? [])
+    .filter({ step -> trim(step?.run ?? "") == "./scripts/ci/finalize_sccache.sh" })
+    .to_list()
+  if len(finalizers) != 1 || trim(finalizers[0]?.if ?? "") != "always()" {
+    errors = errors + ["ci.yml:${job_name} must summarize live sccache stats before shutdown"]
+  }
+  return errors
+}
+
+/** Validate the persistent local sccache action and every authorized heavy CI consumer. */
+pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
+  let errors: list<string> = []
+  const action_steps = action?.runs?.steps ?? []
+  const sticky = action_steps
+    .filter({ step -> step_uses(step).starts_with(STICKY_DISK_PREFIX) })
+    .to_list()
+  if len(sticky) != 1 || step_uses(sticky[0]) != STICKY_DISK_PIN {
+    errors = errors + ["${SCCACHE_ACTION_PATH} must use exactly one pinned sticky-disk action"]
+  } else {
+    if trim(sticky[0]?.if ?? "") != "inputs.sticky == 'true'"
+      || !(sticky[0]?.["continue-on-error"] ?? false) {
+      errors = errors + ["${SCCACHE_ACTION_PATH} sticky storage must be optional and non-fatal"]
+    }
+    if trim(sticky[0]?.with?.path ?? "") != "~/.cache/sccache"
+      || !contains(trim(sticky[0]?.with?.key ?? ""), "inputs.cache-key") {
+      errors = errors + ["${SCCACHE_ACTION_PATH} must persist the lane-keyed local sccache directory"]
+    }
+  }
+  if len(
+    matching_steps(
+      action?.runs,
+      "mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696",
+    ),
+  )
+    != 1
+    || len(matching_steps(action?.runs, "./.github/actions/configure-cargo-sccache")) != 1 {
+    errors = errors + ["${SCCACHE_ACTION_PATH} must own pinned sccache setup and wrapper configuration"]
+  }
+  errors = errors
+    + persistent_sccache_job_errors(workflow, "package-audit", "blacksmith-4vcpu-ubuntu-2404")
+    + persistent_sccache_job_errors(workflow, "rust-builds", "matrix.runner")
+    + persistent_sccache_job_errors(workflow, "audit-scripts", "blacksmith-8vcpu-ubuntu-2404")
+  const rust_job = workflow?.jobs?.["rust-builds"]
+  const matrix = rust_job?.strategy?.matrix?.include ?? []
+  const runners = matrix.map({ row -> trim(row?.runner ?? "") }).to_list()
+  const cache_keys = matrix.map({ row -> trim(row?.cache_key ?? "") }).to_list()
+  if runners
+    != ["blacksmith-4vcpu-ubuntu-2404", "blacksmith-8vcpu-ubuntu-2404", "blacksmith-8vcpu-ubuntu-2404"]
+    || cache_keys != ["workspace-lint", "workspace-test", "workspace-audit"] {
+    errors = errors + ["ci.yml:rust-builds must keep distinct lane caches and policy-sized runners"]
+  }
+  for step_name in [
+    "Run affected-crate tests (PR fast feedback)",
+    "Run full test suite (merge queue + non-metadata push backstop)",
+  ] {
+    const jobs = trim(step_by_name(rust_job?.steps ?? [], step_name)?.env?.CARGO_BUILD_JOBS ?? "")
+    if !contains(jobs, BLACKSMITH_DISABLE_VAR) || !contains(jobs, "'2'") || !contains(jobs, "'4'") {
+      errors = errors + ["ci.yml:rust-builds ${step_name} must preserve 4-way/2-way fan-out"]
+    }
+  }
+  const allowed = ["package-audit", "rust-builds", "audit-scripts"]
+  for {key: job_name, value: job} in workflow?.jobs ?? {} {
+    if len(matching_steps(job, SCCACHE_ACTION)) > 0 && !allowed.contains(job_name) {
+      errors = errors + ["ci.yml:${job_name} uses persistent sccache without a lane policy"]
+    }
+  }
+  return errors
+}
+
 /** Return every policy violation without stopping at the first workflow. */
 pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workflows: dict) -> list<string> {
   let errors = cache_action_errors(policy, action)
@@ -349,11 +455,13 @@ fn main(harness: Harness) {
   }
   const action = read_yaml(ACTION_PATH, nil)
   const node_action = read_yaml(NODE_ACTION_PATH, nil)
+  const sccache_action = read_yaml(SCCACHE_ACTION_PATH, nil)
   let workflows = {}
   for path in harness.fs.glob(WORKFLOW_GLOB).sort() {
     workflows[workflow_name(path)] = read_yaml(path, nil)
   }
   const errors = ci_cache_policy_errors(policy, action, node_action, workflows)
+    + ci_sccache_policy_errors(sccache_action, workflows["ci.yml"])
   if len(errors) > 0 {
     harness.stdio.eprintln("CI cache policy violations:")
     for error in errors {
