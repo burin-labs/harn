@@ -31,6 +31,7 @@ use harn_parser::analysis::{AnalysisDatabase, SourceId, SourceVersion};
 use crate::package;
 
 use super::check_cmd::{check_file_report_inner, CheckFileReport, CheckTextOutput};
+use super::host_capabilities::{resolve_host_capabilities, ResolvedHostCapabilities};
 
 /// Environment override for the check worker-pool size. `1` forces the
 /// serial path; unset defaults to the machine's available parallelism.
@@ -53,6 +54,11 @@ pub(crate) struct CheckedFile {
     pub report: CheckFileReport,
     pub strict: bool,
     pub text: CheckTextOutput,
+}
+
+struct EffectiveCheckConfig {
+    config: package::CheckConfig,
+    host_capabilities: ResolvedHostCapabilities,
 }
 
 fn worker_count(files: usize) -> usize {
@@ -80,7 +86,10 @@ pub(crate) fn check_files(
 ) -> Vec<CheckedFile> {
     let workers = worker_count(files.len());
     let parsed_sources = Mutex::new(parsed_sources);
-    let config_by_dir: Mutex<HashMap<PathBuf, package::CheckConfig>> = Mutex::new(HashMap::new());
+    // Resolve directory-stable check inputs before worker fan-out. In
+    // particular, an external host-capability manifest is read and parsed once
+    // per source directory instead of once per checked file.
+    let config_by_dir = build_check_contexts(files, overrides);
     let next = AtomicUsize::new(0);
 
     let run_worker = || {
@@ -138,7 +147,7 @@ fn check_one(
     file: &Path,
     module_graph: &harn_modules::ModuleGraph,
     parsed_sources: &Mutex<HashMap<PathBuf, harn_modules::ParsedModuleSource>>,
-    config_by_dir: &Mutex<HashMap<PathBuf, package::CheckConfig>>,
+    config_by_dir: &HashMap<PathBuf, EffectiveCheckConfig>,
     cross_file_imports: &HashSet<String>,
     overrides: &CheckCliOverrides,
     want_text: bool,
@@ -151,19 +160,10 @@ fn check_one(
             parsed.program,
         );
     }
-    let mut config = load_check_config_cached(config_by_dir, file);
-    if let Some(path) = overrides.host_capabilities.as_ref() {
-        config.host_capabilities_path = Some(path.clone());
-    }
-    if let Some(path) = overrides.bundle_root.as_ref() {
-        config.bundle_root = Some(path.clone());
-    }
-    if overrides.strict_types {
-        config.strict_types = true;
-    }
-    if let Some(severity) = overrides.preflight.as_deref() {
-        config.preflight_severity = Some(severity.to_string());
-    }
+    let context = config_by_dir
+        .get(&check_config_key(file))
+        .expect("every checked file has a precomputed check context");
+    let config = &context.config;
 
     // Persistent result cache (#4391): key on the file's content + import
     // closure + check config + this file's cross-file lint exemptions, replay
@@ -179,14 +179,15 @@ fn check_one(
                 file,
                 &file.to_string_lossy(),
                 &source,
-                &config,
+                config,
+                context.host_capabilities.source_content.as_deref(),
                 overrides.invariants,
                 &exemptions,
             )
         });
     if let Some(key) = cache_key.as_ref() {
         if let Some(hit) =
-            super::result_cache::load(key, &file.to_string_lossy(), &config, want_text)
+            super::result_cache::load(key, &file.to_string_lossy(), config, want_text)
         {
             return hit;
         }
@@ -199,9 +200,10 @@ fn check_one(
         check_file_report_inner(
             analysis,
             file,
-            &config,
+            config,
             cross_file_imports,
             module_graph,
+            &context.host_capabilities.capabilities,
             overrides.invariants,
             text.as_mut(),
         )
@@ -249,32 +251,55 @@ fn lint_exemptions_for_file(
         .collect()
 }
 
-/// Load the `[check]` config for `file`, memoized per parent directory for
-/// the run. `load_check_config` walks up to 16 ancestor directories probing
-/// for `harn.toml` and re-parses the manifest on every call; sibling files
-/// share the answer, so a whole-tree check needs it once per directory, not
-/// once per file.
-fn load_check_config_cached(
-    config_by_dir: &Mutex<HashMap<PathBuf, package::CheckConfig>>,
-    file: &Path,
-) -> package::CheckConfig {
-    let Some(dir) = file.parent() else {
-        return package::load_check_config(Some(file));
-    };
-    if let Some(hit) = config_by_dir
-        .lock()
-        .expect("check config memo lock poisoned")
-        .get(dir)
-        .cloned()
-    {
-        return hit;
+/// Key directory-stable check inputs by a file's parent. `load_check_config`
+/// walks up to 16 ancestor directories probing for `harn.toml`; sibling files
+/// share both that config and its resolved host-capability manifest, so the
+/// driver computes the effective context once per directory before fan-out.
+fn check_config_key(file: &Path) -> PathBuf {
+    file.parent().unwrap_or(file).to_path_buf()
+}
+
+fn build_check_contexts(
+    files: &[PathBuf],
+    overrides: &CheckCliOverrides,
+) -> HashMap<PathBuf, EffectiveCheckConfig> {
+    build_check_contexts_with(files, overrides, resolve_host_capabilities)
+}
+
+fn build_check_contexts_with(
+    files: &[PathBuf],
+    overrides: &CheckCliOverrides,
+    resolve: impl Fn(&package::CheckConfig) -> ResolvedHostCapabilities,
+) -> HashMap<PathBuf, EffectiveCheckConfig> {
+    let mut contexts = HashMap::new();
+    for file in files {
+        let key = check_config_key(file);
+        if contexts.contains_key(&key) {
+            continue;
+        }
+        let mut config = package::load_check_config(Some(file));
+        if let Some(path) = overrides.host_capabilities.as_ref() {
+            config.host_capabilities_path = Some(path.clone());
+        }
+        if let Some(path) = overrides.bundle_root.as_ref() {
+            config.bundle_root = Some(path.clone());
+        }
+        if overrides.strict_types {
+            config.strict_types = true;
+        }
+        if let Some(severity) = overrides.preflight.as_deref() {
+            config.preflight_severity = Some(severity.to_string());
+        }
+        let host_capabilities = resolve(&config);
+        contexts.insert(
+            key,
+            EffectiveCheckConfig {
+                config,
+                host_capabilities,
+            },
+        );
     }
-    let config = package::load_check_config(Some(file));
-    config_by_dir
-        .lock()
-        .expect("check config memo lock poisoned")
-        .insert(dir.to_path_buf(), config.clone());
-    config
+    contexts
 }
 
 /// Claim the module-graph build's parsed AST for `file`, if still unclaimed.
@@ -289,4 +314,43 @@ fn take_parsed_source(
         .lock()
         .expect("parsed-source map lock poisoned")
         .remove(&canonical)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    #[test]
+    fn sibling_files_resolve_one_host_capability_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.harn");
+        let second = dir.path().join("second.harn");
+        std::fs::write(&first, "pipeline first() {}\n").unwrap();
+        std::fs::write(&second, "pipeline second() {}\n").unwrap();
+        let manifest = dir.path().join("host-capabilities.toml");
+        let manifest_content = "[capabilities.custom]\noperations = [\"inspect\"]\n";
+        std::fs::write(&manifest, manifest_content).unwrap();
+
+        let resolutions = AtomicUsize::new(0);
+        let overrides = CheckCliOverrides {
+            host_capabilities: Some(manifest.display().to_string()),
+            ..CheckCliOverrides::default()
+        };
+        let files = vec![first.clone(), second.clone()];
+        let contexts = build_check_contexts_with(&files, &overrides, |config| {
+            resolutions.fetch_add(1, Ordering::Relaxed);
+            resolve_host_capabilities(config)
+        });
+
+        assert_eq!(resolutions.load(Ordering::Relaxed), 1);
+        assert_eq!(contexts.len(), 1);
+        let first_context = &contexts[&check_config_key(&first)];
+        assert!(first_context.host_capabilities.capabilities["custom"].contains("inspect"));
+        assert_eq!(
+            first_context.host_capabilities.source_content.as_deref(),
+            Some(manifest_content)
+        );
+    }
 }
