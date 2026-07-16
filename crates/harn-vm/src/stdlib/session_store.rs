@@ -397,7 +397,15 @@ async fn import_legacy_events(
 
     let mut events = Vec::with_capacity(source.events.len());
     for legacy in source.events {
-        let original_headers = serde_json::to_string(&legacy.headers).map_err(|error| {
+        let mut original_headers = serde_json::to_value(&legacy.headers).map_err(|error| {
+            VmError::Runtime(format!(
+                "session_store: failed to preserve legacy headers: {error}"
+            ))
+        })?;
+        if let Some(redactor) = store.hooks().redaction.as_ref() {
+            redactor.redact_json_in_place(&mut original_headers);
+        }
+        let original_headers = serde_json::to_string(&original_headers).map_err(|error| {
             VmError::Runtime(format!(
                 "session_store: failed to preserve legacy headers: {error}"
             ))
@@ -722,6 +730,7 @@ mod tests {
                 "tags": ["legacy"],
                 "headers": {
                     "run_id": " ",
+                    "authorization": "Bearer source-secret",
                     "x-source": 7,
                     "harn.legacy.event_id": "source-value",
                     "harn.legacy.header.run_id": "source-relocation-value",
@@ -813,16 +822,18 @@ mod tests {
         assert_eq!(events[0].headers["source_event_id"], "1");
         assert_eq!(
             events[0].headers["harn.legacy.record_hash"],
-            serde_json::from_str::<JsonValue>(&legacy_before.lines().next().unwrap()).unwrap()
+            serde_json::from_str::<JsonValue>(legacy_before.lines().next().unwrap()).unwrap()
                 ["record_hash"]
                 .as_str()
                 .unwrap()
         );
         assert_eq!(events[0].headers["x-source"], "7");
+        assert_eq!(events[0].headers["authorization"], "[redacted]");
         let original_headers =
             serde_json::from_str::<JsonValue>(&events[0].headers["harn.legacy.original_headers"])
                 .unwrap();
         assert_eq!(original_headers["run_id"], " ");
+        assert_eq!(original_headers["authorization"], "[redacted]");
         assert_eq!(original_headers["harn.legacy.event_id"], "source-value");
         assert_eq!(
             original_headers["harn.legacy.header.run_id"],
