@@ -61,6 +61,7 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
     let timeout = result.timeout.expect("expected typed timeout metadata");
     assert_eq!(timeout.phase, TestPhase::Execute);
     assert_eq!(timeout.limit_ms, 0);
+    assert_eq!(result.phases.modules, harn_vm::ModulePhaseStats::default());
     assert_eq!(
         result.error.as_deref(),
         Some("execute phase timed out after 0ms")
@@ -392,6 +393,7 @@ fn passing_result_with_timings(total_ms: u64, execute_ms: u64) -> TestResult {
             compile_ms: 3,
             execute_ms,
             teardown_ms: 2,
+            modules: harn_vm::ModulePhaseStats::default(),
         },
     }
 }
@@ -945,6 +947,7 @@ pipeline test_value(value) { assert(false, "must not execute") }
 
     assert_eq!(summary.total, 1);
     assert_eq!(summary.results[0].name, "<file error>");
+    assert_eq!(summary.timing.sample_count, 0);
     assert!(summary.results[0]
         .error
         .as_deref()

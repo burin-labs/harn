@@ -15,6 +15,7 @@ use harn_vm::VmValue;
 use serde::Serialize;
 
 use crate::env_guard::ScopedEnvVar;
+use crate::test_timing::DurationSummary;
 use crate::CLI_RUNTIME_STACK_SIZE;
 
 mod execution;
@@ -60,6 +61,8 @@ pub struct TestSummary {
     pub failed: usize,
     pub total: usize,
     pub duration_ms: u64,
+    /// Distribution of per-test wall-clock durations.
+    pub timing: DurationSummary,
     /// Aggregated phase costs across the entire run.
     pub aggregate: AggregateTimings,
 }
@@ -78,12 +81,16 @@ pub struct PhaseTimings {
     pub compile_ms: u64,
     /// `vm.execute(chunk)` wall time, i.e. the actual user-test body.
     pub execute_ms: u64,
-    /// `reset_thread_local_state` between tests.
+    /// VM/LocalSet task cancellation and `reset_thread_local_state` between tests.
     pub teardown_ms: u64,
+    /// Module attribution overlapping setup and execute. These values are
+    /// diagnostic subtotals and must not be added to the top-level phases.
+    pub modules: harn_vm::ModulePhaseStats,
 }
 
-/// Aggregated cost across the run. Mirrors [`PhaseTimings`] plus the
-/// suite-level collection cost (discover + parse).
+/// Cumulative worker-time across the run. Mirrors [`PhaseTimings`] plus the
+/// suite-level collection cost (discover + parse). Parallel case phases overlap,
+/// so these totals may exceed suite wall time.
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct AggregateTimings {
     pub collection_ms: u64,
@@ -91,6 +98,8 @@ pub struct AggregateTimings {
     pub compile_ms: u64,
     pub execute_ms: u64,
     pub teardown_ms: u64,
+    /// Sum of per-case module attribution. Overlaps setup and execute.
+    pub modules: harn_vm::ModulePhaseStats,
 }
 
 impl AggregateTimings {
@@ -106,6 +115,7 @@ impl AggregateTimings {
                 compile_ms: acc.compile_ms.saturating_add(p.compile_ms),
                 execute_ms: acc.execute_ms.saturating_add(p.execute_ms),
                 teardown_ms: acc.teardown_ms.saturating_add(p.teardown_ms),
+                modules: acc.modules.saturating_add(p.modules),
             },
         )
     }
@@ -118,13 +128,17 @@ impl TestResult {
     fn emit_diagnose(&self) {
         let outcome = if self.passed { "ok" } else { "FAIL" };
         eprintln!(
-            "[harn test diag] {} {} setup={}ms compile={}ms execute={}ms teardown={}ms total={}ms",
+            "[harn test diag] {} {} setup={}ms compile={}ms execute={}ms teardown={}ms module_compile={}ms module_load={}ms modules_compiled={} modules_loaded={} total={}ms",
             outcome,
             self.name,
             self.phases.setup_ms,
             self.phases.compile_ms,
             self.phases.execute_ms,
             self.phases.teardown_ms,
+            self.phases.modules.module_compile_ms,
+            self.phases.modules.module_load_ms,
+            self.phases.modules.modules_compiled,
+            self.phases.modules.modules_loaded,
             self.duration_ms,
         );
     }
@@ -460,18 +474,28 @@ async fn run_tests_with_session_impl(
 
     let mut all_results = discovery.discovery_errors;
     let total_tests = cases.len();
-    if !options.fail_fast || all_results.is_empty() {
-        all_results.extend(execute_cases(cases, workers, options, total_tests, session).await);
-    }
+    let execution = if !options.fail_fast || all_results.is_empty() {
+        execute_cases(cases, workers, options, total_tests, session).await
+    } else {
+        CaseExecutionResults::default()
+    };
 
+    let timing = DurationSummary::from_samples(
+        &execution
+            .cases
+            .iter()
+            .map(|result| result.duration_ms)
+            .collect::<Vec<_>>(),
+    );
+    if let Some(path) = timings_path.as_deref() {
+        update_timings_cache(path, timings, &execution.cases);
+    }
+    all_results.extend(execution.cases);
+    all_results.extend(execution.infrastructure_errors);
     let total = all_results.len();
-    let passed = all_results.iter().filter(|r| r.passed).count();
+    let passed = all_results.iter().filter(|result| result.passed).count();
     let failed = total - passed;
     let aggregate = AggregateTimings::from_results(collection_ms, &all_results);
-
-    if let Some(path) = timings_path.as_deref() {
-        update_timings_cache(path, timings, &all_results);
-    }
 
     TestSummary {
         results: all_results,
@@ -479,6 +503,7 @@ async fn run_tests_with_session_impl(
         failed,
         total,
         duration_ms: start.elapsed().as_millis() as u64,
+        timing,
         aggregate,
     }
 }
@@ -1091,9 +1116,6 @@ fn load_timings_cache(path: &Path) -> BTreeMap<String, u64> {
 
 fn update_timings_cache(path: &Path, mut existing: BTreeMap<String, u64>, results: &[TestResult]) {
     for result in results {
-        if result.name == "<file error>" || result.name == "<join error>" {
-            continue;
-        }
         existing.insert(
             timings_key(Path::new(&result.file), &result.name),
             result.duration_ms,
@@ -1107,15 +1129,21 @@ fn update_timings_cache(path: &Path, mut existing: BTreeMap<String, u64>, result
     }
 }
 
+#[derive(Default)]
+struct CaseExecutionResults {
+    cases: Vec<TestResult>,
+    infrastructure_errors: Vec<TestResult>,
+}
+
 async fn execute_cases(
     cases: Vec<TestCase>,
     workers: usize,
     options: &RunOptions,
     total_tests: usize,
     session: &TestRunSession,
-) -> Vec<TestResult> {
+) -> CaseExecutionResults {
     if cases.is_empty() {
-        return Vec::new();
+        return CaseExecutionResults::default();
     }
     let completed = Arc::new(Mutex::new(0usize));
     if workers <= 1 {
@@ -1157,12 +1185,16 @@ async fn execute_cases(
                 break;
             }
         }
-        return results;
+        return CaseExecutionResults {
+            cases: results,
+            infrastructure_errors: Vec::new(),
+        };
     }
 
     let queue = Arc::new(Mutex::new(cases));
     let gate = Arc::new(ResourceGate::new(workers));
     let results: Arc<Mutex<Vec<TestResult>>> = Arc::new(Mutex::new(Vec::new()));
+    let infrastructure_errors: Arc<Mutex<Vec<TestResult>>> = Arc::new(Mutex::new(Vec::new()));
     let cancelled = Arc::new(AtomicBool::new(false));
 
     let mut handles = Vec::with_capacity(workers);
@@ -1170,6 +1202,7 @@ async fn execute_cases(
         let queue = Arc::clone(&queue);
         let gate = Arc::clone(&gate);
         let results = Arc::clone(&results);
+        let infrastructure_errors = Arc::clone(&infrastructure_errors);
         let completed = Arc::clone(&completed);
         let timeout_ms = options.timeout_ms;
         #[cfg(test)]
@@ -1193,7 +1226,7 @@ async fn execute_cases(
                 {
                     Ok(rt) => rt,
                     Err(error) => {
-                        results.lock().unwrap().push(TestResult {
+                        infrastructure_errors.lock().unwrap().push(TestResult {
                             name: "<worker error>".to_string(),
                             file: String::new(),
                             passed: false,
@@ -1256,9 +1289,16 @@ async fn execute_cases(
     // All workers have joined, so this Arc holds the only remaining
     // reference. The lock-and-clone fallback survives the unlikely case
     // where a panic-unwind kept an extra reference alive.
-    Arc::try_unwrap(results)
+    let cases = Arc::try_unwrap(results)
         .map(|m| m.into_inner().unwrap_or_default())
-        .unwrap_or_else(|arc| arc.lock().unwrap().clone())
+        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
+    let infrastructure_errors = Arc::try_unwrap(infrastructure_errors)
+        .map(|mutex| mutex.into_inner().unwrap_or_default())
+        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
+    CaseExecutionResults {
+        cases,
+        infrastructure_errors,
+    }
 }
 
 fn claim_next_case(

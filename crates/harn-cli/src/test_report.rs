@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-pub const USER_TEST_REPORT_SCHEMA_VERSION: u32 = 1;
+use crate::test_runner::{AggregateTimings, PhaseTimings, TestTimeout};
+use crate::test_timing::DurationSummary;
+
+pub const USER_TEST_REPORT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -42,6 +45,10 @@ pub struct TestCaseReport {
     pub classname: String,
     pub outcome: TestOutcome,
     pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<TestTimeout>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phases: Option<PhaseTimings>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
@@ -74,6 +81,10 @@ pub struct TestReport {
     pub suite: String,
     pub root: Option<String>,
     pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<DurationSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregate: Option<AggregateTimings>,
     pub summary: TestReportSummary,
     pub cases: Vec<TestCaseReport>,
 }
@@ -85,9 +96,16 @@ impl TestReport {
             suite: suite.into(),
             root: root.map(|p| p.display().to_string()),
             duration_ms: 0,
+            timing: None,
+            aggregate: None,
             summary: TestReportSummary::default(),
             cases: Vec::new(),
         }
+    }
+
+    pub fn set_execution_metrics(&mut self, timing: DurationSummary, aggregate: AggregateTimings) {
+        self.timing = Some(timing);
+        self.aggregate = Some(aggregate);
     }
 
     pub fn push(&mut self, case: TestCaseReport) {
@@ -204,6 +222,8 @@ mod tests {
             classname: "suite/a.harn".into(),
             outcome: TestOutcome::Passed,
             duration_ms: 12,
+            timeout: None,
+            phases: None,
             message: None,
         });
         report.push(TestCaseReport {
@@ -212,6 +232,8 @@ mod tests {
             classname: "suite/b.harn".into(),
             outcome: TestOutcome::Failed,
             duration_ms: 34,
+            timeout: None,
+            phases: None,
             message: Some("expected 1 == 2".into()),
         });
         report.push(TestCaseReport {
@@ -220,6 +242,14 @@ mod tests {
             classname: "suite/c.harn".into(),
             outcome: TestOutcome::TimedOut,
             duration_ms: 30_000,
+            timeout: Some(TestTimeout {
+                phase: crate::test_runner::TestPhase::Execute,
+                limit_ms: 30_000,
+            }),
+            phases: Some(PhaseTimings {
+                execute_ms: 30_000,
+                ..PhaseTimings::default()
+            }),
             message: Some("timed out after 30000ms".into()),
         });
         report.push(TestCaseReport {
@@ -228,6 +258,8 @@ mod tests {
             classname: "suite/d.harn".into(),
             outcome: TestOutcome::Skipped,
             duration_ms: 0,
+            timeout: None,
+            phases: None,
             message: Some("xfail: flaky".into()),
         });
         report.set_duration_ms(100);
@@ -278,6 +310,9 @@ mod tests {
         assert_eq!(cases[0]["outcome"], "passed");
         assert_eq!(cases[1]["outcome"], "failed");
         assert_eq!(cases[2]["outcome"], "timed_out");
+        assert_eq!(cases[2]["timeout"]["phase"], "execute");
+        assert_eq!(cases[2]["timeout"]["limit_ms"], 30_000);
+        assert_eq!(cases[2]["phases"]["execute_ms"], 30_000);
         assert_eq!(cases[3]["outcome"], "skipped");
     }
 

@@ -93,9 +93,10 @@ pub(super) async fn execute_case(
     let local = tokio::task::LocalSet::new();
     let file_display = case.file.display().to_string();
     let setup_start = Instant::now();
+    let mut vm = harn_vm::Vm::new();
+    let module_phase_recorder = vm.enable_module_phase_timing();
     let result = local
         .run_until(async {
-            let mut vm = harn_vm::Vm::new();
             vm.set_prepared_module_cache(prepared_module_cache.clone());
             harn_vm::register_vm_stdlib(&mut vm);
             crate::install_default_hostlib(&mut vm);
@@ -194,12 +195,16 @@ pub(super) async fn execute_case(
             Ok::<_, String>((outcome, setup_ms, execute_ms))
         })
         .await;
-
     let failed_setup_ms = result
         .as_ref()
         .err()
         .map(|_| setup_start.elapsed().as_millis() as u64);
     let teardown_start = Instant::now();
+    // Cancel and drain detached VM/LocalSet work inside the teardown phase,
+    // then snapshot spans closed by task cancellation for this case.
+    drop(local);
+    drop(vm);
+    phases.modules = module_phase_recorder.snapshot();
     // Clear thread-locals so the next case scheduled onto this worker
     // sees a clean slate. Wall clock for this work lands in the
     // teardown bucket so the phase breakdown sums to wall time.

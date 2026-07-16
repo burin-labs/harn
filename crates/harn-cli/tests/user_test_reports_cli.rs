@@ -74,12 +74,18 @@ fn junit_and_json_out_written_for_passing_user_tests() {
 
     let json: Value = serde_json::from_str(&std::fs::read_to_string(&json_out).expect("read JSON"))
         .expect("parse JSON");
-    assert_eq!(json["schemaVersion"], 1);
+    assert_eq!(json["schemaVersion"], 2);
     assert_eq!(json["summary"]["total"], 1);
     assert_eq!(json["summary"]["passed"], 1);
     assert_eq!(json["summary"]["failed"], 0);
     assert_eq!(json["cases"][0]["name"], "test_pass");
     assert_eq!(json["cases"][0]["outcome"], "passed");
+    assert_eq!(json["timing"]["sample_count"], 1);
+    assert!(json["timing"]["p90_ms"].as_u64().is_some());
+    assert!(json["aggregate"]["setup_ms"].as_u64().is_some());
+    assert!(json["cases"][0]["phases"]["modules"]["modules_loaded"]
+        .as_u64()
+        .is_some());
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]

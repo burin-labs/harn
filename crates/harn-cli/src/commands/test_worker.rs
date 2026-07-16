@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::test_runner::{RunOptions, TestRunSession, TestRunSessionStats, TestShard};
 
 const PROTOCOL_VERSION: &str = "1";
-const TEST_RUN_SCHEMA_VERSION: u32 = 1;
+const TEST_RUN_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -366,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn pins_test_run_response_schema_v1() {
+    fn pins_test_run_response_schema_v2() {
         let response = TestRunResponse {
             schema_version: TEST_RUN_SCHEMA_VERSION,
             worker_id: "worker-1".to_string(),
@@ -397,18 +397,21 @@ mod tests {
                         compile_ms: 1,
                         execute_ms: 10,
                         teardown_ms: 0,
+                        modules: harn_vm::ModulePhaseStats::default(),
                     },
                 }],
                 passed: 0,
                 failed: 1,
                 total: 1,
                 duration_ms: 13,
+                timing: crate::test_timing::DurationSummary::from_samples(&[12]),
                 aggregate: crate::test_runner::AggregateTimings {
                     collection_ms: 1,
                     setup_ms: 1,
                     compile_ms: 1,
                     execute_ms: 10,
                     teardown_ms: 0,
+                    modules: harn_vm::ModulePhaseStats::default(),
                 },
             },
         };
@@ -416,7 +419,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(response).unwrap(),
             json!({
-                "schema_version": 1,
+                "schema_version": 2,
                 "worker_id": "worker-1",
                 "process_id": 42,
                 "run_count": 3,
@@ -438,13 +441,25 @@ mod tests {
                         "duration_ms": 12,
                         "phases": {
                             "setup_ms": 1, "compile_ms": 1,
-                            "execute_ms": 10, "teardown_ms": 0
+                            "execute_ms": 10, "teardown_ms": 0,
+                            "modules": {
+                                "module_compile_ms": 0, "module_load_ms": 0,
+                                "modules_compiled": 0, "modules_loaded": 0
+                            }
                         }
                     }],
                     "passed": 0, "failed": 1, "total": 1, "duration_ms": 13,
+                    "timing": {
+                        "sample_count": 1, "average_ms": 12,
+                        "p50_ms": 12, "p90_ms": 12, "p95_ms": 12, "p99_ms": 12
+                    },
                     "aggregate": {
                         "collection_ms": 1, "setup_ms": 1, "compile_ms": 1,
-                        "execute_ms": 10, "teardown_ms": 0
+                        "execute_ms": 10, "teardown_ms": 0,
+                        "modules": {
+                            "module_compile_ms": 0, "module_load_ms": 0,
+                            "modules_compiled": 0, "modules_loaded": 0
+                        }
                     }
                 }
             })

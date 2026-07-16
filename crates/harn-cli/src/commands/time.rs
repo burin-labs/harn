@@ -6,9 +6,10 @@
 //! wall-clock + cache hit/miss + per-LLM-call + per-tool-call latency.
 //!
 //! Phases are emitted in fixed order — `parse`, `typecheck`,
-//! `bytecode_compile`, `run_setup`, `run_main` — even when a cache hit
+//! `bytecode_compile`, `run_setup`, `run_main`, `module_compile`,
+//! `module_load` — even when a cache hit
 //! lets us skip parse/typecheck. That keeps consumers' shape stable so
-//! `phases.length >= 5` is a safe assertion and `cache: "hit"` always
+//! `phases.length >= 7` is a safe assertion and `cache: "hit"` always
 //! lives on the `bytecode_compile` row.
 
 use std::fs;
@@ -27,7 +28,7 @@ use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 
 /// Schema version for the `harn time run --json` envelope. Bump when
 /// the [`TimingReport`] shape changes in a way agents must detect.
-pub const TIME_RUN_SCHEMA_VERSION: u32 = 1;
+pub const TIME_RUN_SCHEMA_VERSION: u32 = 2;
 
 /// Per-phase wall-clock samples recorded by the run path. Filled in by
 /// [`crate::commands::run`] when timing is requested; absent fields
@@ -44,6 +45,9 @@ pub struct RunTiming {
     pub input_bytes: u64,
     /// True when the bytecode cache short-circuited parse/typecheck.
     pub cache_hit: bool,
+    /// VM-scoped module attribution. The live handle lets error paths report
+    /// partial work without copying timing state at every return site.
+    pub(crate) module_phases: Option<harn_vm::ModulePhaseRecorder>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,8 +77,7 @@ pub struct PhaseRecord {
     /// `"hit"` or `"miss"` on `bytecode_compile`; absent on other phases.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache: Option<String>,
-    /// Count of completed VM spans observed inside this phase. Only
-    /// populated on `run_main` today.
+    /// Count of completed events attributed to this phase.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub events: Option<u64>,
 }
@@ -353,6 +356,11 @@ fn duration_ms(secs: libc::time_t, micros: libc::suseconds_t) -> u64 {
 
 pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<PhaseRecord> {
     let cache_hit = timing.cache_hit;
+    let modules = timing
+        .module_phases
+        .as_ref()
+        .map(harn_vm::ModulePhaseRecorder::snapshot)
+        .unwrap_or_default();
     vec![
         PhaseRecord {
             name: "parse".into(),
@@ -397,6 +405,22 @@ pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<P
             cache: None,
             events: Some(main_events),
         },
+        // These are attribution rows overlapping run_setup/run_main, not
+        // additive top-level phases.
+        PhaseRecord {
+            name: "module_compile".into(),
+            duration_ms: modules.module_compile_ms,
+            input_bytes: None,
+            cache: None,
+            events: Some(modules.modules_compiled),
+        },
+        PhaseRecord {
+            name: "module_load".into(),
+            duration_ms: modules.module_load_ms,
+            input_bytes: None,
+            cache: None,
+            events: Some(modules.modules_loaded),
+        },
     ]
 }
 
@@ -422,6 +446,7 @@ mod tests {
             run_main: Duration::from_millis(1200),
             input_bytes: 4096,
             cache_hit,
+            module_phases: None,
         }
     }
 
@@ -430,51 +455,7 @@ mod tests {
         TimingReport {
             command: "run".into(),
             target: Some("examples/hello.harn".into()),
-            phases: vec![
-                PhaseRecord {
-                    name: "parse".into(),
-                    duration_ms: timing.parse.as_millis() as u64,
-                    input_bytes: if cache_hit {
-                        None
-                    } else {
-                        Some(timing.input_bytes)
-                    },
-                    cache: None,
-                    events: None,
-                },
-                PhaseRecord {
-                    name: "typecheck".into(),
-                    duration_ms: timing.typecheck.as_millis() as u64,
-                    input_bytes: None,
-                    cache: None,
-                    events: None,
-                },
-                PhaseRecord {
-                    name: "bytecode_compile".into(),
-                    duration_ms: timing.bytecode_compile.as_millis() as u64,
-                    input_bytes: None,
-                    cache: Some(if cache_hit {
-                        "hit".into()
-                    } else {
-                        "miss".into()
-                    }),
-                    events: None,
-                },
-                PhaseRecord {
-                    name: "run_setup".into(),
-                    duration_ms: timing.run_setup.as_millis() as u64,
-                    input_bytes: None,
-                    cache: None,
-                    events: None,
-                },
-                PhaseRecord {
-                    name: "run_main".into(),
-                    duration_ms: timing.run_main.as_millis() as u64,
-                    input_bytes: None,
-                    cache: None,
-                    events: Some(14),
-                },
-            ],
+            phases: build_phase_records(&timing, 14),
             llm_calls: vec![LlmCallTiming {
                 model: "claude-sonnet-4-6".into(),
                 latency_ms: 850,
@@ -495,16 +476,20 @@ mod tests {
     }
 
     #[test]
-    fn miss_envelope_has_five_phases_and_cache_miss_marker() {
+    fn miss_envelope_has_top_level_and_module_attribution_phases() {
         let envelope = JsonEnvelope::ok(TIME_RUN_SCHEMA_VERSION, make_report(false));
         let value = serde_json::to_value(&envelope).unwrap();
         let data = assert_envelope(&value, TIME_RUN_SCHEMA_VERSION);
         let phases = data["phases"].as_array().expect("phases is array");
-        assert_eq!(phases.len(), 5);
+        assert_eq!(phases.len(), 7);
         assert_eq!(phases[0]["name"], "parse");
         assert_eq!(phases[0]["input_bytes"], 4096);
         assert_eq!(phases[2]["name"], "bytecode_compile");
         assert_eq!(phases[2]["cache"], "miss");
+        assert_eq!(phases[5]["name"], "module_compile");
+        assert_eq!(phases[5]["events"], 0);
+        assert!(phases[5].get("cache").is_none());
+        assert_eq!(phases[6]["name"], "module_load");
         assert_eq!(data["totals"]["cache_misses"], 1);
         assert_eq!(data["totals"]["cache_hits"], 0);
     }

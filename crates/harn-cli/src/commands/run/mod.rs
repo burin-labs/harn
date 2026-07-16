@@ -100,7 +100,7 @@ struct RunSummaryLlm {
 }
 
 pub const RUN_SUMMARY_SCHEMA_VERSION: u32 = 1;
-pub const RUN_PHASE_SCHEMA_VERSION: u32 = 1;
+pub const RUN_PHASE_SCHEMA_VERSION: u32 = 2;
 pub const RUN_RUSAGE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Serialize)]
@@ -1568,11 +1568,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     };
     let path = resolved_path;
 
-    // Bracket the VM-setup phase explicitly. `run_setup` covers
-    // everything between the bytecode compile and the first VM
-    // instruction; `run_main` covers `vm.execute` proper.
+    // `run_setup` ends at the first VM instruction; `run_main` is execute.
     let setup_start = Instant::now();
-
     if trace || summary.is_some() {
         harn_vm::llm::enable_tracing();
     }
@@ -1599,6 +1596,9 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     }
 
     let mut vm = harn_vm::Vm::new();
+    if let Some(timing) = timing.as_deref_mut() {
+        timing.module_phases = Some(vm.enable_module_phase_timing());
+    }
     if let Some(interrupt_tokens) = interrupt_tokens {
         vm.install_interrupt_signal_token(interrupt_tokens.signal_token);
         vm.install_cancel_token(interrupt_tokens.cancel_token);

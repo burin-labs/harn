@@ -135,32 +135,36 @@ summary JSON is requested, even without `--trace`.
 ### Post-run phase JSON
 
 `harn run --emit-phase-json <file>` emits one raw JSON object after
-the run finishes. This uses the same fixed five-phase contract as
+the run finishes. This uses the same fixed seven-row contract as
 `harn time run --json`, but keeps the data on a separate sink so a
 wrapper can spawn `harn run` and recover parse/typecheck/compile/setup
 timings without changing stdout. Use `--phase-file <path>` or
 `--phase-fd <fd>` to isolate the line from stderr.
 
-Shape (`schema_version: 1`):
+Shape (`schema_version: 2`):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "event": "run_phase",
   "phases": [
     { "name": "parse", "duration_ms": 12, "input_bytes": 4096 },
     { "name": "typecheck", "duration_ms": 80 },
     { "name": "bytecode_compile", "duration_ms": 35, "cache": "miss" },
     { "name": "run_setup", "duration_ms": 8 },
-    { "name": "run_main", "duration_ms": 1200, "events": 14 }
+    { "name": "run_main", "duration_ms": 1200, "events": 14 },
+    { "name": "module_compile", "duration_ms": 40, "events": 3 },
+    { "name": "module_load", "duration_ms": 75, "events": 8 }
   ]
 }
 ```
 
 The phase array is always in this order: `parse`, `typecheck`,
-`bytecode_compile`, `run_setup`, `run_main`. On a bytecode-cache hit,
+`bytecode_compile`, `run_setup`, `run_main`, `module_compile`, `module_load`.
+On a bytecode-cache hit,
 `parse` and `typecheck` stay present with `duration_ms: 0`, and the
-`bytecode_compile` row flips to `"cache": "hit"`.
+`bytecode_compile` row flips to `"cache": "hit"`. The final two attribution
+rows overlap setup/main and are not additive.
 
 ### Post-run rusage JSON
 
@@ -410,13 +414,13 @@ test still receives a fresh VM, module state, and persistence root.
 | `--api-key <key>` | Bearer API key for `harn test agents-conformance` |
 | `--category <name>` | Agents conformance category to run; repeatable or comma-separated |
 | `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
-| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; schemaVersion 1 |
+| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 2 includes typed timeout, phase, aggregate, and latency-distribution data |
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
 | `--parallel` | Run tests concurrently with a bounded worker pool. Slow tests are front-loaded using historical timings from `.harn/test-timings.json` |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). Defaults to available parallelism, capped at 8 |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
 | `--verbose` / `-v` | Show per-test timing and detailed failures |
-| `--timing` | Show per-test timing plus summary statistics |
+| `--timing` | Show detailed per-test timing, slowest tests/files, and phase totals. Every user-test run prints the concise p50/p90 latency line |
 | `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup is measured separately and does not consume the pipeline-execution budget; other targets bound their test case or subprocess |
 | `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget |
@@ -500,18 +504,22 @@ harn time run -e 'log("hi")' --json
 harn time run script.harn -- arg1 arg2
 ```
 
-The output is keyed by five fixed phases — `parse`, `typecheck`,
-`bytecode_compile`, `run_setup`, `run_main` — even when a bytecode-cache
+The output is keyed by seven fixed rows — `parse`, `typecheck`,
+`bytecode_compile`, `run_setup`, `run_main`, `module_compile`, and
+`module_load` — even when a bytecode-cache
 hit lets us skip parse/typecheck. The `bytecode_compile` row carries a
 `cache: "hit" | "miss"` field so cost-and-perf eyeballs and agent
 pipelines can dispatch on cache state without a separate flag.
+`module_compile` and `module_load` attribute module work that overlaps
+`run_setup` and `run_main`; do not add them to the five top-level rows.
+Their `events` values count successful compiles and unique fresh-VM loads.
 
 `--json` emits a versioned `JsonEnvelope` (schema registered as
 `time run` in `harn --json-schemas`):
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "ok": true,
   "data": {
     "command": "run",
@@ -521,7 +529,9 @@ pipelines can dispatch on cache state without a separate flag.
       { "name": "typecheck", "duration_ms": 80 },
       { "name": "bytecode_compile", "duration_ms": 35, "cache": "miss" },
       { "name": "run_setup", "duration_ms": 8 },
-      { "name": "run_main", "duration_ms": 1200, "events": 14 }
+      { "name": "run_main", "duration_ms": 1200, "events": 14 },
+      { "name": "module_compile", "duration_ms": 40, "events": 3 },
+      { "name": "module_load", "duration_ms": 75, "events": 8 }
     ],
     "llm_calls": [
       { "model": "claude-sonnet-5", "latency_ms": 850, "tokens": 1500 }
@@ -2544,6 +2554,8 @@ the Harn `server_version`, stable `worker_id`, and `process_id`. Then call
 `max_execute_ms`, `parallel`, `fail_fast`, `jobs`, `shard`, `skill_dirs`, or
 `diagnose`. Each response includes the same worker identity, typed test
 summary, cumulative `run_count`, and cache counters before and after that run.
+The advertised `test_run.schema_version` is 2; summaries include the shared
+duration distribution plus per-case and aggregate module attribution.
 `shutdown` returns the final run and cache receipt; closing stdin also stops the
 worker. Every test still receives fresh VM and module state; only reusable
 prepared module artifacts are retained by the worker session.
