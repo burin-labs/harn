@@ -4,7 +4,8 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 usage: scripts/native_platform_ci_plan.sh --platform windows|macos --event EVENT \
-  --changed-files PATH [--head-ref REF] [--ci-diff PATH] [--workflow PATH]
+  --changed-files PATH [--head-ref REF] [--ci-diff PATH] \
+  [--policy-diff PATH] [--workflow PATH]
 
 Prints true when the changed-file set should run the requested native platform
 CI lane. The path policy is intentionally centralized here instead of duplicated
@@ -17,6 +18,7 @@ event_name=""
 head_ref=""
 changed_files=""
 ci_diff=""
+policy_diff=""
 workflow=".github/workflows/ci.yml"
 
 while [[ $# -gt 0 ]]; do
@@ -39,6 +41,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ci-diff)
       ci_diff="${2:-}"
+      shift 2
+      ;;
+    --policy-diff)
+      policy_diff="${2:-}"
       shift 2
       ;;
     --workflow)
@@ -172,6 +178,30 @@ ci_diff_touches_platform() {
   return "$status"
 }
 
+release_control_path() {
+  local path="$1"
+  [[ "$path" =~ ^(\.github/release-runner-policy\.json|\.github/workflows/(build-release-binaries|release-smoke)\.yml|scripts/(release_runner_matrix|release_smoke|smoke_installed_binary)\.sh)$ ]]
+}
+
+release_control_diff_mentions_platform() {
+  # Release workflows and smoke scripts are mostly control-plane code. A
+  # control-plane-only edit should be covered by action hygiene and release
+  # script tests instead of paying a hosted native Windows/macOS compile. If CI
+  # cannot provide the diff, keep the old conservative behavior and run.
+  if [[ -z "$policy_diff" || ! -r "$policy_diff" || ! -s "$policy_diff" ]]; then
+    return 0
+  fi
+
+  case "$platform" in
+    windows)
+      grep -Eiq 'windows|Windows_NT|x86_64-pc-windows-msvc|msvc|powershell|pwsh|\.exe' "$policy_diff"
+      ;;
+    macos)
+      grep -Eiq 'macos|Darwin|apple-darwin|x86_64-apple|aarch64-apple|codesign|xcrun|notar' "$policy_diff"
+      ;;
+  esac
+}
+
 path_matches_platform() {
   local path="$1"
   # Keep native source/workflow path policy here, not in ci.yml. The ci.yml file
@@ -179,10 +209,10 @@ path_matches_platform() {
   # workflow edits do not pay hosted native Windows/macOS compiles.
   case "$platform" in
     windows)
-      [[ "$path" =~ ^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|crates/harn-terminal/.*|\.github/release-runner-policy\.json|\.github/workflows/(windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_runner_matrix|release_smoke|smoke_installed_binary)\.sh)$ ]]
+      [[ "$path" =~ ^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|crates/harn-terminal/.*|\.github/workflows/windows-nightly\.yml)$ ]]
       ;;
     macos)
-      [[ "$path" =~ ^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-terminal/.*|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/release-runner-policy\.json|\.github/workflows/(macos-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_runner_matrix|release_smoke|smoke_installed_binary)\.sh)$ ]]
+      [[ "$path" =~ ^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/.*|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-terminal/.*|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/workflows/macos-nightly\.yml)$ ]]
       ;;
   esac
 }
@@ -216,6 +246,11 @@ while IFS= read -r changed_path || [[ -n "$changed_path" ]]; do
         fi
         ;;
     esac
+  elif release_control_path "$changed_path"; then
+    if release_control_diff_mentions_platform; then
+      echo true
+      exit 0
+    fi
   elif path_matches_platform "$changed_path"; then
     echo true
     exit 0

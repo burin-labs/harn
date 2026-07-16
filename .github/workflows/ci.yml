@@ -675,12 +675,24 @@ jobs:
               run_windows=true
             else
               ci_diff="$RUNNER_TEMP/windows-ci-workflow.diff"
+              policy_diff="$RUNNER_TEMP/windows-native-policy.diff"
               : > "$ci_diff"
+              : > "$policy_diff"
               if grep -Fxq ".github/workflows/ci.yml" "$RUNNER_TEMP/windows-changed-files.txt"; then
                 if ! git diff --unified=0 "$diff_base" HEAD -- .github/workflows/ci.yml > "$ci_diff" 2>/dev/null; then
                   echo "windows: ci.yml diff against $diff_base failed; running Windows smoke defensively."
                   run_windows=true
                 fi
+              fi
+              if ! git diff --unified=0 "$diff_base" HEAD -- \
+                .github/release-runner-policy.json \
+                .github/workflows/build-release-binaries.yml \
+                .github/workflows/release-smoke.yml \
+                scripts/release_runner_matrix.sh \
+                scripts/release_smoke.sh \
+                scripts/smoke_installed_binary.sh > "$policy_diff" 2>/dev/null; then
+                echo "windows: native policy diff against $diff_base failed; running Windows smoke defensively."
+                run_windows=true
               fi
               cat "$RUNNER_TEMP/windows-changed-files.txt"
               if [[ "$run_windows" != "true" ]]; then
@@ -690,7 +702,8 @@ jobs:
                     --event "$EVENT_NAME" \
                     --head-ref "$PR_HEAD_REF" \
                     --changed-files "$RUNNER_TEMP/windows-changed-files.txt" \
-                    --ci-diff "$ci_diff"
+                    --ci-diff "$ci_diff" \
+                    --policy-diff "$policy_diff"
                 )"
               fi
             fi
@@ -911,12 +924,24 @@ jobs:
               run_macos=true
             else
               ci_diff="$RUNNER_TEMP/macos-ci-workflow.diff"
+              policy_diff="$RUNNER_TEMP/macos-native-policy.diff"
               : > "$ci_diff"
+              : > "$policy_diff"
               if grep -Fxq ".github/workflows/ci.yml" "$RUNNER_TEMP/macos-changed-files.txt"; then
                 if ! git diff --unified=0 "$diff_base" HEAD -- .github/workflows/ci.yml > "$ci_diff" 2>/dev/null; then
                   echo "macos: ci.yml diff against $diff_base failed; running macOS check defensively."
                   run_macos=true
                 fi
+              fi
+              if ! git diff --unified=0 "$diff_base" HEAD -- \
+                .github/release-runner-policy.json \
+                .github/workflows/build-release-binaries.yml \
+                .github/workflows/release-smoke.yml \
+                scripts/release_runner_matrix.sh \
+                scripts/release_smoke.sh \
+                scripts/smoke_installed_binary.sh > "$policy_diff" 2>/dev/null; then
+                echo "macos: native policy diff against $diff_base failed; running macOS check defensively."
+                run_macos=true
               fi
               cat "$RUNNER_TEMP/macos-changed-files.txt"
               if [[ "$run_macos" != "true" ]]; then
@@ -926,7 +951,8 @@ jobs:
                     --event "$EVENT_NAME" \
                     --head-ref "$PR_HEAD_REF" \
                     --changed-files "$RUNNER_TEMP/macos-changed-files.txt" \
-                    --ci-diff "$ci_diff"
+                    --ci-diff "$ci_diff" \
+                    --policy-diff "$policy_diff"
                 )"
               fi
             fi
