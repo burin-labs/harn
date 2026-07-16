@@ -102,12 +102,28 @@ fi
 jq -c \
   --arg runner_key "$RUNNER_KEY" \
   --argjson requested "$REQUESTED_JSON" '
+    def rust_cache_broad_restore_prefix($target):
+      if $target == "x86_64-apple-darwin" then
+        "v0-rust-release-x86_64-apple-darwin-Darwin-x64-"
+      elif $target == "aarch64-apple-darwin" then
+        "v0-rust-release-aarch64-apple-darwin-Darwin-arm64-"
+      elif $target == "x86_64-unknown-linux-gnu" then
+        "v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-"
+      elif $target == "aarch64-unknown-linux-gnu" then
+        "v0-rust-release-aarch64-unknown-linux-gnu-Linux-arm64-"
+      elif $target == "x86_64-pc-windows-msvc" then
+        "v0-rust-release-x86_64-pc-windows-msvc-Windows_NT-x64-"
+      else
+        error("missing release Rust cache prefix for " + $target)
+      end;
+
     [.targets[]
       | . as $entry
       | select(($requested | length) == 0 or ($requested | index($entry.target)))
       | {
           target,
           runner: .runners[$runner_key],
+          rust_cache_broad_restore_prefix: rust_cache_broad_restore_prefix(.target),
           release_codegen_units,
           use_sccache
         }]

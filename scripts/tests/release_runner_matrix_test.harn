@@ -25,6 +25,10 @@ fn runners(rows) {
   return rows.map({ row -> row.target + "=" + row.runner })
 }
 
+fn cache_prefixes(rows) {
+  return rows.map({ row -> row.target + "=" + row.rust_cache_broad_restore_prefix })
+}
+
 pipeline test_release_runner_policy_pins_every_mode(task) {
   const standard = [
     "x86_64-apple-darwin=macos-15-intel",
@@ -36,6 +40,16 @@ pipeline test_release_runner_policy_pins_every_mode(task) {
   assert_eq(runners(matrix("--mode warm")), standard)
   assert_eq(runners(matrix("--mode primary")), standard)
   assert_eq(runners(matrix("--mode recovery")), standard)
+  assert_eq(
+    cache_prefixes(matrix("--mode primary")),
+    [
+      "x86_64-apple-darwin=v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
+      "aarch64-apple-darwin=v0-rust-release-aarch64-apple-darwin-Darwin-arm64-",
+      "x86_64-unknown-linux-gnu=v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-",
+      "aarch64-unknown-linux-gnu=v0-rust-release-aarch64-unknown-linux-gnu-Linux-arm64-",
+      "x86_64-pc-windows-msvc=v0-rust-release-x86_64-pc-windows-msvc-Windows_NT-x64-",
+    ],
+  )
 }
 
 pipeline test_release_runner_policy_selects_targeted_fast_capacity(task) {
@@ -45,6 +59,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(task) {
       {
         target: "x86_64-apple-darwin",
         runner: "macos-15-large",
+        rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
         release_codegen_units: 16,
         use_sccache: "false",
       },

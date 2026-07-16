@@ -30,6 +30,8 @@ const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
 const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
 
+const UPSTREAM_CACHE_RESTORE_PREFIX = "actions/cache/restore@"
+
 const UPSTREAM_NODE_PREFIX = "actions/setup-node@"
 
 const UPSTREAM_GENERIC_CACHE_PREFIX = "actions/cache@"
@@ -146,8 +148,30 @@ fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
   let errors: list<string> = []
   const steps = action?.runs?.steps ?? []
   const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) }).to_list()
+  const broad_restore = steps
+    .filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) })
+    .to_list()
   if len(upstream) != 1 {
     return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
+  }
+  if len(broad_restore) != 1 {
+    errors = errors
+      + ["${ACTION_PATH} must contain one pinned restore-only broad Rust cache fallback step"]
+  } else {
+    const restore_if = trim(broad_restore[0]?.if ?? "")
+    if !contains(restore_if, "inputs.broad-restore-prefix != ''") {
+      errors = errors + ["${ACTION_PATH} broad fallback must be opt-in per caller"]
+    }
+    const restore_keys = trim(broad_restore[0]?.with?.["restore-keys"] ?? "")
+    const restore_key = trim(broad_restore[0]?.with?.key ?? "")
+    if !contains(restore_keys, "inputs.broad-restore-prefix")
+      || !contains(restore_key, "inputs.broad-restore-prefix")
+      || !contains(restore_key, "github.sha") {
+      errors = errors + ["${ACTION_PATH} broad fallback must restore by prefix without becoming a writer"]
+    }
+    if !(broad_restore[0]?.["continue-on-error"] ?? false) {
+      errors = errors + ["${ACTION_PATH} broad fallback must keep cache-service failures non-fatal"]
+    }
   }
   const step = upstream[0]
   const save_if = trim(step?.with?.["save-if"] ?? "")
@@ -164,7 +188,7 @@ fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
 fn node_cache_action_errors(action) -> list<string> {
   const steps = action?.runs?.steps ?? []
   const setup = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_NODE_PREFIX) }).to_list()
-  const restores = steps.filter({ step -> step_uses(step).starts_with("actions/cache/restore@") }).to_list()
+  const restores = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) }).to_list()
   const caches = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_GENERIC_CACHE_PREFIX) }).to_list()
   if len(setup) != 1 || len(restores) != 1 || len(caches) != 1 {
     return ["${NODE_ACTION_PATH} must contain one pinned setup, restore-only cache, and main cache step"]
