@@ -101,6 +101,27 @@ struct HandleStore {
 static HANDLE_STORE: LazyLock<Mutex<HandleStore>> =
     LazyLock::new(|| Mutex::new(HandleStore::default()));
 
+type HandleNotifiers = (
+    Option<std::sync::mpsc::SyncSender<()>>,
+    Vec<std::sync::mpsc::SyncSender<VmValue>>,
+);
+
+fn take_handle_notifiers(handle_id: &str) -> HandleNotifiers {
+    let mut store = HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned");
+    store
+        .entries
+        .remove(handle_id)
+        .map(|mut entry| {
+            (
+                entry.completion_tx.take(),
+                std::mem::take(&mut entry.result_txs),
+            )
+        })
+        .unwrap_or((None, Vec::new()))
+}
+
 /// Metadata returned to the caller immediately when a long-running spawn
 /// succeeds. Serialised as a response dict by the calling builtin.
 pub struct LongRunningHandleInfo {
@@ -432,7 +453,13 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         Some(&context.handle_id),
     ) {
         Ok(artifacts) => artifacts,
-        Err(_) => return,
+        Err(_) => {
+            let (completion_tx, _result_txs) = take_handle_notifiers(&context.handle_id);
+            if let Some(tx) = completion_tx {
+                let _ = tx.try_send(());
+            }
+            return;
+        }
     };
     let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
 
@@ -532,16 +559,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     // the child has exited but artifacts are still being finalized; waking that
     // waiter after the inbox push lets `wait_command` consume the matching
     // inbox entry and preserve the old no-duplicate-feedback contract.
-    let (completion_tx, result_txs) = {
-        let mut store = HANDLE_STORE
-            .lock()
-            .expect("long-running handle store poisoned");
-        let entry = store
-            .entries
-            .remove(&context.handle_id)
-            .map(|mut e| (e.completion_tx.take(), std::mem::take(&mut e.result_txs)));
-        entry.unwrap_or((None, Vec::new()))
-    };
+    let (completion_tx, result_txs) = take_handle_notifiers(&context.handle_id);
     for tx in result_txs {
         let _ = tx.try_send(result_value.clone());
     }

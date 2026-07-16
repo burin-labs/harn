@@ -38,6 +38,9 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             let _ = drain_matching_result(&session_id, &handle_id);
             return Ok(mark_tool_result(result));
         }
+        if let Some(result) = drain_matching_result(&session_id, &handle_id) {
+            return Ok(result);
+        }
 
         // The inbox is keyed per-session, but multiple concurrent background
         // handles can share one session (notably `session_id == ""` under
