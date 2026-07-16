@@ -344,6 +344,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_merge_group_proof_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
+	./scripts/tests/release_ship_tag_push_idempotent_test.sh
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/nextest_filters_from_paths_test.sh
 	./scripts/tests/affected_crate_args_test.sh
