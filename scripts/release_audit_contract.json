@@ -15,9 +15,17 @@
       "name": "Format check",
       "job_id": "fmt",
       "matrix_kind": "",
-      "proofs": ["rust-audit", "package-audit"],
+      "proofs": ["rust-audit"],
       "steps": [
-        {"id": "release-audit-format", "condition": "", "run": "make fmt-check"},
+        {"id": "release-audit-format", "condition": "", "run": "make fmt-check"}
+      ]
+    },
+    {
+      "name": "Package audit",
+      "job_id": "package-audit",
+      "matrix_kind": "",
+      "proofs": ["package-audit"],
+      "steps": [
         {"id": "release-audit-package", "condition": "", "run": "./scripts/verify_crate_packages.sh"}
       ]
     },
