@@ -9,12 +9,13 @@ hook_timing_start pre-commit
 changed=$(mktemp)
 harn_format_files=$(mktemp)
 harn_lint_files=$(mktemp)
+markdown_files=$(mktemp)
 # Combine into a single EXIT trap (a second `trap ... EXIT` would replace,
 # not stack with, this one): capture the hook's real exit code FIRST (the
 # subsequent `rm` would otherwise clobber $? with its own status), clean up
 # temp files, then let hook_timing_finish append the NDJSON timing line and
 # re-exit with the captured code.
-trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files"; hook_timing_finish "$hook_timing_exit_code"' EXIT
+trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$markdown_files"; hook_timing_finish "$hook_timing_exit_code"' EXIT
 hook_write_staged_files "$changed"
 if ! hook_fast_default_mode; then
   hook_export_cargo_target_dir
@@ -124,9 +125,14 @@ else
 fi
 
 if hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN" && command -v npx >/dev/null 2>&1; then
-  echo "=== Pre-commit: checking markdown ==="
-  make lint-md
-  echo "    Markdown OK."
+  hook_write_staged_markdown_files "$markdown_files"
+  if [ -s "$markdown_files" ]; then
+    echo "=== Pre-commit: checking staged markdown ==="
+    xargs -0 npx markdownlint-cli2 -- < "$markdown_files"
+    echo "    Markdown OK."
+  else
+    echo "=== Pre-commit: skipping markdown lint (only deleted markdown files) ==="
+  fi
 elif hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN"; then
   echo "=== Pre-commit: skipping markdown lint (npx not found) ==="
 else

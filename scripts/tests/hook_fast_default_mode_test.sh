@@ -8,6 +8,8 @@ trap 'rm -rf "$tmp_root"' EXIT
 
 fake_bin="$tmp_root/bin"
 record="$tmp_root/unexpected-command-record.txt"
+markdown_record="$tmp_root/markdown-command-record.txt"
+precommit_markdown_record="$tmp_root/precommit-markdown-command-record.txt"
 work="$tmp_root/work"
 mkdir -p "$fake_bin" "$work/.githooks" "$work/crates/harn-vm/src" \
   "$work/crates/harn-lexer/src" "$work/crates/harn-stdlib/src/stdlib/agent" \
@@ -31,6 +33,13 @@ printf '%s %s\n' "$(basename "$0")" "$*" >> "$UNEXPECTED_COMMAND_RECORD"
 exit 91
 SH
 chmod +x "$fake_bin/harn"
+
+cat > "$fake_bin/npx" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\0' "$@" >> "$MARKDOWN_COMMAND_RECORD"
+SH
+chmod +x "$fake_bin/npx"
 
 cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
@@ -62,14 +71,29 @@ printf '%s\n' 'pub fn schema_closed_object() {}' > "$work/crates/harn-stdlib/src
 printf '%s\n' '// @harn-entrypoint-category agent.stdlib' 'pub fn agent_loop() {}' > "$work/crates/harn-stdlib/src/stdlib/agent/loop.harn"
 printf '%s\n' 'fn main(harness: Harness) {}' > "$work/conformance/tests/demo.harn"
 printf '%s\n' '[artifacts]' > "$work/scripts/generated_artifacts.toml"
+mkdir -p "$work/docs"
+printf '%s\n' '# Guide' > "$work/docs/guide with spaces.md"
 git -C "$work" add .
 
 (
   cd "$work"
   UNEXPECTED_COMMAND_RECORD="$record" \
+    MARKDOWN_COMMAND_RECORD="$precommit_markdown_record" \
     PATH="$fake_bin:$PATH" \
     ./.githooks/pre-commit > "$tmp_root/pre-commit.out"
 )
+
+expected_precommit_markdown_args="$tmp_root/expected-precommit-markdown-args.txt"
+actual_precommit_markdown_args="$tmp_root/actual-precommit-markdown-args.txt"
+printf '%s\n' \
+  "markdownlint-cli2" \
+  "--" \
+  "docs/guide with spaces.md" > "$expected_precommit_markdown_args"
+tr '\0' '\n' < "$precommit_markdown_record" > "$actual_precommit_markdown_args"
+if ! diff -u "$expected_precommit_markdown_args" "$actual_precommit_markdown_args"; then
+  echo "pre-commit should lint only staged, non-deleted Markdown paths" >&2
+  exit 1
+fi
 
 if [[ -s "$record" ]]; then
   echo "no-local-build mode still invoked a build-capable command" >&2
@@ -94,6 +118,7 @@ mkdir -p "$prepush_fake_bin"
 cp "$fake_bin/cargo" "$prepush_fake_bin/cargo"
 cp "$fake_bin/harn" "$prepush_fake_bin/harn"
 cp "$fake_bin/make" "$prepush_fake_bin/make"
+cp "$fake_bin/npx" "$prepush_fake_bin/npx"
 
 cat > "$prepush_fake_bin/git" <<'SH'
 #!/usr/bin/env bash
@@ -115,6 +140,9 @@ case "$*" in
       "crates/harn-lexer/src/token.rs" \
       "crates/harn-vm/src/lib.rs" \
       "scripts/generated_artifacts.toml"
+    ;;
+  "diff --name-only -z --no-renames --diff-filter=ACMR base...HEAD -- *.md")
+    printf '%s\0' "docs/guide with spaces.md" "CHANGELOG.md"
     ;;
   "rev-list base..HEAD")
     ;;
@@ -163,10 +191,12 @@ run_prepush() {
   input=$1
   output=$2
   : > "$record"
+  : > "$markdown_record"
   (
     cd "$work"
     printf '%s' "$input" | \
       UNEXPECTED_COMMAND_RECORD="$record" \
+      MARKDOWN_COMMAND_RECORD="$markdown_record" \
       PATH="$prepush_fake_bin:$PATH" \
       ./.githooks/pre-push origin git@example.com:burin-labs/harn.git
   ) > "$output"
@@ -199,7 +229,9 @@ fi
 (
   cd "$work"
   : > "$record"
+  : > "$markdown_record"
   if ! UNEXPECTED_COMMAND_RECORD="$record" \
+    MARKDOWN_COMMAND_RECORD="$markdown_record" \
     PATH="$prepush_fake_bin:$PATH" \
     ./.githooks/pre-push origin git@example.com:burin-labs/harn.git > "$tmp_root/pre-push.out"; then
     echo "pre-push no-local-build simulation failed" >&2
@@ -208,6 +240,19 @@ fi
     exit 1
   fi
 )
+
+expected_markdown_args="$tmp_root/expected-markdown-args.txt"
+actual_markdown_args="$tmp_root/actual-markdown-args.txt"
+printf '%s\n' \
+  "markdownlint-cli2" \
+  "--" \
+  "docs/guide with spaces.md" \
+  "CHANGELOG.md" > "$expected_markdown_args"
+tr '\0' '\n' < "$markdown_record" > "$actual_markdown_args"
+if ! diff -u "$expected_markdown_args" "$actual_markdown_args"; then
+  echo "pre-push should lint only changed, non-deleted Markdown paths" >&2
+  exit 1
+fi
 
 if [[ -s "$record" ]]; then
   echo "pre-push no-local-build mode still invoked a build-capable command" >&2
