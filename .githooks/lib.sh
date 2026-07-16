@@ -308,6 +308,10 @@ hook_write_staged_files() {
   git diff --cached --name-only --no-renames --diff-filter=ACMRD > "$1"
 }
 
+hook_write_staged_markdown_files() {
+  git diff --cached --name-only -z --no-renames --diff-filter=ACMR -- '*.md' > "$1"
+}
+
 hook_push_base() {
   upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
   if [ -n "$upstream" ]; then
@@ -345,6 +349,12 @@ hook_write_push_files() {
   output=$1
   base=${2:-$(hook_validation_base)}
   git diff --name-only --no-renames --diff-filter=ACMRD "$base"...HEAD > "$output"
+}
+
+hook_write_push_markdown_files() {
+  output=$1
+  base=${2:-$(hook_validation_base)}
+  git diff --name-only -z --no-renames --diff-filter=ACMR "$base"...HEAD -- '*.md' > "$output"
 }
 
 # Cover the same incremental-cache corruption that scripts/release_gate.sh
