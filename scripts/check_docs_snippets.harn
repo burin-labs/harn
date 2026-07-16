@@ -7,14 +7,47 @@
 // Blocks tagged ```harn,ignore are skipped — use that for intentionally
 // non-syntactic fragments (grammar demos in language-spec.md, etc.).
 //
-// Ported from scripts/check_docs_snippets.sh — same fence state machine
-// (exact ```harn / ```harn,check / ```harn,ignore info strings,
-// unclosed-fence detection), same FAIL output shape, same summary line and
-// exit codes.
+// A fence may be indented — blocks nested under a list item are checked
+// like any other, with the opening fence's indent stripped from the body.
+// The info string itself is still matched exactly (```harn / ```harn,check
+// / ```harn,ignore): a trailing word or space does not open a checked block.
+//
+// Ported from scripts/check_docs_snippets.sh — same unclosed-fence
+// detection, same FAIL output shape, same summary line and exit codes.
 //
 // Usage:
 //   harn run scripts/check_docs_snippets.harn
 const DOCS_GLOB = "docs/src/**/*.md"
+
+/** Count of leading space/tab characters in `line`. */
+pub fn leading_ws_len(line: string) -> int {
+  let i = 0
+  const n = line.len()
+  while i < n {
+    const c = line.char_at(i)
+    if c != " " && c != "\t" {
+      break
+    }
+    i = i + 1
+  }
+  return i
+}
+
+/**
+ * Drop up to `n` leading space/tab characters from `line`, so a block
+ * nested under a list item is reproduced at column 0. Lines indented
+ * less than the opening fence (blank lines, most commonly) lose only the
+ * whitespace they have.
+ */
+pub fn strip_indent(line: string, n: int) -> string {
+  const ws = leading_ws_len(line)
+  const take = if ws < n {
+    ws
+  } else {
+    n
+  }
+  return line.substring(take, line.len())
+}
 
 /**
  * Walk `text` with the fence state machine and return the block events in
@@ -37,32 +70,36 @@ pub fn extract_blocks(text: string) -> list {
   let block_mode = "parse"
   let idx = 0
   let open_line = 0
+  let indent = 0
   let body: list<string> = []
   let line_no = 0
   for line in text.lines() {
     line_no = line_no + 1
-    if line == "```harn" || line == "```harn,check" || line == "```harn,ignore" {
+    const ws = leading_ws_len(line)
+    const info = line.substring(ws, line.len())
+    if info == "```harn" || info == "```harn,check" || info == "```harn,ignore" {
       if in_block {
         // Nested or unclosed fence — markdown is malformed. Surface the
         // line where the previous fence opened so the author can find it.
         events = events + [{kind: "unclosed", open_line: open_line}]
       }
       in_block = true
-      skip = line == "```harn,ignore"
-      block_mode = if line == "```harn,check" {
+      skip = info == "```harn,ignore"
+      block_mode = if info == "```harn,check" {
         "check"
       } else {
         "parse"
       }
       idx = idx + 1
       open_line = line_no
+      indent = ws
       body = []
       if skip {
         events = events + [{kind: "skip", idx: idx}]
       }
       continue
     }
-    if line.starts_with("```") && in_block {
+    if info.starts_with("```") && in_block {
       in_block = false
       if !skip {
         events = events + [{kind: "block", idx: idx, mode: block_mode, content: body.join("\n") + "\n"}]
@@ -70,7 +107,7 @@ pub fn extract_blocks(text: string) -> list {
       continue
     }
     if in_block && !skip {
-      body = body + [line]
+      body = body + [strip_indent(line, indent)]
     }
   }
   if in_block {
