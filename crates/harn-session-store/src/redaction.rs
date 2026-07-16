@@ -35,11 +35,21 @@ pub(crate) fn prepare_append_event(hooks: &StoreHooks, event: &mut AppendEvent) 
     Ok(())
 }
 
-pub(crate) fn redact_stored_events(hooks: &StoreHooks, events: &mut [StoredEvent]) {
+pub(crate) fn redact_stored_events(
+    hooks: &StoreHooks,
+    events: &mut [StoredEvent],
+) -> StoreResult<()> {
     let Some(policy) = hooks.redaction.as_ref() else {
-        return;
+        return Ok(());
     };
     for event in events {
+        let identity = normalize_identity_headers(&mut event.headers)
+            .map_err(|error| StoreError::InvalidInput(error.to_string()))?;
         policy.redact_json_in_place(&mut event.payload);
+        event.headers = policy.redact_headers(&event.headers);
+        identity
+            .apply_to_headers(&mut event.headers)
+            .map_err(|error| StoreError::InvalidInput(error.to_string()))?;
     }
+    Ok(())
 }
