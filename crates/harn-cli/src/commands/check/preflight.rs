@@ -44,16 +44,13 @@ pub(crate) fn is_preflight_allowed(tag: &Option<String>, allow: &[String]) -> bo
     })
 }
 
-pub(crate) fn collect_preflight_diagnostics(
-    path: &Path,
-    source: &str,
-    program: &[SNode],
-    config: &CheckConfig,
-) -> Vec<PreflightDiagnostic> {
-    let module_graph = harn_modules::build(std::slice::from_ref(&path.to_path_buf()));
-    collect_preflight_diagnostics_with_module_graph(path, source, program, config, &module_graph)
-}
-
+/// Collect preflight diagnostics for `path` against an existing module graph.
+///
+/// The graph is a parameter, never built here: every caller walks a set of
+/// files and already holds one over the whole set. Building it per file would
+/// re-walk that file's import closure and re-lex and re-parse all of it — which
+/// is exactly what `harn fix` did, with the shared graph in scope twelve lines
+/// above the call.
 pub(crate) fn collect_preflight_diagnostics_with_module_graph(
     path: &Path,
     source: &str,

@@ -7,6 +7,57 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Counts the filesystem work package resolution performs, so tests can assert
+/// that work which is not needed does not happen.
+///
+/// Counters rather than behavioural assertions because there is nothing else to
+/// observe: acquiring a snapshot and discarding it changes no result, only wall
+/// time. That is exactly how a 5x regression shipped and stayed hidden for three
+/// releases (harn#4815) — the property under test is "this work does not
+/// happen", and only a probe can see that.
+///
+/// The two halves are counted separately because they cost very differently: a
+/// root walk is a handful of stats, while an acquire canonicalizes, takes two
+/// shared flocks, parses two TOML files, and re-reads plus SHA256s the lockfile.
+/// A caller resolving N files under one root should walk N times and acquire
+/// ONCE; a single total could not tell that apart from N acquires.
+#[cfg(test)]
+pub(crate) mod probe_counter {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ACQUIRE_CALLS: Cell<usize> = const { Cell::new(0) };
+        static ROOT_WALK_CALLS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(crate) fn record_acquire() {
+        ACQUIRE_CALLS.with(|calls| calls.set(calls.get() + 1));
+    }
+
+    pub(crate) fn record_root_walk() {
+        ROOT_WALK_CALLS.with(|calls| calls.set(calls.get() + 1));
+    }
+
+    /// Run `body`, returning its value and how many times it probed the
+    /// filesystem for a package at all. Thread-local, so concurrent tests
+    /// cannot bleed into each other.
+    pub(crate) fn count_probes<T>(body: impl FnOnce() -> T) -> (T, usize) {
+        let (value, walks, _) = count_walks_and_acquires(body);
+        (value, walks)
+    }
+
+    pub(crate) fn count_walks_and_acquires<T>(body: impl FnOnce() -> T) -> (T, usize, usize) {
+        ROOT_WALK_CALLS.with(|calls| calls.set(0));
+        ACQUIRE_CALLS.with(|calls| calls.set(0));
+        let value = body();
+        (
+            value,
+            ROOT_WALK_CALLS.with(|calls| calls.get()),
+            ACQUIRE_CALLS.with(|calls| calls.get()),
+        )
+    }
+}
+
 pub const PACKAGE_STATE_DIR: &str = ".harn";
 pub const PACKAGE_CURRENT_FILE: &str = "package-current.toml";
 pub const PACKAGE_GENERATIONS_DIR: &str = "package-generations";
@@ -90,6 +141,8 @@ impl PackageSnapshot {
     /// The publication lock closes the pointer-to-lease race: GC cannot remove
     /// the selected generation until this reader holds its shared lease.
     pub fn acquire(project_root: &Path) -> Result<Option<Self>, PackageSnapshotError> {
+        #[cfg(test)]
+        probe_counter::record_acquire();
         let project_root = project_root
             .canonicalize()
             .map_err(|error| PackageSnapshotError::io("canonicalize", project_root, error))?;
@@ -175,7 +228,17 @@ impl PackageSnapshot {
         }))
     }
 
-    pub fn acquire_nearest(anchor: &Path) -> Result<Option<Self>, PackageSnapshotError> {
+    /// The nearest ancestor of `anchor` that publishes a package generation.
+    ///
+    /// Split out from `acquire_nearest` so a caller resolving many files can
+    /// find each one's root — a cheap stat-walk — and then acquire only once
+    /// per DISTINCT root. Acquiring is the expensive half (canonicalize, two
+    /// shared flocks, two TOML parses, and a re-read plus SHA256 of the
+    /// lockfile), so a caller that acquires per file and dedupes afterwards
+    /// pays it once per file and throws all but one result away.
+    pub fn nearest_project_root(anchor: &Path) -> Option<PathBuf> {
+        #[cfg(test)]
+        probe_counter::record_root_walk();
         let mut cursor = if anchor.is_dir() {
             Some(anchor)
         } else {
@@ -187,14 +250,21 @@ impl PackageSnapshot {
                 .join(PACKAGE_CURRENT_FILE)
                 .is_file()
             {
-                return Self::acquire(dir);
+                return Some(dir.to_path_buf());
             }
             if dir.join(".git").exists() {
                 break;
             }
             cursor = dir.parent();
         }
-        Ok(None)
+        None
+    }
+
+    pub fn acquire_nearest(anchor: &Path) -> Result<Option<Self>, PackageSnapshotError> {
+        match Self::nearest_project_root(anchor) {
+            Some(root) => Self::acquire(&root),
+            None => Ok(None),
+        }
     }
 
     pub fn project_root(&self) -> &Path {

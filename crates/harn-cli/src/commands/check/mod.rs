@@ -41,6 +41,6 @@ pub(crate) use lint::{
     lint_file_inner, lint_fix_file, project_engine_rule_sources, project_native_rule_paths,
 };
 pub(crate) use lint_report::{lint_file_report, LintFileReport, LintReport, LINT_SCHEMA_VERSION};
-pub(crate) use preflight::{collect_preflight_diagnostics, is_preflight_allowed};
+pub(crate) use preflight::{collect_preflight_diagnostics_with_module_graph, is_preflight_allowed};
 pub(crate) use script_rules::run_project_script_rules;
 pub(crate) use template_lint::{collect_lint_targets, lint_prompt_file_inner};
