@@ -318,11 +318,13 @@ fn materialize_suite(root: string, index: int) -> string {
   return test_file
 }
 
-fn time_flags(platform: string) -> string {
+const GNU_TIME_FORMAT = "real %e\nuser %U\nsys %S\nMaximum resident set size (kbytes): %M\nMajor (requiring I/O) page faults: %F\nMinor (reclaiming a frame) page faults: %R\nVoluntary context switches: %w\nInvoluntary context switches: %c\nFile system inputs: %I\nFile system outputs: %O"
+
+pub fn time_args(platform: string) -> list<string> {
   return if platform == "macos" {
-    "-p -l"
+    ["-p", "-l"]
   } else {
-    "-p -v"
+    ["-f", GNU_TIME_FORMAT]
   }
 }
 
@@ -350,10 +352,8 @@ fn run_parallel(root: string, platform: string, test_files: list<string>) -> dic
       + shell_quote(home)
       + " HARN_CACHE_DIR="
       + shell_quote(cache)
-      + " HARN_BYTECODE_CACHE=0 /usr/bin/time "
-      + time_flags(platform)
-      + " "
-      + invocation(argv)
+      + " HARN_BYTECODE_CACHE=0 "
+      + invocation(["/usr/bin/time"] + time_args(platform) + argv)
       + " >"
       + shell_quote(stdout_path)
       + " 2>"
