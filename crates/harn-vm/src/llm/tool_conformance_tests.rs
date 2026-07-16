@@ -123,6 +123,7 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
             "single_tool_call",
             "parallel_tool_calls",
             "large_string_argument",
+            "tool_result_followup",
             "no_tool_answer_or_refusal",
             "unavailable_tool_repair",
             "done_sentinel",
@@ -799,6 +800,42 @@ fn done_sentinel_fixture_passes_only_as_text() {
     assert_eq!(
         report.cases[0].classification,
         ToolProbeClassification::DoneSentinel
+    );
+}
+
+#[test]
+fn tool_result_followup_fixture_passes_without_second_tool_call() {
+    let report = classify_tool_conformance_fixture_for_case(
+        "openai",
+        "gpt-5.4-mini",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::ToolResultFollowup,
+        "case",
+        r#"{"choices":[{"message":{"content":"tool_result_followup:case"}}]}"#,
+    );
+
+    assert!(report.cases[0].ok, "{:?}", report.cases[0]);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::ProseOnlyNonTool
+    );
+}
+
+#[test]
+fn tool_result_followup_fixture_fails_on_spurious_second_tool_call() {
+    let report = classify_tool_conformance_fixture_for_case(
+        "openai",
+        "gpt-5.4-mini",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::ToolResultFollowup,
+        "case",
+        r#"{"choices":[{"message":{"tool_calls":[{"type":"function","function":{"name":"echo_marker","arguments":"{\"value\":\"case\"}"}}]}}]}"#,
+    );
+
+    assert!(!report.cases[0].ok, "{:?}", report.cases[0]);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::RawModelToolTag
     );
 }
 

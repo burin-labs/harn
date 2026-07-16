@@ -75,6 +75,7 @@ pub enum ToolProbeCase {
     SingleToolCall,
     ParallelToolCalls,
     LargeStringArgument,
+    ToolResultFollowup,
     NoToolAnswerOrRefusal,
     UnavailableToolRepair,
     DoneSentinel,
@@ -107,6 +108,7 @@ impl ToolProbeCase {
             Self::SingleToolCall => "single_tool_call",
             Self::ParallelToolCalls => "parallel_tool_calls",
             Self::LargeStringArgument => "large_string_argument",
+            Self::ToolResultFollowup => "tool_result_followup",
             Self::NoToolAnswerOrRefusal => "no_tool_answer_or_refusal",
             Self::UnavailableToolRepair => "unavailable_tool_repair",
             Self::DoneSentinel => "done_sentinel",
@@ -118,6 +120,7 @@ impl ToolProbeCase {
             Self::SingleToolCall,
             Self::ParallelToolCalls,
             Self::LargeStringArgument,
+            Self::ToolResultFollowup,
             Self::NoToolAnswerOrRefusal,
             Self::UnavailableToolRepair,
             Self::DoneSentinel,
@@ -131,6 +134,7 @@ impl ToolProbeCase {
             Self::LargeStringArgument => format!(
                 "marker={marker}\nquoted=\"value\"\njson={{\"marker\":{marker:?},\"nested\":[1,true]}}\nheredoc=<<EOF\n{marker}\nEOF\nunicode=\\u{{2603}}\\u{{1F680}}\nend"
             ),
+            Self::ToolResultFollowup => format!("tool_result_followup:{marker}"),
             Self::NoToolAnswerOrRefusal => format!("direct_answer:{marker}"),
             Self::UnavailableToolRepair => format!("unavailable_tool:{marker}"),
             Self::DoneSentinel => format!("<done>{marker}</done>"),
@@ -142,6 +146,10 @@ impl ToolProbeCase {
             self,
             Self::SingleToolCall | Self::ParallelToolCalls | Self::LargeStringArgument
         )
+    }
+
+    fn request_uses_probe_tool(self) -> bool {
+        self.requires_probe_tool() || self == Self::ToolResultFollowup
     }
 }
 

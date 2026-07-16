@@ -34,8 +34,7 @@ pub(super) fn probe_request_payload(
         |key: &str| -> Option<f64> { model_defaults.get(key).and_then(toml::Value::as_float) };
     let default_int =
         |key: &str| -> Option<i64> { model_defaults.get(key).and_then(toml::Value::as_integer) };
-    let prompt = probe_prompt(probe_case, marker);
-    let native_tools = if probe_case.requires_probe_tool() {
+    let native_tools = if probe_case.request_uses_probe_tool() {
         Some(
             crate::llm::tools::vm_tools_to_native(&probe_tool_registry(), provider, model)
                 .expect("tool probe registry is static and should convert to native tools"),
@@ -71,7 +70,7 @@ pub(super) fn probe_request_payload(
         region: None,
         api_key: String::new(),
         api_mode: LlmApiMode::ChatCompletions,
-        messages: vec![json!({"role": "user", "content": prompt})],
+        messages: Vec::new(),
         system: None,
         max_tokens: default_int("max_tokens").unwrap_or(256),
         temperature: Some(default_float("temperature").unwrap_or(0.0)),
@@ -112,6 +111,7 @@ pub(super) fn probe_request_payload(
         reminder_lifecycle: Vec::new(),
         cli_llm_mock_scope: None,
     };
+    payload.messages = probe_messages(probe_case, marker);
     apply_request_profile(&mut payload, request_profile);
     Ok(payload)
 }
@@ -151,6 +151,9 @@ fn probe_prompt(probe_case: ToolProbeCase, marker: &str) -> String {
         ToolProbeCase::LargeStringArgument => format!(
             "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once. The value argument must exactly equal this string, preserving newlines and escapes: {marker:?}. Do not answer in prose."
         ),
+        ToolProbeCase::ToolResultFollowup => format!(
+            "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once with value {marker:?}. After the tool result arrives, reply with the exact text {marker:?} and do not call any tool again."
+        ),
         ToolProbeCase::NoToolAnswerOrRefusal => format!(
             "Do not call any tool. Reply with the exact text {marker:?} and nothing else."
         ),
@@ -161,6 +164,35 @@ fn probe_prompt(probe_case: ToolProbeCase, marker: &str) -> String {
             format!("Do not call any tool. Emit the exact completion sentinel {marker:?}.")
         }
     }
+}
+
+fn probe_messages(probe_case: ToolProbeCase, marker: &str) -> Vec<Value> {
+    if probe_case != ToolProbeCase::ToolResultFollowup {
+        return vec![json!({"role": "user", "content": probe_prompt(probe_case, marker)})];
+    }
+
+    let tool_call_id = "call_harn_tool_probe_1";
+    vec![
+        json!({"role": "user", "content": probe_prompt(probe_case, marker)}),
+        json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": TOOL_PROBE_TOOL_NAME,
+                    "arguments": json!({"value": marker}).to_string(),
+                },
+            }],
+        }),
+        json!({
+            "role": "tool",
+            "name": TOOL_PROBE_TOOL_NAME,
+            "tool_call_id": tool_call_id,
+            "content": json!({"value": marker}).to_string(),
+        }),
+    ]
 }
 
 fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value {
@@ -246,7 +278,7 @@ fn validate_openai_compat_probe_request(
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
-    if !probe_case.requires_probe_tool() {
+    if !probe_case.request_uses_probe_tool() {
         reject_present(body, "/tools", "OpenAI-compatible no-tool request", issues);
         reject_present(
             body,
@@ -257,7 +289,16 @@ fn validate_openai_compat_probe_request(
         return;
     }
     require_openai_function_tool(body, "/tools/0", issues);
-    validate_openai_compat_tool_choice(body, caps, issues);
+    if probe_case.requires_probe_tool() {
+        validate_openai_compat_tool_choice(body, caps, issues);
+    } else {
+        reject_present(
+            body,
+            "/tool_choice",
+            "OpenAI-compatible tool-result-followup request",
+            issues,
+        );
+    }
     reject_present(body, "/toolConfig", "OpenAI-compatible request", issues);
 }
 
@@ -310,7 +351,7 @@ fn validate_anthropic_probe_request(
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
-    if !probe_case.requires_probe_tool() {
+    if !probe_case.request_uses_probe_tool() {
         reject_present(body, "/tools", "Anthropic no-tool request", issues);
         reject_present(body, "/tool_choice", "Anthropic no-tool request", issues);
         return;
@@ -335,32 +376,41 @@ fn validate_anthropic_probe_request(
         "Anthropic tool declaration",
         issues,
     );
-    match request_profile {
-        ToolProbeRequestProfile::CatalogDefault => {
-            require_string_eq(
-                body,
-                "/tool_choice/type",
-                "tool",
-                "Anthropic tool_choice.type",
-                issues,
-            );
-            require_string_eq(
-                body,
-                "/tool_choice/name",
-                TOOL_PROBE_TOOL_NAME,
-                "Anthropic tool_choice.name",
-                issues,
-            );
+    if probe_case.requires_probe_tool() {
+        match request_profile {
+            ToolProbeRequestProfile::CatalogDefault => {
+                require_string_eq(
+                    body,
+                    "/tool_choice/type",
+                    "tool",
+                    "Anthropic tool_choice.type",
+                    issues,
+                );
+                require_string_eq(
+                    body,
+                    "/tool_choice/name",
+                    TOOL_PROBE_TOOL_NAME,
+                    "Anthropic tool_choice.name",
+                    issues,
+                );
+            }
+            ToolProbeRequestProfile::ParameterEdges => {
+                require_string_eq(
+                    body,
+                    "/tool_choice/type",
+                    "any",
+                    "Anthropic parameter-edge tool_choice.type",
+                    issues,
+                );
+            }
         }
-        ToolProbeRequestProfile::ParameterEdges => {
-            require_string_eq(
-                body,
-                "/tool_choice/type",
-                "any",
-                "Anthropic parameter-edge tool_choice.type",
-                issues,
-            );
-        }
+    } else {
+        reject_present(
+            body,
+            "/tool_choice",
+            "Anthropic tool-result-followup request",
+            issues,
+        );
     }
 }
 
@@ -371,7 +421,7 @@ fn validate_gemini_probe_request(
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/contents", issues);
-    if !probe_case.requires_probe_tool() {
+    if !probe_case.request_uses_probe_tool() {
         reject_present(body, "/tools", "Gemini no-tool request", issues);
         reject_present(body, "/toolConfig", "Gemini no-tool request", issues);
         return;
@@ -390,19 +440,30 @@ fn validate_gemini_probe_request(
         "Gemini function declaration value type",
         issues,
     );
-    require_string_eq(
-        body,
-        "/toolConfig/functionCallingConfig/mode",
-        "ANY",
-        "Gemini toolConfig mode",
-        issues,
-    );
-    if request_profile == ToolProbeRequestProfile::CatalogDefault {
+    if probe_case.requires_probe_tool() {
+        require_string_eq(
+            body,
+            "/toolConfig/functionCallingConfig/mode",
+            "ANY",
+            "Gemini toolConfig mode",
+            issues,
+        );
+    }
+    if probe_case.requires_probe_tool()
+        && request_profile == ToolProbeRequestProfile::CatalogDefault
+    {
         require_array_contains_string(
             body,
             "/toolConfig/functionCallingConfig/allowedFunctionNames",
             TOOL_PROBE_TOOL_NAME,
             "Gemini allowedFunctionNames",
+            issues,
+        );
+    } else if !probe_case.requires_probe_tool() {
+        reject_present(
+            body,
+            "/toolConfig",
+            "Gemini tool-result-followup request",
             issues,
         );
     }
@@ -415,7 +476,7 @@ fn validate_bedrock_probe_request(
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
-    if !probe_case.requires_probe_tool() {
+    if !probe_case.request_uses_probe_tool() {
         reject_present(body, "/toolConfig", "Bedrock no-tool request", issues);
         return;
     }
@@ -442,7 +503,7 @@ fn validate_ollama_probe_request(
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
-    if !probe_case.requires_probe_tool() {
+    if !probe_case.request_uses_probe_tool() {
         reject_present(body, "/tools", "Ollama no-tool request", issues);
         reject_present(body, "/tool_choice", "Ollama no-tool request", issues);
         return;
@@ -620,5 +681,134 @@ mod tests {
         assert_eq!(body["temperature"], 1.0);
         assert_eq!(body["top_p"], 1.0);
         assert_eq!(body["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn tool_result_followup_renders_anthropic_adjacent_tool_result() {
+        let body = probe_request_body(
+            "anthropic",
+            "claude-3-5-haiku-20241022",
+            ToolProbeMode::NonStreaming,
+            super::super::ToolProbeCase::ToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            "tool_result_followup:case",
+        )
+        .expect("Anthropic follow-up request body");
+
+        assert_eq!(body["tools"][0]["name"], TOOL_PROBE_TOOL_NAME);
+        assert!(body.get("tool_choice").is_none());
+        assert_eq!(body["messages"][1]["role"], "assistant");
+        assert_eq!(
+            body["messages"][1]["content"][0]["type"],
+            serde_json::json!("tool_use")
+        );
+        assert_eq!(body["messages"][2]["role"], "user");
+        assert_eq!(
+            body["messages"][2]["content"][0]["type"],
+            serde_json::json!("tool_result")
+        );
+        assert_eq!(
+            body["messages"][2]["content"][0]["tool_use_id"],
+            body["messages"][1]["content"][0]["id"]
+        );
+
+        let validation = validate_probe_request_body(
+            "anthropic",
+            "claude-3-5-haiku-20241022",
+            super::super::ToolProbeCase::ToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            &body,
+        );
+        assert_eq!(
+            validation.status,
+            ToolConformanceRequestValidationStatus::Pass,
+            "{:?}",
+            validation.issues
+        );
+    }
+
+    #[test]
+    fn tool_result_followup_renders_openai_tool_history_without_tool_choice() {
+        let body = probe_request_body(
+            "openai",
+            "gpt-5.4-mini",
+            ToolProbeMode::NonStreaming,
+            super::super::ToolProbeCase::ToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            "tool_result_followup:case",
+        )
+        .expect("OpenAI follow-up request body");
+
+        assert_eq!(body["tools"][0]["function"]["name"], TOOL_PROBE_TOOL_NAME);
+        assert!(body.get("tool_choice").is_none());
+        assert_eq!(body["messages"][1]["role"], "assistant");
+        assert_eq!(
+            body["messages"][1]["tool_calls"][0]["id"],
+            "call_harn_tool_probe_1"
+        );
+        assert_eq!(body["messages"][2]["role"], "tool");
+        assert_eq!(
+            body["messages"][2]["tool_call_id"],
+            "call_harn_tool_probe_1"
+        );
+
+        let validation = validate_probe_request_body(
+            "openai",
+            "gpt-5.4-mini",
+            super::super::ToolProbeCase::ToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            &body,
+        );
+        assert_eq!(
+            validation.status,
+            ToolConformanceRequestValidationStatus::Pass,
+            "{:?}",
+            validation.issues
+        );
+    }
+
+    #[test]
+    fn tool_result_followup_renders_gemini_function_response_without_forcing_tool() {
+        let body = probe_request_body(
+            "gemini",
+            "gemini-2.5-flash",
+            ToolProbeMode::NonStreaming,
+            super::super::ToolProbeCase::ToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            "tool_result_followup:case",
+        )
+        .expect("Gemini follow-up request body");
+
+        assert_eq!(
+            body["tools"][0]["functionDeclarations"][0]["name"],
+            TOOL_PROBE_TOOL_NAME
+        );
+        assert!(body.get("toolConfig").is_none());
+        assert_eq!(body["contents"][1]["role"], "model");
+        let function_call = body["contents"][1]["parts"]
+            .as_array()
+            .expect("Gemini model contents parts")
+            .iter()
+            .find_map(|part| part.get("functionCall"))
+            .expect("Gemini model history includes functionCall");
+        assert_eq!(function_call["name"], TOOL_PROBE_TOOL_NAME);
+        assert_eq!(
+            body["contents"][2]["parts"][0]["functionResponse"]["name"],
+            TOOL_PROBE_TOOL_NAME
+        );
+
+        let validation = validate_probe_request_body(
+            "gemini",
+            "gemini-2.5-flash",
+            super::super::ToolProbeCase::ToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            &body,
+        );
+        assert_eq!(
+            validation.status,
+            ToolConformanceRequestValidationStatus::Pass,
+            "{:?}",
+            validation.issues
+        );
     }
 }

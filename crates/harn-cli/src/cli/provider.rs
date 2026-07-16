@@ -367,6 +367,8 @@ pub(crate) enum ProviderToolProbeCaseArg {
     ParallelToolCalls,
     #[value(name = "large_string_argument", alias = "large-string-argument")]
     LargeStringArgument,
+    #[value(name = "tool_result_followup", alias = "tool-result-followup")]
+    ToolResultFollowup,
     #[value(
         name = "no_tool_answer_or_refusal",
         alias = "no-tool-answer-or-refusal"
@@ -410,6 +412,9 @@ impl ProviderToolProbeCaseArg {
             }
             Self::LargeStringArgument => {
                 harn_vm::llm::tool_conformance::ToolProbeCase::LargeStringArgument
+            }
+            Self::ToolResultFollowup => {
+                harn_vm::llm::tool_conformance::ToolProbeCase::ToolResultFollowup
             }
             Self::NoToolAnswerOrRefusal => {
                 harn_vm::llm::tool_conformance::ToolProbeCase::NoToolAnswerOrRefusal

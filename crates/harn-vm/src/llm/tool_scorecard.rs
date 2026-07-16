@@ -481,7 +481,8 @@ fn fixed_micro_cases_for_route(
     model: &CatalogModel,
     claim: &ToolScorecardCatalogClaim,
 ) -> Vec<ToolScorecardPlanCase> {
-    let parallel_requirement = if claim.supports_parallel_tool_calls {
+    let has_tool_surface = claim.native_tools || claim.text_tools;
+    let parallel_requirement = if claim.native_tools && claim.supports_parallel_tool_calls {
         ("required", "route_claims_parallel_tool_calls")
     } else {
         ("not_applicable", "route_does_not_claim_parallel_tool_calls")
@@ -497,11 +498,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["tool_choice", "json_arguments", "wire_dialect"],
-            execution: executable_tool_probe_case(
-                provider,
-                model_id,
-                ToolProbeCase::SingleToolCall,
-            ),
+            execution: if has_tool_surface {
+                executable_tool_probe_case(provider, model_id, ToolProbeCase::SingleToolCall)
+            } else {
+                not_applicable_case("route_declares_no_tool_surface")
+            },
         },
         ToolScorecardPlanCase {
             id: "parallel_tool_calls",
@@ -511,11 +512,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["parallel_dispatch", "tool_call_count", "argument_binding"],
-            execution: executable_tool_probe_case(
-                provider,
-                model_id,
-                ToolProbeCase::ParallelToolCalls,
-            ),
+            execution: if claim.native_tools && claim.supports_parallel_tool_calls {
+                executable_tool_probe_case(provider, model_id, ToolProbeCase::ParallelToolCalls)
+            } else {
+                not_applicable_case(parallel_requirement.1)
+            },
         },
         ToolScorecardPlanCase {
             id: "large_string_argument",
@@ -525,11 +526,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["byte_fidelity", "escaping", "unicode"],
-            execution: executable_tool_probe_case(
-                provider,
-                model_id,
-                ToolProbeCase::LargeStringArgument,
-            ),
+            execution: if has_tool_surface {
+                executable_tool_probe_case(provider, model_id, ToolProbeCase::LargeStringArgument)
+            } else {
+                not_applicable_case("route_declares_no_tool_surface")
+            },
         },
         ToolScorecardPlanCase {
             id: "tool_result_followup",
@@ -539,9 +540,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 2,
             batch_eligible: false,
             probe_focus: vec!["tool_result_adjacency", "continuation", "action_vs_prose"],
-            execution: missing_case_runner(
-                "multi_turn_provider_scorecard_runner_not_yet_available",
-            ),
+            execution: if has_tool_surface {
+                executable_tool_probe_case(provider, model_id, ToolProbeCase::ToolResultFollowup)
+            } else {
+                not_applicable_case("route_declares_no_tool_surface")
+            },
         },
         ToolScorecardPlanCase {
             id: "no_tool_answer_or_refusal",
@@ -589,7 +592,11 @@ fn fixed_micro_cases_for_route(
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["temperature", "max_tokens", "tool_choice"],
-            execution: executable_parameter_edges_request_case(provider, model_id),
+            execution: executable_parameter_edges_request_case(
+                provider,
+                model_id,
+                has_tool_surface,
+            ),
         },
     ]
 }
@@ -612,6 +619,9 @@ fn executable_tool_probe_case(
             }
             ToolProbeCase::LargeStringArgument => {
                 "harn provider tool-probe executes the large string argument byte-fidelity probe"
+            }
+            ToolProbeCase::ToolResultFollowup => {
+                "harn provider tool-probe executes the tool-result follow-up continuation probe"
             }
             ToolProbeCase::NoToolAnswerOrRefusal => {
                 "harn provider tool-probe executes the no-tool direct-answer fixture"
@@ -652,7 +662,13 @@ fn executable_tool_probe_case(
 fn executable_parameter_edges_request_case(
     provider: &str,
     model: &str,
+    has_tool_surface: bool,
 ) -> ToolScorecardPlanCaseExecution {
+    let probe_case = if has_tool_surface {
+        ToolProbeCase::SingleToolCall
+    } else {
+        ToolProbeCase::NoToolAnswerOrRefusal
+    };
     ToolScorecardPlanCaseExecution {
         status: "executable",
         runner: "provider_tool_probe_request",
@@ -667,7 +683,7 @@ fn executable_parameter_edges_request_case(
             "--mode".to_string(),
             "both".to_string(),
             "--case".to_string(),
-            "single_tool_call".to_string(),
+            probe_case.as_str().to_string(),
             "--request-profile".to_string(),
             "parameter_edges".to_string(),
             "--dry-run-request".to_string(),
@@ -681,10 +697,10 @@ fn executable_parameter_edges_request_case(
     }
 }
 
-fn missing_case_runner(reason: &'static str) -> ToolScorecardPlanCaseExecution {
+fn not_applicable_case(reason: &'static str) -> ToolScorecardPlanCaseExecution {
     ToolScorecardPlanCaseExecution {
-        status: "missing_runner",
-        runner: "planned_tool_scorecard_case",
+        status: "not_applicable",
+        runner: "none",
         reason,
         command: None,
         artifact_hint: None,
@@ -1352,8 +1368,103 @@ mod tests {
             .iter()
             .find(|case| case.id == "tool_result_followup")
             .expect("follow-up case");
-        assert_eq!(followup_case.execution.status, "missing_runner");
-        assert!(followup_case.execution.command.is_none());
+        assert_eq!(followup_case.execution.status, "executable");
+        assert_eq!(followup_case.execution.runner, "provider_tool_probe");
+        assert_eq!(
+            followup_case.execution.command.as_ref().unwrap(),
+            &vec![
+                "harn".to_string(),
+                "provider".to_string(),
+                "tool-probe".to_string(),
+                "anthropic".to_string(),
+                "--model".to_string(),
+                "claude-sonnet-5".to_string(),
+                "--mode".to_string(),
+                "both".to_string(),
+                "--case".to_string(),
+                "tool_result_followup".to_string(),
+                "--repeat".to_string(),
+                "1".to_string(),
+                "--timeout-secs".to_string(),
+                "120".to_string(),
+                "--json".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
+        let plan = tool_scorecard_plan_from_catalog(&[String::from("groq:groq/compound")], false)
+            .expect("plan from catalog");
+        let cases = &plan.routes[0].cases;
+
+        for case_id in [
+            "single_tool_call",
+            "parallel_tool_calls",
+            "large_string_argument",
+            "tool_result_followup",
+        ] {
+            let case = cases
+                .iter()
+                .find(|case| case.id == case_id)
+                .expect("case exists");
+            assert_eq!(case.execution.status, "not_applicable", "{case_id}");
+            assert_eq!(case.execution.runner, "none", "{case_id}");
+            assert!(case.execution.command.is_none(), "{case_id}");
+        }
+
+        let parameter_edges = cases
+            .iter()
+            .find(|case| case.id == "parameter_edges")
+            .expect("parameter edge case exists");
+        assert_eq!(parameter_edges.execution.status, "executable");
+        assert_eq!(
+            parameter_edges.execution.command.as_ref().unwrap(),
+            &vec![
+                "harn".to_string(),
+                "provider".to_string(),
+                "tool-probe".to_string(),
+                "groq".to_string(),
+                "--model".to_string(),
+                "groq/compound".to_string(),
+                "--mode".to_string(),
+                "both".to_string(),
+                "--case".to_string(),
+                "no_tool_answer_or_refusal".to_string(),
+                "--request-profile".to_string(),
+                "parameter_edges".to_string(),
+                "--dry-run-request".to_string(),
+                "--json".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn scorecard_plan_does_not_treat_text_routes_as_native_parallel_evidence() {
+        let plan = tool_scorecard_plan_from_catalog(
+            &[String::from("deepinfra:deepinfra/openai/gpt-oss-120b")],
+            false,
+        )
+        .expect("plan from catalog");
+        assert!(!plan.routes[0].catalog_claim.native_tools);
+        assert!(plan.routes[0].catalog_claim.text_tools);
+
+        let parallel = plan.routes[0]
+            .cases
+            .iter()
+            .find(|case| case.id == "parallel_tool_calls")
+            .expect("parallel case exists");
+        assert_eq!(parallel.requirement, "not_applicable");
+        assert_eq!(parallel.execution.status, "not_applicable");
+        assert!(parallel.execution.command.is_none());
+
+        let single = plan.routes[0]
+            .cases
+            .iter()
+            .find(|case| case.id == "single_tool_call")
+            .expect("single tool case exists");
+        assert_eq!(single.requirement, "required");
+        assert_eq!(single.execution.status, "executable");
     }
 
     #[test]
