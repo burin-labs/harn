@@ -1825,7 +1825,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, provider, input_tokens, output_tokens, usage, prose, visible_text, blocks, transcript?, tool_calls?, stop_reason?, data?}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
-| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: llm_call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of `ErrorCategory`'s canonical strings (`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`, `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`, `"circuit_open"`, `"budget_exceeded"`, `"tool_error"`, `"tool_rejected"`, `"egress_blocked"`, `"cancelled"`, `"generic"`) |
+| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: llm_call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of the [error categories](#error-categories) |
 | `llm_stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, finish_reason}>`; dropping the stream cancels the background request. Uses the same options as `llm_call`; the `stream` option remains the transport toggle |
 | `with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `llm_call` |
@@ -2127,9 +2127,38 @@ Structured error throwing and classification for retry logic and error handling.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `throw_error(message, category?)` | message: string, category: string | never | Throw a categorized error. The error is a dict with `message` and `category` fields |
-| `error_category(err)` | err: any | string | Extract category from a caught error. Returns `"timeout"`, `"auth"`, `"rate_limit"`, `"tool_error"`, `"tool_rejected"`, `"egress_blocked"`, `"cancelled"`, `"not_found"`, `"circuit_open"`, or `"generic"` |
+| `error_category(err)` | err: any | string | Extract category from a caught error. Returns one of the [error categories](#error-categories) |
 | `is_timeout(err)` | err: any | bool | Check if error is a timeout |
 | `is_rate_limited(err)` | err: any | bool | Check if error is a rate limit |
+
+### Error categories
+
+Every categorized error carries one of these strings. This table is the
+canonical list — `error_category()`, `llm_call_safe()`'s `error.category`, and
+`throw_error()`'s `category` argument all draw from it. Code that switches on a
+category should keep a default branch: the set grows as the runtime learns to
+distinguish new failure modes.
+
+| Category | Meaning |
+|---|---|
+| `timeout` | Network or connection timeout |
+| `auth` | Authentication or authorization failure |
+| `rate_limit` | Rate limit exceeded (HTTP 429 / quota) |
+| `overloaded` | Upstream provider is shedding load (HTTP 503 / 529). Distinct from `rate_limit`: no quota was exceeded and the provider recovers on its own |
+| `server_error` | Provider-side 5xx (500, 502) that is not specifically overload |
+| `transient_network` | Network-level transient failure — connection reset, DNS hiccup, partial stream. Retryable but not provider-status-coded |
+| `schema_validation` | LLM output failed schema validation. Retryable via `schema_retries` |
+| `schema_stream_aborted` | A streaming response was aborted because the partial content could not satisfy `output_schema`. Consumes one `schema_retries` slot; see `schema_stream_abort` |
+| `tool_error` | Tool execution failed |
+| `tool_rejected` | The host refused the tool — not permitted, or not in the allowlist |
+| `egress_blocked` | Outbound network egress was blocked by policy |
+| `cancelled` | The operation was cancelled |
+| `channel_closed` | A channel closed before the operation could complete |
+| `not_found` | Resource not found |
+| `circuit_open` | The circuit breaker is open |
+| `budget_exceeded` | An LLM cost or token budget would be exceeded |
+| `internal` | An engine or wiring bug — an undefined builtin, corrupt bytecode, a violated VM invariant. Retrying and rewording the prompt cannot fix it, so the agent loop re-raises rather than folding it into a tool observation |
+| `generic` | Unclassified |
 
 Example:
 
