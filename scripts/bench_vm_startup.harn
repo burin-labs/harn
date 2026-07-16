@@ -74,12 +74,7 @@ fn run_once_ms(harn_bin: string, fixture: string, cache_dir: string) -> float {
   return to_float(elapsed) ?? 0.0
 }
 
-fn measure_runs(
-  harn_bin: string,
-  fixture: string,
-  runs: int,
-  cache_dir: string,
-) -> StartupSummary {
+fn measure_runs(harn_bin: string, fixture: string, runs: int, cache_dir: string) -> StartupSummary {
   let samples: list<float> = []
   for _ in range(0, runs) {
     samples = samples + [run_once_ms(harn_bin, fixture, cache_dir)]

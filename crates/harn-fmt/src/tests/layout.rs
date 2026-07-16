@@ -5,6 +5,7 @@
 //! the three ways it was previously violated — deciding from source newlines,
 //! wrapping args at the wrong depth, and measuring a prefix instead of a line.
 
+use super::assert_roundtrip;
 use crate::{format_source, LINE_WIDTH_DEFAULT};
 
 fn formatted(source: &str) -> String {
@@ -85,6 +86,39 @@ fn signature_width_accounts_for_return_type_and_body_brace() {
     assert_within_line_width(source);
 }
 
+/// The boundary, from both sides. Budgeting for the suffix must not tip into
+/// double-counting the `)` that `format_comma_sequence` already adds: a
+/// signature that fits EXACTLY must stay on one line.
+#[test]
+fn signature_that_fits_exactly_is_not_wrapped() {
+    let source =
+        "fn __verification_gate_classification(value, current_hashes: dict, hashes_available: bool) -> dict {\n  return {}\n}\n";
+    let first = source.lines().next().unwrap();
+    assert_eq!(
+        first.chars().count(),
+        LINE_WIDTH_DEFAULT,
+        "precondition: this fixture must sit exactly on the width"
+    );
+    let out = formatted(source);
+    assert!(
+        out.lines().next() == Some(first),
+        "a signature that fits exactly must not wrap:\n{out}"
+    );
+    assert_within_line_width(source);
+}
+
+#[test]
+fn signature_one_column_over_does_wrap() {
+    let source =
+        "fn __verification_gate_classification(value, current_hashes: dict, hashes_available: booly) -> dict {\n  return {}\n}\n";
+    assert_eq!(
+        source.lines().next().unwrap().chars().count(),
+        LINE_WIDTH_DEFAULT + 1,
+        "precondition: this fixture must sit one column over"
+    );
+    assert_within_line_width(source);
+}
+
 #[test]
 fn signature_without_return_type_still_respects_width() {
     let source = "pub fn configure_the_ratchet(counts: dict, baseline: CountBaseline, vocabulary: RatchetVocabulary) {\n  log(\"x\")\n}\n";
@@ -132,4 +166,54 @@ fn wrapped_layout_is_idempotent() {
         once, twice,
         "formatter is not idempotent for wrapped layout"
     );
+}
+
+// Relocated from `tests.rs`: these are layout tests, and they belong beside the
+// rule they exercise rather than in the general formatter suite.
+#[test]
+fn test_method_call_args_dont_overcount_multiline_receiver() {
+    // When the receiver of a method call wraps to multiple lines, the
+    // method-call args should be laid out based on the new line's column,
+    // not the receiver's total byte length. With short args, they should
+    // stay on the same line as the `.method(`.
+    //
+    // The receiver here is multi-line because its OWN arguments overflow the
+    // width. That is the condition this test names. It previously wrote the
+    // receiver on one line and split the chain in the source instead, which
+    // only exercised the multi-line path because layout was (wrongly) keyed on
+    // source newlines; the formatter now keys on the formatted receiver.
+    let source = r"pipeline default(task) {
+  let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(argument_number_one, argument_number_two, argument_number_three).map(item)
+}";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains('\n'),
+        "precondition: the receiver must wrap:\n{result}"
+    );
+    // Short args list (just `item`) must NOT wrap onto its own line just
+    // because the receiver wrapped onto multiple lines above.
+    assert!(
+        result.contains(".map(item)"),
+        "trailing method args wrapped unnecessarily after multi-line receiver:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_optional_method_call_args_dont_overcount_multiline_receiver() {
+    // See the sibling above: the receiver is multi-line by width, not by where
+    // the author happened to press return.
+    let source = r"pipeline default(task) {
+  let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(argument_number_one, argument_number_two, argument_number_three)?.map(item)
+}";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains('\n'),
+        "precondition: the receiver must wrap:\n{result}"
+    );
+    assert!(
+        result.contains("?.map(item)"),
+        "trailing optional method args wrapped unnecessarily after multi-line receiver:\n{result}"
+    );
+    assert_roundtrip(source);
 }

@@ -589,11 +589,7 @@ pub fn latest_release(repo: string | dict, options: GitHubCallOptions = {}) {
  * @effects: []
  * @errors: []
  */
-pub fn release_assets(
-  repo: string | dict,
-  release_id: any = nil,
-  options: GitHubCallOptions = {},
-) {
+pub fn release_assets(repo: string | dict, release_id: any = nil, options: GitHubCallOptions = {}) {
   const r = __github_repo_or_throw(repo)
   return call("github.release.assets", filter_nil({repo: r.full_name, release_id: release_id}), options)
 }
@@ -873,11 +869,7 @@ fn __github_repo_matches(payload, repo) {
  * @effects: []
  * @errors: []
  */
-pub fn deployment_status_source(
-  repo: string,
-  deployment_id: any,
-  options: GitHubCallOptions = {},
-) {
+pub fn deployment_status_source(repo: string, deployment_id: any, options: GitHubCallOptions = {}) {
   return {
     label: "github.deployment_status:" + repo + "#" + to_string(deployment_id),
     prefers_push: true,

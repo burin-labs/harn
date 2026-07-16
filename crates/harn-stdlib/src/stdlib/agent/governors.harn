@@ -194,11 +194,7 @@ fn __convergence_guard_patterns(facts: dict, recent: dict) -> list<string> {
   return []
 }
 
-fn __convergence_guard_evidence(
-  policy: ConvergenceGuardPolicy,
-  facts: dict,
-  recent: dict,
-) -> dict {
+fn __convergence_guard_evidence(policy: ConvergenceGuardPolicy, facts: dict, recent: dict) -> dict {
   const proof_artifact_writes = to_int(facts?.post_green_proof_artifact_writes ?? 0) ?? 0
   const marker_commands = to_int(facts?.post_green_marker_commands ?? 0) ?? 0
   const policy_denials = to_int(facts?.post_green_policy_denials ?? 0) ?? 0

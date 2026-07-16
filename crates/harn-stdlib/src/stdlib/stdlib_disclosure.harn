@@ -337,11 +337,7 @@ fn __github_trailers(config: DisclosureConfig, ctx: DisclosureContext) -> string
   return __safe_git_trailers(__render_text(surface_config, ctx), ctx)
 }
 
-fn __render_github(
-  surface_config: dict,
-  ctx: DisclosureContext,
-  config: DisclosureConfig,
-) -> dict {
+fn __render_github(surface_config: dict, ctx: DisclosureContext, config: DisclosureConfig) -> dict {
   const author_mode = __github_author_mode(surface_config)
   const human_author = __select_principal(ctx, surface_config?.author ?? "origin")
   const bot_author = __select_principal(ctx, surface_config?.bot_author ?? "current")

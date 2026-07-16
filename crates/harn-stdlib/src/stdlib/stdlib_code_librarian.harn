@@ -222,7 +222,10 @@ pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<Libra
  * @api_stability: experimental
  * @example: code_librarian_member_surface("StatusOr", "include/status.hpp")
  */
-pub fn code_librarian_member_surface(container: string, defining_path: string? = nil) -> LibrarianMemberSurface {
+pub fn code_librarian_member_surface(
+  container: string,
+  defining_path: string? = nil,
+) -> LibrarianMemberSurface {
   const target = container.trim()
   const requested_path = to_string(defining_path ?? "").trim()
   if target == "" {
@@ -309,7 +312,11 @@ pub fn code_librarian_member_surface(container: string, defining_path: string? =
  * @api_stability: experimental
  * @example: code_librarian_external_consumers("greet", "src/greeter.rs")
  */
-pub fn code_librarian_external_consumers(symbol: string, defining_path: string, max_sites: int = 20) -> LibrarianExternalConsumers {
+pub fn code_librarian_external_consumers(
+  symbol: string,
+  defining_path: string,
+  max_sites: int = 20,
+) -> LibrarianExternalConsumers {
   if max_sites < 1 {
     throw "code_librarian_external_consumers: max_sites must be >= 1"
   }

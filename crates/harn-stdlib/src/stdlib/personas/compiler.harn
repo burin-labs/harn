@@ -148,7 +148,9 @@ fn __persona_blueprint_error(
   return report + {errors: report.errors + [{code: code, path: path, message: message}]}
 }
 
-fn __persona_blueprint_finalize(report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
+fn __persona_blueprint_finalize(
+  report: PersonaBlueprintValidationReport,
+) -> PersonaBlueprintValidationReport {
   return report + {valid: len(report.errors) == 0}
 }
 
@@ -185,7 +187,11 @@ fn __persona_blueprint_cron_fields(cron) -> list<string> {
   return regex_split(trim(cron ?? ""), "\\s+").filter({ field -> field != "" }).to_list()
 }
 
-fn __persona_blueprint_validate_cron(blueprint, providers, report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
+fn __persona_blueprint_validate_cron(
+  blueprint,
+  providers,
+  report: PersonaBlueprintValidationReport,
+) -> PersonaBlueprintValidationReport {
   let out = report
   const source = blueprint.cron
   if len(__persona_blueprint_cron_fields(source.cron)) != 5 || !is_valid_cron(source.cron) {
@@ -397,12 +403,11 @@ fn __persona_prompt_catalog(providers) -> list<PersonaPromptCatalogEntry> {
   let catalog: list<PersonaPromptCatalogEntry> = []
   for provider in providers {
     const transports = provider.kinds.map({ kind -> to_string(kind) }).sort_by({ kind -> kind })
-    const required_secrets = provider.secret_requirements
-      .filter({ requirement -> requirement.required })
-      .map({ requirement -> to_string(requirement.name) })
+    const required_secrets = provider.secret_requirements.filter({ requirement -> requirement.required }).map(
+      { requirement -> to_string(requirement.name) },
+    )
       .sort_by({ name -> name })
-    catalog = catalog
-      .push(
+    catalog = catalog.push(
       {provider: provider.provider, transports: transports, required_secrets: required_secrets},
     )
   }
@@ -413,7 +418,10 @@ fn __persona_prompt_digest(value) -> string {
   return "sha256:" + sha256(json_stringify(value))
 }
 
-fn __persona_prompt_grounding(user_prompt: string, catalog: list<PersonaPromptCatalogEntry>) -> string {
+fn __persona_prompt_grounding(
+  user_prompt: string,
+  catalog: list<PersonaPromptCatalogEntry>,
+) -> string {
   return "Compile the user's request into exactly one closed PersonaBlueprint JSON object.\n"
     + "Do not emit TOML, Harn source, paths, tools, capabilities, budgets, model policy, filters, destinations, or authority.\n"
     + "Choose one template: deterministic-sweeper for periodic watches/digests; hybrid-classify-then-act for event triage; frontier-judgment-loop only for bounded judgment work.\n"
@@ -508,7 +516,9 @@ fn __persona_prompt_preflight_failure(
   }
 }
 
-fn __persona_prompt_validation_error(report: PersonaBlueprintValidationReport) -> PersonaBlueprintDiagnostic {
+fn __persona_prompt_validation_error(
+  report: PersonaBlueprintValidationReport,
+) -> PersonaBlueprintDiagnostic {
   if len(report.errors) > 0 {
     return report.errors[0]
       ?? {code: "blueprint_invalid", path: "", message: "persona blueprint failed validation"}

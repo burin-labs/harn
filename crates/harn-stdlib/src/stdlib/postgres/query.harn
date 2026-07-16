@@ -197,12 +197,7 @@ fn __render_sql_template(template: string, values: dict) {
  * @api_stability: experimental
  * @example: named("list_receipts", "many", sql, [tenant_id])
  */
-pub fn named(
-  name: string,
-  mode: PgQueryMode,
-  sql: string,
-  params: list<any> = [],
-) -> PgNamedQuery {
+pub fn named(name: string, mode: PgQueryMode, sql: string, params: list<any> = []) -> PgNamedQuery {
   return __normalize_query({name: name, mode: mode, sql: sql, params: params})
 }
 

@@ -85,8 +85,7 @@ fn main(harness: Harness) -> int {
     const confirmed = harness.env.get_or("HARN_PERSONA_EVAL_CONFIRM_SPEND", "0") == "1"
     const max_cells = __env_int(harness, "HARN_PERSONA_EVAL_MAX_CELLS", 0)
     if !confirmed || max_cells < planned_cells || shared_ledger_path == "" {
-      harness.stdio
-        .eprintln(
+      harness.stdio.eprintln(
         "live persona prompt eval requires spend confirmation, a cell ceiling >= "
           + to_string(planned_cells)
           + ", and HARN_EVENT_LOG_BACKEND=sqlite with an absolute HARN_EVENT_LOG_SQLITE_PATH shared by both revisions",

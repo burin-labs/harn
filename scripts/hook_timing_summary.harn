@@ -211,7 +211,10 @@ fn duration_stats(durations: list<int>) -> DurationStats {
   }
 }
 
-fn summarize_hook_timing_groups(events: list<HookTimingEvent>, by_worktree: bool) -> list<HookTimingGroup> {
+fn summarize_hook_timing_groups(
+  events: list<HookTimingEvent>,
+  by_worktree: bool,
+) -> list<HookTimingGroup> {
   let by_key = {}
   for event in events {
     const repo = if by_worktree {
@@ -365,8 +368,9 @@ pub fn summarize_hook_timing_worktrees(events: list<HookTimingEvent>) -> list<Ho
 }
 
 fn observation_window(events: list<HookTimingEvent>) -> string {
-  const timestamps = events.filter({ event -> event.ts != nil }).map({ event -> event.ts ?? "" }).to_list()
-    .sort_by({ value -> value })
+  const timestamps = events.filter({ event -> event.ts != nil }).map({ event -> event.ts ?? "" }).to_list().sort_by(
+    { value -> value },
+  )
   if timestamps.count == 0 {
     return "unknown"
   }
@@ -374,16 +378,13 @@ fn observation_window(events: list<HookTimingEvent>) -> string {
 }
 
 pub fn derive_hook_timing_budgets(events: list<HookTimingEvent>) -> HookTimingBudgetReport {
-  const successful = events
-    .filter({ event -> (event.exit_code ?? 0) == 0 && event.profile != "legacy" })
-    .to_list()
+  const successful = events.filter({ event -> (event.exit_code ?? 0) == 0 && event.profile != "legacy" }).to_list()
   let limits: dict<string, HookTimingBudget> = {}
   for group in summarize_hook_timings(successful) {
     if group.count < 4 {
       continue
     }
-    const samples = successful
-      .filter(
+    const samples = successful.filter(
       { event -> event.repository == group.repository && event.profile == group.profile
         && event.hook == group.hook },
     )

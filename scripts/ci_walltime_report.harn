@@ -33,7 +33,8 @@ fn usage() -> string {
     "usage: harn run scripts/ci_walltime_report.harn -- [--repo OWNER/NAME] [--workflow FILE] [--event NAME] [--limit N] [--json]",
     "",
     "Summarize successful GitHub Actions workflow wall time and critical jobs.",
-  ].join("\n")
+  ]
+    .join("\n")
 }
 
 fn arg_spec() -> list {
@@ -173,8 +174,7 @@ fn format_seconds(duration_ms: int) -> string {
 fn render_report(report: CiWalltimeReport) -> string {
   const wall = report.wall
   const summary = "${report.repository} ${report.workflow} ${report.event}: n=${wall.count} mean=${format_seconds(wall.mean_ms)} p50=${format_seconds(wall.p50_ms)} p90=${format_seconds(wall.p90_ms)} max=${format_seconds(wall.max_ms)}"
-  const rows = report.jobs
-    .map(
+  const rows = report.jobs.map(
     { group -> {
       job: group.name,
       n: group.stats.count,
@@ -183,7 +183,8 @@ fn render_report(report: CiWalltimeReport) -> string {
       p90: format_seconds(group.stats.p90_ms),
       max: format_seconds(group.stats.max_ms),
     } },
-  ).to_list()
+  )
+    .to_list()
   return summary
     + "\n\n"
     + render_table(

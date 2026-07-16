@@ -72,9 +72,9 @@ fn read_loop_script(tool_format = "text") {
 }
 
 fn actuation_receipts(events) {
-  return events
-    .filter({ event -> event.type == "typed_checkpoint" })
-    .filter({ event -> event.checkpoint?.schema == "harn.agent_loop_monologue_actuation.v1" })
+  return events.filter({ event -> event.type == "typed_checkpoint" }).filter(
+    { event -> event.checkpoint?.schema == "harn.agent_loop_monologue_actuation.v1" },
+  )
 }
 
 fn options(session, actuation = nil, tool_format = "text", extra = nil) {

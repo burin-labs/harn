@@ -165,10 +165,7 @@ fn __agent_loop_retry_with_default_predicate(
  * @effects: []
  * @errors: []
  */
-pub fn agent_apply_default_retry(
-  options = nil,
-  apply_options: AgentDefaultRetryApplyOptions = {},
-) {
+pub fn agent_apply_default_retry(options = nil, apply_options: AgentDefaultRetryApplyOptions = {}) {
   const opts: AgentRetryOptionBag = options ?? {}
   __validate_agent_loop_retry(opts)
   const wrap_existing = apply_options.wrap_existing ?? false

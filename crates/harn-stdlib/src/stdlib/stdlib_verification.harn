@@ -948,11 +948,7 @@ fn __verification_gate_unclassified(value) -> dict {
   }
 }
 
-fn __verification_gate_classification(
-  value,
-  current_hashes: dict,
-  hashes_available: bool,
-) -> dict {
+fn __verification_gate_classification(value, current_hashes: dict, hashes_available: bool) -> dict {
   const embedded = __verification_gate_embedded_classification(value)
   if embedded != nil {
     return embedded

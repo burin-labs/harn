@@ -482,11 +482,14 @@ impl<'a> Formatter<'a> {
         let throws_str = format_throws_clause(throws);
         let where_str = format_where_clauses(where_clauses);
         // The wrap decision must budget for the WHOLE line, not just what
-        // precedes the params: `)`, the return type, throws/where clauses and
-        // the ` {` every caller appends all consume width. Counting only the
-        // prefix is what let signatures land past `line_width`.
+        // precedes the params: the return type, throws/where clauses and the
+        // ` {` every caller appends all consume width. Counting only the prefix
+        // is what let signatures land past `line_width`.
+        //
+        // The closing `)` is NOT counted here — `format_comma_sequence` already
+        // adds it. Counting it twice wraps a signature that fits exactly.
         let suffix_len =
-            1 + ret.len() + throws_str.len() + where_str.len() + SIGNATURE_BODY_BRACE_WIDTH;
+            ret.len() + throws_str.len() + where_str.len() + SIGNATURE_BODY_BRACE_WIDTH;
         let prefix_len =
             indent_level * 2 + pub_prefix.len() + 3 + name.len() + generics.len() + 1 + suffix_len;
         let params_str = self.format_typed_params_wrapped(params, prefix_len, indent_level);

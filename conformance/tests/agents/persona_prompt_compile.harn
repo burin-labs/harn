@@ -31,8 +31,7 @@ const PROVIDERS = [
   },
 ]
 
-const PROVIDERS_WITH_ROTATED_SLACK_SECRET = PROVIDERS
-  .map(
+const PROVIDERS_WITH_ROTATED_SLACK_SECRET = PROVIDERS.map(
   { provider ->
     if provider.provider == "slack" {
       provider + {secret_requirements: [{name: "bot_token", required: true, namespace: "slack"}]}

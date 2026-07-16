@@ -91,8 +91,9 @@ fn git_candidate_files(root: string) -> list<string>? {
   }
   // `git grep` intentionally avoids walking ignored build output, but a local
   // pre-commit check must still see newly authored source before it is staged.
-  const untracked = harness.process
-    .spawn_captured({cmd: "git", args: ["-C", root, "ls-files", "--others", "--exclude-standard"]})
+  const untracked = harness.process.spawn_captured(
+    {cmd: "git", args: ["-C", root, "ls-files", "--others", "--exclude-standard"]},
+  )
   if untracked.exit_code != 0 {
     return nil
   }
@@ -138,8 +139,7 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
     const line = lines[index]
     const line_no = index + 1
     if line_has_let_only_harn_binding_regex(line) {
-      findings = findings
-        .push(
+      findings = findings.push(
         line_finding(
           path,
           line_no,
@@ -149,8 +149,7 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
       )
     }
     if line_has_stale_var_tool_registry_example(line) {
-      findings = findings
-        .push(
+      findings = findings.push(
         line_finding(
           path,
           line_no,
@@ -193,8 +192,7 @@ fn render_report(report: dict) -> string {
     "Use parser/codemod facts where possible. If text scanning is unavoidable, accept both current and recently migrated Harn keyword spellings or document an explicit non-Harn target.",
   ]
   for finding in report.findings {
-    lines = lines
-      .push(
+    lines = lines.push(
       "- "
         + to_string(finding.path)
         + ":"

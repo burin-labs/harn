@@ -1320,54 +1320,6 @@ fn test_imports_stay_tight_then_blank_before_first_item() {
 }
 
 #[test]
-fn test_method_call_args_dont_overcount_multiline_receiver() {
-    // When the receiver of a method call wraps to multiple lines, the
-    // method-call args should be laid out based on the new line's column,
-    // not the receiver's total byte length. With short args, they should
-    // stay on the same line as the `.method(`.
-    //
-    // The receiver here is multi-line because its OWN arguments overflow the
-    // width. That is the condition this test names. It previously wrote the
-    // receiver on one line and split the chain in the source instead, which
-    // only exercised the multi-line path because layout was (wrongly) keyed on
-    // source newlines; the formatter now keys on the formatted receiver.
-    let source = r"pipeline default(task) {
-  let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(argument_number_one, argument_number_two, argument_number_three).map(item)
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains('\n'),
-        "precondition: the receiver must wrap:\n{result}"
-    );
-    // Short args list (just `item`) must NOT wrap onto its own line just
-    // because the receiver wrapped onto multiple lines above.
-    assert!(
-        result.contains(".map(item)"),
-        "trailing method args wrapped unnecessarily after multi-line receiver:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_optional_method_call_args_dont_overcount_multiline_receiver() {
-    // See the sibling above: the receiver is multi-line by width, not by where
-    // the author happened to press return.
-    let source = r"pipeline default(task) {
-  let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(argument_number_one, argument_number_two, argument_number_three)?.map(item)
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains('\n'),
-        "precondition: the receiver must wrap:\n{result}"
-    );
-    assert!(
-        result.contains("?.map(item)"),
-        "trailing optional method args wrapped unnecessarily after multi-line receiver:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
 fn test_roundtrip_plain_raw_string_keeps_no_hashes() {
     // A raw string without `"` must not gain hashes.
     let source = "pipeline default(task) { let p = r\"\\d+\" }";

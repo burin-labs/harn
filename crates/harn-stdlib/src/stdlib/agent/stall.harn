@@ -1793,7 +1793,9 @@ fn __agent_stall_apply_action_signal(
   )
 }
 
-fn __agent_stall_observe_monologue_actuation(observation: AgentStallObservation) -> AgentStallObservation {
+fn __agent_stall_observe_monologue_actuation(
+  observation: AgentStallObservation,
+) -> AgentStallObservation {
   return observation
     + {
     state: observation.state

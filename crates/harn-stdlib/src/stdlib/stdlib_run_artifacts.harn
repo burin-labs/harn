@@ -129,14 +129,7 @@ fn __run_artifacts_standard_paths(run: {dir: string, ...rest}) -> RunArtifactPat
   }
 }
 
-fn __run_artifacts_make_run(
-  kind,
-  namespace,
-  root,
-  run_id,
-  dir,
-  modified = nil,
-) -> RunArtifactsRun {
+fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) -> RunArtifactsRun {
   const base = {kind: kind, namespace: namespace, run_id: run_id, root: root, dir: dir, modified: modified}
   return base + {paths: __run_artifacts_standard_paths(base)}
 }
@@ -207,11 +200,7 @@ pub fn run_artifact_read_json(run: RunArtifactsRun, name: string) -> unknown {
  * @effects: [fs.read]
  * @errors: [validation, StructuredReadFailure, SchemaValidationFailure]
  */
-pub fn run_artifact_read_json_typed<T>(
-  run: RunArtifactsRun,
-  name: string,
-  schema: Schema<T>,
-) -> T {
+pub fn run_artifact_read_json_typed<T>(run: RunArtifactsRun, name: string, schema: Schema<T>) -> T {
   return read_json_typed(run_artifact_path(run, name), schema)
 }
 

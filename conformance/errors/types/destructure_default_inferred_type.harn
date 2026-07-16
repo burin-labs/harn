@@ -5,7 +5,7 @@
 // through unchecked.
 pipeline default() {
   const opts = {}
-  const { count = 0 } = opts
+  const {count = 0} = opts
   const bad: string = count
   __io_println(bad)
 }

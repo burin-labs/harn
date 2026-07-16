@@ -1013,11 +1013,7 @@ pub fn git_forge_pull_request_topic() {
  * @errors: []
  * @example: git_forge_pull_request_event("github", payload)
  */
-pub fn git_forge_pull_request_event(
-  provider,
-  payload,
-  options = nil,
-) -> GitForgePullRequestEvent? {
+pub fn git_forge_pull_request_event(provider, payload, options = nil) -> GitForgePullRequestEvent? {
   const opts = options ?? {}
   const value = __git_forge_payload(payload)
   const resolved_provider = __git_forge_provider(provider, value, opts)

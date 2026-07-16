@@ -206,14 +206,12 @@ pipeline test_ci_cache_policy_rejects_writer_key_drift(task) {
   }
   const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
   assert(
-    errors
-      .contains(
+    errors.contains(
       "windows-nightly.yml:nextest:workspace-windows-renamed is not an authorized persistent cache writer",
     ),
   )
   assert(
-    errors
-      .contains(
+    errors.contains(
       "authorized persistent cache writer is not active: windows-nightly.yml:nextest:workspace-windows",
     ),
   )

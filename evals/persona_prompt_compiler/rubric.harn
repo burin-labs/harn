@@ -109,7 +109,11 @@ fn __expect(condition: bool, message: string, failures: list<string>) -> list<st
 }
 
 /** Adjudicate raw `harn orchestrator fire` evidence for one generated persona binding. */
-pub fn persona_prompt_fire_verdict(result: dict, expected_persona: string, expected_binding: string) -> PersonaPromptEvalVerdict {
+pub fn persona_prompt_fire_verdict(
+  result: dict,
+  expected_persona: string,
+  expected_binding: string,
+) -> PersonaPromptEvalVerdict {
   const stdout = result.stdout ?? ""
   const lines = split(trim(stdout), "\n")
   const receipt = __dispatch_receipt(stdout)
@@ -150,7 +154,10 @@ pub fn persona_prompt_fire_verdict(result: dict, expected_persona: string, expec
   }
 }
 
-fn __compile_failures(receipt: PersonaPromptCompileReceipt, expected: PersonaPromptEvalExpected) -> list<string> {
+fn __compile_failures(
+  receipt: PersonaPromptCompileReceipt,
+  expected: PersonaPromptEvalExpected,
+) -> list<string> {
   let failures: list<string> = []
   failures = __expect(receipt.ok, "compiler receipt was not accepted", failures)
   failures = __expect(receipt.checkpoint.status == "accepted", "checkpoint was not accepted", failures)
@@ -239,7 +246,10 @@ pub fn persona_prompt_eval_verdict(
 }
 
 /** Check that the canonical materializer preserved a safe lowering exactly. */
-pub fn persona_prompt_materialized_verdict(manifest, lowering: PersonaBlueprintLowering) -> PersonaPromptEvalVerdict {
+pub fn persona_prompt_materialized_verdict(
+  manifest,
+  lowering: PersonaBlueprintLowering,
+) -> PersonaPromptEvalVerdict {
   let failures: list<string> = []
   const personas = manifest?.personas ?? []
   const triggers = manifest?.triggers ?? []

@@ -148,12 +148,7 @@ fn shard_safe(value: string) -> string {
   return lowercase(out.trim("-"))
 }
 
-fn run_eval_args(
-  runner: string,
-  cell: string,
-  model: string,
-  flags: list<string>,
-) -> list<string> {
+fn run_eval_args(runner: string, cell: string, model: string, flags: list<string>) -> list<string> {
   let args = ["bash", runner, cell, "--model", model, "--trials", "1", "--meter"]
   for flag in flags {
     args = args + ["--flag", flag]

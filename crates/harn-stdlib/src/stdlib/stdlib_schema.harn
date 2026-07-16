@@ -218,11 +218,7 @@ pub fn get_typed_report(value, schema, apply_defaults = false) {
  * @effects: []
  * @errors: []
  */
-pub fn parse_json_typed_report<T>(
-  text: string,
-  schema: Schema<T>,
-  apply_defaults = false,
-) -> dict {
+pub fn parse_json_typed_report<T>(text: string, schema: Schema<T>, apply_defaults = false) -> dict {
   const parsed = try {
     json_parse(text ?? "")
   }
