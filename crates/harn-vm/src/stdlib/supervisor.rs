@@ -219,7 +219,7 @@ async fn supervisor_stop_impl(
             .lock()
             .children
             .iter()
-            .all(|child| !matches!(child.status.as_str(), "running" | "draining"))
+            .all(|child| !matches!(child.status.as_str(), "pending" | "running" | "draining"))
         {
             break;
         }
@@ -236,7 +236,7 @@ async fn supervisor_stop_impl(
             let child = &mut state.children[idx];
             if matches!(
                 child.status.as_str(),
-                "running" | "draining" | "waiting" | "circuit_open"
+                "pending" | "running" | "draining" | "waiting" | "circuit_open"
             ) {
                 child.generation = child.generation.saturating_add(1);
                 if let Some(join) = child.join.take() {
