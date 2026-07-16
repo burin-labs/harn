@@ -33,6 +33,47 @@ keeps condensed series summaries instead of full per-patch history.
   handles, so it can return a completed result after process output is visible but
   before the session feedback inbox wakes.
 
+## v0.10.21
+
+### Added
+
+- Add `harn provider dispatch-audit` for offline, in-process provider dispatch
+  matrix validation across catalog routes and tool-format/thinking variants,
+  provider/model/capability filters, typed zero-route provider diagnostics, and
+  a resumable `provider tool-probe` plan that separates live transport probes
+  from zero-network request-profile audit commands, with per-route
+  not-applicable rows, matrix counts, command-id-prefixed receipt paths, stricter
+  scorecard mode/request evidence-completeness fields, and routing-route-based
+  request audit coverage including signed-thinking not-applicable rows.
+
+### Fixed
+
+- Provider tool-probe audits now classify unsupported signed-thinking routes and
+  surfaces as not applicable instead of validation failures.
+
+  Provider tool-scorecards now treat successful prose `tool_result_followup`
+  responses as terminal-answer evidence instead of false actionless-completion
+  warnings.
+
+  Provider tool-scorecard catalog plans now use canonical routing routes instead
+  of raw catalog model ids, so generated probe commands match dispatch-audit route
+  ids for hosted providers with distinct catalog and wire model names.
+- `harn provider tool-scorecard --plan-from-catalog` now reports providers that have no scorecardable
+  catalog routes with typed reasons instead of silently omitting them from the plan.
+- **Agent terminal checkpoints preserve completion-sentinel truth (#4834).**
+  Successful loops that emit their configured done sentinel are reported as
+  natural completion instead of a policy stop.
+- **Native platform CI routing is now hunk-aware for workflow edits (#4854).**
+  Unrelated `ci.yml` changes no longer force hosted Windows/macOS native builds
+  unless they touch the native routing or job sections.
+- Avoid hosted native Windows/macOS PR compiles for platform-neutral release workflow control-plane edits.
+- Fixed release binary builds to restore a same-target broad Rust cache fallback
+  before Swatinem's precise cache key, avoiding cold release compiles when
+  workspace/version hashes rotate.
+- Fixed release smoke topology so tag releases validate finalized artifacts
+  after release binary publication instead of occupying a runner in a long
+  asset-polling loop.
+
 ## v0.10.20
 
 - Added coverage for the mock provider's native tool-call path: unit tests that
