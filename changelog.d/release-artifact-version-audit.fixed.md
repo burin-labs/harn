@@ -1,1 +1,0 @@
-- Keep release protocol-artifact audits pinned to the bumped workspace version when reusing the pre-bump Harn binary.
