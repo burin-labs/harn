@@ -699,7 +699,7 @@ check-ported-handler-loc:
 	@$(HARN_CMD) run scripts/check_ported_handler_loc.harn
 
 # Repo-wide 1500-line ceiling for Rust and stdlib Harn. Existing debt is
-# grandfathered at exact per-source counts so unrelated refactors cannot
+# pinned at exact per-source counts so unrelated refactors cannot
 # conflict in a central baseline. Regeneration only tightens existing debt.
 check-source-file-lengths:
 	@$(HARN_CMD) run scripts/check_source_file_lengths.harn

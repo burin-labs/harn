@@ -172,7 +172,7 @@ keeps condensed series summaries instead of full per-patch history.
 - `harn check` no longer reports `HARN-NAM-001` (unresolved value identifier) for
   the ambient globals the ACP session executor binds before running a pipeline
   (`prompt`, `prompt_content`, `prompt_messages`, `cwd`, `mcp`). The type
-  checker's ambient-root whitelist and the executor's global bindings now derive
+  checker's ambient-root allowlist and the executor's global bindings now derive
   from one source of truth (`harn_parser::acp_ambient_globals`), so a global the
   executor injects can never be one the checker rejects.
 - Run ignored Harn CLI binary-surface tests in the slow E2E suite.
@@ -477,7 +477,7 @@ keeps condensed series summaries instead of full per-patch history.
   NUL-delimited porcelain output and fail closed when structured Git output cannot
   be represented as UTF-8 without changing path identity.
 - **Repository source now has a down-only 1,500-line ceiling (#4591).** Rust
-  and stdlib Harn files above the ceiling are grandfathered at exact counts;
+  and stdlib Harn files above the ceiling are pinned at exact counts;
   new growth, stale baselines, and newly oversized files fail the audit gate.
 - Add the embedded `harn-de-slop` skill for evidence-driven maintainability,
   typed-contract, and test-harness refactors.

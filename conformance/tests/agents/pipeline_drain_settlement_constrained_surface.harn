@@ -1,7 +1,7 @@
 /**
  * Settlement-agent drain loop (#1856 P-03) flips the
  * `settlement_agent_active` flag on for the duration of the loop body
- * so constrained-surface guards can reject non-whitelisted tool calls
+ * so constrained-surface guards can reject non-allowlisted tool calls
  * with HARN-DRN-002. The fixture registers an `on_drain_decision`
  * session hook that introspects the flag at the moment a disposition
  * fires, then verifies it is `false` again once the loop exits — so
@@ -34,7 +34,7 @@ pipeline default() {
       const pre = __host_settlement_agent_active()
       const result = on_finish_drain(harness, return_value)
       const post = __host_settlement_agent_active()
-      const _audits = lifecycle_audit_log_take()
+      const _ = lifecycle_audit_log_take()
       harness.stdio.println("pre_active=" + to_string(pre))
       harness.stdio.println("post_active=" + to_string(post))
       harness.stdio.println("observed_active=" + to_string(atomic_get(observed_active)))

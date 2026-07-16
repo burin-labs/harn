@@ -132,7 +132,7 @@ pub enum Node {
     /// (reassignment is rejected). When the initializer falls in the pure,
     /// bounded const-eval subset (literal arithmetic, string concat, literal
     /// lists/dicts, ternaries, reads of earlier `const` identifiers, and a
-    /// whitelist of pure builtins) it is **folded at compile time** via
+    /// allowlist of pure builtins) it is **folded at compile time** via
     /// `harn_parser::const_eval`; otherwise it is an ordinary immutable
     /// runtime binding. Unlike the pre-re-platform `const`, an impure
     /// initializer is *not* an error (it simply is not folded), and a

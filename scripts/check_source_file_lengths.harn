@@ -308,7 +308,7 @@ pub fn evaluate_inventory(
           path: path,
           actual: source.lines,
           baseline: baseline.lines,
-          message: "only files above ${max_lines} lines may be grandfathered",
+          message: "only files above ${max_lines} lines may have an existing baseline",
         },
       ]
       continue
@@ -349,7 +349,7 @@ pub fn evaluate_inventory(
           path: path,
           actual: source.lines,
           baseline: recorded,
-          message: "grandfathered source grew beyond its exact baseline",
+          message: "existing source grew beyond its exact baseline",
         },
       ]
     } else if source.lines < recorded {
@@ -447,7 +447,7 @@ pub fn check_source_file_lengths(root: string = "") -> SourceLengthReport {
 fn render_report(report: SourceLengthReport) -> string {
   if report.findings.count == 0 {
     return "source file-length ratchet passed: ${report.source_count} source file(s), "
-      + "${report.oversized_count} exact grandfathered file(s), ${report.max_lines}-line cap"
+      + "${report.oversized_count} exact existing file(s), ${report.max_lines}-line cap"
   }
   let lines = ["source file-length ratchet failed: ${report.findings.count} violation(s)", ""]
   for finding in report.findings {
@@ -464,7 +464,7 @@ fn render_report(report: SourceLengthReport) -> string {
     + [
     "",
     "Split oversized files. After a shrink, run `make update-source-file-length-baseline`.",
-    "New oversized files are never auto-grandfathered; an intentional baseline increase must be reviewed directly.",
+    "New oversized files never automatically become existing entries; an intentional baseline increase must be reviewed directly.",
   ]
   return join(lines, "\n")
 }

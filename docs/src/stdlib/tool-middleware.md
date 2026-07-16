@@ -228,8 +228,8 @@ without declaring a full persona manifest.
 
 Never invokes `next` — short-circuits with a synthetic OK result
 tagged `status: "dry_run"`. Useful for previewing a tool sequence
-without side-effects. Options: `only` (whitelist) and `except`
-(blacklist).
+without side-effects. Options: `only` (allowlist) and `except`
+(denylist).
 
 This is the userspace seam for **crystallization shadow runs**: when
 `shadow_replay_bundle` (orchestration/crystallize) re-executes a
