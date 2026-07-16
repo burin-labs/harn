@@ -1,0 +1,177 @@
+import {
+  aggregate_runs,
+  evaluate_metrics,
+  load_platform_baseline,
+  parse_diagnose_output,
+  parse_time_output,
+  percentile,
+} from "../check_test_case_performance.harn"
+
+fn sample_diag(name: string, setup: int, execute: int) -> string {
+  return "[harn test diag] ok ${name} setup=${setup}ms compile=2ms execute=${execute}ms teardown=1ms total=20ms"
+}
+
+@test
+pipeline test_diagnose_parser_requires_exact_lines(task) {
+  const parsed = parse_diagnose_output(
+    sample_diag("alpha", 4, 7)
+      + "\nnoise\n[harn test diag] FAIL beta setup=8ms compile=2ms execute=9ms teardown=1ms total=20ms\n",
+  )
+  assert_eq(parsed.samples.count, 2)
+  assert_eq(parsed.samples[0].name, "alpha")
+  assert_eq(parsed.samples[0].setup_ms, 4)
+  assert_eq(parsed.samples[1].execute_ms, 9)
+  assert_eq(parsed.failures, ["beta"])
+}
+
+@test
+pipeline test_portable_time_parser_reads_gnu_output(task) {
+  const parsed = parse_time_output(
+    "real 0.42\nuser 0.31\nsys 0.17\n\tMaximum resident set size (kbytes): 12345\n\tMajor (requiring I/O) page faults: 2\n\tMinor (reclaiming a frame) page faults: 300\n\tVoluntary context switches: 41\n\tInvoluntary context switches: 5\n\tFile system inputs: 6\n\tFile system outputs: 7\n",
+  )
+  assert_eq(parsed.ok, true)
+  assert_eq(parsed.wall_ms, 420.0)
+  assert_eq(parsed.user_ms, 310.0)
+  assert_eq(parsed.sys_ms, 170.0)
+  assert_eq(parsed.max_rss_kb, 12345)
+  assert_eq(parsed.major_faults, 2)
+  assert_eq(parsed.minor_faults, 300)
+  assert_eq(parsed.voluntary_context_switches, 41)
+  assert_eq(parsed.involuntary_context_switches, 5)
+  assert_eq(parsed.fs_inputs, 6)
+  assert_eq(parsed.fs_outputs, 7)
+}
+
+@test
+pipeline test_portable_time_parser_reads_bsd_output(task) {
+  const parsed = parse_time_output(
+    "real 0.55\nuser 0.40\nsys 0.20\n  54321  maximum resident set size\n  77  page reclaims\n  3  page faults\n  19  voluntary context switches\n  4  involuntary context switches\n  8  block input operations\n  9  block output operations\n",
+  )
+  assert_eq(parsed.ok, true)
+  assert_eq(parsed.wall_ms, 550.0)
+  assert_eq(parsed.max_rss_kb, 53)
+  assert_eq(parsed.minor_faults, 77)
+  assert_eq(parsed.major_faults, 3)
+  assert_eq(parsed.fs_inputs, 8)
+  assert_eq(parsed.fs_outputs, 9)
+}
+
+@test
+pipeline test_portable_time_parser_fails_closed(task) {
+  assert_eq(parse_time_output("real 1.0\nuser 0.5\n").ok, false)
+}
+
+@test
+pipeline test_percentile_uses_nearest_rank(task) {
+  assert_eq(percentile([], 90), 0)
+  assert_eq(percentile([1, 2, 3, 4, 5], 50), 3)
+  assert_eq(percentile([1, 2, 3, 4, 5], 90), 5)
+  assert_eq(percentile([9], 90), 9)
+}
+
+@test
+pipeline test_aggregate_keeps_parallel_wall_and_sums_cpu(task) {
+  const first = {
+    time: {
+      wall_ms: 400.0,
+      user_ms: 100.0,
+      sys_ms: 50.0,
+      max_rss_kb: 100,
+      major_faults: 1,
+      minor_faults: 10,
+      voluntary_context_switches: 3,
+      involuntary_context_switches: 2,
+      fs_inputs: 4,
+      fs_outputs: 5,
+    },
+    diagnose: {samples: [{setup_ms: 2, execute_ms: 1}, {setup_ms: 8, execute_ms: 4}]},
+  }
+  const second = {
+    time: {
+      wall_ms: 500.0,
+      user_ms: 200.0,
+      sys_ms: 70.0,
+      max_rss_kb: 90,
+      major_faults: 2,
+      minor_faults: 20,
+      voluntary_context_switches: 4,
+      involuntary_context_switches: 1,
+      fs_inputs: 6,
+      fs_outputs: 7,
+    },
+    diagnose: {samples: [{setup_ms: 4, execute_ms: 2}, {setup_ms: 6, execute_ms: 3}]},
+  }
+  const metrics = aggregate_runs([first, second])
+  assert_eq(metrics.max_child_wall_ms, 500.0)
+  assert_eq(metrics.sum_user_ms, 300.0)
+  assert_eq(metrics.sum_sys_ms, 120.0)
+  assert_eq(metrics.setup_p50_ms, 4)
+  assert_eq(metrics.setup_p90_ms, 8)
+  assert_eq(metrics.execute_p90_ms, 4)
+  assert_eq(metrics.test_count, 4)
+  assert_eq(metrics.telemetry.max_rss_kb, 100)
+  assert_eq(metrics.telemetry.minor_faults, 30)
+}
+
+fn baseline() -> dict {
+  return {
+    regression_x: 2.0,
+    warn_utilization: 0.8,
+    telemetry_warn_x: 4.0,
+    max_child_wall_ms: 400.0,
+    sum_user_ms: 300.0,
+    sum_sys_ms: 200.0,
+    setup_p50_ms: 4.0,
+    setup_p90_ms: 8.0,
+    execute_p90_ms: 3.0,
+    telemetry: {max_rss_kb: 100.0},
+  }
+}
+
+fn metrics() -> dict {
+  return {
+    max_child_wall_ms: 500.0,
+    sum_user_ms: 400.0,
+    sum_sys_ms: 250.0,
+    setup_p50_ms: 5.0,
+    setup_p90_ms: 9.0,
+    execute_p90_ms: 4.0,
+    telemetry: {max_rss_kb: 200.0},
+  }
+}
+
+@test
+pipeline test_evaluation_passes_below_multiplicative_and_additive_limits(task) {
+  const verdict = evaluate_metrics(metrics(), baseline())
+  assert_eq(verdict.ok, true)
+  assert_eq(verdict.failures, [])
+}
+
+@test
+pipeline test_evaluation_fails_checked_metric_and_only_warns_telemetry(task) {
+  const regressed = metrics() + {sum_sys_ms: 401.0, telemetry: {max_rss_kb: 500.0}}
+  const verdict = evaluate_metrics(regressed, baseline())
+  assert_eq(verdict.ok, false)
+  assert_eq(verdict.failures.count, 1)
+  assert_eq(verdict.warnings.count, 1)
+}
+
+@test
+pipeline test_evaluation_rejects_unmeasured_zero_reference(task) {
+  const verdict = evaluate_metrics(metrics(), baseline() + {setup_p50_ms: 0.0})
+  assert_eq(verdict.ok, false)
+  assert_eq(verdict.failures.contains("baseline `setup_p50_ms` must be positive"), true)
+}
+
+@test
+pipeline test_baseline_loader_is_platform_specific_and_versioned(task) {
+  const text = "schema_version = 1\nworkload_version = 1\n[platform.macos]\nmax_child_wall_ms = 12.0\n"
+  const found = load_platform_baseline(text, "macos")
+  assert_eq(found.ok, true)
+  assert_eq(found.baseline.max_child_wall_ms, 12.0)
+  assert_eq(load_platform_baseline(text, "linux").ok, false)
+  assert_eq(
+    load_platform_baseline(text.replace("schema_version = 1", "schema_version = 2"), "macos").ok,
+    false,
+  )
+}

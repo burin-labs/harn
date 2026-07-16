@@ -65,6 +65,7 @@ GATES=(
   check-docs-workflow-quickstart
   check-release-audit-contract
   check-vm-rss-soak
+  check-test-case-performance
 )
 
 nproc_count() { getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4; }
