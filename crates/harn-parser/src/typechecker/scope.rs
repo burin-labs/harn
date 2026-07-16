@@ -9,6 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
+use harn_lexer::Span;
+
 use crate::ast::*;
 use crate::builtin_signatures;
 
@@ -220,6 +222,8 @@ impl TypeScope {
                             default_value: None,
                             rest: false,
                         }],
+                        // Synthesized builtin: no source text, so no span.
+                        span: Span::dummy(),
                     },
                     EnumVariant {
                         name: "Err".into(),
@@ -229,6 +233,7 @@ impl TypeScope {
                             default_value: None,
                             rest: false,
                         }],
+                        span: Span::dummy(),
                     },
                 ],
             },
