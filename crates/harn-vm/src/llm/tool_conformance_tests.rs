@@ -117,7 +117,18 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
         report.catalog_model_count
     );
     assert_eq!(report.route_count, report.catalog_model_count);
-    assert_eq!(report.probe_cases.len(), 5);
+    assert_eq!(
+        report.probe_cases,
+        vec![
+            "single_tool_call",
+            "parallel_tool_calls",
+            "large_string_argument",
+            "tool_result_followup",
+            "no_tool_answer_or_refusal",
+            "unavailable_tool_repair",
+            "done_sentinel",
+        ]
+    );
     assert_eq!(report.request_profiles.len(), 2);
     assert_eq!(report.modes.len(), 2);
     assert_eq!(
@@ -484,6 +495,124 @@ fn classify_anthropic_tool_use_as_native_pass() {
 }
 
 #[test]
+fn classify_parallel_native_tool_calls_as_pass() {
+    let raw = serde_json::json!({
+        "choices": [{
+            "message": {
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "echo_marker",
+                            "arguments": serde_json::json!({
+                                "value": "harn_tool_probe_marker:first"
+                            }).to_string(),
+                        },
+                    },
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {
+                            "name": "echo_marker",
+                            "arguments": serde_json::json!({
+                                "value": "harn_tool_probe_marker:second"
+                            }).to_string(),
+                        },
+                    },
+                ],
+            },
+        }],
+    })
+    .to_string();
+    let report = classify_tool_conformance_fixture_for_case(
+        "local",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::ParallelToolCalls,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &raw,
+    );
+
+    assert_eq!(report.tool_calling.native, ToolProbeStatus::Pass);
+    assert_eq!(
+        report.tool_calling.fallback_mode,
+        ToolProbeFallbackMode::Native
+    );
+    assert_eq!(report.cases[0].native_tool_call_count, 2);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::StructuredNativeToolCall
+    );
+}
+
+#[test]
+fn classify_parallel_text_tool_calls_as_fallback_pass() {
+    let first = serde_json::json!({
+        "name": "echo_marker",
+        "arguments": {"value": "harn_tool_probe_marker:first"},
+    });
+    let second = serde_json::json!({
+        "name": "echo_marker",
+        "arguments": {"value": "harn_tool_probe_marker:second"},
+    });
+    let content = [
+        "<tool_call>",
+        &first.to_string(),
+        "</tool_call>\n<tool_call>",
+        &second.to_string(),
+        "</tool_call>",
+    ]
+    .concat();
+    let raw = serde_json::json!({
+        "content": content,
+    })
+    .to_string();
+    let report = classify_tool_conformance_fixture_for_case(
+        "local",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::ParallelToolCalls,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &raw,
+    );
+
+    assert_eq!(report.tool_calling.native, ToolProbeStatus::Fail);
+    assert_eq!(report.tool_calling.text, ToolProbeStatus::Pass);
+    assert_eq!(
+        report.tool_calling.fallback_mode,
+        ToolProbeFallbackMode::Text
+    );
+    assert_eq!(report.cases[0].text_tool_call_count, 2);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::ParseableHarnTextToolCall
+    );
+}
+
+#[test]
+fn classify_parallel_tool_calls_requires_both_values() {
+    let report = classify_tool_conformance_fixture_for_case(
+        "local",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::ParallelToolCalls,
+        DEFAULT_TOOL_PROBE_MARKER,
+        r#"{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"echo_marker","arguments":"{\"value\":\"harn_tool_probe_marker:first\"}"}}]}}]}"#,
+    );
+
+    assert_eq!(report.tool_calling.native, ToolProbeStatus::Fail);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::ProseOnlyNonTool
+    );
+    assert_eq!(
+        report.cases[0].failure_reason.as_deref(),
+        Some("no_executable_tool_call")
+    );
+}
+
+#[test]
 fn classify_native_tool_call_with_text_call_in_name_as_pass() {
     let report = classify_tool_conformance_fixture(
         "zai",
@@ -671,6 +800,42 @@ fn done_sentinel_fixture_passes_only_as_text() {
     assert_eq!(
         report.cases[0].classification,
         ToolProbeClassification::DoneSentinel
+    );
+}
+
+#[test]
+fn tool_result_followup_fixture_passes_without_second_tool_call() {
+    let report = classify_tool_conformance_fixture_for_case(
+        "openai",
+        "gpt-5.4-mini",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::ToolResultFollowup,
+        "case",
+        r#"{"choices":[{"message":{"content":"tool_result_followup:case"}}]}"#,
+    );
+
+    assert!(report.cases[0].ok, "{:?}", report.cases[0]);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::ProseOnlyNonTool
+    );
+}
+
+#[test]
+fn tool_result_followup_fixture_fails_on_spurious_second_tool_call() {
+    let report = classify_tool_conformance_fixture_for_case(
+        "openai",
+        "gpt-5.4-mini",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::ToolResultFollowup,
+        "case",
+        r#"{"choices":[{"message":{"tool_calls":[{"type":"function","function":{"name":"echo_marker","arguments":"{\"value\":\"case\"}"}}]}}]}"#,
+    );
+
+    assert!(!report.cases[0].ok, "{:?}", report.cases[0]);
+    assert_eq!(
+        report.cases[0].classification,
+        ToolProbeClassification::RawModelToolTag
     );
 }
 

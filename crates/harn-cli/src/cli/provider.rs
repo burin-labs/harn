@@ -363,8 +363,12 @@ impl ProviderToolProbeModeArg {
 pub(crate) enum ProviderToolProbeCaseArg {
     #[value(name = "single_tool_call", alias = "single-tool-call")]
     SingleToolCall,
+    #[value(name = "parallel_tool_calls", alias = "parallel-tool-calls")]
+    ParallelToolCalls,
     #[value(name = "large_string_argument", alias = "large-string-argument")]
     LargeStringArgument,
+    #[value(name = "tool_result_followup", alias = "tool-result-followup")]
+    ToolResultFollowup,
     #[value(
         name = "no_tool_answer_or_refusal",
         alias = "no-tool-answer-or-refusal"
@@ -403,8 +407,14 @@ impl ProviderToolProbeCaseArg {
     pub(crate) fn tool_probe_case(self) -> harn_vm::llm::tool_conformance::ToolProbeCase {
         match self {
             Self::SingleToolCall => harn_vm::llm::tool_conformance::ToolProbeCase::SingleToolCall,
+            Self::ParallelToolCalls => {
+                harn_vm::llm::tool_conformance::ToolProbeCase::ParallelToolCalls
+            }
             Self::LargeStringArgument => {
                 harn_vm::llm::tool_conformance::ToolProbeCase::LargeStringArgument
+            }
+            Self::ToolResultFollowup => {
+                harn_vm::llm::tool_conformance::ToolProbeCase::ToolResultFollowup
             }
             Self::NoToolAnswerOrRefusal => {
                 harn_vm::llm::tool_conformance::ToolProbeCase::NoToolAnswerOrRefusal

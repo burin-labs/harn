@@ -1500,7 +1500,7 @@ fn test_parses_provider_tool_probe_args() {
         "--mode",
         "non-streaming",
         "--case",
-        "large_string_argument",
+        "parallel_tool_calls",
         "--marker",
         "marker",
         "--repeat",
@@ -1520,7 +1520,7 @@ fn test_parses_provider_tool_probe_args() {
     assert!(matches!(args.mode, ProviderToolProbeModeArg::NonStreaming));
     assert!(matches!(
         args.probe_case,
-        ProviderToolProbeCaseArg::LargeStringArgument
+        ProviderToolProbeCaseArg::ParallelToolCalls
     ));
     assert_eq!(args.marker, "marker");
     assert_eq!(args.repeat, 5);
