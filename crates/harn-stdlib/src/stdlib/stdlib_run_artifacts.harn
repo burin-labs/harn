@@ -129,7 +129,14 @@ fn __run_artifacts_standard_paths(run: {dir: string, ...rest}) -> RunArtifactPat
   }
 }
 
-fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) -> RunArtifactsRun {
+fn __run_artifacts_make_run(
+  kind,
+  namespace,
+  root,
+  run_id,
+  dir,
+  modified = nil,
+) -> RunArtifactsRun {
   const base = {kind: kind, namespace: namespace, run_id: run_id, root: root, dir: dir, modified: modified}
   return base + {paths: __run_artifacts_standard_paths(base)}
 }
@@ -200,7 +207,11 @@ pub fn run_artifact_read_json(run: RunArtifactsRun, name: string) -> unknown {
  * @effects: [fs.read]
  * @errors: [validation, StructuredReadFailure, SchemaValidationFailure]
  */
-pub fn run_artifact_read_json_typed<T>(run: RunArtifactsRun, name: string, schema: Schema<T>) -> T {
+pub fn run_artifact_read_json_typed<T>(
+  run: RunArtifactsRun,
+  name: string,
+  schema: Schema<T>,
+) -> T {
   return read_json_typed(run_artifact_path(run, name), schema)
 }
 
@@ -210,7 +221,10 @@ pub fn run_artifact_read_json_typed<T>(run: RunArtifactsRun, name: string, schem
  * @effects: [fs.read]
  * @errors: [validation]
  */
-pub fn run_artifact_read_json_result(run: RunArtifactsRun, name: string) -> Result<unknown, StructuredReadFailure> {
+pub fn run_artifact_read_json_result(
+  run: RunArtifactsRun,
+  name: string,
+) -> Result<unknown, StructuredReadFailure> {
   return read_json_result(run_artifact_path(run, name))
 }
 
@@ -286,7 +300,10 @@ pub fn run_artifact_transcript_path(run: RunArtifactsRun, name: string = "agent-
  * @errors: [validation]
  * @example: run_artifacts_list("release", {limit: 5})
  */
-pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -> list<RunArtifactsRun> {
+pub fn run_artifacts_list(
+  kind: string,
+  options: RunArtifactsListOptions = {},
+) -> list<RunArtifactsRun> {
   const opts = options ?? {}
   const clean_kind = __run_artifacts_clean_segment(kind, "kind")
   const namespace = __run_artifacts_namespace(opts)
@@ -316,8 +333,7 @@ pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -
       rows = rows.push(__run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified))
     }
   }
-  return rows
-    .sort_by(
+  return rows.sort_by(
     { row ->
       const modified = row.modified ?? 0
       return pair(0 - modified, row.run_id ?? "")

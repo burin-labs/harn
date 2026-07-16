@@ -6,8 +6,7 @@ pipeline test(task) {
   harness.fs.mkdir("project_scan_ignored/node_modules/pkg/src")
   harness.fs.mkdir("project_scan_ignored/target/tooling")
   harness.fs.write_text("project_scan_ignored/.gitignore", "ignored/\n")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     "project_scan_ignored/app/Cargo.toml",
     "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
   )
@@ -17,8 +16,7 @@ pipeline test(task) {
   harness.fs.write_text("project_scan_ignored/node_modules/pkg/package.json", "{\"name\":\"pkg\"}\n")
   harness.fs.write_text("project_scan_ignored/node_modules/pkg/package-lock.json", "{}\n")
   harness.fs.write_text("project_scan_ignored/node_modules/pkg/src/index.js", "export const x = 1\n")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     "project_scan_ignored/target/tooling/Cargo.toml",
     "[package]\nname = \"tooling\"\nversion = \"0.1.0\"\n",
   )

@@ -30,20 +30,17 @@ pipeline test(task) {
   harness.fs.mkdir(path_join(rust_workspace, ".config"))
   harness.fs.mkdir(path_join(rust_workspace, "crates/api/src"))
   harness.fs.mkdir(path_join(rust_workspace, "crates/cli/src"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(rust_workspace, "Cargo.toml"),
     "[workspace]\nmembers = [\"crates/api\", \"crates/cli\"]\n",
   )
   harness.fs.write_text(path_join(rust_workspace, "Cargo.lock"), "# lock\n")
   harness.fs.write_text(path_join(rust_workspace, ".config/nextest.toml"), "[profile.default]\n")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(rust_workspace, "crates/api/Cargo.toml"),
     "[package]\nname = \"api\"\nversion = \"0.1.0\"\n[dependencies]\naxum = \"0.8\"\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(rust_workspace, "crates/cli/Cargo.toml"),
     "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n",
   )
@@ -52,8 +49,7 @@ pipeline test(task) {
   harness.fs.mkdir(swift_library)
   harness.fs.mkdir(path_join(swift_library, "Sources/Lib"))
   harness.fs.mkdir(path_join(swift_library, "Tests/LibTests"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(swift_library, "Package.swift"),
     "import PackageDescription\nlet package = Package(name: \"Lib\", products: [.library(name: \"Lib\", targets: [\"Lib\"])], targets: [.target(name: \"Lib\"), .testTarget(name: \"LibTests\", dependencies: [\"Lib\"])])\n",
   )
@@ -64,21 +60,21 @@ pipeline test(task) {
   harness.fs.mkdir(swift_executable)
   harness.fs.mkdir(path_join(swift_executable, "Sources/App"))
   harness.fs.mkdir(path_join(swift_executable, "Tests/AppTests"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(swift_executable, "Package.swift"),
     "import PackageDescription\nlet package = Package(name: \"App\", targets: [.executableTarget(name: \"App\"), .testTarget(name: \"AppTests\", dependencies: [\"App\"])])\n",
   )
   harness.fs.write_text(path_join(swift_executable, "Sources/App/main.swift"), "__io_print(\"hi\")\n")
-  harness.fs
-    .write_text(path_join(swift_executable, "Tests/AppTests/AppTests.swift"), "import XCTest\n")
+  harness.fs.write_text(
+    path_join(swift_executable, "Tests/AppTests/AppTests.swift"),
+    "import XCTest\n",
+  )
   __io_println("swift-executable " + fingerprint_signature(project_fingerprint(swift_executable)))
   const npm_monorepo = path_join(root, "npm-monorepo")
   harness.fs.mkdir(npm_monorepo)
   harness.fs.mkdir(path_join(npm_monorepo, "packages/web/src"))
   harness.fs.mkdir(path_join(npm_monorepo, "packages/web/tests"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(npm_monorepo, "package.json"),
     "{\n  \"name\": \"npm-monorepo\",\n  \"private\": true,\n  \"workspaces\": [\"packages/*\"],\n  \"packageManager\": \"npm@10.8.0\",\n  \"devDependencies\": {\n    \"vite\": \"5.0.0\",\n    \"vitest\": \"2.0.0\"\n  },\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"test\": \"vitest run\"\n  }\n}\n",
   )
@@ -88,8 +84,7 @@ pipeline test(task) {
   const pnpm_monorepo = path_join(root, "pnpm-monorepo")
   harness.fs.mkdir(pnpm_monorepo)
   harness.fs.mkdir(path_join(pnpm_monorepo, "apps/web"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(pnpm_monorepo, "package.json"),
     "{\n  \"name\": \"pnpm-monorepo\",\n  \"private\": true,\n  \"workspaces\": [\"apps/*\"],\n  \"packageManager\": \"pnpm@9.0.0\",\n  \"dependencies\": {\n    \"next\": \"15.0.0\",\n    \"react\": \"19.0.0\"\n  },\n  \"scripts\": {\n    \"build\": \"next build\"\n  }\n}\n",
   )
@@ -99,8 +94,7 @@ pipeline test(task) {
   const python_poetry = path_join(root, "python-poetry")
   harness.fs.mkdir(python_poetry)
   harness.fs.mkdir(path_join(python_poetry, "tests"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(python_poetry, "pyproject.toml"),
     "[tool.poetry]\nname = \"svc\"\nversion = \"0.1.0\"\n[tool.poetry.dependencies]\npython = \"^3.12\"\nfastapi = \"^0.110\"\n[tool.poetry.group.dev.dependencies]\npytest = \"^8.0\"\n",
   )
@@ -109,8 +103,7 @@ pipeline test(task) {
   const python_uv = path_join(root, "python-uv")
   harness.fs.mkdir(python_uv)
   harness.fs.mkdir(path_join(python_uv, "tests"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(python_uv, "pyproject.toml"),
     "[project]\nname = \"svc\"\ndependencies = [\"fastapi>=0.110\", \"pytest>=8.0\"]\n[tool.uv]\n",
   )
@@ -129,14 +122,12 @@ pipeline test(task) {
   harness.fs.mkdir(path_join(mixed_repo, ".github/workflows"))
   harness.fs.mkdir(path_join(mixed_repo, "backend"))
   harness.fs.mkdir(path_join(mixed_repo, "portal/tests"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(mixed_repo, "backend/Cargo.toml"),
     "[package]\nname = \"backend\"\nversion = \"0.1.0\"\n[dependencies]\naxum = \"0.8\"\n",
   )
   harness.fs.write_text(path_join(mixed_repo, "backend/Cargo.lock"), "# lock\n")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(mixed_repo, "portal/package.json"),
     "{\n  \"name\": \"portal\",\n  \"packageManager\": \"pnpm@9.0.0\",\n  \"dependencies\": {\n    \"next\": \"15.0.0\",\n    \"react\": \"19.0.0\"\n  }\n}\n",
   )

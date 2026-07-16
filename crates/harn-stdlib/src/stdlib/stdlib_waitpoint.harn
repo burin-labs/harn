@@ -65,7 +65,10 @@ pub fn create(id_or_options: WaitpointCreateInput = nil) -> Waitpoint {
  * @effects: []
  * @errors: []
  */
-pub fn wait(waitpoints: string | dict | list, options: WaitpointWaitOptions = nil) -> Waitpoint | list<Waitpoint> {
+pub fn wait(
+  waitpoints: string | dict | list,
+  options: WaitpointWaitOptions = nil,
+) -> Waitpoint | list<Waitpoint> {
   if type_of(waitpoints) == "list" {
     if options == nil {
       return __waitpoint_wait(waitpoints)
@@ -84,7 +87,11 @@ pub fn wait(waitpoints: string | dict | list, options: WaitpointWaitOptions = ni
  * @effects: []
  * @errors: []
  */
-pub fn complete(waitpoint: WaitpointHandle, value, options: WaitpointTerminalOptions = nil) -> Waitpoint {
+pub fn complete(
+  waitpoint: WaitpointHandle,
+  value,
+  options: WaitpointTerminalOptions = nil,
+) -> Waitpoint {
   if options == nil {
     return __waitpoint_complete(waitpoint, value)
   }

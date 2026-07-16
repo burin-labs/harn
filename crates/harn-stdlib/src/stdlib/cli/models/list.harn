@@ -104,7 +104,11 @@ fn __group_by_provider(
  * Synthesize installed Ollama models the catalog hasn't listed yet,
  * so users still see local models before curated metadata exists.
  */
-fn __augment_with_unknown_ollama(groups: dict, provider_filter: string, installed_ollama_list: list) -> dict {
+fn __augment_with_unknown_ollama(
+  groups: dict,
+  provider_filter: string,
+  installed_ollama_list: list,
+) -> dict {
   const show_ollama = provider_filter == "" || provider_filter == "ollama"
   if !show_ollama {
     return groups
@@ -257,8 +261,7 @@ fn main(harness: Harness) -> int {
   const installed_ollama_list = try {
     json_parse(installed_raw)
   } catch (e) {
-    harness.stdio
-      .eprintln("internal error: failed to parse HARN_MODELS_INSTALLED_OLLAMA: " + e.message)
+    harness.stdio.eprintln("internal error: failed to parse HARN_MODELS_INSTALLED_OLLAMA: " + e.message)
     return 70
   }
   if type_of(installed_ollama_list) != "list" {

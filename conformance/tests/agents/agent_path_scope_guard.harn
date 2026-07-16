@@ -44,8 +44,7 @@ pipeline main() {
   assert(len(rejected) == 1 && rejected[0] == "Read", "out-of-anchor path is denied")
   const snap = agent_session_snapshot(session)
   const reminders = (snap.events ?? []).filter({ ev -> ev?.kind == "system_reminder" })
-  const scope_alerts = reminders
-    .filter(
+  const scope_alerts = reminders.filter(
     { ev -> ev?.reminder?.tags != nil && ev.reminder.tags.any({ tag -> tag == "scope_alert" }) },
   )
   assert(len(scope_alerts) >= 1, "scope_alert reminder is appended on deny")

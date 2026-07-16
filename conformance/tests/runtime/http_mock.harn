@@ -16,8 +16,7 @@ pipeline test(task) {
   assert_eq(len(data.users), 2)
   log("users: " + to_string(len(data.users)))
   // Make a POST request - should hit glob mock
-  const post_resp = harness.net
-    .post(
+  const post_resp = harness.net.post(
     "https://api.example.com/items",
     "{\"name\": \"test\"}",
     {headers: {Authorization: "Bearer test-token", "Content-Type": "application/json"}},

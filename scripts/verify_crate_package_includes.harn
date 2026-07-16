@@ -97,8 +97,7 @@ fn arg_spec() -> list {
 fn main(harness: Harness) {
   const parsed = parse_args(argv, arg_spec())
   if parsed?._help ?? false {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/verify_crate_package_includes.harn -- --package-dir DIR --crate CRATE",
     )
     return nil
@@ -116,8 +115,9 @@ fn main(harness: Harness) {
   }
   const errors = packaged_include_errors(package_dir, crate)
   if errors.count > 0 {
-    harness.stdio
-      .eprintln("error: packaged " + crate + " has invalid include_str!/include_bytes! paths:")
+    harness.stdio.eprintln(
+      "error: packaged " + crate + " has invalid include_str!/include_bytes! paths:",
+    )
     for error in errors {
       harness.stdio.eprintln("  - " + error)
     }

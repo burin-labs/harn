@@ -11,8 +11,7 @@ pipeline test(task) {
     "stream providers should publish the shared stream payload schema",
   )
   assert(
-    stream_providers
-      .all(
+    stream_providers.all(
       { provider -> provider.runtime.kind == "builtin" && provider.runtime.connector == "stream" },
     ),
     "stream providers should use the generic stream ingress connector",
@@ -222,8 +221,9 @@ pipeline test(task) {
   const notion_secrets = notion?.secret_requirements ?? []
   assert(len(notion_secrets) == 1, "notion should publish its webhook verification secret")
   assert(
-    notion_secrets
-      .any({ secret -> secret.name == "verification_token" && secret.namespace == "notion" }),
+    notion_secrets.any(
+      { secret -> secret.name == "verification_token" && secret.namespace == "notion" },
+    ),
     "notion should require verification_token in the notion namespace",
   )
   const notion_methods = notion?.outbound_methods ?? []

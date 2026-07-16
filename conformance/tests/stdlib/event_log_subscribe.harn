@@ -10,8 +10,7 @@ pipeline default() {
   const live_event = live.next()
   __io_println(live_event.value.kind)
   __io_println(live_event.value.cursor)
-  const filtered = event_log
-    .subscribe(
+  const filtered = event_log.subscribe(
     {topic: "tests.events", from_cursor: live_event.value.cursor, kind_prefix: "transcript.reminder."},
   )
   event_log.emit("tests.events", "other", {n: 4})

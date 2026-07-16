@@ -583,8 +583,7 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
     if tenant == nil || type_of(conversation) != "dict" || conversation?.tenant_id == tenant {
       const text = __conversation_text(conversation)
       const snippet = __token_prefix(text, max_prefix_tokens)
-      records = records
-        .push(
+      records = records.push(
         {
           id: __conversation_id(conversation, index),
           tenant_id: if type_of(conversation) == "dict" {
@@ -631,8 +630,7 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
         if monthly >= min_monthly_savings {
           const scope = tenant ?? "default"
           const id = "kmeans-" + scope + "-" + substring(sha256(prefix.text), 0, 12)
-          proposals = proposals
-            .push(
+          proposals = proposals.push(
             prompt_fragment(
               id,
               prefix.text,
@@ -671,8 +669,7 @@ pub fn prompt_library_review_queue(library, filters = nil) {
   const review_status = filters?.status ?? "pending_review"
   const review_filters = base_filters + {provenance: "kmeans", status: review_status}
   for fragment in prompt_library_list(library, review_filters) {
-    queue = queue
-      .push(
+    queue = queue.push(
       {
         id: fragment.id,
         title: fragment.title,

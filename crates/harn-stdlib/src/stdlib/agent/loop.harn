@@ -1375,7 +1375,13 @@ fn __blank_name_dropped_count(llm_result, parsed) -> int {
  * note was injected (so the caller flags turn-level tool-call feedback and the
  * stall accounting stays consistent with the parse-error path).
  */
-fn __maybe_inject_blank_name_feedback(session_id, llm_result, parsed, dispatched_count, turn_opts) -> bool {
+fn __maybe_inject_blank_name_feedback(
+  session_id,
+  llm_result,
+  parsed,
+  dispatched_count,
+  turn_opts,
+) -> bool {
   let dropped = __blank_name_dropped_count(llm_result, parsed)
   if dropped == 0 {
     return false
@@ -1960,7 +1966,13 @@ fn __intra_turn_failed_guard_record(call, index, resource_guard, result) {
   }
 }
 
-fn __intra_turn_dependent_suffix_count(tool_calls, tools, options, index, blocking_guard) -> number {
+fn __intra_turn_dependent_suffix_count(
+  tool_calls,
+  tools,
+  options,
+  index,
+  blocking_guard,
+) -> number {
   let count = 0
   for (candidate_index, candidate_call) in iter(tool_calls).enumerate() {
     if candidate_index < index {
@@ -2342,8 +2354,7 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       // Unknown still poisons, preserving today's conservative behavior.
       if resource_guard != nil && !__tool_result_ok(result)
         && __intra_turn_failure_poisons_resource(result) {
-        failed_resource_guards = failed_resource_guards
-          .push(__intra_turn_failed_guard_record(call, index, resource_guard, result))
+        failed_resource_guards = failed_resource_guards.push(__intra_turn_failed_guard_record(call, index, resource_guard, result))
       }
       if fanout_cap > 0 {
         const signature = __intra_turn_failure_signature(result)
@@ -2394,8 +2405,7 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       if __agent_error_must_propagate(err) {
         throw err
       }
-      results = results
-        .push(
+      results = results.push(
         {
           ok: false,
           status: "error",
@@ -2550,7 +2560,13 @@ fn __agent_loop_verify_closure_exists(turn_opts) -> bool {
   return turn_opts?.verify_completion != nil || turn_opts?.verify_completion_judge != nil
 }
 
-fn __agent_loop_post_edit_reverify_mandated(repair_cfg, turn_opts, stall_state, dispatch, tools) -> bool {
+fn __agent_loop_post_edit_reverify_mandated(
+  repair_cfg,
+  turn_opts,
+  stall_state,
+  dispatch,
+  tools,
+) -> bool {
   const has_live_failure = stall_state.last_diagnostic_class == "fail" || stall_state.reverify_owed
   return repair_cfg.post_edit_reverify
     && __agent_loop_verify_closure_exists(turn_opts)
@@ -2972,8 +2988,7 @@ fn __agent_loop_emit_budget_exhausted(session_id, exhaustion) {
 }
 
 fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason) {
-  return decisions
-    .push(
+  return decisions.push(
     {
       iteration: iteration,
       action: "stop",
@@ -2986,8 +3001,7 @@ fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason) {
 }
 
 fn __agent_loop_record_terminal_callback_continue(decisions, iteration, old_limit, new_limit) {
-  return decisions
-    .push(
+  return decisions.push(
     {
       iteration: iteration,
       action: "extend",
@@ -3378,8 +3392,7 @@ fn __scope_classifier_recent_context(messages, limit) {
   let i = start
   while i < total {
     const msg = messages[i]
-    out = out
-      .push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
+    out = out.push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
     i = i + 1
   }
   return out
@@ -3601,8 +3614,7 @@ fn __scope_classifier_mounted_roots(anchor) {
   }
   let lines = []
   for root in roots {
-    lines = lines
-      .push(
+    lines = lines.push(
       "  - " + to_string(root?.path ?? root?.root ?? "")
         + " (mount_mode: "
         + to_string(root?.mount_mode ?? "")

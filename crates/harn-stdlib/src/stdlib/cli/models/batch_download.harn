@@ -549,7 +549,13 @@ fn __download_openai_compatible_files(
   return state
 }
 
-fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: bool, max_bytes: int) -> dict {
+fn __download_one_job(
+  harness: Harness,
+  job: dict,
+  out_dir: string,
+  dry_run: bool,
+  max_bytes: int,
+) -> dict {
   const provider = safe_string(job["provider"], "")
   const wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
   const source_status = safe_string(job["status"], "")

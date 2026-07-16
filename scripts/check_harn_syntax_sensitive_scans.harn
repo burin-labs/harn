@@ -218,8 +218,7 @@ fn arg_spec() -> list {
 fn main(harness: Harness) {
   const parsed = parse_args(argv, arg_spec())
   if parsed?._help ?? false {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/check_harn_syntax_sensitive_scans.harn -- [--json] [--root PATH]",
     )
     return nil

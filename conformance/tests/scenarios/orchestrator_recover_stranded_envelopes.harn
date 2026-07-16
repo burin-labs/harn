@@ -21,13 +21,11 @@ fn wait_for_readyz(harness: Harness, url, pid) {
 pipeline test(task) {
   const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-recover-" + uuid())
   harness.fs.mkdir(root)
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "harn.toml"),
     "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\npath = \"/a2a/review\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> string {\n  return event.kind\n}\n",
   )
@@ -45,8 +43,7 @@ pipeline test(task) {
   const crash_url = wait_for_listener_url(harness, path_join(root, "orchestrator-crash.log"))
   assert(crash_url != nil, "crashing listener URL did not appear in log")
   assert(wait_for_readyz(harness, crash_url, crash_pid), "crashing listener did not become ready")
-  const response = harness.net
-    .request(
+  const response = harness.net.request(
     "POST",
     crash_url + "/a2a/review",
     {

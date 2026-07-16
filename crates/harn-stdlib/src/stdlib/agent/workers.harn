@@ -465,7 +465,11 @@ pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
  * @api_stability: experimental
  * @example: agent_await_resumption("waiting on review", {timeout: {duration_minutes: 5}})
  */
-pub fn agent_await_resumption(reason, conditions = nil, resume_by = nil) -> AgentAwaitResumptionRequest {
+pub fn agent_await_resumption(
+  reason,
+  conditions = nil,
+  resume_by = nil,
+) -> AgentAwaitResumptionRequest {
   const normalized_reason = trim(to_string(reason ?? ""))
   if normalized_reason == "" {
     throw "HARN-SUS-005: agent_await_resumption reason is required"
@@ -904,7 +908,7 @@ pub fn agent_fanout(requests, options = nil) {
     let outcomes = []
     for request in wave {
       const outcome = try {
-        let handle = sub_agent_run(request.task, request.options + {background: true, name: request.label})
+        const handle = sub_agent_run(request.task, request.options + {background: true, name: request.label})
         {spawned: true, handle: handle}
       } catch (spawn_error) {
         {spawned: false, error: spawn_error}

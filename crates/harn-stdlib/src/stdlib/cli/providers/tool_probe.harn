@@ -145,8 +145,9 @@ fn __render_human(report: dict) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON", "")
   if raw == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON not set by dispatch shim")
+    harness.stdio.eprintln(
+      "internal error: HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON not set by dispatch shim",
+    )
     return 70
   }
   const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
@@ -160,8 +161,7 @@ fn main(harness: Harness) -> int {
     const report = try {
       json_parse(raw)
     } catch (e) {
-      harness.stdio
-        .eprintln("internal error: failed to parse provider-tool-probe payload: " + e.message)
+      harness.stdio.eprintln("internal error: failed to parse provider-tool-probe payload: " + e.message)
       return 70
     }
     const text = __render_human(report)

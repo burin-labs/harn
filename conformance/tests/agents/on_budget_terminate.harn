@@ -38,15 +38,13 @@ pipeline default() {
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)
       harness.stdio.println("audit_strategy=" + audits[0].payload.strategy)
-      harness.stdio
-        .println(
+      harness.stdio.println(
         "audit_consumed_tokens=" + to_string(audits[0].payload.budget_state.consumed_tokens),
       )
       const ns = OnBudget()
       harness.stdio.println("ns_has_terminate=" + to_string(type_of(ns.terminate) == "closure"))
       harness.stdio.println("ns_has_graceful_exit=" + to_string(type_of(ns.graceful_exit) == "closure"))
-      harness.stdio
-        .println(
+      harness.stdio.println(
         "ns_has_warn_and_continue=" + to_string(type_of(ns.warn_and_continue) == "closure"),
       )
       return return_value

@@ -31,10 +31,8 @@ pipeline test(task) {
   }
   log(cap_error)
   const mid_error = try {
-    stream
-      .collect(
-      stream
-        .map(
+    stream.collect(
+      stream.map(
         [1, 2, 3],
         { x ->
           if x == 2 {

@@ -221,8 +221,7 @@ pipeline default() {
   const paired_entry = paired.schema_transform(tools.tools[0])
   __io_println(contains(paired_entry.parameters.properties.keys(), "_nl_intent"))
   const _ = mock_time(0)
-  const r7 = paired
-    .caller(
+  const r7 = paired.caller(
     envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
     next,
   )
@@ -232,29 +231,29 @@ pipeline default() {
   __io_println(r7.arguments.path)
   // (9) Option validation is schema-backed: malformed public options fail
   // deterministically before any binder hop can run.
-  let missing_provider = try {
+  const missing_provider = try {
     with_natural_language_executor({model: "gpt-oss-120b", binder_fn: mock_binder})
   }
   __io_println(error_contains(missing_provider, "provider"))
-  let bad_timeout = try {
+  const bad_timeout = try {
     with_natural_language_executor(
       {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 0, binder_fn: mock_binder},
     )
   }
   __io_println(error_contains(bad_timeout, "timeout_ms"))
-  let bad_intent_field = try {
+  const bad_intent_field = try {
     with_natural_language_executor(
       {provider: "cerebras", model: "gpt-oss-120b", intent_field: "   ", binder_fn: mock_binder},
     )
   }
   __io_println(error_contains(bad_intent_field, "intent_field"))
-  let bad_failure_mode = try {
+  const bad_failure_mode = try {
     with_natural_language_executor(
       {provider: "cerebras", model: "gpt-oss-120b", on_failure: "retry", binder_fn: mock_binder},
     )
   }
   __io_println(error_contains(bad_failure_mode, "on_failure"))
-  let bad_binder_fn = try {
+  const bad_binder_fn = try {
     with_natural_language_executor({provider: "cerebras", model: "gpt-oss-120b", binder_fn: "nope"})
   }
   __io_println(error_contains(bad_binder_fn, "binder_fn"))

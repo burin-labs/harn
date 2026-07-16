@@ -174,9 +174,7 @@ fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
   let errors: list<string> = []
   const steps = action?.runs?.steps ?? []
   const upstream = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX) }).to_list()
-  const broad_restore = steps
-    .filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) })
-    .to_list()
+  const broad_restore = steps.filter({ step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) }).to_list()
   if len(upstream) != 1 {
     return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
   }
@@ -237,7 +235,12 @@ fn node_cache_action_errors(action) -> list<string> {
   return errors
 }
 
-fn ephemeral_cache_writer_error(workflow: string, job: string, step, policy: CiCachePolicy) -> string? {
+fn ephemeral_cache_writer_error(
+  workflow: string,
+  job: string,
+  step,
+  policy: CiCachePolicy,
+) -> string? {
   const uses = step_uses(step)
   if uses.starts_with(UPSTREAM_NODE_PREFIX) && trim(step?.with?.cache ?? "") != "" {
     return "${workflow}:${job} bypasses ${policy.node_cache_action} with setup-node caching"
@@ -263,9 +266,7 @@ fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
   if trim(job?.permissions?.actions ?? "") != "read" {
     errors = errors + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must grant actions: read"]
   }
-  const reporters = (job?.steps ?? [])
-    .filter({ step -> trim(step?.run ?? "") == CACHE_BUDGET_SCRIPT })
-    .to_list()
+  const reporters = (job?.steps ?? []).filter({ step -> trim(step?.run ?? "") == CACHE_BUDGET_SCRIPT }).to_list()
   if len(reporters) != 1 {
     return errors
       + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must run ${CACHE_BUDGET_SCRIPT} exactly once"]
@@ -445,7 +446,12 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
 }
 
 /** Return every policy violation without stopping at the first workflow. */
-pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workflows: dict) -> list<string> {
+pub fn ci_cache_policy_errors(
+  policy: CiCachePolicy,
+  action,
+  node_action,
+  workflows: dict,
+) -> list<string> {
   let errors = cache_action_errors(policy, action)
     + node_cache_action_errors(node_action)
     + cache_budget_reporter_errors(workflows)
@@ -512,8 +518,7 @@ fn main(harness: Harness) {
     }
     exit(1)
   }
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "CI cache policy: OK (${len(workflows.keys())} workflows, ${len(policy.writers)} Rust writer)",
   )
 }

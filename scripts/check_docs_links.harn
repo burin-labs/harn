@@ -275,7 +275,11 @@ pub fn join_path(a: string, b: string) -> string {
  * links. Strings may contain `.`/`..`; the caller normalises before use.
  * Mirrors `candidate_paths` branch-for-branch.
  */
-pub fn candidate_rel_paths(source_dir: string, link_path: string, docs_dir: string) -> list<string> {
+pub fn candidate_rel_paths(
+  source_dir: string,
+  link_path: string,
+  docs_dir: string,
+) -> list<string> {
   let primary = ""
   if link_path.starts_with("/") {
     let rest = link_path

@@ -19,6 +19,13 @@ pub use trailing_comma::{
 /// `line_width` minus the current indent.
 pub const AUTO_SEPARATOR_WIDTH: usize = 0;
 
+/// Maximum line width the formatter targets.
+///
+/// This is the single budget every wrap decision spends from: calls, method
+/// chains, signatures, and struct literals all break against it, and none of
+/// them may emit a line past it.
+pub const LINE_WIDTH_DEFAULT: usize = 100;
+
 /// Error returned when formatting cannot proceed.
 #[derive(Debug, Clone)]
 pub struct FormatError {
@@ -66,7 +73,7 @@ pub struct FmtOptions {
 impl Default for FmtOptions {
     fn default() -> Self {
         Self {
-            line_width: 100,
+            line_width: LINE_WIDTH_DEFAULT,
             separator_width: AUTO_SEPARATOR_WIDTH,
         }
     }

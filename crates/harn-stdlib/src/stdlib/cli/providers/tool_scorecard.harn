@@ -400,8 +400,7 @@ fn __render_plan_markdown(report: dict) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON", "")
   if raw == "" {
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "internal error: HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON not set by dispatch shim",
     )
     return 70
@@ -415,8 +414,9 @@ fn main(harness: Harness) -> int {
     const report = try {
       json_parse(raw)
     } catch (e) {
-      harness.stdio
-        .eprintln("internal error: failed to parse provider-tool-scorecard payload: " + e.message)
+      harness.stdio.eprintln(
+        "internal error: failed to parse provider-tool-scorecard payload: " + e.message,
+      )
       return 70
     }
     const kind = __safe_string(report["kind"], "report")

@@ -17,8 +17,7 @@ pipeline test(task) {
     },
   )
   const records: list<TrustGraphRecord> = query({actor: actor_id, action: "merge_pr", outcome: "success"})
-  const namespaced: list<TrustGraphRecord> = trust
-    .query({actor_id: actor_id, since: "2000-01-01T00:00:00Z"})
+  const namespaced: list<TrustGraphRecord> = trust.query({actor_id: actor_id, since: "2000-01-01T00:00:00Z"})
   __io_println(len(records) == 1)
   __io_println(records[0]?.actor_id == actor_id)
   __io_println(records[0]?.autonomy_tier_at_time == "act_with_approval")

@@ -45,8 +45,7 @@ fn __render_human(harness: Harness, report: dict) {
   const provider = safe_string(base["provider"], "")
   harness.stdio.println("LoRA export for " + base_id + " via " + provider)
   harness.stdio.println("  corpus: " + safe_string(request["corpus"], ""))
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  tool format: "
       + safe_string(request["effective_tool_format"], "")
       + " (requested "
@@ -55,23 +54,21 @@ fn __render_human(harness: Harness, report: dict) {
   )
   harness.stdio.println("  dataset format: " + safe_string(request["dataset_format"], ""))
   harness.stdio.println("  contract: " + safe_string(contract["id"], ""))
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  contract assistant mask: "
       + safe_string(training_contract["assistant_mask_policy"], ""),
   )
-  harness.stdio
-    .println("  contract parser owner: " + safe_string(training_contract["tool_parser_owner"], ""))
+  harness.stdio.println(
+    "  contract parser owner: " + safe_string(training_contract["tool_parser_owner"], ""),
+  )
   render_tool_catalog_contract(harness, safe_dict(training_contract["tool_catalog"]))
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  contract split policy: "
       + safe_string(training_contract["dataset_split_policy"], ""),
   )
   const peft_save_policy = safe_dict(training_contract["peft_save_policy"])
   render_peft_save_policy(harness, peft_save_policy)
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  provenance defaults: split="
       + safe_string(request["default_split"], "")
       + " license="
@@ -92,17 +89,18 @@ fn __render_human(harness: Harness, report: dict) {
     harness.stdio.println("  chat template: " + template)
   }
   harness.stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
-  harness.stdio
-    .println("  LoRA module format: " + safe_string(serving["lora_module_value_format"], ""))
+  harness.stdio.println(
+    "  LoRA module format: " + safe_string(serving["lora_module_value_format"], ""),
+  )
   const request_model = safe_string(serving["request_model"], "")
   if request_model != "" {
     harness.stdio.println("  request model: " + request_model)
   }
-  harness.stdio
-    .println("  promotion minimum trials: " + safe_int_string(promotion["minimum_trials"], "0"))
+  harness.stdio.println(
+    "  promotion minimum trials: " + safe_int_string(promotion["minimum_trials"], "0"),
+  )
   harness.stdio.println("  promotion id: " + safe_string(evidence["promotion_id"], ""))
-  harness.stdio
-    .println("  promotion baseline: " + safe_string(promotion["comparison_baseline"], ""))
+  harness.stdio.println("  promotion baseline: " + safe_string(promotion["comparison_baseline"], ""))
   print_list(harness, "promotion metrics", safe_list(promotion["required_metrics"]))
   print_list(harness, "promotion gates", safe_list(promotion["gates"]))
   print_list(harness, "promotion receipts", safe_list(evidence["required_receipts"]))
@@ -121,8 +119,7 @@ fn __render_human(harness: Harness, report: dict) {
   if safe_bool(request["check"], false) {
     harness.stdio.println("  mode: check")
   }
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  stats: records="
       + safe_int_string(stats["records"], "0")
       + " emitted="
@@ -134,8 +131,7 @@ fn __render_human(harness: Harness, report: dict) {
       + " tool_results="
       + safe_int_string(stats["tool_results"], "0"),
   )
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  behavior strata: source="
       + json_stringify(safe_dict(behavior_strata["source"]))
       + " emitted="

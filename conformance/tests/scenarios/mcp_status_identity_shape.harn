@@ -1,6 +1,5 @@
 pipeline default() {
-  const name = harn.mcp
-    .spawn(
+  const name = harn.mcp.spawn(
     {name: "identity-shape", transport: "http", url: "https://identity.example.invalid/mcp"},
     {lazy: true},
   )

@@ -763,7 +763,11 @@ fn __agent_stall_gate_failure(gate) -> bool {
  *    bump the epoch; otherwise leave the model untouched (epoch still bumps on
  *    an edit).
  */
-fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_made_edit: bool) -> AgentStallState {
+fn __agent_stall_fold_diagnostic(
+  state: AgentStallState,
+  prev_dispatch,
+  turn_made_edit: bool,
+) -> AgentStallState {
   // Edit bookkeeping first: a successful workspace mutation advances the epoch,
   // which arms the post-edit re-verify mandate in the loop.
   const new_write_epoch = if turn_made_edit {
@@ -1114,7 +1118,10 @@ fn __agent_stall_update_ping_pong(state: AgentStallState, signature: string) -> 
  * Apply a fired trip: bump the consecutive-trip escalation and decide whether
  * to flag a hard stop. Returns the state with the trip recorded.
  */
-fn __agent_stall_register_trip(state: AgentStallState, config: AgentStallConfig) -> AgentStallState {
+fn __agent_stall_register_trip(
+  state: AgentStallState,
+  config: AgentStallConfig,
+) -> AgentStallState {
   const trips = state.consecutive_trips + 1
   return state + {consecutive_trips: trips, hard_stop: trips >= config.hard_stop_after_trips}
 }
@@ -1465,8 +1472,7 @@ fn __agent_stall_observe_core(
   // Soft progress-report tools (e.g. `agent_progress`) report status without
   // advancing task state, so they are excluded from the real-action stream: a
   // turn whose only call is such a report is treated as no-progress.
-  const substantive_calls = tool_calls
-    .filter({ c -> !contains(SOFT_PROGRESS_TOOLS, __agent_tool_call_name(c)) })
+  const substantive_calls = tool_calls.filter({ c -> !contains(SOFT_PROGRESS_TOOLS, __agent_tool_call_name(c)) })
   if len(substantive_calls) == 0 {
     // No substantive tool call this turn — either none at all, or only soft
     // progress reports. With visible text or a progress report, that is a
@@ -1672,8 +1678,7 @@ fn __agent_stall_apply_repair(
   // so a non-tripping evaluation still records the new per-signature count.
   let current = folded
   if delivered_candidate {
-    const raw_delivered = config
-      .remediation_delivered(
+    const raw_delivered = config.remediation_delivered(
       {prev_dispatch: prev_dispatch, session_id: session_id, signature: folded.last_diagnostic_signature},
     )
     const evaluated = __agent_stall_eval_remediation(folded, folded.last_diagnostic_signature, raw_delivered)
@@ -2109,7 +2114,11 @@ pub fn agent_stall_clear_current_failure(stall_state: AgentStallState) -> AgentS
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stall_apply_result(result: dict, stall_enabled: bool, stall_state: AgentStallState) -> dict {
+pub fn agent_stall_apply_result(
+  result: dict,
+  stall_enabled: bool,
+  stall_state: AgentStallState,
+) -> dict {
   if !stall_enabled && len(stall_state.warnings) == 0 {
     return result
   }
@@ -2226,7 +2235,12 @@ pub type DetectorSpec = {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn token_runaway_resolve_cap(median: float, stddev: float, sigma: float, fallback: float) -> float {
+pub fn token_runaway_resolve_cap(
+  median: float,
+  stddev: float,
+  sigma: float,
+  fallback: float,
+) -> float {
   if median <= 0.0 {
     return fallback
   }

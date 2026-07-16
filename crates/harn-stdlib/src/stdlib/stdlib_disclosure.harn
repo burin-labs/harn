@@ -337,7 +337,11 @@ fn __github_trailers(config: DisclosureConfig, ctx: DisclosureContext) -> string
   return __safe_git_trailers(__render_text(surface_config, ctx), ctx)
 }
 
-fn __render_github(surface_config: dict, ctx: DisclosureContext, config: DisclosureConfig) -> dict {
+fn __render_github(
+  surface_config: dict,
+  ctx: DisclosureContext,
+  config: DisclosureConfig,
+) -> dict {
   const author_mode = __github_author_mode(surface_config)
   const human_author = __select_principal(ctx, surface_config?.author ?? "origin")
   const bot_author = __select_principal(ctx, surface_config?.bot_author ?? "current")
@@ -390,8 +394,7 @@ fn __render_github(surface_config: dict, ctx: DisclosureContext, config: Disclos
 fn __public_principals(ctx: DisclosureContext) -> list<dict> {
   let principals = []
   for principal in ctx.principals {
-    principals = principals
-      .push(
+    principals = principals.push(
       {
         subject: principal.subject,
         kind: principal.kind,
@@ -635,6 +638,10 @@ pub fn git_trailers(chain, options: DisclosureGitTrailerOptions = {}) -> string 
  * @effects: [fs-read, env-read]
  * @errors: [TypeError, ValueError]
  */
-pub fn append_git_trailers(message: string, chain, options: DisclosureGitTrailerOptions = {}) -> string {
+pub fn append_git_trailers(
+  message: string,
+  chain,
+  options: DisclosureGitTrailerOptions = {},
+) -> string {
   return __append_trailer_block(message, git_trailers(chain, options))
 }

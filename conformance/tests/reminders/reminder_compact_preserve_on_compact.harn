@@ -7,13 +7,11 @@ pipeline main() {
       {role: "assistant", content: "four"},
     ],
   )
-  const with_keeper = transcript
-    .inject_reminder(
+  const with_keeper = transcript.inject_reminder(
     base,
     {body: "preserved across compaction", dedupe_key: "keeper", ttl_turns: 5, preserve_on_compact: true},
   ).transcript
-  const with_discard = transcript
-    .inject_reminder(
+  const with_discard = transcript.inject_reminder(
     with_keeper,
     {
       body: "discarded during compaction",

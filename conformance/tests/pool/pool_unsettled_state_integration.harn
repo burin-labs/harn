@@ -13,15 +13,14 @@ pipeline default() {
   const pool = pool_create({name: "unsettled-integration", max_concurrent: 1})
   // One task occupies the slot (parked on `gate`), two more sit in the
   // queue. None reach a terminal state before on_finish runs.
-  const _running = pool
-    .submit(
+  const _ = pool.submit(
     { ->
       receive(gate)
       return "done"
     },
   )
-  const _queued_a = pool.submit({ -> "a" }, {priority: 5})
-  const _queued_b = pool.submit({ -> "b" }, {priority: 10})
+  const _ = pool.submit({ -> "a" }, {priority: 5})
+  const _ = pool.submit({ -> "b" }, {priority: 10})
   pipeline_on_finish(
     { harness, return_value ->
       const state = harness.unsettled_state()

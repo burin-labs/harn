@@ -145,8 +145,7 @@ fn __safe_string_local(value, fallback: string) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_MODEL_SELECTOR_INPUT", "")
   if raw == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_MODEL_SELECTOR_INPUT not set")
+    harness.stdio.eprintln("internal error: HARN_MODEL_SELECTOR_INPUT not set")
     return 70
   }
   const aliases_json = harness.env.get_or("HARN_MODEL_SELECTOR_ALIASES_JSON", "{}")

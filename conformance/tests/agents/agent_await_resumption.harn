@@ -24,7 +24,7 @@ pipeline main() {
       const captured = agent_capture_events(
         session_id,
         fn() {
-          let handle = sub_agent_run(
+          const handle = sub_agent_run(
             "Park until a reviewer responds.",
             {
               provider: "mock",
@@ -39,8 +39,7 @@ pipeline main() {
       )
       const suspended = captured.result
       const payload = suspended?.result
-      const audit = captured.events
-        .filter(
+      const audit = captured.events.filter(
         { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
       )
       __io_println(suspended?.status)

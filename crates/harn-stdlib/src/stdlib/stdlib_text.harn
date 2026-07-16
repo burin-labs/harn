@@ -58,20 +58,17 @@ pub fn parse_float_or(value, fallback) {
  * @errors: []
  */
 pub fn extract_paths(text) {
-  const lines = split(text, "\n")
-    .filter(
+  const lines = split(text, "\n").filter(
     { line ->
-      let t = trim(line)
+      const t = trim(line)
       return contains(t, "/")
         && !starts_with(t, "//")
         && !starts_with(t, "#")
     },
   )
   let seen = []
-  return lines
-    .flat_map(
-    { line -> return split(trim(line), " ")
-      .map(
+  return lines.flat_map(
+    { line -> return split(trim(line), " ").map(
       { word ->
         let clean = regex_replace("^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$", "", trim(word))
         while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":")
@@ -82,24 +79,25 @@ pub fn extract_paths(text) {
       },
     )
       .filter(
-      { clean ->
-        if !contains(clean, "/") && !contains(clean, ".") {
-          return false
-        }
-        const ext = extname(clean)
-        return ext != "" && len(ext) <= 11
-      },
-    ) },
+        { clean ->
+          if !contains(clean, "/") && !contains(clean, ".") {
+            return false
+          }
+          const ext = extname(clean)
+          return ext != "" && len(ext) <= 11
+        },
+      ) },
   )
     .filter(
-    { p ->
-      if seen.contains(p) {
-        return false
-      }
-      seen = seen + [p]
-      return true
-    },
-  ).sort()
+      { p ->
+        if seen.contains(p) {
+          return false
+        }
+        seen = seen + [p]
+        return true
+      },
+    )
+    .sort()
 }
 
 // Parse fenced code blocks from LLM response text.
@@ -162,8 +160,7 @@ pub fn parse_cells(response) {
  * @errors: []
  */
 pub fn filter_test_cells(cells, target_file) {
-  return cells
-    .filter(
+  return cells.filter(
     { cell ->
       if cell.type == "call" && contains(cell.code, "write_file") {
         if target_file != nil {
@@ -318,8 +315,7 @@ pub fn has_got_want(output) {
  * @errors: []
  */
 pub fn format_test_errors(output) {
-  const error_lines = split(output, "\n")
-    .filter(
+  const error_lines = split(output, "\n").filter(
     { line -> return contains(line, "FAIL")
       || contains(line, "Error")
       || contains(line, "error")

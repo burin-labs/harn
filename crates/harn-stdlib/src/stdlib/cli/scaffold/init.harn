@@ -792,8 +792,7 @@ fn __print_next_steps(harness: Harness, name: string, template: string) {
     harness.stdio.println("  harn serve mcp main.harn # expose the starter MCP server")
   } else if template == "pipeline-lab" {
     harness.stdio.println("  harn playground --task \"Explain this repo\"    # run the lab")
-    harness.stdio
-      .println("  harn playground --watch --task \"Refine the prompt\"  # live iteration")
+    harness.stdio.println("  harn playground --watch --task \"Refine the prompt\"  # live iteration")
   } else {
     // basic | agent | eval | package | connector
     harness.stdio.println("  harn run main.harn       # run the program")
@@ -816,8 +815,7 @@ fn main(harness: Harness) {
   const template = harness.env.get_or("HARN_INIT_TEMPLATE", "basic")
   const harn_range = harness.env.get_or("HARN_INIT_HARN_RANGE", "")
   if dir == "" || harn_range == "" {
-    harness.stdio
-      .eprintln("init: HARN_INIT_DIR and HARN_INIT_HARN_RANGE must be set")
+    harness.stdio.eprintln("init: HARN_INIT_DIR and HARN_INIT_HARN_RANGE must be set")
     exit(2)
   }
   if name != "" {

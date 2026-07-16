@@ -3,8 +3,7 @@ import { obs } from "std/observability"
 pipeline default() {
   const o = obs()
   o.reset()
-  o
-    .configure(
+  o.configure(
     {
       backends: {
         otel: o.Backend.otel("http://collector.example"),

@@ -65,7 +65,12 @@ fn __collect_harn_files(harness: Harness, root: string) -> list<string> {
   return out
 }
 
-fn __destination_path(source_path: string, source_root: string, out_root: string, extension: string) -> string {
+fn __destination_path(
+  source_path: string,
+  source_root: string,
+  out_root: string,
+  extension: string,
+) -> string {
   // Mirror the Rust output_path() exactly: when out_root is empty, write
   // adjacent to source; otherwise compute the relative path from
   // source_root and join under out_root, then swap the extension.
@@ -75,7 +80,7 @@ fn __destination_path(source_path: string, source_root: string, out_root: string
   const relative = if source_root == "" {
     path_basename(source_path)
   } else {
-    let rel = path_relative_to(source_path, source_root)
+    const rel = path_relative_to(source_path, source_root)
     if rel == nil {
       path_basename(source_path)
     } else {
@@ -93,7 +98,12 @@ fn __ensure_parent(harness: Harness, path: string) {
   }
 }
 
-fn __spawn_precompile(harness: Harness, bin: string, source_path: string, per_file_out: string) -> dict {
+fn __spawn_precompile(
+  harness: Harness,
+  bin: string,
+  source_path: string,
+  per_file_out: string,
+) -> dict {
   // Always force the child into the Rust compiler entrypoint: this script IS
   // the .harn dispatch target, so leaving HARN_PRECOMPILE_INNER unset would
   // re-enter us and spin forever.
@@ -130,8 +140,7 @@ fn main(harness: Harness) {
   }
   const bin = harness.env.get_or("HARN_CLI_SELF_EXE", "")
   if bin == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_CLI_SELF_EXE not set by dispatch shim")
+    harness.stdio.eprintln("internal error: HARN_CLI_SELF_EXE not set by dispatch shim")
     exit(70)
   }
   const target = argv[0]
@@ -169,7 +178,7 @@ fn main(harness: Harness) {
     const per_file_out = if out_root == "" {
       ""
     } else {
-      let dest = __destination_path(source, source_root, out_root, "harnbc")
+      const dest = __destination_path(source, source_root, out_root, "harnbc")
       __ensure_parent(harness, dest)
       path_parent(dest)
     }
@@ -190,8 +199,7 @@ fn main(harness: Harness) {
     }
   }
   if !quiet {
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "precompile: " + to_string(compiled) + " succeeded, "
         + to_string(failed)
         + " failed",

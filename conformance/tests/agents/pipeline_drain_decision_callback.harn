@@ -61,8 +61,7 @@ pipeline default() {
   clear_session_hooks()
   pipeline_on_finish(
     { harness, return_value ->
-      const receipt = harness
-        .emit_audit(
+      const receipt = harness.emit_audit(
         "drain_decision",
         {
           pipeline_id: "pipeline-1",

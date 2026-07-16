@@ -1,6 +1,5 @@
 pipeline main() {
-  const injected = transcript
-    .inject_reminder(
+  const injected = transcript.inject_reminder(
     transcript(),
     {body: "ttl reminder", ttl_turns: 5, preserve_on_compact: true, propagate: "none"},
   )

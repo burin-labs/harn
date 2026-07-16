@@ -1050,8 +1050,7 @@ pub fn edit_insert_at_anchor(params) {
  */
 pub fn edit_batch_apply(params) {
   const payload = hostlib_ast_batch_apply(params ?? {}) ?? {}
-  return payload
-    .merge(
+  return payload.merge(
     {
       ok: (payload?.summary?.files_failed ?? 1) == 0,
       provenance: {module: "std/edit", helper: "edit_batch_apply", caller: params?.provenance},

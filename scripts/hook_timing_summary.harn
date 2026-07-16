@@ -417,7 +417,10 @@ pub fn slowest_hook_timings(events: list<HookTimingEvent>, limit: int) -> list<H
   return sorted.slice(0, limit)
 }
 
-pub fn filter_hook_timings(events: list<HookTimingEvent>, filters: HookTimingFilters) -> list<HookTimingEvent> {
+pub fn filter_hook_timings(
+  events: list<HookTimingEvent>,
+  filters: HookTimingFilters,
+) -> list<HookTimingEvent> {
   let out: list<HookTimingEvent> = []
   for event in events {
     if filters.repo != ""

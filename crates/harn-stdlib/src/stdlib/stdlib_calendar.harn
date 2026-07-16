@@ -262,7 +262,10 @@ pub fn end_of_month(timestamp: CalendarInstant, timezone: string = "UTC") -> Cal
  * @effects: []
  * @errors: []
  */
-pub fn start_of_quarter(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+pub fn start_of_quarter(
+  timestamp: CalendarInstant,
+  timezone: string = "UTC",
+) -> CalendarTimestamp {
   return boundary(timestamp, "quarter", "start", timezone)
 }
 

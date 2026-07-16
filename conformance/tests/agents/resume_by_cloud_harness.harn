@@ -15,8 +15,7 @@ pipeline default() {
   const RB = ResumeBy()
   pipeline_on_finish(
     { harness, return_value ->
-      const result = RB
-        .cloud_harness(
+      const result = RB.cloud_harness(
         harness,
         {
           handle: "worker://triage/cloud",

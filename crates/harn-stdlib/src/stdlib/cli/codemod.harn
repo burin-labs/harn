@@ -81,10 +81,10 @@ fn main(harness: Harness) {
   hostlib_enable("tools:deterministic")
   const recipe = harness.env.get_or("HARN_CODEMOD_RECIPE", "")
   const out = if recipe {
-    let files = json_parse(harness.env.get_or("HARN_CODEMOD_RECIPE_FILES_JSON", "[]"))
+    const files = json_parse(harness.env.get_or("HARN_CODEMOD_RECIPE_FILES_JSON", "[]"))
     run_builtin_recipe(recipe, files, apply)
   } else {
-    let raw = harness.env.get_or("HARN_CODEMOD_PLAN_JSON", "")
+    const raw = harness.env.get_or("HARN_CODEMOD_PLAN_JSON", "")
     if raw == "" {
       harness.stdio.eprintln("codemod: internal error — no codemod plan or recipe set by the shim")
       exit(70)
@@ -105,8 +105,7 @@ fn main(harness: Harness) {
       if apply {
         harness.stdio.println("rewrote " + f.path + "  [safety=" + f.safety + "]")
       } else {
-        harness.stdio
-          .println(
+        harness.stdio.println(
           "would change "
             + f.path
             + "  [safety="

@@ -136,9 +136,9 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
     return []
   }
   let paths: list<string> = []
-  const entries = harness.fs
-    .walk_dir(dir, {max_depth: 1, follow_symlinks: false})
-    .filter({ entry -> entry.depth == 1 })
+  const entries = harness.fs.walk_dir(dir, {max_depth: 1, follow_symlinks: false}).filter(
+    { entry -> entry.depth == 1 },
+  )
     .to_list()
     .sort_by({ entry -> entry.path })
   for entry in entries {
@@ -178,9 +178,7 @@ pub fn source_files(root: string = "") -> list<string> {
   } else {
     path_normalize(root)
   }
-  let paths = files_below(resolved_root, "", ".rs")
-    .filter({ path -> !is_generated_source(path) })
-    .to_list()
+  let paths = files_below(resolved_root, "", ".rs").filter({ path -> !is_generated_source(path) }).to_list()
   for path in files_below(resolved_root, "crates/harn-stdlib/src/stdlib", ".harn") {
     if !paths.contains(path) {
       paths = paths + [path]
@@ -480,8 +478,7 @@ fn arg_spec() -> list {
 fn main(harness: Harness) {
   const parsed = parse_args(argv, arg_spec())
   if parsed?._help ?? false {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/check_source_file_lengths.harn -- [--json] [--root PATH] [--update]",
     )
     return nil

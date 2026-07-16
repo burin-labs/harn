@@ -14,8 +14,7 @@ pipeline test(task) {
           {provider: "mock", daemon: true, max_iterations: 1, wake_interval_ms: 1, session_id: session_id},
         ) },
       )
-      const audit = captured.events
-        .filter(
+      const audit = captured.events.filter(
         { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
       )
       __io_println(captured.result.status)

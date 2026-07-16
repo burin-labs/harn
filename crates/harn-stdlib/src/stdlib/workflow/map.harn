@@ -111,8 +111,7 @@ fn __map_collect_branch_outcomes(branches, join_target) {
         for artifact in artifacts {
           produced = produced.push(artifact)
         }
-        completed = completed
-          .push(
+        completed = completed.push(
           {
             index: __map_item_index(branch),
             status: branch.status,
@@ -121,8 +120,7 @@ fn __map_collect_branch_outcomes(branches, join_target) {
           },
         )
       } else {
-        failures = failures
-          .push(
+        failures = failures.push(
           {index: __map_item_index(branch), status: branch?.status ?? "failed", error: branch?.error},
         )
       }

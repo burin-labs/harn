@@ -347,7 +347,11 @@ pub fn check_constructor_calls_text(rel: string, needle: string, text: string) -
  * `code_names`. Snake_case inherent methods (`Code::repair_template()`) are
  * intentionally ignored. Mirrors `check_unknown_code_variants`'s per-file body.
  */
-pub fn check_unknown_variants_text(rel: string, text: string, code_names: list<string>) -> list<string> {
+pub fn check_unknown_variants_text(
+  rel: string,
+  text: string,
+  code_names: list<string>,
+) -> list<string> {
   let out: list<string> = []
   for m in regex_captures(r"\bCode::([A-Z][A-Za-z0-9_]*)", text, "") {
     const variant = m.groups[0]

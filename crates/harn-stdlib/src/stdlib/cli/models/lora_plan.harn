@@ -51,8 +51,7 @@ fn __render_human(harness: Harness, report: dict) {
   const provider = safe_string(base["provider"], "")
   harness.stdio.println("LoRA plan for " + base_id + " via " + provider)
   harness.stdio.println("  base selector: " + safe_string(base["selector"], ""))
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  tool format: "
       + safe_string(request["effective_tool_format"], "")
       + " (requested "
@@ -68,15 +67,13 @@ fn __render_human(harness: Harness, report: dict) {
   } else {
     "no"
   }
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  native tools: "
       + native_tools
       + ", preferred: "
       + nonempty_string(tool_calling["preferred_tool_format"], "unset"),
   )
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  training: "
       + safe_string(request["method"], "")
       + " + "
@@ -84,8 +81,7 @@ fn __render_human(harness: Harness, report: dict) {
   )
   harness.stdio.println("  trainer: " + safe_string(training["trainer"], ""))
   render_trainer_identity_check(harness, training["trainer_identity"])
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  LoRA hparams: rank="
       + safe_int_string(training["rank"], "")
       + " alpha="
@@ -94,42 +90,42 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_number_string(training["dropout"], ""),
   )
   harness.stdio.println("  quantization: " + safe_string(training["quantization"], ""))
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  training base precision: "
       + safe_string(precision["training_base_precision"], ""),
   )
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  training compute precision: "
       + safe_string(precision["training_compute_precision"], ""),
   )
-  harness.stdio
-    .println("  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""))
-  harness.stdio
-    .println("  serving base precision: " + safe_string(precision["serving_base_precision"], ""))
-  harness.stdio
-    .println("  precision policy: " + safe_string(precision["compatibility_policy"], ""))
+  harness.stdio.println(
+    "  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""),
+  )
+  harness.stdio.println(
+    "  serving base precision: " + safe_string(precision["serving_base_precision"], ""),
+  )
+  harness.stdio.println("  precision policy: " + safe_string(precision["compatibility_policy"], ""))
   harness.stdio.println("  loss scope: " + safe_string(training["loss_scope"], ""))
   harness.stdio.println("  packing: " + safe_string(training["packing"], ""))
   const target_module_contract = safe_dict(training["target_modules"])
   const target_modules = safe_list(target_module_contract["modules"])
   if len(target_modules) > 0 {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "  target modules: " + join(target_modules.map({ item -> safe_string(item, "") }), ", "),
     )
-    harness.stdio
-      .println("  target module policy: " + safe_string(target_module_contract["policy"], ""))
+    harness.stdio.println(
+      "  target module policy: " + safe_string(target_module_contract["policy"], ""),
+    )
   }
-  harness.stdio
-    .println("  assistant mask: " + safe_string(training_contract["assistant_mask_policy"], ""))
+  harness.stdio.println(
+    "  assistant mask: " + safe_string(training_contract["assistant_mask_policy"], ""),
+  )
   render_peft_save_policy(harness, peft_save_policy)
-  harness.stdio
-    .println("  parser owner: " + safe_string(training_contract["tool_parser_owner"], ""))
+  harness.stdio.println("  parser owner: " + safe_string(training_contract["tool_parser_owner"], ""))
   render_tool_catalog_contract(harness, safe_dict(training_contract["tool_catalog"]))
-  harness.stdio
-    .println("  split policy: " + safe_string(training_contract["dataset_split_policy"], ""))
+  harness.stdio.println(
+    "  split policy: " + safe_string(training_contract["dataset_split_policy"], ""),
+  )
   harness.stdio.println("  template: " + safe_string(template["name"], ""))
   harness.stdio.println("  template source: " + safe_string(template["source"], ""))
   harness.stdio.println("  supervised target: " + safe_string(template["supervised_target"], ""))
@@ -137,8 +133,7 @@ fn __render_human(harness: Harness, report: dict) {
   if corpus != "" {
     harness.stdio.println("  corpus: " + corpus)
   }
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  corpus strategy: "
       + safe_string(request["effective_corpus_strategy"], "")
       + " (requested "
@@ -148,8 +143,7 @@ fn __render_human(harness: Harness, report: dict) {
   const teacher = safe_dict(request["teacher"])
   const teacher_id = safe_string(teacher["id"], "")
   if teacher_id != "" {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "  teacher: "
         + teacher_id
         + " via "
@@ -178,13 +172,12 @@ fn __render_human(harness: Harness, report: dict) {
   print_list(harness, "trainer contract", safe_list(training["trainer_contract"]))
   print_list(harness, "precision gates", safe_list(precision["promotion_gates"]))
   print_list(harness, "training notes", safe_list(training["notes"]))
-  harness.stdio
-    .println("  holdout policy: " + safe_string(evaluation["holdout_policy"], ""))
-  harness.stdio
-    .println("  minimum trials: " + safe_int_string(evaluation["minimum_trials"], "0"))
+  harness.stdio.println("  holdout policy: " + safe_string(evaluation["holdout_policy"], ""))
+  harness.stdio.println("  minimum trials: " + safe_int_string(evaluation["minimum_trials"], "0"))
   harness.stdio.println("  promotion id: " + safe_string(evidence["promotion_id"], ""))
-  harness.stdio
-    .println("  comparison baseline: " + safe_string(evaluation["comparison_baseline"], ""))
+  harness.stdio.println(
+    "  comparison baseline: " + safe_string(evaluation["comparison_baseline"], ""),
+  )
   print_list(harness, "required metrics", safe_list(evaluation["required_metrics"]))
   print_list(harness, "eval gates", safe_list(evaluation["gates"]))
   print_list(harness, "required receipts", safe_list(evidence["required_receipts"]))
@@ -193,8 +186,9 @@ fn __render_human(harness: Harness, report: dict) {
   print_list(harness, "optional batch receipts", safe_list(evidence["optional_batch_receipts"]))
   print_list(harness, "batch group by", safe_list(batch_ready["group_by"]))
   harness.stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
-  harness.stdio
-    .println("  LoRA module format: " + safe_string(serving["lora_module_value_format"], ""))
+  harness.stdio.println(
+    "  LoRA module format: " + safe_string(serving["lora_module_value_format"], ""),
+  )
   harness.stdio.println("  request model: " + safe_string(serving["request_model"], ""))
   print_list(harness, "serving notes", safe_list(serving["runtime_notes"]))
   print_list(harness, "promotion gates", safe_list(serving["promotion_gates"]))

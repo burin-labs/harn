@@ -40,10 +40,8 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("  LoRA contract: " + safe_string(contract["lora_contract_id"], ""))
   render_trainer_identity_check(harness, contract["trainer_identity"])
   harness.stdio.println("  eval dataset: " + safe_string(contract["eval_dataset"], ""))
-  harness.stdio
-    .println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
-  harness.stdio
-    .println(
+  harness.stdio.println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
+  harness.stdio.println(
     "  totals: adapter_passed="
       + safe_int_string(totals["adapter_passed"], "0")
       + " adapter_failed="

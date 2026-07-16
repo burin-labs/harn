@@ -458,8 +458,7 @@ fn __skill_score_metadata(context, registry) {
       triggers = triggers.push(to_string(path_hits) + " path glob(s) matched")
     }
     if score > 0.0 {
-      scored = scored
-        .push(
+      scored = scored.push(
         {id: id, name: id, score: score, trigger: join(triggers, "; "), reason: join(triggers, "; ")},
       )
     }

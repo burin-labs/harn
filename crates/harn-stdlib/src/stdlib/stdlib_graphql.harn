@@ -323,8 +323,7 @@ pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
   const auth = options?.auth ?? options?.authorization
   const headers = graphql_auth_headers(auth, options?.headers)
   const body = graphql_request_body(query, variables, options)
-  const response = harness.net
-    .request(
+  const response = harness.net.request(
     "POST",
     endpoint,
     filter_nil(
@@ -383,7 +382,7 @@ pub fn graphql_execute_operation(client, operation, variables = nil, options = n
   }
   const request_options = merge(client_options, options ?? {})
   const checked_variables = if operation.variables_schema != nil {
-    let checked = schema_check(variables ?? {}, operation.variables_schema)
+    const checked = schema_check(variables ?? {}, operation.variables_schema)
     if is_err(checked) {
       throw_error(unwrap_err(checked).message)
     }

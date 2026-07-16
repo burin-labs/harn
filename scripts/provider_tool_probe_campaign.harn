@@ -106,7 +106,9 @@ pub fn provider_tool_probe_campaign_routes(specs: list<string>) -> list<Provider
   return routes
 }
 
-pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> list<ProviderToolProbeRoute> {
+pub fn provider_tool_probe_campaign_default_routes(
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
   const routes: list<ProviderToolProbeRoute> = [
     {
       id: "fireworks-gpt-oss-120b",
@@ -313,7 +315,10 @@ fn __catalog_route_from_routing_row(
   }
 }
 
-fn __catalog_routes_from_routing_table(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+fn __catalog_routes_from_routing_table(
+  catalog: dict,
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
   const providers = __provider_meta_by_id(catalog)
   const models = __catalog_models_by_route(catalog)
   let routes: list<ProviderToolProbeRoute> = []
@@ -326,7 +331,10 @@ fn __catalog_routes_from_routing_table(catalog: dict, include_expensive: bool) -
   return routes
 }
 
-fn __catalog_routes_from_models(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+fn __catalog_routes_from_models(
+  catalog: dict,
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
   const providers = __provider_meta_by_id(catalog)
   let routes: list<ProviderToolProbeRoute> = []
   for model in catalog.models ?? [] {
@@ -357,7 +365,10 @@ fn __catalog_routes_from_models(catalog: dict, include_expensive: bool) -> list<
   return routes
 }
 
-pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+pub fn provider_tool_probe_campaign_catalog_routes(
+  catalog: dict,
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
   if len(catalog.routing_routes ?? []) > 0 {
     return __catalog_routes_from_routing_table(catalog, include_expensive)
   }
@@ -502,7 +513,9 @@ fn __behavior_matches(behavior: ProviderToolProbeBehavior, filters: list<string>
   return false
 }
 
-pub fn provider_tool_probe_campaign_select_behaviors(filters: list<string>) -> list<ProviderToolProbeBehavior> {
+pub fn provider_tool_probe_campaign_select_behaviors(
+  filters: list<string>,
+) -> list<ProviderToolProbeBehavior> {
   let selected: list<ProviderToolProbeBehavior> = []
   for behavior in provider_tool_probe_campaign_behaviors() {
     if __behavior_matches(behavior, filters) {
@@ -823,7 +836,10 @@ fn __missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> 
   return route.env_keys
 }
 
-pub fn provider_tool_probe_campaign_missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
+pub fn provider_tool_probe_campaign_missing_env_keys(
+  route: ProviderToolProbeRoute,
+  env: dict,
+) -> list<string> {
   return __missing_env_keys(route, env)
 }
 
@@ -1298,7 +1314,13 @@ pub fn provider_tool_probe_campaign_env_from_dotenv_text(text: string) -> dict {
   return env
 }
 
-fn __env_load_receipt(path: string, checked: bool, loaded: bool, key_count: int, reason: string) -> dict {
+fn __env_load_receipt(
+  path: string,
+  checked: bool,
+  loaded: bool,
+  key_count: int,
+  reason: string,
+) -> dict {
   return {path: path, checked: checked, loaded: loaded, parsed_key_count: key_count, reason: reason}
 }
 
@@ -1363,8 +1385,7 @@ pub fn provider_tool_probe_campaign_parse_args(args: list<string>) -> dict {
 fn main(harness: Harness) {
   const parsed = provider_tool_probe_campaign_parse_args(argv)
   if parsed?._help ?? false {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
     )
     return nil
@@ -1476,8 +1497,10 @@ fn main(harness: Harness) {
     cell_plan.slice ?? {},
   )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
-  harness.fs
-    .write_text(report.artifacts.report_markdown, provider_tool_probe_campaign_markdown(report))
+  harness.fs.write_text(
+    report.artifacts.report_markdown,
+    provider_tool_probe_campaign_markdown(report),
+  )
   if parsed?.markdown ?? false {
     harness.stdio.println(provider_tool_probe_campaign_markdown(report))
   } else {

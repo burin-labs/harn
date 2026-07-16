@@ -58,7 +58,11 @@ pub fn gha_escape_property(value) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptions = {}) -> string {
+pub fn gha_annotation(
+  kind: string,
+  message: string,
+  options: GhaAnnotationOptions = {},
+) -> string {
   const opts = options ?? {}
   let props = []
   for pair in [
