@@ -56,6 +56,7 @@ pub(super) async fn execute_case(
     execution_cwd: &Path,
     timeout_ms: u64,
     cli_skill_dirs: &[PathBuf],
+    prepared_module_cache: &harn_vm::PreparedModuleCache,
     #[cfg(test)] setup_delay_ms: u64,
 ) -> TestResult {
     harn_vm::reset_thread_local_state();
@@ -93,6 +94,7 @@ pub(super) async fn execute_case(
     let result = local
         .run_until(async {
             let mut vm = harn_vm::Vm::new();
+            vm.set_prepared_module_cache(prepared_module_cache.clone());
             harn_vm::register_vm_stdlib(&mut vm);
             crate::install_default_hostlib(&mut vm);
             let source_parent = case.file.parent().unwrap_or(Path::new("."));

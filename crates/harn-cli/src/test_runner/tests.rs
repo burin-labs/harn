@@ -46,7 +46,15 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         serial_group: None,
     };
 
-    let result = execute_case(&case, temp.path(), 0, &[], 0).await;
+    let result = execute_case(
+        &case,
+        temp.path(),
+        0,
+        &[],
+        &harn_vm::PreparedModuleCache::default(),
+        0,
+    )
+    .await;
 
     assert!(!result.passed);
     let timeout = result.timeout.expect("expected typed timeout metadata");

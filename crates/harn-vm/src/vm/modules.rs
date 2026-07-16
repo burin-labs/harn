@@ -6,16 +6,17 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::bytecode_cache;
-use crate::chunk::{Chunk, CompiledFunction};
-use crate::module_artifact::{compile_module_artifact_from_source, ModuleArtifact};
+use crate::module_artifact::compile_module_artifact_from_source;
+use crate::prepared_module::PreparedModuleArtifact;
 use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
 use super::{ScopeSpan, Vm};
 
-static STDLIB_MODULE_ARTIFACT_CACHE: OnceLock<Mutex<BTreeMap<String, Arc<ModuleArtifact>>>> =
-    OnceLock::new();
+static STDLIB_MODULE_ARTIFACT_CACHE: OnceLock<
+    Mutex<BTreeMap<String, Arc<PreparedModuleArtifact>>>,
+> = OnceLock::new();
 
-fn stdlib_module_artifact_cache() -> &'static Mutex<BTreeMap<String, Arc<ModuleArtifact>>> {
+fn stdlib_module_artifact_cache() -> &'static Mutex<BTreeMap<String, Arc<PreparedModuleArtifact>>> {
     STDLIB_MODULE_ARTIFACT_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -95,7 +96,7 @@ fn stdlib_module_artifact(
     module: &str,
     synthetic: &Path,
     source: &'static str,
-) -> Result<Arc<ModuleArtifact>, VmError> {
+) -> Result<Arc<PreparedModuleArtifact>, VmError> {
     let key = stdlib_artifact_cache_key(module, source);
     {
         let cache = stdlib_module_artifact_cache().lock().unwrap();
@@ -121,7 +122,7 @@ fn stdlib_module_artifact(
         compiled
     };
 
-    let compiled = Arc::new(artifact);
+    let compiled = Arc::new(PreparedModuleArtifact::from_cached(artifact));
     let mut cache = stdlib_module_artifact_cache().lock().unwrap();
     if let Some(cached) = cache.get(&key) {
         return Ok(Arc::clone(cached));
@@ -211,7 +212,9 @@ impl Vm {
         }
         Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
 
-        let artifact = compile_module_artifact_from_source(&synthetic, source)?;
+        let artifact = PreparedModuleArtifact::from_cached(compile_module_artifact_from_source(
+            &synthetic, source,
+        )?);
 
         self.imported_paths.push(synthetic.clone());
         let loaded = self.instantiate_module(None, &artifact).await?;
@@ -241,12 +244,12 @@ impl Vm {
 
     async fn instantiate_stdlib_module(
         &mut self,
-        artifact: &ModuleArtifact,
+        artifact: &PreparedModuleArtifact,
     ) -> Result<LoadedModule, VmError> {
         self.instantiate_module(None, artifact).await
     }
 
-    /// Instantiate a previously-compiled [`ModuleArtifact`] into a
+    /// Instantiate a previously-hydrated [`PreparedModuleArtifact`] into a
     /// [`LoadedModule`]. Re-runs nested imports, replays the init chunk
     /// into a fresh module env, mints a [`VmClosure`] for each compiled
     /// function (stamped with `module_source_dir` so imports from inside
@@ -256,7 +259,7 @@ impl Vm {
     async fn instantiate_module(
         &mut self,
         module_source_dir: Option<PathBuf>,
-        artifact: &ModuleArtifact,
+        artifact: &PreparedModuleArtifact,
     ) -> Result<LoadedModule, VmError> {
         let caller_env = self.env.clone();
         let old_source_dir = self.source_dir.clone();
@@ -271,7 +274,6 @@ impl Vm {
         let module_state: crate::value::ModuleState = {
             let mut init_env = self.env.clone();
             if let Some(init_chunk) = &artifact.init_chunk {
-                let fresh_init_chunk = Chunk::from_cached(init_chunk);
                 let saved_env = std::mem::replace(&mut self.env, init_env);
                 let saved_frames = std::mem::take(&mut self.frames);
                 let saved_handlers = std::mem::take(&mut self.exception_handlers);
@@ -288,7 +290,7 @@ impl Vm {
                 // so module loading is invisible to the step-tracking
                 // surface.
                 let active_context = crate::step_runtime::take_active_context();
-                let init_result = self.run_chunk(std::sync::Arc::new(fresh_init_chunk)).await;
+                let init_result = self.run_chunk(Arc::clone(init_chunk)).await;
                 crate::step_runtime::restore_active_context(active_context);
                 init_env = std::mem::replace(&mut self.env, saved_env);
                 self.frames = saved_frames;
@@ -332,7 +334,7 @@ impl Vm {
 
         for (name, compiled) in &artifact.functions {
             let closure = Arc::new(VmClosure {
-                func: Arc::new(CompiledFunction::from_cached(compiled)),
+                func: Arc::clone(compiled),
                 env: module_env.clone(),
                 source_dir: module_source_dir.clone(),
                 module_functions: Some(Arc::downgrade(&registry)),
@@ -589,27 +591,44 @@ impl Vm {
             Arc::make_mut(&mut self.source_cache).insert(canonical.clone(), source.clone());
             Arc::make_mut(&mut self.source_cache).insert(file_path.clone(), source.clone());
 
-            // Disk cache first: hits skip parse + compile for the imported
-            // module's whole function pool, not just the entry pipeline.
-            let lookup = bytecode_cache::load_module(&file_path, &source);
-            let artifact = if let Some(artifact) = lookup.artifact {
-                artifact
+            let prepared = if bytecode_cache::cache_enabled() {
+                self.prepared_module_cache.get(&canonical, &source)
             } else {
-                let compiled = compile_module_artifact_from_source(&file_path, &source)?;
-                if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
-                    if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
-                        eprintln!(
-                            "[harn] module cache write skipped for {}: {err}",
-                            file_path.display()
-                        );
+                None
+            };
+            let artifact = if let Some(prepared) = prepared {
+                prepared
+            } else {
+                // Disk cache hits skip parse + compile. The scoped prepared
+                // cache additionally skips deserialization and chunk hydration
+                // on later fresh VMs without sharing any runtime module state.
+                let lookup = bytecode_cache::load_module(&file_path, &source);
+                let cached = if let Some(artifact) = lookup.artifact {
+                    artifact
+                } else {
+                    let compiled = compile_module_artifact_from_source(&file_path, &source)?;
+                    if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
+                        if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+                            eprintln!(
+                                "[harn] module cache write skipped for {}: {err}",
+                                file_path.display()
+                            );
+                        }
                     }
+                    compiled
+                };
+                let mut prepared = Arc::new(PreparedModuleArtifact::from_cached(cached));
+                if bytecode_cache::cache_enabled() {
+                    prepared =
+                        self.prepared_module_cache
+                            .insert(canonical.clone(), &source, prepared);
                 }
-                compiled
+                prepared
             };
 
             let module_source_dir = file_path.parent().map(|p| p.to_path_buf());
             let loaded = self
-                .instantiate_module(module_source_dir, &artifact)
+                .instantiate_module(module_source_dir, artifact.as_ref())
                 .await?;
             self.imported_paths.pop();
             Arc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
@@ -951,12 +970,132 @@ pub fn works() {
             .expect("second export exists");
 
         assert!(!Arc::ptr_eq(first, second));
-        assert!(!Arc::ptr_eq(&first.func, &second.func));
-        assert!(!Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
+        assert!(Arc::ptr_eq(&first.func, &second.func));
+        assert!(Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
         assert!(first.module_state().is_none());
         assert!(second.module_state().is_none());
         assert!(first_state_weak.upgrade().is_none());
         assert!(second_state_weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn prepared_user_module_reuses_code_with_fresh_mutable_state() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let module = temp.path().join("counter.harn");
+        std::fs::write(
+            &module,
+            r"
+let count = 0
+
+pub fn increment() {
+  count = count + 1
+  return count
+}
+",
+        )
+        .expect("write module");
+        let cache = crate::PreparedModuleCache::default();
+
+        runtime.block_on(async {
+            let mut first_vm = Vm::new();
+            first_vm.set_prepared_module_cache(cache.clone());
+            let first_exports = first_vm
+                .load_module_exports(&module)
+                .await
+                .expect("first module load succeeds");
+            let first = first_exports.get("increment").expect("first export");
+            assert!(matches!(
+                first_vm.call_closure_pub(first, &[]).await,
+                Ok(VmValue::Int(1))
+            ));
+            assert!(matches!(
+                first_vm.call_closure_pub(first, &[]).await,
+                Ok(VmValue::Int(2))
+            ));
+
+            let mut second_vm = Vm::new();
+            second_vm.set_prepared_module_cache(cache.clone());
+            let second_exports = second_vm
+                .load_module_exports(&module)
+                .await
+                .expect("second module load succeeds");
+            let second = second_exports.get("increment").expect("second export");
+
+            assert!(!Arc::ptr_eq(first, second));
+            assert!(Arc::ptr_eq(&first.func, &second.func));
+            assert!(Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
+            assert_ne!(
+                Arc::as_ptr(&first.module_state().expect("first state")),
+                Arc::as_ptr(&second.module_state().expect("second state"))
+            );
+            assert!(matches!(
+                second_vm.call_closure_pub(second, &[]).await,
+                Ok(VmValue::Int(1))
+            ));
+        });
+
+        let stats = cache.stats();
+        assert_eq!(stats.insertions, 1);
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.entries, 1);
+    }
+
+    #[test]
+    fn prepared_importer_reloads_changed_dependency() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let module = temp.path().join("reader.harn");
+        let dependency = temp.path().join("value.harn");
+        std::fs::write(
+            &module,
+            "import { value } from \"./value\"\npub fn read() { return value() }\n",
+        )
+        .expect("write importer");
+        std::fs::write(&dependency, "pub fn value() { return 1 }\n").expect("write dependency");
+        let cache = crate::PreparedModuleCache::default();
+
+        runtime.block_on(async {
+            let mut first_vm = Vm::new();
+            first_vm.set_prepared_module_cache(cache.clone());
+            let first_exports = first_vm
+                .load_module_exports(&module)
+                .await
+                .expect("first module load succeeds");
+            let first = first_exports.get("read").expect("first export");
+            let first_result = first_vm.call_closure_pub(first, &[]).await;
+            assert!(
+                matches!(first_result, Ok(VmValue::Int(1))),
+                "unexpected first dependency result: {first_result:?}"
+            );
+
+            std::fs::write(&dependency, "pub fn value() { return 2 }\n")
+                .expect("rewrite dependency");
+
+            let mut second_vm = Vm::new();
+            second_vm.set_prepared_module_cache(cache.clone());
+            let second_exports = second_vm
+                .load_module_exports(&module)
+                .await
+                .expect("second module load succeeds");
+            let second = second_exports.get("read").expect("second export");
+            let second_result = second_vm.call_closure_pub(second, &[]).await;
+            assert!(
+                matches!(second_result, Ok(VmValue::Int(2))),
+                "unexpected refreshed dependency result: {second_result:?}"
+            );
+        });
+
+        let stats = cache.stats();
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.insertions, 3);
+        assert_eq!(stats.entries, 3);
     }
 
     #[test]

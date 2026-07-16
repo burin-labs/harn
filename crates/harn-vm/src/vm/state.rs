@@ -414,6 +414,9 @@ pub struct Vm {
     pub(crate) deferred_cyclic_imports: Vec<super::modules::DeferredCyclicImport>,
     /// Loaded module cache keyed by canonical or synthetic module path.
     pub(crate) module_cache: Arc<BTreeMap<std::path::PathBuf, LoadedModule>>,
+    /// Immutable hydrated module bytecode shared across fresh VM isolates.
+    /// Runtime closures, registries, state, and init execution are not cached.
+    pub(crate) prepared_module_cache: crate::PreparedModuleCache,
     /// Lazy manifest modules initialized by any child in this execution tree.
     /// The complete export set is retained so handlers and predicates from the
     /// same module share one module state across repeated child invocations.
@@ -483,6 +486,7 @@ pub struct VmBaseline {
     project_root: Option<std::path::PathBuf>,
     globals: Arc<crate::value::DictMap>,
     denied_builtins: Arc<HashSet<String>>,
+    prepared_module_cache: crate::PreparedModuleCache,
     runtime_limits: RuntimeLimits,
 }
 
@@ -500,6 +504,7 @@ impl VmBaseline {
             project_root: vm.project_root.clone(),
             globals: Arc::clone(&vm.globals),
             denied_builtins: Arc::clone(&vm.denied_builtins),
+            prepared_module_cache: vm.prepared_module_cache.clone(),
             runtime_limits: vm.runtime_limits,
         }
     }
@@ -551,6 +556,7 @@ impl VmBaseline {
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
+            prepared_module_cache: self.prepared_module_cache.clone(),
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(source_cache),
             source_file: self.source_file.clone(),
@@ -799,6 +805,7 @@ impl Vm {
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
+            prepared_module_cache: crate::PreparedModuleCache::default(),
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(BTreeMap::new()),
             source_file: None,
@@ -826,6 +833,12 @@ impl Vm {
 
     pub fn baseline(&self) -> VmBaseline {
         VmBaseline::from_vm(self)
+    }
+
+    /// Replace the scoped immutable module-template cache used by this VM.
+    /// Fresh runtime module state is still instantiated for every VM.
+    pub fn set_prepared_module_cache(&mut self, cache: crate::PreparedModuleCache) {
+        self.prepared_module_cache = cache;
     }
 
     /// Return the effective runtime limit profile for this VM.
@@ -965,6 +978,7 @@ impl Vm {
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::clone(&self.module_cache),
+            prepared_module_cache: self.prepared_module_cache.clone(),
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
             source_cache: Arc::clone(&self.source_cache),
             source_file: self.source_file.clone(),

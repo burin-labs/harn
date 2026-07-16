@@ -482,6 +482,7 @@ pub async fn run_test_file(
     let execution_cwd = execution_cwd
         .map(Path::to_path_buf)
         .unwrap_or_else(test_execution_cwd);
+    let prepared_module_cache = harn_vm::PreparedModuleCache::default();
     for case in cases {
         results.push(
             execute_case(
@@ -489,6 +490,7 @@ pub async fn run_test_file(
                 &execution_cwd,
                 timeout_ms,
                 cli_skill_dirs,
+                &prepared_module_cache,
                 #[cfg(test)]
                 0,
             )
@@ -1050,6 +1052,7 @@ async fn execute_cases(
     }
     let completed = Arc::new(Mutex::new(0usize));
     if workers <= 1 {
+        let prepared_module_cache = harn_vm::PreparedModuleCache::default();
         let mut results = Vec::with_capacity(cases.len());
         for case in cases {
             let cwd = case_execution_cwd(&case);
@@ -1068,6 +1071,7 @@ async fn execute_cases(
                 &cwd,
                 options.timeout_ms,
                 &options.cli_skill_dirs,
+                &prepared_module_cache,
                 #[cfg(test)]
                 options.setup_delay_ms,
             )
@@ -1113,6 +1117,7 @@ async fn execute_cases(
             .name(format!("harn-test-worker-{worker_idx}"))
             .stack_size(CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
+                let prepared_module_cache = harn_vm::PreparedModuleCache::default();
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -1155,6 +1160,7 @@ async fn execute_cases(
                         &cwd,
                         timeout_ms,
                         &cli_skill_dirs,
+                        &prepared_module_cache,
                         #[cfg(test)]
                         setup_delay_ms,
                     ));

@@ -87,6 +87,7 @@ pub mod observability;
 pub mod op_interrupt;
 pub mod orchestration;
 pub mod personas;
+mod prepared_module;
 pub mod process_sandbox;
 pub mod profile;
 pub mod provenance;
@@ -157,6 +158,8 @@ pub(crate) mod wait_for_graph;
 pub mod waitpoints;
 pub mod workspace_anchor;
 pub mod workspace_path;
+
+pub use prepared_module::{PreparedModuleCache, PreparedModuleCacheStats};
 
 pub use actor_chain::{
     ActorChain, ActorChainEntry, ActorChainError, Principal, ScopeAttenuationMode,
