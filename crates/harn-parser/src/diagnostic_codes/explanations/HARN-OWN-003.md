@@ -32,19 +32,15 @@ fn open_log() -> channel {
   }
   ```
 
-- **Confine the value to a narrower scope** by moving the work into a helper
-  whose return triggers the auto-drop, then returning a non-owned summary from
-  the caller:
+- **Confine the value to a narrower scope** with `block { ... }`. Owned values
+  declared inside the block drop before the enclosing function continues:
 
   ```harn
-  fn send_once(msg: string) -> nil {
-    const ch: owned<channel> = channel("log", 64)
-    send(ch, msg)
-    nil
-  }   // `ch` drops here, when `send_once` returns
-
   fn write_log(msg: string) -> nil {
-    send_once(msg)
+    block {
+      const ch: owned<channel> = channel("log", 64)
+      send(ch, msg)
+    }   // `ch` drops here, before `write_log` continues
     nil
   }
   ```
