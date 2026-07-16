@@ -34,6 +34,52 @@ fn out(source: &str) -> Vec<String> {
 }
 
 #[test]
+fn tool_decl_direct_call_invokes_harn_handler() {
+    let lines = out(r#"
+pipeline main(task) {
+  tool greet(name: string) -> string {
+    return "hello " + name
+  }
+  log(greet("ada"))
+}
+"#);
+    assert_eq!(lines, vec!["hello ada"]);
+}
+
+#[test]
+fn tool_decl_tail_call_invokes_harn_handler() {
+    let lines = out(r#"
+pipeline main(task) {
+  tool greet(name: string) -> string {
+    return "hello " + name
+  }
+
+  fn call_greet(name: string) -> string {
+    return greet(name)
+  }
+
+  log(call_greet("ada"))
+}
+"#);
+    assert_eq!(lines, vec!["hello ada"]);
+}
+
+#[test]
+fn tool_decl_callable_value_invokes_harn_handler() {
+    let lines = out(r#"
+pipeline main(task) {
+  tool greet(name: string) -> string {
+    return "hello " + name
+  }
+
+  const greetings = ["ada"].map(greet)
+  log(greetings[0])
+}
+"#);
+    assert_eq!(lines, vec!["hello ada"]);
+}
+
+#[test]
 fn tool_ref_returns_name_when_registered() {
     let lines = out(r#"
 pipeline main(task) {

@@ -97,6 +97,56 @@ fn vm_registered_names(registry: &crate::value::DictMap) -> Vec<String> {
     names
 }
 
+pub(crate) fn single_harn_tool_handler(
+    registry: &crate::value::DictMap,
+) -> Result<Option<Arc<VmClosure>>, VmError> {
+    match registry.get("_type") {
+        Some(VmValue::String(t)) if &**t == "tool_registry" => {}
+        _ => return Ok(None),
+    }
+
+    let tools = vm_get_tools(registry);
+    let [tool] = tools else {
+        return Err(VmError::TypeError(format!(
+            "Cannot call tool registry with {} tools; expected exactly one Harn-backed tool",
+            tools.len()
+        )));
+    };
+    let VmValue::Dict(entry) = tool else {
+        return Err(VmError::TypeError(
+            "Cannot call malformed tool registry: tool entry is not a dict".to_string(),
+        ));
+    };
+
+    let name = entry
+        .get("name")
+        .map(VmValue::display)
+        .unwrap_or_else(|| "<unnamed>".to_string());
+    let executor = entry
+        .get("executor")
+        .map(VmValue::display)
+        .unwrap_or_else(|| "harn".to_string());
+    if executor != "harn" {
+        return Err(VmError::TypeError(format!(
+            "Cannot call tool registry entry {name:?}: executor {executor:?} is not Harn-backed"
+        )));
+    }
+
+    match entry.get("handler") {
+        Some(VmValue::Closure(handler)) => Ok(Some(Arc::clone(handler))),
+        _ => Err(VmError::TypeError(format!(
+            "Cannot call tool registry entry {name:?}: missing Harn closure handler"
+        ))),
+    }
+}
+
+pub(crate) fn is_single_harn_tool_registry_value(value: &VmValue) -> bool {
+    match value {
+        VmValue::Dict(registry) => single_harn_tool_handler(registry).ok().flatten().is_some(),
+        _ => false,
+    }
+}
+
 fn vm_current_registry_dict(builtin: &str) -> Result<VmValue, VmError> {
     match current_tool_registry() {
         Some(value) => match &value {
@@ -1663,5 +1713,57 @@ fn vm_harn_type_to_json_schema(harn_type: &str) -> &str {
         "list" | "array" => "array",
         "dict" | "object" => "object",
         _ => "string",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn registry(tools: Vec<VmValue>) -> crate::value::DictMap {
+        let mut registry = crate::value::DictMap::new();
+        registry.put_str("_type", "tool_registry");
+        registry.insert(
+            crate::value::intern_key("tools"),
+            VmValue::List(Arc::new(tools)),
+        );
+        registry
+    }
+
+    fn tool_entry(name: &str, executor: &str) -> VmValue {
+        let mut entry = crate::value::DictMap::new();
+        entry.put_str("name", name);
+        entry.put_str("executor", executor);
+        entry.insert(crate::value::intern_key("handler"), VmValue::Nil);
+        VmValue::dict(entry)
+    }
+
+    #[test]
+    fn single_harn_tool_handler_ignores_non_registry_dicts() {
+        let empty = crate::value::DictMap::new();
+        assert!(single_harn_tool_handler(&empty).unwrap().is_none());
+    }
+
+    #[test]
+    fn single_harn_tool_handler_rejects_multi_tool_registries() {
+        let err = single_harn_tool_handler(&registry(vec![
+            tool_entry("first", "harn"),
+            tool_entry("second", "harn"),
+        ]))
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("with 2 tools"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn single_harn_tool_handler_rejects_external_executors() {
+        let err = single_harn_tool_handler(&registry(vec![tool_entry("edit", "host_bridge")]))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("not Harn-backed"),
+            "unexpected error: {err}"
+        );
     }
 }
