@@ -16,6 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::agent::AgentEvent;
+
 /// Coarse, typed classification of why an agent-loop session terminated.
 /// Serialized `snake_case`. The vocabulary is deliberately extensible —
 /// [`Self::Unknown`] is the honest fallback when no rule matched and the raw
@@ -107,11 +109,13 @@ impl AgentTerminalKind {
 /// callback `stop`) that must NOT be reported as a natural completion — that
 /// conflation is the Burin #4642 failure mode. Sourced from the loop's own
 /// terminal-`done` assignments and `__agent_loop_sealed_stop_reason`.
-const NATURAL_STOP_REASONS: [&str; 6] = [
+const NATURAL_STOP_REASONS: [&str; 8] = [
     "",
     "completed",
+    "natural",
     "post_edit_reverify",
     "repeated_verified_pass",
+    "required_tools_satisfied",
     "stalled_done_judge",
     "done",
 ];
@@ -142,6 +146,24 @@ impl AgentTerminalOutcome {
             "reason": self.reason,
             "owner": self.owner,
         })
+    }
+
+    /// Project the outcome onto the existing typed-checkpoint event stream.
+    pub fn checkpoint(
+        &self,
+        session_id: &str,
+        final_status: &str,
+        stop_reason: &str,
+    ) -> AgentEvent {
+        AgentEvent::TypedCheckpoint {
+            session_id: session_id.to_owned(),
+            checkpoint: serde_json::json!({
+                "schema": "harn.agent_terminal.v1",
+                "terminal": self.to_json(),
+                "final_status": final_status,
+                "stop_reason": stop_reason,
+            }),
+        }
     }
 }
 
@@ -264,8 +286,10 @@ mod tests {
         for reason in [
             "",
             "completed",
+            "natural",
             "post_edit_reverify",
             "repeated_verified_pass",
+            "required_tools_satisfied",
         ] {
             assert_eq!(
                 classify_agent_terminal("done", reason, false, None),

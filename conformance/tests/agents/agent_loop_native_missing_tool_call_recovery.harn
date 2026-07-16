@@ -1,0 +1,75 @@
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn edit_tools() {
+  let tools = tool_registry()
+  return tool_define(
+    tools,
+    "edit",
+    "Edit a file.",
+    {
+      handler: { args -> return "edited " + to_string(args?.path ?? "") },
+      parameters: {path: {type: "string", description: "Path to edit"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+}
+
+fn intended_edit_classifier() {
+  return {
+    classifier: { payload -> return if (payload?.iteration ?? 0) == 0 {
+      {
+        action: "tool_call_intended",
+        tool_name: "edit",
+        confidence: 0.96,
+        evidence: "fixture classifier found a tool action",
+        language: "fixture",
+      }
+    } else {
+      {
+        action: "no_tool_call_intended",
+        tool_name: "",
+        confidence: 0.96,
+        evidence: "fixture classifier found a final answer",
+        language: "fixture",
+      }
+    } },
+  }
+}
+
+fn injected_kind_in(calls, idx, marker) {
+  if idx >= len(calls) {
+    return false
+  }
+  return contains(json_stringify(calls[idx].messages), marker)
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      llm_text("Let me edit the file now."),
+      llm_tool_call("edit", {path: "main.py"}),
+      llm_text("The edit is complete."),
+    ],
+    { ->
+      const result = agent_loop(
+        "Edit main.py.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+          missing_tool_call_recovery: intended_edit_classifier(),
+        },
+      )
+      const calls = llm_mock_calls()
+      __io_println("status=" + result.status)
+      __io_println("nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
+      __io_println("native_instruction=" + to_string(injected_kind_in(calls, 1, "native tool interface")))
+      __io_println("successful=" + json_stringify(result.tools.successful))
+    },
+  )
+}
