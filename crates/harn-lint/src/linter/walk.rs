@@ -789,11 +789,11 @@ impl<'a> Linter<'a> {
                     }
                 }
                 self.push_scope();
-                self.lint_block(then_body);
+                self.lint_value_block(then_body);
                 self.pop_scope();
                 if let Some(else_b) = else_body {
                     self.push_scope();
-                    self.lint_block(else_b);
+                    self.lint_value_block(else_b);
                     self.pop_scope();
                 }
             }
@@ -887,7 +887,7 @@ impl<'a> Linter<'a> {
                     });
                 }
                 self.push_scope();
-                self.lint_block(body);
+                self.lint_value_block(body);
                 self.pop_scope();
                 self.push_scope();
                 if let Some(ev) = error_var {
@@ -896,7 +896,7 @@ impl<'a> Linter<'a> {
                     }
                     self.references.insert(ev.clone());
                 }
-                self.lint_block(catch_body);
+                self.lint_value_block(catch_body);
                 self.pop_scope();
                 if let Some(fb) = finally_body {
                     self.push_scope();
@@ -907,9 +907,7 @@ impl<'a> Linter<'a> {
 
             Node::TryExpr { body } => {
                 self.push_scope();
-                self.value_block_depth += 1;
-                self.lint_block(body);
-                self.value_block_depth -= 1;
+                self.lint_value_block(body);
                 self.pop_scope();
             }
 
@@ -935,7 +933,7 @@ impl<'a> Linter<'a> {
                         self.lint_node(guard);
                     }
                     self.push_scope();
-                    self.lint_block(&arm.body);
+                    self.lint_value_block(&arm.body);
                     self.pop_scope();
                 }
             }
@@ -971,7 +969,7 @@ impl<'a> Linter<'a> {
 
             Node::Block(nodes) => {
                 self.push_scope();
-                self.lint_block(nodes);
+                self.lint_value_block(nodes);
                 self.pop_scope();
             }
 
@@ -985,7 +983,7 @@ impl<'a> Linter<'a> {
                 }
                 self.lint_param_default_values(params);
                 self.enter_long_running_body(body);
-                self.lint_block(body);
+                self.lint_value_block(body);
                 self.exit_long_running_body();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();

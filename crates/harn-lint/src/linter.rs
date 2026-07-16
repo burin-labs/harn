@@ -24,7 +24,10 @@ use crate::fixes::{
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
 use crate::rule::{Rule, RuleCtx};
 
+mod discarded_result;
 mod walk;
+
+use discarded_result::BlockKind;
 
 /// Inputs threaded into [`Linter::check_ambient_capability_builtin`].
 /// One value per ambient call site keeps the per-sub-handle wrappers
@@ -119,9 +122,10 @@ pub(crate) struct Linter<'a> {
     /// Threshold above which the cyclomatic-complexity rule fires.
     /// Configurable via `[lint].complexity_threshold` in `harn.toml`.
     pub(crate) complexity_threshold: usize,
-    /// Suppress the discarded-approval-result lint for the final expression
-    /// in value-producing blocks such as `try { ... }`.
-    pub(super) value_block_depth: usize,
+    /// Method names declared in `impl` blocks in this file. Suppresses the
+    /// discarded-pure-result lint on a same-named user method, which — unlike
+    /// the built-in collection methods — may exist for its effects.
+    pub(super) impl_method_names: HashSet<String>,
     /// Stack of connector exports whose default effect policy restricts
     /// direct builtin calls.
     pub(super) connector_effect_export_stack: Vec<String>,
@@ -190,7 +194,7 @@ impl<'a> Linter<'a> {
             harness_param_stack: Vec::new(),
             complexity_suppression_depth: 0,
             complexity_threshold: DEFAULT_COMPLEXITY_THRESHOLD,
-            value_block_depth: 0,
+            impl_method_names: HashSet::new(),
             connector_effect_export_stack: Vec::new(),
             long_running_cleanup_stack: Vec::new(),
             mcp_registry_missing_annotation_spans: HashMap::new(),
@@ -1592,6 +1596,7 @@ impl<'a> Linter<'a> {
 
     pub(crate) fn lint_program(&mut self, nodes: &[SNode]) {
         self.collect_persona_step_metadata(nodes);
+        self.collect_impl_method_names(nodes);
         self.run_program_rules(nodes);
         for node in nodes {
             self.lint_node(node);
@@ -1897,9 +1902,28 @@ impl<'a> Linter<'a> {
         pattern == value
     }
 
+    /// Lint a statement block whose trailing expression is discarded — a `fn`
+    /// / `for` / `while` / `try` body. Harn has no implicit block return, so
+    /// every node here is in statement position, the tail included.
+    pub(super) fn lint_block(&mut self, nodes: &[SNode]) {
+        self.lint_block_of_kind(nodes, BlockKind::Statement);
+    }
+
+    /// Lint a block whose trailing expression *is* the block's value — a
+    /// closure body, `match` arm, `if`/`else` branch, or `block { … }`. The
+    /// tail is a result, not a discarded statement, so result-discarding
+    /// checks must skip it.
+    pub(super) fn lint_value_block(&mut self, nodes: &[SNode]) {
+        self.lint_block_of_kind(nodes, BlockKind::Value);
+    }
+
     /// Lint a block of statements, flagging unreachable code after a
     /// terminator (`return`/`throw`).
-    pub(super) fn lint_block(&mut self, nodes: &[SNode]) {
+    ///
+    /// `kind` governs the tail node only, and describes the *immediately*
+    /// enclosing block — it deliberately does not nest. A `for` body inside a
+    /// closure is still a statement block, so its tail is still discarded.
+    fn lint_block_of_kind(&mut self, nodes: &[SNode], kind: BlockKind) {
         use harn_parser::stmt_definitely_exits;
 
         let mut found_terminator = false;
@@ -1919,9 +1943,10 @@ impl<'a> Linter<'a> {
                 break;
             }
 
-            let final_value_expr = self.value_block_depth > 0 && idx + 1 == nodes.len();
+            let final_value_expr = kind == BlockKind::Value && idx + 1 == nodes.len();
             if !final_value_expr {
                 self.check_discarded_approval_result(node);
+                self.check_discarded_pure_result(node);
             }
 
             if let Some(next) = nodes.get(idx + 1) {
@@ -1995,35 +2020,6 @@ impl<'a> Linter<'a> {
                 "return the expression assigned to `{name}` directly"
             )),
             fix,
-        });
-    }
-
-    fn check_discarded_approval_result(&mut self, node: &SNode) {
-        // The approval primitive is recognized in either form: the
-        // legacy `request_approval(...)` function-call shape (still
-        // valid for back-compat) and the first-class `HitlExpr` form
-        // produced by the reserved-keyword parser.
-        let name = match &node.node {
-            Node::FunctionCall { name, .. } if Self::is_approval_record_builtin(name) => {
-                name.as_str()
-            }
-            Node::HitlExpr {
-                kind: harn_parser::HitlKind::RequestApproval,
-                ..
-            } => "request_approval",
-            _ => return,
-        };
-        self.diagnostics.push(LintDiagnostic {
-            code: Code::LintUnhandledApprovalResult,
-            rule: "unhandled-approval-result".into(),
-            message: format!("approval result from `{name}` is discarded"),
-            span: node.span,
-            severity: LintSeverity::Warning,
-            suggestion: Some(
-                "bind the result, inspect its signed approver receipts, or explicitly assign it to `_`"
-                    .to_string(),
-            ),
-            fix: None,
         });
     }
 

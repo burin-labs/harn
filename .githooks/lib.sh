@@ -412,7 +412,11 @@ hook_harn_format_supported() {
 
 hook_harn_lint_supported() {
   harn_path=$1
-  [ ! -f "${harn_path%.harn}.error" ]
+  # A conformance fixture with a `.error` or `.lint` sibling asserts the
+  # diagnostics it provokes, so linting it here is wrong by construction:
+  # the fixture is *supposed* to be unclean, and `harn lint --fix` would
+  # quietly rewrite away the very violation under test.
+  [ ! -f "${harn_path%.harn}.error" ] && [ ! -f "${harn_path%.harn}.lint" ]
 }
 
 hook_write_harn_format_files() {

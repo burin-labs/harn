@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 65
+      "count": 66
     },
     {
       "id": "FMT",
@@ -2381,6 +2381,15 @@
           "summary": "Simplify the expression to its canonical form"
         }
       ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-066",
+      "category": "LNT",
+      "summary": "the result of a pure collection method is discarded, so the call has no effect on the receiver",
+      "repairs": [],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
