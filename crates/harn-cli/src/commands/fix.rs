@@ -652,13 +652,18 @@ fn count_remaining_diagnostics(target: &Path) -> Result<RemainingDiagnostics, St
 
         let preflight_severity = PreflightSeverity::from_opt(config.preflight_severity.as_deref());
         if preflight_severity != PreflightSeverity::Off {
-            count +=
-                commands::check::collect_preflight_diagnostics(file, &source, &program, &config)
-                    .into_iter()
-                    .filter(|diag| {
-                        !commands::check::is_preflight_allowed(&diag.tags, &config.preflight_allow)
-                    })
-                    .count();
+            count += commands::check::collect_preflight_diagnostics_with_module_graph(
+                file,
+                &source,
+                &program,
+                &config,
+                &module_graph,
+            )
+            .into_iter()
+            .filter(|diag| {
+                !commands::check::is_preflight_allowed(&diag.tags, &config.preflight_allow)
+            })
+            .count();
         }
     }
 
@@ -753,7 +758,15 @@ fn collect_file_candidates(
         });
     }
 
-    collect_preflight_candidates(file, &source, &program, &config, safety_ceiling, out);
+    collect_preflight_candidates(
+        file,
+        &source,
+        &program,
+        &config,
+        module_graph,
+        safety_ceiling,
+        out,
+    );
     Ok(())
 }
 
@@ -1435,6 +1448,7 @@ fn collect_preflight_candidates(
     source: &str,
     program: &[SNode],
     config: &CheckConfig,
+    module_graph: &harn_modules::ModuleGraph,
     safety_ceiling: Option<RepairSafety>,
     out: &mut Vec<RepairCandidate>,
 ) {
@@ -1443,7 +1457,13 @@ fn collect_preflight_candidates(
         return;
     }
 
-    for diag in commands::check::collect_preflight_diagnostics(file, source, program, config) {
+    for diag in commands::check::collect_preflight_diagnostics_with_module_graph(
+        file,
+        source,
+        program,
+        config,
+        module_graph,
+    ) {
         if commands::check::is_preflight_allowed(&diag.tags, &config.preflight_allow) {
             continue;
         }

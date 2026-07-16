@@ -18,9 +18,25 @@ use super::host_capabilities::parse_host_capability_value;
 use super::lint::lint_file_inner;
 use super::lint_report::lint_file_report;
 use super::preflight::{
-    collect_preflight_diagnostics, collect_preflight_diagnostics_with_module_graph,
-    is_preflight_allowed,
+    collect_preflight_diagnostics_with_module_graph, is_preflight_allowed, PreflightDiagnostic,
 };
+
+/// Single-file preflight, for tests that have one file and no graph.
+///
+/// Production has no such caller: everything that walks a set of files already
+/// holds a graph over the whole set and passes it. Building a graph per file
+/// re-walks that file's import closure and re-lexes and re-parses all of it, so
+/// this convenience lives here rather than beside the real entry point where it
+/// was previously easy to reach for by mistake — and was, by `harn fix`.
+fn collect_preflight_diagnostics(
+    path: &std::path::Path,
+    source: &str,
+    program: &[SNode],
+    config: &CheckConfig,
+) -> Vec<PreflightDiagnostic> {
+    let module_graph = harn_modules::build(std::slice::from_ref(&path.to_path_buf()));
+    collect_preflight_diagnostics_with_module_graph(path, source, program, config, &module_graph)
+}
 
 fn parse_program(source: &str) -> Vec<SNode> {
     let mut lexer = Lexer::new(source);
