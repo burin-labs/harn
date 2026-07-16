@@ -1223,5 +1223,5 @@ pub(crate) use execution::{
 
 #[cfg(test)]
 use execution::{
-    duration_ms, matches_failover, physical_request_attempt_count, provider_exhausted_routing_error,
+    matches_failover, physical_request_attempt_count, provider_exhausted_routing_error,
 };

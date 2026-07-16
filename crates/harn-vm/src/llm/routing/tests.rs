@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::ErrorCategory;
 
 fn dict(items: &[(&str, VmValue)]) -> crate::value::DictMap {
     items
