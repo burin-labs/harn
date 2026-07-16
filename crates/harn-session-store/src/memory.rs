@@ -241,7 +241,7 @@ impl SessionStore for MemorySessionStore {
             None
         };
         // Defense in depth for data imported or written under an older policy.
-        redact_stored_events(&self.hooks, &mut events);
+        redact_stored_events(&self.hooks, &mut events)?;
         Ok(EventPage {
             events,
             next_cursor,

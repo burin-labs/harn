@@ -2,6 +2,7 @@
 //!
 //! The runners exercise the memory and SQLite backends against the same scenarios.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde_json::json;
@@ -52,6 +53,29 @@ impl EventRedactor for IdentityClobberingRedactor {
         let mut headers = headers.clone();
         headers.insert("run_id".to_string(), "[redacted]".to_string());
         headers
+    }
+}
+
+#[derive(Clone)]
+struct SwitchableRedactor {
+    enabled: Arc<AtomicBool>,
+}
+
+impl EventRedactor for SwitchableRedactor {
+    fn redact_json_in_place(&self, value: &mut serde_json::Value) {
+        if self.enabled.load(Ordering::SeqCst) {
+            TestRedactor.redact_json_in_place(value);
+        }
+    }
+
+    fn redact_headers(
+        &self,
+        headers: &std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        if !self.enabled.load(Ordering::SeqCst) {
+            return headers.clone();
+        }
+        TestRedactor.redact_headers(headers)
     }
 }
 
@@ -885,6 +909,53 @@ async fn redaction_hook_scrubs_payload_on_append() {
         let api_key = payload["api_key"].as_str().expect("string");
         assert_eq!(api_key, "[redacted]");
         assert_eq!(page.events[0].headers["authorization"], "[redacted]");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn read_reapplies_redaction_to_stored_data_without_clobbering_identity() {
+    let enabled = Arc::new(AtomicBool::new(false));
+    let hooks = StoreHooks {
+        redaction: Some(Arc::new(SwitchableRedactor {
+            enabled: Arc::clone(&enabled),
+        })),
+        ..Default::default()
+    };
+    run_with_hooks(hooks, |store| {
+        let enabled = Arc::clone(&enabled);
+        async move {
+            enabled.store(false, Ordering::SeqCst);
+            let meta = store
+                .create(CreateSession::default())
+                .await
+                .expect("create");
+            let identity = EventIdentity::new()
+                .with(EventIdentityField::RunId, "run-1")
+                .expect("run id");
+            let mut event = AppendEvent::new(
+                SessionEventKind::Message,
+                json!({"api_key": "sensitive", "text": "ok"}),
+            )
+            .with_identity(&identity)
+            .expect("stamp identity");
+            event
+                .headers
+                .insert("authorization".to_string(), "Bearer sensitive".to_string());
+            let stored = store.append(&meta.id, event).await.expect("append");
+            assert_eq!(stored.payload["api_key"], "sensitive");
+            assert_eq!(stored.headers["authorization"], "Bearer sensitive");
+
+            enabled.store(true, Ordering::SeqCst);
+            let page = store
+                .read(&meta.id, ReadRange::default())
+                .await
+                .expect("read");
+
+            assert_eq!(page.events[0].payload["api_key"], "[redacted]");
+            assert_eq!(page.events[0].headers["authorization"], "[redacted]");
+            assert_eq!(page.events[0].headers["run_id"], "run-1");
+        }
     })
     .await;
 }
