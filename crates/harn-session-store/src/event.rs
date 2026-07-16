@@ -119,6 +119,22 @@ impl AppendEvent {
         self.tags = tags.into_iter().map(Into::into).collect();
         self
     }
+
+    /// Stamp producer identity into canonical signed headers.
+    pub fn with_identity(
+        mut self,
+        identity: &crate::identity::EventIdentity,
+    ) -> Result<Self, crate::identity::EventIdentityError> {
+        identity.apply_to_headers(&mut self.headers)?;
+        Ok(self)
+    }
+
+    /// Read the producer identity already present in canonical headers.
+    pub fn identity(
+        &self,
+    ) -> Result<crate::identity::EventIdentity, crate::identity::EventIdentityError> {
+        crate::identity::EventIdentity::from_headers(&self.headers)
+    }
 }
 
 /// Event as persisted by the store, including assigned identifiers,
@@ -147,6 +163,15 @@ pub struct StoredEvent {
     /// is closed and the [`crate::signing::SessionSigner`]
     /// finalises the chain receipt.
     pub signed_by: Option<EventSignature>,
+}
+
+impl StoredEvent {
+    /// Read producer identity from the signed canonical headers.
+    pub fn identity(
+        &self,
+    ) -> Result<crate::identity::EventIdentity, crate::identity::EventIdentityError> {
+        crate::identity::EventIdentity::from_headers(&self.headers)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

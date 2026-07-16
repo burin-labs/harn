@@ -398,6 +398,16 @@ impl RedactionPolicy {
     }
 }
 
+impl harn_session_store::EventRedactor for RedactionPolicy {
+    fn redact_json_in_place(&self, value: &mut JsonValue) {
+        Self::redact_json_in_place(self, value);
+    }
+
+    fn redact_headers(&self, headers: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+        Self::redact_headers(self, headers)
+    }
+}
+
 fn find_http_url_start(value: &str) -> Option<usize> {
     match (value.find("http://"), value.find("https://")) {
         (Some(http), Some(https)) => Some(http.min(https)),

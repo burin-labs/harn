@@ -17,6 +17,7 @@ use uuid::Uuid;
 use super::event::{
     now_ms_and_rfc3339, AppendEvent, EventId, EventSignature, SessionEventKind, StoredEvent,
 };
+use super::redaction::{prepare_append_event, redact_stored_events};
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
     verify_event_chain,
@@ -461,14 +462,6 @@ fn load_all_events(conn: &Connection, session_id: &str) -> StoreResult<Vec<Store
     Ok(out)
 }
 
-fn apply_redaction(hooks: &StoreHooks, event: &mut AppendEvent) {
-    let Some(policy) = hooks.redaction.as_ref() else {
-        return;
-    };
-    policy.redact_json_in_place(&mut event.payload);
-    event.headers = policy.redact_headers(&event.headers);
-}
-
 /// Core append logic, operating on a caller-owned connection (typically a
 /// transaction). Redacts, validates, links, signs (when an event signer
 /// is configured), inserts the event, and advances the session counters —
@@ -481,7 +474,7 @@ fn append_in_tx(
     session_id: &str,
     mut event: AppendEvent,
 ) -> StoreResult<StoredEvent> {
-    apply_redaction(hooks, &mut event);
+    prepare_append_event(hooks, &mut event)?;
     let (mut meta, next_event_id) = read_session_meta(conn, session_id)?;
     super::memory_helpers::validate_open(&meta)?;
     if let Some(parent_event_id) = event.parent_event_id {
@@ -701,11 +694,7 @@ impl SessionStore for SqliteSessionStore {
         for row in rows {
             events.push(row.map_err(map_sql)?);
         }
-        if let Some(policy) = self.hooks.redaction.as_ref() {
-            for event in events.iter_mut() {
-                policy.redact_json_in_place(&mut event.payload);
-            }
-        }
+        redact_stored_events(&self.hooks, &mut events);
         let next_cursor = if events.len() as i64 == limit {
             events.last().map(|tail| tail.event_id + 1)
         } else {

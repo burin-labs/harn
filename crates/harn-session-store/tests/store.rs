@@ -4,11 +4,56 @@
 
 use std::sync::Arc;
 
-use harn_vm::redact::RedactionPolicy;
 use serde_json::json;
 use tempfile::TempDir;
 
 use harn_session_store::*;
+
+#[derive(Clone)]
+struct TestRedactor;
+
+impl EventRedactor for TestRedactor {
+    fn redact_json_in_place(&self, value: &mut serde_json::Value) {
+        if let Some(object) = value.as_object_mut() {
+            if object.contains_key("api_key") {
+                object.insert("api_key".to_string(), json!("[redacted]"));
+            }
+        }
+    }
+
+    fn redact_headers(
+        &self,
+        headers: &std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        headers
+            .iter()
+            .map(|(name, value)| {
+                let value = if name == "authorization" {
+                    "[redacted]".to_string()
+                } else {
+                    value.clone()
+                };
+                (name.clone(), value)
+            })
+            .collect()
+    }
+}
+
+#[derive(Clone)]
+struct IdentityClobberingRedactor;
+
+impl EventRedactor for IdentityClobberingRedactor {
+    fn redact_json_in_place(&self, _value: &mut serde_json::Value) {}
+
+    fn redact_headers(
+        &self,
+        headers: &std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        let mut headers = headers.clone();
+        headers.insert("run_id".to_string(), "[redacted]".to_string());
+        headers
+    }
+}
 
 fn dummy_signer(seed: u8) -> SessionSigner {
     SessionSigner::from_seed([seed; 32])
@@ -93,6 +138,98 @@ async fn append_assigns_monotonic_ids_and_chain_hashes() {
         assert_eq!(described.event_count, 2);
         assert_eq!(described.last_event_id, Some(2));
         assert!(described.chain_root_hash.is_some());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn typed_identity_is_normalized_and_preserved_by_every_backend() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create");
+        let identity = EventIdentity::new()
+            .with(EventIdentityField::RunId, " run-1 ")
+            .expect("run id")
+            .with(EventIdentityField::TurnId, "turn-1")
+            .expect("turn id")
+            .with(EventIdentityField::SourceEventId, "event-7")
+            .expect("source event id")
+            .with(EventIdentityField::MessageId, "message-3")
+            .expect("message id")
+            .with(EventIdentityField::ToolCallId, "tool-2")
+            .expect("tool call id");
+        let event = AppendEvent::new(SessionEventKind::ToolCall, json!({"name": "shell"}))
+            .with_identity(&identity)
+            .expect("stamp identity");
+
+        let stored = store.append(&meta.id, event).await.expect("append");
+
+        assert_eq!(stored.identity().expect("stored identity"), identity);
+        assert_eq!(stored.headers["run_id"], "run-1");
+        let mut tampered = stored.clone();
+        tampered
+            .headers
+            .insert("run_id".to_string(), "run-2".to_string());
+        assert_ne!(compute_record_hash(&tampered), stored.record_hash);
+        let replayed = store
+            .replay(&store.snapshot(&meta.id).await.expect("snapshot").id)
+            .await
+            .expect("replay");
+        assert_eq!(replayed.events[0].identity().unwrap(), identity);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn redaction_cannot_silently_replace_producer_identity() {
+    let hooks = StoreHooks {
+        redaction: Some(Arc::new(IdentityClobberingRedactor)),
+        ..Default::default()
+    };
+    run_with_hooks(hooks, |store| async move {
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create");
+        let identity = EventIdentity::new()
+            .with(EventIdentityField::RunId, "run-1")
+            .expect("run id");
+        let event = AppendEvent::new(SessionEventKind::Message, json!({"text": "hello"}))
+            .with_identity(&identity)
+            .expect("stamp identity");
+
+        let error = store
+            .append(&meta.id, event)
+            .await
+            .expect_err("identity clobber must fail");
+
+        assert!(matches!(error, StoreError::InvalidInput(_)));
+        assert_eq!(store.describe(&meta.id).await.unwrap().event_count, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn raw_reserved_identity_headers_are_validated_before_persistence() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create");
+        let mut event = AppendEvent::new(SessionEventKind::Message, json!({"text": "hello"}));
+        event
+            .headers
+            .insert("run_id".to_string(), " \n ".to_string());
+
+        let error = store
+            .append(&meta.id, event)
+            .await
+            .expect_err("blank run id must fail");
+
+        assert!(matches!(error, StoreError::InvalidInput(_)));
+        assert_eq!(store.describe(&meta.id).await.unwrap().event_count, 0);
     })
     .await;
 }
@@ -440,10 +577,8 @@ async fn verify_reports_chain_hash_mismatch() {
 
 #[tokio::test]
 async fn redaction_hook_scrubs_payload_on_append() {
-    let mut policy = RedactionPolicy::default();
-    policy = policy.with_extra_field("api_key");
     let hooks = StoreHooks {
-        redaction: Some(policy),
+        redaction: Some(Arc::new(TestRedactor)),
         ..Default::default()
     };
     run_with_hooks(hooks, |store| async move {
@@ -451,23 +586,22 @@ async fn redaction_hook_scrubs_payload_on_append() {
             .create(CreateSession::default())
             .await
             .expect("create");
-        store
-            .append(
-                &meta.id,
-                AppendEvent::new(
-                    SessionEventKind::Message,
-                    json!({"api_key": "ghp_1234567890abcdef", "text": "ok"}),
-                ),
-            )
-            .await
-            .expect("append");
+        let mut event = AppendEvent::new(
+            SessionEventKind::Message,
+            json!({"api_key": "sensitive", "text": "ok"}),
+        );
+        event
+            .headers
+            .insert("authorization".to_string(), "Bearer sensitive".to_string());
+        store.append(&meta.id, event).await.expect("append");
         let page = store
             .read(&meta.id, ReadRange::default())
             .await
             .expect("read");
         let payload = &page.events[0].payload;
         let api_key = payload["api_key"].as_str().expect("string");
-        assert_ne!(api_key, "ghp_1234567890abcdef");
+        assert_eq!(api_key, "[redacted]");
+        assert_eq!(page.events[0].headers["authorization"], "[redacted]");
     })
     .await;
 }
