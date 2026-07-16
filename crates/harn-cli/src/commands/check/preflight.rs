@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 use harn_modules::resolve_import_path;
 use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
-use super::host_capabilities::{
-    is_known_host_operation, resolve_host_capabilities, HostCapabilities,
-};
+use super::host_capabilities::{is_known_host_operation, HostCapabilities};
 use super::imports::{
     scan_import_collisions, scan_re_export_conflicts, scan_selective_import_visibility,
 };
@@ -44,31 +42,6 @@ pub(crate) fn is_preflight_allowed(tag: &Option<String>, allow: &[String]) -> bo
         }
         entry == cap
     })
-}
-
-/// Collect preflight diagnostics for `path` against an existing module graph.
-///
-/// The graph is a parameter, never built here: every caller walks a set of
-/// files and already holds one over the whole set. Building it per file would
-/// re-walk that file's import closure and re-lex and re-parse all of it — which
-/// is exactly what `harn fix` did, with the shared graph in scope twelve lines
-/// above the call.
-pub(crate) fn collect_preflight_diagnostics_with_module_graph(
-    path: &Path,
-    source: &str,
-    program: &[SNode],
-    config: &CheckConfig,
-    module_graph: &harn_modules::ModuleGraph,
-) -> Vec<PreflightDiagnostic> {
-    let host_capabilities = resolve_host_capabilities(config);
-    collect_preflight_diagnostics_with_host_capabilities(
-        path,
-        source,
-        program,
-        config,
-        module_graph,
-        &host_capabilities.capabilities,
-    )
 }
 
 pub(super) fn collect_preflight_diagnostics_with_host_capabilities(
