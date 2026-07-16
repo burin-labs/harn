@@ -105,9 +105,6 @@ pub(crate) struct RoutingErrorSnapshot {
     pub status: Option<u16>,
 }
 
-/// Match an error against the policy's failover rules. Returns true
-/// when the error is eligible to advance the chain.
-
 pub(super) fn emit_routing_event(
     dispatch: &str,
     event: &str,
