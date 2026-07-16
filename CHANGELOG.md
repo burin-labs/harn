@@ -9,7 +9,7 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.20
 
 - Added coverage for the mock provider's native tool-call path: unit tests that
   the CLI mock install/match/build path and the result-to-assistant-envelope path
@@ -68,6 +68,15 @@ keeps condensed series summaries instead of full per-patch history.
   execution metadata, including concrete `harn provider tool-probe` command
   recipes for rows that are executable today and typed missing-runner reasons for
   remaining scorecard cases.
+
+### Added
+
+- Add `harn provider dispatch-audit` for offline, in-process provider dispatch
+  matrix validation across catalog routes and tool-format/thinking variants,
+  provider/model/capability filters, typed zero-route provider diagnostics, and
+  a resumable live `provider tool-probe` plan with explicit request profiles,
+  per-route not-applicable rows, matrix counts, and command-id-prefixed receipt
+  paths.
 
 ### Fixed
 
@@ -133,6 +142,18 @@ keeps condensed series summaries instead of full per-patch history.
   failing during option extraction.
 - Fixed supervisor shutdown so `supervisor_stop` does not leave not-yet-started
   child tasks in a pending state under load.
+
+- Provider tool-probe audits now classify unsupported signed-thinking routes and
+  surfaces as not applicable instead of validation failures.
+- Surface the agent loop's typed terminal outcome on the ACP agent-event stream so headless hosts can distinguish
+  natural completion from policy, budget, and error stops, including the live natural-completion reasons.
+- Apply classifier-backed missing-tool-call recovery to native-tool turns before accepting prose as natural completion.
+- `release_ship.sh --finalize` now skips a redundant `git push origin <tag>` when
+  origin already has the release tag at `HEAD`, avoiding pre-push hook failures
+  during tag-triggered release finalization.
+- `wait_command(timeout_ms)` now synchronizes directly with live background
+  handles, so it can return a completed result after process output is visible but
+  before the session feedback inbox wakes.
 
 ## v0.10.19
 
