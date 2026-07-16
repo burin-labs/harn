@@ -13,16 +13,6 @@ keeps condensed series summaries instead of full per-patch history.
 
 ### Added
 
-- Add `harn provider dispatch-audit` for offline, in-process provider dispatch
-  matrix validation across catalog routes and tool-format/thinking variants,
-  provider/model/capability filters, typed zero-route provider diagnostics, and
-  a resumable live `provider tool-probe` plan with explicit request profiles,
-  per-route not-applicable rows, matrix counts, and command-id-prefixed receipt
-  paths.
-
-
-- Provider tool-probe audits now classify unsupported signed-thinking routes and
-  surfaces as not applicable instead of validation failures.
 - Surface the agent loop's typed terminal outcome on the ACP agent-event stream so headless hosts can distinguish
   natural completion from policy, budget, and error stops, including the live natural-completion reasons.
 - Apply classifier-backed missing-tool-call recovery to native-tool turns before accepting prose as natural completion.
