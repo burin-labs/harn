@@ -81,6 +81,52 @@ pub struct CreateSession {
     pub attributes: BTreeMap<String, serde_json::Value>,
 }
 
+/// One atomic, idempotent import into a new canonical session.
+///
+/// `source_id` names the external source independently of the target session;
+/// its receipt survives session deletion so retired sources cannot resurrect
+/// data. Reusing a source id with a different digest is a conflict.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportSession {
+    pub source_id: String,
+    pub source_digest: String,
+    pub session: CreateSession,
+    #[serde(default)]
+    pub events: Vec<AppendEvent>,
+}
+
+impl ImportSession {
+    /// Validate the backend-independent import contract.
+    pub fn validate(&self) -> StoreResult<()> {
+        if self.source_id.trim().is_empty() || self.source_digest.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "import source_id and source_digest must be non-empty".to_string(),
+            ));
+        }
+        if self
+            .session
+            .id
+            .as_deref()
+            .is_none_or(|session_id| session_id.trim().is_empty())
+        {
+            return Err(StoreError::InvalidInput(
+                "import session id must be explicit and non-empty".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportResult {
+    pub source_id: String,
+    pub source_digest: String,
+    pub session_id: SessionId,
+    pub event_count: usize,
+    /// True only for the call that committed the import.
+    pub imported: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListFilter {
     #[serde(default)]
@@ -304,6 +350,15 @@ pub trait SessionStore: Send + Sync {
         );
         Ok(result)
     }
+}
+
+/// Atomic, idempotent ingestion for stores that accept external session data.
+///
+/// This remains separate from [`SessionStore`] so downstream backends do not
+/// need to implement migration semantics unless they expose import support.
+#[async_trait]
+pub trait SessionImporter: SessionStore {
+    async fn import(&self, request: ImportSession) -> StoreResult<ImportResult>;
 }
 
 /// Drain every event for a session via repeated paginated reads. Used

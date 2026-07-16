@@ -3,13 +3,12 @@ import "std/session-store"
 /**
  * Exercises the std/session-store substrate: append (hash chain), mutation
  * projection (upsert/delete), value projection, and chain verification. All
- * fields printed are deterministic (record_hash covers only
- * {session_id, event_id, payload, prev_hash}; ts is pinned via options.now).
+ * fields printed are deterministic apart from the opaque canonical hashes.
  */
 pipeline default() {
   const root = path_join(".harn", "tmp", "harn-session-store-" + uuid())
   const sid = "burin.agent_context.memories.project"
-  const opts = {root: root, now: "2026-04-29T00:00:00Z", kind_type: "AgentMemory"}
+  const opts = {root: root, kind_type: "AgentMemory"}
   const first = session_store_append(sid, {operation: "upsert", record: {id: "m1", title: "one"}}, opts)
   const second = session_store_append(sid, {operation: "upsert", record: {id: "m2", title: "two"}}, opts)
   session_store_append(sid, {operation: "upsert", record: {id: "m1", title: "one-v2"}}, opts)
@@ -18,6 +17,7 @@ pipeline default() {
   __io_println(first.event_id)
   __io_println(first.prev_hash == nil)
   __io_println(second.prev_hash == first.record_hash)
+  __io_println(second.parent_event_id == first.event_id)
   __io_println(starts_with(first.record_hash, "sha256:"))
   __io_println(first.kind.type)
   // Projection: m1 updated to v2, m2 deleted → only m1 survives.
@@ -25,20 +25,14 @@ pipeline default() {
   __io_println(len(records))
   __io_println(records[0].id)
   __io_println(records[0].title)
-  // Verification of the on-disk chain.
+  // Verification of the canonical SQLite chain.
   const report = session_store_verify(sid, {root: root})
   __io_println(report.ok)
   __io_println(report.count)
   // Value stream projection (replace / clear fold).
   const vsid = "example.value.stream"
-  session_store_append(
-    vsid,
-    {operation: "replace", value: "hello"},
-    {root: root, now: "2026-04-29T00:00:00Z"},
-  )
+  session_store_append(vsid, {operation: "replace", value: "hello"}, {root: root})
   __io_println(session_store_project_value(vsid, "fallback", {root: root}))
-  __io_println(
-    ends_with(session_store_path(sid, {root: root}), "/.harn/session-store/" + sid + ".jsonl"),
-  )
+  __io_println(ends_with(session_store_path(sid, {root: root}), "/.harn/session-store.sqlite"))
   harness.fs.delete(root)
 }

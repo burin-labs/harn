@@ -14,12 +14,12 @@ use super::memory_helpers::{meta_for_create, validate_open};
 use super::redaction::{prepare_append_event, redact_stored_events};
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
-    verify_event_chain,
+    verify_session_chain,
 };
 use super::store::{
-    CreateSession, EventPage, ForkResult, ListFilter, ReadRange, SessionId, SessionMeta,
-    SessionStatus, SessionStore, Snapshot, SnapshotId, StoreError, StoreHooks, StoreResult,
-    TruncateResult, VerifyFailure, VerifyReport, MAX_READ_BATCH,
+    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
+    SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, Snapshot, SnapshotId,
+    StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport, MAX_READ_BATCH,
 };
 
 struct SessionRecord {
@@ -42,6 +42,7 @@ impl SessionRecord {
 struct Inner {
     sessions: BTreeMap<SessionId, SessionRecord>,
     snapshots: BTreeMap<String, Snapshot>,
+    imports: BTreeMap<String, ImportResult>,
 }
 
 #[derive(Clone)]
@@ -122,6 +123,44 @@ fn append_locked(
     record.meta.updated_at = stored.ts.clone();
     record.meta.chain_root_hash = Some(chain_root_fold(&prev_root, &stored.record_hash));
     Ok(stored)
+}
+
+#[async_trait]
+impl SessionImporter for MemorySessionStore {
+    async fn import(&self, request: ImportSession) -> StoreResult<ImportResult> {
+        request.validate()?;
+        let mut guard = lock(&self.inner);
+        if let Some(existing) = guard.imports.get(&request.source_id) {
+            if existing.source_digest != request.source_digest {
+                return Err(StoreError::Conflict(format!(
+                    "import source '{}' changed digest",
+                    request.source_id
+                )));
+            }
+            let mut result = existing.clone();
+            result.imported = false;
+            return Ok(result);
+        }
+
+        let meta = meta_for_create(request.session);
+        if guard.sessions.contains_key(&meta.id) {
+            return Err(StoreError::AlreadyExists(meta.id));
+        }
+        let mut record = SessionRecord::fresh(meta.clone());
+        for event in request.events {
+            append_locked(&mut record, &self.hooks, event)?;
+        }
+        let result = ImportResult {
+            source_id: request.source_id.clone(),
+            source_digest: request.source_digest,
+            session_id: meta.id.clone(),
+            event_count: record.events.len(),
+            imported: true,
+        };
+        guard.sessions.insert(meta.id, record);
+        guard.imports.insert(request.source_id, result.clone());
+        Ok(result)
+    }
 }
 
 #[async_trait]
@@ -426,7 +465,6 @@ impl SessionStore for MemorySessionStore {
             .sessions
             .get(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
-        let chain_root = chain_root_hash(&record.events);
         let event_verifier = self
             .hooks
             .event_signer
@@ -438,21 +476,12 @@ impl SessionStore for MemorySessionStore {
             .as_ref()
             .or(self.hooks.event_signer.as_ref())
             .map(|signer| signer.verifying_key());
-        let (signed, failures) = verify_event_chain(
+        Ok(verify_session_chain(
+            &record.meta,
             &record.events,
             event_verifier.as_ref(),
             receipt_verifier.as_ref(),
-        );
-        Ok(VerifyReport {
-            session_id: session_id.to_string(),
-            chain_root_hash: chain_root,
-            event_count: record.events.len(),
-            signed_event_count: signed,
-            failures: failures
-                .into_iter()
-                .map(|(event_id, reason)| VerifyFailure { event_id, reason })
-                .collect(),
-        })
+        ))
     }
 }
 

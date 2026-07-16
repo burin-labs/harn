@@ -21,6 +21,7 @@ use super::event::{
     canonical_event_bytes, canonical_json_bytes, EventId, EventSignature, SessionEventKind,
     StoredEvent,
 };
+use super::store::{SessionMeta, VerifyFailure, VerifyReport};
 
 pub const ALGORITHM: &str = "ed25519";
 
@@ -202,20 +203,59 @@ pub fn verify_event_chain(
     event_verifier: Option<&VerifyingKey>,
     receipt_verifier: Option<&VerifyingKey>,
 ) -> (usize, Vec<(EventId, String)>) {
+    let (signed, failures) = verify_event_chain_detailed(events, event_verifier, receipt_verifier);
+    (
+        signed,
+        failures
+            .into_iter()
+            .map(|failure| (failure.event_id, failure.reason))
+            .collect(),
+    )
+}
+
+struct ChainFailure {
+    event_id: EventId,
+    reason: String,
+}
+
+fn verify_event_chain_detailed(
+    events: &[StoredEvent],
+    event_verifier: Option<&VerifyingKey>,
+    receipt_verifier: Option<&VerifyingKey>,
+) -> (usize, Vec<ChainFailure>) {
     let mut signed = 0usize;
-    let mut failures: Vec<(EventId, String)> = Vec::new();
+    let mut failures = Vec::new();
+    let mut expected_prev_hash: Option<&str> = None;
     for (index, event) in events.iter().enumerate() {
+        let expected_event_id = index as EventId + 1;
+        if event.event_id != expected_event_id {
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: format!(
+                    "event_id sequence gap: expected {expected_event_id}, found {}",
+                    event.event_id
+                ),
+            });
+        }
+        if event.prev_hash.as_deref() != expected_prev_hash {
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: "prev_hash chain break".to_string(),
+            });
+        }
         let recomputed = compute_record_hash(event);
         if recomputed != event.record_hash {
-            failures.push((
-                event.event_id,
-                format!(
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: format!(
                     "record_hash mismatch: stored '{stored}' vs computed '{recomputed}'",
                     stored = event.record_hash
                 ),
-            ));
+            });
+            expected_prev_hash = Some(event.record_hash.as_str());
             continue;
         }
+        expected_prev_hash = Some(event.record_hash.as_str());
         let Some(signed_by) = event.signed_by.as_ref() else {
             continue;
         };
@@ -237,10 +277,67 @@ pub fn verify_event_chain(
         };
         match result {
             Ok(()) => signed += 1,
-            Err(error) => failures.push((event.event_id, error.to_string())),
+            Err(error) => failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: error.to_string(),
+            }),
         }
     }
     (signed, failures)
+}
+
+/// Verify event bytes, sequence/linkage, signatures, and the persisted session
+/// counters/root as one contract shared by every backend.
+pub fn verify_session_chain(
+    meta: &SessionMeta,
+    events: &[StoredEvent],
+    event_verifier: Option<&VerifyingKey>,
+    receipt_verifier: Option<&VerifyingKey>,
+) -> VerifyReport {
+    let chain_root = chain_root_hash(events);
+    let (signed_event_count, mut failures) =
+        verify_event_chain_detailed(events, event_verifier, receipt_verifier);
+    let tail_id = events.last().map(|event| event.event_id).unwrap_or(0);
+    if meta.event_count != events.len() {
+        failures.push(ChainFailure {
+            event_id: tail_id,
+            reason: format!(
+                "session event_count mismatch: stored {}, found {}",
+                meta.event_count,
+                events.len()
+            ),
+        });
+    }
+    if meta.last_event_id != events.last().map(|event| event.event_id) {
+        failures.push(ChainFailure {
+            event_id: tail_id,
+            reason: "session last_event_id mismatch".to_string(),
+        });
+    }
+    let expected_root = if events.is_empty() {
+        None
+    } else {
+        Some(chain_root.as_str())
+    };
+    if meta.chain_root_hash.as_deref() != expected_root {
+        failures.push(ChainFailure {
+            event_id: tail_id,
+            reason: "session chain_root_hash mismatch".to_string(),
+        });
+    }
+    VerifyReport {
+        session_id: meta.id.clone(),
+        chain_root_hash: chain_root,
+        event_count: events.len(),
+        signed_event_count,
+        failures: failures
+            .into_iter()
+            .map(|failure| VerifyFailure {
+                event_id: failure.event_id,
+                reason: failure.reason,
+            })
+            .collect(),
+    }
 }
 
 /// Initial chain root before any events have been appended. The prefix

@@ -1,0 +1,51 @@
+import "std/session-store"
+
+/**
+ * Proves the public Harn API atomically imports a retired JSONL stream once,
+ * survives separately opened store connections, and writes only to SQLite
+ * after cutover.
+ */
+pipeline default() {
+  const root = path_join(".harn", "tmp", "harn-session-import-" + uuid())
+  const sid = "legacy.public"
+  const legacy_dir = path_join(root, ".harn", "session-store")
+  const legacy_path = path_join(legacy_dir, sid + ".jsonl")
+  harness.fs.mkdir(legacy_dir, true)
+  const payload = {operation: "upsert", record: {id: "legacy", title: "imported"}}
+  const record_hash = "sha256:"
+    + sha256(json_stringify({event_id: 1, payload: payload, prev_hash: nil, session_id: sid}))
+  const legacy_event = {
+    event_id: 1,
+    session_id: sid,
+    tenant_id: "tenant-a",
+    parent_event_id: nil,
+    actor: "harn",
+    kind: {kind: "custom", type: "LibrarianEntry"},
+    payload: payload,
+    tags: ["legacy"],
+    headers: {source: "conformance"},
+    ts_ms: 1000,
+    ts: "1970-01-01T00:00:01Z",
+    record_hash: record_hash,
+    prev_hash: nil,
+  }
+  harness.fs.write_text(legacy_path, json_stringify(legacy_event) + "\n")
+  const legacy_before = harness.fs.read_text(legacy_path)
+  const first = session_store_events(sid, {root: root})
+  __io_println(len(first))
+  const imported = first[0]
+  if imported == nil {
+    throw "legacy import did not produce an event"
+  }
+  __io_println(imported.payload.record.title)
+  __io_println(len(session_store_events(sid, {root: root})))
+  session_store_append(
+    sid,
+    {operation: "upsert", record: {id: "canonical", title: "new"}},
+    {root: root, tenant_id: "tenant-a"},
+  )
+  __io_println(len(session_store_events(sid, {root: root})))
+  __io_println(harness.fs.read_text(legacy_path) == legacy_before)
+  __io_println(ends_with(session_store_path(sid, {root: root}), "/.harn/session-store.sqlite"))
+  harness.fs.delete(root)
+}
