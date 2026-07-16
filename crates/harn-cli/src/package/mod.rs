@@ -36,6 +36,7 @@ mod lockfile;
 mod manifest;
 mod maturity;
 mod package_ops;
+mod persona_runtime;
 mod registry;
 mod skills;
 mod validation;
@@ -59,6 +60,7 @@ pub use maturity::{
     OutdatedStatus,
 };
 pub use package_ops::*;
+pub(crate) use persona_runtime::*;
 pub(crate) use registry::*;
 pub use registry::{
     clean_package_cache, list_package_cache, search_package_registry, search_rule_package_registry,

@@ -89,6 +89,7 @@ pub fn current() -> int {
 #[tokio::test(flavor = "current_thread")]
 async fn lazy_pipeline_callable_binds_arguments_and_returns_value() {
     let dir = tempfile::tempdir().expect("tempdir");
+    let caller_dir = tempfile::tempdir().expect("caller tempdir");
     let module_path = dir.path().join("workflow.harn");
     std::fs::write(
         &module_path,
@@ -101,6 +102,7 @@ pub pipeline run(value) {
     .expect("write pipeline module");
     let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
     let mut vm = Vm::new();
+    vm.set_source_dir(caller_dir.path());
 
     let result = vm
         .execute_callable(&callable, &[VmValue::Int(42)])
@@ -111,4 +113,5 @@ pub pipeline run(value) {
         panic!("expected pipeline result dict, got {result:?}");
     };
     assert!(matches!(result.get("received"), Some(VmValue::Int(42))));
+    assert_eq!(vm.source_dir.as_deref(), Some(caller_dir.path()));
 }

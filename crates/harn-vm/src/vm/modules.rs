@@ -235,13 +235,17 @@ impl Vm {
         let chunk = crate::Compiler::new()
             .compile_named_with_param_globals(&program, &pipeline.pipeline_name)
             .map_err(|error| VmError::Runtime(error.to_string()))?;
+        let previous_source_dir = self.source_dir.clone();
         if let Some(parent) = module_path.parent() {
             self.set_source_dir(parent);
         }
         for (param, value) in params.iter().zip(args) {
             self.set_global(param, value.clone());
         }
-        self.execute(&chunk).await
+        let result = self.execute(&chunk).await;
+        self.source_dir = previous_source_dir;
+        crate::stdlib::set_thread_source_dir_option(self.source_dir.as_deref());
+        result
     }
 
     fn lazy_callable_module_path(&self, lazy: &crate::value::LazyVmCallable) -> (PathBuf, PathBuf) {

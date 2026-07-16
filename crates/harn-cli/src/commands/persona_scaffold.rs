@@ -93,7 +93,7 @@ pub fn {{persona_ident}}(task) {
 
 {{steps}}
 
-pipeline run(task) {
+pub pipeline run(task) {
   return {{persona_ident}}(task)
 }
 "#;

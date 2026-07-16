@@ -2,6 +2,45 @@ use tokio::sync::broadcast;
 
 use super::*;
 
+fn persona_run_cost_from_dispatch_result(result: &serde_json::Value) -> crate::PersonaRunCost {
+    let cost_usd = micros_to_usd(dispatch_result_cost_usd_micros(result));
+    let tokens = dispatch_result_tokens(result);
+    crate::PersonaRunCost {
+        cost_usd,
+        tokens,
+        llm_steps: i64::from(cost_usd > 0.0 || tokens > 0),
+        metadata: serde_json::json!({"source": "dispatch_result"}),
+        ..Default::default()
+    }
+}
+
+fn dispatch_result_tokens(result: &serde_json::Value) -> u64 {
+    for field in ["tokens", "total_tokens", "totalTokens"] {
+        if let Some(tokens) = result.get(field).and_then(serde_json::Value::as_u64) {
+            return tokens;
+        }
+    }
+    if let Some(usage) = result.get("usage") {
+        let input = usage
+            .get("input_tokens")
+            .or_else(|| usage.get("inputTokens"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default();
+        let output = usage
+            .get("output_tokens")
+            .or_else(|| usage.get("outputTokens"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default();
+        if input > 0 || output > 0 {
+            return input.saturating_add(output);
+        }
+    }
+    result
+        .get("result")
+        .map(dispatch_result_tokens)
+        .unwrap_or_default()
+}
+
 impl Dispatcher {
     pub(super) async fn dispatch_persona(
         &self,

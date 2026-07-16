@@ -1375,7 +1375,6 @@ pub enum CollectedTriggerHandler {
         ledger_options: Option<serde_json::Value>,
     },
 }
-
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Predicate callables are validated now and reused by harn#161 dispatch gating.
 pub struct CollectedTriggerPredicate {
