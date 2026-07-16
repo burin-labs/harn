@@ -448,8 +448,10 @@ fn __classify_missing_tool_call(session, text, opts, iteration) {
 }
 
 /**
- * TEXT-mode corrective nudges that the native-gated completion
- * confirmation never reaches. Two cases, in priority order:
+ * Corrective nudges for a toolless turn. Text mode also detects fenced calls;
+ * both text and native modes use the same typed missing-tool-call classifier.
+ * Native callers invoke this before accepting prose as natural completion.
+ * Two cases, in priority order:
  *   1. fenced-call attempt → tell the model to emit the call bare.
  *   2. missing-tool-call recovery → tell the model to emit the intended call.
  * One nudge per turn; both are bounded by the loop's `max_nudges` budget.
@@ -457,11 +459,17 @@ fn __classify_missing_tool_call(session, text, opts, iteration) {
  * loop can suppress the fallback progress-streak nudge and avoid
  * double-injecting on the same turn.
  */
-fn __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, iteration) {
-  if !__text_mode_toolless_turn(opts, has_tool_calls, text) {
+fn __maybe_inject_action_nudge(session, opts, has_tool_calls, text, iteration) {
+  const text_mode = __text_mode_toolless_turn(opts, has_tool_calls, text)
+  const native_mode = __native_completion_context(opts, has_tool_calls, text)
+  if !text_mode && !native_mode {
     return false
   }
-  const fenced = __detect_fenced_call_attempt(text)
+  const fenced = if text_mode {
+    __detect_fenced_call_attempt(text)
+  } else {
+    nil
+  }
   if fenced != nil {
     agent_session_inject_feedback(
       session.session_id,
@@ -480,14 +488,22 @@ fn __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, it
   const missing = __classify_missing_tool_call(session, text, opts, iteration)
   if missing != nil {
     const tool_name = missing.tool_name
+    const instruction = if native_mode {
+      "Call `"
+        + to_string(tool_name)
+        + "` now using the available native tool interface. Do not describe the action again."
+    } else {
+      "Emit the call now: <tool_call>\n"
+        + to_string(tool_name)
+        + "({ ... })\n</tool_call>. Do not describe the action again."
+    }
     agent_session_inject_feedback(
       session.session_id,
       "missing_tool_call",
       "You appeared to intend a call to `"
         + to_string(tool_name)
-        + "` but did not call it. Emit the call now: <tool_call>\n"
-        + to_string(tool_name)
-        + "({ ... })\n</tool_call>. Do not describe the action again.",
+        + "` but did not call it. "
+        + instruction,
     )
     agent_emit_event(
       session.session_id,
@@ -1133,6 +1149,17 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   if verdict_result != nil {
     return __post_turn_with_narrowing(verdict_result, narrowing)
   }
+  const native_action_nudged = if lowercase(to_string(opts?.tool_format ?? "")) == "native" {
+    __maybe_inject_action_nudge(session, opts, has_tool_calls, text, iteration)
+  } else {
+    false
+  }
+  if native_action_nudged {
+    return __post_turn_with_narrowing(
+      {kind: "continue", done_judge_due: false, nudged_this_turn: true},
+      narrowing,
+    )
+  }
   if !has_tool_calls && trim(text) != "" && opts?.done_judge != nil {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
@@ -1150,7 +1177,11 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
   const confirmation_nudged = __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration)
-  const action_nudged = __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, iteration)
+  const action_nudged = if lowercase(to_string(opts?.tool_format ?? "")) == "native" {
+    false
+  } else {
+    __maybe_inject_action_nudge(session, opts, has_tool_calls, text, iteration)
+  }
   return __post_turn_with_narrowing(
     {kind: "continue", done_judge_due: false, nudged_this_turn: confirmation_nudged || action_nudged},
     narrowing,
