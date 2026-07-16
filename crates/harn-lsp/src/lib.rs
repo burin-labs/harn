@@ -88,13 +88,9 @@ mod tests {
     /// Resolve the hover target at the given 0-based line/column, through the
     /// real handler code.
     ///
-    /// This used to re-implement `handlers::hover`'s scope resolution inline,
-    /// under a comment saying it mirrored it. It did mirror it — which is why
-    /// every test below passed while the handler resolved `harness.exit` to the
-    /// global `exit` builtin (#4794). A mirror cannot fail with its subject, so
-    /// the bug lived in the one step the copy did not reproduce: the order in
-    /// which builtins, keywords and symbols are consulted. The copy is gone;
-    /// these tests now drive `resolve_hover_target` itself.
+    /// Hover tests must call the production resolver. A test that re-implements
+    /// resolution cannot fail with the code it stands in for, so it cannot
+    /// cover the order in which builtins, keywords and symbols are consulted.
     fn hover_target_at(source: &str, line: u32, col: u32) -> Option<HoverTarget> {
         let state = DocumentState::new(source.to_string());
         resolve_hover_target(source, &state.symbols, Position::new(line, col))
@@ -293,13 +289,30 @@ fn read_to_string(path: string) -> string {
     }
 
     #[test]
+    fn hover_member_access_does_not_resolve_to_a_user_defined_global_of_the_same_name() {
+        // Same constraint as the builtin case, for user-defined globals: a
+        // top-level binding carries no scope span, so nothing but an explicit
+        // receiver-owned check keeps `value.greet` from resolving to `fn greet`.
+        let source = "fn greet() {\n  log(\"hi\")\n}\n\nfn main(harness: Harness) {\n  const value = 1\n  value.greet\n}\n";
+
+        // `.greet` is a member of `value`, which has no such method.
+        assert!(
+            hover_target_at(source, 6, 9).is_none(),
+            "a member access must not resolve to a top-level function of the same name",
+        );
+
+        // The same name, used bare, still resolves to the global it names.
+        match hover_target_at(source, 0, 4) {
+            Some(HoverTarget::Symbol(sym)) => assert_eq!(sym.name, "greet"),
+            other => panic!("bare `greet` must still hover as the global fn, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn hover_member_access_does_not_resolve_to_a_global_builtin_of_the_same_name() {
-        // `harness.exit` is not a method: the runtime answers `value of type
-        // Harness has no method \`exit\``. But `exit` IS a global builtin, so
-        // hovering it reported "**exit(code)** — Terminate process with exit
-        // code" and the method looked implemented. Someone then wrote
-        // `harness.exit(2)`, got exit code 1, and filed a bug against exit codes
-        // -- which work fine. The hover invented the API the bug was about.
+        // A member access must not consult the global builtin namespace: a
+        // member that borrows a builtin's docs describes an API the receiver
+        // does not have.
         let source = "fn main(harness: Harness) {\n  harness.exit(2)\n}\n";
 
         // Column 11 is inside `exit`, after the dot.

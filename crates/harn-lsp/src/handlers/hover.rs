@@ -38,13 +38,13 @@ pub(crate) fn resolve_hover_target(
 ) -> Option<HoverTarget> {
     let (word, word_start) = word_span_at_position(source, position)?;
 
-    // A member access names something on the receiver, so the global namespaces
-    // do not apply to it. Consulting them here is what made `harness.exit` hover
-    // as the global `exit(code)` builtin and look implemented, when no such
-    // method exists and the runtime rejects the call. This is not specific to
-    // `exit`: every member whose name collides with a builtin (`.log`, `.env`,
-    // `.type_of`, `.read_file`, ...) resolved to the wrong thing.
-    if !is_member_access(source, word_start) {
+    // A member access names something on its receiver, so no global namespace
+    // applies to it: not builtins, not keywords, and not top-level bindings. A
+    // member that resolves to a global describes something the receiver does not
+    // have, which makes a call the runtime rejects look implemented.
+    let member_access = is_member_access(source, word_start);
+
+    if !member_access {
         if let Some(doc) = builtin_doc(&word) {
             return Some(HoverTarget::Builtin(doc));
         }
@@ -61,7 +61,16 @@ pub(crate) fn resolve_hover_target(
         if sym.name != word {
             continue;
         }
-        // Impl-block methods are globally visible via dot syntax — skip scope check.
+        // Only a receiver-owned symbol can answer a member access. A top-level
+        // binding carries no scope span and would otherwise pass the scope check
+        // below, so `value.greet` would resolve to a global `fn greet`. Until
+        // receiver types are inferred, an impl-block method is the only symbol
+        // that can be receiver-owned; anything else is a name collision.
+        if member_access && sym.impl_type.is_none() {
+            continue;
+        }
+        // Impl-block methods are visible through dot syntax from anywhere, so a
+        // cursor-position scope check does not apply to them.
         let in_scope = if sym.impl_type.is_some() {
             true
         } else {
