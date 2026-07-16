@@ -102,7 +102,7 @@ pipeline test_parse_args_help(task) {
 // --- parse_budget_mb / budget_bytes_of --------------------------------------
 @test
 pipeline test_budget_parse_valid(task) {
-  assert_eq(parse_budget_mb(default_binary_size_budget_mb()), 202.0)
+  assert_eq(parse_budget_mb(default_binary_size_budget_mb()), 202.25)
   assert_eq(parse_budget_mb("1.2"), 1.2)
 }
 
