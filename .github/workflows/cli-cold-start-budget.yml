@@ -1,32 +1,19 @@
 # Cold-start budget gate for ported CLI subcommands. Tracks epic
 # #2293 (G5 = #2298).
 #
-# IMPORTANT: this workflow is NOT yet wired into the required-status
-# set in `ci.yml`'s `CI status` job. We are deliberately keeping it
-# advisory until at least one ported command has its baseline committed
-# (W1 #2297 will be the trigger to promote it). Until then it runs and
-# reports a result but a red run does not block the merge queue.
+# IMPORTANT: this workflow is NOT wired into the required-status set in
+# `ci.yml`'s `CI status` job. It is intentionally advisory and runs on a daily
+# main-branch cadence plus manual dispatch. Do not add a pull_request trigger:
+# this lane builds an optimized `harn` binary before measuring ~millisecond
+# CLI startup and otherwise adds release-build wall time to PR rollup.
 #
 # See perf/cli/README.md for the methodology and per-command budgets.
 
 name: CLI cold-start budget
 
 on:
-  pull_request:
-    paths:
-      - 'crates/harn-cli/src/cli/**'
-      - 'crates/harn-cli/src/dispatch.rs'
-      - 'crates/harn-stdlib/src/stdlib/cli/**'
-      - 'crates/harn-stdlib/src/lib.rs'
-      - 'crates/harn-vm/src/bytecode_cache.rs'
-      # Root Cargo.toml carries [profile.release]; a profile change (LTO,
-      # codegen-units, strip) shifts the shipped binary's cold start, so the
-      # budget must re-validate when it moves.
-      - 'Cargo.toml'
-      - 'perf/cli/**'
-      - 'scripts/bench_cli_cold_start.sh'
-      - 'scripts/bench_cli_cold_start.harn'
-      - '.github/workflows/cli-cold-start-budget.yml'
+  schedule:
+    - cron: '17 11 * * *'
   workflow_dispatch:
 
 permissions:
@@ -34,8 +21,8 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -47,15 +34,15 @@ env:
 jobs:
   cold-start-budget:
     name: Cold-start budget
-    # Release PRs always touch Cargo.toml for the version bump, but that does
-    # not change release-profile cold-start behavior. The release binary matrix
-    # is already building official artifacts, so this advisory budget lane adds
-    # noise and ~20 minutes of extra PR rollup latency on every release.
-    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release/v')
+    # Keep manual release-ref runs out of this advisory lane. The release binary
+    # matrix already builds official artifacts, so this budget lane would add
+    # noise without new coverage.
+    if: >-
+      (github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))
     # This advisory workflow can run on GitHub-hosted runners before it is part
     # of the required CI aggregate. Keep an explicit ceiling so a wedged release
-    # build does not burn the platform default timeout after the PR has moved on.
-    timeout-minutes: 45
+    # build does not burn the platform default timeout.
+    timeout-minutes: 25
     # Bench is wall-clock sensitive, so a fixed-class runner is the
     # right long-term home. For now we stay on ubuntu-latest so the
     # workflow lights up for everyone without depending on the
@@ -80,8 +67,8 @@ jobs:
           shared-key: cli-cold-start-budget
           cache-bin: false
       - name: Build release harn
-        timeout-minutes: 40
-        run: cargo build --release --bin harn
+        timeout-minutes: 20
+        run: cargo build --locked --release --bin harn
       - name: Run cold-start bench
         timeout-minutes: 5
         # `--no-build` because we already built above; `--iterations` is

@@ -3,21 +3,26 @@ use std::fs;
 use std::process;
 use std::time::{Duration, Instant};
 
-use futures::StreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Method, StatusCode};
 use serde::Serialize;
 use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use url::Url;
 use uuid::Uuid;
 
-use crate::net;
 use crate::test_timing::DurationSummary;
 
-const PROTOCOL_VERSION: &str = "agents-protocol-2026-04-25";
+mod wire;
+
 const REPORT_SCHEMA: &str = "harn-agents-conformance-2026-04-25";
+
+use wire::{
+    error_code, expect_array_field, expect_error_code, expect_field_eq, expect_json,
+    expect_list_response, expect_status, expect_status_any, expect_string_array_contains,
+    expect_string_field, expect_task_status, expect_u64_field, first_id_from_list,
+    is_terminal_status, list_data, stream_sse_frames, validate_sse_frames,
+    validate_status_transitions, ConformanceClient, ProbeResult, PROTOCOL_VERSION,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct AgentsConformanceConfig {
@@ -30,22 +35,6 @@ pub(crate) struct AgentsConformanceConfig {
     pub(crate) json_out: Option<String>,
     pub(crate) workspace_id: Option<String>,
     pub(crate) session_id: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct ConformanceClient {
-    http: reqwest::Client,
-    base_url: Url,
-    api_key: Option<String>,
-    timeout: Duration,
-}
-
-#[derive(Debug)]
-struct HttpResult {
-    status: StatusCode,
-    headers: HeaderMap,
-    body: String,
-    json: Option<Value>,
 }
 
 #[derive(Debug, Default)]
@@ -126,8 +115,6 @@ struct LeaderboardReport {
     categories: Vec<CategoryReport>,
 }
 
-type ProbeResult<T = ()> = Result<T, String>;
-
 pub(crate) async fn run_agents_conformance(config: AgentsConformanceConfig) {
     let client = ConformanceClient::new(
         &config.target_url,
@@ -159,7 +146,7 @@ pub(crate) async fn run_agents_conformance(config: AgentsConformanceConfig) {
     if !config.json {
         println!(
             "Running Harn Agents Protocol conformance against {}",
-            client.base_url.as_str().trim_end_matches('/')
+            client.base_url().as_str().trim_end_matches('/')
         );
         println!();
     }
@@ -172,7 +159,7 @@ pub(crate) async fn run_agents_conformance(config: AgentsConformanceConfig) {
         reports.push(report);
     }
 
-    let report = build_leaderboard_report(client.base_url.as_str(), state, reports, suite_start);
+    let report = build_leaderboard_report(client.base_url().as_str(), state, reports, suite_start);
     let failed = report.summary.failed > 0 || report.summary.categories_failed > 0;
 
     if config.json {
@@ -458,7 +445,9 @@ async fn workspace_crud(client: &ConformanceClient, state: &mut ProbeState) -> P
             Some(&format!("{}-workspace", state.run_id)),
         )
         .await?;
-    if response.status == StatusCode::NOT_FOUND || response.status == StatusCode::NOT_IMPLEMENTED {
+    if response.status() == StatusCode::NOT_FOUND
+        || response.status() == StatusCode::NOT_IMPLEMENTED
+    {
         let fallback = first_list_id(client, "/v1/workspaces").await?;
         state.workspace_id = Some(fallback);
         return Ok(());
@@ -581,7 +570,7 @@ async fn task_crud(client: &ConformanceClient, state: &mut ProbeState) -> ProbeR
             StatusCode::UNPROCESSABLE_ENTITY,
         ],
     )?;
-    if response.status == StatusCode::OK {
+    if response.status() == StatusCode::OK {
         expect_task_status(expect_json(&response)?)?;
     }
     Ok(())
@@ -641,7 +630,7 @@ async fn extended_read_surfaces(client: &ConformanceClient, state: &mut ProbeSta
     ] {
         let response = client.get_json(path).await?;
         expect_status_any(&response, &[StatusCode::OK, StatusCode::NOT_IMPLEMENTED])?;
-        if response.status == StatusCode::OK {
+        if response.status() == StatusCode::OK {
             expect_list_response(expect_json(&response)?, path)?;
         }
     }
@@ -666,7 +655,7 @@ async fn extended_read_surfaces(client: &ConformanceClient, state: &mut ProbeSta
             StatusCode::NOT_IMPLEMENTED,
         ],
     )?;
-    if response.status == StatusCode::CREATED || response.status == StatusCode::OK {
+    if response.status() == StatusCode::CREATED || response.status() == StatusCode::OK {
         let body = expect_json(&response)?;
         expect_field_eq(body, "object", "branch")?;
         let branch_id = expect_string_field(body, "id")?;
@@ -714,7 +703,7 @@ async fn task_state_machine(client: &ConformanceClient, state: &mut ProbeState) 
     statuses.push(expect_task_status(&task)?.to_string());
 
     let deadline =
-        Instant::now() + Duration::from_millis(client.timeout.as_millis().min(10_000) as u64);
+        Instant::now() + Duration::from_millis(client.timeout().as_millis().min(10_000) as u64);
     while Instant::now() < deadline {
         let body = get_required_resource(client, &format!("/v1/tasks/{task_id}")).await?;
         let status = expect_task_status(&body)?.to_string();
@@ -837,7 +826,7 @@ async fn same_key_different_body_conflicts(
 }
 
 async fn authenticated_request_succeeds(client: &ConformanceClient) -> ProbeResult {
-    if client.api_key.is_none() {
+    if client.api_key().is_none() {
         return skip("no --api-key supplied; authenticated request probe skipped");
     }
     let response = client.get_json("/v1/tasks").await?;
@@ -848,15 +837,15 @@ async fn authenticated_request_succeeds(client: &ConformanceClient) -> ProbeResu
 
 async fn missing_auth_rejected(client: &ConformanceClient) -> ProbeResult {
     let response = client.get_json_without_auth("/v1/tasks").await?;
-    if response.status == StatusCode::OK {
+    if response.status() == StatusCode::OK {
         return Err("authenticated endpoint accepted a request without Authorization".to_string());
     }
     expect_status_any(
         &response,
         &[StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN],
     )?;
-    if let Some(api_key) = client.api_key.as_deref() {
-        if !api_key.is_empty() && response.body.contains(api_key) {
+    if let Some(api_key) = client.api_key() {
+        if !api_key.is_empty() && response.body_contains(api_key) {
             return Err("error response leaked the API key".to_string());
         }
     }
@@ -1003,7 +992,7 @@ async fn vault_create_and_read(client: &ConformanceClient, state: &mut ProbeStat
             StatusCode::NOT_IMPLEMENTED,
         ],
     )?;
-    if response.status == StatusCode::NOT_IMPLEMENTED {
+    if response.status() == StatusCode::NOT_IMPLEMENTED {
         return skip("vault creation is not implemented by this target");
     }
     let body = expect_json(&response)?;
@@ -1051,7 +1040,7 @@ async fn outcome_list_and_read(client: &ConformanceClient, state: &mut ProbeStat
 async fn connector_webhook_metadata(client: &ConformanceClient) -> ProbeResult {
     let response = client.get_json("/v1/connectors").await?;
     expect_status_any(&response, &[StatusCode::OK, StatusCode::NOT_IMPLEMENTED])?;
-    if response.status == StatusCode::NOT_IMPLEMENTED {
+    if response.status() == StatusCode::NOT_IMPLEMENTED {
         return skip("connector listing is not implemented by this target");
     }
     let body = expect_json(&response)?;
@@ -1146,258 +1135,6 @@ async fn get_required_resource(client: &ConformanceClient, path: &str) -> ProbeR
     let response = client.get_json(path).await?;
     expect_status(&response, StatusCode::OK)?;
     Ok(expect_json(&response)?.clone())
-}
-
-async fn stream_sse_frames(
-    client: &ConformanceClient,
-    path: &str,
-    min_frames: usize,
-) -> ProbeResult<Vec<SseFrame>> {
-    let mut request = client
-        .http
-        .get(client.url(path)?)
-        .header("Harn-Agents-Protocol-Version", PROTOCOL_VERSION)
-        .header(ACCEPT, "text/event-stream");
-    if let Some(api_key) = client.api_key.as_deref() {
-        request = request.header(AUTHORIZATION, format!("Bearer {api_key}"));
-    }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| format!("GET {path} failed: {}", net::reqwest_error(&error)))?;
-    if response.status() != StatusCode::OK {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("GET {path} returned {status}: {body}"));
-    }
-    let content_type = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-    if !content_type.starts_with("text/event-stream") {
-        return Err(format!(
-            "GET {path} returned content-type {content_type}, expected text/event-stream"
-        ));
-    }
-
-    let mut stream = response.bytes_stream();
-    let mut buffer = String::new();
-    let mut frames = Vec::new();
-    let deadline = Instant::now() + client.timeout.min(Duration::from_secs(5));
-    while frames.len() < min_frames && Instant::now() < deadline {
-        let next = tokio::time::timeout(Duration::from_millis(500), stream.next()).await;
-        let Some(chunk) = next.ok().flatten() else {
-            continue;
-        };
-        let chunk = chunk.map_err(|error| {
-            format!("SSE read failed for {path}: {}", net::reqwest_error(&error))
-        })?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(idx) = buffer.find("\n\n") {
-            let raw = buffer[..idx].to_string();
-            buffer = buffer[idx + 2..].to_string();
-            if raw.trim().is_empty() {
-                continue;
-            }
-            frames.push(parse_sse_frame(&raw)?);
-            if frames.len() >= min_frames {
-                break;
-            }
-        }
-    }
-
-    if frames.len() < min_frames {
-        return Err(format!(
-            "SSE stream {path} produced {} frame(s), expected at least {min_frames}",
-            frames.len()
-        ));
-    }
-    Ok(frames)
-}
-
-#[derive(Debug)]
-struct SseFrame {
-    id: Option<String>,
-    event: Option<String>,
-    data: Option<Value>,
-}
-
-fn parse_sse_frame(raw: &str) -> ProbeResult<SseFrame> {
-    let mut id = None;
-    let mut event = None;
-    let mut data_lines = Vec::new();
-    for line in raw.lines() {
-        if let Some(value) = line.strip_prefix("id:") {
-            id = Some(value.trim().to_string());
-        } else if let Some(value) = line.strip_prefix("event:") {
-            event = Some(value.trim().to_string());
-        } else if let Some(value) = line.strip_prefix("data:") {
-            data_lines.push(value.trim_start().to_string());
-        }
-    }
-    let data = if data_lines.is_empty() {
-        None
-    } else {
-        Some(
-            serde_json::from_str(&data_lines.join("\n"))
-                .map_err(|error| format!("SSE data is not valid JSON: {error}"))?,
-        )
-    };
-    Ok(SseFrame { id, event, data })
-}
-
-fn validate_sse_frames(frames: &[SseFrame]) -> ProbeResult {
-    for frame in frames {
-        let id = frame
-            .id
-            .as_deref()
-            .ok_or_else(|| "SSE frame is missing id".to_string())?;
-        if id.is_empty() {
-            return Err("SSE frame id must not be empty".to_string());
-        }
-        let event = frame
-            .event
-            .as_deref()
-            .ok_or_else(|| "SSE frame is missing event".to_string())?;
-        if event.is_empty() {
-            return Err("SSE frame event must not be empty".to_string());
-        }
-        let data = frame
-            .data
-            .as_ref()
-            .ok_or_else(|| "SSE frame is missing data".to_string())?;
-        expect_field_eq(data, "object", "event")?;
-        expect_string_field(data, "id")?;
-        expect_string_field(data, "event")?;
-        expect_u64_field(data, "sequence")?;
-    }
-    Ok(())
-}
-
-impl ConformanceClient {
-    fn new(base_url: &str, api_key: Option<String>, timeout: Duration) -> ProbeResult<Self> {
-        let mut base_url = Url::parse(base_url).map_err(|error| {
-            format!("invalid agents conformance target URL {base_url}: {error}")
-        })?;
-        if !base_url.path().ends_with('/') {
-            let path = format!("{}/", base_url.path().trim_end_matches('/'));
-            base_url.set_path(&path);
-        }
-        let http = net::http_client_builder("cli.agents_conformance")
-            .timeout(timeout)
-            .build()
-            .map_err(|error| {
-                format!(
-                    "failed to create HTTP client: {}",
-                    net::reqwest_error(&error)
-                )
-            })?;
-        Ok(Self {
-            http,
-            base_url,
-            api_key,
-            timeout,
-        })
-    }
-
-    fn url(&self, path: &str) -> ProbeResult<Url> {
-        self.base_url
-            .join(path.trim_start_matches('/'))
-            .map_err(|error| format!("failed to resolve URL path {path}: {error}"))
-    }
-
-    async fn get_public_json(&self, path: &str) -> ProbeResult<HttpResult> {
-        self.request_json(Method::GET, path, None, None, false, None)
-            .await
-    }
-
-    async fn get_json(&self, path: &str) -> ProbeResult<HttpResult> {
-        self.request_json(Method::GET, path, None, None, true, None)
-            .await
-    }
-
-    async fn get_json_without_auth(&self, path: &str) -> ProbeResult<HttpResult> {
-        self.request_json(Method::GET, path, None, None, false, None)
-            .await
-    }
-
-    async fn post_json(
-        &self,
-        path: &str,
-        body: &Value,
-        idempotency_key: Option<&str>,
-    ) -> ProbeResult<HttpResult> {
-        self.request_json(Method::POST, path, Some(body), idempotency_key, true, None)
-            .await
-    }
-
-    async fn patch_json(
-        &self,
-        path: &str,
-        body: &Value,
-        idempotency_key: Option<&str>,
-    ) -> ProbeResult<HttpResult> {
-        self.request_json(Method::PATCH, path, Some(body), idempotency_key, true, None)
-            .await
-    }
-
-    async fn request_json(
-        &self,
-        method: Method,
-        path: &str,
-        body: Option<&Value>,
-        idempotency_key: Option<&str>,
-        auth: bool,
-        protocol_version: Option<&str>,
-    ) -> ProbeResult<HttpResult> {
-        let url = self.url(path)?;
-        let mut request = self
-            .http
-            .request(method.clone(), url)
-            .header(ACCEPT, "application/json")
-            .header(
-                "Harn-Agents-Protocol-Version",
-                protocol_version.unwrap_or(PROTOCOL_VERSION),
-            );
-        if let Some(body) = body {
-            request = request.json(body);
-        }
-        if let Some(key) = idempotency_key {
-            request = request.header("Idempotency-Key", key);
-        }
-        if auth {
-            if let Some(api_key) = self.api_key.as_deref() {
-                request = request.header(AUTHORIZATION, bearer_value(api_key)?);
-            }
-        }
-        let response = request
-            .send()
-            .await
-            .map_err(|error| format!("{method} {path} failed: {}", net::reqwest_error(&error)))?;
-        let status = response.status();
-        let headers = response.headers().clone();
-        let body_text = response
-            .text()
-            .await
-            .map_err(|error| format!("{method} {path} body read failed: {error}"))?;
-        let json = if body_text.trim().is_empty() {
-            None
-        } else {
-            serde_json::from_str(&body_text).ok()
-        };
-        Ok(HttpResult {
-            status,
-            headers,
-            body: body_text,
-            json,
-        })
-    }
-}
-
-fn bearer_value(api_key: &str) -> ProbeResult<HeaderValue> {
-    HeaderValue::from_str(&format!("Bearer {api_key}"))
-        .map_err(|error| format!("invalid API key for Authorization header: {error}"))
 }
 
 fn resolve_categories(requested: &[String]) -> ProbeResult<Vec<&'static str>> {
@@ -1588,196 +1325,6 @@ fn message_input(text: &str) -> Value {
     })
 }
 
-fn expect_status(response: &HttpResult, expected: StatusCode) -> ProbeResult {
-    if response.status == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected HTTP {}, got {}{}",
-            expected.as_u16(),
-            response.status.as_u16(),
-            body_suffix(response)
-        ))
-    }
-}
-
-fn expect_status_any(response: &HttpResult, expected: &[StatusCode]) -> ProbeResult {
-    if expected.contains(&response.status) {
-        Ok(())
-    } else {
-        let expected = expected
-            .iter()
-            .map(|status| status.as_u16().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        Err(format!(
-            "expected HTTP one of [{}], got {}{}",
-            expected,
-            response.status.as_u16(),
-            body_suffix(response)
-        ))
-    }
-}
-
-fn body_suffix(response: &HttpResult) -> String {
-    let mut suffix = String::new();
-    if let Some(content_type) = response
-        .headers
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-    {
-        suffix.push_str(&format!(" content-type={content_type}"));
-    }
-    if !response.body.trim().is_empty() {
-        let body = response.body.trim();
-        suffix.push_str(": ");
-        suffix.push_str(if body.len() > 500 { &body[..500] } else { body });
-    }
-    suffix
-}
-
-fn expect_json(response: &HttpResult) -> ProbeResult<&Value> {
-    response.json.as_ref().ok_or_else(|| {
-        format!(
-            "expected JSON response for HTTP {}, body was {}",
-            response.status, response.body
-        )
-    })
-}
-
-fn expect_list_response<'a>(value: &'a Value, label: &str) -> ProbeResult<&'a [Value]> {
-    let data = list_data(value)?;
-    value
-        .get("object")
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("{label} list is missing object discriminator"))?;
-    Ok(data)
-}
-
-fn list_data(value: &Value) -> ProbeResult<&[Value]> {
-    value
-        .get("data")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .ok_or_else(|| "list response must include data array".to_string())
-}
-
-fn expect_field_eq<'a>(value: &'a Value, field: &str, expected: &str) -> ProbeResult<&'a str> {
-    let actual = expect_string_field(value, field)?;
-    if actual == expected {
-        Ok(actual)
-    } else {
-        Err(format!("{field} must be {expected:?}, got {actual:?}"))
-    }
-}
-
-fn expect_string_field<'a>(value: &'a Value, field: &str) -> ProbeResult<&'a str> {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{field} must be a non-empty string"))
-}
-
-fn expect_u64_field(value: &Value, field: &str) -> ProbeResult<u64> {
-    value
-        .get(field)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| format!("{field} must be an unsigned integer"))
-}
-
-fn expect_array_field<'a>(value: &'a Value, field: &str) -> ProbeResult<&'a [Value]> {
-    value
-        .get(field)
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .ok_or_else(|| format!("{field} must be an array"))
-}
-
-fn expect_string_array_contains(value: &Value, field: &str, expected: &str) -> ProbeResult {
-    let values = expect_array_field(value, field)?;
-    if values.iter().any(|value| value.as_str() == Some(expected)) {
-        Ok(())
-    } else {
-        Err(format!("{field} must contain {expected}"))
-    }
-}
-
-fn expect_task_status(value: &Value) -> ProbeResult<&str> {
-    let status = expect_string_field(value, "status")?;
-    if is_task_status(status) {
-        Ok(status)
-    } else {
-        Err(format!("unknown task status {status:?}"))
-    }
-}
-
-fn is_task_status(status: &str) -> bool {
-    matches!(
-        status,
-        "SUBMITTED"
-            | "WORKING"
-            | "INPUT_REQUIRED"
-            | "AUTH_REQUIRED"
-            | "COMPLETED"
-            | "FAILED"
-            | "CANCELED"
-    )
-}
-
-fn is_terminal_status(status: &str) -> bool {
-    matches!(status, "COMPLETED" | "FAILED" | "CANCELED")
-}
-
-fn validate_status_transitions(statuses: &[String]) -> ProbeResult {
-    for pair in statuses.windows(2) {
-        let from = pair[0].as_str();
-        let to = pair[1].as_str();
-        let allowed = match from {
-            "SUBMITTED" => matches!(to, "WORKING" | "CANCELED" | "FAILED"),
-            "WORKING" => matches!(
-                to,
-                "INPUT_REQUIRED" | "AUTH_REQUIRED" | "COMPLETED" | "FAILED" | "CANCELED"
-            ),
-            "INPUT_REQUIRED" | "AUTH_REQUIRED" => matches!(to, "WORKING" | "FAILED" | "CANCELED"),
-            "COMPLETED" | "FAILED" | "CANCELED" => false,
-            _ => false,
-        };
-        if !allowed {
-            return Err(format!("invalid task status transition {from} -> {to}"));
-        }
-    }
-    Ok(())
-}
-
-fn expect_error_code(response: &HttpResult, expected: &str) -> ProbeResult {
-    let actual = error_code(response)?;
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!("expected error code {expected}, got {actual}"))
-    }
-}
-
-fn error_code(response: &HttpResult) -> ProbeResult<String> {
-    let body = expect_json(response)?;
-    body.get("error")
-        .and_then(|error| error.get("code"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| "error response must include error.code".to_string())
-}
-
-fn first_id_from_list(value: &Value) -> Option<String> {
-    value
-        .get("data")
-        .and_then(Value::as_array)
-        .and_then(|data| data.first())
-        .and_then(|item| item.get("id"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
 fn remember_first_event(state: &mut ProbeState, list: &Value) {
     if state.event_id.is_none() {
         state.event_id = first_id_from_list(list);
@@ -1829,29 +1376,5 @@ mod tests {
     fn rejects_unknown_category() {
         let error = resolve_categories(&["bogus".to_string()]).unwrap_err();
         assert!(error.contains("unknown agents conformance category"));
-    }
-
-    #[test]
-    fn validates_task_transitions() {
-        validate_status_transitions(&[
-            "SUBMITTED".to_string(),
-            "WORKING".to_string(),
-            "COMPLETED".to_string(),
-        ])
-        .unwrap();
-        assert!(
-            validate_status_transitions(&["COMPLETED".to_string(), "WORKING".to_string()]).is_err()
-        );
-    }
-
-    #[test]
-    fn parses_sse_frame() {
-        let frame = parse_sse_frame(
-            "id: evt_1\nevent: task.started\ndata: {\"object\":\"event\",\"id\":\"evt_1\",\"event\":\"task.started\",\"sequence\":1}\n",
-        )
-        .unwrap();
-        assert_eq!(frame.id.as_deref(), Some("evt_1"));
-        assert_eq!(frame.event.as_deref(), Some("task.started"));
-        validate_sse_frames(&[frame]).unwrap();
     }
 }

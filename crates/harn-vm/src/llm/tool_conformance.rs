@@ -16,12 +16,14 @@ use crate::llm_config::{self, ProviderDef};
 mod helpers;
 #[path = "tool_conformance_request.rs"]
 mod request;
+use super::usage_normalization::extract_probe_usage;
+pub use super::usage_normalization::ToolProbeUsage;
 pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
 use request::{probe_request_body, validate_probe_request_body};
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
 pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 3;
-pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 2;
+pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 4;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
 pub const DEFAULT_TOOL_PROBE_MARKER: &str = "harn_tool_probe_marker";
 
@@ -123,10 +125,20 @@ impl ToolProbeCase {
             Self::ParallelToolCalls,
             Self::LargeStringArgument,
             Self::ToolResultFollowup,
+            Self::SignedThinkingToolResultFollowup,
             Self::NoToolAnswerOrRefusal,
             Self::UnavailableToolRepair,
             Self::DoneSentinel,
         ]
+    }
+
+    pub fn is_live_applicable(self, provider: &str, model: &str) -> bool {
+        match self {
+            Self::SignedThinkingToolResultFollowup => {
+                crate::llm::tool_scorecard::signed_thinking_tool_history_supported(provider, model)
+            }
+            _ => true,
+        }
     }
 
     fn expected_value(self, marker: &str) -> String {
@@ -205,11 +217,14 @@ pub struct ToolConformanceRequestAuditReport {
     pub request_count: usize,
     pub validation_pass_count: usize,
     pub validation_fail_count: usize,
+    pub not_applicable_count: usize,
     pub dialect_counts: BTreeMap<String, usize>,
     pub provider_counts: BTreeMap<String, usize>,
     pub routes: Vec<ToolConformanceRequestAuditRoute>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<ToolConformanceRequestAuditFailure>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_applicable: Vec<ToolConformanceRequestAuditNotApplicable>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,6 +234,7 @@ pub struct ToolConformanceRequestAuditRoute {
     pub request_count: usize,
     pub validation_pass_count: usize,
     pub validation_fail_count: usize,
+    pub not_applicable_count: usize,
     pub dialect_counts: BTreeMap<String, usize>,
 }
 
@@ -233,11 +249,23 @@ pub struct ToolConformanceRequestAuditFailure {
     pub issues: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConformanceRequestAuditNotApplicable {
+    pub provider: String,
+    pub model: String,
+    pub probe_case: String,
+    pub request_profile: String,
+    pub mode: String,
+    pub dialect: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolConformanceRequestValidationStatus {
     Pass,
     Fail,
+    NotApplicable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -333,6 +361,8 @@ pub struct ToolConformanceCase {
     pub elapsed_ms: Option<u64>,
     pub native_tool_call_count: usize,
     pub text_tool_call_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<ToolProbeUsage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parser_errors: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -353,6 +383,7 @@ impl ToolConformanceCase {
             elapsed_ms,
             native_tool_call_count: 0,
             text_tool_call_count: 0,
+            usage: None,
             parser_errors: Vec::new(),
             protocol_violations: Vec::new(),
             content_sample: None,
@@ -375,6 +406,7 @@ impl ToolConformanceCase {
             elapsed_ms,
             native_tool_call_count: 0,
             text_tool_call_count: 0,
+            usage: None,
             parser_errors: Vec::new(),
             protocol_violations: Vec::new(),
             content_sample: None,
@@ -456,12 +488,22 @@ pub fn classify_tool_conformance_fixture_for_case(
 ) -> ToolConformanceReport {
     let marker = marker.into();
     let expected_value = probe_case.expected_value(&marker);
+    let provider = provider.into();
+    let model = model.into();
     let response = serde_json::from_str::<Value>(raw).unwrap_or_else(|_| json!({ "content": raw }));
-    let case =
-        classify_tool_probe_response(mode, &response, probe_case, &expected_value, None, None);
+    let usage = extract_probe_usage(&provider, &model, &response);
+    let case = classify_tool_probe_response(
+        mode,
+        &response,
+        probe_case,
+        &expected_value,
+        None,
+        None,
+        usage,
+    );
     report_from_cases(
-        provider.into(),
-        model.into(),
+        provider,
+        model,
         None,
         probe_case,
         marker,
@@ -558,22 +600,26 @@ pub fn tool_conformance_request_catalog_audit(
     } else {
         normalized_request_profiles(&request_profiles)
     };
-    let entries = llm_config::model_catalog_entries();
+    let catalog_model_count = llm_config::model_catalog_entries().len();
+    let routing_routes = crate::provider_catalog::artifact().routing_routes;
     let mut request_count = 0usize;
     let mut validation_pass_count = 0usize;
     let mut validation_fail_count = 0usize;
+    let mut not_applicable_count = 0usize;
     let mut dialect_counts = BTreeMap::new();
     let mut provider_counts = BTreeMap::new();
     let mut routes = Vec::new();
     let mut failures = Vec::new();
+    let mut not_applicable = Vec::new();
 
-    for (model_id, model) in &entries {
+    for catalog_route in &routing_routes {
         let mut route = ToolConformanceRequestAuditRoute {
-            provider: model.provider.clone(),
-            model: model_id.clone(),
+            provider: catalog_route.provider.clone(),
+            model: catalog_route.model.clone(),
             request_count: 0,
             validation_pass_count: 0,
             validation_fail_count: 0,
+            not_applicable_count: 0,
             dialect_counts: BTreeMap::new(),
         };
         for probe_case in &probe_cases {
@@ -581,10 +627,12 @@ pub fn tool_conformance_request_catalog_audit(
                 for mode in &modes {
                     route.request_count += 1;
                     request_count += 1;
-                    *provider_counts.entry(model.provider.clone()).or_insert(0) += 1;
+                    *provider_counts
+                        .entry(catalog_route.provider.clone())
+                        .or_insert(0) += 1;
                     match tool_conformance_request_report(
-                        model.provider.clone(),
-                        model_id.clone(),
+                        catalog_route.provider.clone(),
+                        catalog_route.model.clone(),
                         None,
                         vec![*mode],
                         *probe_case,
@@ -605,14 +653,39 @@ pub fn tool_conformance_request_catalog_audit(
                                         route.validation_fail_count += 1;
                                         validation_fail_count += 1;
                                         failures.push(ToolConformanceRequestAuditFailure {
-                                            provider: model.provider.clone(),
-                                            model: model_id.clone(),
+                                            provider: catalog_route.provider.clone(),
+                                            model: catalog_route.model.clone(),
                                             probe_case: probe_case.as_str().to_string(),
                                             request_profile: request_profile.as_str().to_string(),
                                             mode: mode.as_str().to_string(),
                                             dialect,
                                             issues: request.validation.issues,
                                         });
+                                    }
+                                    ToolConformanceRequestValidationStatus::NotApplicable => {
+                                        route.not_applicable_count += 1;
+                                        not_applicable_count += 1;
+                                        not_applicable.push(
+                                            ToolConformanceRequestAuditNotApplicable {
+                                                provider: catalog_route.provider.clone(),
+                                                model: catalog_route.model.clone(),
+                                                probe_case: probe_case.as_str().to_string(),
+                                                request_profile: request_profile
+                                                    .as_str()
+                                                    .to_string(),
+                                                mode: mode.as_str().to_string(),
+                                                dialect,
+                                                reason: request
+                                                    .validation
+                                                    .issues
+                                                    .first()
+                                                    .cloned()
+                                                    .unwrap_or_else(|| {
+                                                        "probe case is not applicable to this route"
+                                                            .to_string()
+                                                    }),
+                                            },
+                                        );
                                     }
                                 }
                             }
@@ -621,8 +694,8 @@ pub fn tool_conformance_request_catalog_audit(
                             route.validation_fail_count += 1;
                             validation_fail_count += 1;
                             failures.push(ToolConformanceRequestAuditFailure {
-                                provider: model.provider.clone(),
-                                model: model_id.clone(),
+                                provider: catalog_route.provider.clone(),
+                                model: catalog_route.model.clone(),
                                 probe_case: probe_case.as_str().to_string(),
                                 request_profile: request_profile.as_str().to_string(),
                                 mode: mode.as_str().to_string(),
@@ -639,7 +712,7 @@ pub fn tool_conformance_request_catalog_audit(
 
     ToolConformanceRequestAuditReport {
         schema_version: TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION,
-        catalog_model_count: entries.len(),
+        catalog_model_count,
         route_count: routes.len(),
         probe_cases: probe_cases
             .into_iter()
@@ -656,10 +729,12 @@ pub fn tool_conformance_request_catalog_audit(
         request_count,
         validation_pass_count,
         validation_fail_count,
+        not_applicable_count,
         dialect_counts,
         provider_counts,
         routes,
         failures,
+        not_applicable,
     }
 }
 
@@ -905,6 +980,7 @@ async fn execute_live_probe_case(
     } else {
         serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({ "content": text }))
     };
+    let usage = extract_probe_usage(provider, model, &response_value);
     classify_tool_probe_response(
         mode,
         &response_value,
@@ -912,6 +988,7 @@ async fn execute_live_probe_case(
         marker,
         Some(status.as_u16()),
         elapsed,
+        usage,
     )
 }
 
@@ -956,6 +1033,7 @@ fn classify_tool_probe_response(
     expected_value: &str,
     http_status: Option<u16>,
     elapsed_ms: Option<u64>,
+    usage: Option<ToolProbeUsage>,
 ) -> ToolConformanceCase {
     let native = extract_native_tool_calls(response);
     let native_count = native.len();
@@ -991,6 +1069,7 @@ fn classify_tool_probe_response(
             elapsed_ms,
             native_tool_call_count: native_count,
             text_tool_call_count: 0,
+            usage,
             parser_errors: Vec::new(),
             protocol_violations: Vec::new(),
             content_sample: content_sample(response),
@@ -1020,6 +1099,7 @@ fn classify_tool_probe_response(
             (native_count, text_count),
             parsed,
             (http_status, elapsed_ms),
+            usage,
         );
     }
     let text_pass = if probe_case == ToolProbeCase::ParallelToolCalls {
@@ -1039,6 +1119,7 @@ fn classify_tool_probe_response(
             elapsed_ms,
             native_tool_call_count: native_count,
             text_tool_call_count: text_count,
+            usage,
             parser_errors: parsed.errors,
             protocol_violations: parsed.violations,
             content_sample: sample_content(&content),
@@ -1080,6 +1161,7 @@ fn classify_tool_probe_response(
         elapsed_ms,
         native_tool_call_count: native_count,
         text_tool_call_count: text_count,
+        usage,
         parser_errors: parsed.errors,
         protocol_violations: parsed.violations,
         content_sample: sample_content(&content),
@@ -1094,6 +1176,7 @@ fn classify_no_tool_probe_response(
     counts: (usize, usize),
     parsed: crate::llm::tools::TextToolParseResult,
     timing: (Option<u16>, Option<u64>),
+    usage: Option<ToolProbeUsage>,
 ) -> ToolConformanceCase {
     let (native_count, text_count) = counts;
     let (http_status, elapsed_ms) = timing;
@@ -1135,6 +1218,7 @@ fn classify_no_tool_probe_response(
         elapsed_ms,
         native_tool_call_count: native_count,
         text_tool_call_count: text_count,
+        usage,
         parser_errors: parsed.errors,
         protocol_violations: parsed.violations,
         content_sample: sample_content(content),

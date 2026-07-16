@@ -149,7 +149,6 @@ HARN_BIN="$fake_bin/harn" \
 FAKE_HARN_RECORD="$record_harn" \
 FAKE_CARGO_RECORD="$record_cargo" \
 FAKE_MAKE_RECORD="$record_make" \
-FAIL_ON_MAKE=1 \
 PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/release_gate.sh" prepare --bump minor
 
@@ -178,6 +177,16 @@ fi
 if ! grep -Fxq "argv=dump-protocol-artifacts --artifact-version 1.3.0" "$record_harn"; then
   echo "release_gate prepare did not generate explicitly versioned protocol artifacts through HARN_BIN" >&2
   cat "$record_harn" >&2
+  exit 1
+fi
+if [[ "$(grep -Fxc 'target=gen-cli-aot' "$record_make")" -ne 1 ]]; then
+  echo "release_gate prepare did not regenerate CLI AOT artifacts exactly once" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
+if ! grep -A1 -Fx 'target=gen-cli-aot' "$record_make" | grep -Fxq 'version=1.3.0'; then
+  echo "release_gate prepare did not regenerate CLI AOT artifacts after the version bump" >&2
+  cat "$record_make" >&2
   exit 1
 fi
 if [[ $(grep -Fxc 'argv=metadata --format-version=1' "$record_cargo") -ne 1 ]] \
@@ -246,12 +255,17 @@ git -C "$real_release_root" config user.name "Release Test"
 git -C "$real_release_root" config user.email "release-test@example.com"
 git -C "$real_release_root" add .
 git -C "$real_release_root" commit --quiet -m "initial"
+fake_make_only="$tmp_root/fake-make-only"
+mkdir -p "$fake_make_only"
+ln -s "$fake_bin/make" "$fake_make_only/make"
+: > "$record_make"
 
 HARN_RELEASE_ROOT="$real_release_root" \
 HARN_BIN="$fake_bin/harn" \
 FAKE_HARN_RECORD="$record_harn" \
+FAKE_MAKE_RECORD="$record_make" \
 CARGO_TARGET_DIR="$tmp_root/real-target" \
-PATH="$real_path" \
+PATH="$fake_make_only:$real_path" \
   "$repo_root/scripts/release_gate.sh" prepare --bump patch
 
 if ! grep -A2 -F 'name = "example"' "$real_release_root/Cargo.lock" | grep -Fq 'version = "1.2.4"'; then
@@ -263,6 +277,11 @@ PATH="$real_path" cargo metadata \
   --manifest-path "$real_release_root/Cargo.toml" \
   --format-version=1 \
   --locked >/dev/null
+if ! grep -A1 -Fx 'target=gen-cli-aot' "$record_make" | grep -Fxq 'version=1.2.4'; then
+  echo "release_gate prepare did not regenerate CLI AOT artifacts after the real Cargo.lock bump" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
 
 git -C "$release_root" reset --hard --quiet HEAD
 : >"$record_make"

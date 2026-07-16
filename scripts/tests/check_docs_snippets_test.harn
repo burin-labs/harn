@@ -90,6 +90,63 @@ pipeline test_extract_empty_input(task) {
   assert_eq(extract_blocks(""), [])
 }
 
+@test
+pipeline test_extract_indented_block_is_checked(task) {
+  // A fence nested under a list item is a real example and gets checked.
+  // Before this was handled, such blocks were silently invisible to the
+  // gate — a `harn parse` failure shipped in docs/src/diagnostics.md
+  // behind exactly this shape.
+  const md = "- bullet:\n\n  ```harn\n  const x = 1\n  ```\n"
+  const events = extract_blocks(md)
+  assert_eq(events.count, 1)
+  assert_eq(events[0].kind, "block")
+  assert_eq(events[0].mode, "parse")
+  // The opening fence's indent is stripped, so the body parses at column 0.
+  assert_eq(events[0].content, "const x = 1\n")
+}
+
+@test
+pipeline test_extract_indented_block_keeps_relative_indent(task) {
+  // Only the fence's own indent is removed; nesting inside the snippet
+  // survives, so the extracted source is byte-identical to the example.
+  const md = "  ```harn\n  fn f() -> int {\n    return 1\n  }\n  ```\n"
+  const events = extract_blocks(md)
+  assert_eq(events.count, 1)
+  assert_eq(events[0].content, "fn f() -> int {\n  return 1\n}\n")
+}
+
+@test
+pipeline test_extract_indented_ignore_and_check_tags(task) {
+  assert_eq(extract_blocks("  ```harn,ignore\n  frag\n  ```\n")[0].kind, "skip")
+  assert_eq(extract_blocks("  ```harn,check\n  x\n  ```\n")[0].mode, "check")
+}
+
+@test
+pipeline test_extract_indented_blank_line_in_body(task) {
+  // A blank line carries no indent to strip and must not underflow.
+  const events = extract_blocks("  ```harn\n  const a = 1\n\n  const b = 2\n  ```\n")
+  assert_eq(events[0].content, "const a = 1\n\nconst b = 2\n")
+}
+
+// --- leading_ws_len / strip_indent ------------------------------------------
+@test
+pipeline test_leading_ws_len(task) {
+  assert_eq(leading_ws_len("no indent"), 0)
+  assert_eq(leading_ws_len("  two"), 2)
+  assert_eq(leading_ws_len("\ttab"), 1)
+  assert_eq(leading_ws_len("   "), 3)
+  assert_eq(leading_ws_len(""), 0)
+}
+
+@test
+pipeline test_strip_indent(task) {
+  assert_eq(strip_indent("  body", 2), "body")
+  assert_eq(strip_indent("    nested", 2), "  nested")
+  // Never strips past the whitespace a line actually has.
+  assert_eq(strip_indent("", 2), "")
+  assert_eq(strip_indent("flush", 2), "flush")
+}
+
 // --- md_base_name -----------------------------------------------------------
 @test
 pipeline test_md_base_name(task) {

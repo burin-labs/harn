@@ -72,6 +72,7 @@ mod tool_search_score;
 mod trace_builtins;
 pub(crate) mod transcript_seed;
 mod transcript_stats;
+pub(crate) mod usage_normalization;
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};

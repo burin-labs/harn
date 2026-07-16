@@ -202,6 +202,7 @@ const DIRECT_HARN_BINARY_BASELINE = [
 // migrate to `Arc<dyn Clock>`.
 const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-cli/src/commands/agents_conformance.rs",
+  "crates/harn-cli/src/commands/agents_conformance/wire.rs",
   "crates/harn-cli/src/commands/bench.rs",
   "crates/harn-cli/src/commands/connect.rs",
   // `harn connect` waits for real browser OAuth callbacks and stamps
@@ -320,7 +321,8 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // `routing_policy` records actual per-link wall-clock elapsed so the
   // routing trace + `<dispatch>.attempt` tape events accurately
   // attribute provider latency.
-  "crates/harn-vm/src/llm/routing.rs",
+  "crates/harn-vm/src/llm/routing/execution/mod.rs",
+  "crates/harn-vm/src/llm/routing/execution/race.rs",
   "crates/harn-vm/src/llm/stream.rs",
   "crates/harn-vm/src/mcp_card.rs",
   // mcp_host.rs supervises external MCP servers: cache TTLs and

@@ -1,0 +1,65 @@
+import { agent_capture_events } from "std/agent/events"
+
+fn terminal_checkpoint(events: list) -> dict {
+  for event in events {
+    if event?.type == "typed_checkpoint" && event?.checkpoint?.schema == "harn.agent_terminal.v1" {
+      return event.checkpoint
+    }
+  }
+  return {}
+}
+
+fn run_case(session_id: string, callback) -> dict {
+  return agent_capture_events(
+    session_id,
+    fn() { return agent_loop(
+      "finish",
+      nil,
+      {
+        session_id: session_id,
+        provider: "mock",
+        llm_caller: { _call -> return {ok: true, value: {text: "finished"}} },
+        post_turn_callback: callback,
+      },
+    ) },
+  )
+}
+
+fn run_sentinel_case(session_id: string) -> dict {
+  return agent_capture_events(
+    session_id,
+    fn() { return agent_loop(
+      "finish",
+      nil,
+      {
+        session_id: session_id,
+        provider: "mock",
+        llm_caller: { _call -> return {ok: true, value: {text: "finished ##DONE##"}} },
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+      },
+    ) },
+  )
+}
+
+pipeline default() {
+  const natural = run_case("terminal-natural-" + uuid(), nil)
+  const natural_checkpoint = terminal_checkpoint(natural.events)
+  __io_println("natural=" + natural_checkpoint.terminal.kind)
+  __io_println("natural_owner=" + natural_checkpoint.terminal.owner)
+  __io_println("natural_reason=" + natural_checkpoint.terminal.reason)
+  __io_println("natural_status=" + natural_checkpoint.final_status)
+  const sentinel = run_sentinel_case("terminal-sentinel-" + uuid())
+  const sentinel_checkpoint = terminal_checkpoint(sentinel.events)
+  __io_println("sentinel=" + sentinel_checkpoint.terminal.kind)
+  __io_println("sentinel_owner=" + sentinel_checkpoint.terminal.owner)
+  __io_println("sentinel_reason=" + sentinel_checkpoint.terminal.reason)
+  const policy = run_case(
+    "terminal-policy-" + uuid(),
+    { _info -> return {stop: true, stop_reason: "fixture_policy_stop"} },
+  )
+  const policy_checkpoint = terminal_checkpoint(policy.events)
+  __io_println("policy=" + policy_checkpoint.terminal.kind)
+  __io_println("policy_owner=" + policy_checkpoint.terminal.owner)
+  __io_println("policy_reason=" + policy_checkpoint.terminal.reason)
+}

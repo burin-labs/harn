@@ -111,6 +111,7 @@ while IFS= read -r run_id; do
     . as $response
     | [
         "Format check",
+        "Package audit",
         "Rust lint",
         "Rust test",
         "Harn conformance + audit",

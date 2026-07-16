@@ -85,9 +85,10 @@ struct HandleEntry {
     /// feedback push is complete. `None` if the test-side hasn't asked
     /// to be notified.
     completion_tx: Option<std::sync::mpsc::SyncSender<()>>,
-    /// Optional one-shot result channel installed by `cancel_handle` when a
-    /// caller wants cancellation to wait until artifacts have been drained.
-    result_tx: Option<std::sync::mpsc::SyncSender<VmValue>>,
+    /// One-shot result channels installed by callers that need to synchronize
+    /// on the finalized command result instead of observing it indirectly
+    /// through the session inbox.
+    result_txs: Vec<std::sync::mpsc::SyncSender<VmValue>>,
     /// Opaque verification snapshot binding provided by the caller.
     snapshot_binding: Option<harn_vm::value::DictMap>,
 }
@@ -99,6 +100,27 @@ struct HandleStore {
 
 static HANDLE_STORE: LazyLock<Mutex<HandleStore>> =
     LazyLock::new(|| Mutex::new(HandleStore::default()));
+
+type HandleNotifiers = (
+    Option<std::sync::mpsc::SyncSender<()>>,
+    Vec<std::sync::mpsc::SyncSender<VmValue>>,
+);
+
+fn take_handle_notifiers(handle_id: &str) -> HandleNotifiers {
+    let mut store = HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned");
+    store
+        .entries
+        .remove(handle_id)
+        .map(|mut entry| {
+            (
+                entry.completion_tx.take(),
+                std::mem::take(&mut entry.result_txs),
+            )
+        })
+        .unwrap_or((None, Vec::new()))
+}
 
 /// Metadata returned to the caller immediately when a long-running spawn
 /// succeeds. Serialised as a response dict by the calling builtin.
@@ -271,7 +293,7 @@ pub(crate) fn spawn_long_running_with_options(
                 session_id: options.session_id.clone(),
                 cancel_state: cancel_state.clone(),
                 completion_tx: None,
-                result_tx: None,
+                result_txs: Vec::new(),
                 snapshot_binding: options.snapshot_binding.clone(),
             },
         );
@@ -402,25 +424,6 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         (state.stdout.clone(), state.stderr.clone())
     };
 
-    // Remove our entry from the store, taking notifiers on the way out so we
-    // can signal them after the feedback/result path completes.
-    let (completion_tx, result_tx) = {
-        let mut store = HANDLE_STORE
-            .lock()
-            .expect("long-running handle store poisoned");
-        let entry = store
-            .entries
-            .remove(&context.handle_id)
-            .map(|mut e| (e.completion_tx.take(), e.result_tx.take()));
-        entry.unwrap_or((None, None))
-    };
-
-    let signal_done = move || {
-        if let Some(tx) = completion_tx {
-            let _ = tx.try_send(());
-        }
-    };
-
     let cancelled = cancel_state.cancelled.load(Ordering::Acquire);
     let timed_out = cancelled && cancel_state.timed_out.load(Ordering::Acquire);
     let process_cleanup = cancel_state
@@ -450,7 +453,13 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         Some(&context.handle_id),
     ) {
         Ok(artifacts) => artifacts,
-        Err(_) => return,
+        Err(_) => {
+            let (completion_tx, _result_txs) = take_handle_notifiers(&context.handle_id);
+            if let Some(tx) = completion_tx {
+                let _ = tx.try_send(());
+            }
+            return;
+        }
     };
     let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
 
@@ -465,7 +474,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     );
     payload.insert(
         "handle_id".into(),
-        serde_json::Value::String(context.handle_id),
+        serde_json::Value::String(context.handle_id.clone()),
     );
     payload.insert(
         "command_or_op_descriptor".into(),
@@ -535,10 +544,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         );
     }
 
-    if let Some(tx) = result_tx {
-        let value = serde_json::Value::Object(payload.clone());
-        let _ = tx.try_send(harn_vm::json_to_vm_value(&value));
-    }
+    let result_value = harn_vm::json_to_vm_value(&serde_json::Value::Object(payload.clone()));
     if !cancelled {
         let content = serde_json::to_string(&payload).unwrap_or_default();
         harn_vm::orchestration::agent_inbox::push(
@@ -548,7 +554,18 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             "hostlib.long_running.exit",
         );
     }
-    signal_done();
+    // Remove our entry from the store only after the public feedback path is
+    // published. An explicit `wait_command` can register a direct waiter while
+    // the child has exited but artifacts are still being finalized; waking that
+    // waiter after the inbox push lets `wait_command` consume the matching
+    // inbox entry and preserve the old no-duplicate-feedback contract.
+    let (completion_tx, result_txs) = take_handle_notifiers(&context.handle_id);
+    for tx in result_txs {
+        let _ = tx.try_send(result_value.clone());
+    }
+    if let Some(tx) = completion_tx {
+        let _ = tx.try_send(());
+    }
 }
 
 fn spawn_output_drain(
@@ -705,7 +722,7 @@ pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions
             .store(options.timed_out, Ordering::Release);
         let result_rx = options.wait_result.map(|_| {
             let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
-            entry.result_tx = Some(tx);
+            entry.result_txs.push(tx);
             rx
         });
         (entry.killer.clone(), entry.cancel_state.clone(), result_rx)
@@ -719,6 +736,28 @@ pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions
         cancelled: true,
         result,
     }
+}
+
+/// Wait for a live long-running handle to finalize and return its result.
+///
+/// Returns `None` when the handle is already gone or the timeout elapses. The
+/// result is also published through the session inbox for normal agent-loop
+/// delivery; callers that use this direct synchronizer should drain the
+/// matching inbox item after receiving the value if they are consuming it.
+pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> Option<VmValue> {
+    if timeout.is_zero() {
+        return None;
+    }
+    let rx = {
+        let mut store = HANDLE_STORE
+            .lock()
+            .expect("long-running handle store poisoned");
+        let entry = store.entries.get_mut(handle_id)?;
+        let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
+        entry.result_txs.push(tx);
+        rx
+    };
+    rx.recv_timeout(timeout).ok()
 }
 
 /// Tuple shape used by `cancel_session_handles` to drain entries while
@@ -810,5 +849,20 @@ pub fn register_completion_notifier(handle_id: &str) -> Option<std::sync::mpsc::
         .expect("long-running handle store poisoned");
     let entry = store.entries.get_mut(handle_id)?;
     entry.completion_tx = Some(tx);
+    Some(rx)
+}
+
+/// Register a result notifier for `handle_id`.
+///
+/// This is a narrow test/diagnostic hook for the same synchronization path
+/// `wait_command` uses. Normal callers should use the `wait_command` tool so
+/// the matching session-inbox feedback is consumed consistently.
+pub fn register_result_notifier(handle_id: &str) -> Option<std::sync::mpsc::Receiver<VmValue>> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
+    let mut store = HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned");
+    let entry = store.entries.get_mut(handle_id)?;
+    entry.result_txs.push(tx);
     Some(rx)
 }

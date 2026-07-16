@@ -37,6 +37,15 @@ fn action() {
     runs: {
       steps: [
         {
+          uses: "actions/cache/restore@exact-pin",
+          if: "inputs.broad-restore-prefix != ''",
+          "continue-on-error": true,
+          with: {
+            key: gha_expression("inputs.broad-restore-prefix") + gha_expression("github.sha"),
+            "restore-keys": gha_expression("inputs.broad-restore-prefix"),
+          },
+        },
+        {
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
           with: {"save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'")},
@@ -76,6 +85,16 @@ fn workflows() {
               with: {"cache-to": gha_expression("github.ref == 'refs/heads/main' && 'type=gha' || ''")},
             },
           ],
+        },
+      },
+    },
+    "cli-cold-start-budget.yml": {
+      on: {schedule: [{cron: "17 11 * * *"}], workflow_dispatch: {}},
+      jobs: {
+        "cold-start-budget": {
+          if: "(github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))",
+          "timeout-minutes": 25,
+          steps: [{name: "Build release harn", "timeout-minutes": 20}],
         },
       },
     },
@@ -135,6 +154,26 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
   )
 }
 
+pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(task) {
+  const invalid_action = {
+    runs: {
+      steps: [
+        {
+          uses: "Swatinem/rust-cache@exact-pin",
+          "continue-on-error": true,
+          with: {"save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'")},
+        },
+      ],
+    },
+  }
+  assert(
+    ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows())
+      .contains(
+      ".github/actions/rust-cache/action.yml must contain one pinned restore-only broad Rust cache fallback step",
+    ),
+  )
+}
+
 pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(task) {
   assert_eq(ci_cache_policy_parse({...policy(), unexpected: true}), nil)
   assert_eq(ci_cache_policy_parse({...policy(), writers: policy().writers + policy().writers}), nil)
@@ -157,5 +196,51 @@ pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(task) {
   const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
   assert(
     errors.contains("build-release-binaries.yml:cache_budget must fail when cache telemetry fails"),
+  )
+}
+
+pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(task) {
+  const invalid = {
+    ...workflows(),
+    "cli-cold-start-budget.yml": {
+      on: {
+        pull_request: {
+          paths: [
+            "Cargo.toml",
+            "crates/harn-cli/src/cli/**",
+            "perf/cli/**",
+            "scripts/bench_cli_cold_start.sh",
+            "scripts/bench_cli_cold_start.harn",
+            ".github/workflows/cli-cold-start-budget.yml",
+          ],
+        },
+        workflow_dispatch: {},
+      },
+      jobs: {
+        "cold-start-budget": {
+          if: "github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release/v')",
+          "timeout-minutes": 45,
+          steps: [{name: "Build release harn", "timeout-minutes": 40}],
+        },
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors
+      .contains(
+      "cli-cold-start-budget.yml must not run release-build cold-start benchmarks on pull_request",
+    ),
+  )
+  assert(errors.contains("cli-cold-start-budget.yml must keep a scheduled main-branch advisory run"))
+  assert(errors.contains("cli-cold-start-budget.yml:cold-start-budget must skip release manual refs"))
+  assert(
+    errors.contains("cli-cold-start-budget.yml:cold-start-budget must cap total runtime at 25 minutes"),
+  )
+  assert(
+    errors
+      .contains(
+      "cli-cold-start-budget.yml:cold-start-budget release build step must cap runtime at 20 minutes",
+    ),
   )
 }

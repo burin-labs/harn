@@ -1,17 +1,19 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+use fs2::FileExt;
 use sha2::{Digest, Sha256};
 
 use crate::error::HostlibError;
 
 static ARTIFACTS: LazyLock<Mutex<BTreeMap<String, CommandArtifacts>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
-static ACTIVE_ARTIFACT_DIRS: LazyLock<Mutex<BTreeSet<PathBuf>>> =
-    LazyLock::new(|| Mutex::new(BTreeSet::new()));
+static ACTIVE_ARTIFACT_LEASES: LazyLock<Mutex<BTreeMap<PathBuf, File>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
 static LAST_RETENTION_SWEEP: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
 
 const RETENTION_ENV: &str = "HARN_COMMAND_ARTIFACT_RETENTION_SECS";
@@ -19,12 +21,13 @@ const MAX_DIRS_ENV: &str = "HARN_COMMAND_ARTIFACT_MAX_DIRS";
 const DEFAULT_RETENTION: Duration = Duration::from_hours(168);
 const DEFAULT_MAX_DIRS: usize = 512;
 const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
+const PRESSURE_GRACE: Duration = Duration::from_mins(5);
 const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
+const ACTIVE_LEASE_FILE: &str = ".active.lock";
 
 #[derive(Clone, Debug)]
 struct ArtifactDir {
     path: PathBuf,
-    pid: u32,
     modified: SystemTime,
 }
 
@@ -60,31 +63,34 @@ pub(crate) fn persist_artifacts(
             std::fs::Permissions::from_mode(0o700),
         );
     }
-    std::fs::write(&artifacts.stdout_path, stdout).map_err(|e| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
-        message: format!("failed to write stdout artifact: {e}"),
-    })?;
-    std::fs::write(&artifacts.stderr_path, stderr).map_err(|e| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
-        message: format!("failed to write stderr artifact: {e}"),
-    })?;
-    let mut combined = Vec::with_capacity(stdout.len() + stderr.len());
-    combined.extend_from_slice(stdout);
-    combined.extend_from_slice(stderr);
-    std::fs::write(&artifacts.output_path, &combined).map_err(|e| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
-        message: format!("failed to write combined output artifact: {e}"),
-    })?;
-    let output_sha256 = format!("sha256:{}", hex::encode(Sha256::digest(&combined)));
-    let artifacts = CommandArtifacts {
-        output_path: artifacts.output_path,
-        stdout_path: artifacts.stdout_path,
-        stderr_path: artifacts.stderr_path,
-        line_count: crate::text::count_lines(&combined),
-        byte_count: combined.len() as u64,
-        output_sha256,
-    };
+    mark_artifacts_active(&artifacts)?;
+    let persisted = (|| -> Result<CommandArtifacts, HostlibError> {
+        std::fs::write(&artifacts.stdout_path, stdout).map_err(|e| HostlibError::Backend {
+            builtin: "hostlib_tools_run_command",
+            message: format!("failed to write stdout artifact: {e}"),
+        })?;
+        std::fs::write(&artifacts.stderr_path, stderr).map_err(|e| HostlibError::Backend {
+            builtin: "hostlib_tools_run_command",
+            message: format!("failed to write stderr artifact: {e}"),
+        })?;
+        let mut combined = Vec::with_capacity(stdout.len() + stderr.len());
+        combined.extend_from_slice(stdout);
+        combined.extend_from_slice(stderr);
+        std::fs::write(&artifacts.output_path, &combined).map_err(|e| HostlibError::Backend {
+            builtin: "hostlib_tools_run_command",
+            message: format!("failed to write combined output artifact: {e}"),
+        })?;
+        Ok(CommandArtifacts {
+            output_path: artifacts.output_path.clone(),
+            stdout_path: artifacts.stdout_path.clone(),
+            stderr_path: artifacts.stderr_path.clone(),
+            line_count: crate::text::count_lines(&combined),
+            byte_count: combined.len() as u64,
+            output_sha256: format!("sha256:{}", hex::encode(Sha256::digest(&combined))),
+        })
+    })();
     mark_artifacts_inactive(&artifacts);
+    let artifacts = persisted?;
     register_artifacts(command_id, handle_id, &artifacts);
     maybe_sweep_stale_artifacts();
     Ok(artifacts)
@@ -110,19 +116,26 @@ pub(crate) fn register_live_artifacts(
             std::fs::Permissions::from_mode(0o700),
         );
     }
-    std::fs::File::create(&artifacts.stdout_path).map_err(|e| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
-        message: format!("failed to create stdout artifact: {e}"),
-    })?;
-    std::fs::File::create(&artifacts.stderr_path).map_err(|e| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
-        message: format!("failed to create stderr artifact: {e}"),
-    })?;
-    std::fs::File::create(&artifacts.output_path).map_err(|e| HostlibError::Backend {
-        builtin: "hostlib_tools_run_command",
-        message: format!("failed to create combined output artifact: {e}"),
-    })?;
-    mark_artifacts_active(&artifacts);
+    mark_artifacts_active(&artifacts)?;
+    let created = (|| -> Result<(), HostlibError> {
+        std::fs::File::create(&artifacts.stdout_path).map_err(|e| HostlibError::Backend {
+            builtin: "hostlib_tools_run_command",
+            message: format!("failed to create stdout artifact: {e}"),
+        })?;
+        std::fs::File::create(&artifacts.stderr_path).map_err(|e| HostlibError::Backend {
+            builtin: "hostlib_tools_run_command",
+            message: format!("failed to create stderr artifact: {e}"),
+        })?;
+        std::fs::File::create(&artifacts.output_path).map_err(|e| HostlibError::Backend {
+            builtin: "hostlib_tools_run_command",
+            message: format!("failed to create combined output artifact: {e}"),
+        })?;
+        Ok(())
+    })();
+    if let Err(error) = created {
+        mark_artifacts_inactive(&artifacts);
+        return Err(error);
+    }
     register_artifacts(command_id, handle_id, &artifacts);
     maybe_sweep_stale_artifacts();
     Ok(artifacts)
@@ -194,21 +207,45 @@ fn artifact_dir(artifacts: &CommandArtifacts) -> Option<PathBuf> {
     artifacts.output_path.parent().map(Path::to_path_buf)
 }
 
-fn mark_artifacts_active(artifacts: &CommandArtifacts) {
-    if let Some(dir) = artifact_dir(artifacts) {
-        ACTIVE_ARTIFACT_DIRS
-            .lock()
-            .expect("active command artifact store poisoned")
-            .insert(dir);
+fn mark_artifacts_active(artifacts: &CommandArtifacts) -> Result<(), HostlibError> {
+    let Some(dir) = artifact_dir(artifacts) else {
+        return Ok(());
+    };
+    let mut active_leases = ACTIVE_ARTIFACT_LEASES
+        .lock()
+        .expect("active command artifact lease store poisoned");
+    if active_leases.contains_key(&dir) {
+        return Ok(());
     }
+    let lease_path = dir.join(ACTIVE_LEASE_FILE);
+    let lease = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lease_path)
+        .map_err(|error| HostlibError::Backend {
+            builtin: "hostlib_tools_run_command",
+            message: format!("failed to open command artifact lease: {error}"),
+        })?;
+    FileExt::lock_exclusive(&lease).map_err(|error| HostlibError::Backend {
+        builtin: "hostlib_tools_run_command",
+        message: format!("failed to lock command artifact lease: {error}"),
+    })?;
+    active_leases.insert(dir, lease);
+    Ok(())
 }
 
 fn mark_artifacts_inactive(artifacts: &CommandArtifacts) {
     if let Some(dir) = artifact_dir(artifacts) {
-        ACTIVE_ARTIFACT_DIRS
+        if let Some(lease) = ACTIVE_ARTIFACT_LEASES
             .lock()
-            .expect("active command artifact store poisoned")
-            .remove(&dir);
+            .expect("active command artifact lease store poisoned")
+            .remove(&dir)
+        {
+            let _ = FileExt::unlock(&lease);
+        }
+        let _ = std::fs::remove_file(dir.join(ACTIVE_LEASE_FILE));
     }
 }
 
@@ -302,9 +339,9 @@ fn collect_command_artifact_dirs(temp_dir: &Path) -> Vec<ArtifactDir> {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let Some(pid) = parse_command_artifact_dir_name(name) else {
+        if parse_command_artifact_dir_name(name).is_none() {
             continue;
-        };
+        }
         let Ok(metadata) = std::fs::symlink_metadata(&path) else {
             continue;
         };
@@ -314,11 +351,7 @@ fn collect_command_artifact_dirs(temp_dir: &Path) -> Vec<ArtifactDir> {
         let Ok(modified) = metadata.modified() else {
             continue;
         };
-        dirs.push(ArtifactDir {
-            path,
-            pid,
-            modified,
-        });
+        dirs.push(ArtifactDir { path, modified });
     }
     dirs
 }
@@ -343,7 +376,7 @@ fn sweep_command_artifact_dirs(
         if should_preserve_artifact_dir(dir) {
             continue;
         }
-        if std::fs::remove_dir_all(&dir.path).is_ok() {
+        if remove_artifact_dir(&dir.path) {
             live_count = live_count.saturating_sub(1);
         }
     }
@@ -354,26 +387,58 @@ fn sweep_command_artifact_dirs(
         if live_count <= max_dirs {
             break;
         }
-        if !dir.path.exists() || should_preserve_artifact_dir(dir) {
+        if !dir.path.exists()
+            || now
+                .duration_since(dir.modified)
+                .map(|age| age < PRESSURE_GRACE)
+                .unwrap_or(true)
+            || should_preserve_artifact_dir(dir)
+        {
             continue;
         }
-        if std::fs::remove_dir_all(&dir.path).is_ok() {
+        if remove_artifact_dir(&dir.path) {
             live_count = live_count.saturating_sub(1);
         }
     }
 }
 
 fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
-    if ACTIVE_ARTIFACT_DIRS
+    if ACTIVE_ARTIFACT_LEASES
         .lock()
-        .expect("active command artifact store poisoned")
-        .contains(&dir.path)
+        .expect("active command artifact lease store poisoned")
+        .contains_key(&dir.path)
     {
         return true;
     }
-    dir.pid != std::process::id()
-        && crate::process_liveness::process_liveness(dir.pid)
-            != crate::process_liveness::ProcessLiveness::Dead
+    let lease_path = dir.path.join(ACTIVE_LEASE_FILE);
+    let Ok(metadata) = std::fs::symlink_metadata(&lease_path) else {
+        return false;
+    };
+    if !metadata.file_type().is_file() {
+        return false;
+    }
+    let Ok(lease) = OpenOptions::new().read(true).write(true).open(lease_path) else {
+        return true;
+    };
+    match FileExt::try_lock_exclusive(&lease) {
+        Ok(()) => {
+            let _ = FileExt::unlock(&lease);
+            false
+        }
+        Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => true,
+        Err(_) => true,
+    }
+}
+
+fn remove_artifact_dir(dir: &Path) -> bool {
+    if std::fs::remove_dir_all(dir).is_err() {
+        return false;
+    }
+    ARTIFACTS
+        .lock()
+        .expect("command artifact store poisoned")
+        .retain(|_, artifacts| artifact_dir(artifacts).as_deref() != Some(dir));
+    true
 }
 
 fn parse_command_artifact_dir_name(name: &str) -> Option<u32> {
@@ -468,13 +533,37 @@ mod tests {
             byte_count: 0,
             output_sha256: String::new(),
         };
-        mark_artifacts_active(&artifacts);
+        mark_artifacts_active(&artifacts).unwrap();
         set_dir_mtime(&active, now - Duration::from_secs(10));
 
         sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
 
         assert!(active.exists());
         mark_artifacts_inactive(&artifacts);
+    }
+
+    #[test]
+    fn command_artifact_sweep_uses_cross_process_active_lease_not_pid_liveness() {
+        let temp = tempdir().unwrap();
+        let now = SystemTime::UNIX_EPOCH + Duration::from_hours(1);
+        let active = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
+        let lease_path = active.join(ACTIVE_LEASE_FILE);
+        let lease = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lease_path)
+            .unwrap();
+        FileExt::lock_exclusive(&lease).unwrap();
+        set_dir_mtime(&active, now - Duration::from_secs(10));
+
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
+        assert!(active.exists());
+
+        FileExt::unlock(&lease).unwrap();
+        sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
+        assert!(!active.exists());
     }
 
     #[test]
@@ -520,11 +609,11 @@ mod tests {
         let first = create_artifact_dir(temp.path(), pid, 100, 1);
         let second = create_artifact_dir(temp.path(), pid, 200, 1);
         let third = create_artifact_dir(temp.path(), pid, 300, 1);
-        set_dir_mtime(&first, now - Duration::from_secs(3));
-        set_dir_mtime(&second, now - Duration::from_secs(2));
-        set_dir_mtime(&third, now - Duration::from_secs(1));
+        set_dir_mtime(&first, now - Duration::from_mins(30));
+        set_dir_mtime(&second, now - Duration::from_mins(20));
+        set_dir_mtime(&third, now - Duration::from_mins(10));
 
-        sweep_command_artifact_dirs(temp.path(), Duration::from_mins(1), 2, now);
+        sweep_command_artifact_dirs(temp.path(), Duration::from_hours(1), 2, now);
 
         assert!(!first.exists());
         assert!(second.exists());

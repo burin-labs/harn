@@ -44,13 +44,12 @@ name: Build release binaries
 # exact tag or on the default branch (main). It cannot reach caches
 # saved by another tag's run. So the warm-only events (2, 3, and explicit
 # warm-cache workflow_dispatch) own the save; tag-push and release
-# workflow_dispatch only restore. Swatinem's
-# restore-keys prefix-matches on `release-${target}`, so even when
-# Cargo.lock changes between two warms (every release rotates internal
-# `harn-*` crate versions, which propagate into Cargo.lock and rotate
-# Swatinem's exact key), the tag-push run still falls back to the most
-# recent main-scoped warm cache with the same shared-key prefix. Cargo
-# then does an incremental rebuild of just the deps whose fingerprints
+# workflow_dispatch only restore. Swatinem's built-in restore key still
+# includes its Rust-environment hash, so a version/toolchain/workspace-key
+# rotation can miss otherwise compatible same-target caches. The local
+# ./.github/actions/rust-cache wrapper therefore runs a restore-only
+# same-target fallback first; Swatinem still owns the precise save key.
+# Cargo then does an incremental rebuild of just the deps whose fingerprints
 # actually changed instead of a 30-50 min cold compile per target.
 on:
   push:
@@ -656,6 +655,7 @@ jobs:
         continue-on-error: true
         with:
           shared-key: release-${{ matrix.target }}
+          broad-restore-prefix: ${{ matrix.rust_cache_broad_restore_prefix }}
           cache-on-failure: true
           cache-bin: false
           save: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main') }}

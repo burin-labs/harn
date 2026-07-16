@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
+use crate::json::vm_value_to_json;
 use crate::tools::args::to_agent_path;
 use crate::tools::payload::{optional_string, optional_u64, require_dict_arg, require_string};
 use crate::tools::proc;
@@ -27,6 +28,20 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
 
     if timeout_ms > 0 {
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if let Some(result) = super::long_running::wait_for_result(&handle_id, remaining) {
+            // The waiter publishes the normal inbox feedback before waking
+            // direct waiters. Consume that matching entry so explicit wait
+            // preserves the historical "result is delivered once" contract.
+            let _ = drain_matching_result(&session_id, &handle_id);
+            return Ok(mark_tool_result(result));
+        }
+        if let Some(result) = drain_matching_result(&session_id, &handle_id) {
+            return Ok(result);
+        }
+
         // The inbox is keyed per-session, but multiple concurrent background
         // handles can share one session (notably `session_id == ""` under
         // `harn test`/headless). `wait_sync` only parks on "this session has
@@ -35,7 +50,6 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         // our handle as still running. Loop until either our handle's result
         // arrives or the deadline elapses, re-parking for the remaining budget
         // after each foreign wakeup.
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -113,6 +127,20 @@ fn drain_matching_result(session_id: &str, handle_id: &str) -> Option<VmValue> {
     }
 
     selected
+}
+
+fn mark_tool_result(value: VmValue) -> VmValue {
+    let mut payload = vm_value_to_json(&value);
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "feedback_kind".to_string(),
+            serde_json::Value::String("tool_result".to_string()),
+        );
+        object
+            .entry("timed_out".to_string())
+            .or_insert(serde_json::Value::Bool(false));
+    }
+    harn_vm::json_to_vm_value(&payload)
 }
 
 #[cfg(test)]
