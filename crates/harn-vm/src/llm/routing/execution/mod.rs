@@ -11,7 +11,7 @@ use crate::llm::cost::{calculate_cost_for_provider, peek_total_cost};
 use crate::llm::routing_verifier::{build_refine_nudge, run_verifier, Verifier, VerifierSignal};
 
 use super::{
-    auth, runtime_error, BudgetExceedAction, FailoverRules, RoutingPolicyConfig,
+    auth, runtime_error, BudgetExceedAction, ChainLink, FailoverRules, RoutingPolicyConfig,
     DEFAULT_FAILOVER_STATUSES, DEFAULT_RACE_PRIMARY_TIMEOUT_MS,
 };
 
@@ -199,7 +199,10 @@ fn budget_overrun_snapshot(
 /// [`LADDER_STEP_OVERRIDE_KEYS`] at build time, so a present value here is
 /// known-supported; type-mismatched values are ignored (the base value
 /// stands) rather than erroring mid-dispatch.
-fn apply_ladder_step_overrides(opts: &mut LlmCallOptions, overrides: &crate::value::DictMap) {
+pub(super) fn apply_ladder_step_overrides(
+    opts: &mut LlmCallOptions,
+    overrides: &crate::value::DictMap,
+) {
     let as_f64 = |value: &VmValue| -> Option<f64> {
         match value {
             VmValue::Float(f) => Some(*f),
