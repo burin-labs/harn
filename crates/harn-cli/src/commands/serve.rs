@@ -28,8 +28,8 @@ use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::cli::{
-    A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs,
-    ServeObsMode, ServeTlsMode, SiteServeArgs, WorkerServeArgs,
+    A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeCommand,
+    ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs, WorkerServeArgs,
 };
 
 /// Default 10 MiB request-body cap applied to every `harn serve` HTTP
@@ -37,6 +37,49 @@ use crate::cli::{
 /// listener so large/runaway POSTs cannot exhaust process memory while
 /// axum buffers a request.
 pub(crate) const SERVE_DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+
+pub(crate) async fn run_command(command: ServeCommand) {
+    match command {
+        ServeCommand::Acp(args) => {
+            if let Err(error) = run_acp_server(&args).await {
+                crate::command_error(&error);
+            }
+        }
+        ServeCommand::A2a(args) => {
+            if let Err(error) = run_a2a_server(&args).await {
+                crate::command_error(&error);
+            }
+        }
+        ServeCommand::Api(args) => {
+            if let Err(error) = run_api_server(&args).await {
+                crate::command_error(&error);
+            }
+        }
+        ServeCommand::Mcp(args) => {
+            if let Err(error) = run_mcp_server(&args).await {
+                crate::command_error(&error);
+            }
+        }
+        ServeCommand::Site(args) => {
+            if let Err(error) = run_site_server(&args).await {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        ServeCommand::Worker(args) => {
+            if let Err(error) = run_worker_server(&args).await {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        ServeCommand::Test => {
+            if let Err(error) = crate::commands::test_worker::serve_stdio().await {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
 
 /// Install the observability backend chosen by `harn serve --obs
 /// <MODE>` before any handler runs. `Auto` defers to environment

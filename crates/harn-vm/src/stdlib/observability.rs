@@ -866,7 +866,7 @@ fn maybe_write_pretty(payload: &serde_json::Value) {
     }
     if let Some(line) = payload.get("payload").and_then(serde_json::Value::as_str) {
         if to_stdout {
-            println!("{line}");
+            super::io::write_ambient_stdout(&format!("{line}\n"));
         } else {
             eprintln!("{line}");
         }

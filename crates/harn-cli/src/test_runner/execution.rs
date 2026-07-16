@@ -35,7 +35,7 @@ fn register_manifest_host_operations(extensions: &crate::package::RuntimeExtensi
     let check = crate::package::absolutize_check_config_paths(manifest.check.clone(), manifest_dir);
     for (capability, operations) in crate::commands::check::load_host_capabilities(&check) {
         for operation in operations {
-            harn_vm::stdlib::host::register_mockable_host_operation(
+            harn_vm::stdlib::host::register_scoped_mockable_host_operation(
                 &capability,
                 &operation,
                 "Host operation declared by the project manifest.",
@@ -57,9 +57,11 @@ pub(super) async fn execute_case(
     timeout_ms: u64,
     cli_skill_dirs: &[PathBuf],
     prepared_module_cache: &harn_vm::PreparedModuleCache,
+    stdio_available: bool,
     #[cfg(test)] setup_delay_ms: u64,
 ) -> TestResult {
     harn_vm::reset_thread_local_state();
+    let _stdio_guard = (!stdio_available).then(harn_vm::reserve_stdio_for_current_thread);
     reset_hostlib_state();
 
     let mut phases = PhaseTimings::default();
@@ -150,7 +152,8 @@ pub(super) async fn execute_case(
                 });
             crate::skill_loader::emit_loader_warnings(&loaded.loader_warnings);
             crate::skill_loader::install_skills_global(&mut vm, &loaded);
-            let extensions = crate::package::load_runtime_extensions(&case.file);
+            let extensions = crate::package::try_load_runtime_extensions(&case.file)
+                .map_err(|error| format!("failed to load runtime extensions: {error}"))?;
             register_manifest_host_operations(&extensions);
             crate::package::install_runtime_extensions(&extensions);
             crate::package::install_manifest_triggers_with_mode(&mut vm, &extensions, true)

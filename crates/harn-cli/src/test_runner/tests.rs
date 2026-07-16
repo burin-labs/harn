@@ -52,6 +52,7 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         0,
         &[],
         &harn_vm::PreparedModuleCache::default(),
+        true,
         0,
     )
     .await;

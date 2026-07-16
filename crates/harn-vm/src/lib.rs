@@ -314,7 +314,10 @@ pub use stdlib::http_response::{
 };
 #[cfg(feature = "postgres")]
 pub use stdlib::install_shared_pool_registry;
-pub use stdlib::io::{set_stdout_passthrough, take_stderr_buffer};
+pub use stdlib::io::{
+    reserve_stdio_for_current_thread, set_stdout_passthrough, take_stderr_buffer,
+    StdioReservationGuard,
+};
 pub use stdlib::long_running::cancel_handle as cancel_long_running_handle;
 pub use stdlib::observability::install_default_backend as install_obs_default_backend;
 pub use stdlib::secret_scan::{

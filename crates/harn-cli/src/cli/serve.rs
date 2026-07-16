@@ -73,6 +73,8 @@ pub(crate) enum ServeCommand {
     Site(SiteServeArgs),
     /// Run a `.harn` file's `@job` exports as a local worker daemon.
     Worker(WorkerServeArgs),
+    /// Serve user-test runs over a caller-owned JSON-RPC stdio session.
+    Test,
 }
 
 #[derive(Debug, Args)]

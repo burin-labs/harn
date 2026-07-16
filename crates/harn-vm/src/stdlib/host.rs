@@ -1,7 +1,7 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde_json::Value as JsonValue;
@@ -10,6 +10,8 @@ use tokio::io::AsyncReadExt;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
+
+mod operation_registry;
 
 /// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
 /// the testbench leak audit so a paused-clock session can surface every
@@ -57,18 +59,14 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
-// Mock-validation declarations describe the embedding process, not one test
-// worker. They intentionally do not make `host_has` report an operation as
-// callable; only installed hostlib handlers and live mocks do that.
-static MOCKABLE_HOST_OPERATIONS: LazyLock<RwLock<BTreeMap<String, BTreeMap<String, String>>>> =
-    LazyLock::new(|| RwLock::new(BTreeMap::new()));
-static CALLABLE_HOST_OPERATIONS: LazyLock<RwLock<BTreeMap<String, BTreeMap<String, String>>>> =
-    LazyLock::new(|| RwLock::new(BTreeMap::new()));
-
 pub(crate) fn reset_host_state() {
     HOST_MOCKS.with(|mocks| mocks.borrow_mut().clear());
     HOST_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
     HOST_MOCK_SCOPES.with(|scopes| scopes.borrow_mut().clear());
+}
+
+pub(crate) fn reset_scoped_host_state() {
+    operation_registry::clear_scoped_mockable();
 }
 
 /// Push the current host-mock state onto an internal stack and start a
@@ -393,15 +391,16 @@ pub fn register_mockable_host_operation(
     operation_name: impl AsRef<str>,
     description: impl AsRef<str>,
 ) {
-    let capability_name = capability_name.as_ref().to_string();
-    let operation_name = operation_name.as_ref().to_string();
-    let description = description.as_ref().to_string();
-    MOCKABLE_HOST_OPERATIONS
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .entry(capability_name)
-        .or_default()
-        .insert(operation_name, description);
+    operation_registry::register_mockable(capability_name, operation_name, description);
+}
+
+/// Register a mock-validation declaration scoped to the current test thread.
+pub fn register_scoped_mockable_host_operation(
+    capability_name: impl AsRef<str>,
+    operation_name: impl AsRef<str>,
+    description: impl AsRef<str>,
+) {
+    operation_registry::register_scoped_mockable(capability_name, operation_name, description);
 }
 
 pub fn register_callable_host_operation(
@@ -409,37 +408,15 @@ pub fn register_callable_host_operation(
     operation_name: impl AsRef<str>,
     description: impl AsRef<str>,
 ) {
-    let capability_name = capability_name.as_ref().to_string();
-    let operation_name = operation_name.as_ref().to_string();
-    let description = description.as_ref().to_string();
-    CALLABLE_HOST_OPERATIONS
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .entry(capability_name)
-        .or_default()
-        .insert(operation_name, description);
+    operation_registry::register_callable(capability_name, operation_name, description);
 }
 
 fn apply_registered_operations(root: &mut crate::value::DictMap) {
-    let registered = CALLABLE_HOST_OPERATIONS
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    for (capability_name, operations) in registered.iter() {
-        for (operation_name, description) in operations {
-            ensure_registered_operation(root, capability_name, operation_name, description);
-        }
-    }
+    operation_registry::apply_callable(root);
 }
 
 fn apply_mockable_operations(root: &mut crate::value::DictMap) {
-    let registered = MOCKABLE_HOST_OPERATIONS
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    for (capability_name, operations) in registered.iter() {
-        for (operation_name, description) in operations {
-            ensure_registered_operation(root, capability_name, operation_name, description);
-        }
-    }
+    operation_registry::apply_mockable(root);
 }
 
 fn capability_manifest_with_mocks() -> VmValue {
@@ -951,15 +928,7 @@ async fn dispatch_builtin_host_operation(
         }
         ("interaction", "ask") => {
             let question = require_param(params, "question")?;
-            use std::io::BufRead;
-            print!("{question}");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-            let mut input = String::new();
-            if std::io::stdin().lock().read_line(&mut input).is_ok() {
-                Ok(VmValue::String(arcstr::ArcStr::from(input.trim_end())))
-            } else {
-                Ok(VmValue::Nil)
-            }
+            super::io::prompt_user_value(&[VmValue::string(question)], &mut String::new())
         }
         ("project", "metadata_get") => crate::metadata::project_metadata_host_get(params),
         ("project", "metadata_inspect") => crate::metadata::project_metadata_host_inspect(params),
@@ -1770,8 +1739,9 @@ mod tests {
     use super::{
         build_sandboxed_command, capability_manifest_with_mocks, clear_host_call_bridge,
         dispatch_host_operation, dispatch_host_tool_call, dispatch_host_tool_list,
-        dispatch_mock_host_call, dispatch_mock_hostlib_call, host_has_builtin, parse_host_mock,
-        push_host_mock, register_mockable_host_operation, reset_host_state,
+        dispatch_mock_host_call, dispatch_mock_hostlib_call, host_has_builtin,
+        host_mock_clear_builtin, parse_host_mock, push_host_mock, register_mockable_host_operation,
+        register_scoped_mockable_host_operation, reset_host_state, reset_scoped_host_state,
         resolve_process_exec_cwd, set_host_call_bridge, validate_host_mock_registration,
         HostCallBridge, HostMock,
     };
@@ -2085,6 +2055,30 @@ mod tests {
         };
         validate_host_mock_registration(&host_mock)
             .expect("registered hostlib operations should be mockable");
+    }
+
+    #[test]
+    fn clearing_live_mocks_preserves_scoped_manifest_declarations() {
+        reset_scoped_host_state();
+        register_scoped_mockable_host_operation(
+            "scoped_clear_fixture",
+            "answer",
+            "Test-scoped manifest declaration.",
+        );
+        let host_mock = HostMock {
+            capability: "scoped_clear_fixture".to_string(),
+            operation: "answer".to_string(),
+            params: None,
+            result: Some(VmValue::Nil),
+            error: None,
+            unregistered_ok: false,
+        };
+
+        validate_host_mock_registration(&host_mock).expect("scoped declaration is registered");
+        host_mock_clear_builtin(&[], &mut String::new()).expect("clear live mocks");
+        validate_host_mock_registration(&host_mock)
+            .expect("clearing live mocks must preserve manifest declarations");
+        reset_scoped_host_state();
     }
 
     #[tokio::test]

@@ -12,6 +12,7 @@ use harn_lexer::Lexer;
 use harn_parser::const_eval::{const_eval, ConstEnv, ConstValue};
 use harn_parser::{Attribute, Node, Parser, SNode};
 use harn_vm::VmValue;
+use serde::Serialize;
 
 use crate::env_guard::ScopedEnvVar;
 use crate::CLI_RUNTIME_STACK_SIZE;
@@ -24,7 +25,7 @@ mod tests;
 use execution::execute_case;
 pub use session::{TestRunSession, TestRunSessionStats};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TestResult {
     pub name: String,
     pub file: String,
@@ -40,18 +41,19 @@ pub struct TestResult {
     pub phases: PhaseTimings,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct TestTimeout {
     pub phase: TestPhase,
     pub limit_ms: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TestPhase {
     Execute,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TestSummary {
     pub results: Vec<TestResult>,
     pub passed: usize,
@@ -67,7 +69,7 @@ pub struct TestSummary {
 /// Sums to the test's `duration_ms` modulo measurement overhead. Surfaced
 /// so consumers can attribute cold-start vs assertion cost without
 /// having to instrument the runner externally.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct PhaseTimings {
     /// VM construction + stdlib/hostlib registration + skill install +
     /// runtime extension install + manifest hooks/triggers install.
@@ -82,7 +84,7 @@ pub struct PhaseTimings {
 
 /// Aggregated cost across the run. Mirrors [`PhaseTimings`] plus the
 /// suite-level collection cost (discover + parse).
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct AggregateTimings {
     pub collection_ms: u64,
     pub setup_ms: u64,
@@ -554,6 +556,7 @@ async fn run_test_file_with_session_impl(
                 timeout_ms,
                 cli_skill_dirs,
                 &prepared_module_cache,
+                session.stdio_available(),
                 #[cfg(test)]
                 0,
             )
@@ -1136,6 +1139,7 @@ async fn execute_cases(
                 options.timeout_ms,
                 &options.cli_skill_dirs,
                 &prepared_module_cache,
+                session.stdio_available(),
                 #[cfg(test)]
                 options.setup_delay_ms,
             )
@@ -1178,6 +1182,7 @@ async fn execute_cases(
         let fail_fast = options.fail_fast;
         let cancelled = Arc::clone(&cancelled);
         let prepared_module_cache = session.prepared_module_cache(worker_idx);
+        let stdio_available = session.stdio_available();
         let handle = thread::Builder::new()
             .name(format!("harn-test-worker-{worker_idx}"))
             .stack_size(CLI_RUNTIME_STACK_SIZE)
@@ -1225,6 +1230,7 @@ async fn execute_cases(
                         timeout_ms,
                         &cli_skill_dirs,
                         &prepared_module_cache,
+                        stdio_available,
                         #[cfg(test)]
                         setup_delay_ms,
                     ));
