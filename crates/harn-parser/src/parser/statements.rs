@@ -266,6 +266,7 @@ impl Parser {
 
         let mut arms = Vec::new();
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let arm_start = self.current_span();
             let first_pat = self.parse_expression()?;
             // Or-pattern: `pat1 | pat2 | pat3 -> body`. `|` is the `Bar`
             // token (only used in type position elsewhere), so an
@@ -302,6 +303,7 @@ impl Parser {
                 pattern,
                 guard,
                 body,
+                span: Span::merge(arm_start, self.prev_span()),
             });
             self.skip_newlines();
         }

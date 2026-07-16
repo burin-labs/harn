@@ -1251,8 +1251,8 @@ impl<'a> Linter<'a> {
                     kind: "interface",
                     is_pub: false,
                 });
-                for (_, default_type) in associated_types {
-                    if let Some(type_expr) = default_type {
+                for assoc in associated_types {
+                    if let Some(type_expr) = &assoc.default {
                         self.record_type_expr_references(type_expr);
                     }
                 }
