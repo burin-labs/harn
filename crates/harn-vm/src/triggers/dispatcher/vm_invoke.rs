@@ -71,10 +71,7 @@ impl Dispatcher {
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), wait_lease));
         let prior_hitl_state = crate::stdlib::hitl::take_hitl_state();
         crate::stdlib::hitl::reset_hitl_state();
-        let future = async {
-            let closure = vm.resolve_callable(callable).await?;
-            vm.call_closure_pub(&closure, &args).await
-        };
+        let future = async { vm.execute_callable(callable, &args).await };
         pin_mut!(future);
         let mut poll = tokio::time::interval(Duration::from_millis(100));
         let result = loop {

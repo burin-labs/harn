@@ -41,6 +41,6 @@ fn judge_until_confident(task) {
   )
 }
 
-pipeline run(task) {
+pub pipeline run(task) {
   return template_persona(task)
 }

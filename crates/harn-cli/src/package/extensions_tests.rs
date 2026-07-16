@@ -870,6 +870,12 @@ budget = { daily_usd = 2.0 }
 "#,
         None,
     );
+    fs::create_dir_all(tmp.path().join("workflows")).unwrap();
+    fs::write(
+        tmp.path().join("workflows/merge_captain.harn"),
+        "pub pipeline run(event) { return event }\n",
+    )
+    .unwrap();
     let extensions = load_runtime_extensions(&harn_file);
     let bindings =
         collect_persona_trigger_binding_specs(&extensions).expect("persona bindings collect");
@@ -882,7 +888,7 @@ budget = { daily_usd = 2.0 }
     assert!(matches!(
         &bindings[0].handler,
         harn_vm::TriggerHandlerSpec::Persona {
-            callable: harn_vm::VmCallable::Lazy(_),
+            callable: harn_vm::VmCallable::Pipeline(_),
             ..
         }
     ));
@@ -941,6 +947,41 @@ triggers = ["github.pr_opened"]
 
     assert!(
         error.to_string().contains("escapes package root"),
+        "{error}"
+    );
+}
+
+#[test]
+fn persona_triggers_reject_private_entry_workflow() {
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_trigger_project(
+        tmp.path(),
+        r#"
+[[personas]]
+name = "merge_captain"
+description = "Owns PR readiness."
+entry_workflow = "workflows/merge_captain.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "required"
+triggers = ["github.pr_opened"]
+"#,
+        None,
+    );
+    fs::create_dir_all(tmp.path().join("workflows")).unwrap();
+    fs::write(
+        tmp.path().join("workflows/merge_captain.harn"),
+        "pipeline run(event) { return event }\n",
+    )
+    .unwrap();
+    let extensions = load_runtime_extensions(&harn_file);
+    let error = collect_persona_trigger_binding_specs(&extensions)
+        .expect_err("private entry workflow should fail collection");
+
+    assert!(
+        error
+            .to_string()
+            .contains("entry_workflow 'workflows/merge_captain.harn#run' is not exported"),
         "{error}"
     );
 }
@@ -1045,6 +1086,12 @@ secrets = { signing_secret = "github/webhook-secret" }
 "#,
         None,
     );
+    fs::create_dir_all(tmp.path().join("workflows")).unwrap();
+    fs::write(
+        tmp.path().join("workflows/merge_captain.harn"),
+        "pub pipeline run(event) { return event }\n",
+    )
+    .unwrap();
     let mut vm = test_vm();
     let collected = collect_manifest_triggers(&mut vm, &load_runtime_extensions(&harn_file))
         .await
@@ -1055,7 +1102,7 @@ secrets = { signing_secret = "github/webhook-secret" }
         &collected[0].handler,
         CollectedTriggerHandler::Persona {
             binding,
-            callable: harn_vm::VmCallable::Lazy(_),
+            callable: harn_vm::VmCallable::Pipeline(_),
         } if binding.name == "merge_captain"
             && binding.entry_workflow == "workflows/merge_captain.harn#run"
     ));

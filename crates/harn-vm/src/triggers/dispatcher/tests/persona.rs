@@ -24,7 +24,7 @@ async fn persona_dispatcher(
         autonomy_tier: crate::AutonomyTier::ActAuto,
         handler: TriggerHandlerSpec::Persona {
             binding: persona,
-            callable: crate::value::VmCallable::Lazy(crate::value::LazyVmCallable::new(
+            callable: crate::value::VmCallable::Pipeline(crate::value::LazyPipelineCallable::new(
                 module_path.to_path_buf(),
                 function_name,
             )),
@@ -72,8 +72,8 @@ async fn persona_dispatch_invokes_entry_workflow_before_completing_run() {
                 r#"
 import "std/triggers"
 
-pub fn run(event: TriggerEvent) -> dict {
-  return {executed: true, kind: event.kind}
+pub pipeline run(event) {
+  return {executed: true, kind: event.kind, cost_usd: 0.125, tokens: 42}
 }
 "#,
             )
@@ -108,6 +108,20 @@ pub fn run(event: TriggerEvent) -> dict {
                 .expect("run completed");
             assert!(started < completed);
             assert!(!kinds.contains(&"persona.run.failed"));
+            let budget = lifecycle
+                .iter()
+                .find(|(_, event)| event.kind == "persona.budget.recorded")
+                .map(|(_, event)| &event.payload)
+                .expect("budget receipt");
+            assert_eq!(budget["cost_usd"], 0.125);
+            assert_eq!(budget["tokens"], 42);
+            let value = lifecycle
+                .iter()
+                .find(|(_, event)| event.kind == "persona.value.run_completed")
+                .map(|(_, event)| &event.payload)
+                .expect("completion value receipt");
+            assert_eq!(value["paid_cost_usd"], 0.125);
+            assert_eq!(value["llm_steps"], 1);
         })
         .await;
 }
@@ -125,7 +139,7 @@ async fn persona_dispatch_failure_records_failed_run_and_releases_lease() {
                 r#"
 import "std/triggers"
 
-pub fn run(_event: TriggerEvent) -> dict {
+pub pipeline run(_event) {
   throw "persona failed"
 }
 "#,
@@ -134,7 +148,7 @@ pub fn run(_event: TriggerEvent) -> dict {
             let (log, dispatcher) = persona_dispatcher(
                 &module_path,
                 "run",
-                TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+                TriggerRetryConfig::new(2, RetryPolicy::Linear { delay_ms: 0 }),
             )
             .await;
 
@@ -145,7 +159,7 @@ pub fn run(_event: TriggerEvent) -> dict {
 
             assert_eq!(outcomes.len(), 1);
             assert_eq!(outcomes[0].status, DispatchStatus::Dlq);
-            assert_eq!(outcomes[0].attempt_count, 1);
+            assert_eq!(outcomes[0].attempt_count, 2);
             assert_eq!(outcomes[0].error.as_deref(), Some("persona failed"));
 
             let lifecycle = read_topic(log, crate::personas::PERSONA_RUNTIME_TOPIC).await;
@@ -162,7 +176,103 @@ pub fn run(_event: TriggerEvent) -> dict {
                 .position(|kind| *kind == "persona.run.failed")
                 .expect("run failed");
             assert!(released < failed);
+            assert_eq!(
+                kinds
+                    .iter()
+                    .filter(|kind| **kind == "persona.run.started")
+                    .count(),
+                2
+            );
+            assert_eq!(
+                kinds
+                    .iter()
+                    .filter(|kind| **kind == "persona.run.failed")
+                    .count(),
+                2
+            );
+            assert_eq!(
+                kinds
+                    .iter()
+                    .filter(|kind| **kind == "persona.lease.released")
+                    .count(),
+                2
+            );
             assert!(!kinds.contains(&"persona.run.completed"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_dispatch_cancellation_records_one_failed_terminal() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            crate::reset_thread_local_state();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let module_path = dir.path().join("merge_captain.harn");
+            std::fs::write(
+                &module_path,
+                r#"
+import "std/triggers"
+
+pub pipeline run(_event) {
+  while !is_cancelled() {
+    sleep(1)
+  }
+  return "cancelled"
+}
+"#,
+            )
+            .expect("write cancellable persona workflow");
+            let (log, dispatcher) = persona_dispatcher(
+                &module_path,
+                "run",
+                TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+            )
+            .await;
+            let binding =
+                resolve_live_trigger_binding("persona.merge_captain.github.issues.opened", None)
+                    .expect("resolve persona trigger binding");
+            let event = trigger_event("issues.opened", "persona-cancel");
+            let event_id = event.id.0.clone();
+            let binding_key = binding.binding_key();
+
+            let run_dispatcher = dispatcher.clone();
+            let handle = tokio::task::spawn_local(async move {
+                run_dispatcher
+                    .dispatch(&binding, event)
+                    .await
+                    .expect("cancelled persona dispatch is recorded")
+            });
+
+            wait_for_dispatcher_in_flight(&dispatcher, 1).await;
+            append_dispatch_cancel_request(
+                &log,
+                &DispatchCancelRequest {
+                    binding_key,
+                    event_id,
+                    requested_at: test_cancel_requested_at(),
+                    requested_by: Some("test".to_string()),
+                    audit_id: Some("persona-cancel-audit".to_string()),
+                },
+            )
+            .await
+            .expect("append persona cancel request");
+
+            let outcome = handle.await.expect("join persona dispatch");
+            assert_eq!(outcome.status, DispatchStatus::Cancelled);
+
+            let lifecycle = read_topic(log, crate::personas::PERSONA_RUNTIME_TOPIC).await;
+            let count = |kind: &str| {
+                lifecycle
+                    .iter()
+                    .filter(|(_, event)| event.kind == kind)
+                    .count()
+            };
+            assert_eq!(count("persona.run.started"), 1);
+            assert_eq!(count("persona.run.failed"), 1);
+            assert_eq!(count("persona.lease.released"), 1);
+            assert_eq!(count("persona.run.completed"), 0);
         })
         .await;
 }

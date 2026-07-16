@@ -173,7 +173,7 @@ pub async fn install_manifest_hooks_with_mode(
 ) -> Result<(), PackageError> {
     harn_vm::orchestration::clear_runtime_hooks();
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
-    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, ModuleFunctionSignature>> =
+    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, ModuleCallableSignature>> =
         HashMap::new();
     for hook in &extensions.hooks {
         let Some((module_name, function_name)) = hook.handler.rsplit_once("::") else {
@@ -189,7 +189,7 @@ pub async fn install_manifest_hooks_with_mode(
             &hook.exports,
             Some(module_name),
         )?;
-        let signatures = cached_module_function_signatures(&mut module_signatures, &module_path)?;
+        let signatures = cached_module_callable_signatures(&mut module_signatures, &module_path)?;
         if signatures
             .get(function_name)
             .is_none_or(|signature| !signature.is_pub)
@@ -260,7 +260,7 @@ async fn collect_manifest_triggers_with_mode(
     validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
     validate_static_trigger_configs(&extensions.triggers, &provider_catalog)?;
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
-    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, ModuleFunctionSignature>> =
+    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, ModuleCallableSignature>> =
         HashMap::new();
     let mut validated = Vec::with_capacity(extensions.triggers.len());
     for trigger in &extensions.triggers {
@@ -358,12 +358,12 @@ struct ValidatedTriggerCallableDeclarations {
 
 fn validate_trigger_callable_declarations(
     trigger: &ResolvedTriggerConfig,
-    module_signatures: &mut HashMap<PathBuf, BTreeMap<String, ModuleFunctionSignature>>,
+    module_signatures: &mut HashMap<PathBuf, BTreeMap<String, ModuleCallableSignature>>,
 ) -> Result<ValidatedTriggerCallableDeclarations, PackageError> {
     let handler = parse_trigger_handler_uri(trigger)?;
     let local_handler_path = if let TriggerHandlerUri::Local(reference) = &handler {
         let module_path = trigger_function_source_path(trigger, reference)?;
-        let signatures = cached_module_function_signatures(module_signatures, &module_path)
+        let signatures = cached_module_callable_signatures(module_signatures, &module_path)
             .map_err(|error| trigger_error(trigger, error))?;
         if signatures
             .get(&reference.function_name)
@@ -384,7 +384,7 @@ fn validate_trigger_callable_declarations(
     let when = if let Some(when_raw) = &trigger.when {
         let reference = parse_local_trigger_ref(when_raw, "when", trigger)?;
         let source_path = trigger_function_source_path(trigger, &reference)?;
-        let signatures = cached_module_function_signatures(module_signatures, &source_path)
+        let signatures = cached_module_callable_signatures(module_signatures, &source_path)
             .map_err(|error| trigger_error(trigger, error))?;
         let Some(signature) = signatures.get(&reference.function_name) else {
             return Err(trigger_error(
@@ -502,14 +502,14 @@ async fn collect_manifest_vm_callable(
     Ok(harn_vm::VmCallable::Eager(closure.clone()))
 }
 
-fn cached_module_function_signatures<'a>(
-    cache: &'a mut HashMap<PathBuf, BTreeMap<String, ModuleFunctionSignature>>,
+fn cached_module_callable_signatures<'a>(
+    cache: &'a mut HashMap<PathBuf, BTreeMap<String, ModuleCallableSignature>>,
     source_path: &Path,
-) -> Result<&'a BTreeMap<String, ModuleFunctionSignature>, PackageError> {
+) -> Result<&'a BTreeMap<String, ModuleCallableSignature>, PackageError> {
     match cache.entry(source_path.to_path_buf()) {
         std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
         std::collections::hash_map::Entry::Vacant(entry) => {
-            let signatures = load_module_function_signatures(source_path)?;
+            let signatures = load_module_callable_signatures(source_path)?;
             Ok(entry.insert(signatures))
         }
     }
@@ -1212,10 +1212,18 @@ fn persona_runtime_callable(
         )));
     }
     let module_path = safe_package_relative_path(manifest_dir, module_path)?;
-    Ok(harn_vm::VmCallable::Lazy(harn_vm::LazyVmCallable::new(
-        module_path,
-        function_name,
-    )))
+    let signatures = load_module_callable_signatures(&module_path)?;
+    if signatures
+        .get(function_name)
+        .is_none_or(|signature| !signature.is_pub)
+    {
+        return Err(PackageError::Manifest(format!(
+            "persona '{name}' entry_workflow '{entry_workflow}' is not exported by the resolved module"
+        )));
+    }
+    Ok(harn_vm::VmCallable::Pipeline(
+        harn_vm::LazyPipelineCallable::new(module_path, function_name),
+    ))
 }
 
 fn persona_autonomy_to_vm(value: PersonaAutonomyTier) -> harn_vm::AutonomyTier {

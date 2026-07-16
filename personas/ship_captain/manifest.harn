@@ -36,7 +36,7 @@ fn ship_captain_manifest() {
   }
 }
 
-pipeline run(task) {
+pub pipeline run(task) {
   const manifest = ship_captain_manifest()
   __io_println(json_stringify(manifest))
   return manifest

@@ -1685,13 +1685,18 @@ impl ConnectorRegistry {
     }
 
     pub fn with_defaults() -> Self {
+        Self::with_defaults_and_clock(harn_clock::RealClock::arc())
+    }
+
+    /// Build the default connector set with a shared clock for time-driven providers.
+    pub fn with_defaults_and_clock(clock: Arc<dyn harn_clock::Clock>) -> Self {
         let mut registry = Self::empty();
         for provider in registered_provider_metadata() {
             if !matches!(provider.runtime, ProviderRuntimeMetadata::Builtin { .. }) {
                 continue;
             }
             registry
-                .register(default_connector_for_provider(&provider))
+                .register(default_connector_for_provider(&provider, clock.clone()))
                 .expect("default connector registration should not fail");
         }
         registry
@@ -1758,14 +1763,17 @@ impl Default for ConnectorRegistry {
     }
 }
 
-fn default_connector_for_provider(provider: &ProviderMetadata) -> Box<dyn Connector> {
+fn default_connector_for_provider(
+    provider: &ProviderMetadata,
+    clock: Arc<dyn harn_clock::Clock>,
+) -> Box<dyn Connector> {
     match &provider.runtime {
         ProviderRuntimeMetadata::Builtin {
             connector,
             default_signature_variant,
         } => match connector.as_str() {
             "a2a-push" => Box::new(A2aPushConnector::new()),
-            "cron" => Box::new(CronConnector::new()),
+            "cron" => Box::new(CronConnector::with_clock(clock)),
             "stream" => Box::new(StreamConnector::new(
                 ProviderId::from(provider.provider.clone()),
                 provider.schema_name.clone(),

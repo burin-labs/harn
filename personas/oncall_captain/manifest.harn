@@ -76,7 +76,7 @@ fn _resolve_incident() {
   }
 }
 
-pipeline run(task) {
+pub pipeline run(task) {
   const incident = _resolve_incident()
   const result = {
     persona: "oncall_captain",
