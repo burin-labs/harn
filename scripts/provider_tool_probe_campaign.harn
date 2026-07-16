@@ -1,6 +1,6 @@
 import { parse_args } from "std/cli"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v2"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v3"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
@@ -18,6 +18,7 @@ pub type ProviderToolProbeBehavior = {
   category: string,
   description: string,
   runner: string,
+  probe_case?: string,
   modes: list<string>,
   tool_formats: list<string>,
   cheap: bool,
@@ -42,7 +43,7 @@ pub type ProviderToolProbeCell = {
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v2",
+  schema_version: "harn.provider_tool_probe_campaign.v3",
   live: bool,
   include_expensive: bool,
   route_count: int,
@@ -258,6 +259,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       category: "tool_calls",
       description: "Single required tool call through non-streaming transport, classified by Harn provider tool-probe.",
       runner: "provider_tool_probe",
+      probe_case: "single_tool_call",
       modes: ["non-streaming"],
       tool_formats: ["native", "json", "text/tagged"],
       cheap: true,
@@ -267,6 +269,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       category: "tool_calls",
       description: "Single required tool call through streaming transport, classified by Harn provider tool-probe.",
       runner: "provider_tool_probe",
+      probe_case: "single_tool_call",
       modes: ["streaming"],
       tool_formats: ["native", "json", "text/tagged"],
       cheap: true,
@@ -275,7 +278,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       id: "parallel_tool_calls",
       category: "dispatch",
       description: "Multiple sibling tool calls in one assistant turn; assertion target is dispatch receipt cardinality.",
-      runner: "planned_agent_loop",
+      runner: "provider_tool_probe",
+      probe_case: "parallel_tool_calls",
       modes: ["non-streaming"],
       tool_formats: ["native", "json", "text/tagged"],
       cheap: true,
@@ -284,7 +288,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       id: "multi_turn_tool_results",
       category: "dispatch",
       description: "Tool result consumed in a follow-up turn without provider-side message-order rejection.",
-      runner: "planned_agent_loop",
+      runner: "provider_tool_probe",
+      probe_case: "tool_result_followup",
       modes: ["non-streaming"],
       tool_formats: ["native", "json", "text/tagged"],
       cheap: true,
@@ -320,7 +325,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       id: "long_heredoc_unicode_args",
       category: "parser",
       description: "Long heredoc and Unicode tool arguments survive provider parsing and dispatch byte-identically.",
-      runner: "planned_agent_loop",
+      runner: "provider_tool_probe",
+      probe_case: "large_string_argument",
       modes: ["non-streaming"],
       tool_formats: ["native", "json", "text/tagged"],
       cheap: true,
@@ -429,6 +435,7 @@ fn __tool_probe_command(
   harn_bin: string,
   route: ProviderToolProbeRoute,
   mode: string,
+  probe_case: string,
   repeat: int,
   timeout_secs: int,
 ) -> list<string> {
@@ -441,6 +448,8 @@ fn __tool_probe_command(
     route.model,
     "--mode",
     mode,
+    "--case",
+    probe_case,
     "--repeat",
     to_string(repeat),
     "--timeout-secs",
@@ -507,7 +516,17 @@ fn __planned_cell(
     {},
   )
   if behavior.runner == "provider_tool_probe" {
-    return cell + {command: __tool_probe_command(harn_bin, route, mode, repeat, timeout_secs)}
+    return cell
+      + {
+      command: __tool_probe_command(
+        harn_bin,
+        route,
+        mode,
+        to_string(behavior.probe_case ?? "single_tool_call"),
+        repeat,
+        timeout_secs,
+      ),
+    }
   }
   return cell
 }
@@ -662,7 +681,14 @@ fn __run_tool_probe(
   if len(missing) > 0 {
     return __skipped_cells_for_missing_env(route, behavior, mode, missing)
   }
-  const command = __tool_probe_command(harn_bin, route, mode, repeat, timeout_secs)
+  const command = __tool_probe_command(
+    harn_bin,
+    route,
+    mode,
+    to_string(behavior.probe_case ?? "single_tool_call"),
+    repeat,
+    timeout_secs,
+  )
   const artifact_path = path_join(output_dir, "tool-probe-" + route.id + "-" + mode + ".json")
   const child = harness.process.spawn_captured({cmd: harn_bin, args: command[1:len(command)], env: env})
   const stdout = child.stdout ?? ""
