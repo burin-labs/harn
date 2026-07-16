@@ -23,7 +23,6 @@ pub type SessionStoreOptions = {
   actor?: string,
   tags?: list<string>,
   headers?: dict<string, string>,
-  now?: string,
 }
 
 pub type SessionStoreEventKind = {kind: string, type?: string}
@@ -100,7 +99,7 @@ fn __session_store_verify_report(raw: dict) -> SessionStoreVerifyReport {
  * options.kind_type}` (default type "LibrarianEntry"). `options.tenant_id`,
  * `options.actor` (default "harn"), `options.tags`, and `options.headers` are
  * optional. Timestamps are assigned by the canonical store; the retired
- * `options.now` override is accepted for compatibility but ignored. A
+ * `options.now` override fails loudly instead of being silently ignored. A
  * stream's non-nil `tenant_id` is immutable after creation. String options,
  * tag lists, and string-valued header dicts are validated at the boundary.
  *
@@ -220,14 +219,27 @@ pub fn session_store_verify(session_id: string, options: SessionStoreOptions? = 
 }
 
 /**
- * Return the absolute path of the shared canonical SQLite database.
+ * Return the retired per-stream JSONL path for compatibility.
  *
- * `session_id` is retained for API compatibility and validated, but the
- * returned database contains every stream under the selected root.
+ * Canonical writes no longer target this path. Use
+ * `session_store_database_path` when the shared SQLite database is intended.
  *
  * @effects: [env.read]
  * @errors: [runtime]
  */
 pub fn session_store_path(session_id: string, options: SessionStoreOptions? = nil) -> string {
   return __session_store_path(session_id, options)
+}
+
+/**
+ * Return the absolute path of the shared canonical SQLite database.
+ *
+ * The returned database contains every stream under the selected root.
+ * Callers must not treat it as a per-session artifact.
+ *
+ * @effects: [env.read]
+ * @errors: [runtime]
+ */
+pub fn session_store_database_path(options: SessionStoreOptions? = nil) -> string {
+  return __session_store_database_path(options)
 }

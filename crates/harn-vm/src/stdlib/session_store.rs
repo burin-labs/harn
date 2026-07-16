@@ -43,6 +43,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &SESSION_STORE_EVENTS_IMPL_DEF,
     &SESSION_STORE_VERIFY_IMPL_DEF,
     &SESSION_STORE_PATH_IMPL_DEF,
+    &SESSION_STORE_DATABASE_PATH_IMPL_DEF,
 ];
 
 #[harn_builtin(
@@ -71,6 +72,7 @@ async fn session_store_append_impl(
         "options",
         ErrorKind::Runtime,
     )?;
+    reject_retired_now(options)?;
     let root = store_root(options)?;
     let store = open_store(&root)?;
     let tenant_id = option_string(options, "tenant_id")?;
@@ -125,7 +127,8 @@ async fn session_store_events_impl(
     )?;
     let root = store_root(options)?;
     let store = open_store(&root)?;
-    if !ensure_session(&store, &root, &session_id, false, None).await? {
+    let tenant_id = option_string(options, "tenant_id")?;
+    if !ensure_session(&store, &root, &session_id, false, tenant_id).await? {
         return Ok(VmValue::List(Arc::new(Vec::new())));
     }
     let events = read_all_events(&store, &session_id).await?;
@@ -163,7 +166,8 @@ async fn session_store_verify_impl(
     )?;
     let root = store_root(options)?;
     let store = open_store(&root)?;
-    if !ensure_session(&store, &root, &session_id, false, None).await? {
+    let tenant_id = option_string(options, "tenant_id")?;
+    if !ensure_session(&store, &root, &session_id, false, tenant_id).await? {
         return Ok(json_to_vm_value(&json!({
             "_type": "session_store_verify",
             "session_id": session_id,
@@ -208,6 +212,29 @@ async fn session_store_path_impl(
         &args,
         1,
         "__session_store_path",
+        "options",
+        ErrorKind::Runtime,
+    )?;
+    Ok(VmValue::String(arcstr::ArcStr::from(
+        legacy_session_path(&store_root(options)?, &session_id)?
+            .to_string_lossy()
+            .as_ref(),
+    )))
+}
+
+#[harn_builtin(
+    sig = "__session_store_database_path(options?: dict) -> string",
+    kind = "async",
+    category = "session_store"
+)]
+async fn session_store_database_path_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let options = optional_dict_arg(
+        &args,
+        0,
+        "__session_store_database_path",
         "options",
         ErrorKind::Runtime,
     )?;
@@ -397,21 +424,25 @@ async fn import_legacy_events(
 
     let mut events = Vec::with_capacity(source.events.len());
     for legacy in source.events {
-        let mut original_headers = serde_json::to_value(&legacy.headers).map_err(|error| {
+        let mut redacted_headers = serde_json::to_value(&legacy.headers).map_err(|error| {
             VmError::Runtime(format!(
                 "session_store: failed to preserve legacy headers: {error}"
             ))
         })?;
         if let Some(redactor) = store.hooks().redaction.as_ref() {
-            redactor.redact_json_in_place(&mut original_headers);
+            redactor.redact_json_in_place(&mut redacted_headers);
         }
-        let original_headers = serde_json::to_string(&original_headers).map_err(|error| {
+        let original_headers = serde_json::to_string(&redacted_headers).map_err(|error| {
             VmError::Runtime(format!(
                 "session_store: failed to preserve legacy headers: {error}"
             ))
         })?;
-        let mut headers = legacy
-            .headers
+        let mut headers = serde_json::from_value::<BTreeMap<String, JsonValue>>(redacted_headers)
+            .map_err(|error| {
+                VmError::Runtime(format!(
+                    "session_store: failed to project redacted legacy headers: {error}"
+                ))
+            })?
             .into_iter()
             .map(|(key, value)| (key, json_header_value(&value)))
             .collect::<BTreeMap<_, _>>();
@@ -531,6 +562,16 @@ fn option_string(options: Option<&DictMap>, key: &str) -> Result<Option<String>,
             "session_store: options.{key} must be a string"
         ))),
     }
+}
+
+fn reject_retired_now(options: Option<&DictMap>) -> Result<(), VmError> {
+    if options.is_some_and(|options| options.contains_key("now")) {
+        return Err(VmError::Runtime(
+            "session_store: options.now is no longer supported; canonical timestamps are assigned by the store"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn option_tags(options: Option<&DictMap>) -> Result<Vec<String>, VmError> {
@@ -731,6 +772,7 @@ mod tests {
                 "headers": {
                     "run_id": " ",
                     "authorization": "Bearer source-secret",
+                    "x-debug": "sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "x-source": 7,
                     "harn.legacy.event_id": "source-value",
                     "harn.legacy.header.run_id": "source-relocation-value",
@@ -781,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_path_is_not_the_retired_jsonl_path() {
+    fn canonical_and_legacy_paths_are_explicitly_distinct() {
         let root = Path::new("/workspace");
         assert_eq!(store_path(root), root.join(".harn/session-store.sqlite"));
         assert_ne!(
@@ -801,6 +843,21 @@ mod tests {
         assert!(store_root(Some(options)).is_err());
         assert!(option_tags(Some(options)).is_err());
         assert!(option_headers(Some(options)).is_err());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retired_timestamp_override_is_rejected_loudly() {
+        let error = session_store_append_impl(
+            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            vec![
+                VmValue::String(arcstr::ArcStr::from("session")),
+                VmValue::Nil,
+                json_to_vm_value(&json!({"now": "2020-01-01T00:00:00Z"})),
+            ],
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("no longer supported"));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -829,6 +886,7 @@ mod tests {
         );
         assert_eq!(events[0].headers["x-source"], "7");
         assert_eq!(events[0].headers["authorization"], "[redacted]");
+        assert!(!events[0].headers["x-debug"].contains("sk-proj-"));
         let original_headers =
             serde_json::from_str::<JsonValue>(&events[0].headers["harn.legacy.original_headers"])
                 .unwrap();
@@ -969,5 +1027,46 @@ mod tests {
         .await
         .unwrap_err();
         assert!(error.to_string().contains("does not match"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reads_and_verification_reject_tenant_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(dir.path()).unwrap();
+        assert!(ensure_session(
+            &store,
+            dir.path(),
+            "tenant.session",
+            true,
+            Some("tenant-a".to_string()),
+        )
+        .await
+        .unwrap());
+        drop(store);
+        let args = || {
+            vec![
+                VmValue::String(arcstr::ArcStr::from("tenant.session")),
+                json_to_vm_value(&json!({
+                    "root": dir.path().to_string_lossy(),
+                    "tenant_id": "tenant-b",
+                })),
+            ]
+        };
+
+        let events_error = session_store_events_impl(
+            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            args(),
+        )
+        .await
+        .unwrap_err();
+        assert!(events_error.to_string().contains("does not match"));
+
+        let verify_error = session_store_verify_impl(
+            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            args(),
+        )
+        .await
+        .unwrap_err();
+        assert!(verify_error.to_string().contains("does not match"));
     }
 }
