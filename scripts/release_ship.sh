@@ -781,6 +781,33 @@ ensure_tag_at_head() {
   fi
 }
 
+remote_tag_commit() {
+  local tag="$1"
+  local commit
+  commit="$(git ls-remote --tags origin "refs/tags/${tag}^{}" | awk 'NR == 1 { print $1 }')"
+  if [[ -n "$commit" ]]; then
+    printf '%s\n' "$commit"
+    return 0
+  fi
+  git ls-remote --tags origin "refs/tags/${tag}" | awk 'NR == 1 { print $1 }'
+}
+
+push_tag_if_needed() {
+  local tag="$1"
+  local head_commit remote_commit
+  head_commit="$(git rev-parse HEAD)"
+  remote_commit="$(remote_tag_commit "$tag")"
+  if [[ -n "$remote_commit" ]]; then
+    if [[ "$remote_commit" == "$head_commit" ]]; then
+      echo "Origin tag already exists at HEAD: $tag"
+      return 0
+    fi
+    echo "error: origin/$tag already exists at $remote_commit, but HEAD is $head_commit"
+    exit 1
+  fi
+  git push origin "$tag"
+}
+
 BUMP="patch"
 SKIP_DRY_RUN=0
 SKIP_AUDIT=0
@@ -933,7 +960,7 @@ ensure_tag_at_head "$TAG"
 # Push the tag before cargo publish so GitHub release-binary workflows and
 # downstream fetchers can start working in parallel with crates.io publication.
 log_step "Push tag"
-git push origin "$TAG"
+push_tag_if_needed "$TAG"
 
 log_step "Publish"
 "$RELEASE_GATE_SCRIPT" publish
