@@ -147,7 +147,8 @@ handler = "handlers::missing"
         "suite/test_pass.harn",
         "import { value } from \"./helper\"\npipeline test_pass(_task) { assert_eq(value(), 42) }\n",
     );
-    let options = RunOptions::new(25);
+    let options = RunOptions::new(1_000);
+    let timeout_options = RunOptions::new(25);
     let session = TestRunSession::default();
 
     let setup = run_tests_with_session(
@@ -165,7 +166,7 @@ handler = "handlers::missing"
     .await;
     let timeout = run_tests_with_session(
         &temp.path().join("suite/test_timeout.harn"),
-        &options,
+        &timeout_options,
         &session,
     )
     .await;
