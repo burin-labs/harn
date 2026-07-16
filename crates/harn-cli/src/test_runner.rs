@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -382,7 +384,15 @@ pub async fn run_tests_with_options(path: &Path, options: &RunOptions) -> TestSu
 /// Callers that execute only once should use [`run_tests_with_options`]. Watch
 /// mode and long-lived hosts should retain one session for their desired cache
 /// lifetime and inspect [`TestRunSession::stats`] for reuse receipts.
-pub async fn run_tests_with_session(
+pub fn run_tests_with_session<'a>(
+    path: &'a Path,
+    options: &'a RunOptions,
+    session: &'a TestRunSession,
+) -> Pin<Box<dyn Future<Output = TestSummary> + 'a>> {
+    Box::pin(run_tests_with_session_impl(path, options, session))
+}
+
+async fn run_tests_with_session_impl(
     path: &Path,
     options: &RunOptions,
     session: &TestRunSession,
@@ -497,7 +507,25 @@ pub async fn run_test_file(
 }
 
 /// Single-file test API that retains prepared artifacts across invocations.
-pub async fn run_test_file_with_session(
+pub fn run_test_file_with_session<'a>(
+    path: &'a Path,
+    filter: Option<&'a str>,
+    timeout_ms: u64,
+    execution_cwd: Option<&'a Path>,
+    cli_skill_dirs: &'a [PathBuf],
+    session: &'a TestRunSession,
+) -> Pin<Box<dyn Future<Output = Result<Vec<TestResult>, String>> + 'a>> {
+    Box::pin(run_test_file_with_session_impl(
+        path,
+        filter,
+        timeout_ms,
+        execution_cwd,
+        cli_skill_dirs,
+        session,
+    ))
+}
+
+async fn run_test_file_with_session_impl(
     path: &Path,
     filter: Option<&str>,
     timeout_ms: u64,
