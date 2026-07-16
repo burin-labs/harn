@@ -415,12 +415,13 @@ fn provider_tool_probe_audit_validates_catalog_requests_in_process() {
         "tool-probe audit JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
-    assert_eq!(harn_value["schema_version"], 2);
+    assert_eq!(harn_value["schema_version"], 3);
     assert_eq!(
         harn_value["request_profiles"],
         serde_json::json!(["catalog_default", "parameter_edges"])
     );
     assert_eq!(harn_value["validation_fail_count"], 0);
+    assert_eq!(harn_value["not_applicable_count"], 0);
     assert_eq!(
         harn_value["validation_pass_count"],
         harn_value["request_count"]
@@ -964,7 +965,8 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
         harn.stdout
     );
     assert!(
-        harn.stdout.contains("executable=8 missing_runner=0"),
+        harn.stdout.contains("required=8 batch_manifest_requests=0")
+            && harn.stdout.contains("executable=9 missing_runner=0"),
         "execution summary missing from human output: {}",
         harn.stdout
     );

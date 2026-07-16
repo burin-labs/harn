@@ -292,6 +292,17 @@ pub(super) fn validate_probe_request_body(
 ) -> ToolConformanceRequestValidation {
     let caps = crate::llm::capabilities::lookup(provider, model);
     let dialect = request_validation_dialect(provider, &caps);
+    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup
+        && !crate::llm::tool_scorecard::signed_thinking_tool_history_supported(provider, model)
+    {
+        return ToolConformanceRequestValidation {
+            dialect,
+            status: ToolConformanceRequestValidationStatus::NotApplicable,
+            issues: vec![format!(
+                "signed thinking replay request is not applicable to {provider}:{model}; route has no signed-thinking tool-history surface"
+            )],
+        };
+    }
     let mut issues = Vec::new();
     match dialect.as_str() {
         "anthropic" => {

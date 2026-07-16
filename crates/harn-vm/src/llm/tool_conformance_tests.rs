@@ -140,8 +140,50 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
     );
     assert_eq!(report.validation_fail_count, 0, "{:#?}", report.failures);
     assert_eq!(report.validation_pass_count, report.request_count);
+    assert_eq!(
+        report.not_applicable_count, 0,
+        "{:#?}",
+        report.not_applicable
+    );
     assert!(report.dialect_counts.contains_key("openai_compat"));
     assert!(report.dialect_counts.contains_key("anthropic"));
+}
+
+#[test]
+fn request_catalog_audit_marks_unsupported_signed_thinking_routes_not_applicable() {
+    let report = tool_conformance_request_catalog_audit(
+        vec![ToolProbeCase::SignedThinkingToolResultFollowup],
+        ToolProbeRequestProfile::catalog_request_audit_profiles(),
+        vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming],
+    );
+
+    assert_eq!(report.validation_fail_count, 0, "{:#?}", report.failures);
+    assert!(
+        report.validation_pass_count > 0,
+        "native signed-thinking routes should validate: {report:#?}"
+    );
+    assert!(
+        report.not_applicable_count > 0,
+        "non-native signed-thinking routes should be counted separately: {report:#?}"
+    );
+    assert_eq!(
+        report.request_count,
+        report.validation_pass_count + report.not_applicable_count
+    );
+    assert!(
+        report
+            .not_applicable
+            .iter()
+            .any(|row| row.dialect == "openai_compat"
+                && row.probe_case == "signed_thinking_tool_result_followup"),
+        "expected OpenAI-compatible signed-thinking rows to be not applicable: {report:#?}"
+    );
+    assert!(
+        report.not_applicable.iter().any(|row| row
+            .reason
+            .contains("route has no signed-thinking tool-history surface")),
+        "signed-thinking not_applicable rows should use the shared scorecard capability predicate: {report:#?}"
+    );
 }
 
 #[test]
