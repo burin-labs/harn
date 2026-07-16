@@ -1,0 +1,94 @@
+import "std/code_librarian"
+
+fn seed_cpp(root: string) {
+  harness.fs.mkdir(path_join(root, "include"))
+  harness.fs.mkdir(path_join(root, "src"))
+  harness.fs.mkdir(path_join(root, "dupe"))
+  harness.fs
+    .write_text(
+    path_join(root, "include/sta'tus.hpp"),
+    "class StatusOr {\npublic:\n  bool ok() const { return true; }\n  int value() const { return 1; }\n};\n",
+  )
+  harness.fs
+    .write_text(
+    path_join(root, "src/use.cpp"),
+    "bool inspect(StatusOr &result) { return result.ok(); }\n",
+  )
+  harness.fs
+    .write_text(
+    path_join(root, "src/use_again.cpp"),
+    "bool inspect_again(StatusOr &result) { return result.ok(); }\n",
+  )
+  harness.fs
+    .write_text(path_join(root, "src/missing.cpp"), "void check_missing() { phantom(); }\n")
+  harness.fs
+    .write_text(path_join(root, "dupe/a.cpp"), "class Duplicate { public: void same() {} };\n")
+  harness.fs
+    .write_text(path_join(root, "dupe/b.cpp"), "class Duplicate { public: void same() {} };\n")
+  harness.fs
+    .write_text(
+    path_join(root, "dupe/use.cpp"),
+    "void inspect_duplicate(Duplicate &value) { value.same(); }\n",
+  )
+}
+
+fn seed_scala(root: string) {
+  harness.fs.mkdir(path_join(root, "scala"))
+  harness.fs
+    .write_text(
+    path_join(root, "scala/Rule.scala"),
+    "object Rule {\n  def greaterThan(a: Int, b: Int): Boolean = a > b\n  def equalTo(a: Int, b: Int): Boolean = a == b\n}\n",
+  )
+  harness.fs
+    .write_text(
+    path_join(root, "scala/RuleSpec.scala"),
+    "object RuleSpec { def check(): Boolean = Rule.greaterThan(2, 1) }\n",
+  )
+}
+
+fn member_names(surface: LibrarianMemberSurface) -> list<string> {
+  return surface.members.map({ member -> member.name }).to_list()
+}
+
+pipeline default() {
+  const root = path_join(
+    harness.fs.temp_dir(),
+    "harn_code_librarian_contracts_" + to_string(harness.random.gen_range(100000, 999999)),
+  )
+  harness.fs.mkdir(root)
+  seed_cpp(root)
+  seed_scala(root)
+  const _ = hostlib_code_index_rebuild({root: root})
+  const cpp = code_librarian_member_surface("StatusOr", "include/sta'tus.hpp")
+  const cpp_names = member_names(cpp)
+  __io_println(!cpp.ambiguous && len(cpp.definitions) == 1)
+  __io_println(cpp_names.contains("ok") && cpp_names.contains("value"))
+  const ok_signature = cpp.members.filter({ member -> member.name == "ok" })[0]?.signature ?? ""
+  __io_println(ok_signature.contains("ok"))
+  const scala = code_librarian_member_surface("Rule", "scala/Rule.scala")
+  const scala_names = member_names(scala)
+  __io_println(
+    !scala.ambiguous && scala_names.contains("greaterThan") && scala_names.contains("equalTo"),
+  )
+  const missing = code_librarian_member_surface("DoesNotExist")
+  __io_println(!missing.ambiguous && len(missing.definitions) == 0 && len(missing.members) == 0)
+  const duplicate = code_librarian_member_surface("Duplicate")
+  __io_println(duplicate.ambiguous && len(duplicate.definitions) == 2)
+  const selected_duplicate = code_librarian_member_surface("Duplicate", "dupe/a.cpp")
+  __io_println(!selected_duplicate.ambiguous && len(selected_duplicate.definitions) == 1)
+  const cpp_consumers = code_librarian_external_consumers("ok", "include/sta'tus.hpp", 1)
+  __io_println(cpp_consumers.definition_found && cpp_consumers.sole_definer)
+  __io_println(cpp_consumers.file_count == 2 && len(cpp_consumers.sites) == 1)
+  const scala_consumers = code_librarian_external_consumers("greaterThan", "scala/Rule.scala")
+  __io_println(
+    scala_consumers.definition_found
+      && scala_consumers.sole_definer
+      && scala_consumers.file_count == 1,
+  )
+  const duplicate_consumers = code_librarian_external_consumers("same", "dupe/a.cpp")
+  __io_println(duplicate_consumers.definition_found && !duplicate_consumers.sole_definer)
+  const phantom = code_librarian_external_consumers("phantom", "src/missing_definition.cpp")
+  __io_println(!phantom.definition_found && !phantom.sole_definer && phantom.file_count == 1)
+  const escaped = code_librarian_who_calls("ok\\\\' OR c.name = 'phantom")
+  __io_println(len(escaped) == 0)
+}

@@ -19,6 +19,8 @@ equivalent), then talk to the librarian.
 | `code_librarian_query(cypher)` | `LibrarianCypherResult` | `hostlib_code_index_cypher` |
 | `code_librarian_outline(path, depth = 1)` | `LibrarianOutline` | `path_to_id` + `outline_get` + `imports_for` + `importers_of` |
 | `code_librarian_who_calls(symbol, max_hops = 2)` | `list<LibrarianCallSite>` | `hostlib_code_index_cypher` (canned `<-[:CALLS]-` query) |
+| `code_librarian_member_surface(container, defining_path?)` | `LibrarianMemberSurface` | `hostlib_code_index_cypher` (`CONTAINS` ownership) |
+| `code_librarian_external_consumers(symbol, defining_path, max_sites = 20)` | `LibrarianExternalConsumers` | `hostlib_code_index_cypher` (raw `CallSite` + definitions) |
 | `code_librarian_what_imports(path)` | `list<LibrarianImport>` | `hostlib_code_index_importers_of` |
 | `code_librarian_recent_changes(since_seq = 0)` | `list<LibrarianFileChange>` | `hostlib_code_index_changes_since` |
 | `code_librarian_freshness(path)` | `LibrarianFreshness` | `hostlib_code_index_freshness` |
@@ -61,6 +63,51 @@ fetchUser has 2 call sites:
   src/router.ts
 ```
 
+## Ground a real member surface
+
+Container names are not globally qualified in the symbol graph. Pass the
+resolved defining path when it is known so a same-named type elsewhere in the
+workspace cannot contaminate the result:
+
+```harn
+const surface: LibrarianMemberSurface = code_librarian_member_surface(
+  "StatusOr",
+  "include/status.hpp",
+)
+if !surface.ambiguous {
+  for member in surface.members {
+    __io_println(member.signature)
+  }
+}
+```
+
+Without `defining_path`, definitions in more than one file set
+`ambiguous: true`. The definitions and members remain available for inspection,
+but consumers should not present the merged set as an authoritative API.
+
+## Find conservative external consumers
+
+`code_librarian_external_consumers` reads raw `CallSite` nodes by final name
+segment. This deliberately differs from `code_librarian_who_calls`: a parser can
+record `result.ok()` as a call to `ok` even when it could not resolve a typed
+`CALLS` edge. The result excludes the defining file, counts distinct consumer
+files, and bounds the returned sites independently:
+
+```harn
+const consumers: LibrarianExternalConsumers = code_librarian_external_consumers(
+  "ok",
+  "include/status.hpp",
+  5,
+)
+if consumers.definition_found && consumers.sole_definer {
+  __io_println(to_string(consumers.file_count) + " files depend on ok")
+}
+```
+
+`sole_definer` is conservative. It is true only when the named symbol is
+actually defined in `defining_path` and no other indexed file defines the same
+name. A missing definition or a common same-named declaration produces `false`.
+
 The full walk-through lives at
 [`examples/code_librarian_explore.harn`](https://github.com/burin-labs/harn/blob/main/examples/code_librarian_explore.harn).
 
@@ -73,6 +120,13 @@ The full walk-through lives at
 - `max_hops` on `code_librarian_who_calls` is reserved for the upcoming
   transitive `<-[:CALLS*1..N]-` query shape. Today only direct callers
   are returned.
+- `code_librarian_member_surface` treats definitions in distinct files as
+  ambiguous unless the caller supplies `defining_path`. This avoids guessing
+  across unrelated same-named types, but extensions or partial types split
+  across files also require the caller to select an owning path.
+- `code_librarian_external_consumers` is a conservative by-name call-site
+  query, not full semantic reference resolution. It covers final-segment calls;
+  non-call field/type uses remain outside this contract.
 - `code_librarian_recent_changes` takes a monotonic version sequence
   number (`since_seq`) because Harn has no native `Duration` primitive
   yet. Pair with `hostlib_code_index_current_seq({})` to checkpoint and

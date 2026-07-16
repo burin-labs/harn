@@ -4,7 +4,7 @@
  * Import: import "std/code_librarian"
  *
  * Wraps the `hostlib_code_index_*` builtin family (issue #2434, PR #2441)
- * behind seven ergonomic functions returning typed records. Consumers call
+ * behind ergonomic functions returning typed records. Consumers call
  * one library instead of stitching outputs from many primitives. The
  * natural-language entry point `code_librarian_query_nl` (issue #2439)
  * compiles NL → Cypher via a cheap LLM and falls back to bounded MCTS
@@ -50,6 +50,40 @@ type LibrarianOutline = {
 /** A single caller site for a target symbol. */
 type LibrarianCallSite = {caller: string?, path: string, symbol: string}
 
+/** One declaration that may own a member surface. */
+type LibrarianSymbolDefinition = {path: string, line: int, kind: string}
+
+/** One member declared by a type or module container. */
+type LibrarianMember = {
+  name: string,
+  kind: string,
+  path: string,
+  line: int,
+  signature: string,
+  access_level: string?,
+}
+
+/** A container's declared members plus enough identity to detect ambiguity. */
+type LibrarianMemberSurface = {
+  container: string,
+  definitions: list<LibrarianSymbolDefinition>,
+  members: list<LibrarianMember>,
+  ambiguous: bool,
+}
+
+/** One external call site for a symbol. */
+type LibrarianConsumerSite = {path: string, line: int}
+
+/** Conservative by-name external-consumer facts for one defining file. */
+type LibrarianExternalConsumers = {
+  symbol: string,
+  defining_path: string,
+  definition_found: bool,
+  sites: list<LibrarianConsumerSite>,
+  file_count: int,
+  sole_definer: bool,
+}
+
 /** A single import edge into a target path. */
 type LibrarianImport = {importer: string, kind: string}
 
@@ -80,6 +114,25 @@ type LibrarianOverlay = {active: string?, reuse_fraction: float}
 
 /** Seq-bound current file-hash snapshot for verification freshness checks. */
 type LibrarianFileHashSnapshot = dict
+
+fn __code_librarian_cypher_literal(value: string) -> string {
+  return replace(replace(value, "\\", "\\\\"), "'", "\\'")
+}
+
+fn __code_librarian_int(value) -> int {
+  return to_int(value ?? 0) ?? 0
+}
+
+fn __code_librarian_optional_string(value) -> string? {
+  if value == nil {
+    return nil
+  }
+  const text = to_string(value)
+  if text == "" {
+    return nil
+  }
+  return text
+}
 
 /**
  * Pass a Cypher query straight through to the typed symbol graph executor.
@@ -144,7 +197,8 @@ pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<Libra
   if max_hops < 1 {
     throw "code_librarian_who_calls: max_hops must be >= 1"
   }
-  const cypher = "MATCH (f:Function {name: '" + symbol
+  const safe_symbol = __code_librarian_cypher_literal(symbol)
+  const cypher = "MATCH (f:Function {name: '" + safe_symbol
     + "'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.caller AS caller, f.name AS symbol"
   const raw = hostlib_code_index_cypher({query: cypher})
   const rows = raw?.rows ?? []
@@ -153,6 +207,169 @@ pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<Libra
     out = out + [{caller: row?.caller, path: row?.path ?? "", symbol: row?.symbol ?? symbol}]
   }
   return out
+}
+
+/**
+ * Resolve the members declared by a project type or module. Container names are
+ * not globally qualified in the symbol graph, so callers may pass
+ * `defining_path` after resolving a type definition. Without it, definitions in
+ * multiple files set `ambiguous = true` instead of presenting a merged surface
+ * as authoritative. Multiple type/implementation nodes in one file contribute
+ * one non-ambiguous surface.
+ *
+ * @effects: [host]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: code_librarian_member_surface("StatusOr", "include/status.hpp")
+ */
+pub fn code_librarian_member_surface(container: string, defining_path: string? = nil) -> LibrarianMemberSurface {
+  const target = container.trim()
+  const requested_path = to_string(defining_path ?? "").trim()
+  if target == "" {
+    return {container: target, definitions: [], members: [], ambiguous: false}
+  }
+  const safe_target = __code_librarian_cypher_literal(target)
+  const definition_raw = hostlib_code_index_cypher(
+    {
+      query: "MATCH (d {name: '${safe_target}'}) WHERE d.kind = 'Type' OR d.kind = 'Module' RETURN d.path AS path, d.line AS line, d.kind AS kind",
+    },
+  )
+  let definitions: list<LibrarianSymbolDefinition> = []
+  let definition_keys: dict = {}
+  let definition_paths: dict = {}
+  for row in definition_raw?.rows ?? [] {
+    const path = to_string(row?.path ?? "")
+    const line = __code_librarian_int(row?.line)
+    const kind = to_string(row?.kind ?? "")
+    if path == "" || (requested_path != "" && path != requested_path) {
+      continue
+    }
+    const key = path + ":" + to_string(line) + ":" + kind
+    if !(definition_keys[key] ?? false) {
+      definitions = definitions + [{path: path, line: line, kind: kind}]
+      definition_keys = definition_keys + {[key]: true}
+      definition_paths = definition_paths + {[path]: true}
+    }
+  }
+  if len(definitions) == 0 {
+    return {container: target, definitions: [], members: [], ambiguous: false}
+  }
+  const member_raw = hostlib_code_index_cypher(
+    {
+      query: "MATCH (owner {name: '${safe_target}'})-[:CONTAINS]->(member) RETURN owner.path AS owner_path, member.name AS name, member.kind AS kind, member.path AS path, member.line AS line, member.signature AS signature, member.access_level AS access_level",
+    },
+  )
+  let members: list<LibrarianMember> = []
+  let member_keys: dict = {}
+  for row in member_raw?.rows ?? [] {
+    const owner_path = to_string(row?.owner_path ?? "")
+    const path = to_string(row?.path ?? "")
+    const line = __code_librarian_int(row?.line)
+    const name = to_string(row?.name ?? "")
+    const kind = to_string(row?.kind ?? "")
+    const signature = to_string(row?.signature ?? "")
+    if !(definition_paths[owner_path] ?? false) || path == "" || name == "" {
+      continue
+    }
+    const key = path + ":" + to_string(line) + ":" + kind + ":" + name + ":" + signature
+    if !(member_keys[key] ?? false) {
+      members = members
+        + [
+        {
+          name: name,
+          kind: kind,
+          path: path,
+          line: line,
+          signature: signature,
+          access_level: __code_librarian_optional_string(row?.access_level),
+        },
+      ]
+      member_keys = member_keys + {[key]: true}
+    }
+  }
+  return {
+    container: target,
+    definitions: definitions,
+    members: members,
+    ambiguous: requested_path == "" && len(definition_paths) > 1,
+  }
+}
+
+/**
+ * Return files outside `defining_path` that call `symbol` by name. This reads
+ * raw `CallSite` nodes rather than only traversing `CALLS` edges: unresolved and
+ * grammar-limited calls still carry the final qualified-name segment even when
+ * the graph could not link an edge. `sole_definer` is true only when the symbol
+ * is present in `defining_path` and absent from every other indexed file.
+ *
+ * `file_count` covers the full result while `sites` is bounded by `max_sites`.
+ *
+ * @effects: [host]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ * @example: code_librarian_external_consumers("greet", "src/greeter.rs")
+ */
+pub fn code_librarian_external_consumers(symbol: string, defining_path: string, max_sites: int = 20) -> LibrarianExternalConsumers {
+  if max_sites < 1 {
+    throw "code_librarian_external_consumers: max_sites must be >= 1"
+  }
+  const target = symbol.trim()
+  const owner_path = defining_path.trim()
+  if target == "" {
+    return {
+      symbol: target,
+      defining_path: owner_path,
+      definition_found: false,
+      sites: [],
+      file_count: 0,
+      sole_definer: false,
+    }
+  }
+  const safe_target = __code_librarian_cypher_literal(target)
+  const call_raw = hostlib_code_index_cypher(
+    {query: "MATCH (c:CallSite) WHERE c.name = '${safe_target}' RETURN c.path AS path, c.line AS line"},
+  )
+  let sites: list<LibrarianConsumerSite> = []
+  let site_keys: dict = {}
+  let consumer_paths: dict = {}
+  for row in call_raw?.rows ?? [] {
+    const path = to_string(row?.path ?? "")
+    const line = __code_librarian_int(row?.line)
+    if path == "" || path == owner_path {
+      continue
+    }
+    consumer_paths = consumer_paths + {[path]: true}
+    const key = path + ":" + to_string(line)
+    if !(site_keys[key] ?? false) {
+      if len(sites) < max_sites {
+        sites = sites + [{path: path, line: line}]
+      }
+      site_keys = site_keys + {[key]: true}
+    }
+  }
+  const definition_raw = hostlib_code_index_cypher(
+    {
+      query: "MATCH (d {name: '${safe_target}'}) WHERE d.kind = 'Function' OR d.kind = 'Type' OR d.kind = 'Module' RETURN d.path AS path",
+    },
+  )
+  let definition_found = false
+  let foreign_definition_found = false
+  for row in definition_raw?.rows ?? [] {
+    const path = to_string(row?.path ?? "")
+    if path == owner_path {
+      definition_found = true
+    } else if path != "" {
+      foreign_definition_found = true
+    }
+  }
+  return {
+    symbol: target,
+    defining_path: owner_path,
+    definition_found: definition_found,
+    sites: sites,
+    file_count: len(consumer_paths),
+    sole_definer: definition_found && !foreign_definition_found,
+  }
 }
 
 /**
@@ -319,7 +536,7 @@ fn __nl_resolve(text, opts) -> dict {
   const compiled = __nl_compile(text, opts)
   if compiled.ok {
     const rows = try {
-      let raw = hostlib_code_index_cypher({query: compiled.cypher})
+      const raw = hostlib_code_index_cypher({query: compiled.cypher})
       raw?.rows ?? []
     } catch (_) {
       []
@@ -469,7 +686,7 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
     return {candidates: [], depth_reached: 0, expansions: 0, seen: seen}
   }
   const seeds = try {
-    let raw = hostlib_code_index_cypher(
+    const raw = hostlib_code_index_cypher(
       {
         query: "MATCH (n) WHERE n.name = '" + __nl_escape(term)
           + "' RETURN n.path AS path, n.name AS name, n.kind AS kind",
@@ -506,7 +723,7 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
     const cypher = "MATCH (s:Function {name: '" + __nl_escape(term) + "'})-[:CALLS*1.." + to_string(depth)
       + "]->(n) RETURN n.path AS path, n.name AS name, n.kind AS kind"
     const hop = try {
-      let raw = hostlib_code_index_cypher({query: cypher})
+      const raw = hostlib_code_index_cypher({query: cypher})
       raw?.rows ?? []
     } catch (_) {
       []
@@ -537,7 +754,7 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
   const callers_cypher = "MATCH (s:Function {name: '" + __nl_escape(term)
     + "'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path, c.name AS name, c.kind AS kind"
   const callers = try {
-    let raw = hostlib_code_index_cypher({query: callers_cypher})
+    const raw = hostlib_code_index_cypher({query: callers_cypher})
     raw?.rows ?? []
   } catch (_) {
     []
@@ -697,5 +914,5 @@ fn __nl_is_stop_word(w) -> bool {
  * `code_index/cypher.rs`).
  */
 fn __nl_escape(s) -> string {
-  return replace(s, "'", "\\'")
+  return __code_librarian_cypher_literal(s)
 }
