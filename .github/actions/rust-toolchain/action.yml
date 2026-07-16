@@ -1,0 +1,29 @@
+name: Install Rust toolchain
+description: Install the repository-pinned Rust toolchain and optional extra components.
+inputs:
+  components:
+    description: Optional comma-separated rustup components to add after rust-toolchain.toml is installed.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install repository Rust toolchain
+      shell: bash
+      env:
+        EXTRA_COMPONENTS: ${{ inputs.components }}
+      run: |
+        set -euo pipefail
+
+        rustup show
+
+        components=()
+        while IFS= read -r component; do
+          components+=("$component")
+        done < <(printf '%s\n' "$EXTRA_COMPONENTS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;/^$/d')
+        if [[ "${#components[@]}" -gt 0 ]]; then
+          rustup component add "${components[@]}"
+        fi
+
+        rustc -Vv
+        cargo -V

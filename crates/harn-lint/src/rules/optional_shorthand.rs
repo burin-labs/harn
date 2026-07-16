@@ -114,8 +114,8 @@ impl<'a, 'd> State<'a, 'd> {
                 methods,
                 ..
             } => {
-                for (_, ty) in associated_types {
-                    if let Some(ty) = ty {
+                for assoc in associated_types {
+                    if let Some(ty) = &assoc.default {
                         self.visit_type(ty, span);
                     }
                 }

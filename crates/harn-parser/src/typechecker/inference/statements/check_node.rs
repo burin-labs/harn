@@ -790,7 +790,7 @@ impl TypeChecker {
                     name.clone(),
                     InterfaceDeclInfo {
                         type_params: type_params.clone(),
-                        associated_types: associated_types.clone(),
+                        associated_types: AssociatedType::bindings(associated_types),
                         methods: methods.clone(),
                     },
                 );

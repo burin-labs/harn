@@ -758,10 +758,14 @@ fn comment_after_the_last_statement_of_a_loop_stays_in_the_loop() {
 /// the node's end would sweep the else's OWN leading comments backwards into
 /// the then, trading one misplacement for another.
 ///
+/// This is the BLOCK-level half of the comment-eviction class and a different
+/// mechanism from the member-level half #4806 fixed: the statements here do
+/// carry spans, but the block they sit in does not. Tracked as #4890.
+///
 /// This asserts what the formatter does TODAY rather than what it should do, so
 /// the behaviour is visible and a fix has to update a failing test instead of
 /// changing comment placement silently. Invert it — the comment belongs before
-/// `} else {` — once blocks carry spans (#4806).
+/// `} else {` — once blocks carry spans (#4890).
 #[test]
 fn comment_after_a_then_branch_is_currently_dragged_into_the_else() {
     let source = "fn h() -> int {\n  if a {\n    b()\n    // TAIL_THEN\n  } else {\n    c()\n  }\n  return 1\n}\n";
@@ -775,4 +779,199 @@ fn comment_after_a_then_branch_is_currently_dragged_into_the_else() {
         "the then-branch's trailing comment is expected to land in the else until #4806; \
          if it now stays put, invert this assertion:\n{formatted}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Member-level comments (#4806)
+// ---------------------------------------------------------------------------
+//
+// A struct field, enum variant, interface member, or match arm is a member of a
+// block, not a statement in one. Members carried no span, so nothing could
+// anchor a comment written against them and `format_program`'s leading-comment
+// sweep adopted it onto the NEXT top-level declaration — which is why a field's
+// doc comment ended up describing an unrelated struct. `later()` below is that
+// next declaration: each test asserts the comment did not travel to it.
+
+/// The reported case: a documented struct. Every field doc must stay on its
+/// field, in order, and none may reach `later`.
+#[test]
+fn struct_field_doc_comments_stay_on_their_fields() {
+    let source = "pub struct Config {\n  /** How many times to retry. */\n  retries: int,\n  /** Seconds to wait between retries. */\n  delay: int,\n}\n\npub struct Other {\n  name: string,\n}\n";
+    let formatted = format_source(source).unwrap();
+    let retries_doc = formatted
+        .find("/** How many times to retry. */")
+        .expect("retries doc was lost");
+    let retries = formatted.find("retries: int").expect("no retries field");
+    let delay_doc = formatted
+        .find("/** Seconds to wait between retries. */")
+        .expect("delay doc was lost");
+    let delay = formatted.find("delay: int").expect("no delay field");
+    let other = formatted.find("struct Other").expect("no Other");
+    assert!(
+        retries_doc < retries && retries < delay_doc && delay_doc < delay,
+        "each field doc must sit directly above its own field, got:\n{formatted}"
+    );
+    assert!(
+        delay < other,
+        "field docs must not be evicted onto the next declaration, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn struct_field_line_comment_stays_in_the_struct() {
+    let source =
+        "struct S {\n  a: int\n  // FIELD_B_NOTE\n  b: int\n}\n\nfn later() -> int {\n  return 2\n}\n";
+    let formatted = format_source(source).unwrap();
+    let comment = formatted.find("// FIELD_B_NOTE").expect("comment was lost");
+    let b = formatted.find("b: int").expect("no b field");
+    let later = formatted.find("fn later").expect("no later");
+    assert!(
+        comment < b && b < later,
+        "the comment must stay above `b` inside the struct, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn struct_field_trailing_comment_stays_on_the_field_line() {
+    let source =
+        "struct S {\n  a: int  // A_NOTE\n  b: int\n}\n\nfn later() -> int {\n  return 2\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("a: int  // A_NOTE"),
+        "a trailing comment must stay on its field's own line, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn comment_before_the_first_struct_field_stays_in_the_struct() {
+    let source = "struct S {\n  // LEADING\n  a: int\n}\n\nfn later() -> int {\n  return 2\n}\n";
+    let formatted = format_source(source).unwrap();
+    let comment = formatted.find("// LEADING").expect("comment was lost");
+    let open = formatted.find("struct S {").expect("no struct");
+    let a = formatted.find("a: int").expect("no a field");
+    assert!(
+        open < comment && comment < a,
+        "the comment must stay between `{{` and the first field, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+/// Asserted against the struct's CLOSING BRACE, not against `later`. An evicted
+/// comment lands immediately above `later` and so is still textually before it —
+/// a `comment < later` assertion holds whether or not the bug is present, and
+/// passes against the broken formatter. Only the brace tells the two apart.
+#[test]
+fn comment_after_the_last_struct_field_stays_in_the_struct() {
+    let source = "struct S {\n  a: int\n  // TRAILING\n}\n\nfn later() -> int {\n  return 2\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("a: int\n  // TRAILING\n}"),
+        "the comment must stay inside the struct, below the last field and above \
+         the closing brace, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+/// An empty body has no member to anchor against, so the comment is held by the
+/// tail flush alone. Asserted against the closing brace, for the reason given on
+/// `comment_after_the_last_struct_field_stays_in_the_struct`.
+#[test]
+fn comment_in_an_empty_struct_body_stays_in_the_struct() {
+    let source = "struct S {\n  // ONLY\n}\n\nfn later() -> int {\n  return 2\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("struct S {\n  // ONLY\n}"),
+        "the comment must stay inside the empty struct body, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn enum_variant_comments_stay_on_their_variants() {
+    let source = "enum Color {\n  // RED_NOTE\n  Red\n  Green  // GREEN_NOTE\n  // TAIL_NOTE\n}\n\nfn later() -> int {\n  return 2\n}\n";
+    let formatted = format_source(source).unwrap();
+    let red_note = formatted.find("// RED_NOTE").expect("RED_NOTE was lost");
+    let red = formatted.find("Red").expect("no Red");
+    let tail = formatted.find("// TAIL_NOTE").expect("TAIL_NOTE was lost");
+    let later = formatted.find("fn later").expect("no later");
+    assert!(
+        red_note < red,
+        "a variant's leading comment must stay above it, got:\n{formatted}"
+    );
+    assert!(
+        formatted.contains("Green  // GREEN_NOTE"),
+        "a variant's trailing comment must stay on its line, got:\n{formatted}"
+    );
+    assert!(
+        tail < later,
+        "the tail comment must stay inside the enum, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn interface_member_comments_stay_on_their_members() {
+    let source = "interface Shape {\n  // ITEM_NOTE\n  type Item\n  // AREA_NOTE\n  fn area() -> float\n}\n\nfn later() -> int {\n  return 2\n}\n";
+    let formatted = format_source(source).unwrap();
+    let item_note = formatted.find("// ITEM_NOTE").expect("ITEM_NOTE was lost");
+    let item = formatted.find("type Item").expect("no type Item");
+    let area_note = formatted.find("// AREA_NOTE").expect("AREA_NOTE was lost");
+    let area = formatted.find("fn area").expect("no fn area");
+    let later = formatted.find("fn later").expect("no later");
+    assert!(
+        item_note < item && item < area_note && area_note < area && area < later,
+        "each interface member's comment must stay above that member, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+/// The parser sorts an interface body into an associated-type list and a method
+/// list, losing the written order. Rendering by span puts it back — otherwise a
+/// comment anchors to whichever member the reordering left next to it.
+#[test]
+fn interleaved_interface_members_keep_their_written_order() {
+    let source = "interface I {\n  fn first() -> int\n  type Item\n  fn second() -> int\n}\n";
+    let formatted = format_source(source).unwrap();
+    let first = formatted.find("fn first").expect("no first");
+    let item = formatted.find("type Item").expect("no Item");
+    let second = formatted.find("fn second").expect("no second");
+    assert!(
+        first < item && item < second,
+        "interface members must render in the order they were written, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+/// The compact arm form (`1 -> { x }`) has nowhere to put a comment written on
+/// its own line, so an arm carrying one must fall back to the block form rather
+/// than choose the layout first and strand the comment.
+#[test]
+fn comment_inside_a_match_arm_stays_in_the_arm() {
+    let source = "fn pick(x: int) -> int {\n  match x {\n    1 -> {\n      // ARM_NOTE\n      10\n    }\n    _ -> { 0 }\n  }\n}\n";
+    let formatted = format_source(source).unwrap();
+    let note = formatted.find("// ARM_NOTE").expect("ARM_NOTE was lost");
+    let ten = formatted.find("10").expect("no arm body");
+    let wildcard = formatted.find("_ ->").expect("no wildcard arm");
+    assert!(
+        note < ten && ten < wildcard,
+        "the comment must stay inside its own arm, above the body, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+/// Asserted against the match's closing brace, for the reason given on
+/// `comment_after_the_last_struct_field_stays_in_the_struct`.
+#[test]
+fn comment_after_the_last_match_arm_stays_in_the_match() {
+    let source = "fn pick(x: int) -> int {\n  match x {\n    1 -> { 10 }\n    _ -> { 0 }\n    // TAIL_ARM\n  }\n}\n\nfn later() -> int {\n  return 2\n}\n";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("_ -> { 0 }\n    // TAIL_ARM\n  }"),
+        "the tail comment must stay inside the match, below the last arm and \
+         above the closing brace, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
 }

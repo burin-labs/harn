@@ -597,9 +597,11 @@ fn collect_symbols(
             let generics = format_type_params(type_params);
             let associated_types_str = associated_types
                 .iter()
-                .map(|(assoc_name, assoc_type)| match assoc_type {
-                    Some(assoc_type) => format!("type {assoc_name} = {}", format_type(assoc_type)),
-                    None => format!("type {assoc_name}"),
+                .map(|assoc| match &assoc.default {
+                    Some(default) => {
+                        format!("type {} = {}", assoc.name, format_type(default))
+                    }
+                    None => format!("type {}", assoc.name),
                 })
                 .collect::<Vec<_>>();
             let methods_str = methods
