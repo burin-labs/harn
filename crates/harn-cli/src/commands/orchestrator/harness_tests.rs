@@ -170,13 +170,13 @@ timezone = "UTC"
         temp.path(),
         "digest.harn",
         &format!(
-            r#"
+            r"
 pub pipeline run(event) {{
   let result = {{executed: true, provider: event.provider, kind: event.kind}}
   write_file({marker:?}, json_stringify(result))
   return result
 }}
-"#,
+",
             marker = marker_path.display().to_string()
         ),
     );

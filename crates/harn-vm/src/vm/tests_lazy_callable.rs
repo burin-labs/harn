@@ -92,11 +92,11 @@ async fn lazy_pipeline_callable_binds_arguments_and_returns_value() {
     let module_path = dir.path().join("workflow.harn");
     std::fs::write(
         &module_path,
-        r#"
+        r"
 pub pipeline run(value) {
   return {received: value}
 }
-"#,
+",
     )
     .expect("write pipeline module");
     let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
