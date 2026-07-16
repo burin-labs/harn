@@ -273,10 +273,10 @@
     {
       "name": "providers/tool_scorecard",
       "source_path": "../harn-stdlib/src/stdlib/cli/providers/tool_scorecard.harn",
-      "source_sha256": "6870dd7f094f39a1506a8435e9585fd405093b802d97082027f2c292c153f2ce",
+      "source_sha256": "b8bd2801a6228d5b12f941983ec13cfd2e2c6d631564bdfd0a0d2233ee6107dd",
       "artifact": {
         "path": "generated/cli-bytecode/providers-tool_scorecard.harnbc",
-        "sha256": "ef64c0695256c17a1b91ca70587985301e2482e54b2809bb3bc565ff0d333cc5"
+        "sha256": "3fc0f3983675d222546bfa4febe2df7adb49e0a9de1125f291fadb43e6b1664e"
       }
     },
     {

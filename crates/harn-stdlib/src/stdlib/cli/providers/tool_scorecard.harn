@@ -245,6 +245,8 @@ fn __render_plan_human(report: dict) -> string {
   const catalog = __safe_dict(report["catalog"])
   let out = "provider tool-call scorecard plan: routes="
     + to_string(__safe_int(report["route_count"], 0))
+    + " unscorecardable_providers="
+    + to_string(__safe_int(report["unscorecardable_provider_count"], 0))
     + " cases="
     + to_string(__safe_int(report["case_count"], 0))
     + " required="
@@ -288,6 +290,27 @@ fn __render_plan_human(report: dict) -> string {
       + __join_case_ids(cases, "-")
       + "\n"
   }
+  const unscorecardable = __safe_list(report["unscorecardable_providers"])
+  for provider in unscorecardable {
+    if type_of(provider) != "dict" {
+      continue
+    }
+    out = out + "  unscorecardable "
+      + __safe_string(provider["provider"], "")
+      + " reason="
+      + __safe_string(provider["reason"], "")
+      + " models="
+      + to_string(__safe_int(provider["model_count"], 0))
+      + " active_models="
+      + to_string(__safe_int(provider["active_model_count"], 0))
+      + " local_runtime="
+      + to_string(__safe_bool(provider["local_runtime"], false))
+      + " auth_required="
+      + to_string(__safe_bool(provider["auth_required"], false))
+      + " credential_env_names="
+      + __join_strings(__safe_list(provider["credential_env_names"]), "-")
+      + "\n"
+  }
   return out
 }
 
@@ -295,6 +318,9 @@ fn __render_plan_markdown(report: dict) -> string {
   const catalog = __safe_dict(report["catalog"])
   let out = "# Provider Tool-Call Scorecard Plan\n\n"
   out = out + "- Routes: " + to_string(__safe_int(report["route_count"], 0)) + "\n"
+  out = out + "- Unscorecardable providers: "
+    + to_string(__safe_int(report["unscorecardable_provider_count"], 0))
+    + "\n"
   out = out + "- Cases: " + to_string(__safe_int(report["case_count"], 0)) + "\n"
   out = out + "- Required cases: "
     + to_string(__safe_int(report["required_case_count"], 0))
@@ -340,6 +366,33 @@ fn __render_plan_markdown(report: dict) -> string {
       + " | "
       + __join_case_ids(cases, "-")
       + " |\n"
+  }
+  const unscorecardable = __safe_list(report["unscorecardable_providers"])
+  if len(unscorecardable) > 0 {
+    out = out
+      + "\n## Unscorecardable Providers\n\n"
+      + "| Provider | Reason | Models | Active models | Local runtime | Auth required | Credential env names |\n"
+    out = out + "| --- | --- | ---: | ---: | --- | --- | --- |\n"
+    for provider in unscorecardable {
+      if type_of(provider) != "dict" {
+        continue
+      }
+      out = out + "| "
+        + __safe_string(provider["provider"], "")
+        + " | "
+        + __safe_string(provider["reason"], "")
+        + " | "
+        + to_string(__safe_int(provider["model_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["active_model_count"], 0))
+        + " | "
+        + to_string(__safe_bool(provider["local_runtime"], false))
+        + " | "
+        + to_string(__safe_bool(provider["auth_required"], false))
+        + " | "
+        + __join_strings(__safe_list(provider["credential_env_names"]), "-")
+        + " |\n"
+    }
   }
   return out
 }

@@ -116,7 +116,10 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
         "catalog unexpectedly tiny: {}",
         report.catalog_model_count
     );
-    assert_eq!(report.route_count, report.catalog_model_count);
+    assert_eq!(
+        report.route_count,
+        crate::provider_catalog::artifact().routing_routes.len()
+    );
     assert_eq!(
         report.probe_cases,
         vec![
@@ -124,6 +127,7 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
             "parallel_tool_calls",
             "large_string_argument",
             "tool_result_followup",
+            "signed_thinking_tool_result_followup",
             "no_tool_answer_or_refusal",
             "unavailable_tool_repair",
             "done_sentinel",
@@ -139,12 +143,23 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
             * report.modes.len()
     );
     assert_eq!(report.validation_fail_count, 0, "{:#?}", report.failures);
-    assert_eq!(report.validation_pass_count, report.request_count);
     assert_eq!(
-        report.not_applicable_count, 0,
+        report.request_count,
+        report.validation_pass_count + report.not_applicable_count
+    );
+    assert_eq!(
+        report.not_applicable_count,
+        report.not_applicable.len(),
         "{:#?}",
         report.not_applicable
     );
+    assert!(
+        report.not_applicable.iter().any(|row| row.probe_case
+            == "signed_thinking_tool_result_followup"),
+        "default zero-network request audit should include signed-thinking not_applicable rows: {:#?}",
+        report.not_applicable
+    );
+    assert_eq!(report.failures.len(), 0, "{:#?}", report.failures);
     assert!(report.dialect_counts.contains_key("openai_compat"));
     assert!(report.dialect_counts.contains_key("anthropic"));
 }
@@ -483,6 +498,7 @@ fn tool_conformance_report_accepts_compact_empty_diagnostics() {
 
     assert!(report.cases[0].parser_errors.is_empty());
     assert!(report.cases[0].protocol_violations.is_empty());
+    assert!(report.cases[0].usage.is_none());
 
     let serialized = serde_json::to_value(&report).expect("serialize report");
     assert!(
@@ -493,6 +509,110 @@ fn tool_conformance_report_accepts_compact_empty_diagnostics() {
         serialized["cases"][0].get("protocol_violations").is_none(),
         "empty protocol diagnostics stay compact on write"
     );
+}
+
+#[test]
+fn tool_probe_fixture_preserves_reported_usage_and_priced_cost() {
+    let response = native_tool_call_fixture_with_usage(serde_json::json!({
+        "prompt_tokens": 1200,
+        "completion_tokens": 75,
+    }));
+    let report = classify_tool_conformance_fixture(
+        "openai",
+        "gpt-4.1",
+        ToolProbeMode::NonStreaming,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &response,
+    );
+
+    let usage = report.cases[0]
+        .usage
+        .as_ref()
+        .expect("reported usage should be preserved");
+    assert_eq!(usage.input_tokens, Some(1200));
+    assert_eq!(usage.output_tokens, Some(75));
+    assert!(
+        usage.cost_usd.unwrap_or(0.0) > 0.0,
+        "priced catalog route should carry non-zero cost: {usage:?}"
+    );
+}
+
+#[test]
+fn tool_probe_fixture_preserves_usage_without_fabricating_unpriced_cost() {
+    let response = native_tool_call_fixture_with_usage(serde_json::json!({
+        "input_tokens": 9,
+        "output_tokens": 3,
+    }));
+    let report = classify_tool_conformance_fixture(
+        "ghost-provider",
+        "ghost-model",
+        ToolProbeMode::NonStreaming,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &response,
+    );
+
+    let usage = report.cases[0]
+        .usage
+        .as_ref()
+        .expect("reported usage should be preserved");
+    assert_eq!(usage.input_tokens, Some(9));
+    assert_eq!(usage.output_tokens, Some(3));
+    assert_eq!(usage.cost_usd, None);
+}
+
+#[test]
+fn tool_probe_fixture_preserves_gemini_usage_metadata_with_thoughts() {
+    let response = native_tool_call_fixture_with_usage_metadata(serde_json::json!({
+        "promptTokenCount": 12,
+        "candidatesTokenCount": 5,
+        "thoughtsTokenCount": 7,
+    }));
+    let report = classify_tool_conformance_fixture(
+        "gemini",
+        "gemini-2.5-pro",
+        ToolProbeMode::NonStreaming,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &response,
+    );
+
+    let usage = report.cases[0]
+        .usage
+        .as_ref()
+        .expect("reported Gemini usage should be preserved");
+    assert_eq!(usage.input_tokens, Some(12));
+    assert_eq!(usage.output_tokens, Some(12));
+}
+
+fn native_tool_call_fixture_with_usage(usage: serde_json::Value) -> String {
+    let mut fixture = native_tool_call_fixture_base();
+    fixture["usage"] = usage;
+    fixture.to_string()
+}
+
+fn native_tool_call_fixture_with_usage_metadata(usage_metadata: serde_json::Value) -> String {
+    let mut fixture = native_tool_call_fixture_base();
+    fixture["usageMetadata"] = usage_metadata;
+    fixture.to_string()
+}
+
+fn native_tool_call_fixture_base() -> serde_json::Value {
+    serde_json::json!({
+        "choices": [{
+            "message": {
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "echo_marker",
+                        "arguments": serde_json::json!({
+                            "value": DEFAULT_TOOL_PROBE_MARKER,
+                        })
+                        .to_string(),
+                    },
+                }],
+            },
+        }],
+    })
 }
 
 #[test]
@@ -916,6 +1036,7 @@ fn aggregates_openai_streaming_tool_call_deltas() {
         DEFAULT_TOOL_PROBE_MARKER,
         None,
         None,
+        None,
     );
     assert!(case.ok, "{case:?}");
     assert_eq!(
@@ -944,6 +1065,7 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
         &response,
         ToolProbeCase::SingleToolCall,
         DEFAULT_TOOL_PROBE_MARKER,
+        None,
         None,
         None,
     );
@@ -1046,6 +1168,7 @@ fn probe_case(
         elapsed_ms: None,
         native_tool_call_count,
         text_tool_call_count,
+        usage: None,
         parser_errors: Vec::new(),
         protocol_violations: Vec::new(),
         content_sample: None,

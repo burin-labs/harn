@@ -18,7 +18,7 @@ use crate::cli::{
     ProviderToolProbeCaseArg,
 };
 
-const SCHEMA_VERSION: u8 = 3;
+const SCHEMA_VERSION: u8 = 4;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct DispatchExplanation {
@@ -105,6 +105,7 @@ struct DispatchAuditToolProbePlan {
     matrix: DispatchAuditToolProbeMatrix,
     readiness_command_count: usize,
     command_count: usize,
+    request_audit_command_count: usize,
     route_count: usize,
     cases: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -112,13 +113,14 @@ struct DispatchAuditToolProbePlan {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     not_applicable_commands: Vec<DispatchAuditToolProbeNotApplicable>,
     live_request_profiles: Vec<String>,
-    excluded_request_profiles: Vec<String>,
+    request_audit_profiles: Vec<String>,
     modes: Vec<String>,
     repeat: u16,
     timeout_secs: u64,
     output_dir: String,
     readiness_commands: Vec<DispatchAuditReadinessCommand>,
     commands: Vec<DispatchAuditToolProbeCommand>,
+    request_audit_commands: Vec<DispatchAuditToolProbeRequestAuditCommand>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -130,9 +132,10 @@ struct DispatchAuditToolProbeMatrix {
     case_count: usize,
     mode_count: usize,
     live_request_profile_count: usize,
-    excluded_request_profile_count: usize,
+    request_audit_profile_count: usize,
     readiness_command_count: usize,
     command_count: usize,
+    request_audit_command_count: usize,
     not_applicable_count: usize,
 }
 
@@ -187,6 +190,32 @@ struct DispatchAuditToolProbeCommand {
     output_path: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct DispatchAuditToolProbeRequestAuditCommand {
+    id: String,
+    route: String,
+    provider: String,
+    model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    structured_output: Option<String>,
+    structured_output_mode: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    secret_envs: Vec<String>,
+    case: String,
+    request_profile: String,
+    mode: String,
+    argv: Vec<String>,
+    output_path: String,
+}
+
+struct DispatchAuditToolProbeCommandContext<'a> {
+    catalog_hash: &'a str,
+    output_dir: &'a str,
+    secret_envs_by_provider: &'a BTreeMap<String, Vec<String>>,
+    repeat: u16,
+    timeout_secs: u64,
+}
+
 pub(crate) fn run(args: &ProviderDispatchExplainArgs) {
     let report = explain(
         &args.provider,
@@ -213,8 +242,9 @@ pub(crate) fn run_audit(args: &ProviderDispatchAuditArgs) {
         );
         if let Some(plan) = &report.tool_probe_plan {
             println!(
-                "tool-probe plan: {} commands across {} routes, {} cases, {} modes",
+                "tool-probe plan: {} live commands and {} request-audit commands across {} routes, {} cases, {} modes",
                 plan.command_count,
+                plan.request_audit_command_count,
                 plan.route_count,
                 plan.cases.len(),
                 plan.modes.len()
@@ -379,7 +409,7 @@ fn tool_probe_plan(
     let case_selection = tool_probe_plan_cases(&args.tool_probe_cases);
     let modes = args.tool_probe_mode.tool_probe_modes();
     let live_request_profiles = vec!["catalog_default".to_string()];
-    let excluded_request_profiles = vec!["parameter_edges".to_string()];
+    let request_audit_profiles = vec!["parameter_edges".to_string()];
     let output_dir = args
         .tool_probe_output_dir
         .clone()
@@ -401,7 +431,7 @@ fn tool_probe_plan(
         .collect::<Vec<_>>()
         .join("\0");
     let live_profile_fingerprint = live_request_profiles.join("\0");
-    let excluded_profile_fingerprint = excluded_request_profiles.join("\0");
+    let request_audit_profile_fingerprint = request_audit_profiles.join("\0");
     let repeat_fingerprint = args.tool_probe_repeat.to_string();
     let timeout_fingerprint = args.tool_probe_timeout_secs.to_string();
     let readiness_fingerprint = "provider_ready";
@@ -412,7 +442,7 @@ fn tool_probe_plan(
         &case_fingerprint,
         &mode_fingerprint,
         &live_profile_fingerprint,
-        &excluded_profile_fingerprint,
+        &request_audit_profile_fingerprint,
         &repeat_fingerprint,
         &timeout_fingerprint,
         readiness_fingerprint,
@@ -426,88 +456,61 @@ fn tool_probe_plan(
         &secret_envs_by_provider,
     );
     let mut commands = Vec::new();
+    let mut request_audit_commands = Vec::new();
     let mut not_applicable_commands = Vec::new();
+    let command_context = DispatchAuditToolProbeCommandContext {
+        catalog_hash,
+        output_dir: &output_dir,
+        secret_envs_by_provider: &secret_envs_by_provider,
+        repeat: args.tool_probe_repeat,
+        timeout_secs: args.tool_probe_timeout_secs,
+    };
     for route in selected_routes {
         for case in &case_selection.included {
-            for request_profile in &live_request_profiles {
-                for mode in &modes {
-                    let case_name = case.as_str();
-                    let mode_name = mode.as_str();
-                    if !case.is_live_applicable(&route.provider, &route.model) {
-                        let (structured_output, structured_output_mode) =
-                            route_structured_output_contract(route);
+            for mode in &modes {
+                let case_name = case.as_str();
+                let mode_name = mode.as_str();
+                if !case.is_live_applicable(&route.provider, &route.model) {
+                    let (structured_output, structured_output_mode) =
+                        route_structured_output_contract(route);
+                    for request_profile in live_request_profiles
+                        .iter()
+                        .chain(request_audit_profiles.iter())
+                    {
                         not_applicable_commands.push(DispatchAuditToolProbeNotApplicable {
                             route: route_key(route),
                             provider: route.provider.clone(),
                             model: route.model.clone(),
-                            structured_output,
-                            structured_output_mode,
+                            structured_output: structured_output.clone(),
+                            structured_output_mode: structured_output_mode.clone(),
                             secret_envs: secret_envs_for_route(route, &secret_envs_by_provider),
                             case: case_name.to_string(),
                             request_profile: request_profile.clone(),
                             mode: mode_name.to_string(),
                             reason: "route_has_no_signed_thinking_tool_history_surface".to_string(),
                         });
-                        continue;
                     }
-                    let id = stable_id(&[
-                        "tool_probe",
-                        catalog_hash,
-                        &route.provider,
-                        &route.model,
+                    continue;
+                }
+                for request_profile in &live_request_profiles {
+                    commands.push(live_tool_probe_command(
+                        &command_context,
+                        route,
                         case_name,
                         request_profile,
                         mode_name,
-                        &args.tool_probe_repeat.to_string(),
-                        &args.tool_probe_timeout_secs.to_string(),
-                    ]);
-                    let mut argv = vec![
-                        "harn".to_string(),
-                        "provider".to_string(),
-                        "tool-probe".to_string(),
-                        route.provider.clone(),
-                        "--model".to_string(),
-                        route.model.clone(),
-                        "--case".to_string(),
-                        case_name.to_string(),
-                        "--request-profile".to_string(),
-                        request_profile.clone(),
-                        "--mode".to_string(),
-                        mode_cli_value(*mode).to_string(),
-                        "--repeat".to_string(),
-                        args.tool_probe_repeat.to_string(),
-                        "--timeout-secs".to_string(),
-                        args.tool_probe_timeout_secs.to_string(),
-                        "--json".to_string(),
-                    ];
-                    argv.shrink_to_fit();
-                    let output_path = tool_probe_output_path(
-                        &output_dir,
-                        &id,
-                        &route.provider,
-                        &route.model,
+                        *mode,
+                    ));
+                }
+                for request_profile in &request_audit_profiles {
+                    request_audit_commands.push(request_audit_tool_probe_command(
+                        &command_context,
+                        route,
                         case_name,
                         request_profile,
                         mode_name,
-                    );
-                    let (structured_output, structured_output_mode) =
-                        route_structured_output_contract(route);
-                    commands.push(DispatchAuditToolProbeCommand {
-                        id,
-                        route: route_key(route),
-                        provider: route.provider.clone(),
-                        model: route.model.clone(),
-                        structured_output,
-                        structured_output_mode,
-                        secret_envs: secret_envs_for_route(route, &secret_envs_by_provider),
-                        case: case_name.to_string(),
-                        request_profile: request_profile.clone(),
-                        mode: mode_name.to_string(),
-                        repeat: args.tool_probe_repeat,
-                        timeout_secs: args.tool_probe_timeout_secs,
-                        argv,
-                        output_path,
-                    });
+                        *mode,
+                    ));
                 }
             }
         }
@@ -530,9 +533,10 @@ fn tool_probe_plan(
         case_count: case_selection.included.len(),
         mode_count: modes.len(),
         live_request_profile_count: live_request_profiles.len(),
-        excluded_request_profile_count: excluded_request_profiles.len(),
+        request_audit_profile_count: request_audit_profiles.len(),
         readiness_command_count: readiness_commands.len(),
         command_count: commands.len(),
+        request_audit_command_count: request_audit_commands.len(),
         not_applicable_count: not_applicable_commands.len(),
     };
     DispatchAuditToolProbePlan {
@@ -542,6 +546,7 @@ fn tool_probe_plan(
         matrix,
         readiness_command_count: readiness_commands.len(),
         command_count: commands.len(),
+        request_audit_command_count: request_audit_commands.len(),
         route_count: selected_routes.len(),
         cases: case_selection
             .included
@@ -551,13 +556,139 @@ fn tool_probe_plan(
         excluded_cases: case_selection.excluded,
         not_applicable_commands,
         live_request_profiles,
-        excluded_request_profiles,
+        request_audit_profiles,
         modes: modes.iter().map(|mode| mode.as_str().to_string()).collect(),
         repeat: args.tool_probe_repeat,
         timeout_secs: args.tool_probe_timeout_secs,
         output_dir,
         readiness_commands,
         commands,
+        request_audit_commands,
+    }
+}
+
+fn live_tool_probe_command(
+    context: &DispatchAuditToolProbeCommandContext<'_>,
+    route: &harn_vm::provider_catalog::CatalogRoutingRoute,
+    case_name: &str,
+    request_profile: &str,
+    mode_name: &str,
+    mode: harn_vm::llm::tool_conformance::ToolProbeMode,
+) -> DispatchAuditToolProbeCommand {
+    let id = stable_id(&[
+        "tool_probe",
+        context.catalog_hash,
+        &route.provider,
+        &route.model,
+        case_name,
+        request_profile,
+        mode_name,
+        &context.repeat.to_string(),
+        &context.timeout_secs.to_string(),
+    ]);
+    let mut argv = vec![
+        "harn".to_string(),
+        "provider".to_string(),
+        "tool-probe".to_string(),
+        route.provider.clone(),
+        "--model".to_string(),
+        route.model.clone(),
+        "--case".to_string(),
+        case_name.to_string(),
+        "--request-profile".to_string(),
+        request_profile.to_string(),
+        "--mode".to_string(),
+        mode_cli_value(mode).to_string(),
+        "--repeat".to_string(),
+        context.repeat.to_string(),
+        "--timeout-secs".to_string(),
+        context.timeout_secs.to_string(),
+        "--json".to_string(),
+    ];
+    argv.shrink_to_fit();
+    let (structured_output, structured_output_mode) = route_structured_output_contract(route);
+    DispatchAuditToolProbeCommand {
+        output_path: tool_probe_output_path(
+            context.output_dir,
+            &id,
+            &route.provider,
+            &route.model,
+            case_name,
+            request_profile,
+            mode_name,
+        ),
+        id,
+        route: route_key(route),
+        provider: route.provider.clone(),
+        model: route.model.clone(),
+        structured_output,
+        structured_output_mode,
+        secret_envs: secret_envs_for_route(route, context.secret_envs_by_provider),
+        case: case_name.to_string(),
+        request_profile: request_profile.to_string(),
+        mode: mode_name.to_string(),
+        repeat: context.repeat,
+        timeout_secs: context.timeout_secs,
+        argv,
+    }
+}
+
+fn request_audit_tool_probe_command(
+    context: &DispatchAuditToolProbeCommandContext<'_>,
+    route: &harn_vm::provider_catalog::CatalogRoutingRoute,
+    case_name: &str,
+    request_profile: &str,
+    mode_name: &str,
+    mode: harn_vm::llm::tool_conformance::ToolProbeMode,
+) -> DispatchAuditToolProbeRequestAuditCommand {
+    let id = stable_id(&[
+        "tool_probe_request_audit",
+        context.catalog_hash,
+        &route.provider,
+        &route.model,
+        case_name,
+        request_profile,
+        mode_name,
+    ]);
+    let mut argv = vec![
+        "harn".to_string(),
+        "provider".to_string(),
+        "tool-probe".to_string(),
+        route.provider.clone(),
+        "--model".to_string(),
+        route.model.clone(),
+        "--case".to_string(),
+        case_name.to_string(),
+        "--request-profile".to_string(),
+        request_profile.to_string(),
+        "--mode".to_string(),
+        mode_cli_value(mode).to_string(),
+        "--dry-run-request".to_string(),
+        "--json".to_string(),
+    ];
+    argv.shrink_to_fit();
+    let (structured_output, structured_output_mode) = route_structured_output_contract(route);
+    DispatchAuditToolProbeRequestAuditCommand {
+        output_path: tool_probe_output_path(
+            context.output_dir,
+            &id,
+            &route.provider,
+            &route.model,
+            case_name,
+            request_profile,
+            mode_name,
+        ),
+        id,
+        route: route_key(route),
+        provider: route.provider.clone(),
+        model: route.model.clone(),
+        structured_output,
+        structured_output_mode,
+        secret_envs: secret_envs_for_route(route, context.secret_envs_by_provider),
+        case: case_name.to_string(),
+        request_profile: request_profile.to_string(),
+        mode: mode_name.to_string(),
+        argv,
     }
 }
 
@@ -1075,4 +1206,63 @@ fn host_of(base_url: &str) -> String {
         .and_then(|rest| rest.split('/').next())
         .map(str::to_string)
         .unwrap_or_else(|| base_url.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cli::ProviderToolProbeModeArg;
+
+    use super::*;
+
+    #[test]
+    fn dispatch_audit_tool_probe_plan_separates_live_and_request_audit_commands() {
+        let artifact = harn_vm::provider_catalog::artifact();
+        let route = artifact
+            .routing_routes
+            .first()
+            .expect("provider catalog should contain at least one routing route");
+        let args = ProviderDispatchAuditArgs {
+            providers: Vec::new(),
+            models: Vec::new(),
+            routes: vec![route_key(route)],
+            capabilities: Vec::new(),
+            variants: Vec::new(),
+            include_tool_probe_plan: true,
+            tool_probe_cases: vec![ProviderToolProbeCaseArg::SingleToolCall],
+            tool_probe_mode: ProviderToolProbeModeArg::NonStreaming,
+            tool_probe_repeat: 3,
+            tool_probe_timeout_secs: 45,
+            tool_probe_output_dir: Some(".harn-runs/provider-live-probes/test".to_string()),
+            json: true,
+        };
+
+        let report = audit(&args);
+
+        assert_eq!(report.schema_version, 4);
+        assert_eq!(report.fail_count, 0, "{:?}", report.failures);
+        let plan = report.tool_probe_plan.expect("tool probe plan emitted");
+        assert_eq!(plan.schema_version, 4);
+        assert_eq!(plan.live_request_profiles, vec!["catalog_default"]);
+        assert_eq!(plan.request_audit_profiles, vec!["parameter_edges"]);
+        assert_eq!(plan.command_count, 1);
+        assert_eq!(plan.request_audit_command_count, 1);
+        assert_eq!(plan.matrix.command_count, 1);
+        assert_eq!(plan.matrix.request_audit_command_count, 1);
+
+        let live = &plan.commands[0];
+        assert_eq!(live.request_profile, "catalog_default");
+        assert_eq!(live.repeat, 3);
+        assert_eq!(live.timeout_secs, 45);
+        assert!(live.argv.contains(&"--repeat".to_string()));
+        assert!(!live.argv.contains(&"--dry-run-request".to_string()));
+
+        let request_audit = &plan.request_audit_commands[0];
+        assert_eq!(request_audit.request_profile, "parameter_edges");
+        assert!(request_audit
+            .argv
+            .contains(&"--dry-run-request".to_string()));
+        assert!(request_audit.argv.contains(&"--json".to_string()));
+        assert!(!request_audit.argv.contains(&"--repeat".to_string()));
+        assert!(!request_audit.argv.contains(&"--timeout-secs".to_string()));
+    }
 }
