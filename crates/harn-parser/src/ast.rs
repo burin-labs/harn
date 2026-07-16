@@ -182,7 +182,7 @@ pub enum Node {
     InterfaceDecl {
         name: String,
         type_params: Vec<TypeParam>,
-        associated_types: Vec<(String, Option<TypeExpr>)>,
+        associated_types: Vec<AssociatedType>,
         methods: Vec<InterfaceMethod>,
     },
     /// Impl block: impl TypeName { fn method(self, ...) { ... } ... }
@@ -581,6 +581,11 @@ pub struct MatchArm {
     /// Optional guard: `pattern if condition -> { body }`.
     pub guard: Option<Box<SNode>>,
     pub body: Vec<SNode>,
+    /// Source extent of the whole arm, pattern through closing brace. The
+    /// pattern's own span cannot bound the arm's body, so without this a
+    /// comment after the arm's last statement has no range to be flushed in.
+    /// See `StructField::span`.
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -601,6 +606,9 @@ pub struct DictEntry {
 pub struct EnumVariant {
     pub name: String,
     pub fields: Vec<TypedParam>,
+    /// Source extent of the variant. A member without a span cannot anchor a
+    /// comment written against it; see `StructField::span`.
+    pub span: Span,
 }
 
 /// A struct field declaration.
@@ -609,6 +617,39 @@ pub struct StructField {
     pub name: String,
     pub type_expr: Option<TypeExpr>,
     pub optional: bool,
+    /// Source extent of the field.
+    ///
+    /// A comment's meaning lives entirely in where it sits, and a comment can
+    /// only be placed next to something that knows its own source lines. Member
+    /// items carrying no span is what let `harn fmt` evict a field's doc
+    /// comment out of the struct and re-attach it to the next declaration,
+    /// where it then described unrelated code.
+    pub span: Span,
+}
+
+/// An associated-type entry in an interface body: `type Item` or
+/// `type Item = string`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct AssociatedType {
+    pub name: String,
+    /// The default, when written as `type Item = <default>`.
+    pub default: Option<TypeExpr>,
+    /// Source extent of the entry. See `StructField::span`.
+    pub span: Span,
+}
+
+impl AssociatedType {
+    /// The name/default pair, dropping source position — the shape the
+    /// typechecker's semantic tables carry, which have no use for a span.
+    pub fn to_binding(&self) -> (String, Option<TypeExpr>) {
+        (self.name.clone(), self.default.clone())
+    }
+
+    /// Project a parsed interface body's associated types onto the binding
+    /// pairs the semantic tables hold. The one place this conversion lives.
+    pub fn bindings(items: &[AssociatedType]) -> Vec<(String, Option<TypeExpr>)> {
+        items.iter().map(AssociatedType::to_binding).collect()
+    }
 }
 
 /// An interface method signature.
@@ -618,6 +659,8 @@ pub struct InterfaceMethod {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<TypedParam>,
     pub return_type: Option<TypeExpr>,
+    /// Source extent of the method signature. See `StructField::span`.
+    pub span: Span,
 }
 
 /// A type annotation (optional, for runtime checking).

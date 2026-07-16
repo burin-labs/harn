@@ -6,6 +6,7 @@ mod statements;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 
+use harn_lexer::Span;
 use harn_parser::{Node, SNode, TypedParam};
 
 use crate::helpers::*;
@@ -468,27 +469,63 @@ impl<'a> Formatter<'a> {
         block_start_line: usize,
         block_end_line: Option<usize>,
     ) {
-        for (i, node) in nodes.iter().enumerate() {
+        self.format_members(
+            nodes,
+            |n| n.span,
+            block_start_line,
+            block_end_line,
+            |f, n| f.format_node(n),
+        );
+    }
+
+    /// Render the members of a block, keeping every comment in the block it was
+    /// written in.
+    ///
+    /// The one mechanism behind every `{ ... }` the formatter emits —
+    /// statements, struct fields, enum variants, interface methods, match arms.
+    /// A comment can only be placed next to something that knows its own source
+    /// lines, so this asks each member for nothing but its `Span`, and the rule
+    /// is uniform: a member claims the comments written above it, bounded below
+    /// by the previous member so claiming stays ordered and idempotent, then
+    /// takes any comment trailing on its own last line.
+    ///
+    /// Members that carry no span cannot participate — which is exactly how a
+    /// struct field's doc comment used to end up describing the next
+    /// declaration.
+    pub(crate) fn format_members<T>(
+        &mut self,
+        members: &[T],
+        span_of: impl Fn(&T) -> Span,
+        block_start_line: usize,
+        block_end_line: Option<usize>,
+        mut render: impl FnMut(&mut Self, &T),
+    ) {
+        for (i, member) in members.iter().enumerate() {
+            let span = span_of(member);
             let range_start = if i > 0 {
-                nodes[i - 1].span.end_line + 1
+                span_of(&members[i - 1]).end_line + 1
             } else {
                 block_start_line + 1
             };
-            self.emit_comments_in_range(range_start, node.span.line);
-            self.format_node(node);
-            self.attach_trailing_comment(node.span.end_line);
+            self.emit_comments_in_range(range_start, span.line);
+            render(self, member);
+            self.attach_trailing_comment(span.end_line);
         }
-        // Nothing claims a comment written after the last statement, so flush
-        // the tail before the caller writes `}`. Without this the comment stays
+        // Nothing claims a comment written after the last member, so flush the
+        // tail before the caller writes `}`. Without this the comment stays
         // unclaimed and `format_program`'s leading-comment sweep adopts it onto
         // the NEXT top-level declaration, where it silently describes code it
         // was never written about.
         if let Some(end_line) = block_end_line {
-            let range_start = nodes
+            // A zero span names no source line, so it can neither anchor a
+            // comment nor bound a range; skip synthesized members when looking
+            // for where the tail begins.
+            let range_start = members
                 .iter()
                 .rev()
-                .find(|n| n.span.end_line != 0)
-                .map(|n| n.span.end_line + 1)
+                .map(span_of)
+                .find(|s| s.end_line != 0)
+                .map(|s| s.end_line + 1)
                 .unwrap_or(block_start_line + 1);
             self.emit_comments_in_range(range_start, end_line);
         }

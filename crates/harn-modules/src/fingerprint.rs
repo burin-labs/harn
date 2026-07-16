@@ -20,8 +20,8 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use harn_parser::{
-    peel_attributes, EnumVariant, InterfaceMethod, Node, Parser, SNode, ShapeField, StructField,
-    TypeExpr, TypeParam, TypedParam, Variance, WhereClause,
+    peel_attributes, AssociatedType, EnumVariant, InterfaceMethod, Node, Parser, SNode, ShapeField,
+    StructField, TypeExpr, TypeParam, TypedParam, Variance, WhereClause,
 };
 
 use crate::read_module_source;
@@ -282,12 +282,14 @@ fn format_enum_variants(variants: &[EnumVariant]) -> String {
     rendered.join(",")
 }
 
-fn format_associated_types(items: &[(String, Option<TypeExpr>)]) -> String {
+/// Renders name and default only: a fingerprint captures an interface's public
+/// shape, which does not change when a member merely moves in the source.
+fn format_associated_types(items: &[AssociatedType]) -> String {
     let mut rendered: Vec<String> = items
         .iter()
-        .map(|(name, bound)| match bound {
-            Some(ty) => format!("{name}:{}", format_type_expr(ty)),
-            None => name.clone(),
+        .map(|item| match &item.default {
+            Some(ty) => format!("{}:{}", item.name, format_type_expr(ty)),
+            None => item.name.clone(),
         })
         .collect();
     rendered.sort();

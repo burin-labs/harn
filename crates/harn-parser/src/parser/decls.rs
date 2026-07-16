@@ -784,6 +784,7 @@ impl Parser {
 
         let mut variants = Vec::new();
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let variant_start = self.current_span();
             let variant_name = self.consume_identifier("variant name")?;
             let fields = if self.check(&TokenKind::LParen) {
                 self.advance();
@@ -796,6 +797,7 @@ impl Parser {
             variants.push(EnumVariant {
                 name: variant_name,
                 fields,
+                span: Span::merge(variant_start, self.prev_span()),
             });
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
@@ -838,6 +840,7 @@ impl Parser {
 
         let mut fields = Vec::new();
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let field_start = self.current_span();
             let field_name = self.consume_identifier("field name")?;
             let optional = if self.check(&TokenKind::Question) {
                 self.advance();
@@ -850,6 +853,7 @@ impl Parser {
                 name: field_name,
                 type_expr,
                 optional,
+                span: Span::merge(field_start, self.prev_span()),
             });
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
@@ -891,16 +895,22 @@ impl Parser {
         let mut methods = Vec::new();
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
             if self.check(&TokenKind::TypeKw) {
+                let assoc_start = self.current_span();
                 self.advance();
                 let assoc_name = self.consume_identifier("associated type name")?;
-                let assoc_type = if self.check(&TokenKind::Assign) {
+                let assoc_default = if self.check(&TokenKind::Assign) {
                     self.advance();
                     Some(self.parse_type_expr()?)
                 } else {
                     None
                 };
-                associated_types.push((assoc_name, assoc_type));
+                associated_types.push(AssociatedType {
+                    name: assoc_name,
+                    default: assoc_default,
+                    span: Span::merge(assoc_start, self.prev_span()),
+                });
             } else {
+                let method_start = self.current_span();
                 self.consume(&TokenKind::Fn, "fn")?;
                 let method_name = self.consume_identifier("method name")?;
                 let method_type_params = if self.check(&TokenKind::Lt) {
@@ -923,6 +933,7 @@ impl Parser {
                     type_params: method_type_params,
                     params,
                     return_type,
+                    span: Span::merge(method_start, self.prev_span()),
                 });
             }
             self.skip_newlines();
