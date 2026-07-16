@@ -465,8 +465,14 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/stdlib/host/operation_registry.rs"
+statics = ["SCOPED_MOCKABLE"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/stdlib/io.rs"
-statics = ["STDIN_MOCK", "STDIN_LINES", "STDERR_BUFFER", "STDERR_CAPTURING", "STDOUT_PASSTHROUGH", "TTY_MOCK", "COLOR_MODE"]
+statics = ["STDIN_MOCK", "STDIN_LINES", "STDIN_ALLOWED", "STDOUT_ALLOWED", "STDERR_BUFFER", "STDERR_CAPTURING", "STDOUT_PASSTHROUGH", "TTY_MOCK", "COLOR_MODE"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
