@@ -1,11 +1,12 @@
 name: Release smoke
 
-# Cross-platform release smoke matrix. For tag pushes, waits on the official
-# GitHub release artifacts and smokes those exact binaries; manual runs can pass
-# a tag to smoke already-published artifacts; scheduled/manual source-health
-# runs without a tag build a native release `harn` binary first. That keeps the
-# release gate tied to the bytes users download without paying a second compile
-# on release artifact checks.
+# Cross-platform release smoke matrix. Release tag smokes run after the
+# build-release-binaries workflow completes, then validate the official GitHub
+# release artifacts exactly as users download them. Manual runs can pass a tag
+# to smoke already-published artifacts; scheduled/manual source-health runs
+# without a tag build a native release `harn` binary first. That keeps the
+# release gate tied to shipped bytes without holding an idle runner while
+# release assets are still being built.
 #
 # The post-merge `windows` job in `ci.yml` and the tag-push release binary
 # build cover Windows-specific compile breaks. This job is the explicit
@@ -15,8 +16,9 @@ name: Release smoke
 on:
   schedule:
     - cron: '17 9 * * *'
-  push:
-    tags: ['v*']
+  workflow_run: # zizmor: ignore[dangerous-triggers] bounded post-build artifact smoke trigger
+    workflows: ["Build release binaries"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -28,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-smoke-${{ inputs.tag || github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  group: release-smoke-${{ inputs.tag || github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -36,13 +38,19 @@ env:
   CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-D warnings"
   HARN_LLM_CALLS_DISABLED: "1"
-  HARN_RELEASE_ASSET_WAIT_SECONDS: "7200"
 
 jobs:
   resolve:
     name: Resolve release smoke input
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        startsWith(github.event.workflow_run.head_branch, 'v')
+      )
     runs-on: ubuntu-latest
-    timeout-minutes: 125
+    timeout-minutes: 5
     outputs:
       mode: ${{ steps.resolve.outputs.mode }}
       tag: ${{ steps.resolve.outputs.tag }}
@@ -53,12 +61,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
-          WAIT_SECONDS: ${{ env.HARN_RELEASE_ASSET_WAIT_SECONDS }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
 
           if [[ -n "${INPUT_TAG:-}" ]]; then
             tag="$INPUT_TAG"
+          elif [[ "${EVENT_NAME}" == "workflow_run" ]]; then
+            tag="$WORKFLOW_RUN_HEAD_BRANCH"
           elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             tag="${GITHUB_REF_NAME}"
           else
@@ -73,11 +84,6 @@ jobs:
             exit 1
           fi
 
-          if [[ ! "${WAIT_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::HARN_RELEASE_ASSET_WAIT_SECONDS must be a positive integer, got '${WAIT_SECONDS}'"
-            exit 1
-          fi
-
           expected_assets=(
             harn-aarch64-apple-darwin.tar.gz
             harn-aarch64-unknown-linux-gnu.tar.gz
@@ -88,36 +94,27 @@ jobs:
             release-assets.json
           )
 
-          deadline=$((SECONDS + WAIT_SECONDS))
-          while true; do
-            assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)"
-            missing=()
-            for asset in "${expected_assets[@]}"; do
-              if ! grep -Fxq "$asset" <<<"$assets"; then
-                missing+=("$asset")
-              fi
-            done
-
-            if (( ${#missing[@]} == 0 )); then
-              echo "mode=artifact" >> "$GITHUB_OUTPUT"
-              echo "tag=$tag" >> "$GITHUB_OUTPUT"
-              echo "::notice::All release assets for $tag are available; smoke jobs will download official artifacts."
-              exit 0
+          assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+          missing=()
+          for asset in "${expected_assets[@]}"; do
+            if ! grep -Fxq "$asset" <<<"$assets"; then
+              missing+=("$asset")
             fi
-
-            if (( SECONDS >= deadline )); then
-              printf '::error::Timed out waiting for release assets for %s: %s\n' "$tag" "${missing[*]}"
-              exit 1
-            fi
-
-            printf '::notice::Waiting for release assets for %s: %s\n' "$tag" "${missing[*]}"
-            sleep 30
           done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf '::error::Missing release assets for %s after build-release-binaries completed: %s\n' "$tag" "${missing[*]}"
+            exit 1
+          fi
+
+          echo "mode=artifact" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "::notice::All release assets for $tag are available; smoke jobs will download official artifacts."
 
   smoke:
     name: Release smoke (${{ matrix.platform }})
     needs: resolve
-    if: always()
+    if: needs.resolve.result == 'success'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -142,14 +139,9 @@ jobs:
             runner: windows-latest
             harn_binary: target/release/harn.exe
     steps:
-      - name: Fail when release assets are unavailable
-        if: needs.resolve.result != 'success'
-        shell: bash
-        run: |
-          echo "::error::release smoke input resolution failed; official artifacts were unavailable or invalid"
-          exit 1
-
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.resolve.outputs.tag || github.sha }}
 
       - name: Resolve harn binary
         id: runtime
