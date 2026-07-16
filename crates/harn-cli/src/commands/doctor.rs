@@ -971,7 +971,9 @@ fn next_step_suggestion(checks: &[DoctorCheck]) -> String {
         return "Run `harn new my-agent --template agent` to scaffold a project.".to_string();
     }
     if !any_fail {
-        return "You're ready. Try `harn try \"summarize this README\"` or `harn run examples/hello.harn`."
+        // Suggest only commands that resolve from any directory: `examples/` ships
+        // in the Harn source tree, not in a user's project.
+        return "You're ready. Try `harn try \"summarize this README\"` or `harn demo` for a bundled scenario."
             .to_string();
     }
     "Address the failing checks above, then re-run `harn doctor`.".to_string()
@@ -2075,6 +2077,27 @@ pub fn on_new_issue(event: TriggerEvent) {
         ];
         let next = next_step_suggestion(&checks);
         assert!(next.contains("harn new"), "unexpected next step: {next}");
+    }
+
+    #[test]
+    fn next_step_ready_suggests_only_directory_independent_commands() {
+        let checks = vec![
+            check("creds:any", DoctorStatus::Ok),
+            check("ollama", DoctorStatus::Ok),
+            DoctorCheck {
+                label: "manifest".to_string(),
+                ..check("manifest", DoctorStatus::Ok)
+            },
+        ];
+        let next = next_step_suggestion(&checks);
+        assert!(
+            next.contains("You're ready"),
+            "unexpected next step: {next}"
+        );
+        assert!(
+            !next.contains("examples/"),
+            "next step must not point at the Harn source tree's `examples/`: {next}"
+        );
     }
 
     #[test]
