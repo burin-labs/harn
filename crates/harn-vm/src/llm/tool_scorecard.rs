@@ -17,7 +17,7 @@ use super::tool_conformance::{
     ToolProbeFallbackMode,
 };
 
-pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 3;
+pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 5;
 pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,7 +65,15 @@ pub struct ToolScorecardRoute {
     pub actionless_rate: f64,
     pub quality_score: u16,
     pub status: &'static str,
+    pub evidence_status: &'static str,
+    pub probe_evidence_status: &'static str,
+    pub request_evidence_status: &'static str,
     pub recommended_tool_mode: &'static str,
+    pub observed_probe_cases: Vec<&'static str>,
+    pub missing_required_cases: Vec<&'static str>,
+    pub observed_probe_evidence: Vec<ToolScorecardProbeEvidence>,
+    pub missing_required_probe_evidence: Vec<ToolScorecardProbeEvidence>,
+    pub missing_required_request_cases: Vec<&'static str>,
     pub observed_wire_dialects: Vec<&'static str>,
     pub classification_counts: BTreeMap<&'static str, usize>,
     pub mode_evidence: Vec<ToolScorecardModeEvidence>,
@@ -92,6 +100,12 @@ pub struct ToolScorecardModeEvidence {
     pub status: &'static str,
     pub classification_counts: BTreeMap<&'static str, usize>,
     pub issues: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct ToolScorecardProbeEvidence {
+    pub case_id: &'static str,
+    pub mode: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -320,9 +334,9 @@ pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolS
         .map(|(key, acc)| score_route(acc, catalog_claims.get(&key).cloned()))
         .collect::<Vec<ToolScorecardRoute>>();
     routes.sort_by(|left, right| {
-        right
-            .quality_score
-            .cmp(&left.quality_score)
+        status_rank(right.status)
+            .cmp(&status_rank(left.status))
+            .then_with(|| right.quality_score.cmp(&left.quality_score))
             .then_with(|| left.provider.cmp(&right.provider))
             .then_with(|| left.model.cmp(&right.model))
     });
@@ -909,6 +923,36 @@ fn score_route(
             .record(case);
     }
 
+    let observed_probe_cases = observed_probe_cases(&acc.cases);
+    let observed_probe_evidence = observed_probe_evidence(&acc.cases);
+    let missing_required_probe_evidence = missing_required_probe_evidence(
+        &acc.provider,
+        &acc.model,
+        catalog_claim.as_ref(),
+        &observed_probe_evidence,
+    );
+    let missing_required_request_cases =
+        missing_required_request_cases(&acc.provider, &acc.model, catalog_claim.as_ref());
+    let probe_evidence_status = if missing_required_probe_evidence.is_empty() {
+        "complete"
+    } else {
+        "partial"
+    };
+    let request_evidence_status = if missing_required_request_cases.is_empty() {
+        "complete"
+    } else {
+        "partial"
+    };
+    let evidence_status =
+        if probe_evidence_status == "complete" && request_evidence_status == "complete" {
+            "complete"
+        } else {
+            "partial"
+        };
+    let missing_required_cases = missing_required_case_ids(
+        &missing_required_probe_evidence,
+        &missing_required_request_cases,
+    );
     let case_count = stats.case_count;
     let pass_rate = rate(stats.successful_cases, case_count);
     let parseable_tool_call_rate = rate(stats.parseable_tool_call_cases, case_count);
@@ -920,20 +964,17 @@ fn score_route(
     let (catalog_mismatches, suggested_catalog_updates) =
         catalog_drift(&catalog_claim, recommended_tool_mode);
     let issues = route_issues(
-        case_count,
-        stats.required_tool_call_cases,
-        stats.successful_cases,
+        &stats,
         recommended_tool_mode,
-        stats.actionless_cases,
-        stats.malformed_argument_cases,
-        stats.http_error_cases,
-        stats.transport_error_cases,
+        !missing_required_probe_evidence.is_empty(),
+        !missing_required_request_cases.is_empty(),
     );
     let status = route_status(
         recommended_tool_mode,
         stats.required_tool_call_cases,
         stats.successful_cases,
         case_count,
+        evidence_status,
         &issues,
     );
     let mode_evidence = stats_by_mode
@@ -962,7 +1003,15 @@ fn score_route(
         actionless_rate,
         quality_score,
         status,
+        evidence_status,
+        probe_evidence_status,
+        request_evidence_status,
         recommended_tool_mode,
+        observed_probe_cases,
+        missing_required_cases,
+        observed_probe_evidence,
+        missing_required_probe_evidence,
+        missing_required_request_cases,
         observed_wire_dialects: stats.observed_wire_dialects.into_iter().collect(),
         classification_counts: stats.classification_counts,
         mode_evidence,
@@ -976,21 +1025,13 @@ fn mode_evidence(mode: &'static str, stats: CaseStats) -> ToolScorecardModeEvide
     let pass_rate = rate(stats.successful_cases, stats.case_count);
     let recommended_tool_mode =
         recommended_tool_mode(stats.native_tool_call_cases, stats.text_tool_call_cases);
-    let issues = route_issues(
-        stats.case_count,
-        stats.required_tool_call_cases,
-        stats.successful_cases,
-        recommended_tool_mode,
-        stats.actionless_cases,
-        stats.malformed_argument_cases,
-        stats.http_error_cases,
-        stats.transport_error_cases,
-    );
+    let issues = route_issues(&stats, recommended_tool_mode, false, false);
     let status = route_status(
         recommended_tool_mode,
         stats.required_tool_call_cases,
         stats.successful_cases,
         stats.case_count,
+        "complete",
         &issues,
     );
     ToolScorecardModeEvidence {
@@ -1145,6 +1186,7 @@ fn route_status(
     required_tool_call_cases: usize,
     successful_cases: usize,
     case_count: usize,
+    evidence_status: &str,
     issues: &[&'static str],
 ) -> &'static str {
     if case_count == 0
@@ -1152,7 +1194,7 @@ fn route_status(
         || (required_tool_call_cases > 0 && recommended_tool_mode == "disabled")
     {
         "fail"
-    } else if successful_cases < case_count || !issues.is_empty() {
+    } else if evidence_status != "complete" || successful_cases < case_count || !issues.is_empty() {
         "warn"
     } else {
         "pass"
@@ -1160,38 +1202,187 @@ fn route_status(
 }
 
 fn route_issues(
-    case_count: usize,
-    required_tool_call_cases: usize,
-    successful_cases: usize,
+    stats: &CaseStats,
     recommended_tool_mode: &str,
-    actionless_cases: usize,
-    malformed_argument_cases: usize,
-    http_error_cases: usize,
-    transport_error_cases: usize,
+    missing_required_probe_evidence: bool,
+    missing_required_request_evidence: bool,
 ) -> Vec<&'static str> {
     let mut issues = Vec::new();
-    if case_count == 0 {
+    if stats.case_count == 0 {
         issues.push("no_cases");
     }
-    if required_tool_call_cases > 0 && recommended_tool_mode == "disabled" {
+    if stats.required_tool_call_cases > 0 && recommended_tool_mode == "disabled" {
         issues.push("tool_calling_disabled");
     }
-    if successful_cases > 0 && successful_cases < case_count {
+    if stats.successful_cases > 0 && stats.successful_cases < stats.case_count {
         issues.push("partial_tool_call_pass_rate");
     }
-    if actionless_cases > 0 {
+    if missing_required_probe_evidence {
+        issues.push("incomplete_required_probe_evidence");
+    }
+    if missing_required_request_evidence {
+        issues.push("incomplete_required_request_evidence");
+    }
+    if stats.actionless_cases > 0 {
         issues.push("empty_or_actionless_completion");
     }
-    if malformed_argument_cases > 0 {
+    if stats.malformed_argument_cases > 0 {
         issues.push("malformed_tool_arguments");
     }
-    if http_error_cases > 0 {
+    if stats.http_error_cases > 0 {
         issues.push("provider_http_errors");
     }
-    if transport_error_cases > 0 {
+    if stats.transport_error_cases > 0 {
         issues.push("transport_errors");
     }
     issues
+}
+
+fn observed_probe_cases(cases: &[ToolScorecardObservedCase]) -> Vec<&'static str> {
+    cases
+        .iter()
+        .map(|case| case.probe_case.as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn observed_probe_evidence(cases: &[ToolScorecardObservedCase]) -> Vec<ToolScorecardProbeEvidence> {
+    cases
+        .iter()
+        .filter_map(|case| {
+            scorecard_probe_case_id(case.probe_case.as_str()).map(|case_id| {
+                ToolScorecardProbeEvidence {
+                    case_id,
+                    mode: case.case.mode.as_str(),
+                }
+            })
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn missing_required_probe_evidence(
+    provider: &str,
+    model: &str,
+    catalog_claim: Option<&ToolScorecardCatalogClaim>,
+    observed_probe_evidence: &[ToolScorecardProbeEvidence],
+) -> Vec<ToolScorecardProbeEvidence> {
+    let observed = observed_probe_evidence
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    required_scorecard_probe_evidence(provider, model, catalog_claim)
+        .into_iter()
+        .filter(|case| !observed.contains(case))
+        .collect()
+}
+
+fn required_scorecard_probe_evidence(
+    provider: &str,
+    model: &str,
+    catalog_claim: Option<&ToolScorecardCatalogClaim>,
+) -> Vec<ToolScorecardProbeEvidence> {
+    if let Some(claim) = catalog_claim {
+        return fixed_micro_cases_for_route(provider, model, claim)
+            .into_iter()
+            .filter(|case| case.requirement == "required")
+            .filter(|case| case.execution.runner == "provider_tool_probe")
+            .filter_map(|case| scorecard_probe_case_id(case.id).map(|case_id| (case_id, case)))
+            .flat_map(|(case_id, case)| {
+                scorecard_probe_modes(&case.execution)
+                    .into_iter()
+                    .map(move |mode| ToolScorecardProbeEvidence { case_id, mode })
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+    }
+    [
+        "single_tool_call",
+        "large_string_argument",
+        "tool_result_followup",
+        "no_tool_answer_or_refusal",
+        "unavailable_tool_repair",
+        "done_sentinel",
+    ]
+    .into_iter()
+    .flat_map(|case_id| {
+        ["non_streaming", "streaming"]
+            .into_iter()
+            .map(move |mode| ToolScorecardProbeEvidence { case_id, mode })
+    })
+    .collect()
+}
+
+fn missing_required_request_cases(
+    provider: &str,
+    model: &str,
+    catalog_claim: Option<&ToolScorecardCatalogClaim>,
+) -> Vec<&'static str> {
+    let Some(claim) = catalog_claim else {
+        return Vec::new();
+    };
+    fixed_micro_cases_for_route(provider, model, claim)
+        .into_iter()
+        .filter(|case| case.requirement == "required")
+        .filter(|case| case.execution.runner == "provider_tool_probe_request")
+        .map(|case| case.id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn missing_required_case_ids(
+    missing_probe_evidence: &[ToolScorecardProbeEvidence],
+    missing_request_cases: &[&'static str],
+) -> Vec<&'static str> {
+    missing_probe_evidence
+        .iter()
+        .map(|evidence| evidence.case_id)
+        .chain(missing_request_cases.iter().copied())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn scorecard_probe_modes(execution: &ToolScorecardPlanCaseExecution) -> Vec<&'static str> {
+    let Some(command) = execution.command.as_ref() else {
+        return Vec::new();
+    };
+    let mode = command
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--mode").then_some(pair[1].as_str()))
+        .unwrap_or("both");
+    match mode {
+        "non-streaming" | "non_streaming" => vec!["non_streaming"],
+        "streaming" => vec!["streaming"],
+        "both" => vec!["non_streaming", "streaming"],
+        _ => vec!["non_streaming", "streaming"],
+    }
+}
+
+fn scorecard_probe_case_id(case_id: &'static str) -> Option<&'static str> {
+    match case_id {
+        "single_tool_call"
+        | "parallel_tool_calls"
+        | "large_string_argument"
+        | "tool_result_followup"
+        | "signed_thinking_tool_result_followup"
+        | "no_tool_answer_or_refusal"
+        | "unavailable_tool_repair"
+        | "done_sentinel" => Some(case_id),
+        _ => None,
+    }
+}
+
+fn status_rank(status: &str) -> u8 {
+    match status {
+        "pass" => 2,
+        "warn" => 1,
+        _ => 0,
+    }
 }
 
 fn probe_case_requires_new_tool_call(probe_case: ToolProbeCase) -> bool {

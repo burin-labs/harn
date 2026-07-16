@@ -23,7 +23,7 @@ use request::{probe_request_body, validate_probe_request_body};
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
 pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 3;
-pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 3;
+pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 4;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
 pub const DEFAULT_TOOL_PROBE_MARKER: &str = "harn_tool_probe_marker";
 
@@ -125,6 +125,7 @@ impl ToolProbeCase {
             Self::ParallelToolCalls,
             Self::LargeStringArgument,
             Self::ToolResultFollowup,
+            Self::SignedThinkingToolResultFollowup,
             Self::NoToolAnswerOrRefusal,
             Self::UnavailableToolRepair,
             Self::DoneSentinel,
@@ -599,7 +600,8 @@ pub fn tool_conformance_request_catalog_audit(
     } else {
         normalized_request_profiles(&request_profiles)
     };
-    let entries = llm_config::model_catalog_entries();
+    let catalog_model_count = llm_config::model_catalog_entries().len();
+    let routing_routes = crate::provider_catalog::artifact().routing_routes;
     let mut request_count = 0usize;
     let mut validation_pass_count = 0usize;
     let mut validation_fail_count = 0usize;
@@ -610,10 +612,10 @@ pub fn tool_conformance_request_catalog_audit(
     let mut failures = Vec::new();
     let mut not_applicable = Vec::new();
 
-    for (model_id, model) in &entries {
+    for catalog_route in &routing_routes {
         let mut route = ToolConformanceRequestAuditRoute {
-            provider: model.provider.clone(),
-            model: model_id.clone(),
+            provider: catalog_route.provider.clone(),
+            model: catalog_route.model.clone(),
             request_count: 0,
             validation_pass_count: 0,
             validation_fail_count: 0,
@@ -625,10 +627,12 @@ pub fn tool_conformance_request_catalog_audit(
                 for mode in &modes {
                     route.request_count += 1;
                     request_count += 1;
-                    *provider_counts.entry(model.provider.clone()).or_insert(0) += 1;
+                    *provider_counts
+                        .entry(catalog_route.provider.clone())
+                        .or_insert(0) += 1;
                     match tool_conformance_request_report(
-                        model.provider.clone(),
-                        model_id.clone(),
+                        catalog_route.provider.clone(),
+                        catalog_route.model.clone(),
                         None,
                         vec![*mode],
                         *probe_case,
@@ -649,8 +653,8 @@ pub fn tool_conformance_request_catalog_audit(
                                         route.validation_fail_count += 1;
                                         validation_fail_count += 1;
                                         failures.push(ToolConformanceRequestAuditFailure {
-                                            provider: model.provider.clone(),
-                                            model: model_id.clone(),
+                                            provider: catalog_route.provider.clone(),
+                                            model: catalog_route.model.clone(),
                                             probe_case: probe_case.as_str().to_string(),
                                             request_profile: request_profile.as_str().to_string(),
                                             mode: mode.as_str().to_string(),
@@ -663,8 +667,8 @@ pub fn tool_conformance_request_catalog_audit(
                                         not_applicable_count += 1;
                                         not_applicable.push(
                                             ToolConformanceRequestAuditNotApplicable {
-                                                provider: model.provider.clone(),
-                                                model: model_id.clone(),
+                                                provider: catalog_route.provider.clone(),
+                                                model: catalog_route.model.clone(),
                                                 probe_case: probe_case.as_str().to_string(),
                                                 request_profile: request_profile
                                                     .as_str()
@@ -690,8 +694,8 @@ pub fn tool_conformance_request_catalog_audit(
                             route.validation_fail_count += 1;
                             validation_fail_count += 1;
                             failures.push(ToolConformanceRequestAuditFailure {
-                                provider: model.provider.clone(),
-                                model: model_id.clone(),
+                                provider: catalog_route.provider.clone(),
+                                model: catalog_route.model.clone(),
                                 probe_case: probe_case.as_str().to_string(),
                                 request_profile: request_profile.as_str().to_string(),
                                 mode: mode.as_str().to_string(),
@@ -708,7 +712,7 @@ pub fn tool_conformance_request_catalog_audit(
 
     ToolConformanceRequestAuditReport {
         schema_version: TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION,
-        catalog_model_count: entries.len(),
+        catalog_model_count,
         route_count: routes.len(),
         probe_cases: probe_cases
             .into_iter()

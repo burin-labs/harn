@@ -3,13 +3,10 @@ use crate::llm::tool_conformance::{ToolCallingConformanceSummary, ToolProbeMode,
 
 #[test]
 fn scorecard_ranks_successful_native_route_first() {
-    let pass = report(
+    let pass = complete_success_reports(
         "anthropic",
         "claude",
-        vec![case(
-            ToolProbeClassification::StructuredNativeToolCall,
-            true,
-        )],
+        ToolProbeClassification::StructuredNativeToolCall,
     );
     let fail = report(
         "fireworks",
@@ -17,34 +14,39 @@ fn scorecard_ranks_successful_native_route_first() {
         vec![case(ToolProbeClassification::EmptySilent, false)],
     );
 
-    let scorecard = scorecard_from_tool_reports(vec![fail, pass]);
+    let scorecard = scorecard_from_tool_reports(pass.into_iter().chain([fail]).collect());
 
     assert_eq!(scorecard.schema_version, TOOL_SCORECARD_SCHEMA_VERSION);
     assert_eq!(scorecard.route_count, 2);
     assert_eq!(scorecard.summary.pass, 1);
+    assert_eq!(scorecard.summary.warn, 0);
     assert_eq!(scorecard.summary.fail, 1);
     assert_eq!(scorecard.routes[0].provider, "anthropic");
     assert_eq!(scorecard.routes[0].status, "pass");
+    assert_eq!(scorecard.routes[0].evidence_status, "complete");
+    assert_eq!(scorecard.routes[0].probe_evidence_status, "complete");
+    assert_eq!(scorecard.routes[0].request_evidence_status, "complete");
     assert_eq!(scorecard.routes[0].recommended_tool_mode, "native");
     assert_eq!(
         scorecard.routes[1].issues,
-        vec!["tool_calling_disabled", "empty_or_actionless_completion"]
+        vec![
+            "tool_calling_disabled",
+            "incomplete_required_probe_evidence",
+            "empty_or_actionless_completion"
+        ]
     );
 }
 
 #[test]
 fn scorecard_reports_catalog_drift_without_failing_route() {
-    let scorecard = scorecard_from_tool_reports(vec![report(
+    let scorecard = scorecard_from_tool_reports(complete_success_reports(
         "anthropic",
         "claude-sonnet-4-6",
-        vec![case(
-            ToolProbeClassification::ParseableHarnTextToolCall,
-            true,
-        )],
-    )]);
+        ToolProbeClassification::ParseableHarnTextToolCall,
+    ));
 
     let route = &scorecard.routes[0];
-    assert_eq!(route.status, "pass");
+    assert_eq!(route.status, "warn");
     assert_eq!(route.recommended_tool_mode, "text");
     assert!(route.catalog_claim.is_some());
     assert!(route
@@ -59,15 +61,37 @@ fn scorecard_reports_catalog_drift_without_failing_route() {
 }
 
 #[test]
+fn scorecard_does_not_complete_mode_both_plan_with_non_streaming_only_reports() {
+    let scorecard = scorecard_from_tool_reports(non_streaming_success_reports(
+        "anthropic",
+        "claude-sonnet-5",
+        ToolProbeClassification::StructuredNativeToolCall,
+    ));
+
+    let route = &scorecard.routes[0];
+    assert_eq!(route.status, "warn");
+    assert_eq!(route.probe_evidence_status, "partial");
+    assert_eq!(route.request_evidence_status, "partial");
+    assert_eq!(route.quality_score, 100);
+    assert!(route
+        .missing_required_probe_evidence
+        .iter()
+        .any(|evidence| evidence.case_id == "single_tool_call" && evidence.mode == "streaming"));
+    assert!(route.missing_required_cases.contains(&"single_tool_call"));
+    assert!(route.missing_required_cases.contains(&"parameter_edges"));
+    assert!(route.issues.contains(&"incomplete_required_probe_evidence"));
+    assert!(route
+        .issues
+        .contains(&"incomplete_required_request_evidence"));
+}
+
+#[test]
 fn scorecard_matches_catalog_claims_by_wire_model() {
-    let scorecard = scorecard_from_tool_reports(vec![report(
+    let scorecard = scorecard_from_tool_reports(complete_success_reports(
         "nvidia",
         "openai/gpt-oss-120b",
-        vec![case(
-            ToolProbeClassification::StructuredNativeToolCall,
-            true,
-        )],
-    )]);
+        ToolProbeClassification::StructuredNativeToolCall,
+    ));
 
     let route = &scorecard.routes[0];
     assert_eq!(route.provider, "nvidia");
@@ -115,7 +139,7 @@ fn scorecard_splits_evidence_by_transport_mode() {
 }
 
 #[test]
-fn scorecard_treats_successful_prose_followup_as_terminal_answer() {
+fn scorecard_marks_successful_prose_followup_as_partial_evidence() {
     let scorecard = scorecard_from_tool_reports(vec![report_with_probe_case(
         "anthropic",
         "claude-sonnet-5",
@@ -124,14 +148,46 @@ fn scorecard_treats_successful_prose_followup_as_terminal_answer() {
     )]);
 
     let route = &scorecard.routes[0];
-    assert_eq!(route.status, "pass");
+    assert_eq!(route.status, "warn");
+    assert_eq!(route.evidence_status, "partial");
+    assert_eq!(route.probe_evidence_status, "partial");
+    assert_eq!(route.request_evidence_status, "partial");
     assert_eq!(route.quality_score, 100);
     assert_eq!(route.successful_cases, 1);
     assert_eq!(route.actionless_cases, 0);
-    assert!(route.issues.is_empty());
+    assert_eq!(route.observed_probe_cases, vec!["tool_result_followup"]);
+    assert!(route.missing_required_cases.contains(&"single_tool_call"));
+    assert!(route.issues.contains(&"incomplete_required_probe_evidence"));
     assert_eq!(
         route.classification_counts.get("prose_only_non_tool"),
         Some(&1)
+    );
+}
+
+#[test]
+fn scorecard_does_not_pass_without_required_baseline_probe_evidence() {
+    let scorecard = scorecard_from_tool_reports(vec![report_with_probe_case(
+        "anthropic",
+        "claude",
+        ToolProbeCase::ToolResultFollowup,
+        vec![case(ToolProbeClassification::ProseOnlyNonTool, true)],
+    )]);
+
+    let route = &scorecard.routes[0];
+    assert_eq!(route.status, "warn");
+    assert_eq!(route.evidence_status, "partial");
+    assert_eq!(route.quality_score, 100);
+    assert_eq!(route.observed_probe_cases, vec!["tool_result_followup"]);
+    assert_eq!(
+        route.missing_required_cases,
+        vec![
+            "done_sentinel",
+            "large_string_argument",
+            "no_tool_answer_or_refusal",
+            "single_tool_call",
+            "tool_result_followup",
+            "unavailable_tool_repair",
+        ]
     );
 }
 
@@ -529,6 +585,100 @@ fn report_with_probe_case(
             fallback_mode: ToolProbeFallbackMode::Disabled,
             failure_reason: None,
         },
+    }
+}
+
+fn complete_success_reports(
+    provider: &str,
+    model: &str,
+    tool_call_classification: ToolProbeClassification,
+) -> Vec<ToolConformanceReport> {
+    success_reports(provider, model, tool_call_classification, None)
+}
+
+fn non_streaming_success_reports(
+    provider: &str,
+    model: &str,
+    tool_call_classification: ToolProbeClassification,
+) -> Vec<ToolConformanceReport> {
+    success_reports(
+        provider,
+        model,
+        tool_call_classification,
+        Some(ToolProbeMode::NonStreaming),
+    )
+}
+
+fn success_reports(
+    provider: &str,
+    model: &str,
+    tool_call_classification: ToolProbeClassification,
+    only_mode: Option<ToolProbeMode>,
+) -> Vec<ToolConformanceReport> {
+    let claims = catalog_claims_by_route();
+    let claim = claims.get(&(provider.to_string(), model.to_string()));
+    let mut cases_by_probe =
+        BTreeMap::<&'static str, (ToolProbeCase, Vec<ToolConformanceCase>)>::new();
+    for evidence in required_scorecard_probe_evidence(provider, model, claim) {
+        let mode = mode_from_scorecard_evidence(evidence.mode);
+        if only_mode.is_some_and(|only_mode| only_mode != mode) {
+            continue;
+        }
+        let probe_case = probe_case_from_id(evidence.case_id);
+        cases_by_probe
+            .entry(evidence.case_id)
+            .or_insert_with(|| (probe_case, Vec::new()))
+            .1
+            .push(successful_case_for_probe_case(
+                probe_case,
+                mode,
+                tool_call_classification.clone(),
+            ));
+    }
+    cases_by_probe
+        .into_iter()
+        .map(|(_, (probe_case, cases))| report_with_probe_case(provider, model, probe_case, cases))
+        .collect()
+}
+
+fn probe_case_from_id(case_id: &str) -> ToolProbeCase {
+    match case_id {
+        "single_tool_call" => ToolProbeCase::SingleToolCall,
+        "parallel_tool_calls" => ToolProbeCase::ParallelToolCalls,
+        "large_string_argument" => ToolProbeCase::LargeStringArgument,
+        "tool_result_followup" => ToolProbeCase::ToolResultFollowup,
+        "signed_thinking_tool_result_followup" => ToolProbeCase::SignedThinkingToolResultFollowup,
+        "no_tool_answer_or_refusal" => ToolProbeCase::NoToolAnswerOrRefusal,
+        "unavailable_tool_repair" => ToolProbeCase::UnavailableToolRepair,
+        "done_sentinel" => ToolProbeCase::DoneSentinel,
+        other => panic!("unsupported scorecard probe case id {other}"),
+    }
+}
+
+fn successful_case_for_probe_case(
+    probe_case: ToolProbeCase,
+    mode: ToolProbeMode,
+    tool_call_classification: ToolProbeClassification,
+) -> ToolConformanceCase {
+    let classification = match probe_case {
+        ToolProbeCase::SingleToolCall
+        | ToolProbeCase::ParallelToolCalls
+        | ToolProbeCase::LargeStringArgument => tool_call_classification,
+        ToolProbeCase::ToolResultFollowup | ToolProbeCase::SignedThinkingToolResultFollowup => {
+            ToolProbeClassification::ProseOnlyNonTool
+        }
+        ToolProbeCase::NoToolAnswerOrRefusal => ToolProbeClassification::DirectAnswerNoTool,
+        ToolProbeCase::UnavailableToolRepair => ToolProbeClassification::UnavailableToolRepair,
+        ToolProbeCase::DoneSentinel => ToolProbeClassification::DoneSentinel,
+    };
+    case_with_mode(mode, classification, true)
+}
+
+fn mode_from_scorecard_evidence(mode: &str) -> ToolProbeMode {
+    match mode {
+        "non_streaming" => ToolProbeMode::NonStreaming,
+        "streaming" => ToolProbeMode::Streaming,
+        other => panic!("unsupported scorecard mode {other}"),
     }
 }
 

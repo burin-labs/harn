@@ -116,7 +116,10 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
         "catalog unexpectedly tiny: {}",
         report.catalog_model_count
     );
-    assert_eq!(report.route_count, report.catalog_model_count);
+    assert_eq!(
+        report.route_count,
+        crate::provider_catalog::artifact().routing_routes.len()
+    );
     assert_eq!(
         report.probe_cases,
         vec![
@@ -124,6 +127,7 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
             "parallel_tool_calls",
             "large_string_argument",
             "tool_result_followup",
+            "signed_thinking_tool_result_followup",
             "no_tool_answer_or_refusal",
             "unavailable_tool_repair",
             "done_sentinel",
@@ -139,12 +143,23 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
             * report.modes.len()
     );
     assert_eq!(report.validation_fail_count, 0, "{:#?}", report.failures);
-    assert_eq!(report.validation_pass_count, report.request_count);
     assert_eq!(
-        report.not_applicable_count, 0,
+        report.request_count,
+        report.validation_pass_count + report.not_applicable_count
+    );
+    assert_eq!(
+        report.not_applicable_count,
+        report.not_applicable.len(),
         "{:#?}",
         report.not_applicable
     );
+    assert!(
+        report.not_applicable.iter().any(|row| row.probe_case
+            == "signed_thinking_tool_result_followup"),
+        "default zero-network request audit should include signed-thinking not_applicable rows: {:#?}",
+        report.not_applicable
+    );
+    assert_eq!(report.failures.len(), 0, "{:#?}", report.failures);
     assert!(report.dialect_counts.contains_key("openai_compat"));
     assert!(report.dialect_counts.contains_key("anthropic"));
 }
