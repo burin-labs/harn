@@ -45,6 +45,19 @@ $hunk
 EOF
 }
 
+write_policy_diff() {
+  local name="$1"
+  local path="$2"
+  local hunk="$3"
+  cat > "$tmp_dir/$name" <<EOF
+diff --git a/$path b/$path
+index old..new 100644
+--- a/$path
++++ b/$path
+$hunk
+EOF
+}
+
 plan() {
   "$script" --workflow "$workflow" "$@"
 }
@@ -73,8 +86,27 @@ assert_plan false --platform windows --event push --changed-files "$tmp_dir/rele
 assert_plan false --platform macos --event push --changed-files "$tmp_dir/release_meta"
 
 write_paths release_workflow .github/workflows/build-release-binaries.yml
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/release_workflow"
-assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/release_workflow"
+write_policy_diff release_control.diff .github/workflows/build-release-binaries.yml '@@ -20,1 +20,1 @@
+-      - run: scripts/release_runner_matrix.sh --mode primary
++      - run: scripts/release_runner_matrix.sh --mode policy'
+assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_control.diff"
+assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_control.diff"
+
+write_policy_diff release_windows.diff .github/workflows/build-release-binaries.yml '@@ -20,1 +20,1 @@
+-          target: x86_64-pc-windows-msvc
++          target: x86_64-pc-windows-msvc
++          shell: pwsh'
+assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_windows.diff"
+assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_windows.diff"
+
+write_policy_diff release_macos.diff .github/workflows/build-release-binaries.yml '@@ -20,1 +20,1 @@
+-          target: aarch64-apple-darwin
++          target: aarch64-apple-darwin
++          runner: macos-latest'
+assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_macos.diff"
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_macos.diff"
+
+assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/missing-policy.diff"
 
 write_paths ci_only .github/workflows/ci.yml
 write_diff package.diff '@@ -4,1 +4,1 @@
