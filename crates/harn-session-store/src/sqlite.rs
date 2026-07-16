@@ -17,7 +17,9 @@ use uuid::Uuid;
 use super::event::{
     now_ms_and_rfc3339, AppendEvent, EventId, EventSignature, SessionEventKind, StoredEvent,
 };
-use super::redaction::{prepare_append_event, redact_stored_events};
+use super::redaction::{
+    prepare_append_event, prepare_stored_events_for_persistence, redact_stored_events,
+};
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
     verify_event_chain,
@@ -749,10 +751,11 @@ impl SessionStore for SqliteSessionStore {
         child_meta.closed_at_ms = None;
         child_meta.closed_at = None;
         child_meta.soft_deleted_at_ms = None;
-        let inherited: Vec<StoredEvent> = parent_events
+        let mut inherited: Vec<StoredEvent> = parent_events
             .into_iter()
             .filter(|event| event.event_id <= at_event_id)
             .collect();
+        prepare_stored_events_for_persistence(&self.hooks, &mut inherited)?;
         let copied = re_anchor_events(&inherited, &new_id);
         child_meta.event_count = copied.len();
         child_meta.last_event_id = copied.last().map(|tail| tail.event_id);
@@ -856,7 +859,8 @@ impl SessionStore for SqliteSessionStore {
     async fn snapshot(&self, session_id: &str) -> StoreResult<Snapshot> {
         let conn = self.lock();
         let (meta, _) = read_session_meta(&conn, session_id)?;
-        let events = load_all_events(&conn, session_id)?;
+        let mut events = load_all_events(&conn, session_id)?;
+        redact_stored_events(&self.hooks, &mut events)?;
         let (ms, text) = now_ms_and_rfc3339();
         let snapshot = Snapshot {
             id: SnapshotId(format!("snap-{}", Uuid::now_v7())),
@@ -893,7 +897,10 @@ impl SessionStore for SqliteSessionStore {
             .optional()
             .map_err(map_sql)?;
         let body = body.ok_or_else(|| StoreError::NotFound(snapshot_id.0.clone()))?;
-        serde_json::from_str(&body).map_err(|error| StoreError::Backend(error.to_string()))
+        let mut snapshot: Snapshot =
+            serde_json::from_str(&body).map_err(|error| StoreError::Backend(error.to_string()))?;
+        redact_stored_events(&self.hooks, &mut snapshot.events)?;
+        Ok(snapshot)
     }
 
     async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {

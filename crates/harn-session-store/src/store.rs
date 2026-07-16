@@ -186,12 +186,13 @@ pub type StoreResult<T> = Result<T, StoreError>;
 /// Memory + sqlite backends apply this; callers iterate via cursors.
 pub const MAX_READ_BATCH: usize = 1_000;
 
-/// Optional processors a host can plug in. They run inline on append
-/// and finalisation; backends call these hooks from the `SessionStore`
-/// mutation points.
+/// Optional processors a host can plug in. Mutation hooks run inline before
+/// persistence; redaction is also reapplied to public retrieval projections
+/// as defense in depth for older stored data.
 #[derive(Default, Clone)]
 pub struct StoreHooks {
-    /// Applied to event payloads and headers before persistence.
+    /// Applied to event payloads and headers before persistence and again
+    /// when events are read, snapshotted, or replayed.
     pub redaction: Option<SharedEventRedactor>,
     /// If set, every event is signed at append time. Without a signer
     /// only the `Receipt` event minted by [`SessionStore::close`] is

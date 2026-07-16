@@ -137,6 +137,12 @@ impl std::fmt::Display for VerifyError {
 impl std::error::Error for VerifyError {}
 
 pub fn verify_event(event: &StoredEvent, verifying_key: &VerifyingKey) -> Result<(), VerifyError> {
+    if event.is_redacted_projection() {
+        return Err(VerifyError::InvalidShape(format!(
+            "redacted projection cannot authenticate canonical source hash '{}'",
+            event.source_record_hash()
+        )));
+    }
     let computed = compute_record_hash(event);
     if computed != event.record_hash {
         return Err(VerifyError::HashMismatch {
@@ -205,6 +211,16 @@ pub fn verify_event_chain(
     let mut signed = 0usize;
     let mut failures: Vec<(EventId, String)> = Vec::new();
     for (index, event) in events.iter().enumerate() {
+        if event.is_redacted_projection() {
+            failures.push((
+                event.event_id,
+                format!(
+                    "redacted projection cannot authenticate canonical source hash '{}'",
+                    event.source_record_hash()
+                ),
+            ));
+            continue;
+        }
         let recomputed = compute_record_hash(event);
         if recomputed != event.record_hash {
             failures.push((
@@ -263,12 +279,14 @@ pub fn chain_root_fold(prev_root: &str, record_hash: &str) -> String {
     finalize_sha256(hasher)
 }
 
-/// Build the chain root hash for a list of stored events by replaying
-/// the fold from genesis. Used by `verify` and by snapshot/replay; the
-/// hot append path uses [`chain_root_fold`] directly.
+/// Build the canonical source-chain root for stored events or redacted
+/// retrieval projections. Projection markers retain the canonical source
+/// hash, so snapshot metadata and valid receipt signatures do not become
+/// false corruption reports merely because presentation bytes were scrubbed.
+/// The hot append path uses [`chain_root_fold`] directly.
 pub fn chain_root_hash(events: &[StoredEvent]) -> String {
     events.iter().fold(chain_root_init(), |root, event| {
-        chain_root_fold(&root, &event.record_hash)
+        chain_root_fold(&root, event.source_record_hash())
     })
 }
 
