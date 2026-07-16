@@ -76,6 +76,7 @@ pub enum ToolProbeCase {
     ParallelToolCalls,
     LargeStringArgument,
     ToolResultFollowup,
+    SignedThinkingToolResultFollowup,
     NoToolAnswerOrRefusal,
     UnavailableToolRepair,
     DoneSentinel,
@@ -109,6 +110,7 @@ impl ToolProbeCase {
             Self::ParallelToolCalls => "parallel_tool_calls",
             Self::LargeStringArgument => "large_string_argument",
             Self::ToolResultFollowup => "tool_result_followup",
+            Self::SignedThinkingToolResultFollowup => "signed_thinking_tool_result_followup",
             Self::NoToolAnswerOrRefusal => "no_tool_answer_or_refusal",
             Self::UnavailableToolRepair => "unavailable_tool_repair",
             Self::DoneSentinel => "done_sentinel",
@@ -135,6 +137,9 @@ impl ToolProbeCase {
                 "marker={marker}\nquoted=\"value\"\njson={{\"marker\":{marker:?},\"nested\":[1,true]}}\nheredoc=<<EOF\n{marker}\nEOF\nunicode=\\u{{2603}}\\u{{1F680}}\nend"
             ),
             Self::ToolResultFollowup => format!("tool_result_followup:{marker}"),
+            Self::SignedThinkingToolResultFollowup => {
+                format!("signed_thinking_tool_result_followup:{marker}")
+            }
             Self::NoToolAnswerOrRefusal => format!("direct_answer:{marker}"),
             Self::UnavailableToolRepair => format!("unavailable_tool:{marker}"),
             Self::DoneSentinel => format!("<done>{marker}</done>"),
@@ -149,7 +154,11 @@ impl ToolProbeCase {
     }
 
     fn request_uses_probe_tool(self) -> bool {
-        self.requires_probe_tool() || self == Self::ToolResultFollowup
+        self.requires_probe_tool()
+            || matches!(
+                self,
+                Self::ToolResultFollowup | Self::SignedThinkingToolResultFollowup
+            )
     }
 }
 

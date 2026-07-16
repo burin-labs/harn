@@ -562,7 +562,7 @@ pub(crate) fn provider_visible_content(content: &serde_json::Value) -> serde_jso
 }
 
 pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Value {
-    let visible = provider_visible_content(content);
+    let visible = anthropic_visible_content(content);
     let content = &visible;
     match content {
         serde_json::Value::Array(blocks) => {
@@ -625,6 +625,58 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
             }
         }
         _ => content.clone(),
+    }
+}
+
+fn anthropic_visible_content(content: &serde_json::Value) -> serde_json::Value {
+    match content {
+        serde_json::Value::Array(blocks) => {
+            serde_json::Value::Array(blocks.iter().filter_map(anthropic_visible_block).collect())
+        }
+        serde_json::Value::Object(_) if is_anthropic_replay_thinking_block(content) => {
+            content.clone()
+        }
+        serde_json::Value::Object(_) if is_private_or_reasoning_block(content) => {
+            serde_json::Value::Array(Vec::new())
+        }
+        serde_json::Value::Object(_) => {
+            anthropic_visible_block(content).unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
+        }
+        _ => content.clone(),
+    }
+}
+
+fn anthropic_visible_block(block: &serde_json::Value) -> Option<serde_json::Value> {
+    if is_anthropic_replay_thinking_block(block) {
+        return Some(block.clone());
+    }
+    if is_private_or_reasoning_block(block) {
+        return None;
+    }
+    let mut normalized = block.clone();
+    if let Some(inner) = block.get("content") {
+        normalized["content"] = anthropic_visible_content(inner);
+    }
+    Some(normalized)
+}
+
+fn is_anthropic_replay_thinking_block(block: &serde_json::Value) -> bool {
+    match block.get("type").and_then(serde_json::Value::as_str) {
+        Some("thinking") => {
+            block
+                .get("thinking")
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+                && block
+                    .get("signature")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some()
+        }
+        Some("redacted_thinking") => block
+            .get("data")
+            .and_then(serde_json::Value::as_str)
+            .is_some(),
+        _ => false,
     }
 }
 
