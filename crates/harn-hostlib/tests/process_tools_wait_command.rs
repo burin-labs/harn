@@ -2,7 +2,8 @@
 
 #![cfg(unix)]
 
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
 use harn_hostlib::process::{
     install_spawner, ExitStatus, MockHandleController, MockProcessConfig, MockSpawner, SpawnerGuard,
@@ -109,6 +110,47 @@ fn wait_command_waits_for_live_handle_result_and_consumes_feedback() {
         leftover.is_empty(),
         "explicit wait must consume matching tool_result feedback, got {leftover:?}"
     );
+}
+
+#[test]
+fn background_finalization_reuses_active_artifact_lease() {
+    let session_id = unique_session_id("test-background-artifact-lease");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sh", "-c", "echo leased"]));
+    req.insert("background".into(), VmValue::Bool(true));
+    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let command_id = require_str(&start, "command_id");
+    let handle_id = require_str(&start, "handle_id");
+
+    let (wait_tx, wait_rx) = mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id);
+        let mut wait_req = dict();
+        wait_req.insert("handle_id".into(), vstr(&handle_id));
+        wait_req.insert("timeout_ms".into(), VmValue::Int(5_000));
+        let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+        wait_tx.send(require_str(&waited, "status")).unwrap();
+    });
+
+    controller.append_stdout(b"leased\n");
+    controller.complete_with(ExitStatus::from_code(0));
+
+    assert_eq!(
+        wait_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("background finalization deadlocked on its active artifact lease"),
+        "completed"
+    );
+    waiter.join().expect("background waiter thread panicked");
+
+    let mut read_req = dict();
+    read_req.insert("command_id".into(), vstr(&command_id));
+    let output = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    assert_eq!(require_str(&output, "content"), "leased\n");
 }
 
 #[test]
