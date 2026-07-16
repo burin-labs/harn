@@ -9,13 +9,7 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## v0.10.19
-
-### Added
-
-- Eval-pack statistics rows now retain case metadata, and `std/eval/stats`
-  exposes `axis_breakdown` for deterministic language, task, platform, and
-  other pack-defined breakdowns with explicit unclassified coverage.
+## Unreleased
 
 - Added coverage for the mock provider's native tool-call path: unit tests that
   the CLI mock install/match/build path and the result-to-assistant-envelope path
@@ -139,6 +133,14 @@ keeps condensed series summaries instead of full per-patch history.
   failing during option extraction.
 - Fixed supervisor shutdown so `supervisor_stop` does not leave not-yet-started
   child tasks in a pending state under load.
+
+## v0.10.19
+
+### Added
+
+- Eval-pack statistics rows now retain case metadata, and `std/eval/stats`
+  exposes `axis_breakdown` for deterministic language, task, platform, and
+  other pack-defined breakdowns with explicit unclassified coverage.
 
 ## v0.10.18
 
