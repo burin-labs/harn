@@ -140,6 +140,69 @@ pipeline test_provider_tool_probe_campaign_catalog_routes_accept_runtime_catalog
 }
 
 @test
+pipeline test_provider_tool_probe_campaign_catalog_routes_prefer_routing_routes(task) {
+  const catalog = {
+    providers: [
+      {id: "baseten", classification: "hosted", auth: {env: ["BASETEN_API_KEY"]}},
+      {id: "fireworks", classification: "hosted", auth: {env: ["FIREWORKS_API_KEY"]}},
+    ],
+    models: [
+      {
+        provider: "baseten",
+        id: "baseten/moonshotai/Kimi-K2.5",
+        wire_model: "moonshotai/Kimi-K2.5",
+        strengths: ["coding"],
+        pricing: {input_per_mtok: 0.6, output_per_mtok: 3.0},
+      },
+      {
+        provider: "fireworks",
+        id: "accounts/fireworks/models/gpt-oss-120b",
+        strengths: ["speed"],
+        pricing: {input_per_mtok: 0.3, output_per_mtok: 0.6},
+      },
+    ],
+    routing_routes: [
+      {
+        provider: "baseten",
+        model: "moonshotai/Kimi-K2.5",
+        secret_env: "BASETEN_ROUTE_KEY",
+        capabilities: ["tools"],
+      },
+    ],
+  }
+  const routes = provider_tool_probe_campaign_catalog_routes(catalog, false)
+  assert_eq(len(routes), 1)
+  assert_eq(routes[0]?.provider, "baseten")
+  assert_eq(routes[0]?.model, "moonshotai/Kimi-K2.5")
+  assert_eq(routes[0]?.env_keys, ["BASETEN_ROUTE_KEY", "BASETEN_API_KEY"])
+  assert_eq(routes[0]?.cheap, true)
+  assert_eq(routes[0]?.metadata.source, "routing_route")
+  assert_eq(routes[0]?.metadata.catalog_model_id, "baseten/moonshotai/Kimi-K2.5")
+  assert_eq(routes[0]?.metadata.catalog_wire_model, "moonshotai/Kimi-K2.5")
+  assert_eq(routes[0]?.metadata.route_capabilities, ["tools"])
+  assert_eq(routes[0]?.metadata.route_secret_env, "BASETEN_ROUTE_KEY")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_env_aliases_are_alternatives(task) {
+  const route: ProviderToolProbeRoute = {
+    id: "moonshot-fixture",
+    provider: "moonshot",
+    model: "kimi-k2.6",
+    env_keys: ["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY", "KIMI_API_KEY"],
+    local: false,
+    cheap: true,
+    metadata: {source: "fixture"},
+  }
+  assert_eq(provider_tool_probe_campaign_missing_env_keys(route, {}), route.env_keys)
+  assert_eq(
+    provider_tool_probe_campaign_missing_env_keys(route, {MOONSHOT_AI_API_KEY: "present"}),
+    [],
+  )
+  assert_eq(provider_tool_probe_campaign_missing_env_keys(route, {KIMI_API_KEY: "present"}), [])
+}
+
+@test
 pipeline test_provider_tool_probe_campaign_modes_expand_both(task) {
   assert_eq(provider_tool_probe_campaign_modes("both"), ["non-streaming", "streaming"])
   assert_eq(provider_tool_probe_campaign_modes("streaming"), ["streaming"])
@@ -177,6 +240,7 @@ pipeline test_provider_tool_probe_campaign_planned_cells_cover_route_behavior_fo
   assert_eq(len(cells), 3)
   assert_eq(cells[0]?.status, "planned")
   assert_eq(cells[0]?.catalog?.tools, provider_capabilities("ollama", "gemma4:e4b")?.tools)
+  assert_eq(cells[0]?.catalog?.route_metadata?.source, "explicit")
   assert_eq(
     cells[0]?.command,
     [
@@ -232,8 +296,18 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(task) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
   const cells = provider_tool_probe_campaign_planned_cells(routes, behaviors)
-  const report = provider_tool_probe_campaign_report(routes, behaviors, cells, false, false, ".out", 1)
-  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v4")
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    1,
+    {},
+    {checked: false},
+  )
+  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v5")
   assert_eq(report.summary.planned, 3)
   assert_eq(report.summary.pass, 0)
   assert_eq(report.cell_count, 3)
@@ -244,6 +318,9 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(task) {
   assert_eq(report.executable_gap.executable_cells, 3)
   assert_eq(report.executable_gap.executable_commands, 1)
   assert_eq(report.executable_gap.missing_runner, 0)
+  assert_eq(report.auth_readiness.env_checked, false)
+  assert_eq(report.auth_readiness.ready_routes, 1)
+  assert_eq(report.auth_readiness.missing_auth_routes, 0)
 }
 
 @test
@@ -251,7 +328,17 @@ pipeline test_provider_tool_probe_campaign_live_spend_is_unknown_until_aggregate
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
   const cells = provider_tool_probe_campaign_planned_cells(routes, behaviors)
-  const report = provider_tool_probe_campaign_report(routes, behaviors, cells, true, false, ".out", 2)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    true,
+    false,
+    ".out",
+    2,
+    {},
+    {checked: true},
+  )
   assert_eq(report.spend.actual_usd_known, false)
   assert_eq(report.spend.estimated_usd_known, false)
   assert_eq(report.spend.actual_usd, nil)
@@ -263,7 +350,17 @@ pipeline test_provider_tool_probe_campaign_report_counts_missing_runners(task) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["stop_sequences"])
   const cells = provider_tool_probe_campaign_planned_cells(routes, behaviors)
-  const report = provider_tool_probe_campaign_report(routes, behaviors, cells, false, false, ".out", 1)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    1,
+    {},
+    {checked: false},
+  )
   assert_eq(report.runner_summary.planned_llm_call.total, 1)
   assert_eq(report.executable_gap.executable_cells, 0)
   assert_eq(report.executable_gap.executable_commands, 0)
@@ -276,7 +373,17 @@ pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(task) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["parallel_tool_calls"])
   const cells = provider_tool_probe_campaign_planned_cells(routes, behaviors)
-  const report = provider_tool_probe_campaign_report(routes, behaviors, cells, false, false, ".out", 1)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    1,
+    {},
+    {checked: false},
+  )
   assert_eq(report.runner_summary.provider_tool_probe.total, 3)
   assert_eq(report.executable_gap.executable_cells, 3)
   assert_eq(report.executable_gap.executable_commands, 1)
@@ -304,6 +411,64 @@ pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(task) {
 }
 
 @test
+pipeline test_provider_tool_probe_campaign_auth_readiness_summarizes_env_without_live_calls(task) {
+  const routes: list<ProviderToolProbeRoute> = [
+    {
+      id: "fireworks-fixture",
+      provider: "fireworks",
+      model: "accounts/fireworks/models/gpt-oss-120b",
+      env_keys: ["FIREWORKS_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {source: "fixture"},
+    },
+    {
+      id: "moonshot-fixture",
+      provider: "moonshot",
+      model: "kimi-k2.6",
+      env_keys: ["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY", "KIMI_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {source: "fixture"},
+    },
+    {
+      id: "ollama-fixture",
+      provider: "ollama",
+      model: "gemma4:e4b",
+      env_keys: [],
+      local: true,
+      cheap: true,
+      metadata: {source: "fixture"},
+    },
+  ]
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
+  const cells = provider_tool_probe_campaign_planned_cells(routes, behaviors)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    1,
+    {KIMI_API_KEY: "present"},
+    {checked: true, loaded: true, parsed_key_count: 1, reason: "loaded"},
+  )
+  assert_eq(report.auth_readiness.env_checked, true)
+  assert_eq(report.auth_readiness.env_source.loaded, true)
+  assert_eq(report.auth_readiness.env_source.parsed_key_count, 1)
+  assert_eq(report.auth_readiness.route_count, 3)
+  assert_eq(report.auth_readiness.ready_routes, 2)
+  assert_eq(report.auth_readiness.missing_auth_routes, 1)
+  assert_eq(report.auth_readiness.local_routes, 1)
+  assert_eq(report.auth_readiness.hosted_routes, 2)
+  assert_eq(report.auth_readiness.ready_by_provider.moonshot, 1)
+  assert_eq(report.auth_readiness.ready_by_provider.ollama, 1)
+  assert_eq(report.auth_readiness.missing_by_provider.fireworks, 1)
+  assert_eq(report.auth_readiness.missing_env_candidates_by_provider.fireworks, ["FIREWORKS_API_KEY"])
+}
+
+@test
 pipeline test_provider_tool_probe_campaign_artifact_paths_are_unique_per_behavior_case(task) {
   const route: ProviderToolProbeRoute = {
     id: "ollama-gemma4-e4b",
@@ -312,6 +477,7 @@ pipeline test_provider_tool_probe_campaign_artifact_paths_are_unique_per_behavio
     env_keys: [],
     local: true,
     cheap: true,
+    metadata: {source: "fixture"},
   }
   const behaviors = provider_tool_probe_campaign_filter_behavior_modes(
     provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"]),
@@ -349,7 +515,15 @@ pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(task) {
 
 @test
 pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(task) {
-  const route: ProviderToolProbeRoute = {id: "fixture-route", provider: "mock", model: "mock", env_keys: [], local: true, cheap: true}
+  const route: ProviderToolProbeRoute = {
+    id: "fixture-route",
+    provider: "mock",
+    model: "mock",
+    env_keys: [],
+    local: true,
+    cheap: true,
+    metadata: {source: "fixture"},
+  }
   const behavior: ProviderToolProbeBehavior = {
     id: "fixture-behavior",
     category: "tool_calls",
@@ -374,7 +548,17 @@ pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(task) {
     observed: {},
     catalog: {},
   }
-  const report = provider_tool_probe_campaign_report([route], [behavior], [cell], false, false, ".out", 1)
+  const report = provider_tool_probe_campaign_report(
+    [route],
+    [behavior],
+    [cell],
+    false,
+    false,
+    ".out",
+    1,
+    {},
+    {checked: false},
+  )
   const markdown = provider_tool_probe_campaign_markdown(report)
   assert(contains(markdown, "left \\| right"), "pipe escaped")
 }

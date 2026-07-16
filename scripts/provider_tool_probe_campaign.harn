@@ -1,6 +1,6 @@
 import { parse_args } from "std/cli"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v4"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v5"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
@@ -11,6 +11,7 @@ pub type ProviderToolProbeRoute = {
   env_keys: list<string>,
   local: bool,
   cheap: bool,
+  metadata: dict,
 }
 
 pub type ProviderToolProbeBehavior = {
@@ -43,7 +44,7 @@ pub type ProviderToolProbeCell = {
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v4",
+  schema_version: "harn.provider_tool_probe_campaign.v5",
   live: bool,
   include_expensive: bool,
   route_count: int,
@@ -52,6 +53,7 @@ pub type ProviderToolProbeCampaignReport = {
   summary: dict,
   runner_summary: dict,
   executable_gap: dict,
+  auth_readiness: dict,
   spend: dict,
   routes: list<ProviderToolProbeRoute>,
   behaviors: list<ProviderToolProbeBehavior>,
@@ -88,6 +90,7 @@ fn __route_from_spec(spec: string) -> ProviderToolProbeRoute? {
     env_keys: [],
     local: false,
     cheap: true,
+    metadata: {source: "explicit"},
   }
 }
 
@@ -111,6 +114,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["FIREWORKS_API_KEY"],
       local: false,
       cheap: true,
+      metadata: {source: "default"},
     },
     {
       id: "cerebras-gpt-oss-120b",
@@ -119,6 +123,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["CEREBRAS_API_KEY"],
       local: false,
       cheap: true,
+      metadata: {source: "default"},
     },
     {
       id: "openrouter-gpt-oss-120b",
@@ -127,6 +132,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["OPENROUTER_API_KEY"],
       local: false,
       cheap: true,
+      metadata: {source: "default"},
     },
     {
       id: "moonshot-kimi",
@@ -135,6 +141,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["MOONSHOT_API_KEY"],
       local: false,
       cheap: true,
+      metadata: {source: "default"},
     },
     {
       id: "local-vllm",
@@ -143,8 +150,17 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: [],
       local: true,
       cheap: true,
+      metadata: {source: "default"},
     },
-    {id: "ollama", provider: "ollama", model: "gemma4:e4b", env_keys: [], local: true, cheap: true},
+    {
+      id: "ollama",
+      provider: "ollama",
+      model: "gemma4:e4b",
+      env_keys: [],
+      local: true,
+      cheap: true,
+      metadata: {source: "default"},
+    },
     {
       id: "xai-grok",
       provider: "xai",
@@ -152,6 +168,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["XAI_API_KEY"],
       local: false,
       cheap: false,
+      metadata: {source: "default"},
     },
   ]
   if include_expensive {
@@ -197,6 +214,22 @@ fn __has_string(values, target: string) -> bool {
   return false
 }
 
+fn __append_unique_string(values: list<string>, value: string) -> list<string> {
+  const key = trim(value)
+  if key == "" || values.contains(key) {
+    return values
+  }
+  return values + [key]
+}
+
+fn __unique_string_list(values: list<string>) -> list<string> {
+  let out: list<string> = []
+  for value in values {
+    out = __append_unique_string(out, value)
+  }
+  return out
+}
+
 fn __catalog_model_is_cheap(model: dict, local: bool) -> bool {
   if local {
     return true
@@ -209,7 +242,90 @@ fn __catalog_model_is_cheap(model: dict, local: bool) -> bool {
   return input <= 1.0 && output <= 5.0
 }
 
-pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+fn __route_key(provider: string, model: string) -> string {
+  return provider + "\n" + model
+}
+
+fn __catalog_models_by_route(catalog: dict) -> dict {
+  let models = {}
+  for model in catalog.models ?? [] {
+    const provider = trim(to_string(model.provider ?? ""))
+    const model_id = trim(to_string(model.id ?? ""))
+    if provider == "" || model_id == "" {
+      continue
+    }
+    models = models + {[__route_key(provider, model_id)]: model}
+    const wire_model = trim(to_string(model.wire_model ?? ""))
+    if wire_model != "" {
+      models = models + {[__route_key(provider, wire_model)]: model}
+    }
+  }
+  return models
+}
+
+fn __route_env_keys(route: dict, meta: dict) -> list<string> {
+  let keys: list<string> = []
+  const route_secret = trim(to_string(route.secret_env ?? ""))
+  if route_secret != "" {
+    keys = keys + [route_secret]
+  }
+  return __unique_string_list(keys + __as_string_list(meta.auth?.env ?? meta.auth_envs))
+}
+
+fn __catalog_route_from_routing_row(
+  route: dict,
+  providers: dict,
+  models: dict,
+  include_expensive: bool,
+) -> ProviderToolProbeRoute? {
+  const provider = trim(to_string(route.provider ?? ""))
+  const model_id = trim(to_string(route.model ?? ""))
+  if provider == "" || model_id == "" {
+    return nil
+  }
+  const meta = providers[provider] ?? {}
+  const model = models[__route_key(provider, model_id)] ?? {}
+  const local = __route_is_local(provider, meta)
+  const cheap = __catalog_model_is_cheap(model, local)
+  if !include_expensive && !cheap {
+    return nil
+  }
+  return {
+    id: __slug(provider + "-" + model_id),
+    provider: provider,
+    model: model_id,
+    env_keys: __route_env_keys(route, meta),
+    local: local,
+    cheap: cheap,
+    metadata: {
+      source: "routing_route",
+      catalog_model_id: model.id,
+      catalog_wire_model: model.wire_model,
+      route_model: model_id,
+      route_family: route.family,
+      route_label: route.label,
+      route_timeout_ms: route.timeout_ms,
+      route_capabilities: route.capabilities ?? [],
+      route_has_base_url: trim(to_string(route.base_url ?? "")) != "",
+      route_secret_env: route.secret_env,
+    },
+  }
+}
+
+fn __catalog_routes_from_routing_table(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+  const providers = __provider_meta_by_id(catalog)
+  const models = __catalog_models_by_route(catalog)
+  let routes: list<ProviderToolProbeRoute> = []
+  for row in catalog.routing_routes ?? [] {
+    const route = __catalog_route_from_routing_row(row, providers, models, include_expensive)
+    if route != nil {
+      routes = routes + [route]
+    }
+  }
+  return routes
+}
+
+fn __catalog_routes_from_models(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
   const providers = __provider_meta_by_id(catalog)
   let routes: list<ProviderToolProbeRoute> = []
   for model in catalog.models ?? [] {
@@ -233,10 +349,18 @@ pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expens
         env_keys: __as_string_list(meta.auth?.env ?? meta.auth_envs),
         local: local,
         cheap: cheap,
+        metadata: {source: "catalog_model", catalog_model_id: model_id, catalog_wire_model: model.wire_model},
       },
     ]
   }
   return routes
+}
+
+pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+  if len(catalog.routing_routes ?? []) > 0 {
+    return __catalog_routes_from_routing_table(catalog, include_expensive)
+  }
+  return __catalog_routes_from_models(catalog, include_expensive)
 }
 
 pub fn provider_tool_probe_campaign_modes(mode: string) -> list<string> {
@@ -489,7 +613,7 @@ fn __base_cell(
     status: status,
     reason: reason,
     observed: observed,
-    catalog: __provider_catalog_claim(route),
+    catalog: __provider_catalog_claim(route) + {route_metadata: route.metadata},
   }
 }
 
@@ -633,13 +757,68 @@ fn __probe_cell(
 }
 
 fn __missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
-  let missing: list<string> = []
+  if len(route.env_keys) == 0 {
+    return []
+  }
   for key in route.env_keys {
-    if trim(to_string(env[key] ?? "")) == "" {
-      missing = missing + [key]
+    if trim(to_string(env[key] ?? "")) != "" {
+      return []
     }
   }
-  return missing
+  return route.env_keys
+}
+
+pub fn provider_tool_probe_campaign_missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
+  return __missing_env_keys(route, env)
+}
+
+fn __merge_unique_strings(left: list<string>, right: list<string>) -> list<string> {
+  let out = left
+  for value in right {
+    out = __append_unique_string(out, value)
+  }
+  return out
+}
+
+fn __auth_readiness(routes: list<ProviderToolProbeRoute>, env: dict, env_source: dict) -> dict {
+  let ready_routes = 0
+  let missing_auth_routes = 0
+  let local_routes = 0
+  let hosted_routes = 0
+  let ready_by_provider: dict = {}
+  let missing_by_provider: dict = {}
+  let missing_env_candidates_by_provider: dict = {}
+  for route in routes {
+    if route.local {
+      local_routes = local_routes + 1
+    } else {
+      hosted_routes = hosted_routes + 1
+    }
+    const missing = __missing_env_keys(route, env)
+    if len(missing) == 0 {
+      ready_routes = ready_routes + 1
+      ready_by_provider = __increment_key(ready_by_provider, route.provider)
+    } else {
+      missing_auth_routes = missing_auth_routes + 1
+      missing_by_provider = __increment_key(missing_by_provider, route.provider)
+      missing_env_candidates_by_provider = missing_env_candidates_by_provider
+        + {
+        [route.provider]: __merge_unique_strings(missing_env_candidates_by_provider[route.provider] ?? [], missing),
+      }
+    }
+  }
+  return {
+    env_checked: env_source.checked ?? false,
+    env_source: env_source,
+    route_count: len(routes),
+    ready_routes: ready_routes,
+    missing_auth_routes: missing_auth_routes,
+    local_routes: local_routes,
+    hosted_routes: hosted_routes,
+    ready_by_provider: ready_by_provider,
+    missing_by_provider: missing_by_provider,
+    missing_env_candidates_by_provider: missing_env_candidates_by_provider,
+  }
 }
 
 fn __skipped_cells_for_missing_env(
@@ -658,8 +837,8 @@ fn __skipped_cells_for_missing_env(
         mode,
         format,
         "skip",
-        "missing required environment keys: " + join(missing, ", "),
-        {missing_env_keys: missing},
+        "missing provider environment key; set one of: " + join(missing, ", "),
+        {missing_env_keys: missing, any_env_key_satisfies_route: true},
       ),
     ]
   }
@@ -870,6 +1049,8 @@ pub fn provider_tool_probe_campaign_report(
   include_expensive: bool,
   output_dir: string,
   repeat: int,
+  env: dict,
+  env_source: dict,
 ) -> ProviderToolProbeCampaignReport {
   return {
     schema_version: SCHEMA_VERSION,
@@ -881,6 +1062,7 @@ pub fn provider_tool_probe_campaign_report(
     summary: __summary(cells),
     runner_summary: __runner_summary(cells),
     executable_gap: __executable_gap(cells),
+    auth_readiness: __auth_readiness(routes, env, env_source),
     spend: __estimated_spend(live, routes, behaviors, repeat),
     routes: routes,
     behaviors: behaviors,
@@ -923,6 +1105,7 @@ pub fn provider_tool_probe_campaign_markdown(report: ProviderToolProbeCampaignRe
   out = out + "- Summary: `" + json_stringify(report.summary) + "`\n"
   out = out + "- Runner summary: `" + json_stringify(report.runner_summary) + "`\n"
   out = out + "- Executable gap: `" + json_stringify(report.executable_gap) + "`\n"
+  out = out + "- Auth readiness: `" + json_stringify(report.auth_readiness) + "`\n"
   out = out + "- Spend: `" + json_stringify(report.spend) + "`\n\n"
   out = out + "| Status | Provider | Model | Behavior | Mode | Tool format | Reason |\n"
   out = out + "| --- | --- | --- | --- | --- | --- | --- |\n"
@@ -996,11 +1179,28 @@ pub fn provider_tool_probe_campaign_env_from_dotenv_text(text: string) -> dict {
   return env
 }
 
-fn __env_for_child(harness: Harness, env_file: string) -> dict {
-  if env_file == "" || !harness.fs.exists(env_file) {
-    return {}
+fn __env_load_receipt(path: string, checked: bool, loaded: bool, key_count: int, reason: string) -> dict {
+  return {path: path, checked: checked, loaded: loaded, parsed_key_count: key_count, reason: reason}
+}
+
+fn __load_env_file(harness: Harness, env_file: string) -> dict {
+  if env_file == "" {
+    return {env: {}, source: __env_load_receipt("", false, false, 0, "no env file requested")}
   }
-  return provider_tool_probe_campaign_env_from_dotenv_text(harness.fs.read_text(env_file))
+  if !harness.fs.exists(env_file) {
+    return {
+      env: {},
+      source: __env_load_receipt(
+        env_file,
+        true,
+        false,
+        0,
+        "env file is not readable in this Harn run; use a worktree-local env snapshot or --no-sandbox for local-only dry-run readiness",
+      ),
+    }
+  }
+  const env = provider_tool_probe_campaign_env_from_dotenv_text(harness.fs.read_text(env_file))
+  return {env: env, source: __env_load_receipt(env_file, true, true, len(env.keys()), "loaded")}
 }
 
 fn __default_env_file(harness: Harness) -> string {
@@ -1090,18 +1290,15 @@ fn main(harness: Harness) {
   __ensure_dir(harness, ".harn-runs")
   __ensure_dir(harness, output_dir)
   const env_file_arg = trim(to_string(parsed?.env_file ?? ""))
-  const env = if live {
-    __env_for_child(
-      harness,
-      if env_file_arg == "" {
-        __default_env_file(harness)
-      } else {
-        env_file_arg
-      },
-    )
+  const env_file_path = if env_file_arg != "" {
+    env_file_arg
+  } else if live {
+    __default_env_file(harness)
   } else {
-    {}
+    ""
   }
+  const env_load = __load_env_file(harness, env_file_path)
+  const env = env_load.env ?? {}
   const cells = if live {
     __live_cells(harness, routes, behaviors, harn_bin, env, repeat, timeout_secs, output_dir)
   } else {
@@ -1121,6 +1318,8 @@ fn main(harness: Harness) {
     include_expensive,
     output_dir,
     repeat,
+    env,
+    env_load.source ?? {},
   )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
   harness.fs
