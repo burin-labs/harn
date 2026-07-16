@@ -81,63 +81,44 @@ async fn serve() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::helpers::{lsp_position_to_offset, word_at_position};
+    use crate::handlers::hover::{resolve_hover_target, HoverTarget};
+    use crate::helpers::word_at_position;
     use crate::symbols::HarnSymbolKind;
 
-    /// Build document state and find the best hover symbol for `word` at
-    /// the given 0-based line/column.
+    /// Resolve the hover target at the given 0-based line/column, through the
+    /// real handler code.
+    ///
+    /// This used to re-implement `handlers::hover`'s scope resolution inline,
+    /// under a comment saying it mirrored it. It did mirror it — which is why
+    /// every test below passed while the handler resolved `harness.exit` to the
+    /// global `exit` builtin (#4794). A mirror cannot fail with its subject, so
+    /// the bug lived in the one step the copy did not reproduce: the order in
+    /// which builtins, keywords and symbols are consulted. The copy is gone;
+    /// these tests now drive `resolve_hover_target` itself.
+    fn hover_target_at(source: &str, line: u32, col: u32) -> Option<HoverTarget> {
+        let state = DocumentState::new(source.to_string());
+        resolve_hover_target(source, &state.symbols, Position::new(line, col))
+    }
+
+    /// The hover symbol at the given position, asserting the word under the
+    /// cursor is what the caller thinks it is.
     fn hover_symbol_at(
         source: &str,
         line: u32,
         col: u32,
         word: &str,
     ) -> Option<symbols::SymbolInfo> {
-        let state = DocumentState::new(source.to_string());
-        let position = Position::new(line, col);
-
-        let extracted = word_at_position(source, position);
+        let extracted = word_at_position(source, Position::new(line, col));
         assert_eq!(
             extracted.as_deref(),
             Some(word),
             "word_at_position mismatch"
         );
 
-        let cursor_offset = lsp_position_to_offset(source, position);
-
-        // Mirrors handlers::hover's scope resolution: tightest scope wins.
-        let mut best: Option<&symbols::SymbolInfo> = None;
-        for sym in &state.symbols {
-            if sym.name != word {
-                continue;
-            }
-            let in_scope = if sym.impl_type.is_some() {
-                true
-            } else {
-                match sym.scope_span {
-                    Some(sp) => cursor_offset >= sp.start && cursor_offset <= sp.end,
-                    None => true,
-                }
-            };
-            if !in_scope {
-                continue;
-            }
-            match best {
-                None => best = Some(sym),
-                Some(prev) => {
-                    let prev_size = prev
-                        .scope_span
-                        .map_or(usize::MAX, |sp| sp.end.saturating_sub(sp.start));
-                    let this_size = sym
-                        .scope_span
-                        .map_or(usize::MAX, |sp| sp.end.saturating_sub(sp.start));
-                    if this_size < prev_size {
-                        best = Some(sym);
-                    }
-                }
-            }
+        match hover_target_at(source, line, col) {
+            Some(HoverTarget::Symbol(sym)) => Some(*sym),
+            _ => None,
         }
-
-        best.cloned()
     }
 
     #[test]
@@ -308,6 +289,58 @@ fn read_to_string(path: string) -> string {
         assert_eq!(
             sym.doc_comment.as_deref(),
             Some("Returns the sum of x and y.")
+        );
+    }
+
+    #[test]
+    fn hover_member_access_does_not_resolve_to_a_global_builtin_of_the_same_name() {
+        // `harness.exit` is not a method: the runtime answers `value of type
+        // Harness has no method \`exit\``. But `exit` IS a global builtin, so
+        // hovering it reported "**exit(code)** — Terminate process with exit
+        // code" and the method looked implemented. Someone then wrote
+        // `harness.exit(2)`, got exit code 1, and filed a bug against exit codes
+        // -- which work fine. The hover invented the API the bug was about.
+        let source = "fn main(harness: Harness) {\n  harness.exit(2)\n}\n";
+
+        // Column 11 is inside `exit`, after the dot.
+        assert!(
+            hover_target_at(source, 1, 11).is_none(),
+            "hovering `.exit` must resolve to nothing: it is a member that does \
+             not exist, and the global `exit` builtin is not what it names"
+        );
+
+        // The same word, named in its own right, is still the builtin. Suppressing
+        // the member case must not cost the bare case.
+        let bare = "fn main(harness: Harness) {\n  exit(2)\n}\n";
+        assert!(
+            matches!(hover_target_at(bare, 1, 3), Some(HoverTarget::Builtin(_))),
+            "a bare `exit` is the global builtin and must still hover"
+        );
+    }
+
+    #[test]
+    fn hover_range_bound_is_not_a_member_access() {
+        // `..` is not a receiver. Reading `0..exit` as a member access would
+        // suppress a genuine builtin, trading the old false positive for a new
+        // false negative.
+        let source = "fn main(harness: Harness) {\n  const r = [0..exit]\n}\n";
+        assert!(
+            matches!(
+                hover_target_at(source, 1, 17),
+                Some(HoverTarget::Builtin(_))
+            ),
+            "a range bound must still resolve to the builtin"
+        );
+    }
+
+    #[test]
+    fn hover_member_access_survives_a_wrapped_method_chain() {
+        // A chain broken across lines puts whitespace between the dot and the
+        // name. It is still a member access.
+        let source = "fn main(harness: Harness) {\n  const v = value\n    .exit\n}\n";
+        assert!(
+            hover_target_at(source, 2, 6).is_none(),
+            "a wrapped `.exit` is still a member access, not the global builtin"
         );
     }
 
