@@ -22,7 +22,6 @@ pub type HypothesisOptions = {
   actor?: string,
   tags?: list<string>,
   headers?: dict<string, string>,
-  now?: string,
   status?: string,
 }
 
