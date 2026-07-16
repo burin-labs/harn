@@ -2,8 +2,10 @@ import { parse_args } from "std/cli"
 
 type HookTimingEvent = {
   ts: string?,
+  repository: string,
   repo: string,
   hook: string,
+  profile: string,
   duration_ms: int,
   exit_code: int?,
   commit_sha: string?,
@@ -11,13 +13,29 @@ type HookTimingEvent = {
 }
 
 type HookTimingGroup = {
-  repo: string,
+  repository: string,
   hook: string,
+  profile: string,
   count: int,
+  failures: int,
   total_ms: int,
   max_ms: int,
   avg_ms: int,
+  p50_ms: int,
+  p95_ms: int,
 }
+
+type HookTimingObserved = {p50: int, p95: int, max: int, n: int, window: string}
+
+type HookTimingBudget = {
+  intent: string,
+  valueMs: int,
+  source: string,
+  rule: string,
+  observed: HookTimingObserved,
+}
+
+type HookTimingBudgetReport = {schemaVersion: int, limits: dict<string, HookTimingBudget>}
 
 type HookTimingParseReport = {events: list<HookTimingEvent>, invalid_lines: int}
 
@@ -34,7 +52,7 @@ type HookTimingReport = {
 fn usage() -> string {
   return join(
     [
-      "usage: harn run scripts/hook_timing_summary.harn -- [--input PATH] [--limit N] [--repo TEXT] [--hook NAME] [--min-ms N] [--json]",
+      "usage: harn run scripts/hook_timing_summary.harn -- [--input PATH] [--limit N] [--repo TEXT] [--hook NAME] [--min-ms N] [--json|--budgets]",
       "",
       "Summarizes ~/.burin/hook-timings.ndjson so slow local hook/build paths are visible.",
       "Use harn run --no-sandbox when reading the default ~/.burin log from outside the repo sandbox.",
@@ -52,9 +70,15 @@ pub fn default_hook_timing_path(home: string) -> string {
 
 pub fn hook_timing_event_from_json(value) -> HookTimingEvent? {
   const repo = to_string(value?.repo ?? "")
+  const repository = to_string(value?.repository ?? repo)
   const hook = to_string(value?.hook ?? "")
+  const profile = to_string(value?.profile ?? "legacy")
   const duration_ms = to_int(value?.duration_ms)
-  if repo == "" || hook == "" || duration_ms == nil {
+  if repository == ""
+    || hook == ""
+    || !["fast", "full", "legacy"].contains(profile)
+    || duration_ms == nil
+    || duration_ms < 0 {
     return nil
   }
   const ts = if value?.ts == nil {
@@ -73,8 +97,10 @@ pub fn hook_timing_event_from_json(value) -> HookTimingEvent? {
     to_string(value?.host)
   }
   const event: HookTimingEvent = {
+    repository: repository,
     repo: repo,
     hook: hook,
+    profile: profile,
     duration_ms: duration_ms,
     ts: ts,
     exit_code: to_int(value?.exit_code),
@@ -118,30 +144,54 @@ fn rounded_average(total: int, count: int) -> int {
   return to_int(round((to_float(total) ?? 0.0) / (to_float(count) ?? 1.0))) ?? 0
 }
 
+fn nearest_rank(values: list<int>, percentile: int) -> int {
+  if values.count == 0 {
+    return 0
+  }
+  const sorted = values.sort_by({ value -> value })
+  const rank = to_int(floor(((to_float(values.count * percentile) ?? 0.0) + 99.0) / 100.0)) ?? 1
+  return sorted[rank - 1] ?? 0
+}
+
 pub fn summarize_hook_timings(events: list<HookTimingEvent>) -> list<HookTimingGroup> {
   let by_key = {}
   for event in events {
-    const key = json_stringify([event.repo, event.hook])
+    const key = json_stringify([event.repository, event.profile, event.hook])
     const previous = by_key[key]
     if previous == nil {
       by_key = by_key
         + {
         [key]: {
-          repo: event.repo,
+          repository: event.repository,
           hook: event.hook,
+          profile: event.profile,
           count: 1,
+          failures: if (event.exit_code ?? 0) == 0 {
+            0
+          } else {
+            1
+          },
           total_ms: event.duration_ms,
           max_ms: event.duration_ms,
+          durations: [event.duration_ms],
         },
       }
     } else {
       by_key = by_key
         + {
         [key]: {
-          repo: previous.repo,
+          repository: previous.repository,
           hook: previous.hook,
+          profile: previous.profile,
           count: previous.count + 1,
+          failures: previous.failures
+            + if (event.exit_code ?? 0) == 0 {
+            0
+          } else {
+            1
+          },
           total_ms: previous.total_ms + event.duration_ms,
+          durations: previous.durations + [event.duration_ms],
           max_ms: if event.duration_ms > previous.max_ms {
             event.duration_ms
           } else {
@@ -157,16 +207,65 @@ pub fn summarize_hook_timings(events: list<HookTimingEvent>) -> list<HookTimingG
     groups = groups
       + [
       {
-        repo: value.repo,
+        repository: value.repository,
         hook: value.hook,
+        profile: value.profile,
         count: value.count,
+        failures: value.failures,
         total_ms: value.total_ms,
         max_ms: value.max_ms,
         avg_ms: rounded_average(value.total_ms, value.count),
+        p50_ms: nearest_rank(value.durations, 50),
+        p95_ms: nearest_rank(value.durations, 95),
       },
     ]
   }
   return groups.sort_by({ group -> 0 - group.total_ms })
+}
+
+fn observation_window(events: list<HookTimingEvent>) -> string {
+  const timestamps = events.filter({ event -> event.ts != nil }).map({ event -> event.ts ?? "" }).to_list()
+    .sort_by({ value -> value })
+  if timestamps.count == 0 {
+    return "unknown"
+  }
+  return timestamps[0] + "/" + timestamps[timestamps.count - 1]
+}
+
+pub fn derive_hook_timing_budgets(events: list<HookTimingEvent>) -> HookTimingBudgetReport {
+  const successful = events
+    .filter({ event -> (event.exit_code ?? 0) == 0 && event.profile != "legacy" })
+    .to_list()
+  let limits: dict<string, HookTimingBudget> = {}
+  for group in summarize_hook_timings(successful) {
+    if group.count < 4 {
+      continue
+    }
+    const samples = successful
+      .filter(
+      { event -> event.repository == group.repository && event.profile == group.profile
+        && event.hook == group.hook },
+    )
+      .to_list()
+    const surface = "hook/" + group.repository + "/" + group.profile + "/" + group.hook
+    limits = limits
+      + {
+      [surface]: {
+        intent: "budget",
+        valueMs: to_int(ceil((to_float(group.p95_ms) ?? 0.0) * 1.2)) ?? group.p95_ms,
+        source: "derived",
+        rule: "p95*1.2",
+        observed: {
+          p50: group.p50_ms,
+          p95: group.p95_ms,
+          max: group.max_ms,
+          n: group.count,
+          window: observation_window(samples),
+        },
+      },
+    }
+  }
+  return {schemaVersion: 1, limits: limits}
 }
 
 pub fn slowest_hook_timings(events: list<HookTimingEvent>, limit: int) -> list<HookTimingEvent> {
@@ -180,7 +279,9 @@ pub fn slowest_hook_timings(events: list<HookTimingEvent>, limit: int) -> list<H
 pub fn filter_hook_timings(events: list<HookTimingEvent>, filters: HookTimingFilters) -> list<HookTimingEvent> {
   let out: list<HookTimingEvent> = []
   for event in events {
-    if filters.repo != "" && !event.repo.contains(filters.repo) {
+    if filters.repo != ""
+      && !event.repo.contains(filters.repo)
+      && !event.repository.contains(filters.repo) {
       continue
     }
     if filters.hook != "" && event.hook != filters.hook {
@@ -195,7 +296,9 @@ pub fn filter_hook_timings(events: list<HookTimingEvent>, filters: HookTimingFil
 }
 
 fn render_group(group: HookTimingGroup) -> string {
-  return "- " + group.repo + " " + group.hook + ": total=" + to_string(group.total_ms) + "ms"
+  return "- " + group.repository + " " + group.profile + " " + group.hook + ": total="
+    + to_string(group.total_ms)
+    + "ms"
     + " count="
     + to_string(group.count)
     + " max="
@@ -204,10 +307,18 @@ fn render_group(group: HookTimingGroup) -> string {
     + " avg="
     + to_string(group.avg_ms)
     + "ms"
+    + " p50="
+    + to_string(group.p50_ms)
+    + "ms p95="
+    + to_string(group.p95_ms)
+    + "ms failures="
+    + to_string(group.failures)
 }
 
 fn render_event(event: HookTimingEvent) -> string {
-  let line = "- " + event.repo + " " + event.hook + ": " + to_string(event.duration_ms) + "ms"
+  let line = "- " + event.repository + " " + event.profile + " " + event.hook + ": "
+    + to_string(event.duration_ms)
+    + "ms"
   if event.exit_code != nil {
     line = line + " exit=" + to_string(event.exit_code)
   }
@@ -249,7 +360,7 @@ pub fn render_hook_timing_report(report: HookTimingReport, limit: int) -> string
       lines = lines + [render_event(event)]
     }
   }
-  lines = lines + ["", "aggregate by repo/hook:"]
+  lines = lines + ["", "aggregate by repository/profile/hook:"]
   const groups = if limit <= 0 || report.groups.count <= limit {
     report.groups
   } else {
@@ -273,6 +384,7 @@ fn arg_spec() -> list {
     {kind: "option", name: "hook", flags: ["--hook"], parse: "string", default: ""},
     {kind: "option", name: "min_ms", flags: ["--min-ms"], parse: "int", default: 0},
     {kind: "flag", name: "json", flags: ["--json"], default: false},
+    {kind: "flag", name: "budgets", flags: ["--budgets"], default: false},
   ]
 }
 
@@ -313,7 +425,13 @@ fn main(harness: Harness) {
     groups: summarize_hook_timings(events),
     invalid_lines: parsed_log.invalid_lines,
   }
-  if parsed?.json ?? false {
+  if (parsed?.json ?? false) && (parsed?.budgets ?? false) {
+    harness.stdio.eprintln("--json and --budgets are mutually exclusive")
+    exit(2)
+  }
+  if parsed?.budgets ?? false {
+    harness.stdio.println(json_stringify_pretty(derive_hook_timing_budgets(events)))
+  } else if parsed?.json ?? false {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
     harness.stdio.println(render_hook_timing_report(report, limit))

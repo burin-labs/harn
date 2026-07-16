@@ -1,11 +1,12 @@
 import "../hook_timing_summary.harn"
 
 const SAMPLE_LOG = """
-{"ts":"2026-07-15T05:31:25Z","repo":"harn4745-recap-fixture-codex0","hook":"pre-push","duration_ms":405030,"exit_code":0,"commit_sha":"4f8387","host":"mac"}
+{"ts":"2026-07-15T05:31:25Z","repository":"burin-labs/harn","repo":"harn4745-recap-fixture-codex0","hook":"pre-push","profile":"fast","duration_ms":405030,"exit_code":0,"commit_sha":"4f8387","host":"mac"}
 not json
 {"ts":"2026-07-15T05:24:28Z","repo":"harn4745-recap-fixture-codex0","hook":"pre-commit","duration_ms":1054,"exit_code":0}
 {"ts":"2026-07-15T05:13:57Z","repo":"harn-affected-global-fastpath-codex1","hook":"pre-push","duration_ms":848,"exit_code":0}
 {"repo":"missing-duration","hook":"pre-push"}
+{"repository":"burin-labs/harn","repo":"invalid-profile","hook":"pre-push","profile":"turbo","duration_ms":10}
 """
 
 @test
@@ -18,8 +19,10 @@ pipeline test_default_hook_timing_path(task) {
 pipeline test_parse_hook_timing_text_skips_invalid_rows(task) {
   const report = parse_hook_timing_text(SAMPLE_LOG)
   assert_eq(report.events.count, 3)
-  assert_eq(report.invalid_lines, 2)
+  assert_eq(report.invalid_lines, 3)
   assert_eq(report.events[0]?.repo, "harn4745-recap-fixture-codex0")
+  assert_eq(report.events[0]?.repository, "burin-labs/harn")
+  assert_eq(report.events[0]?.profile, "fast")
   assert_eq(report.events[0]?.duration_ms, 405030)
   assert_eq(report.events[0]?.exit_code, 0)
 }
@@ -35,11 +38,17 @@ pipeline test_summarize_hook_timings_aggregates_and_sorts_by_total(task) {
   )
   const groups = summarize_hook_timings(parsed.events)
   assert_eq(groups.count, 2)
-  assert_eq(
-    groups[0],
-    {repo: "slow", hook: "pre-push", count: 2, total_ms: 400, max_ms: 300, avg_ms: 200},
-  )
-  assert_eq(groups[1]?.repo, "fast")
+  assert_eq(groups[0]?.repository, "slow")
+  assert_eq(groups[0]?.profile, "legacy")
+  assert_eq(groups[0]?.hook, "pre-push")
+  assert_eq(groups[0]?.count, 2)
+  assert_eq(groups[0]?.failures, 0)
+  assert_eq(groups[0]?.total_ms, 400)
+  assert_eq(groups[0]?.max_ms, 300)
+  assert_eq(groups[0]?.avg_ms, 200)
+  assert_eq(groups[0]?.p50_ms, 100)
+  assert_eq(groups[0]?.p95_ms, 300)
+  assert_eq(groups[1]?.repository, "fast")
 }
 
 @test
@@ -71,7 +80,46 @@ pipeline test_render_hook_timing_report_contains_actionable_sections(task) {
     1,
   )
   assert_eq(rendered.contains("slowest invocations:"), true)
-  assert_eq(rendered.contains("aggregate by repo/hook:"), true)
-  assert_eq(rendered.contains("harn4745-recap-fixture-codex0 pre-push: 405030ms"), true)
-  assert_eq(rendered.contains("invalid_lines: 2"), true)
+  assert_eq(rendered.contains("aggregate by repository/profile/hook:"), true)
+  assert_eq(rendered.contains("burin-labs/harn fast pre-push: 405030ms"), true)
+  assert_eq(rendered.contains("invalid_lines: 3"), true)
+}
+
+@test
+pipeline test_budget_projection_separates_profiles_and_excludes_failures(task) {
+  const parsed = parse_hook_timing_text(
+    """
+{"ts":"2026-07-16T01:00:00Z","repository":"burin-labs/harn","repo":"one","hook":"pre-push","profile":"fast","duration_ms":100,"exit_code":0}
+{"ts":"2026-07-16T02:00:00Z","repository":"burin-labs/harn","repo":"two","hook":"pre-push","profile":"fast","duration_ms":200,"exit_code":0}
+{"ts":"2026-07-16T03:00:00Z","repository":"burin-labs/harn","repo":"three","hook":"pre-push","profile":"fast","duration_ms":300,"exit_code":0}
+{"ts":"2026-07-16T04:00:00Z","repository":"burin-labs/harn","repo":"four","hook":"pre-push","profile":"fast","duration_ms":400,"exit_code":0}
+{"ts":"2026-07-16T05:00:00Z","repository":"burin-labs/harn","repo":"failed","hook":"pre-push","profile":"fast","duration_ms":9999,"exit_code":1}
+{"repository":"burin-labs/harn","repo":"full","hook":"pre-push","profile":"full","duration_ms":800,"exit_code":0}
+{"repo":"old","hook":"pre-push","duration_ms":900,"exit_code":0}
+""",
+  )
+  const report = derive_hook_timing_budgets(parsed.events)
+  assert_eq(report.schemaVersion, 1)
+  assert_eq(report.limits.keys().to_list().count, 1)
+  const budget = report.limits["hook/burin-labs/harn/fast/pre-push"]
+  assert_eq(budget?.intent, "budget")
+  assert_eq(budget?.valueMs, 480)
+  assert_eq(budget?.source, "derived")
+  assert_eq(budget?.rule, "p95*1.2")
+  assert_eq(
+    budget?.observed,
+    {p50: 200, p95: 400, max: 400, n: 4, window: "2026-07-16T01:00:00Z/2026-07-16T04:00:00Z"},
+  )
+}
+
+@test
+pipeline test_budget_projection_refuses_thin_samples(task) {
+  const parsed = parse_hook_timing_text(
+    """
+{"repository":"burin-labs/harn","repo":"one","hook":"pre-commit","profile":"fast","duration_ms":100}
+{"repository":"burin-labs/harn","repo":"two","hook":"pre-commit","profile":"fast","duration_ms":200}
+{"repository":"burin-labs/harn","repo":"three","hook":"pre-commit","profile":"fast","duration_ms":300}
+""",
+  )
+  assert_eq(derive_hook_timing_budgets(parsed.events).limits.keys().to_list().count, 0)
 }

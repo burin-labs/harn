@@ -189,6 +189,13 @@ the targeted build-backed local gates; combine it with
 bootstraps dependencies through `./scripts/ensure_portal_deps.sh`; repo-root
 `npm run portal:*` commands reuse the same bootstrap path.
 
+Hooks append profile-tagged timing rows to `~/.burin/hook-timings.ndjson`.
+Inspect invocations with
+`harn run --no-sandbox scripts/hook_timing_summary.harn`; add `-- --budgets` to
+emit sample-gated (`n >= 4`) `p95*1.2` budget observations for the shared fleet
+budget registry. Failed, legacy, and full opt-in hook runs never inflate the
+fast-hook budget.
+
 Harn-authored checks run through `scripts/harn_bin.sh`, which reuses
 `$HARN_BIN` or the worktree `target/debug/harn` when that binary is newer than
 the Rust/Cargo inputs that relink the executable. If the binary is missing or

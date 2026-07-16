@@ -93,8 +93,10 @@ hook_skip_no_local_build() {
 
 # ---------------------------------------------------------------------------
 # Hook duration instrument. Appends one NDJSON line per hook invocation to
-# ~/.burin/hook-timings.ndjson: {ts, repo, hook, duration_ms, exit_code,
-# commit_sha, host}. Zero-dep (POSIX sh + date only), never changes the
+# ~/.burin/hook-timings.ndjson: {ts, repository, repo, hook, profile,
+# duration_ms, exit_code, commit_sha, host}. `repository` is the stable owner;
+# legacy `repo` remains the checkout basename for worktree forensics. Zero-dep
+# (POSIX sh + date only), never changes the
 # hook's own exit code, and degrades silently if the log directory can't be
 # created (e.g. no ~/.burin on this machine). Usage from a hook script:
 #
@@ -147,12 +149,17 @@ hook_timing_finish() {
     commit_sha=$(git rev-parse HEAD 2>/dev/null) || commit_sha="unknown"
     host=$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)
     ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+    if [ "${HARN_HOOKS_FULL_LOCAL:-0}" = "1" ]; then
+      profile="full"
+    else
+      profile="fast"
+    fi
 
     mkdir -p "$HOOK_TIMING_LOG_DIR" 2>/dev/null || exit 0
     [ -d "$HOOK_TIMING_LOG_DIR" ] || exit 0
 
-    printf '{"ts":"%s","repo":"%s","hook":"%s","duration_ms":%s,"exit_code":%s,"commit_sha":"%s","host":"%s"}\n' \
-      "$ts" "$repo" "${HOOK_TIMING_HOOK_NAME:-unknown}" "$duration_ms" "$exit_code" "$commit_sha" "$host" \
+    printf '{"ts":"%s","repository":"burin-labs/harn","repo":"%s","hook":"%s","profile":"%s","duration_ms":%s,"exit_code":%s,"commit_sha":"%s","host":"%s"}\n' \
+      "$ts" "$repo" "${HOOK_TIMING_HOOK_NAME:-unknown}" "$profile" "$duration_ms" "$exit_code" "$commit_sha" "$host" \
       >> "$HOOK_TIMING_LOG_FILE" 2>/dev/null || true
   ) || true
   exit "$exit_code"

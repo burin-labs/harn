@@ -351,6 +351,7 @@ test-pr-gate-scripts:
 	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_fast_default_mode_test.sh
 	./scripts/tests/hook_rust_gate_test.sh
+	./scripts/tests/hook_timing_instrument_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
