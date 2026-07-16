@@ -354,6 +354,7 @@ diagnostic_codes! {
     LintUnnecessaryNonNullAssert, "HARN-LNT-063", Lnt, "non-null assertion `!` on an already-non-nil value";
     LintMutableCaptureAcrossParallel, "HARN-LNT-064", Lnt, "a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race";
     LintNilCoalesceSelfFallback, "HARN-LNT-065", Lnt, "nil coalesce fallback repeats the left identifier";
+    LintDiscardedPureResult, "HARN-LNT-066", Lnt, "the result of a pure collection method is discarded, so the call has no effect on the receiver";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";

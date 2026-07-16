@@ -134,11 +134,16 @@ only in covariant positions.
 | Constructor | Variance |
 |---|---|
 | `iter<T>` | covariant in `T` (read-only) |
-| `list<T>` | invariant in `T` (mutable: `push`, index assignment) |
-| `dict<K, V>` | invariant in both `K` and `V` (mutable) |
+| `list<T>` | invariant in `T` (index assignment writes `T`) |
+| `dict<K, V>` | invariant in both `K` and `V` (index assignment writes `V`) |
 | `Result<T, E>` | covariant in both `T` and `E` |
 | `fn(P1, ...) -> R` | parameters **contravariant**, return covariant |
 | Shape `{ field: T, ... }` | covariant per field (width subtyping) |
+
+`list` and `dict` are invariant because index assignment can *write* through
+them, which makes them read-write positions. Methods such as `push` are not a
+reason: they return a new collection and never modify the receiver, so they are
+covariant reads. See [Binding mutability](04-scope-rules.md#binding-mutability).
 
 The numeric widening `int <: float` only applies in covariant
 positions. In invariant or contravariant positions it is suppressed —

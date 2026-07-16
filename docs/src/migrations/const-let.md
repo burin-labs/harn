@@ -17,11 +17,18 @@ expects.
 
 ## Semantics
 
-- **`const` is an immutable binding** (reassignment is rejected), exactly like
-  TypeScript `const` and Swift `let`. It is the common case — reach for it by
-  default and use `let` only when you need to reassign.
+- **`const` means this binding's value never changes.** It is the common case —
+  reach for it by default and use `let` only when the value must change.
 - **`let` is a mutable binding.** Reassignment and field/index mutation are
   allowed (`let o = {}; o.a = 1`).
+- **The keyword *spelling* follows TypeScript; the *rule* follows Swift.** The
+  two agree on reassignment but disagree on collection contents, so it is worth
+  being exact. TypeScript's `const o = {}; o.a = 1` is legal, because a TS
+  object is a *reference* and `const` constrains only the binding. Harn's
+  collections are **values**, so `o.a = 1` changes `o`'s whole value and
+  requires `let` — the same position Swift takes for the same reason. Methods
+  such as `push` return a new value and modify nothing, so they remain fine on
+  a `const`. See [Binding mutability](../language-spec.md) for the full rule.
 - **`const` now accepts any initializer.** Previously `const` was a strict
   compile-time constant that *rejected* impure or non-foldable initializers.
   Because `const` is now the default immutable binding, that restriction is

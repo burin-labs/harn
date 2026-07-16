@@ -1,0 +1,6 @@
+warning: Cannot mutate 'frozen_list' through an immutable binding (declared with 'const'); use 'let' for a mutable binding
+warning: Cannot mutate 'frozen_dict' through an immutable binding (declared with 'const'); use 'let' for a mutable binding
+warning: Cannot mutate 'frozen_dict' through an immutable binding (declared with 'const'); use 'let' for a mutable binding
+warning: Cannot mutate 'frozen_nested' through an immutable binding (declared with 'const'); use 'let' for a mutable binding
+warning: Cannot mutate 'frozen_point' through an immutable binding (declared with 'const'); use 'let' for a mutable binding
+[harn] binding mutation matrix: all tests passed

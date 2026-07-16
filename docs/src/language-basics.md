@@ -40,7 +40,8 @@ always available.
 
 ## Variables
 
-`let` creates immutable bindings. `var` creates mutable ones.
+`const` creates a binding whose value never changes. `let` creates one whose
+value may change.
 
 ```harn
 const name = "Alice"
@@ -49,6 +50,32 @@ let counter = 0
 counter = counter + 1  // ok
 name = "Bob"           // error: immutable assignment
 ```
+
+That rule covers collections too, and it is the one place Harn surprises people
+arriving from JavaScript or Python. Collections are **values**, not references,
+so writing into one changes the binding's whole value and needs `let`:
+
+```harn
+let scores = {}
+scores["alice"] = 1    // ok: changes the value of `scores`, so `let`
+
+const frozen = {}
+frozen["alice"] = 1    // error: `const` means this value never changes
+```
+
+Methods never modify the receiver — `push` returns a *new* list — so they are
+fine on a `const`, and you build a collection by assigning the result back:
+
+```harn
+let items = []
+items = items.push("a")   // `items` is now ["a"]
+
+const base = []
+base.push("a")            // error[HARN-LNT-066]: no effect — `base` is still []
+```
+
+See [Binding mutability](language-spec.md) in the language spec for the full
+rule and why Harn follows Swift here rather than TypeScript.
 
 Bindings are lexically scoped. Each `if` branch, loop body, `catch` body, and
 explicit `{ ... }` block gets its own scope, so inner bindings can shadow outer

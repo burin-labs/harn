@@ -1,0 +1,100 @@
+/**
+ * The `const` / `let` binding rule, across every collection type and every
+ * mutation form. The rule is uniform:
+ *
+ *   `const` = this binding's VALUE never changes.  `let` = it may.
+ *
+ * Harn's collections are value types (copy-on-write), so an index / property /
+ * nested / struct-field assignment CHANGES the binding's value and therefore
+ * requires `let`. A pure method such as `push` returns a new value and leaves
+ * the receiver's value alone, so it is permitted on `const`.
+ *
+ * This file exists to keep those two halves consistent with each other: every
+ * collection type must answer the same way for the same mutation form.
+ */
+struct Point {
+  x: int
+  y: int
+}
+
+/**
+ * Assigning through an immutable binding is rejected at runtime, whatever the
+ * collection type or the assignment form. Returns the error text.
+ */
+fn rejected(body) -> string {
+  return try {
+    body()
+    "NOT REJECTED"
+  } catch (err) {
+    to_string(err)
+  }
+}
+
+pipeline test(task) {
+  // ---- const + every assignment form: uniformly rejected -----------------
+  const frozen_list = [0]
+  const frozen_dict = {k: 0}
+  const frozen_nested = {a: {}}
+  const frozen_point = Point {x: 1, y: 2}
+  assert(
+    contains(rejected({ -> frozen_list[0] = 9 }), "immutable"),
+    "const list: index assignment is rejected",
+  )
+  assert(
+    contains(rejected({ -> frozen_dict["k"] = 9 }), "immutable"),
+    "const dict: subscript assignment is rejected",
+  )
+  assert(
+    contains(rejected({ -> frozen_dict.k = 9 }), "immutable"),
+    "const dict: property assignment is rejected",
+  )
+  assert(
+    contains(rejected({ -> frozen_nested["a"]["b"] = 9 }), "immutable"),
+    "const dict: nested path assignment is rejected",
+  )
+  assert(
+    contains(rejected({ -> frozen_point.x = 9 }), "immutable"),
+    "const struct: field assignment is rejected",
+  )
+  // ---- let + every assignment form: uniformly allowed --------------------
+  let list_ = [0]
+  list_[0] = 9
+  assert_eq(list_[0], 9, "let list: index assignment applies")
+  let dict_ = {k: 0}
+  dict_["k"] = 9
+  assert_eq(dict_["k"], 9, "let dict: subscript assignment applies")
+  let dict_prop = {k: 0}
+  dict_prop.k = 9
+  assert_eq(dict_prop.k, 9, "let dict: property assignment applies")
+  let nested = {a: {}}
+  nested["a"]["b"] = 9
+  assert_eq(nested["a"]["b"], 9, "let dict: nested path assignment applies")
+  let point = Point {x: 1, y: 2}
+  point.x = 9
+  assert_eq(point.x, 9, "let struct: field assignment applies")
+  // ---- pure methods are not mutations, so `const` is fine ---------------
+  // The receiver keeps its value; the new value comes back as the result.
+  const base = [1]
+  const appended = base.push(2)
+  assert_eq(base.count, 1, "const list: push leaves the receiver's value alone")
+  assert_eq(appended.count, 2, "const list: push returns the new list")
+  const unsorted = [3, 1, 2]
+  assert_eq(unsorted.sort()[0], 1, "const list: sort returns a sorted copy")
+  assert_eq(unsorted[0], 3, "const list: sort leaves the receiver's value alone")
+  const members = set([1])
+  assert_eq(len(members.add(2)), 2, "const set: add returns the new set")
+  assert_eq(len(members), 1, "const set: add leaves the receiver's value alone")
+  // Rebinding a `let` to the result is how a collection is built.
+  let built = []
+  built = built.push(1)
+  built = built.push(2)
+  assert_eq(built.count, 2, "let list: assigning the pure result back accumulates")
+  // ---- collections are value types, which is WHY the rule is what it is --
+  // Copying a binding copies the value: mutating the copy cannot be observed
+  // through the original. That is the Swift position, not TypeScript's.
+  const original = {k: 1}
+  let copy = original
+  copy["k"] = 99
+  assert_eq(original["k"], 1, "dict assignment is a value copy, not an alias")
+  log("binding mutation matrix: all tests passed")
+}

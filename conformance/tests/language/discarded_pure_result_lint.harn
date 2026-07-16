@@ -1,0 +1,9 @@
+/**
+ * Every method on Harn's built-in collections is pure: `push` returns a new
+ * list rather than modifying the receiver. Calling one as a statement and
+ * dropping the result is therefore a silent no-op, which HARN-LNT-066 rejects.
+ */
+pipeline main(task) {
+  const l = []
+  l.push(1)
+}

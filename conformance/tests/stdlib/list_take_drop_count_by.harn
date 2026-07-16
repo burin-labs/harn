@@ -47,7 +47,9 @@ pipeline test(task) {
   // tally inherits the same strict-string contract: ints used to collapse
   // into the same bucket as their stringified form via `display()`.
   const tally_error = try {
-    [1, 2, 3].tally()
+    // Called for its error, not its value: discard the result explicitly so
+    // HARN-LNT-066 can tell this apart from an accidental no-op.
+    const _ = [1, 2, 3].tally()
     "no error"
   } catch (e) {
     to_string(e)
