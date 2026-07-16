@@ -1,6 +1,6 @@
 import { parse_args } from "std/cli"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v3"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v4"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
@@ -43,7 +43,7 @@ pub type ProviderToolProbeCell = {
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v3",
+  schema_version: "harn.provider_tool_probe_campaign.v4",
   live: bool,
   include_expensive: bool,
   route_count: int,
@@ -689,7 +689,7 @@ fn __run_tool_probe(
     repeat,
     timeout_secs,
   )
-  const artifact_path = path_join(output_dir, "tool-probe-" + route.id + "-" + mode + ".json")
+  const artifact_path = provider_tool_probe_campaign_artifact_path(route, behavior, mode, output_dir)
   const child = harness.process.spawn_captured({cmd: harn_bin, args: command[1:len(command)], env: env})
   const stdout = child.stdout ?? ""
   if trim(stdout) != "" {
@@ -728,6 +728,20 @@ fn __run_tool_probe(
     cells = cells + [__probe_cell(route, behavior, mode, format, parsed, artifact_path, command)]
   }
   return cells
+}
+
+pub fn provider_tool_probe_campaign_artifact_path(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  output_dir: string,
+) -> string {
+  const probe_case = __slug(to_string(behavior.probe_case ?? "single_tool_call"))
+  return path_join(
+    output_dir,
+    "tool-probe-" + route.id + "-" + __slug(behavior.id) + "-" + probe_case + "-" + __slug(mode)
+      + ".json",
+  )
 }
 
 fn __live_cells(
@@ -830,17 +844,22 @@ fn __estimated_spend(
       executable = executable + len(behavior.modes)
     }
   }
-  return {
+  const executable_probe_count = len(routes) * executable * repeat
+  const base = {
     cap_usd: 10.0,
-    estimated_usd: 0.0,
-    actual_usd: 0.0,
+    estimated_usd_known: false,
+    actual_usd_known: !live,
     accounting: if live {
-      "provider APIs report usage after each call; this campaign records zero until a per-provider cost mapper is added"
+      "live campaign spend is unknown until per-probe usage receipts are priced and aggregated"
     } else {
       "dry run; no provider calls"
     },
-    executable_probe_count: len(routes) * executable * repeat,
+    executable_probe_count: executable_probe_count,
   }
+  if live {
+    return base + {unpriced_probe_count: executable_probe_count}
+  }
+  return base + {estimated_usd: 0.0, actual_usd: 0.0, estimated_usd_known: true}
 }
 
 pub fn provider_tool_probe_campaign_report(
