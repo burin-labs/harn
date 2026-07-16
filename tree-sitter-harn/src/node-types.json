@@ -837,6 +837,10 @@
           "named": true
         },
         {
+          "type": "block_statement",
+          "named": true
+        },
+        {
           "type": "break_statement",
           "named": true
         },
@@ -988,6 +992,22 @@
     }
   },
   {
+    "type": "block_statement",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "break_statement",
     "named": true,
     "fields": {}
@@ -1040,6 +1060,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block_statement",
           "named": true
         },
         {
@@ -1644,6 +1668,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block_statement",
           "named": true
         },
         {
@@ -3201,6 +3229,10 @@
         },
         {
           "type": "block",
+          "named": true
+        },
+        {
+          "type": "block_statement",
           "named": true
         },
         {
@@ -7373,6 +7405,10 @@
           "named": true
         },
         {
+          "type": "block_statement",
+          "named": true
+        },
+        {
           "type": "break_statement",
           "named": true
         },
@@ -7724,6 +7760,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block_statement",
           "named": true
         },
         {
@@ -8264,6 +8304,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block_statement",
           "named": true
         },
         {
@@ -11161,6 +11205,10 @@
           "named": true
         },
         {
+          "type": "block_statement",
+          "named": true
+        },
+        {
           "type": "break_statement",
           "named": true
         },
@@ -12349,6 +12397,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block_statement",
           "named": true
         },
         {
@@ -14160,6 +14212,10 @@
   },
   {
     "type": "ask_user",
+    "named": false
+  },
+  {
+    "type": "block",
     "named": false
   },
   {

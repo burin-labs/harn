@@ -321,6 +321,7 @@ module.exports = grammar({
         $.require_statement,
         $.mutex_block,
         $.scope_block,
+        $.block_statement,
         $.select_block,
         $.break_statement,
         $.continue_statement,
@@ -1276,6 +1277,12 @@ module.exports = grammar({
     // (`...dict<string, V>`), so it carries a `type_annotation`.
     row_tail: ($) =>
       seq("...", field("type", $.type_annotation)),
+
+    // Explicit lexical scope. Keep this rule last so adding the contextual
+    // word does not renumber every existing generated parser symbol. Bare
+    // `{ ... }` remains a dict literal, including in function tail position.
+    block_statement: ($) =>
+      seq("block", field("body", $.block)),
   },
 });
 

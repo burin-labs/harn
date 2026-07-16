@@ -14,7 +14,7 @@ use harn_parser::Parser;
 
 use super::*;
 
-fn run_harn(source: &str) -> (String, VmValue) {
+pub(super) fn run_harn(source: &str) -> (String, VmValue) {
     run_harn_with_options(source, CompilerOptions::optimized())
 }
 
@@ -42,7 +42,7 @@ fn run_harn_with_options(source: &str, options: CompilerOptions) -> (String, VmV
     })
 }
 
-fn run_harn_result_display_with_options(
+pub(super) fn run_harn_result_display_with_options(
     source: &str,
     options: CompilerOptions,
 ) -> Result<(String, String), String> {

@@ -1,4 +1,5 @@
 mod comments;
+mod scoped_blocks;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
@@ -6,7 +7,7 @@ use harn_parser::Parser;
 use crate::helpers::format_duration;
 use crate::{format_source, format_source_opts, FmtOptions, AUTO_SEPARATOR_WIDTH};
 
-fn assert_roundtrip(source: &str) {
+pub(super) fn assert_roundtrip(source: &str) {
     let formatted = format_source(source).unwrap();
     let mut lexer = Lexer::new(&formatted);
     let tokens = lexer
@@ -52,22 +53,6 @@ fn range_nested_in_subexpression_keeps_parens_and_round_trips() {
         );
         assert_roundtrip(src);
     }
-}
-
-#[test]
-fn test_roundtrip_mutex_bare() {
-    assert_roundtrip("pipeline default(task) { mutex { log(1) } }");
-}
-
-#[test]
-fn test_roundtrip_mutex_keyed_preserves_key() {
-    let source = "pipeline default(task) { mutex(\"acct\") { log(1) } }";
-    let formatted = format_source(source).unwrap();
-    assert!(
-        formatted.contains("mutex(\"acct\")"),
-        "keyed mutex must preserve its resource key:\n{formatted}"
-    );
-    assert_roundtrip(source);
 }
 
 #[test]
