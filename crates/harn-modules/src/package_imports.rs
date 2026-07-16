@@ -11,30 +11,34 @@ struct PackageManifest {
     exports: HashMap<String, String>,
 }
 
-/// Resolve an import string relative to the importing file.
+/// How far an import resolves without consulting installed packages.
 ///
-/// Returns the path as constructed so callers can compare it with their own
-/// `PathBuf::join` result. The module graph canonicalizes its internal keys.
-pub fn resolve_import_path(current_file: &Path, import_path: &str) -> Option<PathBuf> {
-    let snapshots = PackageSnapshot::acquire_nearest(current_file)
-        .ok()
-        .flatten()
-        .into_iter()
-        .collect::<Vec<_>>();
-    resolve_import_path_with_snapshots(current_file, import_path, &snapshots)
+/// The distinction between `Rejected` and `NotPackage` is load-bearing: a
+/// `std/` import that names no real stdlib module resolves to nothing and must
+/// NOT fall through to package resolution, or a package could shadow the
+/// standard library.
+enum LocalResolution {
+    /// Resolved without touching installed packages.
+    Resolved(PathBuf),
+    /// Owned by the stdlib namespace but not a real module. Resolution ends.
+    Rejected,
+    /// Not a stdlib or relative import; only packages can resolve it.
+    NotPackage,
 }
 
-pub(crate) fn resolve_import_path_with_snapshots(
-    current_file: &Path,
-    import_path: &str,
-    package_snapshots: &[PackageSnapshot],
-) -> Option<PathBuf> {
+/// Resolve everything that does not require a package snapshot.
+///
+/// Sole owner of the stdlib and relative-path import rules, so the lazy and
+/// pre-acquired entry points below cannot drift apart on what counts as local.
+fn resolve_local_import(current_file: &Path, import_path: &str) -> LocalResolution {
     if let Some(module) = import_path
         .strip_prefix("std/")
         .or_else(|| (import_path == "observability").then_some("observability"))
     {
-        return super::stdlib::get_stdlib_source(module)
-            .map(|_| super::stdlib::stdlib_virtual_path(module));
+        return match super::stdlib::get_stdlib_source(module) {
+            Some(_) => LocalResolution::Resolved(super::stdlib::stdlib_virtual_path(module)),
+            None => LocalResolution::Rejected,
+        };
     }
 
     let base = current_file.parent().unwrap_or(Path::new("."));
@@ -43,10 +47,49 @@ pub(crate) fn resolve_import_path_with_snapshots(
         file_path.set_extension("harn");
     }
     if file_path.exists() {
-        return Some(file_path);
+        return LocalResolution::Resolved(file_path);
     }
 
-    resolve_package_import(current_file, import_path, package_snapshots)
+    LocalResolution::NotPackage
+}
+
+/// Resolve an import string relative to the importing file.
+///
+/// Returns the path as constructed so callers can compare it with their own
+/// `PathBuf::join` result. The module graph canonicalizes its internal keys.
+pub fn resolve_import_path(current_file: &Path, import_path: &str) -> Option<PathBuf> {
+    match resolve_local_import(current_file, import_path) {
+        LocalResolution::Resolved(path) => Some(path),
+        LocalResolution::Rejected => None,
+        // Only a package import needs a generation lease, so only a package
+        // import pays for one. Acquiring it before the stdlib and relative
+        // checks made every `std/...` and every sibling import — nearly all of
+        // them — walk its ancestors stat-ing for a package pointer, then open,
+        // flock and parse it, and then discard the snapshot unused. That is
+        // pure syscall cost on the hottest path in the module graph.
+        LocalResolution::NotPackage => {
+            let snapshots = PackageSnapshot::acquire_nearest(current_file)
+                .ok()
+                .flatten()
+                .into_iter()
+                .collect::<Vec<_>>();
+            resolve_package_import(current_file, import_path, &snapshots)
+        }
+    }
+}
+
+pub(crate) fn resolve_import_path_with_snapshots(
+    current_file: &Path,
+    import_path: &str,
+    package_snapshots: &[PackageSnapshot],
+) -> Option<PathBuf> {
+    match resolve_local_import(current_file, import_path) {
+        LocalResolution::Resolved(path) => Some(path),
+        LocalResolution::Rejected => None,
+        LocalResolution::NotPackage => {
+            resolve_package_import(current_file, import_path, package_snapshots)
+        }
+    }
 }
 
 pub(crate) fn acquire_package_snapshots(files: &[PathBuf]) -> Vec<PackageSnapshot> {

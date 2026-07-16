@@ -7,6 +7,36 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Counts `acquire_nearest` calls so tests can assert that resolving an import
+/// which cannot possibly live in a package does not probe the filesystem for a
+/// package generation.
+///
+/// A counter rather than a behavioural assertion because there is nothing else
+/// to observe: acquiring a snapshot and discarding it is invisible except in
+/// wall time, which is exactly how a 5x per-import regression shipped and stayed
+/// hidden for three releases (harn#4815). The property under test is "this work
+/// does not happen", and only a probe can see that.
+#[cfg(test)]
+pub(crate) mod probe_counter {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ACQUIRE_NEAREST_CALLS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(crate) fn record_acquire_nearest() {
+        ACQUIRE_NEAREST_CALLS.with(|calls| calls.set(calls.get() + 1));
+    }
+
+    /// Run `body`, returning its value and how many package-pointer probes it
+    /// performed. Thread-local, so concurrent tests cannot bleed into it.
+    pub(crate) fn count_probes<T>(body: impl FnOnce() -> T) -> (T, usize) {
+        ACQUIRE_NEAREST_CALLS.with(|calls| calls.set(0));
+        let value = body();
+        (value, ACQUIRE_NEAREST_CALLS.with(|calls| calls.get()))
+    }
+}
+
 pub const PACKAGE_STATE_DIR: &str = ".harn";
 pub const PACKAGE_CURRENT_FILE: &str = "package-current.toml";
 pub const PACKAGE_GENERATIONS_DIR: &str = "package-generations";
@@ -176,6 +206,8 @@ impl PackageSnapshot {
     }
 
     pub fn acquire_nearest(anchor: &Path) -> Result<Option<Self>, PackageSnapshotError> {
+        #[cfg(test)]
+        probe_counter::record_acquire_nearest();
         let mut cursor = if anchor.is_dir() {
             Some(anchor)
         } else {

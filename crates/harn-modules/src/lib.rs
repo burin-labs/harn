@@ -1308,6 +1308,7 @@ pub fn canonical_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::package_snapshot::probe_counter;
     use std::fs;
 
     fn write_file(dir: &Path, name: &str, contents: &str) -> PathBuf {
@@ -1709,6 +1710,94 @@ mod tests {
             .imported_names_for_file(&entry)
             .expect("package export should resolve");
         assert!(imported.contains("exported_capability"));
+    }
+
+    /// Only a package import can be answered by a package, so only a package
+    /// import may pay to find one.
+    ///
+    /// harn#4657 hoisted `PackageSnapshot::acquire_nearest` above the stdlib and
+    /// relative-path checks, so every `std/...` and every sibling import walked
+    /// its ancestors stat-ing for a package pointer, then opened, flocked and
+    /// parsed it — and discarded the snapshot unused. Those are the two
+    /// overwhelmingly common import shapes. It cost ~5x per-test module setup,
+    /// 1.8x on a downstream CI critical path, and it was invisible for three
+    /// releases because the wasted work changes nothing except wall time
+    /// (harn#4815).
+    #[test]
+    fn stdlib_and_relative_imports_never_probe_for_a_package() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // A real installed package, so a probe would find something and the
+        // test cannot pass merely because there is nothing to look for.
+        package_fixture(root);
+        write_file(root, "sibling.harn", "pub fn helper() { 1 }\n");
+        let entry = write_file(root, "entry.harn", "");
+
+        let (resolved, probes) =
+            probe_counter::count_probes(|| resolve_import_path(&entry, "std/testing"));
+        assert!(resolved.is_some(), "std/testing must still resolve");
+        assert_eq!(
+            probes, 0,
+            "a std/ import probed the filesystem for a package"
+        );
+
+        let (resolved, probes) =
+            probe_counter::count_probes(|| resolve_import_path(&entry, "./sibling"));
+        assert!(resolved.is_some(), "a relative sibling must still resolve");
+        assert_eq!(
+            probes, 0,
+            "a relative import probed the filesystem for a package"
+        );
+    }
+
+    /// The counter above only means something if a real package import still
+    /// probes — otherwise the assertions would hold even with resolution
+    /// removed entirely.
+    #[test]
+    fn a_package_import_still_acquires_a_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let packages_root = package_fixture(root);
+        fs::create_dir_all(packages_root.join("acme")).unwrap();
+        fs::write(
+            packages_root.join("acme/capabilities.harn"),
+            "pub fn exported_capability() { 1 }\n",
+        )
+        .unwrap();
+        let entry = write_file(root, "entry.harn", "");
+
+        let (resolved, probes) =
+            probe_counter::count_probes(|| resolve_import_path(&entry, "acme/capabilities"));
+        assert!(resolved.is_some(), "a package import must still resolve");
+        assert_eq!(
+            probes, 1,
+            "a package import must acquire exactly one snapshot"
+        );
+    }
+
+    /// A `std/` import that names no real module resolves to nothing and must
+    /// not fall through to package resolution — otherwise a package could
+    /// shadow the standard library namespace.
+    #[test]
+    fn an_unknown_stdlib_module_does_not_fall_through_to_packages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let packages_root = package_fixture(root);
+        fs::create_dir_all(packages_root.join("std")).unwrap();
+        fs::write(
+            packages_root.join("std/not_a_real_module.harn"),
+            "pub fn impostor() { 1 }\n",
+        )
+        .unwrap();
+        let entry = write_file(root, "entry.harn", "");
+
+        let (resolved, probes) =
+            probe_counter::count_probes(|| resolve_import_path(&entry, "std/not_a_real_module"));
+        assert!(
+            resolved.is_none(),
+            "a package resolved a std/ import and shadowed the stdlib namespace"
+        );
+        assert_eq!(probes, 0, "an unknown std/ import probed for a package");
     }
 
     #[test]
