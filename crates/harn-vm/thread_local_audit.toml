@@ -346,7 +346,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/orchestration/policy/approval_rules.rs"
-statics = ["APPROVAL_CALL_COUNTS"]
+statics = ["APPROVAL_CALL_COUNTS", "APPROVAL_UNAVAILABLE_CLASS_COUNTS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
