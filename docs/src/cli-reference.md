@@ -2532,7 +2532,21 @@ harn serve api agent.harn                  # local OpenAPI + SSE Agents API
 harn serve api --bind 127.0.0.1:8787 agent.harn
 harn serve mcp server.harn                 # exported pub fn -> MCP tools over stdio
 harn serve mcp --transport http server.harn
+harn serve test                            # reusable user-test worker over stdio
 ```
+
+`harn serve test` lets a caller retain one isolated test-run session instead
+of spawning a fresh Harn process for every suite. It accepts JSON-RPC 2.0 as
+newline-delimited JSON or `Content-Length` frames. Call `initialize` with
+`{"protocol_version":"1"}`; its result includes the negotiated protocol and
+the Harn `server_version`, stable `worker_id`, and `process_id`. Then call
+`test/run` with a test `path` and any of `filter`, `timeout_ms`, `max_test_ms`,
+`max_execute_ms`, `parallel`, `fail_fast`, `jobs`, `shard`, `skill_dirs`, or
+`diagnose`. Each response includes the same worker identity, typed test
+summary, cumulative `run_count`, and cache counters before and after that run.
+`shutdown` returns the final run and cache receipt; closing stdin also stops the
+worker. Every test still receives fresh VM and module state; only reusable
+prepared module artifacts are retained by the worker session.
 
 `harn serve api` starts the local Harn Agents HTTP API. It serves
 `/openapi.json`, health/version/runtime/capability metadata, session and task

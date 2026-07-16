@@ -421,6 +421,7 @@ pub fn reset_stdlib_state() {
     json::reset_json_state();
     json_stream::reset_json_stream_state();
     host::reset_host_state();
+    host::reset_scoped_host_state();
     observability::reset_observability_state();
     timing::reset_timing_state();
     durable_step::reset_durable_step_state();

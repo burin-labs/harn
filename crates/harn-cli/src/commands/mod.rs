@@ -79,6 +79,7 @@ pub(crate) mod skills;
 pub(crate) mod supervisor;
 pub(crate) mod test;
 pub mod test_bench;
+pub(crate) mod test_worker;
 pub mod time;
 pub(crate) mod tool;
 pub(crate) mod tool_mode_parity;

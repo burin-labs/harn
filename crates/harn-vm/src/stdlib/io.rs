@@ -1,8 +1,10 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, VecDeque};
 #[cfg(not(unix))]
 use std::io::BufRead;
 use std::io::{IsTerminal, Read, Write};
+use std::marker::PhantomData;
+use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 #[cfg(unix)]
@@ -71,6 +73,8 @@ enum MockReadLine {
 thread_local! {
     static STDIN_MOCK: RefCell<Option<String>> = const { RefCell::new(None) };
     static STDIN_LINES: RefCell<Option<VecDeque<String>>> = const { RefCell::new(None) };
+    static STDIN_ALLOWED: Cell<bool> = const { Cell::new(true) };
+    static STDOUT_ALLOWED: Cell<bool> = const { Cell::new(true) };
     static STDERR_BUFFER: RefCell<String> = const { RefCell::new(String::new()) };
     static STDERR_CAPTURING: RefCell<bool> = const { RefCell::new(false) };
     static STDOUT_PASSTHROUGH: RefCell<bool> = const { RefCell::new(false) };
@@ -79,6 +83,33 @@ thread_local! {
 }
 
 static STDIN_READ_LOCK: Mutex<()> = Mutex::new(());
+
+/// Restores current-thread stdio ownership when dropped.
+#[must_use]
+pub struct StdioReservationGuard {
+    stdin_previous: bool,
+    stdout_previous: bool,
+    _thread_bound: PhantomData<Rc<()>>,
+}
+
+impl Drop for StdioReservationGuard {
+    fn drop(&mut self) {
+        STDIN_ALLOWED.set(self.stdin_previous);
+        STDOUT_ALLOWED.set(self.stdout_previous);
+    }
+}
+
+/// Reserve ambient stdin and stdout for a control protocol on this thread.
+///
+/// Guest stdin appears closed, explicit stdin mocks still take precedence,
+/// and stdout remains captured by the VM instead of reaching the protocol.
+pub fn reserve_stdio_for_current_thread() -> StdioReservationGuard {
+    StdioReservationGuard {
+        stdin_previous: STDIN_ALLOWED.replace(false),
+        stdout_previous: STDOUT_ALLOWED.replace(false),
+        _thread_bound: PhantomData,
+    }
+}
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &LOG_BUILTIN_DEF,
@@ -173,13 +204,22 @@ pub(crate) fn write_stdout(out: &mut String, text: &str) {
         });
         return;
     }
-    if stdout_passthrough_enabled() {
+    if STDOUT_ALLOWED.get() && stdout_passthrough_enabled() {
         let mut stdout = std::io::stdout().lock();
         let _ = stdout.write_all(text.as_bytes());
         let _ = stdout.flush();
     } else {
         out.push_str(text);
     }
+}
+
+pub(crate) fn write_ambient_stdout(text: &str) {
+    if !STDOUT_ALLOWED.get() {
+        return;
+    }
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout.write_all(text.as_bytes());
+    let _ = stdout.flush();
 }
 
 fn stdout_passthrough_enabled() -> bool {
@@ -348,6 +388,9 @@ fn read_line_from_mock_or_real(options: &ReadLineOptions) -> ReadLineOutcome {
         }
         MockReadLine::Eof => return ReadLineOutcome::Eof,
         MockReadLine::Unset => {}
+    }
+    if !STDIN_ALLOWED.get() {
+        return ReadLineOutcome::Eof;
     }
     read_stdin_line_real_with_options(options)
 }
@@ -689,6 +732,9 @@ fn read_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         // After read_stdin, future read_line calls return nil because stdin is consumed.
         STDIN_LINES.with(|lines| *lines.borrow_mut() = Some(VecDeque::new()));
         return Ok(VmValue::String(arcstr::ArcStr::from(buf)));
+    }
+    if !STDIN_ALLOWED.get() {
+        return Ok(VmValue::Nil);
     }
     match read_stdin_all_real() {
         Some(s) => Ok(VmValue::String(arcstr::ArcStr::from(s))),
@@ -1235,11 +1281,13 @@ mod tests {
     use crate::value::VmValue;
 
     use super::{
-        render_progress_bar, render_progress_line, reset_io_state, set_stdout_passthrough,
-        spinner_frame, stdout_passthrough_enabled,
+        mock_stdin_builtin, read_line_from_mock_or_real, read_stdin_builtin, render_progress_bar,
+        render_progress_line, reserve_stdio_for_current_thread, reset_io_state,
+        set_stdout_passthrough, spinner_frame, stdout_passthrough_enabled, ReadLineOptions,
+        ReadLineOutcome, STDIN_ALLOWED, STDOUT_ALLOWED,
     };
-    #[cfg(unix)]
-    use super::{ReadLineOptions, ReadLineOutcome};
+
+    static_assertions::assert_not_impl_any!(super::StdioReservationGuard: Send, Sync);
 
     #[test]
     fn stdout_passthrough_state_toggles() {
@@ -1251,6 +1299,50 @@ mod tests {
 
         assert!(set_stdout_passthrough(false));
         assert!(!stdout_passthrough_enabled());
+    }
+
+    #[test]
+    fn scoped_stdio_reservation_is_repeatable_and_restores_prior_policy() {
+        reset_io_state();
+        assert!(STDIN_ALLOWED.get());
+        assert!(STDOUT_ALLOWED.get());
+
+        {
+            let _outer = reserve_stdio_for_current_thread();
+            assert_eq!(
+                read_line_from_mock_or_real(&ReadLineOptions::default()),
+                ReadLineOutcome::Eof
+            );
+            assert!(matches!(
+                read_stdin_builtin(&[], &mut String::new()).unwrap(),
+                VmValue::Nil
+            ));
+            assert!(matches!(
+                read_stdin_builtin(&[], &mut String::new()).unwrap(),
+                VmValue::Nil
+            ));
+            mock_stdin_builtin(&[VmValue::string("fixture")], &mut String::new()).unwrap();
+            assert_eq!(
+                read_stdin_builtin(&[], &mut String::new())
+                    .unwrap()
+                    .display(),
+                "fixture"
+            );
+            assert!(matches!(
+                read_stdin_builtin(&[], &mut String::new()).unwrap(),
+                VmValue::Nil
+            ));
+            {
+                let _inner = reserve_stdio_for_current_thread();
+                assert!(!STDIN_ALLOWED.get());
+                assert!(!STDOUT_ALLOWED.get());
+            }
+            assert!(!STDIN_ALLOWED.get());
+            assert!(!STDOUT_ALLOWED.get());
+        }
+
+        assert!(STDIN_ALLOWED.get());
+        assert!(STDOUT_ALLOWED.get());
     }
 
     #[test]

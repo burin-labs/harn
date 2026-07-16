@@ -35,8 +35,7 @@ use cli::{
     GuardCommand, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
     PersonaCommand, PersonaSupervisionCommand, PgCommand, ProviderCatalogCommand, ProviderCommand,
-    RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, TimeCommand,
-    ToolCommand,
+    RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -898,40 +897,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(code);
             }
         }
-        Command::Serve(args) => match args.command {
-            ServeCommand::Acp(args) => {
-                if let Err(error) = commands::serve::run_acp_server(&args).await {
-                    command_error(&error);
-                }
-            }
-            ServeCommand::A2a(args) => {
-                if let Err(error) = commands::serve::run_a2a_server(&args).await {
-                    command_error(&error);
-                }
-            }
-            ServeCommand::Api(args) => {
-                if let Err(error) = commands::serve::run_api_server(&args).await {
-                    command_error(&error);
-                }
-            }
-            ServeCommand::Mcp(args) => {
-                if let Err(error) = commands::serve::run_mcp_server(&args).await {
-                    command_error(&error);
-                }
-            }
-            ServeCommand::Site(args) => {
-                if let Err(error) = commands::serve::run_site_server(&args).await {
-                    eprintln!("{error}");
-                    std::process::exit(1);
-                }
-            }
-            ServeCommand::Worker(args) => {
-                if let Err(error) = commands::serve::run_worker_server(&args).await {
-                    eprintln!("{error}");
-                    std::process::exit(1);
-                }
-            }
-        },
+        Command::Serve(args) => commands::serve::run_command(args.command).await,
         Command::Connector(args) => {
             if let Err(error) = commands::connector::handle_connector_command(args).await {
                 eprintln!("error: {error}");
@@ -1800,7 +1766,7 @@ async fn run_provider_ready(
     }
 }
 
-fn command_error(message: &str) -> ! {
+pub(crate) fn command_error(message: &str) -> ! {
     Cli::command()
         .error(ErrorKind::ValueValidation, message)
         .exit()

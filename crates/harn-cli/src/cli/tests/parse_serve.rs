@@ -209,6 +209,16 @@ fn test_parses_serve_worker() {
 }
 
 #[test]
+fn test_parses_serve_test() {
+    let cli = Cli::parse_from(["harn", "serve", "test"]);
+
+    let Command::Serve(args) = cli.command.unwrap() else {
+        panic!("expected serve command");
+    };
+    assert!(matches!(args.command, crate::cli::ServeCommand::Test));
+}
+
+#[test]
 fn test_parses_portal_flags() {
     let cli = Cli::parse_from([
         "harn", "portal", "--dir", "runs", "--host", "0.0.0.0", "--port", "4900", "--open", "false",
