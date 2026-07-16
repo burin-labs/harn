@@ -211,6 +211,12 @@ fn mark_artifacts_active(artifacts: &CommandArtifacts) -> Result<(), HostlibErro
     let Some(dir) = artifact_dir(artifacts) else {
         return Ok(());
     };
+    let mut active_leases = ACTIVE_ARTIFACT_LEASES
+        .lock()
+        .expect("active command artifact lease store poisoned");
+    if active_leases.contains_key(&dir) {
+        return Ok(());
+    }
     let lease_path = dir.join(ACTIVE_LEASE_FILE);
     let lease = OpenOptions::new()
         .read(true)
@@ -226,10 +232,7 @@ fn mark_artifacts_active(artifacts: &CommandArtifacts) -> Result<(), HostlibErro
         builtin: "hostlib_tools_run_command",
         message: format!("failed to lock command artifact lease: {error}"),
     })?;
-    ACTIVE_ARTIFACT_LEASES
-        .lock()
-        .expect("active command artifact lease store poisoned")
-        .insert(dir, lease);
+    active_leases.insert(dir, lease);
     Ok(())
 }
 
