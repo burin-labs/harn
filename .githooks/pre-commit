@@ -16,7 +16,7 @@ harn_lint_files=$(mktemp)
 # re-exit with the captured code.
 trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files"; hook_timing_finish "$hook_timing_exit_code"' EXIT
 hook_write_staged_files "$changed"
-if ! hook_no_local_build_mode; then
+if ! hook_fast_default_mode; then
   hook_export_cargo_target_dir
   hook_disable_cargo_incremental_if_release_bump staged
   hook_export_existing_harn_bin_for_non_rust_changes "$changed"
@@ -66,6 +66,17 @@ fi
 # source is markdown-linted here too, so linting the mirror before the
 # Phase-2 sync step yields the same result the sync would produce.
 # ---------------------------------------------------------------------------
+
+# rustfmt does not compile the workspace. Keep this read-only formatting guard
+# in the default hook while leaving build-backed Harn formatting, linting, and
+# generated-artifact work to explicit developer commands and required CI.
+if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
+  echo "=== Pre-commit: checking Rust formatting ==="
+  cargo fmt --all -- --check
+  echo "    Rust formatting OK."
+else
+  echo "=== Pre-commit: skipping Rust formatting (no Rust/Cargo changes) ==="
+fi
 
 if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
   if hook_skip_no_local_build "pre-commit CI ratchets"; then
@@ -130,7 +141,9 @@ else
   echo "=== Pre-commit: skipping GitHub Actions lint (no workflow/hook changes) ==="
 fi
 
-if hook_paths_match "$changed" "$HOOK_PORTAL_PATTERN" && command -v npm >/dev/null 2>&1; then
+if hook_paths_match "$changed" "$HOOK_PORTAL_PATTERN" && hook_fast_default_mode; then
+  echo "=== Pre-commit: skipping portal lint (fast default; required CI remains authoritative) ==="
+elif hook_paths_match "$changed" "$HOOK_PORTAL_PATTERN" && command -v npm >/dev/null 2>&1; then
   echo "=== Pre-commit: linting portal frontend ==="
   ./scripts/ensure_portal_deps.sh
   npm run portal:lint
@@ -149,17 +162,6 @@ fi
 
 if hook_skip_no_local_build "pre-commit local build/format/lint phases"; then
   exit 0
-fi
-
-if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
-  echo "=== Pre-commit: formatting Rust ==="
-  cargo fmt --all
-  if ! git diff --quiet; then
-    git diff --name-only -z | xargs -0 git add
-  fi
-  echo "    Rust formatting OK."
-else
-  echo "=== Pre-commit: skipping Rust formatting (no Rust/Cargo changes) ==="
 fi
 
 if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then

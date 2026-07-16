@@ -84,7 +84,7 @@ runs:
 
 In-process, deterministic, zero subprocess-per-test. Wall-clock budget: <2 min
 on a warm cache. Runs on every PR and when you opt into the broader local
-pre-push gate with `HARN_PREPUSH_FULL_TESTS=1`. The nextest
+pre-push gate with `HARN_HOOKS_FULL_LOCAL=1 HARN_PREPUSH_FULL_TESTS=1`. The nextest
 `default` and `ci` profiles exclude the `harn-cli` integration test binaries
 (those live in `crates/harn-cli/tests/` and spawn the compiled `harn` binary as
 a subprocess).
@@ -179,14 +179,14 @@ small differences as noise unless they reproduce consistently. When running
 benchmarks from multiple worktrees, set a per-run `CARGO_TARGET_DIR` to avoid
 build contention.
 
-Pre-commit hooks (`.githooks/pre-commit`) run fmt + clippy + highlight keyword
-regeneration + markdown lint automatically. Pre-push hooks
-(`.githooks/pre-push`) run targeted package `cargo check --tests` for changed
-crates, affected Harn formatting/lint checks, generated-file drift checks, and
-markdown/actionlint/portal lint when touched. Set `HARN_PREPUSH_FULL_TESTS=1`
-to run `make test` from pre-push before code leaves your machine. Both hooks
-bootstrap the portal frontend dependencies through
-`./scripts/ensure_portal_deps.sh` before running portal lint, and the repo-root
+Pre-commit hooks (`.githooks/pre-commit`) run cheap staged guards, markdown and
+workflow lint when touched, and a read-only `cargo fmt --check`. Pre-push hooks
+(`.githooks/pre-push`) enforce signed commits, merge-queue safety, and cheap
+drift guards. Required CI owns compilation, tests, Harn formatting/linting,
+generated mirrors, and portal lint. Set `HARN_HOOKS_FULL_LOCAL=1` to opt into
+the targeted build-backed local gates; combine it with
+`HARN_PREPUSH_FULL_TESTS=1` to run `make test` too. The full local portal gate
+bootstraps dependencies through `./scripts/ensure_portal_deps.sh`; repo-root
 `npm run portal:*` commands reuse the same bootstrap path.
 
 Harn-authored checks run through `scripts/harn_bin.sh`, which reuses

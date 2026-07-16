@@ -53,7 +53,7 @@ validation_base=$(hook_validation_base)
 # Expensive changed-file gates should validate the PR delta against the base
 # branch, not the stale upstream range used below to inspect pushed commits.
 hook_write_push_files "$changed" "$validation_base"
-if ! hook_no_local_build_mode; then
+if ! hook_fast_default_mode; then
   hook_export_cargo_target_dir
   hook_disable_cargo_incremental_if_release_bump "push $validation_base"
   hook_export_existing_harn_bin_for_non_rust_changes "$changed"
@@ -209,8 +209,8 @@ fi
 # expensive steps). Reached only once the fast validators above pass.
 # ---------------------------------------------------------------------------
 
-if hook_no_local_build_mode || [ "${HARN_PREPUSH_FAST_ONLY:-0}" = "1" ]; then
-  echo "=== Pre-push: skipping expensive local checks (HARN_HOOKS_NO_LOCAL_BUILD/HARN_HOOKS_FAST_ONLY/HARN_PREPUSH_FAST_ONLY) ==="
+if hook_fast_default_mode; then
+  echo "=== Pre-push: skipping expensive local checks (fast default; set HARN_HOOKS_FULL_LOCAL=1 to opt in) ==="
   echo "    Signature, merge-queue, and fast drift guards passed; remote CI remains required."
   exit 0
 fi

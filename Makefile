@@ -349,7 +349,7 @@ test-pr-gate-scripts:
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/nextest_filters_from_paths_test.sh
 	./scripts/tests/affected_crate_args_test.sh
-	./scripts/tests/hook_no_local_build_mode_test.sh
+	./scripts/tests/hook_fast_default_mode_test.sh
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
