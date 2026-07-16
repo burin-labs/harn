@@ -20,6 +20,7 @@
 
 mod arithmetic;
 mod call;
+mod call_named;
 mod collections;
 mod comparison;
 mod control_flow;

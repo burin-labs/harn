@@ -80,6 +80,35 @@ pipeline main(task) {
 }
 
 #[test]
+fn tool_decl_pipe_invokes_harn_handler() {
+    let lines = out(r#"
+pipeline main(task) {
+  tool greet(name: string) -> string {
+    return "hello " + name
+  }
+
+  log("ada" |> greet)
+}
+"#);
+    assert_eq!(lines, vec!["hello ada"]);
+}
+
+#[test]
+fn tool_decl_spread_call_invokes_harn_handler() {
+    let lines = out(r#"
+pipeline main(task) {
+  tool greet(name: string) -> string {
+    return "hello " + name
+  }
+
+  const args = ["ada"]
+  log(greet(...args))
+}
+"#);
+    assert_eq!(lines, vec!["hello ada"]);
+}
+
+#[test]
 fn tool_ref_returns_name_when_registered() {
     let lines = out(r#"
 pipeline main(task) {

@@ -13,6 +13,7 @@ mod modules;
 pub(crate) mod ops;
 mod scope;
 mod state;
+mod tool_callable;
 
 #[cfg(test)]
 mod depth_regression_tests;

@@ -369,12 +369,10 @@ impl Vm {
         match callable {
             VmValue::Closure(closure) => self.call_closure_args(closure, args).await,
             VmValue::Dict(registry) => {
-                let Some(handler) = crate::stdlib::tools::single_harn_tool_handler(registry)?
-                else {
-                    return Err(VmError::TypeError(
-                        "expected callable, got dict".to_string(),
-                    ));
-                };
+                let handler =
+                    crate::vm::tool_callable::require_single_harn_tool_handler(registry, || {
+                        "expected callable, got dict".to_string()
+                    })?;
                 self.call_closure_args(&handler, args).await
             }
             VmValue::BuiltinRef(name) => {
@@ -414,7 +412,7 @@ impl Vm {
         matches!(
             v,
             VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
-        ) || crate::stdlib::tools::is_single_harn_tool_registry_value(v)
+        ) || crate::vm::tool_callable::is_single_harn_tool_registry_value(v)
     }
 
     /// Public wrapper for `call_closure`, used by the MCP server to invoke
