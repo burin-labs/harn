@@ -66,10 +66,12 @@ local `harn` binary so it matches the version in use.
 - `crates/harn-wasm` is outside the Cargo workspace. Build it with
   `cd crates/harn-wasm && wasm-pack build`.
 
-Keep installed hooks on. Pre-commit runs format/lint checks and generated-file
-fixups. Pre-push runs targeted package checks, generated-file drift checks, and
-affected Harn format/lint checks. Set `HARN_PREPUSH_FULL_TESTS=1` to run the
-broader `make test` gate before pushing.
+Keep installed hooks on. The default pre-commit hook runs cheap staged guards
+and a read-only Rust format check; the default pre-push hook enforces signed
+commits, merge-queue safety, and cheap drift guards. Required CI owns compiling,
+testing, Harn formatting/linting, and generated-artifact validation. Set
+`HARN_HOOKS_FULL_LOCAL=1` to opt into the targeted build-backed local gates; add
+`HARN_PREPUSH_FULL_TESTS=1` to run the broader `make test` pre-push gate too.
 
 ## Repository map
 

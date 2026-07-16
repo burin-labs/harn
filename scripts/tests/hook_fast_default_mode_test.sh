@@ -13,15 +13,24 @@ mkdir -p "$fake_bin" "$work/.githooks" "$work/crates/harn-vm/src" \
   "$work/crates/harn-lexer/src" "$work/crates/harn-stdlib/src/stdlib/agent" \
   "$work/conformance/tests" "$work/scripts"
 
-for name in cargo harn; do
-  cat > "$fake_bin/$name" <<'SH'
+cat > "$fake_bin/cargo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == "fmt --all -- --check" ]]; then
+  exit 0
+fi
+printf '%s %s\n' "$(basename "$0")" "$*" >> "$UNEXPECTED_COMMAND_RECORD"
+exit 91
+SH
+chmod +x "$fake_bin/cargo"
+
+cat > "$fake_bin/harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$UNEXPECTED_COMMAND_RECORD"
 exit 91
 SH
-  chmod +x "$fake_bin/$name"
-done
+chmod +x "$fake_bin/harn"
 
 cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
@@ -57,8 +66,7 @@ git -C "$work" add .
 
 (
   cd "$work"
-  HARN_HOOKS_NO_LOCAL_BUILD=1 \
-    UNEXPECTED_COMMAND_RECORD="$record" \
+  UNEXPECTED_COMMAND_RECORD="$record" \
     PATH="$fake_bin:$PATH" \
     ./.githooks/pre-commit > "$tmp_root/pre-commit.out"
 )
@@ -158,7 +166,6 @@ run_prepush() {
   (
     cd "$work"
     printf '%s' "$input" | \
-      HARN_HOOKS_NO_LOCAL_BUILD=1 \
       UNEXPECTED_COMMAND_RECORD="$record" \
       PATH="$prepush_fake_bin:$PATH" \
       ./.githooks/pre-push origin git@example.com:burin-labs/harn.git
@@ -192,8 +199,7 @@ fi
 (
   cd "$work"
   : > "$record"
-  if ! HARN_HOOKS_NO_LOCAL_BUILD=1 \
-    UNEXPECTED_COMMAND_RECORD="$record" \
+  if ! UNEXPECTED_COMMAND_RECORD="$record" \
     PATH="$prepush_fake_bin:$PATH" \
     ./.githooks/pre-push origin git@example.com:burin-labs/harn.git > "$tmp_root/pre-push.out"; then
     echo "pre-push no-local-build simulation failed" >&2
@@ -293,10 +299,9 @@ git -C "$work" commit --quiet --no-verify -m initial
   cd "$work"
   # shellcheck source=/dev/null
   . ./.githooks/lib.sh
-  HARN_HOOKS_NO_LOCAL_BUILD=1 hook_no_local_build_mode
-  HARN_HOOKS_NO_LOCAL_BUILD=0 HARN_HOOKS_FAST_ONLY=1 hook_no_local_build_mode
-  if HARN_HOOKS_NO_LOCAL_BUILD=0 HARN_HOOKS_FAST_ONLY=0 hook_no_local_build_mode; then
-    echo "hook_no_local_build_mode should be false when both env vars are unset/0" >&2
+  hook_fast_default_mode
+  if HARN_HOOKS_FULL_LOCAL=1 hook_fast_default_mode; then
+    echo "hook_fast_default_mode should be false after explicitly opting into full local validation" >&2
     exit 1
   fi
 
@@ -329,4 +334,4 @@ git -C "$work" commit --quiet --no-verify -m initial
   fi
 )
 
-echo "hook_no_local_build_mode_test: ok"
+echo "hook_fast_default_mode_test: ok"

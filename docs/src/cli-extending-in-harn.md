@@ -201,7 +201,7 @@ max_loc = 45   # current+5 slack
 The next port to land in this file shrinks the budget to its new
 `current+5`. The ratchet itself is a pure-`.harn` script
 (`scripts/check_ported_handler_loc.harn`) wired into
-`make check-ported-handler-loc` and `.github/workflows/ported-handler-loc.yml`.
+`make check-ported-handler-loc` in the required Harn conformance and audit lane.
 
 ## Argparse cookbook
 

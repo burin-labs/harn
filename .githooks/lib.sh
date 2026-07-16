@@ -78,14 +78,14 @@ hook_paths_need_highlight() {
   return 1
 }
 
-hook_no_local_build_mode() {
-  [ "${HARN_HOOKS_NO_LOCAL_BUILD:-0}" = "1" ] || [ "${HARN_HOOKS_FAST_ONLY:-0}" = "1" ]
+hook_fast_default_mode() {
+  [ "${HARN_HOOKS_FULL_LOCAL:-0}" != "1" ]
 }
 
 hook_skip_no_local_build() {
   label=$1
-  if hook_no_local_build_mode; then
-    echo "=== Hook: skipping $label (HARN_HOOKS_NO_LOCAL_BUILD/HARN_HOOKS_FAST_ONLY; remote CI remains required) ==="
+  if hook_fast_default_mode; then
+    echo "=== Hook: skipping $label (fast default; set HARN_HOOKS_FULL_LOCAL=1 to opt in; remote CI remains required) ==="
     return 0
   fi
   return 1

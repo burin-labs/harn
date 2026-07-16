@@ -87,6 +87,11 @@ if ! grep -Fq $'\t-j3 -k -Otarget ' "$record"; then
   cat "$record" >&2
   exit 1
 fi
+if ! grep -Fq "check-ported-handler-loc" "$record"; then
+  echo "required audit fanout omitted the ported-handler LOC ratchet" >&2
+  cat "$record" >&2
+  exit 1
+fi
 
 : > "$record"
 rm -f "$tmp_root/audit.started"

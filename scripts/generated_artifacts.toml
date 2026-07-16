@@ -3,11 +3,9 @@
 #
 # WHY THIS FILE EXISTS
 # --------------------
-# Generated-artifact drift guards must stay wired through four consumers:
+# Generated-artifact drift guards must stay wired through two authoritative consumers:
 #   1. the `all:` recipe in the Makefile
 #   2. the audit step(s) in .github/workflows/ci.yml
-#   3. .githooks/pre-commit
-#   4. .githooks/pre-push
 # The registry below is the authority that keeps those surfaces in sync. Without
 # it, a stale generated output can pass review when one consumer forgets to run
 # the corresponding `check-*` target.
@@ -21,11 +19,9 @@
 # -----------------------------------
 #   1. Add `gen-<id>` (or `sync-<id>`) and `check-<id>` targets to the Makefile.
 #   2. Add an [[artifact]] block below describing them.
-#   3. Set the stage flags to where the check must run, then wire it:
+#   3. Set the authority flags, then wire them:
 #        ci        -> add `make check-<id>` to .github/workflows/ci.yml (or another workflow)
 #        make_all  -> add `check-<id>` to the `all:` recipe in the Makefile
-#        pre_commit/pre_push are informational today (the hooks already
-#        run a curated fast subset); the audit does not force them.
 #   4. Run `make check-generated-registry` — it fails until the registry
 #      and the consumers agree.
 #
@@ -88,8 +84,6 @@ sources = [
 ]
 ci = true
 make_all = true
-pre_commit = true
-pre_push = true
 
 [[artifact]]
 id = "highlight"
@@ -100,8 +94,6 @@ outputs = ["docs/theme/harn-keywords.js"]
 sources = ["crates/harn-lexer/src/", "crates/harn-stdlib/src/stdlib/", "crates/harn-vm/src/stdlib.rs", "crates/harn-vm/src/lib.rs", "crates/harn-modules/"]
 ci = true
 make_all = true
-pre_commit = true
-pre_push = true
 
 [[artifact]]
 id = "language-spec"
@@ -112,8 +104,6 @@ outputs = ["spec/HARN_SPEC.md", "docs/src/language-spec.md", "docs/src/spec/lang
 sources = ["spec/chapters/*.md"]
 ci = true
 make_all = true
-pre_commit = true
-pre_push = true
 
 [[artifact]]
 id = "diagnostics-catalog"
@@ -124,8 +114,6 @@ outputs = ["docs/src/diagnostics.md", "docs/diagnostics-catalog.json"]
 sources = ["crates/harn-parser/src/diagnostic_codes.rs", "crates/harn-parser/src/diagnostic_codes/"]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = true
 
 [[artifact]]
 id = "tree-sitter-keywords"
@@ -136,8 +124,6 @@ outputs = ["tree-sitter-harn/grammar/keywords.js"]
 sources = ["crates/harn-lexer/src/token.rs"]
 ci = true
 make_all = true
-pre_commit = true
-pre_push = true
 
 # ---------------------------------------------------------------------------
 # Mirrors whose drift guards are required in both `make all` and CI. Keep this
@@ -158,8 +144,6 @@ outputs = [
 sources = ["spec/openapi.yaml", "crates/harn-cli/src/commands/"]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "connector-schemas"
@@ -173,8 +157,6 @@ sources = [
 ]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "session-bundle-schema"
@@ -189,8 +171,6 @@ sources = [
 ]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = true
 
 [[artifact]]
 id = "run-session-view-fixtures"
@@ -215,8 +195,6 @@ sources = [
 ]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "provider-catalog"
@@ -242,8 +220,6 @@ sources = [
 ]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "provider-catalog-drift"
@@ -257,8 +233,6 @@ outputs = [
 sources = ["scripts/update_provider_catalog.harn", "scripts/provider_catalog_fixtures/", "crates/harn-vm/src/llm/"]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "docs-workflow-quickstart"
@@ -269,8 +243,6 @@ outputs = ["scripts/check_docs_workflow_quickstart.harn"]
 sources = ["docs/src/", "scripts/check_docs_workflow_quickstart.harn"]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "receipt-structs"
@@ -281,8 +253,6 @@ outputs = ["scripts/check_receipt_struct_duplication.harn"]
 sources = ["crates/harn-vm/src/", "crates/harn-hostlib/src/"]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 # ---------------------------------------------------------------------------
 # Already-wired CI checks (verified present in a workflow).
@@ -300,8 +270,6 @@ outputs = [
 sources = ["spec/protocol-artifacts/python/", "spec/protocol-artifacts/go/", "scripts/check_protocol_bindings.harn"]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "trigger-quickref"
@@ -312,8 +280,6 @@ outputs = ["docs/llm/harn-triggers-quickref.md"]
 sources = ["crates/harn-vm/src/llm/", "crates/harn-vm/src/provider_catalog.rs"]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "provider-matrix"
@@ -328,8 +294,6 @@ sources = [
 ]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "provider-support"
@@ -346,8 +310,6 @@ sources = [
 ]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 [[artifact]]
 id = "connector-matrix"
@@ -358,8 +320,6 @@ outputs = ["docs/src/connectors/parity-matrix.md"]
 sources = ["crates/harn-cli/portal/", "crates/harn-modules/"]
 ci = true
 make_all = true
-pre_commit = false
-pre_push = false
 
 # ---------------------------------------------------------------------------
 # Cross-repo guard — intentionally NOT in harn CI (needs a sibling
@@ -375,5 +335,3 @@ outputs = ["spec/protocol-artifacts/HarnProtocol.swift", "spec/protocol-artifact
 sources = ["spec/protocol-artifacts/"]
 ci = false  # requires BURIN_CODE_ROOT / a sibling burin-code checkout; runs in release + cross-repo jobs only
 make_all = false  # excluded from `make all` for the same reason (no sibling checkout locally)
-pre_commit = false
-pre_push = false

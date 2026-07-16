@@ -122,7 +122,7 @@ git -C "$work" add crates/harn-lint/src/lib.rs
 )
 
 cat > "$tmp_root/expected-pre-commit.txt" <<'EOF'
-cargo fmt --all
+cargo fmt --all -- --check
 EOF
 if ! diff -u "$tmp_root/expected-pre-commit.txt" "$record"; then
   echo "pre-commit should format Rust without compiling it" >&2
@@ -146,11 +146,9 @@ remote_sha=$(git -C "$work" rev-parse origin/main)
       ./.githooks/pre-push origin "$origin" >/dev/null
 )
 
-cat > "$tmp_root/expected-pre-push.txt" <<'EOF'
-cargo clippy -p harn-lint --tests -- -D warnings
-EOF
-if ! diff -u "$tmp_root/expected-pre-push.txt" "$record"; then
-  echo "pre-push should run one changed-package Rust lint/test compile" >&2
+if [[ -s "$record" ]]; then
+  echo "default pre-push should not compile changed Rust packages" >&2
+  cat "$record" >&2
   exit 1
 fi
 
@@ -161,6 +159,29 @@ fi
     | CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
       CARGO_TARGET_DIR="$tmp_root/target" \
       FAKE_CARGO_RECORD="$record" \
+      HARN_HOOKS_FULL_LOCAL=1 \
+      HOOK_TIMING_LOG_DIR="$tmp_root/timings" \
+      PATH="$fake_bin:$PATH" \
+      REAL_GIT="$real_git" \
+      ./.githooks/pre-push origin "$origin" >/dev/null
+)
+
+cat > "$tmp_root/expected-targeted-pre-push.txt" <<'EOF'
+cargo clippy -p harn-lint --tests -- -D warnings
+EOF
+if ! diff -u "$tmp_root/expected-targeted-pre-push.txt" "$record"; then
+  echo "full-local pre-push should run one changed-package Rust lint/test compile" >&2
+  exit 1
+fi
+
+: > "$record"
+(
+  cd "$work"
+  printf 'refs/heads/feature %s refs/heads/feature %s\n' "$local_sha" "$remote_sha" \
+    | CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
+      CARGO_TARGET_DIR="$tmp_root/target" \
+      FAKE_CARGO_RECORD="$record" \
+      HARN_HOOKS_FULL_LOCAL=1 \
       HARN_PREPUSH_FULL_TESTS=1 \
       HOOK_TIMING_LOG_DIR="$tmp_root/timings" \
       PATH="$fake_bin:$PATH" \
@@ -196,6 +217,7 @@ provider_catalog_sha=$(git -C "$work" rev-parse HEAD)
     | CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
       CARGO_TARGET_DIR="$tmp_root/target" \
       FAKE_CARGO_RECORD="$record" \
+      HARN_HOOKS_FULL_LOCAL=1 \
       HOOK_TIMING_LOG_DIR="$tmp_root/timings" \
       PATH="$fake_bin:$PATH" \
       REAL_GIT="$real_git" \
@@ -229,13 +251,14 @@ deletion_sha=$(git -C "$work" rev-parse HEAD)
     | CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
       CARGO_TARGET_DIR="$tmp_root/target" \
       FAKE_CARGO_RECORD="$record" \
+      HARN_HOOKS_FULL_LOCAL=1 \
       HOOK_TIMING_LOG_DIR="$tmp_root/timings" \
       PATH="$fake_bin:$PATH" \
       REAL_GIT="$real_git" \
       ./.githooks/pre-push origin "$origin" >/dev/null
 )
 
-if ! diff -u "$tmp_root/expected-pre-push.txt" "$record"; then
+if ! diff -u "$tmp_root/expected-targeted-pre-push.txt" "$record"; then
   echo "deletion-only Rust changes must run one owning-package compile gate" >&2
   exit 1
 fi
@@ -256,6 +279,7 @@ rename_sha=$(git -C "$work" rev-parse HEAD)
     | CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
       CARGO_TARGET_DIR="$tmp_root/target" \
       FAKE_CARGO_RECORD="$record" \
+      HARN_HOOKS_FULL_LOCAL=1 \
       HOOK_TIMING_LOG_DIR="$tmp_root/timings" \
       PATH="$fake_bin:$PATH" \
       REAL_GIT="$real_git" \
