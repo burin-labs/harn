@@ -39,7 +39,7 @@ pub(super) fn link_options(
         opts.budget = Some(merged);
     }
     if let Some(overrides) = link.overrides.as_ref() {
-        super::apply_ladder_step_overrides(&mut opts, overrides);
+        super::execution::apply_ladder_step_overrides(&mut opts, overrides);
     }
     opts
 }

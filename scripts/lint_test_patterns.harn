@@ -321,7 +321,8 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // `routing_policy` records actual per-link wall-clock elapsed so the
   // routing trace + `<dispatch>.attempt` tape events accurately
   // attribute provider latency.
-  "crates/harn-vm/src/llm/routing.rs",
+  "crates/harn-vm/src/llm/routing/execution/mod.rs",
+  "crates/harn-vm/src/llm/routing/execution/race.rs",
   "crates/harn-vm/src/llm/stream.rs",
   "crates/harn-vm/src/mcp_card.rs",
   // mcp_host.rs supervises external MCP servers: cache TTLs and
