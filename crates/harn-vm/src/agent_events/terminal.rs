@@ -16,6 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::agent::AgentEvent;
+
 /// Coarse, typed classification of why an agent-loop session terminated.
 /// Serialized `snake_case`. The vocabulary is deliberately extensible —
 /// [`Self::Unknown`] is the honest fallback when no rule matched and the raw
@@ -144,6 +146,24 @@ impl AgentTerminalOutcome {
             "reason": self.reason,
             "owner": self.owner,
         })
+    }
+
+    /// Project the outcome onto the existing typed-checkpoint event stream.
+    pub fn checkpoint(
+        &self,
+        session_id: &str,
+        final_status: &str,
+        stop_reason: &str,
+    ) -> AgentEvent {
+        AgentEvent::TypedCheckpoint {
+            session_id: session_id.to_owned(),
+            checkpoint: serde_json::json!({
+                "schema": "harn.agent_terminal.v1",
+                "terminal": self.to_json(),
+                "final_status": final_status,
+                "stop_reason": stop_reason,
+            }),
+        }
     }
 }
 

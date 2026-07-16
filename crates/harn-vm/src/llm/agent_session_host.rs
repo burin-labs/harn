@@ -7,9 +7,7 @@
 //! provider/tool capability surfaces, and resource lifecycle.
 
 use crate::value::VmDictExt;
-use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 use crate::agent_events::AgentEvent;
 use crate::orchestration::{
@@ -25,11 +23,11 @@ use super::agent_terminal_class::{
     agent_terminal_class, agent_turn_made_no_llm_call, session_status_indicates_error,
 };
 use super::cost::calculate_cost_for_provider_with_cache;
-use super::permissions;
 use super::tools::{
     assistant_prose_block, build_assistant_response_message, render_canonical_call,
     text_tool_call_block,
 };
+use super::{emit_live_agent_event_sync as emit_event, permissions};
 
 const HOST_SESSION_FINALIZE: &str = "__host_agent_session_finalize";
 const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assistant";
@@ -854,21 +852,7 @@ async fn host_agent_session_finalize(
             stop_reason.clone()
         },
     );
-    // The returned agent-loop dict already carries this typed terminal outcome,
-    // but ACP clients only receive the protocol's coarse `stopReason`. Publish
-    // the same producer-owned value on the existing typed-checkpoint extension
-    // stream before the prompt response lands so thin hosts can distinguish a
-    // natural completion from a policy/budget/error stop without reclassifying
-    // `final_status` or parsing callback prose.
-    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TypedCheckpoint {
-        session_id: session_id.clone(),
-        checkpoint: serde_json::json!({
-            "schema": "harn.agent_terminal.v1",
-            "terminal": terminal_outcome.to_json(),
-            "final_status": canonical_status,
-            "stop_reason": stop_reason,
-        }),
-    });
+    emit_event(&terminal_outcome.checkpoint(&session_id, &canonical_status, &stop_reason));
     let trace_summary = super::trace::agent_trace_summary();
     let result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
