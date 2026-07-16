@@ -11,6 +11,15 @@ pub struct PackageCheckReport {
     pub exports: Vec<PackageExportReport>,
     pub tools: Vec<PackageToolExportReport>,
     pub skills: Vec<PackageSkillExportReport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub personas: Vec<PackagePersonaExportReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackagePersonaExportReport {
+    pub name: String,
+    pub version: Option<String>,
+    pub entry_workflow: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +96,8 @@ pub struct PackageListReport {
     pub lock_present: bool,
     pub dependency_count: usize,
     pub packages: Vec<PackageListEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub personas: Vec<InstalledPersonaReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -110,6 +121,20 @@ pub struct PackageDoctorReport {
     pub lock_path: String,
     pub diagnostics: Vec<PackageDoctorDiagnostic>,
     pub packages: Vec<PackageListEntry>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub personas: Vec<InstalledPersonaReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledPersonaReport {
+    pub id: String,
+    pub name: String,
+    pub package_alias: String,
+    pub package_version: Option<String>,
+    pub content_hash: Option<String>,
+    pub integrity: String,
+    pub manifest_path: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

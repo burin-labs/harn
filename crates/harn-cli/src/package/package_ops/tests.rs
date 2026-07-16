@@ -681,6 +681,366 @@ name = "consumer"
     assert_eq!(package.host_requirements, vec!["workspace.read_text"]);
 }
 
+fn persona_manifest(name: &str, entry_workflow: &str) -> String {
+    format!(
+        r#"[[personas]]
+name = "{name}"
+version = "1.2.3"
+description = "A package persona."
+entry_workflow = "{entry_workflow}"
+tools = ["filesystem"]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+"#
+    )
+}
+
+fn install_test_persona_package(
+    root: &Path,
+    alias: &str,
+    locked_names: Vec<String>,
+    manifest_names: &[&str],
+) -> LockFile {
+    create_test_package_generation(root);
+    let mut lock = LockFile::default();
+    add_test_persona_package(root, &mut lock, alias, locked_names, manifest_names);
+    lock
+}
+
+fn add_test_persona_package(
+    root: &Path,
+    lock: &mut LockFile,
+    alias: &str,
+    locked_names: Vec<String>,
+    manifest_names: &[&str],
+) {
+    let packages = current_packages_dir(root);
+    let package_dir = packages.join(alias);
+    fs::create_dir_all(&package_dir).unwrap();
+    let mut manifest = format!("[package]\nname = \"{alias}\"\nversion = \"1.2.3\"\n\n");
+    for name in manifest_names {
+        manifest.push_str(&persona_manifest(name, "workflow.harn#run"));
+        manifest.push('\n');
+    }
+    fs::write(package_dir.join(MANIFEST), manifest).unwrap();
+    fs::write(
+        package_dir.join("workflow.harn"),
+        "pub pipeline run(task) -> dict { return {ok: true} }\n",
+    )
+    .unwrap();
+    let content_hash = compute_content_hash(&package_dir).unwrap();
+    lock.packages.push(LockEntry {
+        name: alias.to_string(),
+        source: format!("path+../{alias}"),
+        content_hash: Some(content_hash),
+        package_version: Some("1.2.3".to_string()),
+        exports: PackageLockExports {
+            personas: locked_names,
+            ..PackageLockExports::default()
+        },
+        ..LockEntry::default()
+    });
+    let body = toml::to_string_pretty(&lock).unwrap();
+    fs::write(root.join(LOCK_FILE), &body).unwrap();
+    write_test_generation_lock(root, &body);
+}
+
+#[test]
+fn package_check_reports_personas_and_rejects_missing_entry_workflow() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join(MANIFEST),
+        format!(
+            "[package]\nname = \"agents\"\nversion = \"1.0.0\"\n\n{}",
+            persona_manifest("reviewer", "missing.harn#run")
+        ),
+    )
+    .unwrap();
+
+    let report = check_package_impl(Some(tmp.path())).unwrap();
+
+    assert!(report.personas.is_empty());
+    assert!(
+        report.errors.iter().any(|error| {
+            error.field == "[[personas]].entry_workflow" && error.message.contains("missing.harn")
+        }),
+        "{:?}",
+        report.errors
+    );
+
+    fs::write(
+        tmp.path().join("missing.harn"),
+        "pub pipeline run(task) -> dict { return {ok: true} }\n",
+    )
+    .unwrap();
+    let report = check_package_impl(Some(tmp.path())).unwrap();
+    assert_eq!(report.personas.len(), 1);
+    assert_eq!(report.personas[0].name, "reviewer");
+    assert_eq!(report.personas[0].entry_workflow, "missing.harn#run");
+}
+
+#[tokio::test]
+async fn installed_persona_catalog_is_qualified_sorted_and_directly_resolvable() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join(MANIFEST),
+        format!(
+            "[package]\nname = \"consumer\"\n\n{}",
+            persona_manifest("reviewer", "root.harn#run")
+        ),
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("root.harn"),
+        "pub pipeline run(task) -> dict { return {root: true} }\n",
+    )
+    .unwrap();
+    install_test_persona_package(
+        tmp.path(),
+        "agents",
+        vec!["reviewer".to_string(), "archivist".to_string()],
+        &["reviewer", "archivist"],
+    );
+
+    let personas = load_discoverable_personas(Some(&tmp.path().join(MANIFEST))).unwrap();
+    let ids = personas
+        .iter()
+        .map(|persona| persona.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["agents/archivist", "agents/reviewer", "reviewer"]);
+
+    let root = resolve_discoverable_persona(Some(&tmp.path().join(MANIFEST)), "reviewer").unwrap();
+    assert_eq!(root.id, "reviewer");
+    assert!(root.installed_provenance().is_none());
+
+    let installed =
+        resolve_discoverable_persona(Some(&tmp.path().join(MANIFEST)), "agents/reviewer").unwrap();
+    let provenance = installed.installed_provenance().unwrap();
+    assert_eq!(provenance.package_alias, "agents");
+    assert_eq!(provenance.package_version.as_deref(), Some("1.2.3"));
+    assert!(provenance
+        .content_hash
+        .as_deref()
+        .unwrap()
+        .starts_with("sha256:"));
+
+    let payload = crate::commands::persona::list_payload(Some(&tmp.path().join(MANIFEST))).unwrap();
+    assert_eq!(payload[0]["id"], "agents/archivist");
+    assert_eq!(payload[0]["source"]["package_alias"], "agents");
+    assert_eq!(payload[0]["source"]["kind"], "installed_package");
+    assert_eq!(payload[0]["source"]["package_version"], "1.2.3");
+    assert!(payload[0]["source"]["content_hash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert_eq!(payload[0]["source"]["integrity"], "ok");
+    let inspect = crate::commands::persona::inspect_payload(
+        Some(&tmp.path().join(MANIFEST)),
+        "agents/reviewer",
+    )
+    .unwrap();
+    assert_eq!(inspect["id"], "agents/reviewer");
+    assert_eq!(inspect["name"], "reviewer");
+
+    let status_error = crate::commands::persona::status_payload(
+        Some(&tmp.path().join(MANIFEST)),
+        &tmp.path().join("state"),
+        "agents/reviewer",
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert!(status_error.contains("persona 'agents/reviewer' not found"));
+
+    let workspace = TestWorkspace::new(tmp.path());
+    let report = list_packages_in(workspace.env()).unwrap();
+    assert_eq!(report.personas.len(), 2);
+    assert_eq!(report.personas[0].id, "agents/archivist");
+    assert_eq!(report.personas[1].id, "agents/reviewer");
+}
+
+#[test]
+fn dependency_persona_collisions_require_qualification_and_direct_inspect_is_targeted() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join(MANIFEST),
+        "[package]\nname = \"consumer\"\n",
+    )
+    .unwrap();
+    create_test_package_generation(tmp.path());
+    let mut lock = LockFile::default();
+    add_test_persona_package(
+        tmp.path(),
+        &mut lock,
+        "zeta",
+        vec!["reviewer".to_string()],
+        &["reviewer"],
+    );
+    add_test_persona_package(
+        tmp.path(),
+        &mut lock,
+        "alpha",
+        vec!["reviewer".to_string()],
+        &["reviewer"],
+    );
+
+    let manifest = tmp.path().join(MANIFEST);
+    let personas = load_discoverable_personas(Some(&manifest)).unwrap();
+    assert_eq!(
+        personas
+            .iter()
+            .map(|persona| persona.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha/reviewer", "zeta/reviewer"]
+    );
+    assert!(resolve_discoverable_persona(Some(&manifest), "reviewer").is_err());
+    assert_eq!(
+        resolve_discoverable_persona(Some(&manifest), "zeta/reviewer")
+            .unwrap()
+            .id,
+        "zeta/reviewer"
+    );
+    assert_eq!(
+        resolve_discoverable_persona(Some(&manifest), "alpha/reviewer")
+            .unwrap()
+            .id,
+        "alpha/reviewer"
+    );
+
+    fs::remove_file(current_packages_dir(tmp.path()).join("zeta/workflow.harn")).unwrap();
+    assert_eq!(
+        resolve_discoverable_persona(Some(&manifest), "alpha/reviewer")
+            .unwrap()
+            .id,
+        "alpha/reviewer"
+    );
+    assert!(load_discoverable_personas(Some(&manifest))
+        .unwrap_err()
+        .contains("zeta"));
+}
+
+#[test]
+fn persona_catalog_rejects_locked_exports_without_a_published_generation() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join(MANIFEST),
+        "[package]\nname = \"consumer\"\n",
+    )
+    .unwrap();
+    let lock = LockFile {
+        packages: vec![LockEntry {
+            name: "agents".to_string(),
+            source: "path+../agents".to_string(),
+            exports: PackageLockExports {
+                personas: vec!["reviewer".to_string()],
+                ..PackageLockExports::default()
+            },
+            ..LockEntry::default()
+        }],
+        ..LockFile::default()
+    };
+    fs::write(
+        tmp.path().join(LOCK_FILE),
+        toml::to_string_pretty(&lock).unwrap(),
+    )
+    .unwrap();
+
+    let error = load_discoverable_personas(Some(&tmp.path().join(MANIFEST))).unwrap_err();
+    assert!(error.contains("package-current.toml"), "{error}");
+    assert!(error.contains("harn install"), "{error}");
+}
+
+#[test]
+fn package_doctor_rejects_stale_locked_persona_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join(MANIFEST),
+        "[package]\nname = \"consumer\"\n",
+    )
+    .unwrap();
+    install_test_persona_package(
+        tmp.path(),
+        "agents",
+        vec!["removed".to_string()],
+        &["reviewer"],
+    );
+
+    let workspace = TestWorkspace::new(tmp.path());
+    let report = doctor_packages_in(workspace.env()).unwrap();
+
+    assert!(!report.ok);
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "persona-exports-stale"
+            && diagnostic.message.contains("removed")
+            && diagnostic.message.contains("reviewer")
+    }));
+    assert!(report.personas.is_empty());
+}
+
+#[test]
+fn package_doctor_rejects_missing_persona_manifest_and_entry_workflow() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join(MANIFEST),
+        "[package]\nname = \"consumer\"\n",
+    )
+    .unwrap();
+    install_test_persona_package(
+        tmp.path(),
+        "agents",
+        vec!["reviewer".to_string()],
+        &["reviewer"],
+    );
+    let package_dir = current_packages_dir(tmp.path()).join("agents");
+    let workspace = TestWorkspace::new(tmp.path());
+
+    fs::remove_file(package_dir.join("workflow.harn")).unwrap();
+    let report = doctor_packages_in(workspace.env()).unwrap();
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "persona-entry-workflow-invalid"
+            && diagnostic.message.contains("workflow.harn")
+    }));
+
+    fs::write(
+        package_dir.join("workflow.harn"),
+        "pipeline run(task) -> dict { return {ok: true} }\n",
+    )
+    .unwrap();
+    let report = doctor_packages_in(workspace.env()).unwrap();
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "persona-entry-workflow-invalid"
+            && diagnostic.message.contains("is not exported")
+    }));
+
+    fs::write(
+        package_dir.join(MANIFEST),
+        r#"[package]
+name = "agents"
+version = "1.2.3"
+
+[[personas]]
+name = "reviewer"
+description = "Invalid authority."
+entry_workflow = "workflow.harn#run"
+tools = ["filesystem"]
+autonomy_tier = "administrator"
+receipt_policy = "required"
+"#,
+    )
+    .unwrap();
+    let report = doctor_packages_in(workspace.env()).unwrap();
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "persona-manifest-invalid"
+            && diagnostic.message.contains("autonomy_tier")
+    }));
+
+    fs::remove_file(package_dir.join(MANIFEST)).unwrap();
+    let report = doctor_packages_in(workspace.env()).unwrap();
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "persona-manifest-invalid" && diagnostic.message.contains(MANIFEST)
+    }));
+}
+
 fn write_release_changelog(root: &Path, version: &str) {
     fs::write(
         root.join("CHANGELOG.md"),
