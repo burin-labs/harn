@@ -824,7 +824,7 @@ async fn same_key_different_body_conflicts(
 }
 
 async fn authenticated_request_succeeds(client: &ConformanceClient) -> ProbeResult {
-    if !client.has_api_key() {
+    if client.api_key().is_none() {
         return skip("no --api-key supplied; authenticated request probe skipped");
     }
     let response = client.get_json("/v1/tasks").await?;

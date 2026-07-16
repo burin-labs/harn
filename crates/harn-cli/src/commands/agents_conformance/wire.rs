@@ -73,10 +73,6 @@ impl ConformanceClient {
         self.timeout
     }
 
-    pub(super) fn has_api_key(&self) -> bool {
-        self.api_key.is_some()
-    }
-
     pub(super) fn api_key(&self) -> Option<&str> {
         self.api_key.as_deref()
     }
