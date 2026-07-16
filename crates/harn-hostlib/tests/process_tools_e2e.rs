@@ -15,6 +15,7 @@
 
 #![cfg(unix)]
 
+use std::io::Write;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use harn_hostlib::tools::ToolsCapability;
@@ -139,6 +140,76 @@ fn real_run_command_echoes_stdout_and_reports_exit_zero() {
     assert_eq!(require_str(&resp, "stdout").trim(), "hello");
     assert_eq!(require_str(&resp, "status"), "completed");
     assert!(!require_bool(&resp, "timed_out"));
+}
+
+#[test]
+fn real_wait_command_completes_background_after_fifo_release() {
+    let session_id = format!(
+        "test-real-wait-command-release-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    );
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fifo_path = temp.path().join("release.fifo");
+    let mkfifo_status = std::process::Command::new("mkfifo")
+        .arg(&fifo_path)
+        .status()
+        .expect("spawn mkfifo");
+    assert!(mkfifo_status.success(), "mkfifo failed: {mkfifo_status}");
+    let mut release_fifo = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo_path)
+        .expect("open release fifo");
+
+    let script = format!(
+        "set -eu\nprintf 'bg-ready\\n'\nIFS= read -r _ < {}\nprintf 'bg-done\\n'\n",
+        shell_quote(&fifo_path.to_string_lossy())
+    );
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["bash", "-c", &script]));
+    req.insert("background".into(), VmValue::Bool(true));
+    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let handle_id = require_str(&start, "handle_id");
+
+    let (wait_started_tx, wait_started_rx) = std::sync::mpsc::sync_channel::<()>(0);
+    let wait_handle_id = handle_id.clone();
+    let wait_session_id = session_id.clone();
+    let waiter = std::thread::spawn(move || {
+        let _session_guard = harn_vm::agent_sessions::enter_current_session(wait_session_id);
+        wait_started_tx
+            .send(())
+            .expect("wait-start receiver dropped");
+        let mut wait_req = dict();
+        wait_req.insert("handle_id".into(), vstr(&wait_handle_id));
+        wait_req.insert("timeout_ms".into(), VmValue::Int(10_000));
+        require_dict(call("hostlib_tools_wait_command", wait_req).unwrap())
+    });
+
+    wait_started_rx
+        .recv()
+        .expect("waiter did not start before release");
+    writeln!(release_fifo, "go").expect("write release line");
+
+    let waited = waiter.join().expect("waiter thread panicked");
+    assert_eq!(require_str(&waited, "status"), "completed");
+    assert_eq!(require_str(&waited, "feedback_kind"), "tool_result");
+    assert_eq!(require_str(&waited, "handle_id"), handle_id);
+    assert_eq!(require_int(&waited, "exit_code"), 0);
+    let stdout = require_str(&waited, "stdout");
+    assert!(
+        stdout.contains("bg-ready\n") && stdout.contains("bg-done\n"),
+        "wait_command returned before released output finalized: {stdout:?}"
+    );
+
+    let leftover = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    assert!(
+        leftover.is_empty(),
+        "explicit wait must consume matching tool_result feedback, got {leftover:?}"
+    );
 }
 
 #[test]

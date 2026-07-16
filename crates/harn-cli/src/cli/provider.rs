@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Args, Subcommand};
+use clap::{ArgAction, Args, Subcommand, ValueEnum};
 
 use super::util::{llm_model_completion_parser, llm_provider_completion_parser};
 
@@ -43,6 +43,10 @@ pub(crate) enum ProviderCommand {
     /// claude-sonnet route native?" instantly, without running an eval.
     #[command(name = "dispatch-explain")]
     DispatchExplain(ProviderDispatchExplainArgs),
+    /// Audit deterministic dispatch resolution across catalog routes and
+    /// tool-format/thinking variants without network or LLM calls.
+    #[command(name = "dispatch-audit")]
+    DispatchAudit(ProviderDispatchAuditArgs),
     /// Report the LLM rate/concurrency governor's live state: the resolved
     /// per-provider limits from the catalog, and — when the `llm.rate_governor`
     /// flag is on and calls have flowed — each (provider, org_key)'s AIMD
@@ -92,6 +96,96 @@ pub(crate) struct ProviderDispatchExplainArgs {
     /// Emit the structured explanation as JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderDispatchAuditArgs {
+    /// Restrict the audit to one provider. Repeat for multiple providers.
+    #[arg(long = "provider", value_parser = llm_provider_completion_parser(), hide_possible_values = true)]
+    pub providers: Vec<String>,
+    /// Restrict the audit to one model name. Repeat for multiple models.
+    #[arg(long = "model")]
+    pub models: Vec<String>,
+    /// Restrict the audit to one catalog route. Repeat for multiple routes.
+    /// Format is `provider:model`; the model part may contain `:`.
+    #[arg(long = "route")]
+    pub routes: Vec<String>,
+    /// Restrict the audit to routes whose catalog capability list contains this
+    /// value. Repeat to require multiple capabilities.
+    #[arg(long = "capability")]
+    pub capabilities: Vec<String>,
+    /// Restrict the audit to one or more dispatch variants. Omit to run every
+    /// variant: default, thinking, native, text, json.
+    #[arg(long = "variant", value_enum)]
+    pub variants: Vec<ProviderDispatchAuditVariantArg>,
+    /// Include a runnable, zero-network execution plan for post-freeze live
+    /// `provider tool-probe` sweeps over the selected catalog routes. The plan
+    /// emits structured argv arrays, not shell strings.
+    #[arg(long = "include-tool-probe-plan")]
+    pub include_tool_probe_plan: bool,
+    /// Restrict the generated tool-probe plan to one or more live micro-cases.
+    /// Omit to plan every live catalog request-audit case except
+    /// signed-thinking, which must be requested explicitly.
+    #[arg(long = "tool-probe-case", value_enum)]
+    pub tool_probe_cases: Vec<ProviderToolProbeCaseArg>,
+    /// Restrict the generated tool-probe plan to one transport mode.
+    #[arg(long = "tool-probe-mode", value_enum, default_value_t = ProviderToolProbeModeArg::Both)]
+    pub tool_probe_mode: ProviderToolProbeModeArg,
+    /// Repeat each generated live tool-probe command.
+    #[arg(long = "tool-probe-repeat", default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=100))]
+    pub tool_probe_repeat: u16,
+    /// Timeout in seconds for each generated live tool-probe command.
+    #[arg(long = "tool-probe-timeout-secs", default_value_t = 120)]
+    pub tool_probe_timeout_secs: u64,
+    /// Relative output directory the generated live tool-probe plan recommends
+    /// for per-command JSON receipts. The directory is advisory; `tool-probe`
+    /// still writes to stdout.
+    #[arg(long = "tool-probe-output-dir")]
+    pub tool_probe_output_dir: Option<String>,
+    /// Emit JSON. Defaults to true because CI and catalog reviews consume the
+    /// structured audit report.
+    #[arg(
+        long,
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        action = ArgAction::Set
+    )]
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ProviderDispatchAuditVariantArg {
+    Default,
+    Thinking,
+    Native,
+    Text,
+    Json,
+}
+
+impl ProviderDispatchAuditVariantArg {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Thinking => "thinking",
+            Self::Native => "native",
+            Self::Text => "text",
+            Self::Json => "json",
+        }
+    }
+
+    pub(crate) fn requested_thinking(self) -> bool {
+        matches!(self, Self::Thinking)
+    }
+
+    pub(crate) fn tool_format_override(self) -> Option<&'static str> {
+        match self {
+            Self::Native => Some("native"),
+            Self::Text => Some("text"),
+            Self::Json => Some("json"),
+            Self::Default | Self::Thinking => None,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -341,7 +435,7 @@ pub(crate) struct ProviderToolScorecardArgs {
     pub json: bool,
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum ProviderToolProbeModeArg {
     Both,
     NonStreaming,
@@ -359,7 +453,7 @@ impl ProviderToolProbeModeArg {
     }
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum ProviderToolProbeCaseArg {
     #[value(name = "single_tool_call", alias = "single-tool-call")]
     SingleToolCall,

@@ -16,9 +16,24 @@ fn contract() -> ReleaseAuditContract {
     lanes: [
       {name: "rust-audit", runner: "run_rust_audit", proof: "merge_group"},
       {name: "harn-audit", runner: "run_harn_audit", proof: "merge_group"},
+      {name: "package-audit", runner: "run_package_audit", proof: "merge_group"},
       {name: "docs-audit", runner: "run_docs_audit", proof: "residual"},
     ],
     merge_group_jobs: [
+      {
+        name: "Format check",
+        job_id: "fmt",
+        matrix_kind: "",
+        proofs: ["rust-audit"],
+        steps: [{id: "release-audit-format", condition: "", run: "make fmt-check"}],
+      },
+      {
+        name: "Package audit",
+        job_id: "package-audit",
+        matrix_kind: "",
+        proofs: ["package-audit"],
+        steps: [{id: "release-audit-package", condition: "", run: "./scripts/verify_crate_packages.sh"}],
+      },
       {
         name: "Rust lint",
         job_id: "rust-builds",
@@ -58,6 +73,20 @@ fn contract() -> ReleaseAuditContract {
 
 fn jobs() {
   return [
+    {
+      id: 4,
+      name: "Format check",
+      url: "https://github.com/burin-labs/harn/actions/runs/123/job/4",
+      status: "completed",
+      conclusion: "success",
+    },
+    {
+      id: 5,
+      name: "Package audit",
+      url: "https://github.com/burin-labs/harn/actions/runs/123/job/5",
+      status: "completed",
+      conclusion: "success",
+    },
     {
       id: 1,
       name: "Rust lint",
@@ -207,7 +236,7 @@ pipeline test_release_audit_contract_reads_typed_result_from_disk(task) {
       assert_eq(loaded.schema_version, "harn.release_audit_contract.v1")
       assert_eq(
         loaded.merge_group_jobs.map({ job -> job.name }).to_list(),
-        ["Rust lint", "Rust test", "Harn conformance + audit"],
+        ["Format check", "Package audit", "Rust lint", "Rust test", "Harn conformance + audit"],
       )
       harness.fs.write_text(path, "{invalid")
       assert_eq(release_audit_contract_read(path), nil)
@@ -219,6 +248,11 @@ pipeline test_release_audit_ci_contract_drift(task) {
   const cfg = contract()
   const ci = {
     jobs: {
+      fmt: {name: "Format check", steps: [{id: "release-audit-format", run: "make fmt-check"}]},
+      "package-audit": {
+        name: "Package audit",
+        steps: [{id: "release-audit-package", run: "./scripts/verify_crate_packages.sh"}],
+      },
       "rust-builds": {
         strategy: {
           matrix: {
@@ -252,6 +286,7 @@ pipeline test_release_audit_ci_contract_drift(task) {
       {
         ...ci,
         jobs: {
+          ...ci.jobs,
           "rust-builds": {
             ...ci.jobs["rust-builds"],
             steps: ci.jobs["rust-builds"].steps
@@ -276,6 +311,7 @@ pipeline test_release_audit_ci_contract_drift(task) {
       {
         ...ci,
         jobs: {
+          ...ci.jobs,
           "rust-builds": {...ci.jobs["rust-builds"], strategy: {matrix: {include: [{kind: "lint", name: "Rust lint"}]}}},
         },
       },
