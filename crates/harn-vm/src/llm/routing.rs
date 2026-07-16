@@ -1219,7 +1219,6 @@ mod tests;
 pub(crate) use execution::{
     execute_with_routing, provider_exhausted_error, trace_to_decision, trace_to_vm_attempts,
     AttemptStatus, RoutingAttempt, RoutingErrorSnapshot, RoutingTrace, VerifierOutcome,
-    VerifierSignalRecord,
 };
 
 #[cfg(test)]

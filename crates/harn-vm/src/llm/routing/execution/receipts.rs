@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::value::VmValue;
+use crate::value::{VmDictExt, VmValue};
 
 use super::super::RoutingPolicyConfig;
 
@@ -66,7 +66,7 @@ pub(crate) enum VerifierOutcome {
 }
 
 impl VerifierOutcome {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::Accept => "accept",
             Self::Refine => "refine",
