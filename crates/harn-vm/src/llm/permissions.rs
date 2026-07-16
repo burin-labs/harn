@@ -5,7 +5,7 @@ use std::thread_local;
 
 use serde::{Deserialize, Serialize};
 
-use crate::llm::agent_tools::stable_hash;
+use crate::llm::agent_tools::hash::stable_hash;
 use crate::trust_graph::{AutonomyTier, TrustOutcome, TrustRecord};
 use crate::value::{VmError, VmValue};
 use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
