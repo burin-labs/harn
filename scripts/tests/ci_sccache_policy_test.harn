@@ -24,15 +24,15 @@ fn sccache_action() {
   }
 }
 
-fn persistent_job(runner: string, cache_key: string) {
+fn persistent_job(runner: string, cache_key: string, sticky_if: string, fallback_if: string) {
   return {
     "runs-on": runner,
     steps: [
       {
         uses: "./.github/actions/sccache",
-        with: {"cache-key": cache_key, sticky: gha_expression("vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'")},
+        with: {"cache-key": cache_key, sticky: gha_expression(sticky_if)},
       },
-      {uses: "./.github/actions/rust-cache", if: "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'"},
+      {uses: "./.github/actions/rust-cache", if: fallback_if},
       {run: "./scripts/ci/finalize_sccache.sh", if: "always()"},
     ],
   }
@@ -43,13 +43,16 @@ fn workflow() {
   const rust = persistent_job(
     gha_expression(disable + " && 'ubuntu-latest' || matrix.runner"),
     gha_expression("matrix.cache_key"),
+    "matrix.kind != 'test' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+    "matrix.kind == 'test' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
   )
-  const jobs = gha_expression(disable + " && '2' || '4'")
   return {
     jobs: {
       "package-audit": persistent_job(
         gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'"),
         "package-audit",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
       ),
       "rust-builds": {
         ...rust,
@@ -57,23 +60,25 @@ fn workflow() {
           matrix: {
             include: [
               {runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
-              {runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-test"},
+              {runner: "ubuntu-latest", cache_key: "workspace-test"},
               {runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-audit"},
             ],
           },
         },
         steps: rust.steps
           + [
-          {name: "Run affected-crate tests (PR fast feedback)", env: {CARGO_BUILD_JOBS: jobs}},
+          {name: "Run affected-crate tests (PR fast feedback)", env: {CARGO_BUILD_JOBS: "2"}},
           {
             name: "Run full test suite (merge queue + non-metadata push backstop)",
-            env: {CARGO_BUILD_JOBS: jobs},
+            env: {CARGO_BUILD_JOBS: "2"},
           },
         ],
       },
       "audit-scripts": persistent_job(
         gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
         "audit-scripts",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
       ),
     },
   }

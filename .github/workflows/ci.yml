@@ -383,7 +383,10 @@ jobs:
             rust_components: clippy
           - kind: test
             name: Rust test
-            runner: blacksmith-8vcpu-ubuntu-2404
+            # The sandbox escape suite requires Linux Landlock. Blacksmith's
+            # current kernel does not expose it, so this security proof stays
+            # on GitHub-hosted Ubuntu rather than being skipped or weakened.
+            runner: ubuntu-latest
             cache_key: workspace-test
             # Affected-crate selection (#2663) diffs `origin/<base>...HEAD`,
             # which needs the merge-base on PRs. Unused on merge_group/push.
@@ -422,9 +425,9 @@ jobs:
       - uses: ./.github/actions/sccache
         with:
           cache-key: ${{ matrix.cache_key }}
-          sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          sticky: ${{ matrix.kind != 'test' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
       - uses: ./.github/actions/rust-cache
-        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
+        if: matrix.kind == 'test' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
         continue-on-error: true
         with:
           shared-key: ${{ matrix.cache_key }}
@@ -461,10 +464,9 @@ jobs:
       - name: Run affected-crate tests (PR fast feedback)
         if: matrix.kind == 'test' && github.event_name == 'pull_request'
         env:
-          # The 32 GB Blacksmith runner safely restores four-way rustc fan-out.
-          # The kill-switch fallback retains the proven two-job cap because
-          # four jobs exceeded ubuntu-latest memory in harn#4293/#4302.
-          CARGO_BUILD_JOBS: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && '2' || '4' }}
+          # This Landlock-capable GitHub runner retains the proven two-job cap;
+          # four jobs exceeded its memory in harn#4293/#4302.
+          CARGO_BUILD_JOBS: "2"
           NEXTEST_PROFILE: ci
           # Route the (event-derived) base ref through env vars rather than
           # expanding `${{ }}` inside the run: script — inline expansion in a
@@ -484,7 +486,7 @@ jobs:
         env:
           # See the PR fast-feedback test step above. This is the queue-critical
           # path where cold-cache speculative merge commits have been OOM-killed.
-          CARGO_BUILD_JOBS: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && '2' || '4' }}
+          CARGO_BUILD_JOBS: "2"
           NEXTEST_PROFILE: ci
         run: scripts/ci/run_rust_test_lane.sh make test
       # These checks use the harn CLI and generated artifacts, but they do not

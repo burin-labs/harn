@@ -310,7 +310,12 @@ fn matching_steps(job, uses: string) -> list {
   return (job?.steps ?? []).filter({ step -> step_uses(step) == uses }).to_list()
 }
 
-fn persistent_sccache_job_errors(workflow, job_name: string, expected_runner: string) -> list<string> {
+fn persistent_sccache_job_errors(
+  workflow,
+  job_name: string,
+  expected_runner: string,
+  fallback_condition: string,
+) -> list<string> {
   const job = workflow?.jobs?.[job_name]
   if job == nil {
     return ["ci.yml:${job_name} must define the persistent sccache lane"]
@@ -328,8 +333,7 @@ fn persistent_sccache_job_errors(workflow, job_name: string, expected_runner: st
     errors = errors + ["ci.yml:${job_name} sticky cache must follow ${BLACKSMITH_DISABLE_VAR}"]
   }
   const fallback = matching_steps(job, "./.github/actions/rust-cache")
-  if len(fallback) != 1
-    || trim(fallback[0]?.if ?? "") != "vars.${BLACKSMITH_DISABLE_VAR} == 'true'" {
+  if len(fallback) != 1 || trim(fallback[0]?.if ?? "") != fallback_condition {
     errors = errors
       + ["ci.yml:${job_name} must retain rust-cache only on the GitHub-hosted fallback"]
   }
@@ -372,15 +376,39 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     errors = errors + ["${SCCACHE_ACTION_PATH} must own pinned sccache setup and wrapper configuration"]
   }
   errors = errors
-    + persistent_sccache_job_errors(workflow, "package-audit", "blacksmith-4vcpu-ubuntu-2404")
-    + persistent_sccache_job_errors(workflow, "rust-builds", "matrix.runner")
-    + persistent_sccache_job_errors(workflow, "audit-scripts", "blacksmith-8vcpu-ubuntu-2404")
+    + persistent_sccache_job_errors(
+    workflow,
+    "package-audit",
+    "blacksmith-4vcpu-ubuntu-2404",
+    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+  )
+    + persistent_sccache_job_errors(
+    workflow,
+    "rust-builds",
+    "matrix.runner",
+    "matrix.kind == 'test' || vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+  )
+    + persistent_sccache_job_errors(
+    workflow,
+    "audit-scripts",
+    "blacksmith-8vcpu-ubuntu-2404",
+    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+  )
   const rust_job = workflow?.jobs?.["rust-builds"]
+  const rust_sccache = matching_steps(rust_job, SCCACHE_ACTION)
+  if len(rust_sccache) == 1 {
+    const sticky_condition = trim(rust_sccache[0]?.with?.sticky ?? "")
+    if !contains(sticky_condition, "matrix.kind != 'test'")
+      || !contains(sticky_condition, BLACKSMITH_DISABLE_VAR) {
+      errors = errors
+        + ["ci.yml:rust-builds must keep persistent storage off the GitHub-hosted Landlock test lane"]
+    }
+  }
   const matrix = rust_job?.strategy?.matrix?.include ?? []
   const runners = matrix.map({ row -> trim(row?.runner ?? "") }).to_list()
   const cache_keys = matrix.map({ row -> trim(row?.cache_key ?? "") }).to_list()
   if runners
-    != ["blacksmith-4vcpu-ubuntu-2404", "blacksmith-8vcpu-ubuntu-2404", "blacksmith-8vcpu-ubuntu-2404"]
+    != ["blacksmith-4vcpu-ubuntu-2404", "ubuntu-latest", "blacksmith-8vcpu-ubuntu-2404"]
     || cache_keys != ["workspace-lint", "workspace-test", "workspace-audit"] {
     errors = errors + ["ci.yml:rust-builds must keep distinct lane caches and policy-sized runners"]
   }
@@ -389,8 +417,9 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     "Run full test suite (merge queue + non-metadata push backstop)",
   ] {
     const jobs = trim(step_by_name(rust_job?.steps ?? [], step_name)?.env?.CARGO_BUILD_JOBS ?? "")
-    if !contains(jobs, BLACKSMITH_DISABLE_VAR) || !contains(jobs, "'2'") || !contains(jobs, "'4'") {
-      errors = errors + ["ci.yml:rust-builds ${step_name} must preserve 4-way/2-way fan-out"]
+    if jobs != "2" {
+      errors = errors
+        + ["ci.yml:rust-builds ${step_name} must keep two-way fan-out on the Landlock-capable runner"]
     }
   }
   const allowed = ["package-audit", "rust-builds", "audit-scripts"]
