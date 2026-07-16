@@ -101,6 +101,79 @@ pipeline test_second(_task) { return 42 }
     }
 }
 
+#[tokio::test]
+async fn reusable_session_hits_prepared_cache_without_sharing_module_state() {
+    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let temp = TempTestDir::new();
+    temp.write(
+        "suite/counter.harn",
+        r"
+let count = 0
+
+pub fn increment() {
+  count = count + 1
+  return count
+}
+",
+    );
+    temp.write(
+        "suite/test_counter.harn",
+        r#"
+import { increment } from "./counter"
+
+pipeline test_counter(_task) {
+  assert_eq(increment(), 1)
+  assert_eq(increment(), 2)
+}
+"#,
+    );
+    let suite = temp.path().join("suite/test_counter.harn");
+    let options = RunOptions::new(5_000);
+    let session = TestRunSession::default();
+
+    let first = run_tests_with_session(&suite, &options, &session).await;
+    let after_first = session.stats();
+    let second = run_tests_with_session(&suite, &options, &session).await;
+    let after_second = session.stats();
+
+    temp.write(
+        "suite/counter.harn",
+        r"
+let count = 40
+
+pub fn increment() {
+  count = count + 1
+  return count
+}
+",
+    );
+    temp.write(
+        "suite/test_counter.harn",
+        r#"
+import { increment } from "./counter"
+
+pipeline test_counter(_task) {
+  assert_eq(increment(), 41)
+  assert_eq(increment(), 42)
+}
+"#,
+    );
+    let after_edit = run_tests_with_session(&suite, &options, &session).await;
+    let after_edit_stats = session.stats();
+
+    assert_eq!(first.passed, 1, "{:?}", first.results);
+    assert_eq!(second.passed, 1, "{:?}", second.results);
+    assert_eq!(after_edit.passed, 1, "{:?}", after_edit.results);
+    assert_eq!(after_first.workers, 1);
+    assert!(after_first.insertions >= 1, "{after_first:?}");
+    assert!(after_second.hits > after_first.hits, "{after_second:?}");
+    assert_eq!(after_second.insertions, after_first.insertions);
+    assert!(
+        after_edit_stats.insertions > after_second.insertions,
+        "{after_edit_stats:?}"
+    );
+}
+
 #[test]
 fn discover_test_files_returns_canonical_absolute_paths() {
     let temp = TempTestDir::new();
