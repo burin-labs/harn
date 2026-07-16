@@ -460,8 +460,8 @@ pub fn tool_conformance_request_report(
         validation.warnings = warnings;
         requests.push(ToolConformanceRequestCase {
             mode,
-            validation,
             request_body,
+            validation,
         });
     }
     Ok(ToolConformanceRequestReport {
