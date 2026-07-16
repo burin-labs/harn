@@ -237,6 +237,7 @@ run_docs_audit() {
 run_generated_audit() {
   time_phase "language-spec drift" make check-language-spec
   time_phase "highlight drift" make check-highlight
+  time_phase "CLI AOT drift" make check-cli-aot
   time_phase "protocol artifact drift" \
     make check-protocol-artifacts HARN_PROTOCOL_ARTIFACT_VERSION="$(current_version)"
   time_phase "connector schema drift" make check-connector-schemas
@@ -667,6 +668,7 @@ PY
   # selected release version explicitly so a Cargo.toml-only rewrite does not
   # force a second full CLI build.
   harn_cmd dump-protocol-artifacts --artifact-version "$next"
+  make gen-cli-aot
   echo "Version updated: $current -> $next"
   echo "Next steps:"
   echo "  1. Review docs/release notes diff"
