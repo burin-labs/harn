@@ -148,13 +148,13 @@ Shape (`schema_version: 2`):
   "schema_version": 2,
   "event": "run_phase",
   "phases": [
-    { "name": "parse", "duration_ms": 12, "input_bytes": 4096 },
-    { "name": "typecheck", "duration_ms": 80 },
-    { "name": "bytecode_compile", "duration_ms": 35, "cache": "miss" },
-    { "name": "run_setup", "duration_ms": 8 },
-    { "name": "run_main", "duration_ms": 1200, "events": 14 },
-    { "name": "module_compile", "duration_ms": 40, "events": 3 },
-    { "name": "module_load", "duration_ms": 75, "events": 8 }
+    { "name": "parse", "kind": "top_level", "duration_ms": 12, "input_bytes": 4096 },
+    { "name": "typecheck", "kind": "top_level", "duration_ms": 80 },
+    { "name": "bytecode_compile", "kind": "top_level", "duration_ms": 35, "cache": "miss" },
+    { "name": "run_setup", "kind": "top_level", "duration_ms": 8 },
+    { "name": "run_main", "kind": "top_level", "duration_ms": 1200, "events": 14 },
+    { "name": "module_compile", "kind": "attribution", "duration_ms": 40, "events": 3 },
+    { "name": "module_load", "kind": "attribution", "duration_ms": 75, "events": 8 }
   ]
 }
 ```
@@ -510,7 +510,8 @@ The output is keyed by seven fixed rows — `parse`, `typecheck`,
 hit lets us skip parse/typecheck. The `bytecode_compile` row carries a
 `cache: "hit" | "miss"` field so cost-and-perf eyeballs and agent
 pipelines can dispatch on cache state without a separate flag.
-`module_compile` and `module_load` attribute module work that overlaps
+Rows carry `kind: "top_level" | "attribution"`; only top-level rows reconcile
+wall time. `module_compile` and `module_load` attribute work that overlaps
 `run_setup` and `run_main`; do not add them to the five top-level rows.
 Their `events` values count successful compiles and unique fresh-VM loads.
 
@@ -525,13 +526,13 @@ Their `events` values count successful compiles and unique fresh-VM loads.
     "command": "run",
     "target": "main.harn",
     "phases": [
-      { "name": "parse", "duration_ms": 12, "input_bytes": 4096 },
-      { "name": "typecheck", "duration_ms": 80 },
-      { "name": "bytecode_compile", "duration_ms": 35, "cache": "miss" },
-      { "name": "run_setup", "duration_ms": 8 },
-      { "name": "run_main", "duration_ms": 1200, "events": 14 },
-      { "name": "module_compile", "duration_ms": 40, "events": 3 },
-      { "name": "module_load", "duration_ms": 75, "events": 8 }
+      { "name": "parse", "kind": "top_level", "duration_ms": 12, "input_bytes": 4096 },
+      { "name": "typecheck", "kind": "top_level", "duration_ms": 80 },
+      { "name": "bytecode_compile", "kind": "top_level", "duration_ms": 35, "cache": "miss" },
+      { "name": "run_setup", "kind": "top_level", "duration_ms": 8 },
+      { "name": "run_main", "kind": "top_level", "duration_ms": 1200, "events": 14 },
+      { "name": "module_compile", "kind": "attribution", "duration_ms": 40, "events": 3 },
+      { "name": "module_load", "kind": "attribution", "duration_ms": 75, "events": 8 }
     ],
     "llm_calls": [
       { "model": "claude-sonnet-5", "latency_ms": 850, "tokens": 1500 }

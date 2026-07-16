@@ -84,7 +84,7 @@ pub(super) async fn execute_case(
                 error: Some(format!("Compile error: {e}")),
                 timeout: None,
                 duration_ms: total_start.elapsed().as_millis() as u64,
-                phases,
+                phases: Some(phases),
             };
         }
     };
@@ -244,7 +244,7 @@ pub(super) async fn execute_case(
         error,
         timeout,
         duration_ms,
-        phases,
+        phases: Some(phases),
     }
 }
 

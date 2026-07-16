@@ -305,14 +305,15 @@ duration distribution under `data.timing`:
 }
 ```
 
-### `harn serve test --stdio`
+### `harn serve test`
 
 The JSON-RPC `initialize` result advertises
 `capabilities.test_run.schema_version: 2`. Each `test/run` result uses
 snake-case `schema_version: 2` and contains worker identity, run/cache counters,
 and `summary`. The summary is the user-runner shape above: `results`, verdict
-counts, wall duration, `timing`, and cumulative `aggregate`; each result carries
-typed `timeout` and `phases` with nested module attribution.
+counts, wall duration, `timing`, and cumulative `aggregate`. Each executed result
+carries optional typed `timeout` and measured `phases` with nested module
+attribution; discovery and worker-start errors omit unavailable phases.
 
 ### `harn run --emit-summary-json`
 
@@ -366,13 +367,13 @@ file descriptor.
   "schema_version": 2,
   "event": "run_phase",
   "phases": [
-    { "name": "parse", "duration_ms": 12, "input_bytes": 4096 },
-    { "name": "typecheck", "duration_ms": 80 },
-    { "name": "bytecode_compile", "duration_ms": 35, "cache": "miss" },
-    { "name": "run_setup", "duration_ms": 8 },
-    { "name": "run_main", "duration_ms": 1200, "events": 14 },
-    { "name": "module_compile", "duration_ms": 40, "events": 3 },
-    { "name": "module_load", "duration_ms": 75, "events": 8 }
+    { "name": "parse", "kind": "top_level", "duration_ms": 12, "input_bytes": 4096 },
+    { "name": "typecheck", "kind": "top_level", "duration_ms": 80 },
+    { "name": "bytecode_compile", "kind": "top_level", "duration_ms": 35, "cache": "miss" },
+    { "name": "run_setup", "kind": "top_level", "duration_ms": 8 },
+    { "name": "run_main", "kind": "top_level", "duration_ms": 1200, "events": 14 },
+    { "name": "module_compile", "kind": "attribution", "duration_ms": 40, "events": 3 },
+    { "name": "module_load", "kind": "attribution", "duration_ms": 75, "events": 8 }
   ]
 }
 ```
@@ -381,9 +382,10 @@ The phase order is fixed: `parse`, `typecheck`, `bytecode_compile`,
 `run_setup`, `run_main`, `module_compile`, `module_load`. Cache hits keep all
 seven rows and switch the
 `bytecode_compile` row to `"cache": "hit"` while leaving `parse` and
-`typecheck` at `duration_ms: 0`. The final two rows are overlapping module
-attribution, not additive top-level phases; their `events` values count
-successful compiles and unique fresh-VM loads.
+`typecheck` at `duration_ms: 0`. `kind` is the machine-readable addition rule:
+only `top_level` rows reconcile wall time. The final two `attribution` rows
+overlap top-level phases; their `events` values count successful compiles and
+unique fresh-VM loads.
 
 ### `harn run --emit-rusage-json`
 

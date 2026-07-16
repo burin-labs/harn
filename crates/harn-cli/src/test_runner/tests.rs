@@ -61,11 +61,150 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
     let timeout = result.timeout.expect("expected typed timeout metadata");
     assert_eq!(timeout.phase, TestPhase::Execute);
     assert_eq!(timeout.limit_ms, 0);
-    assert_eq!(result.phases.modules, harn_vm::ModulePhaseStats::default());
+    assert_eq!(
+        result.phases.expect("measured phases").modules,
+        harn_vm::ModulePhaseStats::default()
+    );
     assert_eq!(
         result.error.as_deref(),
         Some("execute phase timed out after 0ms")
     );
+}
+
+#[tokio::test]
+async fn execution_timeout_includes_lazy_module_load_attribution() {
+    let temp = TempTestDir::new();
+    temp.write(
+        "helper.harn",
+        "sleep(10)\npub fn spin() { while true {} }\n",
+    );
+    temp.write(
+        "test_timeout_import.harn",
+        "import { spin } from \"./helper\"\npipeline test_timeout_import(_task) { spin() }\n",
+    );
+    let file = temp.path().join("test_timeout_import.harn");
+    let source = Arc::new(fs::read_to_string(&file).unwrap());
+    let case = TestCase {
+        name: "test_timeout_import".to_string(),
+        pipeline_name: "test_timeout_import".to_string(),
+        program: Arc::new(parse_program(&source).unwrap()),
+        source,
+        file,
+        bindings: Vec::new(),
+        weight: 1,
+        serial_group: None,
+    };
+
+    let result = execute_case(
+        &case,
+        temp.path(),
+        100,
+        &[],
+        &harn_vm::PreparedModuleCache::default(),
+        true,
+        0,
+    )
+    .await;
+
+    assert_eq!(
+        result.timeout.expect("typed timeout").phase,
+        TestPhase::Execute
+    );
+    let phases = result.phases.expect("measured phases");
+    assert_eq!(phases.modules.modules_loaded, 1);
+    assert!(phases.modules.module_load_ms >= 10);
+}
+
+#[tokio::test]
+async fn failures_and_timeout_do_not_leak_module_timing_to_later_runs() {
+    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let temp = TempTestDir::new();
+    temp.write("suite/helper.harn", "pub fn value() { return 42 }\n");
+    temp.write(
+        "suite/harn.toml",
+        r#"
+[package]
+name = "setup-failure"
+
+[exports]
+handlers = "hooks.harn"
+
+[[hooks]]
+event = "PostTurn"
+handler = "handlers::missing"
+"#,
+    );
+    temp.write("suite/hooks.harn", "pub fn valid(_event) {}\n");
+    temp.write(
+        "suite/test_setup_failure.harn",
+        "pipeline test_setup_failure(_task) {}\n",
+    );
+    temp.write(
+        "suite/test_runtime_failure.harn",
+        "import { value } from \"./helper\"\npipeline test_runtime_failure(_task) { throw \"boom\" }\n",
+    );
+    temp.write(
+        "suite/test_timeout.harn",
+        "import { value } from \"./helper\"\npipeline test_timeout(_task) { while true {} }\n",
+    );
+    temp.write(
+        "suite/test_pass.harn",
+        "import { value } from \"./helper\"\npipeline test_pass(_task) { assert_eq(value(), 42) }\n",
+    );
+    let options = RunOptions::new(25);
+    let session = TestRunSession::default();
+
+    let setup = run_tests_with_session(
+        &temp.path().join("suite/test_setup_failure.harn"),
+        &options,
+        &session,
+    )
+    .await;
+    fs::remove_file(temp.path().join("suite/harn.toml")).expect("remove failing manifest");
+    let runtime = run_tests_with_session(
+        &temp.path().join("suite/test_runtime_failure.harn"),
+        &options,
+        &session,
+    )
+    .await;
+    let timeout = run_tests_with_session(
+        &temp.path().join("suite/test_timeout.harn"),
+        &options,
+        &session,
+    )
+    .await;
+    let pass = run_tests_with_session(
+        &temp.path().join("suite/test_pass.harn"),
+        &options,
+        &session,
+    )
+    .await;
+
+    let phases = |summary: &TestSummary| {
+        summary.results[0]
+            .phases
+            .expect("executed case has measured phases")
+    };
+    assert_eq!(phases(&setup).modules.modules_loaded, 0);
+    assert!(setup.results[0]
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("failed to install manifest hooks")));
+    assert_eq!(phases(&runtime).modules.modules_loaded, 1);
+    assert_eq!(runtime.failed, 1);
+    assert!(runtime.results[0]
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("boom")));
+    assert_eq!(phases(&timeout).modules.modules_loaded, 1);
+    assert_eq!(phases(&timeout).modules.modules_compiled, 0);
+    assert_eq!(
+        timeout.results[0].timeout.expect("typed timeout").phase,
+        TestPhase::Execute
+    );
+    assert_eq!(phases(&pass).modules.modules_loaded, 1);
+    assert_eq!(phases(&pass).modules.modules_compiled, 0);
+    assert_eq!(pass.passed, 1, "{:?}", pass.results);
 }
 
 #[tokio::test]
@@ -99,7 +238,7 @@ pipeline test_second(_task) { return 42 }
         assert!(summary
             .results
             .iter()
-            .all(|result| result.phases.setup_ms >= 30));
+            .all(|result| result.phases.is_some_and(|phases| phases.setup_ms >= 30)));
     }
 }
 
@@ -388,13 +527,13 @@ fn passing_result_with_timings(total_ms: u64, execute_ms: u64) -> TestResult {
         error: None,
         timeout: None,
         duration_ms: total_ms,
-        phases: PhaseTimings {
+        phases: Some(PhaseTimings {
             setup_ms: 7,
             compile_ms: 3,
             execute_ms,
             teardown_ms: 2,
             modules: harn_vm::ModulePhaseStats::default(),
-        },
+        }),
     }
 }
 
@@ -755,7 +894,8 @@ pipeline test_two(task) { assert_eq(2, 2) }
     let per_test_sum: u64 = summary
         .results
         .iter()
-        .map(|r| r.phases.setup_ms.saturating_add(r.phases.compile_ms))
+        .filter_map(|result| result.phases)
+        .map(|phases| phases.setup_ms.saturating_add(phases.compile_ms))
         .sum();
     let agg_sum = summary
         .aggregate

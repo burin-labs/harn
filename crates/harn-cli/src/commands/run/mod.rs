@@ -1568,7 +1568,6 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     };
     let path = resolved_path;
 
-    // `run_setup` ends at the first VM instruction; `run_main` is execute.
     let setup_start = Instant::now();
     if trace || summary.is_some() {
         harn_vm::llm::enable_tracing();
@@ -1578,6 +1577,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     }
     if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
         stderr.push_str(&format!("error: {error}\n"));
+        time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
         return finalize_run_error(
             stdout,
             stderr,
@@ -1687,6 +1687,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 stderr.push_str(&format!(
                     "error: failed to configure harness secret provider: {error}\n"
                 ));
+                time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
                 return finalize_run_error(
                     stdout,
                     stderr,
@@ -1717,6 +1718,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         stderr.push_str(&format!(
             "error: failed to install manifest triggers: {error}\n"
         ));
+        time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
         return finalize_run_error(
             stdout,
             stderr,
@@ -1737,6 +1739,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         stderr.push_str(&format!(
             "error: failed to install manifest hooks: {error}\n"
         ));
+        time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
         return finalize_run_error(
             stdout,
             stderr,
@@ -1754,11 +1757,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         );
     }
 
-    // Run inside a LocalSet so spawn_local works for concurrency builtins.
     let local = tokio::task::LocalSet::new();
-    if let Some(t) = timing.as_deref_mut() {
-        t.run_setup = setup_start.elapsed();
-    }
+    time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
     let main_start = Instant::now();
     // Re-anchor the entry source dir immediately before executing the entry
     // pipeline. The manifest/dependency setup above (provider-connector

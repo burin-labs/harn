@@ -238,7 +238,10 @@ impl Vm {
         self.imported_paths.push(synthetic.clone());
         let loaded = self.instantiate_module(None, &artifact).await?;
         self.imported_paths.pop();
-        Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+        {
+            let _load_span = self.module_load_span();
+            Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+        }
         self.record_module_loaded();
         Ok(loaded)
     }
@@ -263,7 +266,10 @@ impl Vm {
         self.imported_paths.push(synthetic.clone());
         let loaded = self.instantiate_stdlib_module(artifact.as_ref()).await?;
         self.imported_paths.pop();
-        Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+        {
+            let _load_span = self.module_load_span();
+            Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+        }
         self.record_module_loaded();
         Ok(loaded)
     }
@@ -563,6 +569,9 @@ impl Vm {
                     if self.imported_paths.contains(&synthetic) {
                         return Ok(());
                     }
+                    if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
+                        return self.export_loaded_module(&synthetic, &loaded, selected_names);
+                    }
                     let loaded = self
                         .load_stdlib_module_from_source(module, synthetic.clone(), source)
                         .await?;
@@ -681,7 +690,10 @@ impl Vm {
                 .instantiate_module(module_source_dir, artifact.as_ref())
                 .await?;
             self.imported_paths.pop();
-            Arc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
+            {
+                let _load_span = self.module_load_span();
+                Arc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
+            }
             self.record_module_loaded();
             {
                 let _load_span = self.module_load_span();
@@ -948,12 +960,14 @@ mod tests {
                 .load_module_from_source(path.clone(), source)
                 .await
                 .expect("first module load succeeds");
+            let first = recorder.snapshot();
             child
                 .load_module_from_source(path, source)
                 .await
                 .expect("cached module load succeeds");
 
             let stats = recorder.snapshot();
+            assert_eq!(stats, first, "per-VM cache hit records no module work");
             assert_eq!(stats.modules_compiled, 1);
             assert_eq!(stats.modules_loaded, 1);
         });
@@ -981,6 +995,36 @@ mod tests {
             let stats = recorder.snapshot();
             assert_eq!(stats.modules_compiled, 0);
             assert_eq!(stats.modules_loaded, 0);
+        });
+    }
+
+    #[test]
+    fn failed_read_does_not_leak_module_counts_to_next_vm() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let valid = temp.path().join("valid.harn");
+        std::fs::write(&valid, "pub fn answer() { return 42 }\n").expect("write valid module");
+
+        runtime.block_on(async {
+            let mut failed_vm = Vm::new();
+            failed_vm.set_source_dir(temp.path());
+            let failed_recorder = failed_vm.enable_module_phase_timing();
+
+            assert!(failed_vm.execute_import("./missing", None).await.is_err());
+            assert_eq!(failed_recorder.snapshot().modules_loaded, 0);
+            drop(failed_vm);
+
+            let mut next_vm = Vm::new();
+            let next_recorder = next_vm.enable_module_phase_timing();
+            next_vm
+                .load_module_exports(&valid)
+                .await
+                .expect("next VM load succeeds");
+            assert_eq!(next_recorder.snapshot().modules_loaded, 1);
+            assert_eq!(failed_recorder.snapshot().modules_loaded, 0);
         });
     }
 
@@ -1149,6 +1193,7 @@ pub fn increment() {
                 Ok(VmValue::Int(1))
             ));
             let second_phases = second_recorder.snapshot();
+            assert_eq!(second_phases.module_compile_ms, 0);
             assert_eq!(second_phases.modules_compiled, 0);
             assert_eq!(second_phases.modules_loaded, 1);
         });

@@ -112,8 +112,21 @@ fn default_user_test_output_includes_latency_summary() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Latency: p50="), "{stdout}");
-    assert!(stdout.contains("p90="), "{stdout}");
+    let latency_lines = stdout
+        .lines()
+        .filter(|line| line.starts_with("Latency: "))
+        .collect::<Vec<_>>();
+    assert_eq!(latency_lines.len(), 1, "{stdout}");
+    let latency = latency_lines[0]
+        .strip_prefix("Latency: p50=")
+        .expect("p50 prefix");
+    let (p50, p90) = latency.split_once(" ms  p90=").expect("p90 separator");
+    assert!(p50.parse::<u64>().is_ok(), "{latency}");
+    assert!(
+        p90.strip_suffix(" ms")
+            .is_some_and(|value| value.parse::<u64>().is_ok()),
+        "{latency}"
+    );
     assert!(!stdout.contains("Per-test detail:"), "{stdout}");
 }
 

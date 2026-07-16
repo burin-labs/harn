@@ -36,10 +36,10 @@ pub struct TestResult {
     /// human-readable error text.
     pub timeout: Option<TestTimeout>,
     pub duration_ms: u64,
-    /// Per-phase timings. Populated by `execute_case`; default-zero on
-    /// discovery/worker-error rows. Used by `--diagnose` and the
-    /// `--timing` aggregate.
-    pub phases: PhaseTimings,
+    /// Per-phase timings for an executed case. Discovery and worker-start
+    /// errors have no execution timeline and leave this absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phases: Option<PhaseTimings>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -104,7 +104,7 @@ pub struct AggregateTimings {
 
 impl AggregateTimings {
     fn from_results(collection_ms: u64, results: &[TestResult]) -> Self {
-        results.iter().map(|r| r.phases).fold(
+        results.iter().filter_map(|result| result.phases).fold(
             Self {
                 collection_ms,
                 ..Self::default()
@@ -127,18 +127,21 @@ impl TestResult {
     /// machine-readable so downstream eval pipelines can grep it.
     fn emit_diagnose(&self) {
         let outcome = if self.passed { "ok" } else { "FAIL" };
+        let phases = self
+            .phases
+            .expect("diagnostics are emitted only for executed cases");
         eprintln!(
             "[harn test diag] {} {} setup={}ms compile={}ms execute={}ms teardown={}ms module_compile={}ms module_load={}ms modules_compiled={} modules_loaded={} total={}ms",
             outcome,
             self.name,
-            self.phases.setup_ms,
-            self.phases.compile_ms,
-            self.phases.execute_ms,
-            self.phases.teardown_ms,
-            self.phases.modules.module_compile_ms,
-            self.phases.modules.module_load_ms,
-            self.phases.modules.modules_compiled,
-            self.phases.modules.modules_loaded,
+            phases.setup_ms,
+            phases.compile_ms,
+            phases.execute_ms,
+            phases.teardown_ms,
+            phases.modules.module_compile_ms,
+            phases.modules.module_load_ms,
+            phases.modules.modules_compiled,
+            phases.modules.modules_loaded,
             self.duration_ms,
         );
     }
@@ -745,7 +748,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     error: Some(format!("Failed to read {}: {e}", file.display())),
                     timeout: None,
                     duration_ms: 0,
-                    phases: PhaseTimings::default(),
+                    phases: None,
                 });
                 continue;
             }
@@ -761,7 +764,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     error: Some(e),
                     timeout: None,
                     duration_ms: 0,
-                    phases: PhaseTimings::default(),
+                    phases: None,
                 });
                 continue;
             }
@@ -783,7 +786,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                 error: Some(error),
                 timeout: None,
                 duration_ms: 0,
-                phases: PhaseTimings::default(),
+                phases: None,
             }),
         }
     }
@@ -1233,7 +1236,7 @@ async fn execute_cases(
                             error: Some(format!("failed to start test runtime: {error}")),
                             timeout: None,
                             duration_ms: 0,
-                            phases: PhaseTimings::default(),
+                            phases: None,
                         });
                         return;
                     }
@@ -1323,6 +1326,9 @@ fn enforce_case_budgets(
         return result;
     }
 
+    let phases = result
+        .phases
+        .expect("passed test results always carry measured phases");
     let mut violations = Vec::new();
     if let Some(max_ms) = max_test_ms {
         if result.duration_ms > max_ms {
@@ -1333,10 +1339,10 @@ fn enforce_case_budgets(
         }
     }
     if let Some(max_ms) = max_execute_ms {
-        if result.phases.execute_ms > max_ms {
+        if phases.execute_ms > max_ms {
             violations.push(format!(
                 "exceeded test execute budget: {}ms > {}ms",
-                result.phases.execute_ms, max_ms
+                phases.execute_ms, max_ms
             ));
         }
     }
@@ -1347,10 +1353,10 @@ fn enforce_case_budgets(
 
     violations.push(format!(
         "phase timings: setup={}ms compile={}ms execute={}ms teardown={}ms total={}ms",
-        result.phases.setup_ms,
-        result.phases.compile_ms,
-        result.phases.execute_ms,
-        result.phases.teardown_ms,
+        phases.setup_ms,
+        phases.compile_ms,
+        phases.execute_ms,
+        phases.teardown_ms,
         result.duration_ms
     ));
     result.passed = false;

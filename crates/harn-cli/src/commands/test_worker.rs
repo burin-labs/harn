@@ -392,13 +392,13 @@ mod tests {
                         limit_ms: 10,
                     }),
                     duration_ms: 12,
-                    phases: crate::test_runner::PhaseTimings {
+                    phases: Some(crate::test_runner::PhaseTimings {
                         setup_ms: 1,
                         compile_ms: 1,
                         execute_ms: 10,
                         teardown_ms: 0,
                         modules: harn_vm::ModulePhaseStats::default(),
-                    },
+                    }),
                 }],
                 passed: 0,
                 failed: 1,

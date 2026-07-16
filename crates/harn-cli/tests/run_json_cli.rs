@@ -498,6 +498,10 @@ pipeline main(_) {
         ]
     );
     assert_eq!(phases[2]["cache"], "miss");
+    assert!(phases[..5].iter().all(|phase| phase["kind"] == "top_level"));
+    assert!(phases[5..]
+        .iter()
+        .all(|phase| phase["kind"] == "attribution"));
     assert!(phases[4]["events"].as_u64().is_some(), "{phase}");
 }
 

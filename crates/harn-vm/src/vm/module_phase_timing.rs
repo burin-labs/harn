@@ -197,14 +197,36 @@ mod tests {
 
         let recorder = vm.enable_module_phase_timing();
         let child = vm.child_vm();
-        let child_recorder = child
-            .module_phase_recorder
-            .as_ref()
-            .expect("child inherits recorder");
-        child_recorder.record_module_loaded();
+        std::thread::spawn(move || child.record_module_loaded())
+            .join()
+            .expect("child records from another thread");
 
         assert_eq!(recorder.snapshot().modules_loaded, 1);
         assert!(vm.baseline().instantiate().module_phase_recorder.is_none());
+    }
+
+    #[test]
+    fn cancelled_span_releases_its_recorder_handle() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+        let recorder = ModulePhaseRecorder::new();
+        let task_recorder = recorder.clone();
+
+        runtime.block_on(async {
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            let task = tokio::spawn(async move {
+                let _span = task_recorder.load_span();
+                let _ = started_tx.send(());
+                std::future::pending::<()>().await;
+            });
+            started_rx.await.expect("span starts");
+            task.abort();
+            assert!(task.await.expect_err("task is cancelled").is_cancelled());
+        });
+
+        assert_eq!(Arc::strong_count(&recorder.inner), 1);
     }
 
     #[test]

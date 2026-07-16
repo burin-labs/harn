@@ -142,7 +142,7 @@ pub(super) fn user_test_report_from_summary(
             outcome,
             duration_ms: result.duration_ms,
             timeout: result.timeout,
-            phases: Some(result.phases),
+            phases: result.phases,
             message: result.error.clone(),
         });
     }
@@ -305,21 +305,32 @@ mod tests {
             ..PhaseTimings::default()
         };
         let summary = test_runner::TestSummary {
-            results: vec![TestResult {
-                name: "test_timeout".into(),
-                file: "/suite/test_timeout.harn".into(),
-                passed: false,
-                error: Some("execute phase timed out after 30ms".into()),
-                timeout: Some(TestTimeout {
-                    phase: TestPhase::Execute,
-                    limit_ms: 30,
-                }),
-                duration_ms: 30,
-                phases,
-            }],
+            results: vec![
+                TestResult {
+                    name: "test_timeout".into(),
+                    file: "/suite/test_timeout.harn".into(),
+                    passed: false,
+                    error: Some("execute phase timed out after 30ms".into()),
+                    timeout: Some(TestTimeout {
+                        phase: TestPhase::Execute,
+                        limit_ms: 30,
+                    }),
+                    duration_ms: 30,
+                    phases: Some(phases),
+                },
+                TestResult {
+                    name: "<file error>".into(),
+                    file: "/suite/broken.harn".into(),
+                    passed: false,
+                    error: Some("parse failed".into()),
+                    timeout: None,
+                    duration_ms: 0,
+                    phases: None,
+                },
+            ],
             passed: 0,
-            failed: 1,
-            total: 1,
+            failed: 2,
+            total: 2,
             duration_ms: 31,
             timing: DurationSummary::from_samples(&[30]),
             aggregate: AggregateTimings {
@@ -341,5 +352,6 @@ mod tests {
             value["cases"][0]["phases"]["modules"]["modules_compiled"],
             0
         );
+        assert!(value["cases"][1].get("phases").is_none());
     }
 }

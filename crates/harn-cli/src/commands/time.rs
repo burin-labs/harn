@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -50,6 +50,12 @@ pub struct RunTiming {
     pub(crate) module_phases: Option<harn_vm::ModulePhaseRecorder>,
 }
 
+pub(crate) fn record_run_setup_elapsed(timing: Option<&mut RunTiming>, started: Instant) {
+    if let Some(timing) = timing {
+        timing.run_setup = started.elapsed();
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct TimingReport {
     /// The wrapped subcommand. Always `"run"` today; future expansions
@@ -68,9 +74,20 @@ pub struct TimingReport {
     pub exit_code: i32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhaseRecordKind {
+    /// A mutually reconcilable component of run wall time.
+    TopLevel,
+    /// Diagnostic work attribution that overlaps top-level phases.
+    Attribution,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PhaseRecord {
     pub name: String,
+    /// Whether this row is additive top-level time or overlapping attribution.
+    pub kind: PhaseRecordKind,
     pub duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_bytes: Option<u64>,
@@ -271,11 +288,18 @@ fn render_human(report: &TimingReport) -> String {
     );
     let _ = writeln!(out, "\n  Phases:");
     for phase in &report.phases {
-        let suffix = match (phase.input_bytes, phase.cache.as_deref(), phase.events) {
-            (Some(bytes), _, _) => format!("  ({bytes} input bytes)"),
-            (_, Some(cache), _) => format!("  (cache {cache})"),
-            (_, _, Some(events)) => format!("  ({events} events)"),
-            _ => String::new(),
+        let suffix = if phase.kind == PhaseRecordKind::Attribution {
+            format!(
+                "  ({} events; attribution overlaps top-level)",
+                phase.events.unwrap_or_default()
+            )
+        } else {
+            match (phase.input_bytes, phase.cache.as_deref(), phase.events) {
+                (Some(bytes), _, _) => format!("  ({bytes} input bytes)"),
+                (_, Some(cache), _) => format!("  (cache {cache})"),
+                (_, _, Some(events)) => format!("  ({events} events)"),
+                _ => String::new(),
+            }
         };
         let _ = writeln!(
             out,
@@ -364,6 +388,7 @@ pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<P
     vec![
         PhaseRecord {
             name: "parse".into(),
+            kind: PhaseRecordKind::TopLevel,
             duration_ms: timing.parse.as_millis() as u64,
             input_bytes: if cache_hit {
                 None
@@ -375,6 +400,7 @@ pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<P
         },
         PhaseRecord {
             name: "typecheck".into(),
+            kind: PhaseRecordKind::TopLevel,
             duration_ms: timing.typecheck.as_millis() as u64,
             input_bytes: None,
             cache: None,
@@ -382,6 +408,7 @@ pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<P
         },
         PhaseRecord {
             name: "bytecode_compile".into(),
+            kind: PhaseRecordKind::TopLevel,
             duration_ms: timing.bytecode_compile.as_millis() as u64,
             input_bytes: None,
             cache: Some(if cache_hit {
@@ -393,6 +420,7 @@ pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<P
         },
         PhaseRecord {
             name: "run_setup".into(),
+            kind: PhaseRecordKind::TopLevel,
             duration_ms: timing.run_setup.as_millis() as u64,
             input_bytes: None,
             cache: None,
@@ -400,6 +428,7 @@ pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<P
         },
         PhaseRecord {
             name: "run_main".into(),
+            kind: PhaseRecordKind::TopLevel,
             duration_ms: timing.run_main.as_millis() as u64,
             input_bytes: None,
             cache: None,
@@ -409,6 +438,7 @@ pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<P
         // additive top-level phases.
         PhaseRecord {
             name: "module_compile".into(),
+            kind: PhaseRecordKind::Attribution,
             duration_ms: modules.module_compile_ms,
             input_bytes: None,
             cache: None,
@@ -416,6 +446,7 @@ pub(crate) fn build_phase_records(timing: &RunTiming, main_events: u64) -> Vec<P
         },
         PhaseRecord {
             name: "module_load".into(),
+            kind: PhaseRecordKind::Attribution,
             duration_ms: modules.module_load_ms,
             input_bytes: None,
             cache: None,
@@ -487,6 +518,7 @@ mod tests {
         assert_eq!(phases[2]["name"], "bytecode_compile");
         assert_eq!(phases[2]["cache"], "miss");
         assert_eq!(phases[5]["name"], "module_compile");
+        assert_eq!(phases[5]["kind"], "attribution");
         assert_eq!(phases[5]["events"], 0);
         assert!(phases[5].get("cache").is_none());
         assert_eq!(phases[6]["name"], "module_load");
@@ -515,6 +547,7 @@ mod tests {
         assert!(rendered.contains("parse"));
         assert!(rendered.contains("bytecode_compile"));
         assert!(rendered.contains("cache miss"));
+        assert!(rendered.contains("attribution overlaps top-level"));
         assert!(rendered.contains("claude-sonnet-4-6"));
         assert!(rendered.contains("mcp_call"));
     }
