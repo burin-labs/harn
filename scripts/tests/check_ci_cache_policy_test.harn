@@ -79,6 +79,16 @@ fn workflows() {
         },
       },
     },
+    "cli-cold-start-budget.yml": {
+      on: {schedule: [{cron: "17 11 * * *"}], workflow_dispatch: {}},
+      jobs: {
+        "cold-start-budget": {
+          if: "(github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))",
+          "timeout-minutes": 25,
+          steps: [{name: "Build release harn", "timeout-minutes": 20}],
+        },
+      },
+    },
   }
 }
 
@@ -157,5 +167,51 @@ pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(task) {
   const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
   assert(
     errors.contains("build-release-binaries.yml:cache_budget must fail when cache telemetry fails"),
+  )
+}
+
+pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(task) {
+  const invalid = {
+    ...workflows(),
+    "cli-cold-start-budget.yml": {
+      on: {
+        pull_request: {
+          paths: [
+            "Cargo.toml",
+            "crates/harn-cli/src/cli/**",
+            "perf/cli/**",
+            "scripts/bench_cli_cold_start.sh",
+            "scripts/bench_cli_cold_start.harn",
+            ".github/workflows/cli-cold-start-budget.yml",
+          ],
+        },
+        workflow_dispatch: {},
+      },
+      jobs: {
+        "cold-start-budget": {
+          if: "github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release/v')",
+          "timeout-minutes": 45,
+          steps: [{name: "Build release harn", "timeout-minutes": 40}],
+        },
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors
+      .contains(
+      "cli-cold-start-budget.yml must not run release-build cold-start benchmarks on pull_request",
+    ),
+  )
+  assert(errors.contains("cli-cold-start-budget.yml must keep a scheduled main-branch advisory run"))
+  assert(errors.contains("cli-cold-start-budget.yml:cold-start-budget must skip release manual refs"))
+  assert(
+    errors.contains("cli-cold-start-budget.yml:cold-start-budget must cap total runtime at 25 minutes"),
+  )
+  assert(
+    errors
+      .contains(
+      "cli-cold-start-budget.yml:cold-start-budget release build step must cap runtime at 20 minutes",
+    ),
   )
 }
