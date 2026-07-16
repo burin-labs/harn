@@ -15,6 +15,8 @@ impl PersonaValueSink for CapturingValueSink {
 fn binding() -> PersonaRuntimeBinding {
     PersonaRuntimeBinding {
         name: "merge_captain".to_string(),
+        autonomy_tier: crate::AutonomyTier::ActAuto,
+        execution_policy: Box::default(),
         template_ref: Some("software_factory@v0".to_string()),
         entry_workflow: "workflows/merge.harn#run".to_string(),
         schedules: vec!["*/30 * * * *".to_string()],
@@ -373,6 +375,8 @@ fn pr_metadata(repository: &str, number: &str) -> BTreeMap<String, String> {
 fn binding_named(name: &str) -> PersonaRuntimeBinding {
     PersonaRuntimeBinding {
         name: name.to_string(),
+        autonomy_tier: crate::AutonomyTier::ActAuto,
+        execution_policy: Box::default(),
         ..binding()
     }
 }

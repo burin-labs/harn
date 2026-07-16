@@ -6,9 +6,12 @@ async fn persona_dispatcher(
     module_path: &Path,
     function_name: &str,
     retry: TriggerRetryConfig,
+    execution_policy: crate::orchestration::CapabilityPolicy,
 ) -> (Arc<crate::event_log::AnyEventLog>, Dispatcher) {
     let persona = crate::PersonaRuntimeBinding {
         name: "merge_captain".to_string(),
+        autonomy_tier: crate::AutonomyTier::ActAuto,
+        execution_policy: Box::new(execution_policy),
         template_ref: Some("software_factory@v0".to_string()),
         entry_workflow: format!("{}#{function_name}", module_path.display()),
         schedules: Vec::new(),
@@ -78,8 +81,13 @@ pub pipeline run(event) {
 "#,
             )
             .expect("write persona workflow");
-            let (log, dispatcher) =
-                persona_dispatcher(&module_path, "run", TriggerRetryConfig::default()).await;
+            let (log, dispatcher) = persona_dispatcher(
+                &module_path,
+                "run",
+                TriggerRetryConfig::default(),
+                crate::orchestration::CapabilityPolicy::default(),
+            )
+            .await;
 
             let outcomes = dispatcher
                 .dispatch_event(trigger_event("issues.opened", "persona-success"))
@@ -127,6 +135,56 @@ pub pipeline run(event) {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn persona_dispatch_enforces_explicit_deny_all_capability_policy() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            crate::reset_thread_local_state();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let module_path = dir.path().join("restricted_persona.harn");
+            std::fs::write(
+                &module_path,
+                r#"
+import "std/triggers"
+
+pub pipeline run(_event) {
+  return llm_call("this call must never reach a provider", nil, {provider: "mock"})
+}
+"#,
+            )
+            .expect("write restricted persona workflow");
+            let (_log, dispatcher) = persona_dispatcher(
+                &module_path,
+                "run",
+                TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+                crate::orchestration::CapabilityPolicy {
+                    tools_restricted: true,
+                    capabilities_restricted: true,
+                    ..Default::default()
+                },
+            )
+            .await;
+
+            let outcomes = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "persona-policy-denial"))
+                .await
+                .expect("policy denial is recorded as a dispatch outcome");
+
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].status, DispatchStatus::Failed);
+            assert_eq!(outcomes[0].attempt_count, 1);
+            assert!(
+                outcomes[0].error.as_deref().is_some_and(|error| {
+                    error.contains("tool_rejected") && error.contains("llm.call ceiling")
+                }),
+                "{:?}",
+                outcomes[0].error
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn persona_dispatch_failure_records_failed_run_and_releases_lease() {
     let local = tokio::task::LocalSet::new();
     local
@@ -149,6 +207,7 @@ pub pipeline run(_event) {
                 &module_path,
                 "run",
                 TriggerRetryConfig::new(2, RetryPolicy::Linear { delay_ms: 0 }),
+                crate::orchestration::CapabilityPolicy::default(),
             )
             .await;
 
@@ -228,6 +287,7 @@ pub pipeline run(_event) {
                 &module_path,
                 "run",
                 TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+                crate::orchestration::CapabilityPolicy::default(),
             )
             .await;
             let binding =

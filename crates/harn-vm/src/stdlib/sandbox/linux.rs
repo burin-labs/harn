@@ -647,7 +647,7 @@ fn workspace_access(policy: &CapabilityPolicy) -> u64 {
         | LANDLOCK_ACCESS_FS_MAKE_SYM
         | LANDLOCK_ACCESS_FS_REFER
         | LANDLOCK_ACCESS_FS_TRUNCATE;
-    if policy.capabilities.is_empty() {
+    if !policy.capabilities_are_restricted() {
         return read_access | write_access;
     }
     let mut access = 0;
@@ -777,10 +777,12 @@ mod tests {
     fn linux_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
         CapabilityPolicy {
             tools: Vec::new(),
+            tools_restricted: false,
             capabilities: std::collections::BTreeMap::from([(
                 "workspace".to_string(),
                 ops.iter().map(|op| op.to_string()).collect(),
             )]),
+            capabilities_restricted: false,
             workspace_roots: vec!["/ws".to_string()],
             read_only_roots: Vec::new(),
             side_effect_level: Some("read_only".to_string()),

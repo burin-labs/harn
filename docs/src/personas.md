@@ -183,7 +183,16 @@ numeric budget, token, and runtime limits can only tighten, and repeated
 subsets of the exported grants. The matching `--no-*` flag selects an empty
 set. Model and receipt policy are inherited without overrides. Deactivation
 does not need the package to remain installed, so stale records are removable.
+A configured model implies the exported `llm.call` capability; selecting an
+empty capability set disables provider calls while retaining that model policy.
 The runtime lifecycle `--state-dir` flag does not relocate this project ledger.
+
+Runtime extension loading includes root personas plus dependency personas whose
+activation still matches the installed package content and exported policy.
+Package or policy drift fails closed with a reactivation diagnostic; installing
+or inspecting a package alone never registers its triggers. Activated personas
+keep their qualified identity in trigger bindings and lifecycle state, and an
+explicit handler may address one as `persona://agents/reviewer`.
 
 ## Trigger handlers
 
@@ -201,7 +210,7 @@ id = "merge-captain-pr-opened"
 kind = "webhook"
 provider = "github"
 match = { events = ["pr_opened"] }
-handler = "persona://merge_captain"
+handler = "persona://merge_captain" # or persona://agents/reviewer after activation
 ```
 
 ## Continuous runtime

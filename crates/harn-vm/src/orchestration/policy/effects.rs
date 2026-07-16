@@ -740,7 +740,7 @@ fn child_nodes(node: &SNode) -> Vec<&SNode> {
 }
 
 fn effect_allowed_by_ceiling(effect: &EffectRecord, ceiling: &CapabilityPolicy) -> bool {
-    if !ceiling.capabilities.is_empty() {
+    if ceiling.capabilities_are_restricted() {
         let (capability, op) = effect_capability_op(effect);
         let allowed = ceiling
             .capabilities

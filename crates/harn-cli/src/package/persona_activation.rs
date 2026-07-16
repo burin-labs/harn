@@ -34,6 +34,8 @@ pub enum PersonaActivationError {
         persona_id: String,
         integrity: String,
     },
+    #[error("activated persona '{persona_id}' is stale: {reason}; reactivate it before use")]
+    StaleActivation { persona_id: String, reason: String },
     #[error("invalid persona attenuation: {0}")]
     InvalidAttenuation(String),
     #[error(
@@ -237,6 +239,111 @@ pub fn activation_ledger_path(project_root: &Path) -> PathBuf {
     project_root.join(ACTIVATION_DIR).join(ACTIVATION_FILE)
 }
 
+pub(crate) fn materialize_activated_persona(
+    discovered: &DiscoverablePersona,
+    activation: &PersonaActivationRecord,
+) -> Result<PersonaManifestEntry, PersonaActivationError> {
+    let provenance = discovered
+        .installed_provenance()
+        .ok_or_else(|| PersonaActivationError::RootPersona(discovered.id.clone()))?;
+    if activation.persona_id != discovered.id {
+        return Err(stale_activation(
+            activation,
+            format!("resolved identity is '{}'", discovered.id),
+        ));
+    }
+    if provenance.integrity != "ok" {
+        return Err(PersonaActivationError::PackageIntegrity {
+            persona_id: discovered.id.clone(),
+            integrity: provenance.integrity.clone(),
+        });
+    }
+    for (field, pinned, current) in [
+        (
+            "package alias",
+            activation.package.alias.as_str(),
+            provenance.package_alias.as_str(),
+        ),
+        (
+            "content hash",
+            activation.package.content_hash.as_str(),
+            provenance.content_hash.as_deref().unwrap_or(""),
+        ),
+        (
+            "package source",
+            activation.package.source.as_str(),
+            provenance.source.as_str(),
+        ),
+    ] {
+        if pinned != current {
+            return Err(stale_activation(
+                activation,
+                format!("pinned {field} '{pinned}' changed to '{current}'"),
+            ));
+        }
+    }
+    if activation.package.version != provenance.package_version {
+        return Err(stale_activation(
+            activation,
+            format!(
+                "pinned package version {:?} changed to {:?}",
+                activation.package.version, provenance.package_version
+            ),
+        ));
+    }
+
+    let exported = effective_policy(&discovered.persona, provenance, &Default::default())?;
+    if policy_digest(&exported)? != activation.exported_policy_digest {
+        return Err(stale_activation(
+            activation,
+            "exported persona policy changed".to_string(),
+        ));
+    }
+    let effective = &activation.effective_policy;
+    let recomputed = effective_policy(
+        &discovered.persona,
+        provenance,
+        &PersonaAttenuation {
+            autonomy_tier: Some(effective.autonomy_tier),
+            daily_usd: effective.budget.daily_usd,
+            hourly_usd: effective.budget.hourly_usd,
+            run_usd: effective.budget.run_usd,
+            frontier_escalations: effective.budget.frontier_escalations,
+            max_tokens: effective.budget.max_tokens,
+            max_runtime_seconds: effective.budget.max_runtime_seconds,
+            tools: Some(effective.tools.clone()),
+            capabilities: Some(effective.capabilities.clone()),
+            permissions: Some(effective.permissions.clone()),
+            host_requirements: Some(effective.host_requirements.clone()),
+        },
+    )?;
+    if &recomputed != effective {
+        return Err(stale_activation(
+            activation,
+            "effective policy no longer attenuates the exported policy".to_string(),
+        ));
+    }
+
+    let mut persona = discovered.persona.clone();
+    persona.autonomy_tier = Some(effective.autonomy_tier);
+    persona.receipt_policy = Some(effective.receipt_policy);
+    persona.tools.clone_from(&effective.tools);
+    persona.capabilities.clone_from(&effective.capabilities);
+    persona.model_policy.clone_from(&effective.model_policy);
+    persona.budget.clone_from(&effective.budget);
+    Ok(persona)
+}
+
+fn stale_activation(
+    activation: &PersonaActivationRecord,
+    reason: String,
+) -> PersonaActivationError {
+    PersonaActivationError::StaleActivation {
+        persona_id: activation.persona_id.clone(),
+        reason,
+    }
+}
+
 fn activation_record(
     discovered: &DiscoverablePersona,
     attenuation: &PersonaAttenuation,
@@ -293,13 +400,14 @@ fn effective_policy(
     let receipt_policy = persona.receipt_policy.ok_or_else(|| {
         PersonaActivationError::InvalidAttenuation("exported receipt policy is missing".to_string())
     })?;
+    let exported_capabilities = normalized_persona_capabilities(persona);
     Ok(PersonaEffectivePolicy {
         autonomy_tier,
         receipt_policy,
         tools: attenuate_set("tool", &persona.tools, attenuation.tools.as_deref())?,
         capabilities: attenuate_set(
             "capability",
-            &persona.capabilities,
+            &exported_capabilities,
             attenuation.capabilities.as_deref(),
         )?,
         permissions: attenuate_set(
@@ -315,6 +423,17 @@ fn effective_policy(
         model_policy: persona.model_policy.clone(),
         budget: activation_budget(&persona.budget, attenuation)?,
     })
+}
+
+pub(crate) fn normalized_persona_capabilities(persona: &PersonaManifestEntry) -> Vec<String> {
+    let mut capabilities = persona.capabilities.clone();
+    if persona.model_policy.default_model.is_some()
+        || persona.model_policy.escalation_model.is_some()
+        || !persona.model_policy.fallback_models.is_empty()
+    {
+        capabilities.push("llm.call".to_string());
+    }
+    normalize_set(&capabilities)
 }
 
 fn activation_budget(

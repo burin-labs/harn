@@ -252,7 +252,17 @@ impl ProcessSandboxPolicy {
 #[serde(default)]
 pub struct CapabilityPolicy {
     pub tools: Vec<String>,
+    /// Whether `tools` is an authoritative allowlist even when it is empty.
+    /// Existing non-empty lists remain restrictive for wire compatibility;
+    /// `true` plus an empty list is the explicit deny-all representation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tools_restricted: bool,
     pub capabilities: BTreeMap<String, Vec<String>>,
+    /// Whether `capabilities` is authoritative even when empty. This keeps
+    /// the historical empty-map-as-unbounded default while allowing callers
+    /// such as persona attenuation to express an explicit deny-all ceiling.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub capabilities_restricted: bool,
     pub workspace_roots: Vec<String>,
     /// Roots the workload may read but never write. A path resolving
     /// under one of these passes read scope checks yet is rejected for
@@ -292,6 +302,22 @@ pub struct CapabilityPolicy {
 }
 
 impl CapabilityPolicy {
+    pub fn is_unbounded(&self) -> bool {
+        self == &Self::default()
+    }
+
+    pub fn tools_are_restricted(&self) -> bool {
+        self.tools_restricted || !self.tools.is_empty()
+    }
+
+    pub fn tool_pattern_allows(&self, tool: &str) -> bool {
+        !self.tools_are_restricted() || self.tools.iter().any(|pattern| glob_match(pattern, tool))
+    }
+
+    pub fn capabilities_are_restricted(&self) -> bool {
+        self.capabilities_restricted || !self.capabilities.is_empty()
+    }
+
     pub fn intersect(&self, requested: &CapabilityPolicy) -> Result<CapabilityPolicy, String> {
         let side_effect_level = match (&self.side_effect_level, &requested.side_effect_level) {
             (Some(a), Some(b)) => Some(min_side_effect(a, b).to_string()),
@@ -300,7 +326,9 @@ impl CapabilityPolicy {
             (None, None) => None,
         };
 
-        if !self.tools.is_empty() {
+        let self_tools_restricted = self.tools_are_restricted();
+        let requested_tools_restricted = requested.tools_are_restricted();
+        if self_tools_restricted {
             let denied: Vec<String> = requested
                 .tools
                 .iter()
@@ -319,7 +347,7 @@ impl CapabilityPolicy {
             if let Some(allowed_ops) = self.capabilities.get(capability) {
                 let denied: Vec<String> = requested_ops
                     .iter()
-                    .filter(|op| !allowed_ops.contains(*op))
+                    .filter(|op| !allowed_ops.is_empty() && !allowed_ops.contains(*op))
                     .cloned()
                     .collect();
                 if !denied.is_empty() {
@@ -329,16 +357,16 @@ impl CapabilityPolicy {
                         denied.join(",")
                     ));
                 }
-            } else if !self.capabilities.is_empty() {
+            } else if self.capabilities_are_restricted() {
                 return Err(format!(
                     "requested capability exceeds host ceiling: {capability}"
                 ));
             }
         }
 
-        let tools = if self.tools.is_empty() {
+        let tools = if !self_tools_restricted {
             requested.tools.clone()
-        } else if requested.tools.is_empty() {
+        } else if !requested_tools_restricted {
             self.tools.clone()
         } else {
             requested
@@ -349,9 +377,11 @@ impl CapabilityPolicy {
                 .collect()
         };
 
-        let capabilities = if self.capabilities.is_empty() {
+        let self_capabilities_restricted = self.capabilities_are_restricted();
+        let requested_capabilities_restricted = requested.capabilities_are_restricted();
+        let capabilities = if !self_capabilities_restricted {
             requested.capabilities.clone()
-        } else if requested.capabilities.is_empty() {
+        } else if !requested_capabilities_restricted {
             self.capabilities.clone()
         } else {
             requested
@@ -359,14 +389,18 @@ impl CapabilityPolicy {
                 .iter()
                 .filter_map(|(capability, requested_ops)| {
                     self.capabilities.get(capability).map(|allowed_ops| {
-                        (
-                            capability.clone(),
+                        let operations = if allowed_ops.is_empty() {
+                            requested_ops.clone()
+                        } else if requested_ops.is_empty() {
+                            allowed_ops.clone()
+                        } else {
                             requested_ops
                                 .iter()
                                 .filter(|op| allowed_ops.contains(*op))
                                 .cloned()
-                                .collect::<Vec<_>>(),
-                        )
+                                .collect()
+                        };
+                        (capability.clone(), operations)
                     })
                 })
                 .collect()
@@ -406,7 +440,10 @@ impl CapabilityPolicy {
 
         Ok(CapabilityPolicy {
             tools,
+            tools_restricted: self_tools_restricted || requested_tools_restricted,
             capabilities,
+            capabilities_restricted: self_capabilities_restricted
+                || requested_capabilities_restricted,
             workspace_roots,
             read_only_roots,
             side_effect_level,
@@ -429,7 +466,10 @@ impl CapabilityPolicy {
     /// empty `tools` / `workspace_roots` / `read_only_roots` / `capabilities`
     /// ceiling imposes no bound on that dimension, so anything passes.
     pub fn assert_within_ceiling(&self, requested: &CapabilityPolicy) -> Result<(), String> {
-        if !self.tools.is_empty() {
+        if self.tools_are_restricted() {
+            if !requested.tools_are_restricted() {
+                return Err("flattened stage policy dropped the stage tool ceiling".to_string());
+            }
             let widened: Vec<String> = requested
                 .tools
                 .iter()
@@ -444,12 +484,20 @@ impl CapabilityPolicy {
             }
         }
 
+        if self.capabilities_are_restricted() && !requested.capabilities_are_restricted() {
+            return Err("flattened stage policy dropped the stage capability ceiling".to_string());
+        }
         for (capability, requested_ops) in &requested.capabilities {
             match self.capabilities.get(capability) {
                 Some(allowed_ops) => {
+                    if requested_ops.is_empty() && !allowed_ops.is_empty() {
+                        return Err(format!(
+                            "flattened stage policy widened capability `{capability}` to every operation"
+                        ));
+                    }
                     let widened: Vec<String> = requested_ops
                         .iter()
-                        .filter(|op| !allowed_ops.contains(*op))
+                        .filter(|op| !allowed_ops.is_empty() && !allowed_ops.contains(*op))
                         .cloned()
                         .collect();
                     if !widened.is_empty() {
@@ -459,7 +507,7 @@ impl CapabilityPolicy {
                         ));
                     }
                 }
-                None if !self.capabilities.is_empty() => {
+                None if self.capabilities_are_restricted() => {
                     return Err(format!(
                         "flattened stage policy added capability `{capability}` beyond the stage grant"
                     ));
@@ -626,7 +674,8 @@ impl CapabilityPolicy {
         // lowered `side_effect_level` slips past the effect ceiling). For every
         // tool the ceiling still grants, its annotation must survive unchanged.
         let tool_still_granted = |tool: &str| {
-            requested.tools.is_empty() || requested.tools.iter().any(|granted| granted == tool)
+            !requested.tools_are_restricted()
+                || requested.tools.iter().any(|granted| granted == tool)
         };
         for (tool, annotation) in &self.tool_annotations {
             if !tool_still_granted(tool) {

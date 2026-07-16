@@ -45,6 +45,15 @@ pub struct PersonaBudgetPolicy {
 pub struct PersonaRuntimeBinding {
     pub name: String,
     #[serde(default)]
+    pub autonomy_tier: crate::trust_graph::AutonomyTier,
+    /// Persona-level authority ceiling applied to every workflow invocation.
+    /// It composes with the trigger tier and ambient host policy.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::orchestration::CapabilityPolicy::is_unbounded"
+    )]
+    pub execution_policy: Box<crate::orchestration::CapabilityPolicy>,
+    #[serde(default)]
     pub template_ref: Option<String>,
     pub entry_workflow: String,
     #[serde(default)]
