@@ -54,6 +54,7 @@ harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
 harn persona --manifest examples/personas/harn.toml inspect review_captain --json
 harn persona --manifest examples/personas/harn.toml inspect oncall_captain --json
 harn persona --manifest examples/personas/harn.toml status merge_captain --json
+harn persona doctor merge_captain --manifest examples/personas/harn.toml --json
 ```
 
 ## Smoke checks

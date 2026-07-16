@@ -1,3 +1,8 @@
+@persona(name: "oncall_captain")
+pub fn oncall_captain_persona(ctx) {
+  return build_verification_plan_step(ctx)
+}
+
 fn sample_incident() {
   return {
     service: "orchestrator-api",
@@ -8,9 +13,9 @@ fn sample_incident() {
   }
 }
 
-pipeline run(task) {
-  const incident = sample_incident()
-  const result = {
+@step(name: "build_verification_plan", approval: required, receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
+fn build_verification_plan_step(incident) {
+  return {
     persona: "oncall_captain",
     execution_mode: "dry_run",
     approval_required: true,
@@ -31,6 +36,10 @@ pipeline run(task) {
     },
     handoff: "review_captain",
   }
+}
+
+pipeline run(task) {
+  const result = build_verification_plan_step(sample_incident())
   __io_println(json_stringify(result))
   return result
 }
