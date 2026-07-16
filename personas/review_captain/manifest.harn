@@ -132,7 +132,7 @@ fn _resolve_policy(request) {
   return default_policy()
 }
 
-pub pipeline run(task) {
+pub pipeline run(task) -> dict {
   const request = _resolve_request()
   const policy = _resolve_policy(request)
   const receipt = review_pr(request, policy, nil)

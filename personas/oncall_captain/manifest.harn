@@ -76,7 +76,7 @@ fn _resolve_incident() {
   }
 }
 
-pub pipeline run(task) {
+pub pipeline run(task) -> dict {
   const incident = _resolve_incident()
   const result = {
     persona: "oncall_captain",

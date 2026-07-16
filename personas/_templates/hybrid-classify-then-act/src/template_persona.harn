@@ -45,6 +45,6 @@ fn act_on_classification(classified) {
   return wrapped()
 }
 
-pub pipeline run(task) {
+pub pipeline run(task) -> dict {
   return template_persona(task)
 }
