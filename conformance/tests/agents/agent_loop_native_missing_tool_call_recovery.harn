@@ -17,12 +17,22 @@ fn edit_tools() {
 
 fn intended_edit_classifier() {
   return {
-    classifier: { _payload -> return {
-      action: "tool_call_intended",
-      tool_name: "edit",
-      confidence: 0.96,
-      evidence: "fixture classifier found a tool action",
-      language: "fixture",
+    classifier: { payload -> return if (payload?.iteration ?? 0) == 0 {
+      {
+        action: "tool_call_intended",
+        tool_name: "edit",
+        confidence: 0.96,
+        evidence: "fixture classifier found a tool action",
+        language: "fixture",
+      }
+    } else {
+      {
+        action: "no_tool_call_intended",
+        tool_name: "",
+        confidence: 0.96,
+        evidence: "fixture classifier found a final answer",
+        language: "fixture",
+      }
     } },
   }
 }
