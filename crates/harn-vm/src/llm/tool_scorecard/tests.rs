@@ -175,6 +175,7 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert!(case_ids.contains(&"single_tool_call"));
     assert!(case_ids.contains(&"large_string_argument"));
     assert!(case_ids.contains(&"tool_result_followup"));
+    assert!(case_ids.contains(&"signed_thinking_tool_result_followup"));
     assert!(case_ids.contains(&"done_sentinel"));
     assert_eq!(plan.case_count, plan.routes[0].cases.len());
     assert!(plan.required_case_count >= 7);
@@ -342,6 +343,33 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
             "--json".to_string(),
         ]
     );
+    let signed_thinking_case = plan.routes[0]
+        .cases
+        .iter()
+        .find(|case| case.id == "signed_thinking_tool_result_followup")
+        .expect("signed thinking follow-up case");
+    assert_eq!(signed_thinking_case.execution.status, "executable");
+    assert_eq!(
+        signed_thinking_case.execution.runner,
+        "provider_tool_probe_request"
+    );
+    assert_eq!(
+        signed_thinking_case.execution.command.as_ref().unwrap(),
+        &vec![
+            "harn".to_string(),
+            "provider".to_string(),
+            "tool-probe".to_string(),
+            "anthropic".to_string(),
+            "--model".to_string(),
+            "claude-sonnet-5".to_string(),
+            "--mode".to_string(),
+            "both".to_string(),
+            "--case".to_string(),
+            "signed_thinking_tool_result_followup".to_string(),
+            "--dry-run-request".to_string(),
+            "--json".to_string(),
+        ]
+    );
 }
 
 #[test]
@@ -355,6 +383,7 @@ fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
         "parallel_tool_calls",
         "large_string_argument",
         "tool_result_followup",
+        "signed_thinking_tool_result_followup",
     ] {
         let case = cases
             .iter()

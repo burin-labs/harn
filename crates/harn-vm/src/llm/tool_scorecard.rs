@@ -547,6 +547,28 @@ fn fixed_micro_cases_for_route(
             },
         },
         ToolScorecardPlanCase {
+            id: "signed_thinking_tool_result_followup",
+            description: "provider-native signed thinking replay adjacent to tool-use history",
+            requirement: "conditional",
+            requirement_reason: "thinking_signature_replay_for_reasoning_tool_models",
+            turn_count: 2,
+            batch_eligible: false,
+            probe_focus: vec![
+                "signed_thinking_replay",
+                "tool_result_adjacency",
+                "history_preservation",
+            ],
+            execution: if has_tool_surface
+                && signed_thinking_tool_history_supported(provider, model_id)
+            {
+                executable_signed_thinking_request_case(provider, model_id)
+            } else if !has_tool_surface {
+                not_applicable_case("route_declares_no_tool_surface")
+            } else {
+                not_applicable_case("route_has_no_signed_thinking_tool_history_surface")
+            },
+        },
+        ToolScorecardPlanCase {
             id: "no_tool_answer_or_refusal",
             description: "plain answer or refusal when no tool should be called",
             requirement: "required",
@@ -601,6 +623,19 @@ fn fixed_micro_cases_for_route(
     ]
 }
 
+fn signed_thinking_tool_history_supported(provider: &str, model: &str) -> bool {
+    let caps = crate::llm::capabilities::lookup(provider, model);
+    let thinking_capable = !caps.thinking_modes.is_empty()
+        || caps.interleaved_thinking_supported
+        || caps.reasoning_effort_supported;
+    thinking_capable
+        && (matches!(
+            caps.message_wire_format,
+            crate::llm::capabilities::WireDialect::Anthropic
+                | crate::llm::capabilities::WireDialect::Gemini
+        ) || provider == "vertex")
+}
+
 fn executable_tool_probe_case(
     provider: &str,
     model: &str,
@@ -622,6 +657,9 @@ fn executable_tool_probe_case(
             }
             ToolProbeCase::ToolResultFollowup => {
                 "harn provider tool-probe executes the tool-result follow-up continuation probe"
+            }
+            ToolProbeCase::SignedThinkingToolResultFollowup => {
+                "harn provider tool-probe renders the signed-thinking tool-result follow-up probe"
             }
             ToolProbeCase::NoToolAnswerOrRefusal => {
                 "harn provider tool-probe executes the no-tool direct-answer fixture"
@@ -655,6 +693,38 @@ fn executable_tool_probe_case(
             artifact_segment(provider),
             artifact_segment(model),
             probe_case_id
+        )),
+    }
+}
+
+fn executable_signed_thinking_request_case(
+    provider: &str,
+    model: &str,
+) -> ToolScorecardPlanCaseExecution {
+    let probe_case = ToolProbeCase::SignedThinkingToolResultFollowup;
+    ToolScorecardPlanCaseExecution {
+        status: "executable",
+        runner: "provider_tool_probe_request",
+        reason: "harn provider tool-probe --dry-run-request renders and validates provider-native signed-thinking tool-history replay without provider calls",
+        command: Some(vec![
+            "harn".to_string(),
+            "provider".to_string(),
+            "tool-probe".to_string(),
+            provider.to_string(),
+            "--model".to_string(),
+            model.to_string(),
+            "--mode".to_string(),
+            "both".to_string(),
+            "--case".to_string(),
+            probe_case.as_str().to_string(),
+            "--dry-run-request".to_string(),
+            "--json".to_string(),
+        ]),
+        artifact_hint: Some(format!(
+            "tool-probe-request-{}-{}-{}.json",
+            artifact_segment(provider),
+            artifact_segment(model),
+            probe_case.as_str()
         )),
     }
 }

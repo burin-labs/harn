@@ -8,6 +8,10 @@ use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
 use crate::llm::capabilities::WireDialect;
 use crate::llm_config;
 
+const ANTHROPIC_THINKING_SIGNATURE: &str = "harn-scorecard-anthropic-thinking-signature";
+const ANTHROPIC_REDACTED_THINKING_DATA: &str = "harn-scorecard-redacted-thinking-payload";
+const GEMINI_THOUGHT_SIGNATURE: &str = "harn-scorecard-gemini-thinking-signature";
+
 pub(super) fn probe_request_body(
     provider: &str,
     model: &str,
@@ -111,7 +115,7 @@ pub(super) fn probe_request_payload(
         reminder_lifecycle: Vec::new(),
         cli_llm_mock_scope: None,
     };
-    payload.messages = probe_messages(probe_case, marker);
+    payload.messages = probe_messages(provider, probe_case, marker);
     apply_request_profile(&mut payload, request_profile);
     Ok(payload)
 }
@@ -154,6 +158,9 @@ fn probe_prompt(probe_case: ToolProbeCase, marker: &str) -> String {
         ToolProbeCase::ToolResultFollowup => format!(
             "Call the {TOOL_PROBE_TOOL_NAME} tool exactly once with value {marker:?}. After the tool result arrives, reply with the exact text {marker:?} and do not call any tool again."
         ),
+        ToolProbeCase::SignedThinkingToolResultFollowup => format!(
+            "The previous assistant turn used signed thinking before calling {TOOL_PROBE_TOOL_NAME}. Continue after the tool result by replying with the exact text {marker:?} and do not call any tool again."
+        ),
         ToolProbeCase::NoToolAnswerOrRefusal => format!(
             "Do not call any tool. Reply with the exact text {marker:?} and nothing else."
         ),
@@ -166,7 +173,10 @@ fn probe_prompt(probe_case: ToolProbeCase, marker: &str) -> String {
     }
 }
 
-fn probe_messages(probe_case: ToolProbeCase, marker: &str) -> Vec<Value> {
+fn probe_messages(provider: &str, probe_case: ToolProbeCase, marker: &str) -> Vec<Value> {
+    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
+        return signed_thinking_probe_messages(provider, marker);
+    }
     if probe_case != ToolProbeCase::ToolResultFollowup {
         return vec![json!({"role": "user", "content": probe_prompt(probe_case, marker)})];
     }
@@ -190,6 +200,62 @@ fn probe_messages(probe_case: ToolProbeCase, marker: &str) -> Vec<Value> {
             "role": "tool",
             "name": TOOL_PROBE_TOOL_NAME,
             "tool_call_id": tool_call_id,
+            "content": json!({"value": marker}).to_string(),
+        }),
+    ]
+}
+
+fn signed_thinking_probe_messages(provider: &str, marker: &str) -> Vec<Value> {
+    let tool_call_id = "call_harn_tool_probe_thinking_1";
+    let prompt = probe_prompt(ToolProbeCase::SignedThinkingToolResultFollowup, marker);
+    if provider == "gemini" || provider == "vertex" {
+        return vec![
+            json!({"role": "user", "content": prompt}),
+            json!({
+                "role": "assistant",
+                "content": [{
+                    "functionCall": {
+                        "id": tool_call_id,
+                        "name": TOOL_PROBE_TOOL_NAME,
+                        "args": {"value": marker},
+                    },
+                    "thoughtSignature": GEMINI_THOUGHT_SIGNATURE,
+                }],
+            }),
+            json!({
+                "role": "tool",
+                "name": TOOL_PROBE_TOOL_NAME,
+                "tool_call_id": tool_call_id,
+                "content": json!({"value": marker}).to_string(),
+            }),
+        ];
+    }
+
+    vec![
+        json!({"role": "user", "content": prompt}),
+        json!({
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "thinking",
+                    "thinking": "Need the probe tool before answering.",
+                    "signature": ANTHROPIC_THINKING_SIGNATURE,
+                },
+                {
+                    "type": "redacted_thinking",
+                    "data": ANTHROPIC_REDACTED_THINKING_DATA,
+                },
+                {
+                    "type": "tool_use",
+                    "id": tool_call_id,
+                    "name": TOOL_PROBE_TOOL_NAME,
+                    "input": {"value": marker},
+                },
+            ],
+        }),
+        json!({
+            "role": "tool_result",
+            "tool_use_id": tool_call_id,
             "content": json!({"value": marker}).to_string(),
         }),
     ]
@@ -278,6 +344,13 @@ fn validate_openai_compat_probe_request(
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
+    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
+        issues.push(
+            "signed thinking replay request is not defined for OpenAI-compatible dialects"
+                .to_string(),
+        );
+        return;
+    }
     if !probe_case.request_uses_probe_tool() {
         reject_present(body, "/tools", "OpenAI-compatible no-tool request", issues);
         reject_present(
@@ -376,6 +449,16 @@ fn validate_anthropic_probe_request(
         "Anthropic tool declaration",
         issues,
     );
+    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
+        validate_anthropic_signed_thinking_history(body, issues);
+        reject_present(
+            body,
+            "/tool_choice",
+            "Anthropic signed-thinking follow-up request",
+            issues,
+        );
+        return;
+    }
     if probe_case.requires_probe_tool() {
         match request_profile {
             ToolProbeRequestProfile::CatalogDefault => {
@@ -421,6 +504,24 @@ fn validate_gemini_probe_request(
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/contents", issues);
+    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
+        require_string_eq(
+            body,
+            "/tools/0/functionDeclarations/0/name",
+            TOOL_PROBE_TOOL_NAME,
+            "Gemini function declaration name",
+            issues,
+        );
+        validate_gemini_signed_thinking_history(body, issues);
+        reject_present(
+            body,
+            "/toolConfig",
+            "Gemini signed-thinking follow-up request",
+            issues,
+        );
+        reject_present(body, "/tool_choice", "Gemini request", issues);
+        return;
+    }
     if !probe_case.request_uses_probe_tool() {
         reject_present(body, "/tools", "Gemini no-tool request", issues);
         reject_present(body, "/toolConfig", "Gemini no-tool request", issues);
@@ -476,6 +577,11 @@ fn validate_bedrock_probe_request(
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
+    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
+        issues
+            .push("signed thinking replay request is not defined for Bedrock Converse".to_string());
+        return;
+    }
     if !probe_case.request_uses_probe_tool() {
         reject_present(body, "/toolConfig", "Bedrock no-tool request", issues);
         return;
@@ -503,6 +609,11 @@ fn validate_ollama_probe_request(
     issues: &mut Vec<String>,
 ) {
     require_array(body, "/messages", issues);
+    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
+        issues
+            .push("signed thinking replay request is not defined for Ollama dialects".to_string());
+        return;
+    }
     if !probe_case.request_uses_probe_tool() {
         reject_present(body, "/tools", "Ollama no-tool request", issues);
         reject_present(body, "/tool_choice", "Ollama no-tool request", issues);
@@ -510,6 +621,121 @@ fn validate_ollama_probe_request(
     }
     require_openai_function_tool(body, "/tools/0", issues);
     reject_present(body, "/tool_choice", "Ollama request", issues);
+}
+
+fn validate_anthropic_signed_thinking_history(body: &Value, issues: &mut Vec<String>) {
+    require_string_eq(
+        body,
+        "/messages/1/role",
+        "assistant",
+        "Anthropic signed-thinking assistant role",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/messages/1/content/0/type",
+        "thinking",
+        "Anthropic thinking block type",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/messages/1/content/0/signature",
+        ANTHROPIC_THINKING_SIGNATURE,
+        "Anthropic thinking signature",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/messages/1/content/1/type",
+        "redacted_thinking",
+        "Anthropic redacted thinking block type",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/messages/1/content/1/data",
+        ANTHROPIC_REDACTED_THINKING_DATA,
+        "Anthropic redacted thinking data",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/messages/1/content/2/type",
+        "tool_use",
+        "Anthropic signed-thinking tool_use type",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/messages/1/content/2/name",
+        TOOL_PROBE_TOOL_NAME,
+        "Anthropic signed-thinking tool_use name",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/messages/2/role",
+        "user",
+        "Anthropic signed-thinking tool_result role",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/messages/2/content/0/type",
+        "tool_result",
+        "Anthropic signed-thinking tool_result type",
+        issues,
+    );
+    let tool_use_id = body
+        .pointer("/messages/1/content/2/id")
+        .and_then(Value::as_str);
+    let tool_result_id = body
+        .pointer("/messages/2/content/0/tool_use_id")
+        .and_then(Value::as_str);
+    if tool_use_id.is_none() || tool_use_id != tool_result_id {
+        issues.push(format!(
+            "Anthropic signed-thinking tool_result id must match tool_use id, got use={tool_use_id:?} result={tool_result_id:?}"
+        ));
+    }
+}
+
+fn validate_gemini_signed_thinking_history(body: &Value, issues: &mut Vec<String>) {
+    require_string_eq(
+        body,
+        "/contents/1/role",
+        "model",
+        "Gemini signed-thinking model role",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/contents/1/parts/0/thoughtSignature",
+        GEMINI_THOUGHT_SIGNATURE,
+        "Gemini thoughtSignature",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/contents/1/parts/0/functionCall/name",
+        TOOL_PROBE_TOOL_NAME,
+        "Gemini signed-thinking functionCall name",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/contents/2/role",
+        "user",
+        "Gemini signed-thinking functionResponse role",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/contents/2/parts/0/functionResponse/name",
+        TOOL_PROBE_TOOL_NAME,
+        "Gemini signed-thinking functionResponse name",
+        issues,
+    );
 }
 
 fn require_openai_function_tool(body: &Value, base: &str, issues: &mut Vec<String>) {
@@ -716,6 +942,100 @@ mod tests {
             "anthropic",
             "claude-3-5-haiku-20241022",
             super::super::ToolProbeCase::ToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            &body,
+        );
+        assert_eq!(
+            validation.status,
+            ToolConformanceRequestValidationStatus::Pass,
+            "{:?}",
+            validation.issues
+        );
+    }
+
+    #[test]
+    fn signed_thinking_followup_preserves_anthropic_replay_blocks() {
+        let body = probe_request_body(
+            "anthropic",
+            "claude-sonnet-5",
+            ToolProbeMode::NonStreaming,
+            super::super::ToolProbeCase::SignedThinkingToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            "thinking:case",
+        )
+        .expect("Anthropic signed-thinking request body");
+
+        assert_eq!(body["tools"][0]["name"], TOOL_PROBE_TOOL_NAME);
+        assert!(body.get("tool_choice").is_none());
+        assert_eq!(body["messages"][1]["content"][0]["type"], "thinking");
+        assert_eq!(
+            body["messages"][1]["content"][0]["signature"],
+            ANTHROPIC_THINKING_SIGNATURE
+        );
+        assert_eq!(
+            body["messages"][1]["content"][1]["type"],
+            "redacted_thinking"
+        );
+        assert_eq!(
+            body["messages"][1]["content"][1]["data"],
+            ANTHROPIC_REDACTED_THINKING_DATA
+        );
+        assert_eq!(body["messages"][1]["content"][2]["type"], "tool_use");
+        assert_eq!(body["messages"][2]["content"][0]["type"], "tool_result");
+        assert_eq!(
+            body["messages"][2]["content"][0]["tool_use_id"],
+            body["messages"][1]["content"][2]["id"]
+        );
+
+        let validation = validate_probe_request_body(
+            "anthropic",
+            "claude-sonnet-5",
+            super::super::ToolProbeCase::SignedThinkingToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            &body,
+        );
+        assert_eq!(
+            validation.status,
+            ToolConformanceRequestValidationStatus::Pass,
+            "{:?}",
+            validation.issues
+        );
+    }
+
+    #[test]
+    fn signed_thinking_followup_preserves_gemini_thought_signature() {
+        let body = probe_request_body(
+            "gemini",
+            "gemini-2.5-flash",
+            ToolProbeMode::NonStreaming,
+            super::super::ToolProbeCase::SignedThinkingToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            "thinking:case",
+        )
+        .expect("Gemini signed-thinking request body");
+
+        assert_eq!(
+            body["tools"][0]["functionDeclarations"][0]["name"],
+            TOOL_PROBE_TOOL_NAME
+        );
+        assert!(body.get("toolConfig").is_none());
+        assert_eq!(
+            body["contents"][1]["parts"][0]["thoughtSignature"],
+            GEMINI_THOUGHT_SIGNATURE
+        );
+        assert_eq!(
+            body["contents"][1]["parts"][0]["functionCall"]["name"],
+            TOOL_PROBE_TOOL_NAME
+        );
+        assert_eq!(
+            body["contents"][2]["parts"][0]["functionResponse"]["name"],
+            TOOL_PROBE_TOOL_NAME
+        );
+
+        let validation = validate_probe_request_body(
+            "gemini",
+            "gemini-2.5-flash",
+            super::super::ToolProbeCase::SignedThinkingToolResultFollowup,
             super::super::ToolProbeRequestProfile::CatalogDefault,
             &body,
         );

@@ -370,6 +370,11 @@ pub(crate) enum ProviderToolProbeCaseArg {
     #[value(name = "tool_result_followup", alias = "tool-result-followup")]
     ToolResultFollowup,
     #[value(
+        name = "signed_thinking_tool_result_followup",
+        alias = "signed-thinking-tool-result-followup"
+    )]
+    SignedThinkingToolResultFollowup,
+    #[value(
         name = "no_tool_answer_or_refusal",
         alias = "no-tool-answer-or-refusal"
     )]
@@ -415,6 +420,9 @@ impl ProviderToolProbeCaseArg {
             }
             Self::ToolResultFollowup => {
                 harn_vm::llm::tool_conformance::ToolProbeCase::ToolResultFollowup
+            }
+            Self::SignedThinkingToolResultFollowup => {
+                harn_vm::llm::tool_conformance::ToolProbeCase::SignedThinkingToolResultFollowup
             }
             Self::NoToolAnswerOrRefusal => {
                 harn_vm::llm::tool_conformance::ToolProbeCase::NoToolAnswerOrRefusal
