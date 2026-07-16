@@ -452,6 +452,7 @@ done
 for expected in \
   "make check-language-spec" \
   "make check-highlight" \
+  "make check-cli-aot" \
   "make check-protocol-artifacts" \
   "make check-connector-schemas" \
   "make check-session-bundle-schema" \
@@ -637,6 +638,11 @@ if ! grep -Fq "dump-protocol-artifacts --artifact-version 1.2.4" "$audit_record"
   cat "$audit_record" >&2
   exit 1
 fi
+if ! grep -Fq "make gen-cli-aot" "$audit_record"; then
+  echo "release_gate full did not regenerate CLI AOT artifacts during prepare" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
 if ! grep -Fxq "publish --dry-run" "$audit_record"; then
   echo "release_gate full did not reach the publish dry run" >&2
   cat "$audit_record" >&2
@@ -650,6 +656,11 @@ preserved_harn="$(grep -F "dump-protocol-artifacts --artifact-version 1.2.4" "$a
 FAKE_WARMED_HARN_VERSION=1.2.3 run_audit bumped-metadata --receipt "$receipt"
 if ! grep -Fq "make check-protocol-artifacts HARN_PROTOCOL_ARTIFACT_VERSION=1.2.4" "$audit_record"; then
   echo "release audit did not check bumped protocol artifacts against the workspace version" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+if ! grep -Fq "make check-cli-aot" "$audit_record"; then
+  echo "release audit did not check bumped CLI AOT artifacts before the binary workflow" >&2
   cat "$audit_record" >&2
   exit 1
 fi
