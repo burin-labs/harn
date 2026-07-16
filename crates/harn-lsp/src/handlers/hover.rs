@@ -16,12 +16,9 @@ use crate::HarnLsp;
 
 /// What the word under the cursor resolves to.
 ///
-/// Resolution is separated from rendering so it can be tested against the real
-/// code. It previously could not be: every hover test drove a copy of the
-/// scope-resolution loop that lived in the test module, so the order in which
-/// the handler consults builtins, keywords and symbols — the part that was
-/// wrong — had no coverage at all. A test that mirrors its subject passes when
-/// the subject is broken.
+/// Resolution is separated from rendering so hover tests drive the order in
+/// which the handler consults builtins, keywords and symbols, rather than a
+/// copy of it.
 #[derive(Debug, Clone)]
 pub(crate) enum HoverTarget {
     Builtin(String),

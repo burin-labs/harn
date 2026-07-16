@@ -88,9 +88,8 @@ mod tests {
     /// Resolve the hover target at the given 0-based line/column, through the
     /// real handler code.
     ///
-    /// Hover tests must call the production resolver. A test that re-implements
-    /// resolution cannot fail with the code it stands in for, so it cannot
-    /// cover the order in which builtins, keywords and symbols are consulted.
+    /// Hover tests call `resolve_hover_target` so they exercise the same
+    /// builtin/keyword/symbol ordering as the LSP handler.
     fn hover_target_at(source: &str, line: u32, col: u32) -> Option<HoverTarget> {
         let state = DocumentState::new(source.to_string());
         resolve_hover_target(source, &state.symbols, Position::new(line, col))
