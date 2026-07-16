@@ -70,23 +70,12 @@ if [[ ! -r "$changed_files" ]]; then
   exit 66
 fi
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
 release_metadata_only() {
-  local paths_file="$1"
-  local saw_path=false
-  local path
-  while IFS= read -r path || [[ -n "$path" ]]; do
-    path="${path#./}"
-    [[ -z "$path" ]] && continue
-    saw_path=true
-    case "$path" in
-      CHANGELOG.md | Cargo.lock | Cargo.toml | changelog.d/* | conformance/protocols/fixtures/* | docs/src/embedding-rust.md | spec/acp-registry/* | spec/protocol-artifacts/*)
-        ;;
-      *)
-        return 1
-        ;;
-    esac
-  done < "$paths_file"
-  [[ "$saw_path" == true ]]
+  local result
+  result="$("$repo_root/scripts/ci_release_metadata_only.sh" "$1")"
+  [[ "$result" == "true" ]]
 }
 
 workflow_ranges() {
@@ -215,13 +204,13 @@ while IFS= read -r changed_path || [[ -n "$changed_path" ]]; do
   if [[ "$changed_path" == ".github/workflows/ci.yml" ]]; then
     case "$platform" in
       windows)
-        if ci_diff_touches_platform "windows-plan,windows"; then
+        if ci_diff_touches_platform "windows"; then
           echo true
           exit 0
         fi
         ;;
       macos)
-        if ci_diff_touches_platform "macos-plan,macos"; then
+        if ci_diff_touches_platform "macos"; then
           echo true
           exit 0
         fi

@@ -86,14 +86,26 @@ assert_plan false --platform macos --event pull_request --changed-files "$tmp_di
 write_diff windows.diff '@@ -7,1 +7,1 @@
 -      - run: echo windows route
 +      - run: echo windows route v2'
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows.diff"
+assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows.diff"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows.diff"
+
+write_diff windows_job.diff '@@ -10,1 +10,1 @@
+-      - run: cargo test --target windows
++      - run: cargo test --target windows --locked'
+assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows_job.diff"
+assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows_job.diff"
 
 write_diff macos.diff '@@ -13,1 +13,1 @@
 -      - run: echo macos route
 +      - run: echo macos route v2'
 assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos.diff"
-assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos.diff"
+assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos.diff"
+
+write_diff macos_job.diff '@@ -16,1 +16,1 @@
+-      - run: cargo clippy
++      - run: cargo clippy --locked'
+assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos_job.diff"
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos_job.diff"
 
 assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/missing.diff"
 
