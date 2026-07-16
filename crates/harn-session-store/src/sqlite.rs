@@ -694,7 +694,7 @@ impl SessionStore for SqliteSessionStore {
         for row in rows {
             events.push(row.map_err(map_sql)?);
         }
-        redact_stored_events(&self.hooks, &mut events);
+        redact_stored_events(&self.hooks, &mut events)?;
         let next_cursor = if events.len() as i64 == limit {
             events.last().map(|tail| tail.event_id + 1)
         } else {
