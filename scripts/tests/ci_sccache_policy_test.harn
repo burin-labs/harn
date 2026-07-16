@@ -43,8 +43,8 @@ fn workflow() {
   const rust = persistent_job(
     gha_expression(disable + " && 'ubuntu-latest' || matrix.runner"),
     gha_expression("matrix.cache_key"),
-    "matrix.kind != 'test' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-    "matrix.kind == 'test' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+    "matrix.kind == 'lint' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+    "matrix.kind != 'lint' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
   )
   return {
     jobs: {
@@ -61,7 +61,7 @@ fn workflow() {
             include: [
               {runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
               {runner: "ubuntu-latest", cache_key: "workspace-test"},
-              {runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-audit"},
+              {runner: "ubuntu-latest", cache_key: "workspace-audit"},
             ],
           },
         },

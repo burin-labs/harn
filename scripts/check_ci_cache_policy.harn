@@ -386,7 +386,7 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     workflow,
     "rust-builds",
     "matrix.runner",
-    "matrix.kind == 'test' || vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+    "matrix.kind != 'lint' || vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
   )
     + persistent_sccache_job_errors(
     workflow,
@@ -398,19 +398,20 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   const rust_sccache = matching_steps(rust_job, SCCACHE_ACTION)
   if len(rust_sccache) == 1 {
     const sticky_condition = trim(rust_sccache[0]?.with?.sticky ?? "")
-    if !contains(sticky_condition, "matrix.kind != 'test'")
+    if !contains(sticky_condition, "matrix.kind == 'lint'")
       || !contains(sticky_condition, BLACKSMITH_DISABLE_VAR) {
       errors = errors
-        + ["ci.yml:rust-builds must keep persistent storage off the GitHub-hosted Landlock test lane"]
+        + ["ci.yml:rust-builds must keep persistent storage on the compile-only lint lane"]
     }
   }
   const matrix = rust_job?.strategy?.matrix?.include ?? []
   const runners = matrix.map({ row -> trim(row?.runner ?? "") }).to_list()
   const cache_keys = matrix.map({ row -> trim(row?.cache_key ?? "") }).to_list()
   if runners
-    != ["blacksmith-4vcpu-ubuntu-2404", "ubuntu-latest", "blacksmith-8vcpu-ubuntu-2404"]
+    != ["blacksmith-4vcpu-ubuntu-2404", "ubuntu-latest", "ubuntu-latest"]
     || cache_keys != ["workspace-lint", "workspace-test", "workspace-audit"] {
-    errors = errors + ["ci.yml:rust-builds must keep distinct lane caches and policy-sized runners"]
+    errors = errors
+      + ["ci.yml:rust-builds must keep behavior proofs on GitHub Ubuntu and distinct lane caches"]
   }
   for step_name in [
     "Run affected-crate tests (PR fast feedback)",

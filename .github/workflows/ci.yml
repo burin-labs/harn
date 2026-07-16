@@ -394,7 +394,11 @@ jobs:
             rust_components: ""
           - kind: audit
             name: Harn conformance + audit
-            runner: blacksmith-8vcpu-ubuntu-2404
+            # Conformance exercises host-tool and sandbox semantics, including
+            # result capture behavior that differs on the Blacksmith image.
+            # Keep product-semantics proofs on the same GitHub Ubuntu contract
+            # as the Landlock escape suite.
+            runner: ubuntu-latest
             cache_key: workspace-audit
             # Full history + tags so the changelog retroactive-edit check can
             # traverse BASE..HEAD and inspect commit trailers.
@@ -425,9 +429,9 @@ jobs:
       - uses: ./.github/actions/sccache
         with:
           cache-key: ${{ matrix.cache_key }}
-          sticky: ${{ matrix.kind != 'test' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          sticky: ${{ matrix.kind == 'lint' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
       - uses: ./.github/actions/rust-cache
-        if: matrix.kind == 'test' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
+        if: matrix.kind != 'lint' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
         continue-on-error: true
         with:
           shared-key: ${{ matrix.cache_key }}
