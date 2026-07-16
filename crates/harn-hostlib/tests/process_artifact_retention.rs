@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime};
+use std::{process, process::Stdio};
 
 use filetime::FileTime;
 use harn_hostlib::process::{install_spawner, MockProcessConfig, MockSpawner};
@@ -12,6 +13,15 @@ use harn_vm::VmValue;
 use tempfile::tempdir;
 
 static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+struct ChildGuard(process::Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
 
 fn registry() -> BuiltinRegistry {
     let mut registry = BuiltinRegistry::new();
@@ -171,4 +181,63 @@ fn command_creation_pressure_sweeps_completed_siblings_from_current_process() {
     );
     let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
     assert_eq!(require_str(&read_resp, "content"), "new\n");
+}
+
+#[test]
+fn completed_artifacts_from_a_live_foreign_pid_do_not_starve_fresh_output() {
+    let _env_lock = ENV_LOCK.lock().expect("env lock poisoned");
+    let temp = tempdir().unwrap();
+    let _tmpdir_guard = TmpdirEnvGuard(std::env::var_os("TMPDIR"));
+    let _max_dirs_guard = EnvGuard::set("HARN_COMMAND_ARTIFACT_MAX_DIRS", "2");
+    let _retention_guard = EnvGuard::set("HARN_COMMAND_ARTIFACT_RETENTION_SECS", "3153600000");
+    std::env::set_var("TMPDIR", temp.path());
+
+    let mut live_owner = ChildGuard(
+        process::Command::new("sh")
+            .args(["-c", "read _"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let old = FileTime::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_mins(1));
+    for counter in 1..=2 {
+        let completed = temp.path().join(format!(
+            "harn-command-cmd_{}_100_{counter}",
+            live_owner.0.id()
+        ));
+        std::fs::create_dir(&completed).unwrap();
+        std::fs::write(completed.join("combined.txt"), "old").unwrap();
+        filetime::set_file_mtime(&completed, old).unwrap();
+    }
+
+    let spawner = Arc::new(MockSpawner::new());
+    let _guard = install_spawner(spawner.clone());
+    spawner.enqueue(MockProcessConfig::with_stdout(0, "fresh\n"));
+
+    let mut run_req = dict();
+    run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo fresh"]));
+    let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
+
+    let artifact_count = std::fs::read_dir(temp.path())
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("harn-command-cmd_")
+        })
+        .count();
+    assert_eq!(artifact_count, 2);
+
+    let mut read_req = dict();
+    read_req.insert(
+        "command_id".into(),
+        vstr(&require_str(&run_resp, "command_id")),
+    );
+    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    assert_eq!(require_str(&read_resp, "content"), "fresh\n");
+
+    drop(live_owner.0.stdin.take());
+    live_owner.0.wait().unwrap();
 }
