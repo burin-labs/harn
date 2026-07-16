@@ -107,11 +107,13 @@ impl AgentTerminalKind {
 /// callback `stop`) that must NOT be reported as a natural completion — that
 /// conflation is the Burin #4642 failure mode. Sourced from the loop's own
 /// terminal-`done` assignments and `__agent_loop_sealed_stop_reason`.
-const NATURAL_STOP_REASONS: [&str; 6] = [
+const NATURAL_STOP_REASONS: [&str; 8] = [
     "",
     "completed",
+    "natural",
     "post_edit_reverify",
     "repeated_verified_pass",
+    "required_tools_satisfied",
     "stalled_done_judge",
     "done",
 ];
@@ -264,8 +266,10 @@ mod tests {
         for reason in [
             "",
             "completed",
+            "natural",
             "post_edit_reverify",
             "repeated_verified_pass",
+            "required_tools_satisfied",
         ] {
             assert_eq!(
                 classify_agent_terminal("done", reason, false, None),

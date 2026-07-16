@@ -30,6 +30,7 @@ pipeline default() {
   const natural_checkpoint = terminal_checkpoint(natural.events)
   __io_println("natural=" + natural_checkpoint.terminal.kind)
   __io_println("natural_owner=" + natural_checkpoint.terminal.owner)
+  __io_println("natural_reason=" + natural_checkpoint.terminal.reason)
   __io_println("natural_status=" + natural_checkpoint.final_status)
   const policy = run_case(
     "terminal-policy-" + uuid(),
