@@ -37,6 +37,15 @@ fn action() {
     runs: {
       steps: [
         {
+          uses: "actions/cache/restore@exact-pin",
+          if: "inputs.broad-restore-prefix != ''",
+          "continue-on-error": true,
+          with: {
+            key: gha_expression("inputs.broad-restore-prefix") + gha_expression("github.sha"),
+            "restore-keys": gha_expression("inputs.broad-restore-prefix"),
+          },
+        },
+        {
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
           with: {"save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'")},
@@ -141,6 +150,26 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
     errors
       .contains(
       "build-release-binaries.yml:cache_budget must run ./scripts/report_ci_cache_budget.sh exactly once",
+    ),
+  )
+}
+
+pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(task) {
+  const invalid_action = {
+    runs: {
+      steps: [
+        {
+          uses: "Swatinem/rust-cache@exact-pin",
+          "continue-on-error": true,
+          with: {"save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'")},
+        },
+      ],
+    },
+  }
+  assert(
+    ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows())
+      .contains(
+      ".github/actions/rust-cache/action.yml must contain one pinned restore-only broad Rust cache fallback step",
     ),
   )
 }
