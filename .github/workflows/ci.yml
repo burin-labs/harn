@@ -74,6 +74,7 @@ jobs:
     outputs:
       merge_group_proven: ${{ steps.merge_group_proof.outputs.proven }}
       rust: ${{ steps.force.outputs.rust }}
+      package_audit: ${{ steps.force.outputs.package_audit }}
       portal: ${{ steps.surface_filter.outputs.portal }}
       docs_site: ${{ steps.surface_filter.outputs.docs_site }}
       prompt_prose: ${{ steps.surface_filter.outputs.prompt_prose }}
@@ -111,6 +112,19 @@ jobs:
               - 'scripts/allowed_long_strings.txt'
               - 'scripts/check_no_rust_prompt_prose.sh'
               - 'scripts/check_rust_prompt_prose.harn'
+            package_audit:
+              - '.github/workflows/ci.yml'
+              - 'Cargo.lock'
+              - 'Cargo.toml'
+              - 'crates/**'
+              - 'scripts/harn_bin.sh'
+              - 'scripts/release_audit_contract.harn'
+              - 'scripts/release_audit_contract.json'
+              - 'scripts/tests/release_audit_contract_test.harn'
+              - 'scripts/tests/verify_crate_packages_plan_test.harn'
+              - 'scripts/verify_crate_package_includes.harn'
+              - 'scripts/verify_crate_packages.sh'
+              - 'scripts/verify_crate_packages_plan.harn'
       - name: Detect release metadata-only PR
         id: release_metadata
         shell: bash
@@ -238,6 +252,7 @@ jobs:
         env:
           FORCE_MERGE_GROUP: ${{ github.event_name == 'merge_group' }}
           F_RUST: ${{ steps.filter.outputs.rust }}
+          F_PACKAGE_AUDIT: ${{ steps.surface_filter.outputs.package_audit }}
           MERGE_GROUP_PROVEN: ${{ steps.merge_group_proof.outputs.proven }}
           RELEASE_METADATA_ONLY: ${{ steps.release_metadata.outputs.release_metadata_only }}
           MERGE_GROUP_DOCS_ONLY_TAIL: ${{ steps.merge_group_tail.outputs.docs_only_tail }}
@@ -246,24 +261,29 @@ jobs:
           if [ "${MERGE_GROUP_PROVEN}" = "true" ]; then
             echo "::notice::changes: exact ${GITHUB_SHA} already passed this workflow on merge_group — skipping duplicate heavy push lanes"
             echo "rust=false" >> "$GITHUB_OUTPUT"
+            echo "package_audit=false" >> "$GITHUB_OUTPUT"
           elif [ "${FORCE_MERGE_GROUP}" = "true" ] && [ "${MERGE_GROUP_DOCS_ONLY_TAIL}" = "true" ]; then
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes for a proven docs-only merge-queue tail"
             echo "rust=false" >> "$GITHUB_OUTPUT"
+            echo "package_audit=false" >> "$GITHUB_OUTPUT"
           elif [ "${FORCE_MERGE_GROUP}" = "true" ]; then
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on"
             echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "package_audit=true" >> "$GITHUB_OUTPUT"
           elif [ "${RELEASE_METADATA_ONLY}" = "true" ]; then
             echo "::notice::changes: release metadata-only ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes"
             echo "rust=false" >> "$GITHUB_OUTPUT"
+            echo "package_audit=false" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — heavy Linux Rust lanes gated by paths filter (rust=${F_RUST})"
             echo "rust=${F_RUST}" >> "$GITHUB_OUTPUT"
+            echo "package_audit=${F_PACKAGE_AUDIT}" >> "$GITHUB_OUTPUT"
           fi
 
   fmt:
     name: Format check
-    # Runs `make fmt-check` + a small shell script; no compilation, no cache
-    # benefit, and no reason to wait for a scarce self-hosted runner.
+    # Runs `make fmt-check`; no compilation, no cache benefit, and no reason to
+    # wait for a scarce self-hosted runner.
     needs: changes
     if: needs.changes.outputs.merge_group_proven != 'true'
     runs-on: ubuntu-latest
@@ -276,9 +296,41 @@ jobs:
       - name: Run release format proof
         id: release-audit-format
         run: make fmt-check
+
+  package-audit:
+    name: Package audit
+    needs: changes
+    # Cargo package verification is a release/package correctness proof, not a
+    # formatting proof. Keep it out of the always-on fmt lane so workflow,
+    # docs, and prompt-only PRs do not pay a 9-minute cargo package/check tail.
+    # It still runs for package-relevant PRs and unconditionally on merge_group
+    # unless the speculative merge diff is a proven docs-only tail.
+    if: needs.changes.outputs.package_audit == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        continue-on-error: true
+      - uses: ./.github/actions/configure-cargo-sccache
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: package-audit
+          cache-on-failure: true
+          cache-bin: false
       - name: Check published crate packages
         id: release-audit-package
         run: ./scripts/verify_crate_packages.sh
+      - name: Stop sccache server
+        if: always()
+        shell: bash
+        run: '"${SCCACHE_PATH:-sccache}" --stop-server || true'
 
   lint-md:
     name: Markdown lint
@@ -1057,7 +1109,7 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [runner-availability, changes, fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
+    needs: [runner-availability, changes, fmt, package-audit, lint-md, rust-builds, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
         env:
@@ -1082,6 +1134,23 @@ jobs:
             && { [ "$merge_group_proven" != "true" ] || [ "$fmt_result" != "skipped" ]; }; then
             echo "::error::Format check failed or skipped without exact-SHA merge-group proof."
             exit 1
+          fi
+
+          # Package audit is package/release proof, not formatting proof. It
+          # runs for package-relevant PRs and merge_group events; skips are OK
+          # only when the changes job determined the package surface was not
+          # touched or when exact-SHA merge-group proof reuse is active.
+          package_audit_result="${{ needs['package-audit'].result }}"
+          package_audit_expected="${{ needs.changes.outputs.package_audit }}"
+          echo "Package audit: $package_audit_result"
+          if [ "$package_audit_result" != "success" ]; then
+            if [ "$package_audit_result" = "skipped" ] \
+              && { [ "$package_audit_expected" != "true" ] || [ "$merge_group_proven" = "true" ]; }; then
+              :
+            else
+              echo "::error::Package audit failed or skipped while package proof was required."
+              exit 1
+            fi
           fi
 
           # The heavy Linux Rust lanes (rust-builds, audit-scripts) skip on a
