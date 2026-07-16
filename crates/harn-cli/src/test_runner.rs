@@ -15,10 +15,12 @@ use crate::env_guard::ScopedEnvVar;
 use crate::CLI_RUNTIME_STACK_SIZE;
 
 mod execution;
+mod session;
 #[cfg(test)]
 mod tests;
 
 use execution::execute_case;
+pub use session::{TestRunSession, TestRunSessionStats};
 
 #[derive(Clone, Debug)]
 pub struct TestResult {
@@ -372,6 +374,19 @@ fn test_budget_ms_via_env(name: &str) -> Option<u64> {
 /// `TestRunEvent::SuiteDiscovered` so consumers can render their own
 /// banner instead of the runner printing to stdout directly.
 pub async fn run_tests_with_options(path: &Path, options: &RunOptions) -> TestSummary {
+    run_tests_with_session(path, options, &TestRunSession::default()).await
+}
+
+/// Run tests while retaining immutable prepared-module artifacts in `session`.
+///
+/// Callers that execute only once should use [`run_tests_with_options`]. Watch
+/// mode and long-lived hosts should retain one session for their desired cache
+/// lifetime and inspect [`TestRunSession::stats`] for reuse receipts.
+pub async fn run_tests_with_session(
+    path: &Path,
+    options: &RunOptions,
+    session: &TestRunSession,
+) -> TestSummary {
     // Default LLM provider to "mock" in test mode unless caller overrides.
     let _default_llm_provider = ScopedEnvVar::set_if_unset("HARN_LLM_PROVIDER", "mock");
     let _disable_llm_calls = ScopedEnvVar::set(harn_vm::llm::LLM_CALLS_DISABLED_ENV, "1");
@@ -434,7 +449,7 @@ pub async fn run_tests_with_options(path: &Path, options: &RunOptions) -> TestSu
     let mut all_results = discovery.discovery_errors;
     let total_tests = cases.len();
     if !options.fail_fast || all_results.is_empty() {
-        all_results.extend(execute_cases(cases, workers, options, total_tests).await);
+        all_results.extend(execute_cases(cases, workers, options, total_tests, session).await);
     }
 
     let total = all_results.len();
@@ -470,6 +485,26 @@ pub async fn run_test_file(
     execution_cwd: Option<&Path>,
     cli_skill_dirs: &[PathBuf],
 ) -> Result<Vec<TestResult>, String> {
+    run_test_file_with_session(
+        path,
+        filter,
+        timeout_ms,
+        execution_cwd,
+        cli_skill_dirs,
+        &TestRunSession::default(),
+    )
+    .await
+}
+
+/// Single-file test API that retains prepared artifacts across invocations.
+pub async fn run_test_file_with_session(
+    path: &Path,
+    filter: Option<&str>,
+    timeout_ms: u64,
+    execution_cwd: Option<&Path>,
+    cli_skill_dirs: &[PathBuf],
+    session: &TestRunSession,
+) -> Result<Vec<TestResult>, String> {
     let source =
         fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
     let program = parse_program(&source)?;
@@ -482,7 +517,7 @@ pub async fn run_test_file(
     let execution_cwd = execution_cwd
         .map(Path::to_path_buf)
         .unwrap_or_else(test_execution_cwd);
-    let prepared_module_cache = harn_vm::PreparedModuleCache::default();
+    let prepared_module_cache = session.prepared_module_cache(0);
     for case in cases {
         results.push(
             execute_case(
@@ -1046,13 +1081,14 @@ async fn execute_cases(
     workers: usize,
     options: &RunOptions,
     total_tests: usize,
+    session: &TestRunSession,
 ) -> Vec<TestResult> {
     if cases.is_empty() {
         return Vec::new();
     }
     let completed = Arc::new(Mutex::new(0usize));
     if workers <= 1 {
-        let prepared_module_cache = harn_vm::PreparedModuleCache::default();
+        let prepared_module_cache = session.prepared_module_cache(0);
         let mut results = Vec::with_capacity(cases.len());
         for case in cases {
             let cwd = case_execution_cwd(&case);
@@ -1113,11 +1149,11 @@ async fn execute_cases(
         let diagnose = options.diagnose;
         let fail_fast = options.fail_fast;
         let cancelled = Arc::clone(&cancelled);
+        let prepared_module_cache = session.prepared_module_cache(worker_idx);
         let handle = thread::Builder::new()
             .name(format!("harn-test-worker-{worker_idx}"))
             .stack_size(CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
-                let prepared_module_cache = harn_vm::PreparedModuleCache::default();
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()

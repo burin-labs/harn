@@ -400,6 +400,9 @@ harn test tests/ --coverage-out lcov.info  # also write an LCOV tracefile
 harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 ```
 
+Watch mode keeps immutable prepared module artifacts warm between reruns. Each
+test still receives a fresh VM, module state, and persistence root.
+
 | Flag | Description |
 |---|---|
 | `--filter <pattern>` | Only run tests matching pattern |

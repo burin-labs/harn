@@ -20,6 +20,8 @@ use crate::test_report::{self, TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
 use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness, ExecError};
 
+mod watch;
+
 pub(crate) async fn run_command(args: TestArgs) {
     if args.watch && (args.junit.is_some() || args.json_out.is_some()) {
         command_error(
@@ -233,7 +235,7 @@ async fn run_user_test_target(path: &str, args: &TestArgs, cli_skill_dirs: &[Pat
         cli_skill_dirs,
     };
     if args.watch {
-        run_watch_tests(path, run_args).await;
+        watch::run(path, run_args).await;
     } else {
         let coverage = (args.coverage || args.coverage_out.is_some()).then(|| CoverageOptions {
             out: args.coverage_out.clone(),
@@ -2162,6 +2164,14 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
     );
 }
 async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_runner::TestSummary {
+    run_user_tests_once_with_session(path, args, &test_runner::TestRunSession::default()).await
+}
+
+async fn run_user_tests_once_with_session(
+    path: &Path,
+    args: UserTestRunArgs<'_>,
+    session: &test_runner::TestRunSession,
+) -> test_runner::TestSummary {
     let options = test_runner::RunOptions {
         filter: args.filter.map(str::to_owned),
         timeout_ms: args.timeout_ms,
@@ -2177,7 +2187,7 @@ async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_run
         #[cfg(test)]
         setup_delay_ms: 0,
     };
-    let summary = test_runner::run_tests_with_options(path, &options).await;
+    let summary = test_runner::run_tests_with_session(path, &options, session).await;
     print_test_results(
         &summary,
         UserTestOutputOptions {
@@ -2624,58 +2634,6 @@ pub(crate) async fn run_conformance_determinism_tests(
         "\x1b[32m{passed} passed, {failed} failed, {} total\x1b[0m",
         passed + failed
     );
-}
-
-pub(crate) async fn run_watch_tests(path_str: &str, args: UserTestRunArgs<'_>) {
-    use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    let path = PathBuf::from(path_str);
-    if !path.exists() {
-        eprintln!("Path not found: {path_str}");
-        process::exit(1);
-    }
-
-    println!("Watching {path_str} for changes... (Ctrl+C to stop)\n");
-
-    run_user_tests_once(&path, args).await;
-
-    let (tx, rx) = mpsc::channel();
-    let mut watcher = RecommendedWatcher::new(tx, Config::default()).unwrap_or_else(|e| {
-        eprintln!("Failed to create file watcher: {e}");
-        process::exit(1);
-    });
-    watcher
-        .watch(&path, RecursiveMode::Recursive)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to watch {path_str}: {e}");
-            process::exit(1);
-        });
-
-    loop {
-        match rx.recv() {
-            Ok(Ok(event)) => {
-                let is_harn = event
-                    .paths
-                    .iter()
-                    .any(|p| p.extension().is_some_and(|e| e == "harn"));
-                if !is_harn {
-                    continue;
-                }
-
-                // Debounce: drain any additional events within 100ms.
-                while rx.recv_timeout(Duration::from_millis(100)).is_ok() {}
-
-                println!("\n\x1b[2m--- file changed, re-running tests ---\x1b[0m\n");
-                run_user_tests_once(&path, args).await;
-            }
-            Ok(Err(e)) => {
-                eprintln!("Watch error: {e}");
-            }
-            Err(_) => break,
-        }
-    }
 }
 
 #[cfg(test)]
