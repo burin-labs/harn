@@ -157,6 +157,34 @@ consume. It includes name, version, tools, capabilities, autonomy tier, model
 policy, budget, triggers, handoffs, context packs, evals, receipt policy, and
 manifest source.
 
+### Installed persona activation
+
+Personas exported by installed packages use qualified IDs such as
+`agents/reviewer`. Installation only makes them discoverable; it does not bind
+their schedules, triggers, or workflows. Activation is a separate,
+project-scoped authority decision:
+
+```bash
+harn persona activate agents/reviewer --json
+harn persona activate agents/reviewer --autonomy-tier suggest \
+  --daily-usd 5 --tool filesystem --no-capabilities --json
+harn persona activations --json
+harn persona deactivate agents/reviewer --json
+```
+
+Activation writes `.harn/personas/activations.json` beside the resolved root
+manifest using an exclusive lock and atomic replacement. Each record pins the
+installed package content hash, exported-policy digest, effective-policy
+digest, and a typed receipt. Repeating the same activation is idempotent.
+
+An activation may inherit or reduce authority. Autonomy can only move down,
+numeric budget, token, and runtime limits can only tighten, and repeated
+`--tool`, `--capability`, `--permission`, or `--host-requirement` flags select
+subsets of the exported grants. The matching `--no-*` flag selects an empty
+set. Model and receipt policy are inherited without overrides. Deactivation
+does not need the package to remain installed, so stale records are removable.
+The runtime lifecycle `--state-dir` flag does not relocate this project ledger.
+
 ## Trigger handlers
 
 Persona trigger names are first-class trigger registrations. A persona with

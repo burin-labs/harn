@@ -59,6 +59,78 @@ pub(crate) fn write_test_generation_lock(root: &Path, body: &str) {
     .unwrap();
 }
 
+pub(crate) fn persona_manifest(name: &str, entry_workflow: &str) -> String {
+    format!(
+        r#"[[personas]]
+name = "{name}"
+version = "1.2.3"
+description = "A package persona."
+entry_workflow = "{entry_workflow}"
+tools = ["filesystem", "shell"]
+capabilities = ["workspace.read_text"]
+autonomy_tier = "act_with_approval"
+receipt_policy = "required"
+model_policy = {{ default_model = "cheap", escalation_model = "frontier", fallback_models = ["backup"] }}
+budget = {{ daily_usd = 10.0, hourly_usd = 4.0, run_usd = 2.0, frontier_escalations = 3, max_tokens = 4096, max_runtime_seconds = 600 }}
+"#
+    )
+}
+
+pub(crate) fn install_test_persona_package(
+    root: &Path,
+    alias: &str,
+    locked_names: Vec<String>,
+    manifest_names: &[&str],
+) -> LockFile {
+    create_test_package_generation(root);
+    let mut lock = LockFile::default();
+    add_test_persona_package(root, &mut lock, alias, locked_names, manifest_names);
+    lock
+}
+
+pub(crate) fn add_test_persona_package(
+    root: &Path,
+    lock: &mut LockFile,
+    alias: &str,
+    locked_names: Vec<String>,
+    manifest_names: &[&str],
+) {
+    let packages = current_packages_dir(root);
+    let package_dir = packages.join(alias);
+    fs::create_dir_all(&package_dir).unwrap();
+    let mut manifest = format!("[package]\nname = \"{alias}\"\nversion = \"1.2.3\"\n\n");
+    for name in manifest_names {
+        manifest.push_str(&persona_manifest(name, "workflow.harn#run"));
+        manifest.push('\n');
+    }
+    fs::write(package_dir.join(MANIFEST), manifest).unwrap();
+    fs::write(
+        package_dir.join("workflow.harn"),
+        "pub pipeline run(task) -> dict { return {ok: true} }\n",
+    )
+    .unwrap();
+    let content_hash = compute_content_hash(&package_dir).unwrap();
+    lock.packages.push(LockEntry {
+        name: alias.to_string(),
+        source: format!("path+../{alias}"),
+        content_hash: Some(content_hash),
+        package_version: Some("1.2.3".to_string()),
+        exports: PackageLockExports {
+            personas: locked_names,
+            ..PackageLockExports::default()
+        },
+        permissions: vec![
+            "process:exec".to_string(),
+            "workspace:read_text".to_string(),
+        ],
+        host_requirements: vec!["workspace.read_text".to_string()],
+        ..LockEntry::default()
+    });
+    let body = toml::to_string_pretty(&lock).unwrap();
+    fs::write(root.join(LOCK_FILE), &body).unwrap();
+    write_test_generation_lock(root, &body);
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TriggerTables {
     #[serde(default)]

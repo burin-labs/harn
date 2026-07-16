@@ -594,6 +594,9 @@ harn persona list
 harn persona list --json
 harn persona inspect merge_captain
 harn persona inspect merge_captain --json
+harn persona activate agents/reviewer --autonomy-tier suggest --daily-usd 5 --json
+harn persona activations --json
+harn persona deactivate agents/reviewer --json
 harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
 harn persona --manifest examples/personas/harn.toml status merge_captain --json
 harn persona --manifest examples/personas/harn.toml tick merge_captain --json
@@ -611,7 +614,7 @@ harn persona --manifest examples/personas/harn.toml supervision tail \
 | Flag | Description |
 |---|---|
 | `--manifest <path>` | Use an explicit `harn.toml` path or directory containing one |
-| `--state-dir <dir>` | Store persona runtime events under a durable EventLog base directory, default `.harn/personas` |
+| `--state-dir <dir>` | Store persona runtime events under a durable EventLog base directory, default `.harn/personas`; installed-persona activations always remain project-scoped beside the root manifest |
 | `--json` | Emit stable JSON for list, inspect, status, controls, trigger, tick, and budget receipts. `supervision tail` always emits NDJSON frames and accepts `--json` for host symmetry |
 | `--persona <name>` | Filter `supervision tail` to one persona; omitted streams every persona in the local state directory |
 | `--since-event-id <N>` | Replay `supervision tail` frames with `event_id > N` |
@@ -621,6 +624,13 @@ harn persona --manifest examples/personas/harn.toml supervision tail \
 `harn persona` validates the manifest before printing. It rejects missing entry
 workflows, unknown capabilities, invalid budget fields, invalid schedules, and
 handoffs that point at undeclared personas.
+
+Installed package personas are addressed as `<package-alias>/<persona-name>`.
+`activate` writes an atomic project record that pins package and policy digests;
+its optional autonomy, budget, tool, capability, permission, and host-requirement
+flags may only reduce exported authority. `activations` lists those records and
+`deactivate` removes one even after its package has been removed. Package
+installation alone never activates a persona.
 
 Runtime commands append event-sourced lifecycle records to
 `persona.runtime.events`. `pause` queues matching trigger events,

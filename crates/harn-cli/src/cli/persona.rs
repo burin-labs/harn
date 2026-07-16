@@ -33,6 +33,12 @@ pub(crate) enum PersonaCommand {
     List(PersonaListArgs),
     /// Inspect one persona from the resolved harn.toml.
     Inspect(PersonaInspectArgs),
+    /// Activate an installed package persona with optional authority attenuation.
+    Activate(PersonaActivateArgs),
+    /// Deactivate an installed package persona for this project.
+    Deactivate(PersonaDeactivateArgs),
+    /// List project-scoped installed persona activations.
+    Activations(PersonaActivationsArgs),
     /// Query durable persona lifecycle, lease, budget, and queue status.
     Status(PersonaStatusArgs),
     /// Pause a persona; matching events queue until resume drains them.
@@ -120,6 +126,98 @@ pub(crate) struct PersonaInspectArgs {
     /// Persona name to inspect.
     pub name: String,
     /// Emit stable JSON for cloud platforms or other hosts.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaActivateArgs {
+    /// Qualified installed persona ID, for example `agents/reviewer`.
+    pub name: String,
+    /// Lower autonomy ceiling. Omit to inherit the exported tier.
+    #[arg(
+        long,
+        value_name = "TIER",
+        value_parser = ["shadow", "suggest", "act_with_approval", "act_auto"]
+    )]
+    pub autonomy_tier: Option<String>,
+    /// Lower daily cost ceiling in USD.
+    #[arg(long)]
+    pub daily_usd: Option<f64>,
+    /// Lower hourly cost ceiling in USD.
+    #[arg(long)]
+    pub hourly_usd: Option<f64>,
+    /// Lower per-run cost ceiling in USD.
+    #[arg(long)]
+    pub run_usd: Option<f64>,
+    /// Lower daily frontier-escalation ceiling.
+    #[arg(long)]
+    pub frontier_escalations: Option<u32>,
+    /// Lower token ceiling.
+    #[arg(long)]
+    pub max_tokens: Option<u64>,
+    /// Lower runtime ceiling in seconds.
+    #[arg(long)]
+    pub max_runtime_seconds: Option<u64>,
+    /// Retain one exported tool. Repeat to retain multiple tools.
+    #[arg(long = "tool", value_name = "NAME", conflicts_with = "no_tools")]
+    pub tools: Vec<String>,
+    /// Attenuate the persona to no tools.
+    #[arg(long, conflicts_with = "tools")]
+    pub no_tools: bool,
+    /// Retain one exported capability. Repeat to retain multiple capabilities.
+    #[arg(
+        long = "capability",
+        value_name = "NAME",
+        conflicts_with = "no_capabilities"
+    )]
+    pub capabilities: Vec<String>,
+    /// Attenuate the persona to no capabilities.
+    #[arg(long, conflicts_with = "capabilities")]
+    pub no_capabilities: bool,
+    /// Retain one package permission. Repeat to retain multiple permissions.
+    #[arg(
+        long = "permission",
+        value_name = "NAME",
+        conflicts_with = "no_permissions"
+    )]
+    pub permissions: Vec<String>,
+    /// Attenuate the persona to no package permissions.
+    #[arg(long, conflicts_with = "permissions")]
+    pub no_permissions: bool,
+    /// Retain one package host requirement. Repeat to retain multiple requirements.
+    #[arg(
+        long = "host-requirement",
+        value_name = "NAME",
+        conflicts_with = "no_host_requirements"
+    )]
+    pub host_requirements: Vec<String>,
+    /// Attenuate the persona to no package host requirements.
+    #[arg(long, conflicts_with = "host_requirements")]
+    pub no_host_requirements: bool,
+    /// RFC3339 timestamp to use for deterministic receipts.
+    #[arg(long, value_name = "RFC3339")]
+    pub at: Option<String>,
+    /// Emit a stable JSON receipt.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaDeactivateArgs {
+    /// Qualified installed persona ID, for example `agents/reviewer`.
+    pub name: String,
+    /// RFC3339 timestamp to use for deterministic receipts.
+    #[arg(long, value_name = "RFC3339")]
+    pub at: Option<String>,
+    /// Emit a stable JSON receipt.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaActivationsArgs {
+    /// Emit a stable JSON array.
     #[arg(long)]
     pub json: bool,
 }

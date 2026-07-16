@@ -22,6 +22,8 @@ pub(crate) struct InstalledPersonaProvenance {
     pub content_hash: Option<String>,
     pub integrity: String,
     pub source: String,
+    pub permissions: Vec<String>,
+    pub host_requirements: Vec<String>,
 }
 
 impl DiscoverablePersona {
@@ -53,6 +55,8 @@ impl DiscoverablePersona {
                 content_hash: entry.content_hash.clone(),
                 integrity: integrity.to_string(),
                 source: entry.source.clone(),
+                permissions: entry.permissions.clone(),
+                host_requirements: entry.host_requirements.clone(),
             }),
         }
     }
@@ -274,13 +278,20 @@ pub(crate) fn resolve_discoverable_persona(
     name: &str,
 ) -> Result<DiscoverablePersona, String> {
     let root = load_root_persona_catalog(manifest)?;
+    resolve_discoverable_persona_in_root(&root, name)
+}
+
+pub(crate) fn resolve_discoverable_persona_in_root(
+    root: &ResolvedPersonaManifest,
+    name: &str,
+) -> Result<DiscoverablePersona, String> {
     if let Some(persona) = root
         .personas
         .iter()
         .find(|persona| persona.name.as_deref() == Some(name))
         .cloned()
     {
-        return Ok(DiscoverablePersona::root(persona, &root));
+        return Ok(DiscoverablePersona::root(persona, root));
     }
     let Some((package_alias, persona_name)) = name.split_once('/') else {
         return Err(format!(
@@ -288,7 +299,7 @@ pub(crate) fn resolve_discoverable_persona(
             root.manifest_path.display()
         ));
     };
-    let installed = load_one_installed_catalog_for_root(&root, package_alias)?;
+    let installed = load_one_installed_catalog_for_root(root, package_alias)?;
     fail_on_catalog_issues(&installed.issues)?;
     installed
         .personas
@@ -297,7 +308,9 @@ pub(crate) fn resolve_discoverable_persona(
         .ok_or_else(|| format!("persona '{name}' is not exported by package {package_alias}"))
 }
 
-fn load_root_persona_catalog(manifest: Option<&Path>) -> Result<ResolvedPersonaManifest, String> {
+pub(crate) fn load_root_persona_catalog(
+    manifest: Option<&Path>,
+) -> Result<ResolvedPersonaManifest, String> {
     let result = if let Some(path) = manifest {
         load_personas_from_manifest_path(path).map(Some)
     } else {
