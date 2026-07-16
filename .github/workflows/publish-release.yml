@@ -381,9 +381,8 @@ jobs:
           fi
           echo "Publishing from $(git rev-parse --short HEAD) ($publish_ref)"
 
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: ./.github/actions/rust-toolchain
         with:
-          toolchain: stable
           components: clippy, rustfmt
 
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
