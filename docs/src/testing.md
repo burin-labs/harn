@@ -599,7 +599,8 @@ assert_matches(receipt.id, "^rcpt-\\d+$")
 
 ### Argument order
 
-Every assertion takes **the thing under test first**:
+Every assertion that weighs a subject against an expectation takes **the
+subject first**:
 
 ```harn
 assert_eq(actual, expected)
@@ -607,10 +608,17 @@ assert_matches(actual, pattern)
 assert_contains(haystack, needle)
 ```
 
-This matters more than it looks. Swap the arguments of an equality assertion
+This matters more than it looks. Swap the two values of an equality assertion
 and it still passes and fails in exactly the same cases — it just labels the
 two halves of every failure backwards, sending you to look for a bug in the
-value that was right all along. One rule, no exceptions.
+value that was right all along.
+
+That hazard is the whole reason for the rule, and it is why
+`assert_snapshot(name, actual)` is not an exception to it: a snapshot's
+expectation lives in a file, so its leading argument is an identifier naming
+*which* snapshot, not an expectation. A name and a value cannot be transposed,
+so there is no backwards failure to print. Where the hazard cannot occur, the
+rule has nothing to say.
 
 ### What a failure looks like
 
