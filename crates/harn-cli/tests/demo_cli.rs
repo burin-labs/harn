@@ -697,6 +697,29 @@ fn pub_type_exports_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn lexical_block_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("lexical-block");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "lexical-block demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("lexical_block_receipt"),
+        "lexical-block stdout missing receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"events\":[\"body:inner\",\"cleanup\",\"outer:outer\"]")
+            && outcome.stdout.contains("\"outer_value\":\"outer\""),
+        "block cleanup and shadowing must end at the explicit boundary:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn catalog_patch_models_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("catalog-patch-models");
     assert_eq!(

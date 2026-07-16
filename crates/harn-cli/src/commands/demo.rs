@@ -283,6 +283,17 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/destructure-with-defaults/tape.jsonl"),
     },
     Scenario {
+        id: "lexical-block",
+        title: "`block` bounds shadowing, cleanup, and owned lifetimes",
+        description: "Use an explicit `block { ... }` to create a lexical lifetime without a \
+                      control-flow condition: shadow an outer binding, run deferred cleanup at \
+                      the block boundary, then prove the outer binding is visible again. This is \
+                      the direct lifetime primitive for owned resources that previously required \
+                      a helper function. Fully offline — no LLM, network, or subprocess.",
+        script: include_str!("../../assets/demo/lexical-block/scenario.harn"),
+        tape: include_str!("../../assets/demo/lexical-block/tape.jsonl"),
+    },
+    Scenario {
         id: "pub-type-exports",
         title: "`pub type` shares one alias across modules, annotations, and output_schema",
         description: "Export a type alias from one module and consume it from another: the \
