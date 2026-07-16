@@ -1,0 +1,6 @@
+natural=natural
+natural_owner=agent
+natural_status=done
+policy=policy_stop
+policy_owner=policy
+policy_reason=fixture_policy_stop

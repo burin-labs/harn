@@ -854,6 +854,21 @@ async fn host_agent_session_finalize(
             stop_reason.clone()
         },
     );
+    // The returned agent-loop dict already carries this typed terminal outcome,
+    // but ACP clients only receive the protocol's coarse `stopReason`. Publish
+    // the same producer-owned value on the existing typed-checkpoint extension
+    // stream before the prompt response lands so thin hosts can distinguish a
+    // natural completion from a policy/budget/error stop without reclassifying
+    // `final_status` or parsing callback prose.
+    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TypedCheckpoint {
+        session_id: session_id.clone(),
+        checkpoint: serde_json::json!({
+            "schema": "harn.agent_terminal.v1",
+            "terminal": terminal_outcome.to_json(),
+            "final_status": canonical_status,
+            "stop_reason": stop_reason,
+        }),
+    });
     let trace_summary = super::trace::agent_trace_summary();
     let result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
