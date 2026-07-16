@@ -1712,6 +1712,66 @@ mod tests {
         assert!(imported.contains("exported_capability"));
     }
 
+    /// Many files under one project root cost one acquire, not one per file.
+    ///
+    /// The walk is a handful of stats; the acquire canonicalizes, takes two
+    /// shared flocks, parses two TOML files and re-reads plus SHA256s the
+    /// lockfile. Deduping roots AFTER acquiring — as this did — paid the
+    /// expensive half once per file and discarded all but one result. Every
+    /// real graph build resolves many files under a single root, so the waste
+    /// was the common case, not the edge case.
+    #[test]
+    fn many_files_under_one_root_acquire_a_single_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        package_fixture(root);
+        let files: Vec<PathBuf> = (0..8)
+            .map(|i| write_file(root, &format!("entry{i}.harn"), ""))
+            .collect();
+
+        let (snapshots, walks, acquires) =
+            probe_counter::count_walks_and_acquires(|| acquire_package_snapshots(&files));
+
+        assert_eq!(snapshots.len(), 1, "one root must yield one snapshot");
+        assert_eq!(walks, 8, "each file still needs its own cheap root walk");
+        assert_eq!(
+            acquires, 1,
+            "the expensive acquire ran once per file instead of once per root"
+        );
+    }
+
+    /// Distinct roots must still each get their own snapshot — otherwise the
+    /// dedup above could 'pass' by never acquiring at all.
+    #[test]
+    fn distinct_roots_each_acquire_their_own_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("first");
+        let second = tmp.path().join("second");
+        for root in [&first, &second] {
+            fs::create_dir_all(root).unwrap();
+            fs::write(root.join(".git"), "").unwrap();
+            package_fixture(root);
+        }
+        let files = vec![
+            write_file(&first, "a.harn", ""),
+            write_file(&first, "b.harn", ""),
+            write_file(&second, "c.harn", ""),
+        ];
+
+        let (snapshots, _, acquires) =
+            probe_counter::count_walks_and_acquires(|| acquire_package_snapshots(&files));
+
+        assert_eq!(
+            snapshots.len(),
+            2,
+            "each distinct root must yield a snapshot"
+        );
+        assert_eq!(
+            acquires, 2,
+            "one acquire per distinct root, no more, no fewer"
+        );
+    }
+
     /// Only a package import can be answered by a package, so only a package
     /// import may pay to find one.
     ///

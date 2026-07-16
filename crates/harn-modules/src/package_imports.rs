@@ -92,14 +92,34 @@ pub(crate) fn resolve_import_path_with_snapshots(
     }
 }
 
+/// Acquire one snapshot per DISTINCT project root among `files`.
+///
+/// Dedupe on the root before acquiring, not after. Acquiring is the expensive
+/// half — canonicalize, two shared flocks, two TOML parses, and a re-read plus
+/// SHA256 of the lockfile — so acquiring per file and discarding the duplicates
+/// made a whole-tree build pay it once per FILE. Every real invocation resolves
+/// many files under a single root, so all but one of those was thrown away.
 pub(crate) fn acquire_package_snapshots(files: &[PathBuf]) -> Vec<PackageSnapshot> {
-    let mut roots = HashSet::new();
+    let mut walked_roots = HashSet::new();
+    let mut canonical_roots = HashSet::new();
     let mut snapshots = Vec::new();
     for file in files {
-        let Ok(Some(snapshot)) = PackageSnapshot::acquire_nearest(file) else {
+        // Cheap: a handful of stats up the ancestors.
+        let Some(root) = PackageSnapshot::nearest_project_root(file) else {
             continue;
         };
-        if roots.insert(snapshot.project_root().to_path_buf()) {
+        if !walked_roots.insert(root.clone()) {
+            continue;
+        }
+        // Expensive: reached at most once per distinct walked root.
+        let Ok(Some(snapshot)) = PackageSnapshot::acquire(&root) else {
+            continue;
+        };
+        // `acquire` canonicalizes, so two walked roots that differ only by
+        // symlink can still land on one real root. Dedupe on the canonical
+        // root as the original did, or such a tree would get two snapshots
+        // where it used to get one.
+        if canonical_roots.insert(snapshot.project_root().to_path_buf()) {
             snapshots.push(snapshot);
         }
     }
