@@ -284,10 +284,10 @@ const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         id: "lexical-block",
-        title: "`block` bounds shadowing, cleanup, and owned lifetimes",
+        title: "`block` bounds cleanup and owned lifetimes",
         description: "Use an explicit `block { ... }` to create a lexical lifetime without a \
-                      control-flow condition: shadow an outer binding, run deferred cleanup at \
-                      the block boundary, then prove the outer binding is visible again. This is \
+                      control-flow condition: keep inner bindings scoped, run deferred cleanup at \
+                      the block boundary, then continue with outer state. This is \
                       the direct lifetime primitive for owned resources that previously required \
                       a helper function. Fully offline — no LLM, network, or subprocess.",
         script: include_str!("../../assets/demo/lexical-block/scenario.harn"),

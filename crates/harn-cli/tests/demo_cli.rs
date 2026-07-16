@@ -714,7 +714,7 @@ fn lexical_block_demo_runs_end_to_end_against_bundled_tape() {
             .stdout
             .contains("\"events\":[\"body:inner\",\"cleanup\",\"outer:outer\"]")
             && outcome.stdout.contains("\"outer_value\":\"outer\""),
-        "block cleanup and shadowing must end at the explicit boundary:\n{}",
+        "block cleanup and bindings must end at the explicit boundary:\n{}",
         outcome.stdout
     );
 }
