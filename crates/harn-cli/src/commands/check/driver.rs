@@ -338,7 +338,7 @@ mod tests {
             host_capabilities: Some(manifest.display().to_string()),
             ..CheckCliOverrides::default()
         };
-        let files = vec![first.clone(), second.clone()];
+        let files = vec![first.clone(), second];
         let contexts = build_check_contexts_with(&files, &overrides, |config| {
             resolutions.fetch_add(1, Ordering::Relaxed);
             resolve_host_capabilities(config)
