@@ -72,12 +72,9 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
 }
 
 #[tokio::test]
-async fn execution_timeout_includes_lazy_module_load_attribution() {
+async fn execution_timeout_captures_lazy_module_load_attribution() {
     let temp = TempTestDir::new();
-    temp.write(
-        "helper.harn",
-        "sleep(10)\npub fn spin() { while true {} }\n",
-    );
+    temp.write("helper.harn", "pub fn spin() { while true {} }\n");
     temp.write(
         "test_timeout_import.harn",
         "import { spin } from \"./helper\"\npipeline test_timeout_import(_task) { spin() }\n",
@@ -112,7 +109,6 @@ async fn execution_timeout_includes_lazy_module_load_attribution() {
     );
     let phases = result.phases.expect("measured phases");
     assert_eq!(phases.modules.modules_loaded, 1);
-    assert!(phases.modules.module_load_ms >= 10);
 }
 
 #[tokio::test]

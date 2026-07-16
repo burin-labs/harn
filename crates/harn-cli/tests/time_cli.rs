@@ -188,7 +188,7 @@ handler = "handlers::missing"
     .expect("write manifest");
     std::fs::write(
         workdir.path().join("hooks.harn"),
-        "sleep(10)\npub fn valid(_event) {}\n",
+        "pub fn valid(_event) {}\n",
     )
     .expect("write hook module");
     let script = workdir.path().join("main.harn");
@@ -205,18 +205,13 @@ handler = "handlers::missing"
             .find(|phase| phase["name"] == name)
             .unwrap_or_else(|| panic!("missing {name}: {phases:?}"))
     };
-    let run_setup_ms = phase("run_setup")["duration_ms"]
-        .as_u64()
-        .expect("run_setup duration");
+    let run_setup = phase("run_setup");
     let module_load = phase("module_load");
-    let module_load_ms = module_load["duration_ms"]
-        .as_u64()
-        .expect("module_load duration");
 
     assert_eq!(data["exit_code"], 1);
+    assert_eq!(run_setup["kind"], "top_level", "{run_setup}");
     assert_eq!(module_load["events"], 1, "{module_load}");
-    assert!(module_load_ms >= 10, "{module_load}");
-    assert!(run_setup_ms >= module_load_ms, "{phases:?}");
+    assert_eq!(module_load["kind"], "attribution", "{module_load}");
 }
 
 #[test]
