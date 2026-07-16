@@ -16,14 +16,23 @@ use crate::llm_config::{self, ProviderDef};
 mod helpers;
 #[path = "tool_conformance_request.rs"]
 mod request;
+#[path = "tool_conformance_types.rs"]
+mod types;
 use super::usage_normalization::extract_probe_usage;
 pub use super::usage_normalization::ToolProbeUsage;
 pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
-use request::{probe_request_body, validate_probe_request_body};
+use request::{probe_request_body, probe_request_body_with_warnings, validate_probe_request_body};
+pub use types::{
+    ToolConformanceRequestAuditFailure, ToolConformanceRequestAuditNotApplicable,
+    ToolConformanceRequestAuditReport, ToolConformanceRequestAuditRoute,
+    ToolConformanceRequestAuditWarning, ToolConformanceRequestCase, ToolConformanceRequestReport,
+    ToolConformanceRequestValidation, ToolConformanceRequestValidationStatus,
+    ToolConformanceRequestWarning,
+};
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
-pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 3;
-pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 4;
+pub const TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION: u32 = 4;
+pub const TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION: u32 = 5;
 pub const TOOL_PROBE_TOOL_NAME: &str = "echo_marker";
 pub const DEFAULT_TOOL_PROBE_MARKER: &str = "harn_tool_probe_marker";
 
@@ -172,100 +181,6 @@ impl ToolProbeCase {
                 Self::ToolResultFollowup | Self::SignedThinkingToolResultFollowup
             )
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolConformanceRequestReport {
-    pub schema_version: u32,
-    pub provider: String,
-    pub model: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    #[serde(default)]
-    pub probe_case: ToolProbeCase,
-    #[serde(default)]
-    pub request_profile: ToolProbeRequestProfile,
-    pub tool_name: String,
-    pub marker: String,
-    pub expected_value: String,
-    pub requests: Vec<ToolConformanceRequestCase>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolConformanceRequestCase {
-    pub mode: ToolProbeMode,
-    pub request_body: Value,
-    pub validation: ToolConformanceRequestValidation,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolConformanceRequestValidation {
-    pub dialect: String,
-    pub status: ToolConformanceRequestValidationStatus,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub issues: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolConformanceRequestAuditReport {
-    pub schema_version: u32,
-    pub catalog_model_count: usize,
-    pub route_count: usize,
-    pub probe_cases: Vec<String>,
-    pub request_profiles: Vec<String>,
-    pub modes: Vec<String>,
-    pub request_count: usize,
-    pub validation_pass_count: usize,
-    pub validation_fail_count: usize,
-    pub not_applicable_count: usize,
-    pub dialect_counts: BTreeMap<String, usize>,
-    pub provider_counts: BTreeMap<String, usize>,
-    pub routes: Vec<ToolConformanceRequestAuditRoute>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub failures: Vec<ToolConformanceRequestAuditFailure>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub not_applicable: Vec<ToolConformanceRequestAuditNotApplicable>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolConformanceRequestAuditRoute {
-    pub provider: String,
-    pub model: String,
-    pub request_count: usize,
-    pub validation_pass_count: usize,
-    pub validation_fail_count: usize,
-    pub not_applicable_count: usize,
-    pub dialect_counts: BTreeMap<String, usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolConformanceRequestAuditFailure {
-    pub provider: String,
-    pub model: String,
-    pub probe_case: String,
-    pub request_profile: String,
-    pub mode: String,
-    pub dialect: String,
-    pub issues: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolConformanceRequestAuditNotApplicable {
-    pub provider: String,
-    pub model: String,
-    pub probe_case: String,
-    pub request_profile: String,
-    pub mode: String,
-    pub dialect: String,
-    pub reason: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolConformanceRequestValidationStatus {
-    Pass,
-    Fail,
-    NotApplicable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -527,7 +442,7 @@ pub fn tool_conformance_request_report(
     let expected_value = probe_case.expected_value(&marker);
     let mut requests = Vec::new();
     for mode in normalized_modes(&modes) {
-        let request_body = probe_request_body(
+        let (request_body, warnings) = probe_request_body_with_warnings(
             &provider,
             &model,
             mode,
@@ -535,15 +450,17 @@ pub fn tool_conformance_request_report(
             request_profile,
             &expected_value,
         )?;
+        let mut validation = validate_probe_request_body(
+            &provider,
+            &model,
+            probe_case,
+            request_profile,
+            &request_body,
+        );
+        validation.warnings = warnings;
         requests.push(ToolConformanceRequestCase {
             mode,
-            validation: validate_probe_request_body(
-                &provider,
-                &model,
-                probe_case,
-                request_profile,
-                &request_body,
-            ),
+            validation,
             request_body,
         });
     }
@@ -605,11 +522,13 @@ pub fn tool_conformance_request_catalog_audit(
     let mut request_count = 0usize;
     let mut validation_pass_count = 0usize;
     let mut validation_fail_count = 0usize;
+    let mut warning_count = 0usize;
     let mut not_applicable_count = 0usize;
     let mut dialect_counts = BTreeMap::new();
     let mut provider_counts = BTreeMap::new();
     let mut routes = Vec::new();
     let mut failures = Vec::new();
+    let mut warnings = Vec::new();
     let mut not_applicable = Vec::new();
 
     for catalog_route in &routing_routes {
@@ -644,6 +563,18 @@ pub fn tool_conformance_request_catalog_audit(
                                 let dialect = request.validation.dialect.clone();
                                 *dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
                                 *route.dialect_counts.entry(dialect.clone()).or_insert(0) += 1;
+                                if !request.validation.warnings.is_empty() {
+                                    warning_count += request.validation.warnings.len();
+                                    warnings.push(ToolConformanceRequestAuditWarning {
+                                        provider: catalog_route.provider.clone(),
+                                        model: catalog_route.model.clone(),
+                                        probe_case: probe_case.as_str().to_string(),
+                                        request_profile: request_profile.as_str().to_string(),
+                                        mode: mode.as_str().to_string(),
+                                        dialect: dialect.clone(),
+                                        warnings: request.validation.warnings.clone(),
+                                    });
+                                }
                                 match request.validation.status {
                                     ToolConformanceRequestValidationStatus::Pass => {
                                         route.validation_pass_count += 1;
@@ -729,11 +660,13 @@ pub fn tool_conformance_request_catalog_audit(
         request_count,
         validation_pass_count,
         validation_fail_count,
+        warning_count,
         not_applicable_count,
         dialect_counts,
         provider_counts,
         routes,
         failures,
+        warnings,
         not_applicable,
     }
 }

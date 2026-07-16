@@ -609,6 +609,20 @@ fn fixed_micro_cases_for_route(
     claim: &ToolScorecardCatalogClaim,
 ) -> Vec<ToolScorecardPlanCase> {
     let has_tool_surface = claim.native_tools || claim.text_tools;
+    let single_tool_requirement =
+        tool_surface_requirement(has_tool_surface, "baseline_tool_call_quality");
+    let large_string_requirement =
+        tool_surface_requirement(has_tool_surface, "byte_fidelity_for_edit_payloads");
+    let tool_result_requirement =
+        tool_surface_requirement(has_tool_surface, "multi_turn_agent_loop_quality");
+    let signed_thinking_requirement = if has_tool_surface {
+        (
+            "conditional",
+            "thinking_signature_replay_for_reasoning_tool_models",
+        )
+    } else {
+        ("not_applicable", "route_declares_no_tool_surface")
+    };
     let parallel_requirement = if claim.native_tools && claim.supports_parallel_tool_calls {
         ("required", "route_claims_parallel_tool_calls")
     } else {
@@ -618,8 +632,8 @@ fn fixed_micro_cases_for_route(
         ToolScorecardPlanCase {
             id: "single_tool_call",
             description: "single ordinary tool call with exact JSON arguments",
-            requirement: "required",
-            requirement_reason: "baseline_tool_call_quality",
+            requirement: single_tool_requirement.0,
+            requirement_reason: single_tool_requirement.1,
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["tool_choice", "json_arguments", "wire_dialect"],
@@ -646,8 +660,8 @@ fn fixed_micro_cases_for_route(
         ToolScorecardPlanCase {
             id: "large_string_argument",
             description: "large string/code argument with quotes, unicode, and heredoc-shaped text",
-            requirement: "required",
-            requirement_reason: "byte_fidelity_for_edit_payloads",
+            requirement: large_string_requirement.0,
+            requirement_reason: large_string_requirement.1,
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["byte_fidelity", "escaping", "unicode"],
@@ -660,8 +674,8 @@ fn fixed_micro_cases_for_route(
         ToolScorecardPlanCase {
             id: "tool_result_followup",
             description: "assistant continuation after receiving a tool result",
-            requirement: "required",
-            requirement_reason: "multi_turn_agent_loop_quality",
+            requirement: tool_result_requirement.0,
+            requirement_reason: tool_result_requirement.1,
             turn_count: 2,
             batch_eligible: false,
             probe_focus: vec!["tool_result_adjacency", "continuation", "action_vs_prose"],
@@ -674,8 +688,8 @@ fn fixed_micro_cases_for_route(
         ToolScorecardPlanCase {
             id: "signed_thinking_tool_result_followup",
             description: "provider-native signed thinking replay adjacent to tool-use history",
-            requirement: "conditional",
-            requirement_reason: "thinking_signature_replay_for_reasoning_tool_models",
+            requirement: signed_thinking_requirement.0,
+            requirement_reason: signed_thinking_requirement.1,
             turn_count: 2,
             batch_eligible: false,
             probe_focus: vec![
@@ -742,6 +756,17 @@ fn fixed_micro_cases_for_route(
             execution: executable_parameter_edges_request_case(provider, model, has_tool_surface),
         },
     ]
+}
+
+fn tool_surface_requirement(
+    has_tool_surface: bool,
+    required_reason: &'static str,
+) -> (&'static str, &'static str) {
+    if has_tool_surface {
+        ("required", required_reason)
+    } else {
+        ("not_applicable", "route_declares_no_tool_surface")
+    }
 }
 
 pub(crate) fn signed_thinking_tool_history_supported(provider: &str, model: &str) -> bool {

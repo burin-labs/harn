@@ -2,7 +2,8 @@ use serde_json::{json, Value};
 
 use super::{
     probe_tool_registry, ToolConformanceRequestValidation, ToolConformanceRequestValidationStatus,
-    ToolProbeCase, ToolProbeMode, ToolProbeRequestProfile, TOOL_PROBE_TOOL_NAME,
+    ToolConformanceRequestWarning, ToolProbeCase, ToolProbeMode, ToolProbeRequestProfile,
+    TOOL_PROBE_TOOL_NAME,
 };
 use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
 use crate::llm::capabilities::WireDialect;
@@ -20,9 +21,23 @@ pub(super) fn probe_request_body(
     request_profile: ToolProbeRequestProfile,
     marker: &str,
 ) -> Result<Value, String> {
+    probe_request_body_with_warnings(provider, model, mode, probe_case, request_profile, marker)
+        .map(|(body, _warnings)| body)
+}
+
+pub(super) fn probe_request_body_with_warnings(
+    provider: &str,
+    model: &str,
+    mode: ToolProbeMode,
+    probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
+    marker: &str,
+) -> Result<(Value, Vec<ToolConformanceRequestWarning>), String> {
     let payload =
         probe_request_payload(provider, model, mode, probe_case, request_profile, marker)?;
-    Ok(provider_compatible_probe_request_body(&payload))
+    let body = provider_compatible_probe_request_body(&payload);
+    let warnings = request_body_warnings(&payload, &body);
+    Ok((body, warnings))
 }
 
 pub(super) fn probe_request_payload(
@@ -283,6 +298,131 @@ fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value 
     }
 }
 
+fn request_body_warnings(
+    payload: &LlmRequestPayload,
+    body: &Value,
+) -> Vec<ToolConformanceRequestWarning> {
+    let caps = crate::llm::capabilities::lookup(&payload.provider, &payload.model);
+    let dialect = request_validation_dialect(&payload.provider, &caps);
+    let mut omitted = Vec::new();
+
+    match dialect.as_str() {
+        "bedrock" => {
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.temperature.is_some(),
+                body,
+                "/inferenceConfig/temperature",
+                "temperature",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_p.is_some(),
+                body,
+                "/inferenceConfig/topP",
+                "top_p",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_k.is_some(),
+                body,
+                "/inferenceConfig/topK",
+                "top_k",
+            );
+        }
+        "gemini" | "vertex" => {
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.temperature.is_some(),
+                body,
+                "/generationConfig/temperature",
+                "temperature",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_p.is_some(),
+                body,
+                "/generationConfig/topP",
+                "top_p",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_k.is_some(),
+                body,
+                "/generationConfig/topK",
+                "top_k",
+            );
+        }
+        "ollama" => {
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.temperature.is_some(),
+                body,
+                "/options/temperature",
+                "temperature",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_p.is_some(),
+                body,
+                "/options/top_p",
+                "top_p",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_k.is_some(),
+                body,
+                "/options/top_k",
+                "top_k",
+            );
+        }
+        _ => {
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.temperature.is_some(),
+                body,
+                "/temperature",
+                "temperature",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_p.is_some(),
+                body,
+                "/top_p",
+                "top_p",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_k.is_some(),
+                body,
+                "/top_k",
+                "top_k",
+            );
+        }
+    }
+
+    if omitted.is_empty() {
+        Vec::new()
+    } else {
+        vec![ToolConformanceRequestWarning::SamplingParamsOmitted {
+            dialect,
+            params: omitted.into_iter().map(str::to_string).collect(),
+        }]
+    }
+}
+
+fn push_omitted_sampling_param(
+    omitted: &mut Vec<&'static str>,
+    payload_supplied: bool,
+    body: &Value,
+    pointer: &str,
+    name: &'static str,
+) {
+    if payload_supplied && body.pointer(pointer).is_none() {
+        omitted.push(name);
+    }
+}
+
 pub(super) fn validate_probe_request_body(
     provider: &str,
     model: &str,
@@ -298,6 +438,7 @@ pub(super) fn validate_probe_request_body(
         return ToolConformanceRequestValidation {
             dialect,
             status: ToolConformanceRequestValidationStatus::NotApplicable,
+            warnings: Vec::new(),
             issues: vec![format!(
                 "signed thinking replay request is not applicable to {provider}:{model}; route has no signed-thinking tool-history surface"
             )],
@@ -326,6 +467,7 @@ pub(super) fn validate_probe_request_body(
         } else {
             ToolConformanceRequestValidationStatus::Fail
         },
+        warnings: Vec::new(),
         issues,
     }
 }
@@ -918,6 +1060,34 @@ mod tests {
         assert_eq!(body["temperature"], 1.0);
         assert_eq!(body["top_p"], 1.0);
         assert_eq!(body["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn request_warnings_record_anthropic_sampling_param_omission() {
+        let (body, warnings) = probe_request_body_with_warnings(
+            "anthropic",
+            "claude-opus-4-7",
+            ToolProbeMode::NonStreaming,
+            super::super::ToolProbeCase::SingleToolCall,
+            super::super::ToolProbeRequestProfile::ParameterEdges,
+            super::super::DEFAULT_TOOL_PROBE_MARKER,
+        )
+        .expect("Anthropic request body");
+
+        assert!(body.get("temperature").is_none(), "{body}");
+        assert!(body.get("top_p").is_none(), "{body}");
+        assert!(body.get("top_k").is_none(), "{body}");
+        assert_eq!(
+            warnings,
+            vec![ToolConformanceRequestWarning::SamplingParamsOmitted {
+                dialect: "anthropic".to_string(),
+                params: vec![
+                    "temperature".to_string(),
+                    "top_p".to_string(),
+                    "top_k".to_string(),
+                ],
+            }]
+        );
     }
 
     #[test]
