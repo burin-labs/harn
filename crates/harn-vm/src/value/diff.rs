@@ -134,7 +134,13 @@ fn walk(path: String, actual: &VmValue, expected: &VmValue, out: &mut Vec<ValueD
                 && a.variant == e.variant
                 && a.fields.len() == e.fields.len() =>
         {
-            guard_recursion(|| walk_sequence(&path, &a.fields, &e.fields, out));
+            // Same enum and variant, differing payload. The payload of a
+            // variant is reached as `value.fields[i]` in Harn, so that is what
+            // the path says — a bare `[i]` here would read as a list index into
+            // something that is not a list.
+            guard_recursion(|| {
+                walk_sequence(&format!("{path}.fields"), &a.fields, &e.fields, out);
+            });
         }
         (VmValue::Set(a), VmValue::Set(e)) => {
             // Sets are unordered, so an index-wise walk would report noise.

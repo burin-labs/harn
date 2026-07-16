@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::value::{DictMap, VmSet};
+use crate::value::{DictMap, StructInstanceData, StructLayout, VmEnumVariant, VmSet};
 
 fn s(text: &str) -> VmValue {
     VmValue::String(arcstr::ArcStr::from(text))
@@ -174,6 +174,73 @@ fn set_diff_reports_membership_not_order() {
     assert!(matches!(diffs[0].kind, DifferenceKind::Unexpected { .. }));
     assert_eq!(diffs[1].path, "{3}");
     assert!(matches!(diffs[1].kind, DifferenceKind::Missing { .. }));
+}
+
+fn struct_value(name: &str, fields: &[(&str, VmValue)]) -> VmValue {
+    let layout = StructLayout::new(
+        name.to_string(),
+        fields.iter().map(|(k, _)| (*k).to_string()).collect(),
+    );
+    VmValue::StructInstance(Arc::new(StructInstanceData {
+        layout: Arc::new(layout),
+        fields: Arc::new(fields.iter().map(|(_, v)| Some(v.clone())).collect()),
+    }))
+}
+
+fn variant(enum_name: &str, variant: &str, fields: Vec<VmValue>) -> VmValue {
+    VmValue::EnumVariant(Arc::new(VmEnumVariant {
+        enum_name: arcstr::ArcStr::from(enum_name),
+        variant: arcstr::ArcStr::from(variant),
+        fields: Arc::new(fields),
+    }))
+}
+
+#[test]
+fn struct_fields_are_addressed_like_field_access() {
+    let diffs = diff_values(
+        &struct_value("User", &[("name", s("Ada")), ("age", VmValue::Int(36))]),
+        &struct_value("User", &[("name", s("Ada")), ("age", VmValue::Int(37))]),
+    );
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].path, ".age");
+}
+
+/// Two different structs are not a field-by-field disagreement, however much
+/// their fields happen to line up — they are different things.
+#[test]
+fn differently_named_structs_are_one_whole_mismatch() {
+    let diffs = diff_values(
+        &struct_value("User", &[("id", VmValue::Int(1))]),
+        &struct_value("Account", &[("id", VmValue::Int(1))]),
+    );
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].path, "");
+}
+
+/// An enum payload is reached as `value.fields[i]`, so the path says that. A
+/// bare `[0]` would read as a list index into something that is not a list.
+#[test]
+fn enum_payload_is_addressed_the_way_harn_reaches_it() {
+    let diffs = diff_values(
+        &variant("Status", "Active", vec![VmValue::Int(1)]),
+        &variant("Status", "Active", vec![VmValue::Int(2)]),
+    );
+    assert_eq!(diffs.len(), 1);
+    assert_eq!(diffs[0].path, ".fields[0]");
+}
+
+#[test]
+fn a_different_variant_is_one_whole_mismatch_and_renders_readably() {
+    assert_eq!(
+        render(
+            &variant("Status", "Active", vec![VmValue::Int(1)]),
+            &variant("Status", "Idle", vec![]),
+        ),
+        "\
+assert_eq failed.
+    expected  Status::Idle
+    actual    Status::Active(1)"
+    );
 }
 
 #[test]
