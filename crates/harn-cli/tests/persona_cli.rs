@@ -113,6 +113,7 @@ fn persona_list_and_inspect_emit_stable_json() {
     assert_eq!(persona["handoffs"][0], "review_captain");
     assert_eq!(persona["context_packs"][0], "repo_policy");
     assert_eq!(persona["evals"][0], "merge_safety");
+    assert_eq!(persona["source"]["kind"], "root");
 }
 
 #[test]

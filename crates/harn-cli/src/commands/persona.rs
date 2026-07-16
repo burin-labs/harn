@@ -9,17 +9,15 @@ use crate::cli::{
     PersonaCheckArgs, PersonaControlArgs, PersonaInspectArgs, PersonaListArgs, PersonaSpendArgs,
     PersonaStatusArgs, PersonaTickArgs, PersonaTriggerArgs,
 };
-use crate::package::{self, PersonaManifestEntry, PersonaValidationError, ResolvedPersonaManifest};
+use crate::package::{self, PersonaValidationError, ResolvedPersonaManifest};
 
 /// In-process variant of `harn persona list --json` used by the binary's
 /// dispatcher and by integration tests that want to assert on the
 /// structured payload without spawning a subprocess.
 pub fn list_payload(manifest: Option<&Path>) -> Result<Vec<serde_json::Value>, String> {
-    let catalog = load_catalog_result(manifest)?;
-    Ok(catalog
-        .personas
+    Ok(package::load_discoverable_personas(manifest)?
         .iter()
-        .map(|persona| persona_to_json(persona, &catalog))
+        .map(discoverable_persona_to_json)
         .collect())
 }
 
@@ -34,25 +32,21 @@ pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
         return;
     }
 
-    let catalog = load_catalog_or_exit(manifest);
-    if catalog.personas.is_empty() {
-        println!(
-            "No personas declared in {}.",
-            catalog.manifest_path.display()
-        );
+    let personas =
+        package::load_discoverable_personas(manifest).unwrap_or_else(|error| fatal(&error));
+    if personas.is_empty() {
+        println!("No personas found.");
         return;
     }
 
-    println!("Personas in {}:", catalog.manifest_path.display());
-    let name_width = catalog
-        .personas
+    println!("Personas:");
+    let name_width = personas
         .iter()
-        .filter_map(|persona| persona.name.as_ref())
-        .map(String::len)
+        .map(|persona| persona.id.len())
         .max()
         .unwrap_or(4);
-    for persona in &catalog.personas {
-        let name = persona.name.as_deref().unwrap_or("<unnamed>");
+    for discovered in &personas {
+        let persona = &discovered.persona;
         let tier = persona
             .autonomy_tier
             .map(|tier| tier.as_str())
@@ -62,7 +56,10 @@ pub(crate) fn run_list(manifest: Option<&Path>, args: &PersonaListArgs) {
             .map(|policy| policy.as_str())
             .unwrap_or("<missing>");
         let entry = persona.entry_workflow.as_deref().unwrap_or("<missing>");
-        println!("  {name:<name_width$}  tier={tier:<17} receipts={receipts:<8} entry={entry}");
+        println!(
+            "  {:<name_width$}  tier={tier:<17} receipts={receipts:<8} entry={entry}",
+            discovered.id
+        );
     }
 }
 
@@ -124,19 +121,8 @@ pub(crate) fn run_check(manifest: Option<&Path>, args: &PersonaCheckArgs) {
 
 /// In-process variant of `harn persona inspect <name> --json`.
 pub fn inspect_payload(manifest: Option<&Path>, name: &str) -> Result<serde_json::Value, String> {
-    let catalog = load_catalog_result(manifest)?;
-    let persona = catalog
-        .personas
-        .iter()
-        .find(|persona| persona.name.as_deref() == Some(name))
-        .ok_or_else(|| {
-            format!(
-                "persona '{}' not found in {}",
-                name,
-                catalog.manifest_path.display()
-            )
-        })?;
-    Ok(persona_to_json(persona, &catalog))
+    let persona = package::resolve_discoverable_persona(manifest, name)?;
+    Ok(discoverable_persona_to_json(&persona))
 }
 
 pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
@@ -150,18 +136,9 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
         return;
     }
 
-    let catalog = load_catalog_or_exit(manifest);
-    let Some(persona) = catalog
-        .personas
-        .iter()
-        .find(|persona| persona.name.as_deref() == Some(args.name.as_str()))
-    else {
-        fatal(&format!(
-            "persona '{}' not found in {}",
-            args.name,
-            catalog.manifest_path.display()
-        ));
-    };
+    let discovered = package::resolve_discoverable_persona(manifest, &args.name)
+        .unwrap_or_else(|error| fatal(&error));
+    let persona = &discovered.persona;
 
     println!(
         "name:           {}",
@@ -241,7 +218,10 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
     if let Some(owner) = &persona.owner {
         println!("owner:          {owner}");
     }
-    println!("manifest:       {}", catalog.manifest_path.display());
+    if let Some(provenance) = discovered.installed_provenance() {
+        println!("package:        {}", provenance.package_alias);
+    }
+    println!("manifest:       {}", discovered.manifest_path.display());
 }
 
 /// In-process variant of `harn persona status`.
@@ -502,13 +482,6 @@ pub(crate) async fn run_spend(
     Ok(())
 }
 
-fn load_catalog_or_exit(manifest: Option<&Path>) -> ResolvedPersonaManifest {
-    match load_catalog_result(manifest) {
-        Ok(catalog) => catalog,
-        Err(message) => fatal(&message),
-    }
-}
-
 fn load_catalog_result(manifest: Option<&Path>) -> Result<ResolvedPersonaManifest, String> {
     load_catalog_validation(manifest).map_err(|errors| validation_errors_to_string(&errors))
 }
@@ -723,11 +696,16 @@ fn print_validation_errors_json(errors: &[PersonaValidationError]) {
     );
 }
 
-fn persona_to_json(
-    persona: &PersonaManifestEntry,
-    catalog: &ResolvedPersonaManifest,
-) -> serde_json::Value {
+fn discoverable_persona_to_json(discovered: &package::DiscoverablePersona) -> serde_json::Value {
+    let persona = &discovered.persona;
+    let installed = discovered.installed_provenance();
+    let source_kind = if installed.is_some() {
+        "installed_package"
+    } else {
+        "root"
+    };
     serde_json::json!({
+        "id": &discovered.id,
         "name": persona.name.as_deref().unwrap_or_default(),
         "version": persona.version.as_deref(),
         "description": persona.description.as_deref().unwrap_or_default(),
@@ -770,8 +748,14 @@ fn persona_to_json(
             "cohorts": &persona.rollout_policy.cohorts,
         },
         "source": {
-            "manifest_path": &catalog.manifest_path,
-            "manifest_dir": &catalog.manifest_dir,
+            "kind": source_kind,
+            "manifest_path": &discovered.manifest_path,
+            "manifest_dir": &discovered.manifest_dir,
+            "package_alias": installed.map(|value| value.package_alias.as_str()),
+            "package_version": installed.and_then(|value| value.package_version.as_deref()),
+            "content_hash": installed.and_then(|value| value.content_hash.as_deref()),
+            "integrity": installed.map(|value| value.integrity.as_str()),
+            "package_source": installed.map(|value| value.source.as_str()),
         },
     })
 }

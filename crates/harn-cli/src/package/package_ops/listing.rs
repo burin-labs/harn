@@ -17,12 +17,21 @@ pub(super) fn list_packages_in(
         .as_ref()
         .map(|lock| package_list_entries(snapshot.as_ref(), lock))
         .unwrap_or_default();
+    let personas = lock
+        .as_ref()
+        .map(|lock| installed_persona_catalog(snapshot.as_ref(), lock))
+        .unwrap_or_default()
+        .personas
+        .iter()
+        .filter_map(DiscoverablePersona::report)
+        .collect();
     Ok(PackageListReport {
         manifest_path: ctx.manifest_path().display().to_string(),
         lock_path: lock_path.display().to_string(),
         lock_present: lock.is_some(),
         dependency_count: ctx.manifest.dependencies.len(),
         packages,
+        personas,
     })
 }
 
@@ -84,6 +93,10 @@ pub(super) fn doctor_packages_in(
         ));
     }
 
+    let persona_catalog = lock
+        .as_ref()
+        .map(|lock| installed_persona_catalog(snapshot.as_ref(), lock))
+        .unwrap_or_default();
     if let Some(lock) = lock.as_ref() {
         if let Err(error) = validate_lock_matches_manifest(workspace, &ctx, lock) {
             diagnostics.push(package_doctor_diagnostic(
@@ -98,6 +111,18 @@ pub(super) fn doctor_packages_in(
         }
     }
 
+    diagnostics.extend(persona_catalog.issues.iter().map(|issue| {
+        package_doctor_diagnostic(
+            "error",
+            issue.code,
+            format!("package {}: {}", issue.package_alias, issue.message),
+            Some(format!(
+                "fix package {} persona exports and run `harn install`",
+                issue.package_alias
+            )),
+        )
+    }));
+
     let packages = lock
         .as_ref()
         .map(|lock| package_list_entries(snapshot.as_ref(), lock))
@@ -111,6 +136,11 @@ pub(super) fn doctor_packages_in(
         lock_path: lock_path.display().to_string(),
         diagnostics,
         packages,
+        personas: persona_catalog
+            .personas
+            .iter()
+            .filter_map(DiscoverablePersona::report)
+            .collect(),
     })
 }
 

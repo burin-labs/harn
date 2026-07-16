@@ -86,6 +86,7 @@ pub(crate) fn check_package_impl(
     validate_rule_pack_for_publish(&ctx, &mut errors);
     let exports = validate_exports_for_publish(&ctx, &mut errors, &mut warnings);
     let (tools, skills) = validate_package_interface_exports(&ctx, &mut errors, &mut warnings);
+    let personas = validate_package_personas(&ctx, &mut errors);
 
     Ok(PackageCheckReport {
         package_dir: ctx.dir.display().to_string(),
@@ -97,6 +98,7 @@ pub(crate) fn check_package_impl(
         exports,
         tools,
         skills,
+        personas,
     })
 }
 
