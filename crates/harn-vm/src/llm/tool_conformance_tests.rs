@@ -483,6 +483,7 @@ fn tool_conformance_report_accepts_compact_empty_diagnostics() {
 
     assert!(report.cases[0].parser_errors.is_empty());
     assert!(report.cases[0].protocol_violations.is_empty());
+    assert!(report.cases[0].usage.is_none());
 
     let serialized = serde_json::to_value(&report).expect("serialize report");
     assert!(
@@ -493,6 +494,110 @@ fn tool_conformance_report_accepts_compact_empty_diagnostics() {
         serialized["cases"][0].get("protocol_violations").is_none(),
         "empty protocol diagnostics stay compact on write"
     );
+}
+
+#[test]
+fn tool_probe_fixture_preserves_reported_usage_and_priced_cost() {
+    let response = native_tool_call_fixture_with_usage(serde_json::json!({
+        "prompt_tokens": 1200,
+        "completion_tokens": 75,
+    }));
+    let report = classify_tool_conformance_fixture(
+        "openai",
+        "gpt-4.1",
+        ToolProbeMode::NonStreaming,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &response,
+    );
+
+    let usage = report.cases[0]
+        .usage
+        .as_ref()
+        .expect("reported usage should be preserved");
+    assert_eq!(usage.input_tokens, Some(1200));
+    assert_eq!(usage.output_tokens, Some(75));
+    assert!(
+        usage.cost_usd.unwrap_or(0.0) > 0.0,
+        "priced catalog route should carry non-zero cost: {usage:?}"
+    );
+}
+
+#[test]
+fn tool_probe_fixture_preserves_usage_without_fabricating_unpriced_cost() {
+    let response = native_tool_call_fixture_with_usage(serde_json::json!({
+        "input_tokens": 9,
+        "output_tokens": 3,
+    }));
+    let report = classify_tool_conformance_fixture(
+        "ghost-provider",
+        "ghost-model",
+        ToolProbeMode::NonStreaming,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &response,
+    );
+
+    let usage = report.cases[0]
+        .usage
+        .as_ref()
+        .expect("reported usage should be preserved");
+    assert_eq!(usage.input_tokens, Some(9));
+    assert_eq!(usage.output_tokens, Some(3));
+    assert_eq!(usage.cost_usd, None);
+}
+
+#[test]
+fn tool_probe_fixture_preserves_gemini_usage_metadata_with_thoughts() {
+    let response = native_tool_call_fixture_with_usage_metadata(serde_json::json!({
+        "promptTokenCount": 12,
+        "candidatesTokenCount": 5,
+        "thoughtsTokenCount": 7,
+    }));
+    let report = classify_tool_conformance_fixture(
+        "gemini",
+        "gemini-2.5-pro",
+        ToolProbeMode::NonStreaming,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &response,
+    );
+
+    let usage = report.cases[0]
+        .usage
+        .as_ref()
+        .expect("reported Gemini usage should be preserved");
+    assert_eq!(usage.input_tokens, Some(12));
+    assert_eq!(usage.output_tokens, Some(12));
+}
+
+fn native_tool_call_fixture_with_usage(usage: serde_json::Value) -> String {
+    let mut fixture = native_tool_call_fixture_base();
+    fixture["usage"] = usage;
+    fixture.to_string()
+}
+
+fn native_tool_call_fixture_with_usage_metadata(usage_metadata: serde_json::Value) -> String {
+    let mut fixture = native_tool_call_fixture_base();
+    fixture["usageMetadata"] = usage_metadata;
+    fixture.to_string()
+}
+
+fn native_tool_call_fixture_base() -> serde_json::Value {
+    serde_json::json!({
+        "choices": [{
+            "message": {
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "echo_marker",
+                        "arguments": serde_json::json!({
+                            "value": DEFAULT_TOOL_PROBE_MARKER,
+                        })
+                        .to_string(),
+                    },
+                }],
+            },
+        }],
+    })
 }
 
 #[test]
@@ -916,6 +1021,7 @@ fn aggregates_openai_streaming_tool_call_deltas() {
         DEFAULT_TOOL_PROBE_MARKER,
         None,
         None,
+        None,
     );
     assert!(case.ok, "{case:?}");
     assert_eq!(
@@ -944,6 +1050,7 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
         &response,
         ToolProbeCase::SingleToolCall,
         DEFAULT_TOOL_PROBE_MARKER,
+        None,
         None,
         None,
     );
@@ -1046,6 +1153,7 @@ fn probe_case(
         elapsed_ms: None,
         native_tool_call_count,
         text_tool_call_count,
+        usage: None,
         parser_errors: Vec::new(),
         protocol_violations: Vec::new(),
         content_sample: None,

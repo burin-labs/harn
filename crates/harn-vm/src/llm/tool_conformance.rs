@@ -16,6 +16,8 @@ use crate::llm_config::{self, ProviderDef};
 mod helpers;
 #[path = "tool_conformance_request.rs"]
 mod request;
+use super::usage_normalization::extract_probe_usage;
+pub use super::usage_normalization::ToolProbeUsage;
 pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
 use request::{probe_request_body, validate_probe_request_body};
 
@@ -358,6 +360,8 @@ pub struct ToolConformanceCase {
     pub elapsed_ms: Option<u64>,
     pub native_tool_call_count: usize,
     pub text_tool_call_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<ToolProbeUsage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parser_errors: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -378,6 +382,7 @@ impl ToolConformanceCase {
             elapsed_ms,
             native_tool_call_count: 0,
             text_tool_call_count: 0,
+            usage: None,
             parser_errors: Vec::new(),
             protocol_violations: Vec::new(),
             content_sample: None,
@@ -400,6 +405,7 @@ impl ToolConformanceCase {
             elapsed_ms,
             native_tool_call_count: 0,
             text_tool_call_count: 0,
+            usage: None,
             parser_errors: Vec::new(),
             protocol_violations: Vec::new(),
             content_sample: None,
@@ -481,12 +487,22 @@ pub fn classify_tool_conformance_fixture_for_case(
 ) -> ToolConformanceReport {
     let marker = marker.into();
     let expected_value = probe_case.expected_value(&marker);
+    let provider = provider.into();
+    let model = model.into();
     let response = serde_json::from_str::<Value>(raw).unwrap_or_else(|_| json!({ "content": raw }));
-    let case =
-        classify_tool_probe_response(mode, &response, probe_case, &expected_value, None, None);
+    let usage = extract_probe_usage(&provider, &model, &response);
+    let case = classify_tool_probe_response(
+        mode,
+        &response,
+        probe_case,
+        &expected_value,
+        None,
+        None,
+        usage,
+    );
     report_from_cases(
-        provider.into(),
-        model.into(),
+        provider,
+        model,
         None,
         probe_case,
         marker,
@@ -960,6 +976,7 @@ async fn execute_live_probe_case(
     } else {
         serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({ "content": text }))
     };
+    let usage = extract_probe_usage(provider, model, &response_value);
     classify_tool_probe_response(
         mode,
         &response_value,
@@ -967,6 +984,7 @@ async fn execute_live_probe_case(
         marker,
         Some(status.as_u16()),
         elapsed,
+        usage,
     )
 }
 
@@ -1011,6 +1029,7 @@ fn classify_tool_probe_response(
     expected_value: &str,
     http_status: Option<u16>,
     elapsed_ms: Option<u64>,
+    usage: Option<ToolProbeUsage>,
 ) -> ToolConformanceCase {
     let native = extract_native_tool_calls(response);
     let native_count = native.len();
@@ -1046,6 +1065,7 @@ fn classify_tool_probe_response(
             elapsed_ms,
             native_tool_call_count: native_count,
             text_tool_call_count: 0,
+            usage,
             parser_errors: Vec::new(),
             protocol_violations: Vec::new(),
             content_sample: content_sample(response),
@@ -1075,6 +1095,7 @@ fn classify_tool_probe_response(
             (native_count, text_count),
             parsed,
             (http_status, elapsed_ms),
+            usage,
         );
     }
     let text_pass = if probe_case == ToolProbeCase::ParallelToolCalls {
@@ -1094,6 +1115,7 @@ fn classify_tool_probe_response(
             elapsed_ms,
             native_tool_call_count: native_count,
             text_tool_call_count: text_count,
+            usage,
             parser_errors: parsed.errors,
             protocol_violations: parsed.violations,
             content_sample: sample_content(&content),
@@ -1135,6 +1157,7 @@ fn classify_tool_probe_response(
         elapsed_ms,
         native_tool_call_count: native_count,
         text_tool_call_count: text_count,
+        usage,
         parser_errors: parsed.errors,
         protocol_violations: parsed.violations,
         content_sample: sample_content(&content),
@@ -1149,6 +1172,7 @@ fn classify_no_tool_probe_response(
     counts: (usize, usize),
     parsed: crate::llm::tools::TextToolParseResult,
     timing: (Option<u16>, Option<u64>),
+    usage: Option<ToolProbeUsage>,
 ) -> ToolConformanceCase {
     let (native_count, text_count) = counts;
     let (http_status, elapsed_ms) = timing;
@@ -1190,6 +1214,7 @@ fn classify_no_tool_probe_response(
         elapsed_ms,
         native_tool_call_count: native_count,
         text_tool_call_count: text_count,
+        usage,
         parser_errors: parsed.errors,
         protocol_violations: parsed.violations,
         content_sample: sample_content(content),

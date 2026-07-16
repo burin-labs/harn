@@ -115,6 +115,27 @@ fn scorecard_splits_evidence_by_transport_mode() {
 }
 
 #[test]
+fn scorecard_treats_successful_prose_followup_as_terminal_answer() {
+    let scorecard = scorecard_from_tool_reports(vec![report_with_probe_case(
+        "anthropic",
+        "claude-sonnet-5",
+        ToolProbeCase::ToolResultFollowup,
+        vec![case(ToolProbeClassification::ProseOnlyNonTool, true)],
+    )]);
+
+    let route = &scorecard.routes[0];
+    assert_eq!(route.status, "pass");
+    assert_eq!(route.quality_score, 100);
+    assert_eq!(route.successful_cases, 1);
+    assert_eq!(route.actionless_cases, 0);
+    assert!(route.issues.is_empty());
+    assert_eq!(
+        route.classification_counts.get("prose_only_non_tool"),
+        Some(&1)
+    );
+}
+
+#[test]
 fn scorecard_does_not_suggest_catalog_disable_without_positive_evidence() {
     let scorecard = scorecard_from_tool_reports(vec![report(
         "anthropic",
@@ -164,6 +185,7 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert_eq!(plan.schema_version, TOOL_SCORECARD_PLAN_SCHEMA_VERSION);
     assert_eq!(plan.kind, "plan");
     assert_eq!(plan.route_count, 1);
+    assert!(plan.unscorecardable_provider_count > 0);
     assert_eq!(plan.routes[0].provider, "anthropic");
     assert_eq!(plan.routes[0].model, "claude-sonnet-5");
     assert!(plan.catalog.hash_blake3.starts_with("blake3:"));
@@ -179,6 +201,27 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert!(case_ids.contains(&"done_sentinel"));
     assert_eq!(plan.case_count, plan.routes[0].cases.len());
     assert!(plan.required_case_count >= 7);
+    let unscorecardable_by_provider = plan
+        .unscorecardable_providers
+        .iter()
+        .map(|provider| (provider.provider.as_str(), provider))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let vllm = unscorecardable_by_provider
+        .get("vllm")
+        .expect("vLLM provider state should be explicit");
+    assert_eq!(vllm.reason, "requires_runtime_model");
+    assert_eq!(vllm.model_count, 0);
+    assert!(vllm.local_runtime);
+    assert!(!vllm.auth_required);
+    assert!(vllm.credential_env_names.is_empty());
+    let bedrock = unscorecardable_by_provider
+        .get("bedrock")
+        .expect("Bedrock provider state should be explicit");
+    assert_eq!(bedrock.reason, "catalog_provider_has_no_models");
+    assert_eq!(bedrock.model_count, 0);
+    assert!(!bedrock.local_runtime);
+    assert!(bedrock.auth_required);
+    assert!(bedrock.credential_env_names.is_empty());
     let single_tool_case = plan.routes[0]
         .cases
         .iter()
@@ -422,11 +465,9 @@ fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
 
 #[test]
 fn scorecard_plan_does_not_treat_text_routes_as_native_parallel_evidence() {
-    let plan = tool_scorecard_plan_from_catalog(
-        &[String::from("deepinfra:deepinfra/openai/gpt-oss-120b")],
-        false,
-    )
-    .expect("plan from catalog");
+    let plan =
+        tool_scorecard_plan_from_catalog(&[String::from("deepinfra:openai/gpt-oss-120b")], false)
+            .expect("plan from catalog");
     assert!(!plan.routes[0].catalog_claim.native_tools);
     assert!(plan.routes[0].catalog_claim.text_tools);
 
@@ -457,12 +498,26 @@ fn scorecard_plan_rejects_unknown_route_filters() {
 }
 
 fn report(provider: &str, model: &str, cases: Vec<ToolConformanceCase>) -> ToolConformanceReport {
+    report_with_probe_case(
+        provider,
+        model,
+        crate::llm::tool_conformance::ToolProbeCase::SingleToolCall,
+        cases,
+    )
+}
+
+fn report_with_probe_case(
+    provider: &str,
+    model: &str,
+    probe_case: ToolProbeCase,
+    cases: Vec<ToolConformanceCase>,
+) -> ToolConformanceReport {
     ToolConformanceReport {
         schema_version: 1,
         provider: provider.to_string(),
         model: model.to_string(),
         base_url: None,
-        probe_case: crate::llm::tool_conformance::ToolProbeCase::SingleToolCall,
+        probe_case,
         tool_name: "echo_marker".to_string(),
         marker: "marker".to_string(),
         expected_value: "marker".to_string(),
@@ -496,6 +551,7 @@ fn case_with_mode(
         elapsed_ms: Some(1),
         native_tool_call_count: usize::from(ok),
         text_tool_call_count: 0,
+        usage: None,
         parser_errors: Vec::new(),
         protocol_violations: Vec::new(),
         content_sample: None,
