@@ -1,4 +1,33 @@
-/** std/testing — helpers for writing Harn tests. */
+/**
+ * std/testing — helpers for writing Harn tests.
+ *
+ * ## Argument order
+ *
+ * Every assertion here takes the thing under test FIRST:
+ *
+ *     assert_eq(actual, expected)
+ *     assert_matches(actual, pattern)
+ *     assert_contains(haystack, needle)
+ *     assert_host_call_count(cap, op, expected_count)
+ *
+ * This is one rule with no exceptions, and it is worth stating loudly because
+ * getting it wrong is invisible: swap the arguments of an equality assertion
+ * and it still passes and fails in all the same cases — it just prints the two
+ * halves of every failure the wrong way round, and sends the reader looking for
+ * a bug in the value that was correct. The rule is pinned by a test on the
+ * rendered failure text (`assert_eq_reads_argument_one_as_actual_and_two_as_
+ * expected`), not by this comment.
+ *
+ * The reason for actual-first rather than expected-first: the subject of the
+ * sentence goes first. "Assert THIS THING equals four" reads in the order it is
+ * written, and it is the order that keeps `assert_eq(x, 4)` consistent with
+ * one-sided checks like `assert_nil(x)` and `assert_true(x)`, where there is no
+ * expected value to put first at all.
+ *
+ * `assert_snapshot(name, actual)` is the one shape that leads with something
+ * else — its expected value lives in a file, so there is no second value to
+ * order against, and the name is what identifies the snapshot.
+ */
 import { unified_diff } from "std/diff"
 
 let __testing_step_events = []
@@ -154,14 +183,27 @@ pub fn assert_host_called(cap: string, op: string, params = nil, message = nil) 
 }
 
 /**
- * assert_host_call_count.
+ * Assert `cap`.`op` was called exactly `expected_count` times. Returns the
+ * actual count.
+ *
+ * The subject under test (`cap`, `op`) comes first, matching
+ * `assert_host_called` and every other assertion in this module — see the
+ * argument-order note at the top of the file.
  *
  * @effects: []
  * @errors: []
+ * @example: assert_host_call_count("workspace", "read_text", 1)
  */
-pub fn assert_host_call_count(expected_count: int, cap: string, op: string, message = nil) {
+pub fn assert_host_call_count(cap: string, op: string, expected_count: int, message = nil) {
   const actual_count = host_call_count_for(cap, op)
-  const default_message = "Expected " + to_string(expected_count) + " host calls, got " + to_string(actual_count)
+  const default_message = "assert_host_call_count: expected "
+    + to_string(expected_count)
+    + " calls to "
+    + cap
+    + "."
+    + op
+    + ", got "
+    + to_string(actual_count)
   require actual_count == expected_count, message ?? default_message
   return actual_count
 }
@@ -575,29 +617,44 @@ pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
 }
 
 /**
- * Assert an RFC 6901 JSON Pointer field inside a receipt or envelope.
+ * Assert the value at RFC 6901 JSON Pointer `path` inside a receipt or
+ * envelope. Returns the value found there.
+ *
+ * On a mismatch the failure carries the full `assert_eq` diff of that field, so
+ * a deep pointer into a large receipt still says exactly what differs.
  *
  * @effects: []
  * @errors: []
+ * @example: assert_receipt_field(receipt, "/outcome/status", "ok")
  */
-pub fn assert_receipt_field(receipt, path, value) {
+pub fn assert_receipt_field(receipt, path: string, expected, message = nil) {
   const actual = json_pointer(receipt, path)
-  require actual == value, "receipt field " + path + " mismatch"
+  const diff = value_diff(actual, expected)
+  require diff == nil, message
+    ?? ("assert_receipt_field: the receipt field " + path + " does not match.\n" + to_string(diff))
   return actual
 }
 
 /**
- * Assert a structured golden against an actual transcript-like value.
+ * Assert an actual transcript-like value matches a structured golden.
  *
- * The expected value may contain `<ms>`, `<uuid>`, or `<any>` sentinel strings.
- * Dict expected values are subset matches so tests can preserve the payload
- * fields that matter without pinning every implementation detail.
+ * The golden may contain `<ms>`, `<uuid>`, or `<any>` sentinel strings. Dict
+ * goldens are subset matches, so a test can pin the payload fields that matter
+ * without pinning every implementation detail.
+ *
+ * Takes the actual value first, like every other assertion here — see the
+ * argument-order note at the top of the file.
  *
  * @effects: []
  * @errors: []
+ * @example: assert_golden_transcript(events, [{kind: "step", at: "<ms>"}])
  */
-pub fn assert_golden_transcript(expected, actual, message = nil) {
-  require __testing_golden_match(expected, actual), message ?? "golden transcript mismatch"
+pub fn assert_golden_transcript(actual, golden, message = nil) {
+  require __testing_golden_match(golden, actual), message
+    ?? ("assert_golden_transcript: the value does not match the golden.\n    golden    "
+    + to_string(golden)
+    + "\n    actual    "
+    + to_string(actual))
   return actual
 }
 
@@ -790,13 +847,19 @@ pub fn assert_no_throw(body, message = nil) -> any {
 
 // Value assertions
 //
-// `assert`/`assert_eq`/`assert_ne` (VM builtins; see `crates/harn-vm/src/
-// stdlib/testing.rs`) already cover the boolean and equality cases, with
-// `assert_eq` rendering both sides on failure. These fill the remaining
-// shapes test authors otherwise hand-roll with bare `assert(cond, msg)`:
-// nil checks, strict booleans (vs. merely-truthy), and haystack/needle
-// containment for strings and lists. Each shows the offending value(s) in
-// its default failure message rather than a bare "assertion failed".
+// `assert`, `assert_eq`, `assert_ne`, `assert_approx`, `assert_matches`, and
+// `value_diff` are implemented in Rust (`crates/harn-vm/src/stdlib/
+// testing.rs`) because they walk the runtime representation of a value, which
+// Harn source cannot reach. They are callable with no import at all, and this
+// module re-exports them so `import { assert_eq } from "std/testing"` resolves
+// too — a reader should not have to know which side of that line an assertion
+// falls on. See `harn_stdlib::builtin_reexports`.
+//
+// The functions below fill the remaining shapes test authors otherwise
+// hand-roll with a bare `assert(cond, msg)`: nil checks, strict booleans (vs.
+// merely-truthy), and haystack/needle containment for strings and lists. Each
+// names the offending value(s) in its default failure message rather than
+// saying "assertion failed" and leaving the author to add logging.
 
 // -------------------------------------------------------------------------------------------------
 

@@ -24,7 +24,7 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
-fn get_cached_regex(pattern: &str, flags: &str) -> Result<Rc<regex::Regex>, VmError> {
+pub(crate) fn get_cached_regex(pattern: &str, flags: &str) -> Result<Rc<regex::Regex>, VmError> {
     if let Some(re) = LAST_REGEX.with(|slot| {
         slot.borrow()
             .as_ref()

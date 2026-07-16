@@ -111,7 +111,7 @@ import { mock_host_result, assert_host_called, clear_host_mocks } from "std/test
 | `host_calls_for(cap, op)` | Return calls for a specific capability/operation |
 | `host_call_count()` / `host_call_count_for(cap, op)` | Return recorded host call counts |
 | `assert_host_called(cap, op, params?)` | Assert a host call was made |
-| `assert_host_call_count(expected_count, cap, op)` | Assert exact call count |
+| `assert_host_call_count(cap, op, expected_count)` | Assert exact call count |
 | `assert_no_host_calls()` | Assert no host calls were made |
 
 ### Persona step assertions
@@ -129,8 +129,8 @@ payloads until `step_assertions_end()`.
 | `assert_step_received(step, predicate?)` | Assert a `PreStep` payload matched a closure, dict subset, or value |
 | `assert_step_emitted(step, predicate?)` | Assert a `PostStep` payload matched a closure, dict subset, or value |
 | `assert_handoff_emitted(source, kind, target?)` | Assert a run record or handoff list contains a typed handoff |
-| `assert_receipt_field(receipt, pointer, value)` | Assert an RFC 6901 JSON Pointer field in a receipt |
-| `assert_golden_transcript(expected, actual)` | Structured subset matcher with `<ms>`, `<uuid>`, and `<any>` sentinels |
+| `assert_receipt_field(receipt, pointer, expected)` | Assert an RFC 6901 JSON Pointer field in a receipt, with a diff on failure |
+| `assert_golden_transcript(actual, golden)` | Structured subset matcher with `<ms>`, `<uuid>`, and `<any>` sentinels |
 
 ### Example
 
@@ -578,17 +578,84 @@ run-record structure to catch branching drift.
 
 ## Built-in assertions
 
-Harn provides `assert`, `assert_eq`, and `assert_ne` builtins for test pipelines:
+These are available with no import at all, and `std/testing` re-exports them so
+`import { assert_eq } from "std/testing"` works too:
+
+| Function | Description |
+|----------|-------------|
+| `assert(condition, message?)` | Assert a condition is truthy |
+| `assert_eq(actual, expected, message?)` | Assert two values are equal, with a structural diff on failure |
+| `assert_ne(actual, expected, message?)` | Assert two values are not equal |
+| `assert_approx(actual, expected, tolerance?, message?)` | Compare numbers within a tolerance (default `1e-9`) |
+| `assert_matches(actual, pattern, message?)` | Assert text matches a regex; returns the text |
+| `value_diff(actual, expected)` | The diff itself, as a string — or `nil` when the values are equal |
 
 ```harn
 assert(x > 0, "x must be positive")
-assert_eq(actual, expected)
-assert_ne(actual, unexpected)
 assert_eq(len(items), 3)
+assert_approx(total, 0.3)
+assert_matches(receipt.id, "^rcpt-\\d+$")
 ```
 
-Failed assertions throw an error with a descriptive message including
-the expected and actual values.
+### Argument order
+
+Every assertion takes **the thing under test first**:
+
+```harn
+assert_eq(actual, expected)
+assert_matches(actual, pattern)
+assert_contains(haystack, needle)
+```
+
+This matters more than it looks. Swap the arguments of an equality assertion
+and it still passes and fails in exactly the same cases — it just labels the
+two halves of every failure backwards, sending you to look for a bug in the
+value that was right all along. One rule, no exceptions.
+
+### What a failure looks like
+
+`assert_eq` does not print two values and leave you to compare them. It reports
+each place they differ, addressed by path, and shows only those leaves:
+
+```text
+assert_eq failed: the two values differ in 2 places.
+
+  at .user.name
+    expected  "Grace"
+    actual    "Ada"
+    The strings first differ at character 0.
+
+  at .user.roles[1]
+    expected  "ops"
+    actual    "dev"
+    The strings first differ at character 0.
+```
+
+A path like `.user.roles[1]` is ordinary Harn access syntax, so you can paste
+it straight back into your program to inspect the value.
+
+Because values carry their type at runtime, the diff can tell apart things that
+would otherwise render identically:
+
+```text
+assert_eq failed.
+    expected  "1" (string)
+    actual    1 (int)
+    One side is a number and the other is text. If this came from parsed
+    input, the conversion may be missing.
+```
+
+Types are named only when the two sides disagree, so the common case stays
+quiet. A float mismatch points you at `assert_approx` rather than making you
+rediscover that `0.1 + 0.2 != 0.3`.
+
+Passing a `message` replaces the diff outright — it is a deliberate choice to
+say something the diff cannot, so reach for it when you have real context to
+add, not to restate what the values already show.
+
+Large values are abbreviated in the middle (keeping both ends, which is where
+strings usually differ), and a mismatch with more than ten differing leaves
+reports the first ten and counts the rest.
 
 Use `require` for runtime invariants in normal pipelines. The linter warns if
 you use `assert*` outside test pipelines, and it suggests `assert*` instead of
