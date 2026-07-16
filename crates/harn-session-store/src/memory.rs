@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use super::event::{now_ms_and_rfc3339, AppendEvent, EventId, SessionEventKind, StoredEvent};
 use super::memory_helpers::{meta_for_create, validate_open};
+use super::redaction::{prepare_append_event, redact_stored_events};
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
     verify_event_chain,
@@ -72,15 +73,6 @@ fn lock(inner: &Arc<Mutex<Inner>>) -> std::sync::MutexGuard<'_, Inner> {
     inner.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn apply_redaction(hooks: &StoreHooks, event: &mut AppendEvent) {
-    let Some(policy) = hooks.redaction.as_ref() else {
-        return;
-    };
-    policy.redact_json_in_place(&mut event.payload);
-    let redacted_headers = policy.redact_headers(&event.headers);
-    event.headers = redacted_headers;
-}
-
 /// Core append logic against an already-locked session record. Both
 /// `append` and `close` call this while holding the single store lock, so
 /// `close` can read the chain state, append the receipt, and finalise it
@@ -91,7 +83,7 @@ fn append_locked(
     hooks: &StoreHooks,
     mut event: AppendEvent,
 ) -> StoreResult<StoredEvent> {
-    apply_redaction(hooks, &mut event);
+    prepare_append_event(hooks, &mut event)?;
     validate_open(&record.meta)?;
     validate_parent(record, &event)?;
     let (ts_ms, ts) = now_ms_and_rfc3339();
@@ -209,12 +201,8 @@ impl SessionStore for MemorySessionStore {
         } else {
             None
         };
-        // Defense in depth: re-redact on read if policy demands it.
-        if let Some(policy) = self.hooks.redaction.as_ref() {
-            for event in events.iter_mut() {
-                policy.redact_json_in_place(&mut event.payload);
-            }
-        }
+        // Defense in depth for data imported or written under an older policy.
+        redact_stored_events(&self.hooks, &mut events);
         Ok(EventPage {
             events,
             next_cursor,

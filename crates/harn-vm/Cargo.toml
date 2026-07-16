@@ -50,6 +50,7 @@ pin-project-lite = "0.2"
 harn-clock = { path = "../harn-clock", version = "=0.10.21" }
 harn-glob = { path = "../harn-glob", version = "=0.10.21" }
 harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.21" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.21" }
 harn-ir = { path = "../harn-ir", version = "=0.10.21" }
 harn-lexer = { path = "../harn-lexer", version = "=0.10.21" }
 harn-modules = { path = "../harn-modules", version = "=0.10.21" }

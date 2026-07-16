@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::event::{AppendEvent, EventId, StoredEvent};
+use super::redaction::SharedEventRedactor;
 use super::retention::{RetentionPolicy, SharedArchiveSink, Tombstone};
 use super::signing::SessionSigner;
-use harn_vm::redact::RedactionPolicy;
 
 pub type SessionId = String;
 
@@ -191,8 +191,8 @@ pub const MAX_READ_BATCH: usize = 1_000;
 /// mutation points.
 #[derive(Default, Clone)]
 pub struct StoreHooks {
-    /// Applied to event payloads, headers, and tags before persistence.
-    pub redaction: Option<RedactionPolicy>,
+    /// Applied to event payloads and headers before persistence.
+    pub redaction: Option<SharedEventRedactor>,
     /// If set, every event is signed at append time. Without a signer
     /// only the `Receipt` event minted by [`SessionStore::close`] is
     /// signed (which is enough to verify the chain end-to-end).
