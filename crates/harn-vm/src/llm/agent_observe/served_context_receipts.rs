@@ -170,7 +170,7 @@ mod tests {
         );
 
         let expected_messages_hash =
-            stable_redacted_json_hash(&serde_json::Value::Array(opts.messages.clone()));
+            stable_redacted_json_hash(&serde_json::Value::Array(opts.messages));
         let expected_native_tools_hash =
             stable_redacted_json_hash(&serde_json::Value::Array(vec![native_tool]));
         assert_eq!(
