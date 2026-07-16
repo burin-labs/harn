@@ -1,6 +1,6 @@
 import { parse_args } from "std/cli"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v5"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v6"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
@@ -44,7 +44,7 @@ pub type ProviderToolProbeCell = {
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v5",
+  schema_version: "harn.provider_tool_probe_campaign.v6",
   live: bool,
   include_expensive: bool,
   route_count: int,
@@ -55,6 +55,7 @@ pub type ProviderToolProbeCampaignReport = {
   executable_gap: dict,
   auth_readiness: dict,
   spend: dict,
+  campaign_slice: dict,
   routes: list<ProviderToolProbeRoute>,
   behaviors: list<ProviderToolProbeBehavior>,
   cells: list<ProviderToolProbeCell>,
@@ -669,17 +670,71 @@ pub fn provider_tool_probe_campaign_planned_cells_with_options(
   repeat: int,
   timeout_secs: int,
 ) -> list<ProviderToolProbeCell> {
+  return provider_tool_probe_campaign_planned_cells_sliced_with_options(
+    routes,
+    behaviors,
+    harn_bin,
+    repeat,
+    timeout_secs,
+    1,
+    0,
+    0,
+  ).cells
+}
+
+pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  harn_bin: string,
+  repeat: int,
+  timeout_secs: int,
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+) -> dict {
   let cells: list<ProviderToolProbeCell> = []
+  let probe_units_total = 0
+  let probe_units_selected = 0
+  let probe_units_excluded_by_shard = 0
+  let probe_units_excluded_by_cap = 0
+  let executable_units_selected = 0
   for route in routes {
     for behavior in behaviors {
       for mode in behavior.modes {
+        const ordinal = probe_units_total
+        probe_units_total = probe_units_total + 1
+        if !__campaign_slice_selects_unit(ordinal, shard_count, shard_index) {
+          probe_units_excluded_by_shard = probe_units_excluded_by_shard + 1
+          continue
+        }
+        if behavior.runner == "provider_tool_probe" && max_probes > 0
+          && executable_units_selected >= max_probes {
+          probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
+          continue
+        }
+        probe_units_selected = probe_units_selected + 1
+        if behavior.runner == "provider_tool_probe" {
+          executable_units_selected = executable_units_selected + 1
+        }
         for format in behavior.tool_formats {
           cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
         }
       }
     }
   }
-  return cells
+  return {
+    cells: cells,
+    slice: __campaign_slice_receipt(
+      shard_count,
+      shard_index,
+      max_probes,
+      probe_units_total,
+      probe_units_selected,
+      executable_units_selected,
+      probe_units_excluded_by_shard,
+      probe_units_excluded_by_cap,
+    ),
+  }
 }
 
 fn __safe_status(value) -> string {
@@ -932,25 +987,87 @@ fn __live_cells(
   repeat: int,
   timeout_secs: int,
   output_dir: string,
-) -> list<ProviderToolProbeCell> {
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+) -> dict {
   let cells: list<ProviderToolProbeCell> = []
+  let probe_units_total = 0
+  let probe_units_selected = 0
+  let probe_units_excluded_by_shard = 0
+  let probe_units_excluded_by_cap = 0
+  let executable_units_selected = 0
   for route in routes {
     for behavior in behaviors {
-      if behavior.runner != "provider_tool_probe" {
-        for mode in behavior.modes {
+      for mode in behavior.modes {
+        const ordinal = probe_units_total
+        probe_units_total = probe_units_total + 1
+        if !__campaign_slice_selects_unit(ordinal, shard_count, shard_index) {
+          probe_units_excluded_by_shard = probe_units_excluded_by_shard + 1
+          continue
+        }
+        const ready_provider_probe = behavior.runner == "provider_tool_probe" && len(__missing_env_keys(route, env)) == 0
+        if ready_provider_probe && max_probes > 0 && executable_units_selected >= max_probes {
+          probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
+          continue
+        }
+        probe_units_selected = probe_units_selected + 1
+        if behavior.runner != "provider_tool_probe" {
           for format in behavior.tool_formats {
             cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
           }
+          continue
         }
-        continue
-      }
-      for mode in behavior.modes {
+        if ready_provider_probe {
+          executable_units_selected = executable_units_selected + 1
+        }
         cells = cells
           + __run_tool_probe(harness, route, behavior, mode, harn_bin, env, repeat, timeout_secs, output_dir)
       }
     }
   }
-  return cells
+  return {
+    cells: cells,
+    slice: __campaign_slice_receipt(
+      shard_count,
+      shard_index,
+      max_probes,
+      probe_units_total,
+      probe_units_selected,
+      executable_units_selected,
+      probe_units_excluded_by_shard,
+      probe_units_excluded_by_cap,
+    ),
+  }
+}
+
+fn __campaign_slice_selects_unit(ordinal: int, shard_count: int, shard_index: int) -> bool {
+  if shard_count <= 1 {
+    return true
+  }
+  return ordinal % shard_count == shard_index
+}
+
+fn __campaign_slice_receipt(
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+  probe_units_total: int,
+  probe_units_selected: int,
+  executable_units_selected: int,
+  probe_units_excluded_by_shard: int,
+  probe_units_excluded_by_cap: int,
+) -> dict {
+  return {
+    shard_count: shard_count,
+    shard_index: shard_index,
+    max_probes: max_probes,
+    probe_units_total: probe_units_total,
+    probe_units_selected: probe_units_selected,
+    executable_units_selected: executable_units_selected,
+    probe_units_excluded_by_shard: probe_units_excluded_by_shard,
+    probe_units_excluded_by_cap: probe_units_excluded_by_cap,
+  }
 }
 
 fn __summary(cells: list<ProviderToolProbeCell>) -> dict {
@@ -1011,19 +1128,18 @@ fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {
   }
 }
 
-fn __estimated_spend(
-  live: bool,
-  routes: list<ProviderToolProbeRoute>,
-  behaviors: list<ProviderToolProbeBehavior>,
-  repeat: int,
-) -> dict {
-  let executable = 0
-  for behavior in behaviors {
-    if behavior.runner == "provider_tool_probe" {
-      executable = executable + len(behavior.modes)
+fn __estimated_spend(live: bool, cells: list<ProviderToolProbeCell>, repeat: int) -> dict {
+  let executable_probe_count = 0
+  for cell in cells {
+    if cell.runner != "provider_tool_probe" || cell.tool_format != "native" {
+      continue
+    }
+    if !live && cell.status == "planned" {
+      executable_probe_count = executable_probe_count + repeat
+    } else if live && (cell.status == "pass" || cell.status == "fail" || cell.status == "error") {
+      executable_probe_count = executable_probe_count + repeat
     }
   }
-  const executable_probe_count = len(routes) * executable * repeat
   const base = {
     cap_usd: 10.0,
     estimated_usd_known: false,
@@ -1051,6 +1167,7 @@ pub fn provider_tool_probe_campaign_report(
   repeat: int,
   env: dict,
   env_source: dict,
+  campaign_slice: dict = {},
 ) -> ProviderToolProbeCampaignReport {
   return {
     schema_version: SCHEMA_VERSION,
@@ -1063,7 +1180,8 @@ pub fn provider_tool_probe_campaign_report(
     runner_summary: __runner_summary(cells),
     executable_gap: __executable_gap(cells),
     auth_readiness: __auth_readiness(routes, env, env_source),
-    spend: __estimated_spend(live, routes, behaviors, repeat),
+    spend: __estimated_spend(live, cells, repeat),
+    campaign_slice: campaign_slice,
     routes: routes,
     behaviors: behaviors,
     cells: cells,
@@ -1106,6 +1224,7 @@ pub fn provider_tool_probe_campaign_markdown(report: ProviderToolProbeCampaignRe
   out = out + "- Runner summary: `" + json_stringify(report.runner_summary) + "`\n"
   out = out + "- Executable gap: `" + json_stringify(report.executable_gap) + "`\n"
   out = out + "- Auth readiness: `" + json_stringify(report.auth_readiness) + "`\n"
+  out = out + "- Campaign slice: `" + json_stringify(report.campaign_slice) + "`\n"
   out = out + "- Spend: `" + json_stringify(report.spend) + "`\n\n"
   out = out + "| Status | Provider | Model | Behavior | Mode | Tool format | Reason |\n"
   out = out + "| --- | --- | --- | --- | --- | --- | --- |\n"
@@ -1224,6 +1343,9 @@ fn __arg_spec() -> list {
     {kind: "option", name: "mode", flags: ["--mode"], default: "both"},
     {kind: "option", name: "repeat", flags: ["--repeat"], parse: "int", default: 1},
     {kind: "option", name: "timeout_secs", flags: ["--timeout-secs"], parse: "int", default: 60},
+    {kind: "option", name: "shard_count", flags: ["--shard-count"], parse: "int", default: 1},
+    {kind: "option", name: "shard_index", flags: ["--shard-index"], parse: "int", default: 0},
+    {kind: "option", name: "max_probes", flags: ["--max-probes"], parse: "int", default: 0},
     {kind: "option", name: "harn_bin", flags: ["--harn-bin"], default: "harn"},
     {kind: "option", name: "env_file", flags: ["--env-file"], default: ""},
     {kind: "option", name: "output_dir", flags: ["--output-dir"], default: DEFAULT_OUTPUT_DIR},
@@ -1243,7 +1365,7 @@ fn main(harness: Harness) {
   if parsed?._help ?? false {
     harness.stdio
       .println(
-      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--include-expensive] [--live] [--markdown]",
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
     )
     return nil
   }
@@ -1285,6 +1407,21 @@ fn main(harness: Harness) {
   const live = parsed?.live ?? false
   const repeat = parsed?.repeat ?? 1
   const timeout_secs = parsed?.timeout_secs ?? 60
+  const shard_count = parsed?.shard_count ?? 1
+  const shard_index = parsed?.shard_index ?? 0
+  const max_probes = parsed?.max_probes ?? 0
+  if shard_count <= 0 {
+    harness.stdio.eprintln("--shard-count must be >= 1")
+    exit(2)
+  }
+  if shard_index < 0 || shard_index >= shard_count {
+    harness.stdio.eprintln("--shard-index must be >= 0 and < --shard-count")
+    exit(2)
+  }
+  if max_probes < 0 {
+    harness.stdio.eprintln("--max-probes must be >= 0")
+    exit(2)
+  }
   const harn_bin = to_string(parsed?.harn_bin ?? "harn")
   const output_dir = to_string(parsed?.output_dir ?? DEFAULT_OUTPUT_DIR)
   __ensure_dir(harness, ".harn-runs")
@@ -1299,17 +1436,33 @@ fn main(harness: Harness) {
   }
   const env_load = __load_env_file(harness, env_file_path)
   const env = env_load.env ?? {}
-  const cells = if live {
-    __live_cells(harness, routes, behaviors, harn_bin, env, repeat, timeout_secs, output_dir)
+  const cell_plan = if live {
+    __live_cells(
+      harness,
+      routes,
+      behaviors,
+      harn_bin,
+      env,
+      repeat,
+      timeout_secs,
+      output_dir,
+      shard_count,
+      shard_index,
+      max_probes,
+    )
   } else {
-    provider_tool_probe_campaign_planned_cells_with_options(
+    provider_tool_probe_campaign_planned_cells_sliced_with_options(
       routes,
       behaviors,
       harn_bin,
       repeat,
       timeout_secs,
+      shard_count,
+      shard_index,
+      max_probes,
     )
   }
+  const cells = cell_plan.cells ?? []
   const report = provider_tool_probe_campaign_report(
     routes,
     behaviors,
@@ -1320,6 +1473,7 @@ fn main(harness: Harness) {
     repeat,
     env,
     env_load.source ?? {},
+    cell_plan.slice ?? {},
   )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
   harness.fs

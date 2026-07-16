@@ -307,7 +307,7 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(task) {
     {},
     {checked: false},
   )
-  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v5")
+  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v6")
   assert_eq(report.summary.planned, 3)
   assert_eq(report.summary.pass, 0)
   assert_eq(report.cell_count, 3)
@@ -324,10 +324,78 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(task) {
 }
 
 @test
+pipeline test_provider_tool_probe_campaign_shard_slices_probe_units(task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(
+    ["tool_calling_non_streaming", "tool_calling_streaming"],
+  )
+  const plan = provider_tool_probe_campaign_planned_cells_sliced_with_options(
+    routes,
+    behaviors,
+    "harn",
+    1,
+    60,
+    2,
+    1,
+    0,
+  )
+  const cells = plan.cells ?? []
+  assert_eq(len(cells), 3)
+  assert_eq(cells[0]?.behavior, "tool_calling_streaming")
+  assert_eq(cells[0]?.mode, "streaming")
+  assert_eq(plan.slice.probe_units_total, 2)
+  assert_eq(plan.slice.probe_units_selected, 1)
+  assert_eq(plan.slice.executable_units_selected, 1)
+  assert_eq(plan.slice.probe_units_excluded_by_shard, 1)
+  assert_eq(plan.slice.probe_units_excluded_by_cap, 0)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_max_probes_caps_executable_units(task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
+  const plan = provider_tool_probe_campaign_planned_cells_sliced_with_options(
+    routes,
+    behaviors,
+    "harn",
+    3,
+    60,
+    1,
+    0,
+    2,
+  )
+  const cells = plan.cells ?? []
+  assert_eq(len(cells), 6)
+  assert_eq(plan.slice.probe_units_total, 5)
+  assert_eq(plan.slice.probe_units_selected, 2)
+  assert_eq(plan.slice.executable_units_selected, 2)
+  assert_eq(plan.slice.probe_units_excluded_by_cap, 3)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    3,
+    {},
+    {checked: true},
+    plan.slice,
+  )
+  assert_eq(report.campaign_slice.max_probes, 2)
+  assert_eq(report.spend.executable_probe_count, 6)
+}
+
+@test
 pipeline test_provider_tool_probe_campaign_live_spend_is_unknown_until_aggregated(task) {
   const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
   const behaviors = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
-  const cells = provider_tool_probe_campaign_planned_cells(routes, behaviors)
+  const planned = provider_tool_probe_campaign_planned_cells(routes, behaviors)
+  const cells = [
+    unwrap(planned[0]) + {status: "pass"},
+    unwrap(planned[1]) + {status: "skip"},
+    unwrap(planned[2]) + {status: "planned"},
+  ]
   const report = provider_tool_probe_campaign_report(
     routes,
     behaviors,
@@ -342,7 +410,7 @@ pipeline test_provider_tool_probe_campaign_live_spend_is_unknown_until_aggregate
   assert_eq(report.spend.actual_usd_known, false)
   assert_eq(report.spend.estimated_usd_known, false)
   assert_eq(report.spend.actual_usd, nil)
-  assert_eq(report.spend.unpriced_probe_count, 10)
+  assert_eq(report.spend.unpriced_probe_count, 2)
 }
 
 @test
@@ -508,9 +576,23 @@ pipeline test_provider_tool_probe_campaign_dotenv_parser_does_not_require_shell(
 
 @test
 pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(task) {
-  const parsed = provider_tool_probe_campaign_parse_args(["--catalog-routes", "--include-expensive"])
+  const parsed = provider_tool_probe_campaign_parse_args(
+    [
+      "--catalog-routes",
+      "--include-expensive",
+      "--shard-count",
+      "4",
+      "--shard-index",
+      "2",
+      "--max-probes",
+      "10",
+    ],
+  )
   assert_eq(parsed.catalog_routes, true)
   assert_eq(parsed.include_expensive, true)
+  assert_eq(parsed.shard_count, 4)
+  assert_eq(parsed.shard_index, 2)
+  assert_eq(parsed.max_probes, 10)
 }
 
 @test
