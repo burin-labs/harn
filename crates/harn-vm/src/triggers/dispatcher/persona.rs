@@ -75,15 +75,17 @@ impl Dispatcher {
         let receipt = match admission {
             crate::personas::PersonaRunAdmission::Terminal(receipt) => receipt,
             crate::personas::PersonaRunAdmission::Admitted(context) => {
+                let effective_autonomy = autonomy_tier.min(persona_binding.autonomy_tier);
                 match self
-                    .invoke_vm_callable(
+                    .invoke_vm_callable_with_policy(
                         callable,
                         &binding.binding_key(),
                         event,
                         None,
                         binding.id.as_str(),
                         &event.qualified_kind(),
-                        autonomy_tier,
+                        effective_autonomy,
+                        Some(&persona_binding.execution_policy),
                         wait_lease,
                         cancel_rx,
                     )

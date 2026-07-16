@@ -83,7 +83,7 @@ pub(super) fn apply_runtime_node_overrides(
             .map(|value| value.display())
             .filter(|value| !value.is_empty());
     }
-    if !node.capability_policy.tools.is_empty() {
+    if node.capability_policy.tools_are_restricted() {
         node.tools = filter_workflow_tools(&node.tools, &node.capability_policy.tools);
         node.raw_tools = node
             .raw_tools

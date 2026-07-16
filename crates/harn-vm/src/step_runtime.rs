@@ -602,11 +602,12 @@ fn stage_policy_for_active_step(step_name: &str) -> Option<CapabilityPolicy> {
         let intersected_tools: Vec<String> = stage_policy
             .tools
             .iter()
-            .filter(|tool| parent.tools.is_empty() || parent.tools.contains(*tool))
+            .filter(|tool| !parent.tools_are_restricted() || parent.tools.contains(*tool))
             .cloned()
             .collect();
         CapabilityPolicy {
             tools: intersected_tools,
+            tools_restricted: stage_policy.tools_restricted,
             ..stage_policy
         }
     }))
@@ -615,6 +616,7 @@ fn stage_policy_for_active_step(step_name: &str) -> Option<CapabilityPolicy> {
 fn stage_decl_to_policy(stage: &StageDecl) -> CapabilityPolicy {
     CapabilityPolicy {
         tools: stage.allowed_tools.clone().unwrap_or_default(),
+        tools_restricted: stage.allowed_tools.is_some(),
         side_effect_level: stage.side_effect_level.clone(),
         ..CapabilityPolicy::default()
     }
@@ -1250,6 +1252,18 @@ mod tests {
         prune_below_frame(0);
         pop_execution_policy();
         assert!(current_execution_policy().is_none());
+    }
+
+    #[test]
+    fn explicit_empty_stage_tool_list_denies_every_tool() {
+        let policy = stage_decl_to_policy(&StageDecl {
+            name: "observe".to_string(),
+            allowed_tools: Some(Vec::new()),
+            ..StageDecl::default()
+        });
+
+        assert!(policy.tools_are_restricted());
+        assert!(policy.tools.is_empty());
     }
 
     #[test]

@@ -32,6 +32,35 @@ impl Dispatcher {
         wait_lease: Option<DispatchWaitLease>,
         cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<VmValue, DispatchError> {
+        self.invoke_vm_callable_with_policy(
+            callable,
+            binding_key,
+            event,
+            replay_of_event_id,
+            agent_id,
+            action,
+            autonomy_tier,
+            None,
+            wait_lease,
+            cancel_rx,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn invoke_vm_callable_with_policy(
+        &self,
+        callable: &crate::value::VmCallable,
+        binding_key: &str,
+        event: &TriggerEvent,
+        replay_of_event_id: Option<&String>,
+        agent_id: &str,
+        action: &str,
+        autonomy_tier: AutonomyTier,
+        invocation_policy: Option<&crate::orchestration::CapabilityPolicy>,
+        wait_lease: Option<DispatchWaitLease>,
+        cancel_rx: &mut broadcast::Receiver<()>,
+    ) -> Result<VmValue, DispatchError> {
         let mut vm = self.base_vm.child_vm();
         let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
         if self.state.shutting_down.load(Ordering::SeqCst) {
@@ -46,11 +75,17 @@ impl Dispatcher {
         let arg = event_to_handler_value(event)?;
         let args = [arg];
         let tier_policy = policy_for_autonomy_tier(autonomy_tier);
-        let effective_policy = match crate::orchestration::current_execution_policy() {
-            Some(parent) => parent
-                .intersect(&tier_policy)
+        let invocation_policy = match invocation_policy {
+            Some(policy) => tier_policy
+                .intersect(policy)
                 .map_err(DispatchError::Local)?,
             None => tier_policy,
+        };
+        let effective_policy = match crate::orchestration::current_execution_policy() {
+            Some(parent) => parent
+                .intersect(&invocation_policy)
+                .map_err(DispatchError::Local)?,
+            None => invocation_policy,
         };
         let _execution_context_guard = DispatchProcessContextGuard::install(&vm);
         crate::orchestration::push_execution_policy(effective_policy);

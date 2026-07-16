@@ -251,4 +251,7 @@ pub(crate) fn parse_json_value<T: for<'de> Deserialize<'de>>(
 mod tests;
 
 #[cfg(test)]
+mod policy_restriction_tests;
+
+#[cfg(test)]
 mod typed_options_parity;

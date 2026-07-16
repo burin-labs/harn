@@ -125,7 +125,7 @@ pub fn current_allowed_tool_names() -> Vec<String> {
     let Some(policy) = current_execution_policy() else {
         return Vec::new();
     };
-    if !policy.tools.is_empty() {
+    if policy.tools_are_restricted() {
         return policy.tools;
     }
     policy.tool_annotations.keys().cloned().collect()
@@ -156,7 +156,7 @@ impl Drop for TrustedBridgeCallGuard {
 }
 
 fn policy_allows_tool(policy: &CapabilityPolicy, tool: &str) -> bool {
-    policy.tools.is_empty() || policy.tools.iter().any(|allowed| allowed == tool)
+    !policy.tools_are_restricted() || policy.tools.iter().any(|allowed| allowed == tool)
 }
 
 fn policy_grants_capability(policy: &CapabilityPolicy, capability: &str, op: &str) -> bool {
@@ -167,7 +167,7 @@ fn policy_grants_capability(policy: &CapabilityPolicy, capability: &str, op: &st
 }
 
 fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, op: &str) -> bool {
-    if policy.capabilities.is_empty() {
+    if !policy.capabilities_are_restricted() {
         // Empty capability map = allow-all (e.g. the root agent policy).
         return true;
     }
@@ -722,7 +722,9 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         // is the sole authority, and an allowlist here would silently block
         // any capability the host adds later.
         tools: Vec::new(),
+        tools_restricted: false,
         capabilities: BTreeMap::new(),
+        capabilities_restricted: false,
         workspace_roots: Vec::new(),
         read_only_roots: Vec::new(),
         // The builtin ceiling is the runtime's OUTERMOST bound — the top of the

@@ -612,6 +612,8 @@ async fn persona_supervision_tail_projects_multiplexed_ndjson_contract() {
         .expect("open persona event log");
     let merge_binding = harn_vm::PersonaRuntimeBinding {
         name: "merge_captain".to_string(),
+        autonomy_tier: harn_vm::AutonomyTier::ActAuto,
+        execution_policy: Box::default(),
         template_ref: Some("merge_captain@1.4.0".to_string()),
         entry_workflow: "workflows/merge.harn#run".to_string(),
         schedules: Vec::new(),

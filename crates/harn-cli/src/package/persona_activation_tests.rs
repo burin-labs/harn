@@ -78,6 +78,41 @@ fn activation_attenuates_and_pins_the_installed_policy_idempotently() {
 }
 
 #[test]
+fn activation_attenuates_model_implied_llm_authority() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = install_one(tmp.path());
+
+    let inherited = activate_persona(
+        Some(&manifest),
+        "agents/reviewer",
+        &PersonaAttenuation::default(),
+        100,
+    )
+    .unwrap();
+    assert_eq!(
+        inherited.activation.unwrap().effective_policy.capabilities,
+        vec!["llm.call", "workspace.read_text"]
+    );
+
+    let denied = activate_persona(
+        Some(&manifest),
+        "agents/reviewer",
+        &PersonaAttenuation {
+            capabilities: Some(Vec::new()),
+            ..Default::default()
+        },
+        200,
+    )
+    .unwrap();
+    assert!(denied
+        .activation
+        .unwrap()
+        .effective_policy
+        .capabilities
+        .is_empty());
+}
+
+#[test]
 fn activation_rejects_every_authority_expansion_without_writing_state() {
     let tmp = tempfile::tempdir().unwrap();
     let manifest = install_one(tmp.path());
