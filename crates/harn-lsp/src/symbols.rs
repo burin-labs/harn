@@ -530,14 +530,15 @@ fn collect_symbols(
                         fields: variant
                             .fields
                             .iter()
-                            .map(|field| ShapeField {
-                                name: field.name.clone(),
-                                type_expr: field
-                                    .type_expr
-                                    .clone()
-                                    .unwrap_or(TypeExpr::Named("any".to_string())),
-                                optional: false,
-                                span: field.span,
+                            .map(|field| {
+                                ShapeField::synthetic(
+                                    field.name.clone(),
+                                    field
+                                        .type_expr
+                                        .clone()
+                                        .unwrap_or(TypeExpr::Named("any".to_string())),
+                                    false,
+                                )
                             })
                             .collect(),
                     })
