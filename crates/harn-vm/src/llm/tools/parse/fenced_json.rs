@@ -53,6 +53,9 @@ enum BlockError {
     /// byte offset so a lone backslash / bad `\u` / raw control char is named
     /// directly instead of surfacing as a downstream symptom.
     InvalidJson { detail: String },
+    /// A recognized chat-template envelope was incomplete or structurally
+    /// invalid, so no partial action may be dispatched.
+    ChatTemplateEnvelope { detail: String },
 }
 
 impl BlockError {
@@ -78,6 +81,11 @@ impl BlockError {
                 "The ```tool block is not valid JSON: {detail}. Pass multi-line or code-bearing \
                  fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", \
                  backslashes as \\\\); backticks need no escaping."
+            ),
+            BlockError::ChatTemplateEnvelope { detail } => format!(
+                "The `<tool_calls>` chat-template envelope is malformed: {detail}. Re-emit \
+                 complete calls as canonical ```tool JSON blocks; incomplete entries were not \
+                 executed."
             ),
         }
     }
@@ -131,7 +139,27 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
 
     if !saw_fenced_blocks {
         let trimmed = src.trim();
-        if let Ok((name, arguments)) = parse_bare_json_tool_call(trimmed) {
+        if let Some(template_calls) = parse_chat_template_json_tool_calls(trimmed) {
+            match template_calls {
+                Ok(template_calls) => {
+                    violations.push(
+                        "protocol_violation: a tool call was emitted in a chat-template \
+                         `<tool_calls>` envelope while `tool_format` is `json`; accepted this \
+                         turn, but emit canonical ```tool JSON blocks next turn."
+                            .to_string(),
+                    );
+                    for (name, arguments) in template_calls {
+                        calls.push(serde_json::json!({
+                            "id": format!("tc_{}", calls.len()),
+                            "name": name,
+                            "arguments": arguments,
+                        }));
+                    }
+                    prose.clear();
+                }
+                Err(error) => errors.push(error.into_message()),
+            }
+        } else if let Ok((name, arguments)) = parse_bare_json_tool_call(trimmed) {
             violations.push(
                 "protocol_violation: a tool call was emitted as a bare JSON object; the contract \
                  requires wrapping each `{ \"name\": ..., \"args\": { ... } }` object in a \
@@ -338,6 +366,17 @@ fn parse_block_body(
         _ => return Err(BlockError::ExpectedSingleObject),
     };
 
+    normalize_json_tool_call_object(obj, false)
+}
+
+/// Normalize one JSON tool-call object into Harn's `{ name, arguments }`
+/// dispatch contract. Canonical fenced JSON requires a nested `args` object;
+/// recognized chat-template envelopes may carry their arguments inline beside
+/// `name`, because that is the only unambiguous shape they emit.
+fn normalize_json_tool_call_object(
+    obj: serde_json::Map<String, serde_json::Value>,
+    allow_inline_arguments: bool,
+) -> Result<(String, serde_json::Value), BlockError> {
     // Canonical keys are `name`/`args`. Accept `tool`/`arguments` as aliases so
     // the bare `{"tool":..,"arguments":..}` dialect emitted by some models on
     // text/json channels (MiniMax, qwen, gpt-oss on text-only routes) parses
@@ -350,7 +389,13 @@ fn parse_block_body(
     let args_value = obj.get("args").or_else(|| obj.get("arguments"));
     let arguments = match args_value {
         Some(value @ serde_json::Value::Object(_)) => value.clone(),
-        Some(serde_json::Value::Null) | None => empty_object(),
+        Some(serde_json::Value::Null) => empty_object(),
+        None if allow_inline_arguments => serde_json::Value::Object(
+            obj.into_iter()
+                .filter(|(key, _)| key != "name" && key != "tool")
+                .collect(),
+        ),
+        None => empty_object(),
         Some(_) => return Err(BlockError::ArgsNotObject),
     };
 
@@ -370,6 +415,109 @@ fn parse_bare_json_tool_call(body: &str) -> Result<(String, serde_json::Value), 
         return Err(BlockError::ExpectedSingleObject);
     }
     parse_block_body(body, 0)
+}
+
+/// Parse the common chat-template JSON dialect used by text-only tool routes:
+///
+/// ```text
+/// <tool_calls>
+/// <tool>
+/// {"name":"look","file":"src/lib.rs"}
+/// {"name":"run","command":"cargo test"}
+/// </tool_calls>
+/// ```
+///
+/// The grammar is intentionally whole-response only. A `<tool_calls>` opener
+/// must have the matching close, at least one `<tool>` marker, and a sequence
+/// of complete JSON objects. This makes the recovery unambiguous while keeping
+/// partial markup fail-loud rather than dispatching a guessed action.
+fn parse_chat_template_json_tool_calls(
+    src: &str,
+) -> Option<Result<Vec<(String, serde_json::Value)>, BlockError>> {
+    const OPEN: &str = "<tool_calls>";
+    const CLOSE: &str = "</tool_calls>";
+    const TOOL_OPEN: &str = "<tool>";
+    const TOOL_CLOSE: &str = "</tool>";
+
+    let body = src.strip_prefix(OPEN)?;
+    let Some(mut body) = body.strip_suffix(CLOSE).map(str::trim) else {
+        return Some(Err(BlockError::ChatTemplateEnvelope {
+            detail: "the opening `<tool_calls>` tag has no matching `</tool_calls>` close"
+                .to_string(),
+        }));
+    };
+
+    let mut saw_tool_marker = false;
+    let mut calls = Vec::new();
+    while !body.is_empty() {
+        if let Some(rest) = body.strip_prefix(TOOL_OPEN) {
+            saw_tool_marker = true;
+            body = rest.trim_start();
+            continue;
+        }
+        if let Some(rest) = body.strip_prefix(TOOL_CLOSE) {
+            body = rest.trim_start();
+            continue;
+        }
+        if !body.starts_with('{') {
+            return Some(Err(BlockError::ChatTemplateEnvelope {
+                detail: format!(
+                    "expected a `{TOOL_OPEN}` marker or a JSON object, found `{}`",
+                    preview_str(body, 80)
+                ),
+            }));
+        }
+
+        let mut values = serde_json::Deserializer::from_str(body).into_iter::<serde_json::Value>();
+        let value = match values.next() {
+            Some(Ok(value)) => value,
+            Some(Err(error)) if error.is_eof() => {
+                return Some(Err(BlockError::ChatTemplateEnvelope {
+                    detail: "a JSON tool object ended before its closing `}`".to_string(),
+                }));
+            }
+            Some(Err(error)) => {
+                return Some(Err(BlockError::ChatTemplateEnvelope {
+                    detail: format!("invalid JSON tool object: {error}"),
+                }));
+            }
+            None => {
+                return Some(Err(BlockError::ChatTemplateEnvelope {
+                    detail: "expected a JSON tool object after `<tool>`".to_string(),
+                }));
+            }
+        };
+        let consumed = values.byte_offset();
+        let obj = match value {
+            serde_json::Value::Object(obj) => obj,
+            _ => {
+                return Some(Err(BlockError::ChatTemplateEnvelope {
+                    detail: "each chat-template tool entry must be a JSON object".to_string(),
+                }));
+            }
+        };
+        match normalize_json_tool_call_object(obj, true) {
+            Ok(call) => calls.push(call),
+            Err(error) => {
+                return Some(Err(BlockError::ChatTemplateEnvelope {
+                    detail: error.into_message(),
+                }));
+            }
+        }
+        body = body[consumed..].trim_start();
+    }
+
+    if !saw_tool_marker {
+        return Some(Err(BlockError::ChatTemplateEnvelope {
+            detail: "the envelope contained no `<tool>` marker".to_string(),
+        }));
+    }
+    if calls.is_empty() {
+        return Some(Err(BlockError::ChatTemplateEnvelope {
+            detail: "the envelope contained no JSON tool object".to_string(),
+        }));
+    }
+    Some(Ok(calls))
 }
 
 fn contains_legacy_tool_call_markup(src: &str) -> bool {
@@ -652,6 +800,73 @@ mod tests {
             "violations: {:?}",
             out.violations
         );
+    }
+
+    #[test]
+    fn chat_template_envelope_recovers_multiple_inline_argument_calls() {
+        // Exact production shape from the Qwen chat template: one `<tool>`
+        // marker introduces consecutive objects, and the template leaves its
+        // arguments inline instead of nesting them under `args`.
+        let out = parse(
+            "<tool_calls>\n<tool>\n{\"name\":\"look\",\"file\":\"src/writer.zig\"}\n{\"name\":\"look\",\"file\":\"src/parser.zig\"}\n</tool_calls>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert!(out.prose.is_empty(), "prose: {:?}", out.prose);
+        assert_eq!(out.calls.len(), 2);
+        assert_eq!(out.calls[0]["name"], "look");
+        assert_eq!(
+            arg(&out.calls[0], "file"),
+            Some(&serde_json::json!("src/writer.zig"))
+        );
+        assert_eq!(out.calls[1]["name"], "look");
+        assert_eq!(
+            arg(&out.calls[1], "file"),
+            Some(&serde_json::json!("src/parser.zig"))
+        );
+        assert!(
+            out.violations
+                .iter()
+                .any(|violation| violation.contains("chat-template")),
+            "violations: {:?}",
+            out.violations
+        );
+    }
+
+    #[test]
+    fn chat_template_envelope_accepts_optional_per_call_close_markers() {
+        let out = parse(
+            "<tool_calls><tool>{\"name\":\"a\",\"args\":{\"k\":1}}</tool><tool>{\"tool\":\"b\",\"arguments\":{\"v\":2}}</tool></tool_calls>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 2);
+        assert_eq!(out.calls[0]["name"], "a");
+        assert_eq!(arg(&out.calls[0], "k"), Some(&serde_json::json!(1)));
+        assert_eq!(out.calls[1]["name"], "b");
+        assert_eq!(arg(&out.calls[1], "v"), Some(&serde_json::json!(2)));
+    }
+
+    #[test]
+    fn malformed_chat_template_envelope_never_dispatches_partial_calls() {
+        let out = parse("<tool_calls>\n<tool>\n{\"name\":\"look\",\"file\":\"src/writer.zig\"");
+        assert!(
+            out.calls.is_empty(),
+            "partial calls must not dispatch: {:?}",
+            out.calls
+        );
+        assert_eq!(out.errors.len(), 1);
+        assert!(
+            out.errors[0].contains("<tool_calls>") && out.errors[0].contains("not executed"),
+            "error: {}",
+            out.errors[0]
+        );
+    }
+
+    #[test]
+    fn chat_template_without_tool_marker_is_rejected() {
+        let out = parse("<tool_calls>{\"name\":\"look\",\"file\":\"src/writer.zig\"}</tool_calls>");
+        assert!(out.calls.is_empty());
+        assert_eq!(out.errors.len(), 1);
+        assert!(out.errors[0].contains("no `<tool>` marker"));
     }
 
     #[test]
