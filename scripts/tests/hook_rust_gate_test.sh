@@ -122,10 +122,16 @@ git -C "$work" add crates/harn-lint/src/lib.rs
 )
 
 cat > "$tmp_root/expected-pre-commit.txt" <<'EOF'
-cargo fmt --all -- --check
+cargo fmt -p harn-lint -- --check
 EOF
 if ! diff -u "$tmp_root/expected-pre-commit.txt" "$record"; then
   echo "pre-commit should format Rust without compiling it" >&2
+  exit 1
+fi
+if ! grep -Eq '"phases":\{"setup-and-guards":[0-9]+,"rust-format":[0-9]+,"fast-validation":[0-9]+,"full-local":[0-9]+\}' \
+  "$tmp_root/timings/hook-timings.ndjson"; then
+  echo "pre-commit timing should isolate Rust formatting from remaining fast validation" >&2
+  cat "$tmp_root/timings/hook-timings.ndjson" >&2
   exit 1
 fi
 
@@ -305,6 +311,53 @@ run_helper() {
       hook_run_rust_test_lint_gate "$changed" "$packages" >/dev/null
   )
 }
+
+run_format_helper() {
+  local changed=$1
+  local packages="$tmp_root/format-packages.txt"
+  (
+    cd "$work"
+    # shellcheck source=/dev/null
+    . .githooks/lib.sh
+    FAKE_CARGO_RECORD="$record" PATH="$fake_bin:$PATH" \
+      hook_run_rust_format_gate "$changed" "$packages" >/dev/null
+  )
+}
+
+assert_format_gate() {
+  local description=$1
+  local expected=$2
+  local changed="$tmp_root/format-case-files.txt"
+  shift 2
+  printf '%s\n' "$@" > "$changed"
+  : > "$record"
+  run_format_helper "$changed"
+  if [[ "$(cat "$record")" != "$expected" ]]; then
+    echo "$description" >&2
+    cat "$record" >&2
+    exit 1
+  fi
+}
+
+assert_format_gate \
+  "multi-package Rust changes should format exactly their sorted owners" \
+  "cargo fmt -p harn-lint -p harn-other -- --check" \
+  crates/harn-other/src/lib.rs crates/harn-lint/src/lib.rs
+# Deleted and intentionally malformed fixtures retain Cargo ownership; direct
+# rustfmt would incorrectly parse the fixture itself.
+assert_format_gate \
+  "fixture and deletion paths should retain their owning Cargo format scope" \
+  "cargo fmt -p harn-lint -- --check" \
+  crates/harn-lint/src/obsolete.rs crates/harn-lint/tests/fixtures/parse_error.rs
+assert_format_gate \
+  "unmapped Rust topology should fall back to workspace formatting" \
+  "cargo fmt --all -- --check" tree-sitter-harn/bindings/rust/lib.rs
+assert_format_gate \
+  "workspace manifest changes should retain workspace formatting" \
+  "cargo fmt --all -- --check" Cargo.toml
+assert_format_gate \
+  "package manifest changes should format their owning package" \
+  "cargo fmt -p harn-other -- --check" crates/harn-other/Cargo.toml
 
 printf 'Cargo.toml\n' > "$tmp_root/workspace-files.txt"
 : > "$record"
