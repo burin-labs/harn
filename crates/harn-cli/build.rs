@@ -19,12 +19,12 @@ mod codegen_fingerprint;
 
 const CLI_AOT_MANIFEST: &str = "generated/cli-bytecode-manifest.json";
 const CLI_BYTECODE_MAGIC: &[u8; 8] = b"HARNBC\0\0";
+const EMBEDDED_ASSET_DIRS: &[&str] = &["assets/persona-templates", "portal-dist"];
 
 fn main() {
     ensure_git_hooks_installed();
     emit_cli_script_bytecode();
     emit_demo_sibling_assets();
-    emit_persona_template_watch();
     emit_check_fingerprint();
 
     let manifest_dir =
@@ -61,7 +61,7 @@ fn main() {
         }
     }
 
-    println!("cargo:rerun-if-changed=portal-dist");
+    emit_embedded_asset_watches(&manifest_dir);
 }
 
 /// Fingerprint the check pipeline's own sources — `harn-lint`, this crate's
@@ -303,14 +303,16 @@ fn emit_demo_sibling_assets() {
     write_demo_assets_table(&out_dir.join("demo_assets_table.rs"), &entries);
 }
 
-/// `persona_scaffold` embeds these source assets with `include_dir!`. Cargo
-/// does not otherwise discover files nested below that macro's directory, so
-/// explicitly watch the tree to keep local materialize/test runs from using
-/// stale template bytes after an asset-only edit.
-fn emit_persona_template_watch() {
-    let manifest_dir =
-        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    emit_rerun_if_changed_recursive(&manifest_dir.join("assets/persona-templates"));
+/// Keep every directory embedded by `include_dir!` under one Cargo-owned watch
+/// contract. This runs after the portal fallback exists so Cargo can observe
+/// nested portal assets on fresh checkouts as well as real frontend builds.
+fn emit_embedded_asset_watches(manifest_dir: &Path) {
+    for relative_dir in EMBEDDED_ASSET_DIRS {
+        println!(
+            "cargo:rerun-if-changed={}",
+            manifest_dir.join(relative_dir).display()
+        );
+    }
 }
 
 /// Recurse `dir`, recording each embeddable sibling file as
