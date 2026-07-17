@@ -139,7 +139,10 @@ pub(crate) async fn run(args: LocalLaunchArgs, base_dir: &Path) -> Result<(), St
     let runtime = def.local_runtime.clone().ok_or_else(|| {
         format!("provider '{provider}' has no [providers.{provider}.local_runtime] catalog row")
     })?;
-    if runtime.kind == Some(LocalRuntimeKind::External) {
+    let lifecycle = runtime
+        .lifecycle()
+        .map_err(|error| format!("provider '{provider}' {error}"))?;
+    if lifecycle.kind == LocalRuntimeKind::External {
         return Err(format!(
             "provider '{provider}' is externally managed; Harn can inspect or select it but cannot launch its process"
         ));
@@ -168,7 +171,7 @@ pub(crate) async fn run(args: LocalLaunchArgs, base_dir: &Path) -> Result<(), St
         .map(|memory| launch_memory_plan(&resolved.id, &memory, ctx, &args, &hardware))
         .transpose()?;
 
-    if runtime.kind == Some(LocalRuntimeKind::DaemonApi) || provider == "ollama" {
+    if lifecycle.kind == LocalRuntimeKind::DaemonApi {
         return launch_daemon(
             args,
             resolved,
@@ -204,11 +207,6 @@ async fn launch_daemon(
     memory_plan: Option<LaunchMemoryPlan>,
     base_dir: &Path,
 ) -> Result<(), String> {
-    if provider != "ollama" {
-        return Err(format!(
-            "provider '{provider}' is marked daemon_api, but only Ollama warmup is implemented"
-        ));
-    }
     let (readiness, rechecked) =
         warm_ollama(&resolved.id, &base_url, ctx, &keep_alive, args.no_pull).await?;
     let selection = LocalSelection::now(
@@ -835,6 +833,7 @@ fn expand_home(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_vm::llm_config::{LocalRuntimeStop, LocalRuntimeWireProtocol};
 
     fn cli_args() -> LocalLaunchArgs {
         LocalLaunchArgs {
@@ -871,6 +870,7 @@ mod tests {
     fn runtime() -> LocalRuntimeDef {
         LocalRuntimeDef {
             kind: Some(LocalRuntimeKind::ManagedProcess),
+            wire_protocol: Some(LocalRuntimeWireProtocol::OpenAiCompatible),
             command: Some("llama-server".to_string()),
             model_arg: Some("--model".to_string()),
             served_model_arg: Some("--alias".to_string()),
@@ -883,6 +883,7 @@ mod tests {
             cache_type_v_arg: Some("--cache-type-v".to_string()),
             cache_ram_arg: Some("--cache-ram".to_string()),
             default_args: vec!["--jinja".to_string()],
+            stop: Some(LocalRuntimeStop::Pid),
             ..LocalRuntimeDef::default()
         }
     }
@@ -923,6 +924,15 @@ mod tests {
         let runtime = llm_config::provider_config("tgi")
             .and_then(|provider| provider.local_runtime)
             .expect("TGI local runtime catalog row");
+        let lifecycle = runtime
+            .lifecycle()
+            .expect("TGI must declare a coherent managed OpenAI lifecycle");
+        assert_eq!(lifecycle.kind, LocalRuntimeKind::ManagedProcess);
+        assert_eq!(lifecycle.stop, LocalRuntimeStop::Pid);
+        assert_eq!(
+            lifecycle.wire_protocol,
+            LocalRuntimeWireProtocol::OpenAiCompatible
+        );
         let mut args = cli_args();
         args.reasoning = None;
         args.reasoning_format = None;

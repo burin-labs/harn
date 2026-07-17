@@ -29,7 +29,7 @@ use harn_vm::llm::{
     normalize_ollama_keep_alive, ollama_readiness, warm_ollama_model_with_settings,
     OllamaReadinessOptions, OllamaRuntimeSettings,
 };
-use harn_vm::llm_config::{self, LocalRuntimeStop};
+use harn_vm::llm_config::{self, LocalRuntimeStop, LocalRuntimeWireProtocol};
 use serde::Serialize;
 
 use crate::cli::LocalSwitchArgs;
@@ -37,7 +37,7 @@ use crate::commands::hardware::collect_hardware_snapshot;
 
 use super::profile::{defaults_for, runtime_profile_host};
 use super::runtime::{
-    local_provider_ids, local_runtime_for_provider, normalize_local_provider_id,
+    local_provider_ids, local_runtime_lifecycle_for_provider, normalize_local_provider_id,
     ollama_unload_model, resolve_provider_def, snapshot_provider, terminate_pid,
 };
 use super::state::{clear_pid_record, read_pid_record, write_selection, LocalSelection};
@@ -98,6 +98,7 @@ pub(crate) async fn run(args: LocalSwitchArgs, base_dir: &Path) -> Result<(), St
     }
 
     let def = resolve_provider_def(&provider)?;
+    let lifecycle = local_runtime_lifecycle_for_provider(&provider)?;
     let base_url = llm_config::resolve_base_url(&def);
     let defaults = defaults_for(&hardware);
     let ctx = args.ctx.unwrap_or_else(|| {
@@ -118,9 +119,13 @@ pub(crate) async fn run(args: LocalSwitchArgs, base_dir: &Path) -> Result<(), St
         evict_siblings(&provider, &resolved.id, base_dir).await
     };
 
-    let (readiness, rechecked) = match provider.as_str() {
-        "ollama" => warm_ollama(&resolved.id, &base_url, ctx, &keep_alive, args.no_pull).await,
-        _ => warm_openai_compatible(&provider, &resolved.id, &base_url).await,
+    let (readiness, rechecked) = match lifecycle.wire_protocol {
+        LocalRuntimeWireProtocol::OllamaApi => {
+            warm_ollama(&resolved.id, &base_url, ctx, &keep_alive, args.no_pull).await
+        }
+        LocalRuntimeWireProtocol::OpenAiCompatible => {
+            warm_openai_compatible(&provider, &resolved.id, &base_url).await
+        }
     }?;
 
     let selection = LocalSelection::now(
@@ -205,20 +210,20 @@ pub(crate) async fn evict_siblings(
 ) -> Vec<EvictionRecord> {
     let mut evicted = Vec::new();
     for provider in local_provider_ids(None) {
-        let Some(runtime) = local_runtime_for_provider(&provider) else {
+        let Ok(lifecycle) = local_runtime_lifecycle_for_provider(&provider) else {
             continue;
         };
-        if runtime.stop == Some(LocalRuntimeStop::External) {
+        if lifecycle.stop == LocalRuntimeStop::External {
             continue;
         }
         let Ok(snapshot) = snapshot_provider(&provider, base_dir).await else {
             continue;
         };
         let keep_model = (provider == active_provider).then_some(active_model);
-        if runtime.stop == Some(LocalRuntimeStop::KeepAliveZero) && provider == "ollama" {
+        if lifecycle.stop == LocalRuntimeStop::KeepAliveZero {
             drain_ollama(&snapshot, keep_model, &mut evicted).await;
         }
-        if provider == active_provider || runtime.stop != Some(LocalRuntimeStop::Pid) {
+        if provider == active_provider || lifecycle.stop != LocalRuntimeStop::Pid {
             continue;
         }
         if let Ok(Some(record)) = read_pid_record(base_dir, &provider) {

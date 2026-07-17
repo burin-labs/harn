@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::cli::LocalStopArgs;
 
 use super::runtime::{
-    local_provider_ids, local_runtime_for_provider, normalize_local_provider_id,
+    local_provider_ids, local_runtime_lifecycle_for_provider, normalize_local_provider_id,
     ollama_unload_model, snapshot_provider, terminate_pid,
 };
 use super::state::{clear_pid_record, read_pid_record, read_selection};
@@ -40,24 +40,13 @@ pub(crate) async fn run(args: LocalStopArgs, base_dir: &Path) -> Result<(), Stri
     let mut outcomes = Vec::with_capacity(targets.len());
     for provider in targets {
         let mut actions = Vec::new();
-        let runtime = local_runtime_for_provider(&provider)
-            .ok_or_else(|| format!("'{provider}' has no local runtime catalog row"))?;
-        match runtime.stop {
-            Some(LocalRuntimeStop::KeepAliveZero) if provider == "ollama" => {
-                stop_ollama(&provider, base_dir, &mut actions).await;
-            }
-            Some(LocalRuntimeStop::Pid) => stop_managed_pid(&provider, base_dir, &mut actions),
-            Some(LocalRuntimeStop::External) => actions.push(StopAction {
+        let lifecycle = local_runtime_lifecycle_for_provider(&provider)?;
+        match lifecycle.stop {
+            LocalRuntimeStop::KeepAliveZero => stop_ollama(&provider, base_dir, &mut actions).await,
+            LocalRuntimeStop::Pid => stop_managed_pid(&provider, base_dir, &mut actions),
+            LocalRuntimeStop::External => actions.push(StopAction {
                 target: "runtime".to_string(),
                 outcome: "externally managed; Harn did not stop it".to_string(),
-            }),
-            Some(LocalRuntimeStop::KeepAliveZero) => actions.push(StopAction {
-                target: "runtime".to_string(),
-                outcome: "keep_alive_zero requires an Ollama-compatible runtime".to_string(),
-            }),
-            None => actions.push(StopAction {
-                target: "runtime".to_string(),
-                outcome: "missing catalog stop strategy".to_string(),
             }),
         }
         outcomes.push(ProviderStopOutcome { provider, actions });

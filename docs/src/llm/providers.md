@@ -155,6 +155,10 @@ vLLM's `vllm serve`; user or project provider overlays can change command names,
 default ports, arg names, prefix args, model-source environment variables, and
 LoRA flag names for local runtime versions or platform-specific installs.
 
+Each local-runtime row declares a closed `kind`, `wire_protocol`, and `stop`
+contract. Harn validates that ownership, request shape, and cleanup strategy are
+coherent before the CLI can launch, inspect, warm, or evict the runtime.
+
 For runtime rows that declare LoRA launch flags, `harn local launch` accepts
 repeatable `--lora-adapter NAME=PATH_OR_REPO` values and forwards them through
 the cataloged runtime shape. Use `harn models lora inspect --base <model>

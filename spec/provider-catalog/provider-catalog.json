@@ -1,6 +1,6 @@
 {
-  "schema_version": 5,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v5.json",
+  "schema_version": 6,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v6.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -686,6 +686,7 @@
       "caveats": [],
       "local_runtime": {
         "kind": "managed_process",
+        "wire_protocol": "open_ai_compatible",
         "command": "llama-server",
         "model_source_env": "LLAMACPP_MODEL",
         "default_port": 8001,
@@ -742,6 +743,7 @@
       "caveats": [],
       "local_runtime": {
         "kind": "external",
+        "wire_protocol": "open_ai_compatible",
         "default_port": 8000,
         "stop": "external",
         "notes": "User-managed generic OpenAI-compatible local endpoint. Harn can inspect and select it, but does not launch or stop its process."
@@ -833,6 +835,7 @@
       "caveats": [],
       "local_runtime": {
         "kind": "managed_process",
+        "wire_protocol": "open_ai_compatible",
         "command": "mlx_lm.server",
         "model_source_env": "MLX_MODEL",
         "default_port": 8002,
@@ -984,6 +987,7 @@
       ],
       "local_runtime": {
         "kind": "daemon_api",
+        "wire_protocol": "ollama_api",
         "command": "ollama",
         "default_port": 11434,
         "stop": "keep_alive_zero",
@@ -1210,6 +1214,7 @@
       "caveats": [],
       "local_runtime": {
         "kind": "managed_process",
+        "wire_protocol": "open_ai_compatible",
         "command": "text-generation-launcher",
         "model_source_env": "TGI_MODEL",
         "default_port": 8080,
@@ -1338,6 +1343,7 @@
       "caveats": [],
       "local_runtime": {
         "kind": "managed_process",
+        "wire_protocol": "open_ai_compatible",
         "command": "vllm",
         "prefix_args": [
           "serve"

@@ -32,7 +32,7 @@ fn generated_header(comment: &str, language: &str) -> String {
 }
 
 const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 5
+  schema_version: 6
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -64,7 +64,8 @@ export interface HarnCatalogProvider {
 }
 
 export interface HarnLocalRuntime {
-  kind?: "daemon_api" | "managed_process" | "external"
+  kind: "daemon_api" | "managed_process" | "external"
+  wire_protocol: "ollama_api" | "open_ai_compatible"
   command?: string
   prefix_args?: string[]
   model_source?: string
@@ -85,7 +86,7 @@ export interface HarnLocalRuntime {
   lora_modules_value_format?: "name_path" | "json_with_base_model"
   max_lora_rank_arg?: string
   default_args?: string[]
-  stop?: "keep_alive_zero" | "pid" | "external"
+  stop: "keep_alive_zero" | "pid" | "external"
   source_url?: string
   last_verified?: string
   notes?: string
@@ -452,7 +453,8 @@ public struct HarnProviderHealthcheck: Codable, Sendable, Equatable {
 }
 
 public struct HarnLocalRuntime: Codable, Sendable, Equatable {
-    public let kind: String?
+    public let kind: String
+    public let wireProtocol: String
     public let command: String?
     public let prefixArgs: [String]?
     public let modelSource: String?
@@ -473,13 +475,14 @@ public struct HarnLocalRuntime: Codable, Sendable, Equatable {
     public let loraModulesValueFormat: String?
     public let maxLoraRankArg: String?
     public let defaultArgs: [String]?
-    public let stop: String?
+    public let stop: String
     public let sourceURL: String?
     public let lastVerified: String?
     public let notes: String?
 
     enum CodingKeys: String, CodingKey {
         case kind
+        case wireProtocol = "wire_protocol"
         case command
         case prefixArgs = "prefix_args"
         case modelSource = "model_source"

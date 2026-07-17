@@ -1466,7 +1466,7 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
     let should_verify = args.verify || args.warm;
     let mut ok = true;
     if should_verify {
-        if resolved.provider == "ollama" {
+        if commands::local::runtime::uses_ollama_wire_protocol(&resolved.provider) {
             let mut readiness = harn_vm::llm::OllamaReadinessOptions::new(resolved.id.clone());
             readiness.warm = args.warm;
             readiness.observe_loaded = true;
@@ -1489,7 +1489,7 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
                 "valid": false,
                 "status": "unsupported_provider",
                 "message": format!(
-                    "models info --verify is only supported for Ollama models; resolved provider is '{}'",
+                    "models info --verify is only supported for models whose local runtime declares the Ollama API protocol; resolved provider is '{}'",
                     resolved.provider
                 ),
                 "provider": resolved.provider,

@@ -18,7 +18,9 @@ use serde::Serialize;
 use crate::cli::{
     ProviderCacheProbeArgs, ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolScorecardArgs,
 };
-use crate::commands::local::runtime::{fetch_ollama_ps, local_runtime_for_provider, LoadedModel};
+use crate::commands::local::runtime::{
+    loaded_models_for_lifecycle, local_runtime_for_provider, LoadedModel,
+};
 use crate::commands::provider_report::{dispatch_provider_report, ProviderReportDispatch};
 
 /// Env var carrying the JSON `ProviderProbe` envelope handed across to
@@ -126,17 +128,18 @@ async fn aggregate_provider_probe(args: &ProviderProbeArgs) -> ProviderProbe {
         llm_config::provider_config(&args.provider).map(|def| llm_config::resolve_base_url(&def))
     });
 
-    let loaded_models = if args.provider == "ollama" {
+    let loaded_models = if let Some(lifecycle) =
+        local_runtime_for_provider(&args.provider).and_then(|runtime| runtime.lifecycle().ok())
+    {
         let base = base_url
             .clone()
             .unwrap_or_else(|| "http://localhost:11434".to_string());
-        match fetch_ollama_ps(&base).await {
+        match loaded_models_for_lifecycle(lifecycle, &base).await {
             Ok(entries) => entries,
             Err(error) => {
-                // `/api/ps` is best-effort: a daemon that doesn't expose it
-                // shouldn't block the readiness signal. Warn so eval logs
-                // surface the gap without failing the probe.
-                eprintln!("warning: /api/ps unavailable: {error}");
+                // Detailed resident-model state is best-effort: a daemon that
+                // doesn't expose it shouldn't block the readiness signal.
+                eprintln!("warning: loaded-model probe unavailable: {error}");
                 Vec::new()
             }
         }

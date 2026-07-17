@@ -72,7 +72,7 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
             validate_provider_healthcheck(provider, healthcheck, &mut result);
         }
         if let Some(local_runtime) = &provider.local_runtime {
-            validate_local_runtime(&provider.id, local_runtime, &mut result);
+            super::local_runtime::validate(&provider.id, local_runtime, &mut result);
         }
     }
 

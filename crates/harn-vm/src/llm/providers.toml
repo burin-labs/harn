@@ -792,12 +792,14 @@ path = "/health"
 
 [providers.local.local_runtime]
 kind = "external"
+wire_protocol = "open_ai_compatible"
 default_port = 8000
 stop = "external"
 notes = "User-managed generic OpenAI-compatible local endpoint. Harn can inspect and select it, but does not launch or stop its process."
 
 [providers.ollama.local_runtime]
 kind = "daemon_api"
+wire_protocol = "ollama_api"
 command = "ollama"
 default_port = 11434
 stop = "keep_alive_zero"
@@ -807,6 +809,7 @@ notes = "Load via Ollama generate/chat warmup; unload by posting an empty prompt
 
 [providers.llamacpp.local_runtime]
 kind = "managed_process"
+wire_protocol = "open_ai_compatible"
 command = "llama-server"
 model_source_env = "LLAMACPP_MODEL"
 default_port = 8001
@@ -828,6 +831,7 @@ notes = "OpenAI-compatible HTTP server. Use --model-source or LLAMACPP_MODEL for
 
 [providers.mlx.local_runtime]
 kind = "managed_process"
+wire_protocol = "open_ai_compatible"
 command = "mlx_lm.server"
 model_source_env = "MLX_MODEL"
 default_port = 8002
@@ -841,6 +845,7 @@ notes = "OpenAI-like MLX-LM server. Use --model-source or MLX_MODEL for an MLX-c
 
 [providers.vllm.local_runtime]
 kind = "managed_process"
+wire_protocol = "open_ai_compatible"
 command = "vllm"
 prefix_args = ["serve"]
 model_source_env = "VLLM_MODEL"
@@ -861,6 +866,7 @@ notes = "OpenAI-compatible vLLM server. `harn local launch --lora-adapter name=p
 
 [providers.tgi.local_runtime]
 kind = "managed_process"
+wire_protocol = "open_ai_compatible"
 command = "text-generation-launcher"
 model_source_env = "TGI_MODEL"
 default_port = 8080
