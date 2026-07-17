@@ -1015,6 +1015,52 @@ pipeline test_b_has_fresh_store(task) {
     );
 }
 
+#[cfg(feature = "hostlib")]
+#[tokio::test]
+async fn user_tests_scope_safe_text_patch_locks_to_case_state() {
+    let temp = TempTestDir::new();
+    temp.write(
+        "suite/test_safe_text_patch.harn",
+        r#"
+import { with_temp_dir } from "std/testing"
+
+pipeline test_safe_text_patch_uses_case_state(task) {
+  const _ = hostlib_enable("tools:deterministic")
+  with_temp_dir(
+    { root ->
+      const path = root + "/notes.txt"
+      harness.fs.write_text(path, "before\n")
+      const applied = hostlib_fs_safe_text_patch({path: path, content: "after\n"})
+      assert_eq(applied.result, "applied")
+      const stale = hostlib_fs_safe_text_patch(
+        {
+          path: path,
+          content: "stale\n",
+          expected_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        },
+      )
+      assert_eq(stale.result, "stale_base")
+      assert_eq(harness.fs.read_text(path), "after\n")
+    },
+  )
+}
+"#,
+    );
+
+    let summary = run_tests(&temp.path().join("suite"), None, 5_000, false, &[]).await;
+
+    assert_eq!(
+        summary.passed, 1,
+        "safe-text-patch user test did not pass: {:?}",
+        summary.results
+    );
+    assert_eq!(
+        summary.failed, 0,
+        "safe-text-patch user test failed: {:?}",
+        summary.results
+    );
+}
+
 #[tokio::test]
 async fn summary_aggregate_timings_sum_phases_across_results() {
     let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
