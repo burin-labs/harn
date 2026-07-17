@@ -82,6 +82,7 @@ pub(super) async fn execute_case(
                 file: case.file.display().to_string(),
                 passed: false,
                 error: Some(format!("Compile error: {e}")),
+                captured_output: None,
                 timeout: None,
                 duration_ms: total_start.elapsed().as_millis() as u64,
                 phases: Some(phases),
@@ -195,6 +196,15 @@ pub(super) async fn execute_case(
             Ok::<_, String>((outcome, setup_ms, execute_ms))
         })
         .await;
+    // Read before `drop(vm)` below. Populated regardless of outcome: a
+    // timed-out or setup-failed case can still have useful `log()` calls
+    // that ran before the deadline/failure, and withholding them here would
+    // silently discard exactly the probes an author added to find where
+    // execution stalled or diverged.
+    let captured_output = {
+        let raw = vm.take_output();
+        (!raw.trim().is_empty()).then_some(raw)
+    };
     let failed_setup_ms = result
         .as_ref()
         .err()
@@ -242,6 +252,7 @@ pub(super) async fn execute_case(
         file: file_display,
         passed,
         error,
+        captured_output,
         timeout,
         duration_ms,
         phases: Some(phases),

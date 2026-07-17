@@ -414,14 +414,14 @@ test still receives a fresh VM, module state, and persistence root.
 | `--api-key <key>` | Bearer API key for `harn test agents-conformance` |
 | `--category <name>` | Agents conformance category to run; repeatable or comma-separated |
 | `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
-| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 2 includes typed timeout, phase, aggregate, and latency-distribution data |
+| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 3 includes typed timeout, phase, aggregate, latency-distribution, and captured-output data |
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
 | `--parallel` | Run tests concurrently with a bounded worker pool. Slow tests are front-loaded using historical timings from `.harn/test-timings.json` |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). Defaults to available parallelism, capped at 8 |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
-| `--verbose` / `-v` | Show per-test timing and detailed failures |
+| `--verbose` / `-v` | Show per-test timing and detailed failures, including a passing test's captured `log`/`print`/`println` output (a failing test's captured output is always shown) |
 | `--timing` | Show detailed per-test timing, slowest tests/files, and phase totals. Every user-test run prints the concise p50/p90 latency line |
-| `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly |
+| `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly. A failing user test's captured output is included as `<system-out>` |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup is measured separately and does not consume the pipeline-execution budget; other targets bound their test case or subprocess |
 | `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget |
 | `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget |

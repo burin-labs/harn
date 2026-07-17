@@ -144,11 +144,92 @@ pub(super) fn user_test_report_from_summary(
             timeout: result.timeout,
             phases: result.phases,
             message: result.error.clone(),
+            captured_output: result.captured_output.clone(),
         });
     }
     report.set_duration_ms(summary.duration_ms);
     report.set_execution_metrics(summary.timing, summary.aggregate);
     report
+}
+
+/// Prints a case's buffered `log`/`print`/`println` output beneath its
+/// result line, indented one level past the `{line}` convention already
+/// used for error text so the two blocks stay visually distinct.
+pub(super) fn print_captured_output(output: &str) {
+    println!("        captured output:");
+    for line in output.lines() {
+        println!("          {line}");
+    }
+}
+
+pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress {
+    std::sync::Arc::new(move |event| match event {
+        test_runner::TestRunEvent::SuiteDiscovered {
+            total_tests,
+            total_files,
+            parallel,
+            workers,
+        } => {
+            if total_tests > 0 {
+                let mode = if parallel { "dynamic" } else { "sequential" };
+                println!(
+                    "Running {} test{} from {} file{} with {} worker{} ({mode} scheduling)\n",
+                    total_tests,
+                    if total_tests == 1 { "" } else { "s" },
+                    total_files,
+                    if total_files == 1 { "" } else { "s" },
+                    workers,
+                    if workers == 1 { "" } else { "s" },
+                );
+            }
+        }
+        test_runner::TestRunEvent::LargeSequentialSuite {
+            total_tests,
+            total_files,
+        } => {
+            println!(
+                "\x1b[33mwarning\x1b[0m: large suite discovered ({total_tests} tests across {total_files} files); running sequentially. Use `--parallel` to enable the bounded worker pool.\n"
+            );
+        }
+        test_runner::TestRunEvent::TestStarted {
+            name,
+            file,
+            test_index,
+            total_tests,
+        } => {
+            if verbose {
+                println!("    RUN   {name} [{file}] ({test_index}/{total_tests})");
+            }
+        }
+        test_runner::TestRunEvent::TestFinished(result) => {
+            if result.passed {
+                println!(
+                    "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
+                    result.name, result.file, result.duration_ms
+                );
+                // Passing tests stay quiet by default; --verbose is the
+                // existing "I want detail even when green" escape hatch,
+                // so probes placed to trace a passing path are visible too.
+                if verbose {
+                    if let Some(output) = &result.captured_output {
+                        print_captured_output(output);
+                    }
+                }
+            } else {
+                println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
+                if verbose {
+                    if let Some(err) = &result.error {
+                        for line in err.lines() {
+                            println!("        {line}");
+                        }
+                    }
+                    if let Some(output) = &result.captured_output {
+                        print_captured_output(output);
+                    }
+                }
+            }
+        }
+    })
 }
 
 pub(super) fn print_test_results(
@@ -186,6 +267,9 @@ pub(super) fn print_test_results(
                         println!("        {line}");
                     }
                 }
+                if let Some(output) = &result.captured_output {
+                    print_captured_output(output);
+                }
             }
         }
     }
@@ -222,6 +306,9 @@ pub(super) fn print_test_results(
                 println!("  {} [{}]", result.name, result.file);
                 for line in error.lines() {
                     println!("        {line}");
+                }
+                if let Some(output) = &result.captured_output {
+                    print_captured_output(output);
                 }
             }
         }
@@ -297,7 +384,7 @@ mod tests {
     use crate::test_runner::{AggregateTimings, PhaseTimings, TestPhase, TestResult, TestTimeout};
 
     #[test]
-    fn user_report_conversion_pins_v2_execution_metrics() {
+    fn user_report_conversion_pins_v3_execution_metrics() {
         let modules = harn_vm::ModulePhaseStats::default();
         let phases = PhaseTimings {
             execute_ms: 30,
@@ -311,6 +398,7 @@ mod tests {
                     file: "/suite/test_timeout.harn".into(),
                     passed: false,
                     error: Some("execute phase timed out after 30ms".into()),
+                    captured_output: Some("[harn] before the deadline\n".into()),
                     timeout: Some(TestTimeout {
                         phase: TestPhase::Execute,
                         limit_ms: 30,
@@ -323,6 +411,7 @@ mod tests {
                     file: "/suite/broken.harn".into(),
                     passed: false,
                     error: Some("parse failed".into()),
+                    captured_output: None,
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
@@ -344,7 +433,7 @@ mod tests {
             serde_json::to_value(user_test_report_from_summary(Path::new("/suite"), &summary))
                 .expect("report serializes");
 
-        assert_eq!(value["schemaVersion"], 2);
+        assert_eq!(value["schemaVersion"], 3);
         assert_eq!(value["timing"]["sample_count"], 1);
         assert_eq!(value["aggregate"]["modules"]["modules_loaded"], 0);
         assert_eq!(value["cases"][0]["timeout"]["phase"], "execute");
@@ -352,6 +441,11 @@ mod tests {
             value["cases"][0]["phases"]["modules"]["modules_compiled"],
             0
         );
+        assert_eq!(
+            value["cases"][0]["captured_output"],
+            "[harn] before the deadline\n"
+        );
         assert!(value["cases"][1].get("phases").is_none());
+        assert!(value["cases"][1].get("captured_output").is_none());
     }
 }
