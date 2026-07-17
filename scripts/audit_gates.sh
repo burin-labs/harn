@@ -41,6 +41,7 @@ GATES=(
   check-highlight
   check-language-spec
   check-grammar-keywords
+  verify-tree-sitter-parse
   check-trigger-quickref
   check-provider-matrix
   check-provider-support
