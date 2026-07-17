@@ -110,7 +110,7 @@ mtime_epoch() {
     printf '%s\n' "$value"
     return
   fi
-  printf '0\n'
+  return 1
 }
 
 removed=0; kept=0; summary_printed=0
@@ -152,8 +152,10 @@ for target_root in "${target_roots[@]}"; do
     [ -d "$d" ] || continue
     name="$(basename "$d")"
     if grep -qxF "$name" "$keep_file"; then kept=$((kept+1)); continue; fi
-    m="$(mtime_epoch "$d")"
-    if [ "${m:-0}" -ge "$cutoff" ]; then
+    if ! m="$(mtime_epoch "$d")"; then
+      echo "skip (mtime unavailable): $name"; kept=$((kept+1)); continue
+    fi
+    if [ "$m" -ge "$cutoff" ]; then
       echo "skip (recently active): $name"; kept=$((kept+1)); continue
     fi
     sz=$(du -sh "$d" 2>/dev/null | cut -f1 || true)
