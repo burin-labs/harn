@@ -278,6 +278,7 @@ fn build_check_contexts_with(
             continue;
         }
         let mut config = package::load_check_config(Some(file));
+        super::apply_harn_lint_config(file, &mut config);
         if let Some(path) = overrides.host_capabilities.as_ref() {
             config.host_capabilities_path = Some(path.clone());
         }
@@ -351,6 +352,30 @@ mod tests {
         assert_eq!(
             first_context.host_capabilities.source_content.as_deref(),
             Some(manifest_content)
+        );
+    }
+
+    #[test]
+    fn check_context_includes_disabled_lint_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("fixture.harn");
+        std::fs::write(&file, "pipeline main() { assert(true) }\n").unwrap();
+        std::fs::write(
+            dir.path().join("harn.toml"),
+            "[lint]\ndisabled = [\"assert-outside-test\"]\n",
+        )
+        .unwrap();
+
+        let files = vec![file.clone()];
+        let contexts = build_check_contexts_with(
+            &files,
+            &CheckCliOverrides::default(),
+            resolve_host_capabilities,
+        );
+
+        assert_eq!(
+            contexts[&check_config_key(&file)].config.disable_rules,
+            ["assert-outside-test"]
         );
     }
 }
