@@ -788,7 +788,7 @@ jobs:
 
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             git fetch --no-tags origin "$BASE_REF"
-            args="$(cargo run --quiet --bin harn -- run scripts/affected-crates.harn -- --base "$AFFECTED_BASE" --output args)"
+            args="$(./scripts/ci/affected_crate_args.sh --base "$AFFECTED_BASE")"
             if [[ -z "$args" ]]; then
               echo "windows: no workspace crate selected; falling back to full workspace."
             elif [[ "$args" == "--workspace" ]]; then
