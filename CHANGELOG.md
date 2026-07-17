@@ -9,7 +9,53 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.22
+
+### Breaking
+
+- **Discarding the result of a pure collection method is now an error
+  (`HARN-LNT-066`) (#4881).** Every method on `list` / `dict` / `set` /
+  `string` is pure: `push` clones the receiver, appends, and returns a *new*
+  list rather than modifying it. A bare `l.push(1)` statement therefore
+  discards the entire result of the call and leaves `l` unchanged — a silent
+  no-op that previously typechecked clean, ran without error, and quietly built
+  an empty list. `harn check` now rejects it:
+
+  ```harn
+  const l = []
+  l.push(1)      // error[HARN-LNT-066]: no effect — `l` is still []
+  ```
+
+  Write `let l = []; l = l.push(1)` instead, or `const _ = l.push(1)` to
+  discard the result deliberately (for a method called only for its errors).
+  The rule stands down on calls taking a closure, on `harness`-rooted
+  receivers, on a name the file also declares in an `impl` block, and on the
+  tail of a value-producing block. This is a breaking change only in that
+  previously-green sources containing such a no-op now fail `harn check`; no
+  language semantics changed.
+
+- **Documented the one binding rule, and corrected the spec where it was
+  wrong (#4881).** `const` means *this binding's value never changes*; `let`
+  means it may. Harn's collections are value types (copy-on-write), so index /
+  property / nested / struct-field assignment changes the binding's value and
+  requires `let`, while a pure method such as `push` changes nothing and is
+  fine on a `const`. The spec previously described `list<T>` as "mutable:
+  `push`, index assignment" — `push` does not mutate — and the scope-rules and
+  language-basics prose still described the pre-`const`/`let` keyword scheme
+  (`let` immutable, `var` mutable). The keyword *spelling* follows TypeScript;
+  the *rule* follows Swift, because Harn's collections are values rather than
+  references.
+- Project scans (`project_fingerprint`, `project_scan`, `project_scan_tree`,
+  `project_walk_tree`, `project_context_profile`) now throw when the requested
+  path does not exist, instead of silently scanning the path's parent directory.
+  A **file** path still resolves to the directory containing it. Previously
+  `project_fingerprint("/tmp/nonexistent")` reported a fingerprint of all of
+  `/tmp` — an unrelated directory the caller never named — and paid a full tree
+  walk to do it.
+- `register_session_end_hook` and `register_harn_owned_pid` now return RAII
+  registrations that callers must retain for the desired lifetime.
+  Package-generation reader leases left open by an aborted run are released
+  during runtime reset.
 
 ### Added
 
@@ -22,6 +68,185 @@ keeps condensed series summaries instead of full per-patch history.
 - `wait_command(timeout_ms)` now synchronizes directly with live background
   handles, so it can return a completed result after process output is visible but
   before the session feedback inbox wakes.
+
+- Add experimental `std/calendar::is_valid_cron` and `std/personas/compiler` primitives for
+  parser-aligned, deterministic prompt-persona trigger lowering.
+- Hook timing reports can now identify top-level hook phases and drill into
+  individual worktrees without fragmenting repository-wide latency statistics.
+- **Code librarian member and consumer contracts (#4791).**
+  `std/code_librarian` now exposes typed, ambiguity-aware member surfaces and
+  conservative external-consumer facts over the existing polyglot symbol
+  graph, with centralized Cypher literal escaping for canned queries.
+- Discover installed package personas through qualified `persona list` and `persona inspect` results,
+  package reports, and package diagnostics. Explicitly activate them per project with attenuated
+  autonomy, tool, and capability authority; full exported-contract and package-content pins; typed
+  receipts; and qualified runtime bindings that remain inert until activation and compile only bytes
+  verified against the activation content pin and package-generation lock at each invocation and
+  import. Local path personas snapshot their observed content when activated.
+- Add explicit `block { ... }` statements for deterministic lexical cleanup and owned-value lifetimes.
+- **Embedders can pin a verified per-session provider endpoint (#4942).** ACP
+  hosts may use the endpoint that passed readiness without mutating process
+  environment or persisting a machine-specific route.
+- **Moonshot Kimi K3 is now catalogued with capability-gated requests and
+  canonical reasoning-history replay (#5104).** Harn defaults the provider to
+  its documented maximum reasoning effort, strips unsupported sampling knobs,
+  and keeps Kimi's required tool-result history complete without forwarding
+  arbitrary provider-private transcript fields.
+
+### Changed
+
+- Persona scaffolding now compiles from the shipped canonical template assets,
+  validates the exact exported entry workflow and smoke suite before
+  publication, and restores forced replacements if publication fails.
+- **Module-cache hits no longer deep-clone loaded runtime modules (#4812).**
+  Child VMs reuse loaded-module records through `Arc` while retaining
+  copy-on-write cache maps and fresh-root isolation, reducing repeated
+  module-graph setup work.
+- `harn check` now resolves each source directory's host-capability manifest once
+  before parallel checking, avoiding repeated reads and parses for sibling files
+  while keeping result-cache keys tied to the exact resolved snapshot.
+- **Test and run timing now expose typed distributions and module-phase
+  attribution (#4824).** User-test and resident test-worker JSON schemas v2
+  include typed timeout, per-case phase, aggregate, and shared p50/p90/p95/p99
+  data; conformance JSON schema v2 adds the shared distribution. `harn time run`
+  and run phase schema v2 add VM-scoped module compile/load rows with an explicit
+  `top_level`/`attribution` kind, without ambient global timing state. Lazy module
+  work remains inside the execute deadline and reports its typed timeout phase.
+- Add a release-blocking parallel test performance check with phase timing, CPU, and kernel-resource telemetry.
+- Restore incremental native Windows CI builds from the full-suite nightly cache,
+  keep pull requests restore-only, and remove the duplicate Harn bootstrap from
+  affected-crate selection.
+- Split the portal run-detail page into focused message, action-graph, and page
+  owners so each TypeScript module stays below the source-length ceiling.
+- Compatible heavy Linux CI lanes now use kill-switch Blacksmith runners and
+  lane-local persistent sccache disks, with cache hit/miss statistics captured
+  before server shutdown. Rust tests and Harn conformance stay on GitHub Ubuntu
+  so sandbox and host-tool behavior proofs retain their established environment.
+- Fast commit and push hooks now lint only affected Markdown files while CI retains the whole-repository Markdown gate.
+- Consolidate hook latency reporting in typed Harn and expose profile-separated,
+  sample-gated budget observations for the shared fleet budget registry.
+- Git hooks now keep commits and pushes responsive by default: local hooks retain
+  cheap formatting, signature, merge-queue, and drift guards while required CI
+  owns build-backed validation. Set `HARN_HOOKS_FULL_LOCAL=1` to opt into the full
+  local gate when needed.
+
+  The ported-handler LOC ratchet now runs inside the already-warm required audit
+  lane instead of paying for a separate Rust checkout and cold Harn build.
+- Reuse shared source and import-path allocations when bytecode-cache graph
+  walks revisit a module, reducing incremental pipeline-load copying.
+- Provider tool scorecards now aggregate saved probe latency, rate-limit, token usage, and cost observations.
+
+### Fixed
+
+- **Hover resolves a member through its receiver instead of the global namespace (#4794).**
+  Hovering `.exit` in `harness.exit(2)` described the global `exit(code)` builtin,
+  making a method that does not exist look implemented. Any member whose name
+  collided with a builtin — `.log`, `.env`, `.type_of`, `.read_file` — resolved to
+  the builtin. An unresolved member access now reports nothing.
+- `harn fmt` no longer moves a comment out of a `struct`, `enum`, `interface`,
+  or `match` body onto the next declaration. Member-level items carried no
+  source span, so a comment written against a struct field, enum variant,
+  interface member, or match arm had nothing to anchor to and was re-attached to
+  the following top-level declaration — where it silently described unrelated
+  code. Members now carry spans and every block body places comments through one
+  rule, so a field's doc comment stays on its field and a trailing comment stays
+  on its line. Interface members also keep the order they were written in.
+- LLM transcripts now include stable served-context hashes for each provider
+  call, covering the redacted system prompt, messages, tool schemas, and native
+  tool declarations without requiring verbose request snapshots.
+- Index compiled host schemas so request and response validation no longer scans the full catalog on every call.
+- Command artifact retention now uses per-directory file leases instead of
+  process IDs, so completed output from long-lived or PID-reused processes
+  cannot exhaust the global cap and delete a fresh artifact before
+  `read_command_output` reads it.
+- **Approval-unavailable tool denials now name terminal risk classes (#4836).**
+  Headless runs that cannot ask for approval include structured denial-class
+  metadata and guidance to stop retrying equivalent approval-required variants.
+- Persona trigger dispatch now executes the declared entry workflow and records failed runs without false completion.
+- Fixed direct calls to declared Harn tools so `harn check` and runtime execution agree.
+- **Documented the sandbox and egress environment variables, and fixed a README link.**
+  The environment-variable reference now covers `HARN_HANDLER_SANDBOX` (how the
+  `worktree` profile reacts when OS confinement is unavailable) and the
+  `HARN_EGRESS_ALLOW` / `HARN_EGRESS_DENY` / `HARN_EGRESS_DEFAULT` /
+  `HARN_EGRESS_BLOCK_PRIVATE` / `HARN_EGRESS_ALLOW_LOOPBACK` egress and
+  private-address-guard knobs, which were previously described only in scattered
+  prose. The README's "approval policies" link pointed at the OS process-sandbox
+  page instead of the approval-policy DSL, and now points at both.
+- **The audit-gate battery names what failed, at the tail (#4896).**
+  Conformance and the audit gates run in parallel, so a failing gate printed its
+  `make: *** [target] Error N` thousands of lines before the job ended. What was
+  left at the tail — `ok: conformance` and a bare non-zero exit — is
+  indistinguishable from the sccache post-job flake, and a real two-gate failure
+  was read as that flake. On failure the tail now names the gates, says the
+  output is above, and states that a passing conformance line is not a passing
+  job.
+- Make conformance lint assertions additive and fail closed, track reviewed
+  diagnostics exactly, and split the oversized CLI conformance runner into
+  focused modules.
+- Make the CLI AOT drift guard validate compiler and version fingerprints against the checkout being pushed.
+- `harn test` now keeps store, metadata, and checkpoint state hermetic per case even when `HARN_STATE_DIR` is set.
+- `harn test` gains two working diagnostic channels: `log()`/`print` output is now captured per test
+  case and shown on failure (and on pass with `--verbose`, plus `--json-out`/JUnit fields), and
+  `assert`/`assert_eq`/`assert_ne` no longer render an uninformative message (nil, empty, or the
+  string `"null"`) as `Thrown: null` — they fall back to the default assertion message instead.
+- Keep `harn test` safe-text-patch CAS locks inside each test case's isolated state root.
+- **Source-length checks now ignore per-worktree Cargo target directories.**
+  Lane-local `target-*` build outputs no longer make generated Rust artifacts
+  fail the source ratchet (#4949).
+- Prevent completion judges from crashing agent sessions when providers return valid structured JSON inside Markdown fences.
+- Normalize Harn schema type names before sending strict structured-output schemas to model providers.
+- **JSON text-mode tool calls now recover complete common chat-template envelopes safely (#4956).**
+  Text-only routes that emit `<tool_calls>` with inline arguments dispatch complete calls while
+  incomplete envelopes fail closed with actionable feedback.
+- **CLI bytecode artifacts no longer cause avoidable rebase conflicts (#4965).**
+  Generated CLI AOT outputs now use an explicit merge policy, preserving the
+  current branch's generated artifacts so their normal regeneration check owns
+  correctness after a source merge.
+- Kept the fast PR script gate from silently compiling the Harn CLI in fresh worktrees. CLI-backed shell integrations
+  now reuse the single binary warmed after Rust cache setup.
+- Let policy-constrained `harn run` defer unrelated manifest trigger and hook handlers.
+- `harn test` now discovers skills once per source-directory context instead of repeating package, config, and
+  skill-manifest I/O for every test case.
+- Scope package snapshot reader leases to their owning VM execution so one
+  parallel run cannot release another run's live package generation.
+- Preserve the configured machine-shared Cargo build directory in Make targets
+  while keeping caller-supplied isolated target directories self-contained.
+- Prevent pull-request changelog checks from blaming newer mainline release paperwork on an older feature branch.
+- **The docs snippet gate now checks indented `harn` code blocks.** Fenced
+  blocks nested under a list item were silently skipped, so a block that failed
+  `harn parse` shipped in the `HARN-OWN-003` "How to fix" guidance. The gate
+  reads those blocks now, and the `HARN-OWN-003` remedy shows a form that
+  compiles.
+- **The documented error categories now match the ones the runtime emits.**
+  `error_category()` listed 10 of 18 and `llm_call_safe()` listed 15, so a
+  script switching on either list could receive a value it was told could not
+  occur — `transient_network`, among others. Both now point at one canonical
+  table, and a test keeps it in step with the runtime.
+- **OpenAPI CI now uses Harn's lock-pinned Redocly validator.** The audit lane can no longer
+  silently accept an unrelated `npx` package while skipping the protocol contract check.
+- Make the bundled persona template pack pass `harn persona doctor` by exposing
+  typed, receipt-backed persona steps and continuously checking every declared
+  template persona with the shared doctor contract.
+- Make `scripts/provider_tool_probe_campaign.harn --catalog-routes` plan live
+  probe campaigns from canonical provider routing routes instead of raw model
+  rows, so dry-run and live catalog audits target the same provider/model IDs
+  as runtime dispatch.
+- Provider readiness now fails closed when a specific local OpenAI-compatible
+  provider route reports a different serving runtime, surfacing the detected
+  runtime and server header for catalog quarantine.
+- Remove the external `dtolnay/rust-toolchain` workflow action dependency so
+  GitHub Actions hygiene cannot fail unrelated PRs when the upstream `stable`
+  action ref advances.
+- Stopped provider tool-scorecard plans from counting native/text tool-call probes as
+  required for catalog routes that explicitly declare no tool surface. Provider
+  tool-probe request audits now also surface structured warnings when
+  provider-compatible request builders omit supplied generation sampling parameters.
+- The tree-sitter grammar now parses struct construction
+  (`TypeName { field: value }`) in every expression position — `return`,
+  ternary operands, and list/dict elements — matching the runtime parser.
+  Previously it was only recognized in binding initializers and call
+  arguments, so a passing program such as `return Basket { items: ... }`
+  produced a spurious `ERROR` node.
 
 ## v0.10.21
 
