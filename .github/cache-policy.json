@@ -6,6 +6,15 @@
   "storage_limit_bytes": 10737418240,
   "remote_sccache": false,
   "writers": [
-    {"workflow": "build-release-binaries.yml", "job": "build"}
+    {
+      "workflow": "build-release-binaries.yml",
+      "job": "build",
+      "shared_key": "release-${{ matrix.target }}"
+    },
+    {
+      "workflow": "windows-nightly.yml",
+      "job": "nextest",
+      "shared_key": "workspace-windows"
+    }
   ]
 }

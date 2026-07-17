@@ -8,7 +8,7 @@ import {
   schema_validator,
 } from "std/schema"
 
-pub type CiCacheWriter = {workflow: string, job: string}
+pub type CiCacheWriter = {workflow: string, job: string, shared_key: string}
 
 pub type CiCachePolicy = {
   schema_version: 2,
@@ -80,6 +80,7 @@ fn policy_schema() {
           {
             workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
             job: schema_string() + {pattern: "^[a-z0-9-]+$"},
+            shared_key: schema_string() + {min_length: 1},
           },
         ),
       ),
@@ -95,8 +96,16 @@ fn policy_from_validated(value) -> CiCachePolicy {
     persistent_ref: "refs/heads/main",
     storage_limit_bytes: value.storage_limit_bytes,
     remote_sccache: false,
-    writers: value.writers.map({ writer -> return {workflow: writer.workflow, job: writer.job} }).to_list(),
+    writers: value.writers
+      .map(
+      { writer -> return {workflow: writer.workflow, job: writer.job, shared_key: writer.shared_key} },
+    )
+      .to_list(),
   }
+}
+
+fn writer_key(workflow: string, job: string, shared_key: string) -> string {
+  return workflow + ":" + job + ":" + shared_key
 }
 
 /** Validate the closed cache-policy document at its owning boundary. */
@@ -106,7 +115,9 @@ pub fn ci_cache_policy_parse(value) -> CiCachePolicy? {
     return nil
   }
   const policy = policy_from_validated(report.value)
-  const writer_keys = policy.writers.map({ writer -> writer.workflow + ":" + writer.job }).to_list()
+  const writer_keys = policy.writers
+    .map({ writer -> writer_key(writer.workflow, writer.job, writer.shared_key) })
+    .to_list()
   if len(writer_keys) == 0 || len(writer_keys) != len(writer_keys.unique()) {
     return nil
   }
@@ -126,8 +137,11 @@ fn save_requested(step) -> bool {
   return value != nil && lowercase(trim(to_string(value))) != "false"
 }
 
-fn writer_allowed(policy: CiCachePolicy, workflow: string, job: string) -> bool {
-  return policy.writers.any({ writer -> writer.workflow == workflow && writer.job == job })
+fn writer_allowed(policy: CiCachePolicy, workflow: string, job: string, shared_key: string) -> bool {
+  return policy.writers
+    .any(
+    { writer -> return writer.workflow == workflow && writer.job == job && writer.shared_key == shared_key },
+  )
 }
 
 fn remote_sccache_errors(value, path: string = "") -> list<string> {
@@ -462,9 +476,10 @@ pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workfl
           errors = errors + [ephemeral_error]
         }
         if uses == policy.rust_cache_action && save_requested(step) {
-          const writer = workflow + ":" + job
+          const shared_key = trim(step?.with?.["shared-key"] ?? "")
+          const writer = writer_key(workflow, job, shared_key)
           observed_writers = observed_writers + [writer]
-          if !writer_allowed(policy, workflow, job) {
+          if !writer_allowed(policy, workflow, job, shared_key) {
             errors = errors + ["${writer} is not an authorized persistent cache writer"]
           }
         }
@@ -472,7 +487,7 @@ pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workfl
     }
   }
   for writer in policy.writers {
-    const key = writer.workflow + ":" + writer.job
+    const key = writer_key(writer.workflow, writer.job, writer.shared_key)
     if !observed_writers.contains(key) {
       errors = errors + ["authorized persistent cache writer is not active: " + key]
     }
