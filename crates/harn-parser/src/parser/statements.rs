@@ -59,9 +59,14 @@ impl Parser {
                 self.parse_gen_fn_decl_with_pub(false)
             }
             TokenKind::Identifier(name)
-                if name == "scope" && self.check_contextual_scope_block() =>
+                if name == "scope" && self.check_contextual_brace_block("scope") =>
             {
                 self.parse_scope_block()
+            }
+            TokenKind::Identifier(name)
+                if name == "block" && self.check_contextual_brace_block("block") =>
+            {
+                self.parse_lexical_block()
             }
             TokenKind::Tool => self.parse_tool_decl(false),
             TokenKind::Skill => self.parse_skill_decl(false),
@@ -816,6 +821,18 @@ impl Parser {
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
             Node::ScopeBlock { body },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_lexical_block(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume_contextual_keyword("block", "block")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::Block(body),
             Span::merge(start, self.prev_span()),
         ))
     }

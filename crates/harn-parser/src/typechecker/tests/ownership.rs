@@ -70,3 +70,24 @@ fn returning_non_owned_binding_is_silent() {
         "non-owned binding return must not fire HARN-OWN-003, got: {codes:?}"
     );
 }
+
+#[test]
+fn lexical_block_preserves_the_outer_binding_after_exit() {
+    let codes = diagnostic_codes(
+        r#"
+            pipeline main() {
+                const value: string = "outer"
+                block {
+                    const value: int = 1
+                    const inner: int = value
+                }
+                const after: string = value
+                log(after)
+            }
+        "#,
+    );
+    assert!(
+        !codes.contains(&Code::VariableTypeMismatch),
+        "the inner `value` binding leaked out of its lexical scope: {codes:?}"
+    );
+}
