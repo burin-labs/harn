@@ -2999,13 +2999,11 @@ fn __next_progress_count(made_progress, turns_since_progress) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn __progress_nudge_text(depth, has_tools, tool_mode = "text", made_tool_calls = false) {
+pub fn __progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
   const action = if has_tools {
-    if tool_mode == "native" {
-      "Call exactly one native tool through the provider tool channel now, or give your final answer and stop."
-    } else {
-      "Emit exactly one well-formed <tool_call> now, or state your final answer in <user_response> and stop."
-    }
+    "Emit exactly one well-formed " + paradigm.call_noun + " now, or state your final answer "
+      + paradigm.final_answer
+      + " and stop."
   } else {
     "Make concrete progress in your reply now, or state your final answer and stop."
   }
@@ -5328,9 +5326,9 @@ fn __agent_loop_run(message, session, initial_opts) {
             && !(outcome?.nudged_this_turn ?? false)
             && len(turn_rejected) == 0 {
             const has_tools = len(opts?.tools?.tools ?? []) > 0
-            const tool_mode = agent_tool_call_paradigm(turn_opts).kind
+            const paradigm = agent_tool_call_paradigm(turn_opts)
             const made_tool_calls = tool_count > 0
-            const nudge_text = __progress_nudge_text(turns_since_progress, has_tools, tool_mode, made_tool_calls)
+            const nudge_text = __progress_nudge_text(turns_since_progress, has_tools, paradigm, made_tool_calls)
             __inject_feedback_with_tool_repair(session.session_id, "no_progress_streak", nudge_text)
             agent_emit_event(
               session.session_id,

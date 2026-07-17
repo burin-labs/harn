@@ -139,13 +139,13 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
 
     if !saw_fenced_blocks {
         let trimmed = src.trim();
-        if let Some(template_calls) = parse_chat_template_json_tool_calls(trimmed) {
-            match template_calls {
+        if let Some(located) = locate_and_parse_tool_envelope(src) {
+            match located.result {
                 Ok(template_calls) => {
                     violations.push(
-                        "protocol_violation: a tool call was emitted in a chat-template \
-                         `<tool_calls>` envelope while `tool_format` is `json`; accepted this \
-                         turn, but emit canonical ```tool JSON blocks next turn."
+                        "protocol_violation: a tool call was emitted in a chat-template tool \
+                         envelope while `tool_format` is `json`; accepted this turn, but emit \
+                         canonical ```tool JSON blocks next turn."
                             .to_string(),
                     );
                     for (name, arguments) in template_calls {
@@ -155,7 +155,7 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
                             "arguments": arguments,
                         }));
                     }
-                    prose.clear();
+                    prose = located.prose;
                 }
                 Err(error) => errors.push(error.into_message()),
             }
@@ -417,37 +417,213 @@ fn parse_bare_json_tool_call(body: &str) -> Result<(String, serde_json::Value), 
     parse_block_body(body, 0)
 }
 
-/// Parse the common chat-template JSON dialect used by text-only tool routes:
+/// A tool-call envelope located anywhere at the top level of the response.
+///
+/// The three openers a text tool route emits when it drops the canonical
+/// ```` ```tool ```` fence. `ToolCalls` carries either the `<tool>`-marker JSON
+/// dialect or the tag-per-call XML dialect; `ToolCode` and `ToolCall` wrap a
+/// list of JSON tool objects directly.
+// The variants mirror the three literal tag names (`<tool_calls>`, `<tool_code>`,
+// `<tool_call>`), so the shared `Tool` prefix is inherent, not incidental.
+#[allow(clippy::enum_variant_names)]
+#[derive(Clone, Copy)]
+enum EnvelopeKind {
+    ToolCalls,
+    ToolCode,
+    ToolCall,
+}
+
+impl EnvelopeKind {
+    fn opener(self) -> &'static str {
+        match self {
+            EnvelopeKind::ToolCalls => "<tool_calls>",
+            EnvelopeKind::ToolCode => "<tool_code>",
+            EnvelopeKind::ToolCall => "<tool_call>",
+        }
+    }
+
+    fn close(self) -> &'static str {
+        match self {
+            EnvelopeKind::ToolCalls => "</tool_calls>",
+            EnvelopeKind::ToolCode => "</tool_code>",
+            EnvelopeKind::ToolCall => "</tool_call>",
+        }
+    }
+}
+
+/// A located envelope: the surrounding prose plus the parse outcome of its body.
+struct LocatedEnvelope {
+    prose: String,
+    result: Result<Vec<(String, serde_json::Value)>, BlockError>,
+}
+
+fn env_err(detail: String) -> BlockError {
+    BlockError::ChatTemplateEnvelope { detail }
+}
+
+/// Locate the first top-level tool-call envelope and parse its body.
+///
+/// The opener may appear ANYWHERE at the top level of the response (outside
+/// markdown code fences), not just as a prefix — prose before and after the
+/// envelope survives as prose. End-of-input acts as an implicit close: the
+/// missing `</tool_calls>` / `</tool_code>` / `</tool_call>` is accepted (models
+/// routinely EOS before closing). An opener whose body yields zero complete
+/// calls returns a `ChatTemplateEnvelope` violation (fail-loud) rather than
+/// `None`, so runtime parse guidance fires instead of misrouting the turn to
+/// completion/monologue feedback.
+fn locate_and_parse_tool_envelope(src: &str) -> Option<LocatedEnvelope> {
+    let (opener_start, kind, content_start) = find_top_level_opener(src)?;
+
+    let close = kind.close();
+    let (inner, after) = match src[content_start..].find(close) {
+        Some(rel) => (
+            &src[content_start..content_start + rel],
+            &src[content_start + rel + close.len()..],
+        ),
+        None => (&src[content_start..], ""),
+    };
+
+    // The singular `<tool_call>` tag collides with the legacy `name({...})`
+    // heredoc markup. Only claim it for the JSON dialect when its body is a JSON
+    // object; otherwise leave it to the legacy-markup path (which emits its own
+    // actionable protocol violation), so the existing legacy behavior is kept.
+    if matches!(kind, EnvelopeKind::ToolCall) && !inner.trim_start().starts_with('{') {
+        return None;
+    }
+
+    let result = match kind {
+        EnvelopeKind::ToolCalls => parse_tool_calls_body(inner),
+        EnvelopeKind::ToolCode | EnvelopeKind::ToolCall => parse_json_object_list(inner),
+    };
+    Some(LocatedEnvelope {
+        prose: collapse_prose_around(&src[..opener_start], after),
+        result,
+    })
+}
+
+/// Find the first `<tool_calls>` / `<tool_code>` / `<tool_call>` opener that is
+/// not inside a markdown code fence. Returns its start byte, kind, and the byte
+/// where its body begins (just past the opener tag).
+fn find_top_level_opener(src: &str) -> Option<(usize, EnvelopeKind, usize)> {
+    let mut offset = 0usize;
+    let mut in_fence = false;
+    let mut fence_marker = "";
+    for line in src.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if in_fence {
+            if trimmed == fence_marker {
+                in_fence = false;
+            }
+            offset += line.len();
+            continue;
+        }
+        if let Some(marker) = markdown_fence_marker(trimmed) {
+            in_fence = true;
+            fence_marker = marker;
+            offset += line.len();
+            continue;
+        }
+        if let Some((rel, kind)) = first_opener_in(line) {
+            let opener_start = offset + rel;
+            return Some((opener_start, kind, opener_start + kind.opener().len()));
+        }
+        offset += line.len();
+    }
+    None
+}
+
+/// The bare fence marker a line opens a markdown code fence with, if any.
+fn markdown_fence_marker(trimmed: &str) -> Option<&'static str> {
+    if trimmed.starts_with(BACKTICK_FENCE) {
+        Some(BACKTICK_FENCE)
+    } else if trimmed.starts_with(TILDE_FENCE) {
+        Some(TILDE_FENCE)
+    } else {
+        None
+    }
+}
+
+/// The earliest envelope opener in one line, if any. `<tool_calls>` and
+/// `<tool_call>` are unambiguous: the char after `<tool_call` is `s` in the
+/// former and `>` in the latter, so neither is a substring of the other.
+fn first_opener_in(line: &str) -> Option<(usize, EnvelopeKind)> {
+    [
+        (line.find("<tool_calls>"), EnvelopeKind::ToolCalls),
+        (line.find("<tool_code>"), EnvelopeKind::ToolCode),
+        (line.find("<tool_call>"), EnvelopeKind::ToolCall),
+    ]
+    .into_iter()
+    .filter_map(|(pos, kind)| pos.map(|p| (p, kind)))
+    .min_by_key(|(p, _)| *p)
+}
+
+/// Join the text before and after the envelope back into prose.
+fn collapse_prose_around(before: &str, after: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    let before = before.trim();
+    if !before.is_empty() {
+        parts.push(before);
+    }
+    let after = after.trim();
+    if !after.is_empty() {
+        parts.push(after);
+    }
+    parts.join("\n")
+}
+
+/// Parse the body of a `<tool_calls>` envelope, choosing the dialect from its
+/// first structural token: a JSON object or a `<tool>` marker routes to the
+/// `<tool>`-marker JSON dialect (preserving its marker-required rejection); any
+/// other opening tag (a tag named after the tool) routes to the XML dialect.
+fn parse_tool_calls_body(inner: &str) -> Result<Vec<(String, serde_json::Value)>, BlockError> {
+    let trimmed = inner.trim();
+    if trimmed.starts_with('{') {
+        return parse_tool_marker_json_body(inner);
+    }
+    match first_tag_name(trimmed) {
+        Some(name) if is_known_marker(&name) => parse_tool_marker_json_body(inner),
+        Some(_) => parse_xml_tool_calls(inner),
+        None => parse_tool_marker_json_body(inner),
+    }
+}
+
+/// The lowercased name of the first XML tag (open or close) in `s`, if any.
+fn first_tag_name(s: &str) -> Option<String> {
+    let lt = s.find('<')?;
+    let after = &s[lt + 1..];
+    let after = after.strip_prefix('/').unwrap_or(after);
+    let name: String = after
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_ascii_lowercase())
+    }
+}
+
+/// True for the structural markers that never name a tool call.
+fn is_known_marker(name: &str) -> bool {
+    matches!(name, "tool" | "tool_call" | "tool_calls" | "tool_code")
+}
+
+/// The `<tool>`-marker JSON dialect body (the classic chat-template shape):
 ///
 /// ```text
-/// <tool_calls>
 /// <tool>
 /// {"name":"look","file":"src/lib.rs"}
 /// {"name":"run","command":"cargo test"}
-/// </tool_calls>
 /// ```
 ///
-/// The grammar is intentionally whole-response only. A `<tool_calls>` opener
-/// must have the matching close, and every `<tool>` marker must be followed by
-/// a complete JSON object before another marker, a `</tool>` close, or the
-/// wrapper close. This makes the recovery unambiguous while keeping partial
-/// markup fail-loud rather than dispatching a guessed action.
-fn parse_chat_template_json_tool_calls(
-    src: &str,
-) -> Option<Result<Vec<(String, serde_json::Value)>, BlockError>> {
-    const OPEN: &str = "<tool_calls>";
-    const CLOSE: &str = "</tool_calls>";
+/// Every `<tool>` marker must be followed by a complete JSON object before
+/// another marker, a `</tool>` close, or the end of the body. Partial markup is
+/// fail-loud rather than dispatching a guessed action.
+fn parse_tool_marker_json_body(body: &str) -> Result<Vec<(String, serde_json::Value)>, BlockError> {
     const TOOL_OPEN: &str = "<tool>";
     const TOOL_CLOSE: &str = "</tool>";
 
-    let body = src.strip_prefix(OPEN)?;
-    let Some(mut body) = body.strip_suffix(CLOSE).map(str::trim) else {
-        return Some(Err(BlockError::ChatTemplateEnvelope {
-            detail: "the opening `<tool_calls>` tag has no matching `</tool_calls>` close"
-                .to_string(),
-        }));
-    };
-
+    let mut body = body.trim();
     let mut saw_tool_marker = false;
     let mut tool_marker_active = false;
     let mut pending_tool_object = false;
@@ -455,10 +631,10 @@ fn parse_chat_template_json_tool_calls(
     while !body.is_empty() {
         if let Some(rest) = body.strip_prefix(TOOL_OPEN) {
             if pending_tool_object {
-                return Some(Err(BlockError::ChatTemplateEnvelope {
-                    detail: "a `<tool>` marker must be followed by a JSON object before another `<tool>` marker"
+                return Err(env_err(
+                    "a `<tool>` marker must be followed by a JSON object before another `<tool>` marker"
                         .to_string(),
-                }));
+                ));
             }
             saw_tool_marker = true;
             tool_marker_active = true;
@@ -468,17 +644,16 @@ fn parse_chat_template_json_tool_calls(
         }
         if let Some(rest) = body.strip_prefix(TOOL_CLOSE) {
             if !tool_marker_active {
-                return Some(Err(BlockError::ChatTemplateEnvelope {
-                    detail:
-                        "found an unmatched `</tool>` close without a preceding `<tool>` marker"
-                            .to_string(),
-                }));
+                return Err(env_err(
+                    "found an unmatched `</tool>` close without a preceding `<tool>` marker"
+                        .to_string(),
+                ));
             }
             if pending_tool_object {
-                return Some(Err(BlockError::ChatTemplateEnvelope {
-                    detail: "a `<tool>` marker must be followed by a JSON object before `</tool>`"
+                return Err(env_err(
+                    "a `<tool>` marker must be followed by a JSON object before `</tool>`"
                         .to_string(),
-                }));
+                ));
             }
             tool_marker_active = false;
             body = rest.trim_start();
@@ -490,75 +665,223 @@ fn parse_chat_template_json_tool_calls(
             } else {
                 "the envelope contained no `<tool>` marker"
             };
-            return Some(Err(BlockError::ChatTemplateEnvelope {
-                detail: detail.to_string(),
-            }));
+            return Err(env_err(detail.to_string()));
         }
         if !body.starts_with('{') {
-            return Some(Err(BlockError::ChatTemplateEnvelope {
-                detail: format!(
-                    "expected a `{TOOL_OPEN}` marker or a JSON object, found `{}`",
-                    preview_str(body, 80)
-                ),
-            }));
+            return Err(env_err(format!(
+                "expected a `{TOOL_OPEN}` marker or a JSON object, found `{}`",
+                preview_str(body, 80)
+            )));
         }
 
         let mut values = serde_json::Deserializer::from_str(body).into_iter::<serde_json::Value>();
         let value = match values.next() {
             Some(Ok(value)) => value,
             Some(Err(error)) if error.is_eof() => {
-                return Some(Err(BlockError::ChatTemplateEnvelope {
-                    detail: "a JSON tool object ended before its closing `}`".to_string(),
-                }));
+                return Err(env_err(
+                    "a JSON tool object ended before its closing `}`".to_string(),
+                ));
             }
             Some(Err(error)) => {
-                return Some(Err(BlockError::ChatTemplateEnvelope {
-                    detail: format!("invalid JSON tool object: {error}"),
-                }));
+                return Err(env_err(format!("invalid JSON tool object: {error}")));
             }
             None => {
-                return Some(Err(BlockError::ChatTemplateEnvelope {
-                    detail: "expected a JSON tool object after `<tool>`".to_string(),
-                }));
+                return Err(env_err(
+                    "expected a JSON tool object after `<tool>`".to_string(),
+                ));
             }
         };
         let consumed = values.byte_offset();
         let obj = match value {
             serde_json::Value::Object(obj) => obj,
             _ => {
-                return Some(Err(BlockError::ChatTemplateEnvelope {
-                    detail: "each chat-template tool entry must be a JSON object".to_string(),
-                }));
+                return Err(env_err(
+                    "each chat-template tool entry must be a JSON object".to_string(),
+                ));
             }
         };
         match normalize_json_tool_call_object(obj, true) {
             Ok(call) => calls.push(call),
-            Err(error) => {
-                return Some(Err(BlockError::ChatTemplateEnvelope {
-                    detail: error.into_message(),
-                }));
-            }
+            Err(error) => return Err(env_err(error.into_message())),
         }
         pending_tool_object = false;
         body = body[consumed..].trim_start();
     }
 
     if pending_tool_object {
-        return Some(Err(BlockError::ChatTemplateEnvelope {
-            detail: "a `<tool>` marker ended without a complete JSON object".to_string(),
-        }));
+        return Err(env_err(
+            "a `<tool>` marker ended without a complete JSON object".to_string(),
+        ));
     }
     if !saw_tool_marker {
-        return Some(Err(BlockError::ChatTemplateEnvelope {
-            detail: "the envelope contained no `<tool>` marker".to_string(),
-        }));
+        return Err(env_err(
+            "the envelope contained no `<tool>` marker".to_string(),
+        ));
     }
     if calls.is_empty() {
-        return Some(Err(BlockError::ChatTemplateEnvelope {
-            detail: "the envelope contained no JSON tool object".to_string(),
-        }));
+        return Err(env_err(
+            "the envelope contained no JSON tool object".to_string(),
+        ));
     }
-    Some(Ok(calls))
+    Ok(calls)
+}
+
+/// Parse a body that is a bare list of consecutive JSON tool objects (the
+/// `<tool_code>` / `<tool_call>` tag-wrapping-JSON dialect). Inline arguments
+/// beside `name` are accepted, matching the chat-template policy.
+fn parse_json_object_list(body: &str) -> Result<Vec<(String, serde_json::Value)>, BlockError> {
+    let mut body = body.trim();
+    let mut calls = Vec::new();
+    while !body.is_empty() {
+        if !body.starts_with('{') {
+            return Err(env_err(format!(
+                "expected a JSON tool object, found `{}`",
+                preview_str(body, 80)
+            )));
+        }
+        let mut values = serde_json::Deserializer::from_str(body).into_iter::<serde_json::Value>();
+        let value = match values.next() {
+            Some(Ok(value)) => value,
+            Some(Err(error)) if error.is_eof() => {
+                return Err(env_err(
+                    "a JSON tool object ended before its closing `}`".to_string(),
+                ));
+            }
+            Some(Err(error)) => {
+                return Err(env_err(format!("invalid JSON tool object: {error}")));
+            }
+            None => break,
+        };
+        let consumed = values.byte_offset();
+        let obj = match value {
+            serde_json::Value::Object(obj) => obj,
+            _ => {
+                return Err(env_err(
+                    "each chat-template tool entry must be a JSON object".to_string(),
+                ));
+            }
+        };
+        match normalize_json_tool_call_object(obj, true) {
+            Ok(call) => calls.push(call),
+            Err(error) => return Err(env_err(error.into_message())),
+        }
+        body = body[consumed..].trim_start();
+    }
+    if calls.is_empty() {
+        return Err(env_err(
+            "the envelope contained no JSON tool object".to_string(),
+        ));
+    }
+    Ok(calls)
+}
+
+/// Parse the tag-per-call XML dialect inside `<tool_calls>`:
+///
+/// ```text
+/// <look>
+/// <file>
+/// src/writer.zig
+/// </file>
+/// </look>
+/// ```
+///
+/// Each top-level block is a call named after its tag; each nested tag is a
+/// string argument (trimmed, multi-line values kept verbatim). Any tag whose
+/// name is a known structural marker is rejected, and an inner tag left unclosed
+/// at end of input is a violation — a truncated/guessed call never dispatches.
+fn parse_xml_tool_calls(inner: &str) -> Result<Vec<(String, serde_json::Value)>, BlockError> {
+    let mut rest = inner.trim();
+    let mut calls = Vec::new();
+    while !rest.is_empty() {
+        if !rest.starts_with('<') {
+            return Err(env_err(format!(
+                "expected a tool-call tag inside `<tool_calls>`, found `{}`",
+                preview_str(rest, 60)
+            )));
+        }
+        let (tag_name, after_open) = parse_open_tag(rest)?;
+        if is_known_marker(&tag_name.to_ascii_lowercase()) {
+            return Err(env_err(format!(
+                "`<{tag_name}>` is a structural marker, not a tool-call tag"
+            )));
+        }
+        let close = format!("</{tag_name}>");
+        let (args, after_close) = parse_xml_call_args(after_open, &close, &tag_name)?;
+        calls.push(super::super::normalize_tool_call_shape(
+            &tag_name,
+            serde_json::Value::Object(args),
+        ));
+        rest = after_close.trim_start();
+    }
+    if calls.is_empty() {
+        return Err(env_err(
+            "the `<tool_calls>` envelope contained no tool-call tags".to_string(),
+        ));
+    }
+    Ok(calls)
+}
+
+/// Parse one `<NAME ...>` opening tag. Returns the tag name and the slice just
+/// past `>`. An unexpected close tag or a tag not closed with `>` before end of
+/// input is a violation.
+fn parse_open_tag(s: &str) -> Result<(String, &str), BlockError> {
+    let after_lt = &s[1..];
+    if after_lt.starts_with('/') {
+        return Err(env_err(format!(
+            "unexpected close tag `{}`",
+            preview_str(s, 40)
+        )));
+    }
+    let gt = after_lt.find('>').ok_or_else(|| {
+        env_err("an XML tool tag was not closed with `>` before end of output".to_string())
+    })?;
+    let name: String = after_lt[..gt]
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    if name.is_empty() {
+        return Err(env_err("an XML tool tag had an empty name".to_string()));
+    }
+    Ok((name, &after_lt[gt + 1..]))
+}
+
+/// Parse the `<arg>value</arg>` sequence inside one XML call tag, up to `close`
+/// (`</NAME>`). Values are trimmed; an unclosed call tag or argument tag at end
+/// of input is a violation.
+fn parse_xml_call_args<'a>(
+    mut s: &'a str,
+    close: &str,
+    tag_name: &str,
+) -> Result<(serde_json::Map<String, serde_json::Value>, &'a str), BlockError> {
+    let mut args = serde_json::Map::new();
+    loop {
+        let t = s.trim_start();
+        if let Some(after) = t.strip_prefix(close) {
+            return Ok((args, after));
+        }
+        if t.is_empty() {
+            return Err(env_err(format!(
+                "the `<{tag_name}>` call tag was not closed with `{close}` before end of output"
+            )));
+        }
+        if !t.starts_with('<') {
+            return Err(env_err(format!(
+                "expected an argument tag or `{close}` inside `<{tag_name}>`, found `{}`",
+                preview_str(t, 60)
+            )));
+        }
+        let (arg_name, after_open) = parse_open_tag(t)?;
+        let arg_close = format!("</{arg_name}>");
+        let end = after_open.find(&arg_close).ok_or_else(|| {
+            env_err(format!(
+                "the `<{arg_name}>` argument tag was not closed with `{arg_close}` before end of output"
+            ))
+        })?;
+        let value = after_open[..end].trim().to_string();
+        args.insert(arg_name, serde_json::Value::String(value));
+        s = &after_open[end + arg_close.len()..];
+    }
 }
 
 fn contains_legacy_tool_call_markup(src: &str) -> bool {
@@ -991,5 +1314,187 @@ mod tests {
         let out = parse(&src);
         assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
         assert_eq!(arg(&out.calls[0], "c").unwrap(), content);
+    }
+
+    // ===================================================================
+    // Broadened text-envelope recovery (qwen3.6 llamacpp json-lane probe).
+    // ===================================================================
+
+    // (a) XML envelope, three tool-tag calls, EOS before `</tool_calls>`.
+    #[test]
+    fn xml_envelope_three_calls_without_close_parses() {
+        let out = parse(
+            "<tool_calls>\n<look>\n<file>\nsrc/writer.zig\n</file>\n</look>\n\
+             <look>\n<file>\nsrc/parser.zig\n</file>\n</look>\n\
+             <look>\n<file>\nsrc/root.zig\n</file>\n</look>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert!(out.prose.is_empty(), "prose: {:?}", out.prose);
+        assert_eq!(out.calls.len(), 3);
+        for (call, file) in
+            out.calls
+                .iter()
+                .zip(["src/writer.zig", "src/parser.zig", "src/root.zig"])
+        {
+            assert_eq!(call["name"], "look");
+            assert_eq!(arg(call, "file").unwrap(), file);
+        }
+        assert!(
+            out.violations.iter().any(|v| v.contains("chat-template")),
+            "violations: {:?}",
+            out.violations
+        );
+    }
+
+    // (a2) single XML call with two args, EOS before `</tool_calls>`.
+    #[test]
+    fn xml_envelope_single_multi_arg_call_without_close_parses() {
+        let out = parse(
+            "<tool_calls>\n<look>\n<file>\nsrc/writer.zig\n</file>\n<intent>\nread\n</intent>\n</look>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "look");
+        assert_eq!(arg(&out.calls[0], "file").unwrap(), "src/writer.zig");
+        assert_eq!(arg(&out.calls[0], "intent").unwrap(), "read");
+    }
+
+    // Multi-line XML argument value is kept verbatim (inner newlines survive,
+    // outer whitespace trimmed).
+    #[test]
+    fn xml_envelope_multiline_arg_value_kept_verbatim() {
+        let out = parse(
+            "<tool_calls>\n<write>\n<content>\nline one\nline two\n</content>\n</write>\n</tool_calls>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "write");
+        assert_eq!(arg(&out.calls[0], "content").unwrap(), "line one\nline two");
+    }
+
+    // (b) `<tool_code>` tag wrapping a JSON object with inline arguments beside
+    // `name`, EOS before `</tool_code>`.
+    #[test]
+    fn tool_code_tag_with_inline_json_args_parses() {
+        let out = parse(
+            "<tool_code>\n{ \"name\": \"look\", \"file\": \"src/writer.zig\", \"intent\": \"read\" }",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "look");
+        assert_eq!(arg(&out.calls[0], "file").unwrap(), "src/writer.zig");
+        assert_eq!(arg(&out.calls[0], "intent").unwrap(), "read");
+        assert!(
+            out.violations.iter().any(|v| v.contains("chat-template")),
+            "violations: {:?}",
+            out.violations
+        );
+    }
+
+    // `<tool_code>` wrapping multiple consecutive JSON objects.
+    #[test]
+    fn tool_code_tag_with_multiple_json_objects_parses() {
+        let out = parse(
+            "<tool_code>\n{\"name\":\"a\",\"args\":{\"k\":1}}\n{\"name\":\"b\",\"args\":{\"v\":2}}\n</tool_code>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 2);
+        assert_eq!(out.calls[0]["name"], "a");
+        assert_eq!(arg(&out.calls[0], "k").unwrap(), 1);
+        assert_eq!(out.calls[1]["name"], "b");
+        assert_eq!(arg(&out.calls[1], "v").unwrap(), 2);
+    }
+
+    // Bare singular `<tool_call>` tag wrapping a JSON object parses.
+    #[test]
+    fn bare_tool_call_tag_with_json_parses() {
+        let out =
+            parse("<tool_call>\n{\"name\":\"look\",\"args\":{\"file\":\"a.rs\"}}\n</tool_call>");
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "look");
+        assert_eq!(arg(&out.calls[0], "file").unwrap(), "a.rs");
+    }
+
+    // (c) prose BEFORE a `<tool_calls>` envelope: the prose stays prose, the
+    // envelope still parses (the prefix-only bug misrouted this to completion
+    // feedback).
+    #[test]
+    fn prose_before_envelope_parses_and_keeps_prose() {
+        let out = parse(
+            "I will read the writer next.\n<tool_calls>\n<tool>\n{\"name\":\"look\",\"file\":\"src/writer.zig\"}\n</tool_calls>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "look");
+        assert_eq!(arg(&out.calls[0], "file").unwrap(), "src/writer.zig");
+        assert!(
+            out.prose.contains("I will read the writer next."),
+            "prose: {:?}",
+            out.prose
+        );
+    }
+
+    // Prose AFTER the envelope close also survives as prose.
+    #[test]
+    fn prose_after_envelope_close_survives() {
+        let out = parse(
+            "<tool_calls>\n<tool>\n{\"name\":\"look\",\"file\":\"a.rs\"}\n</tool_calls>\nDone reading.",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert!(
+            out.prose.contains("Done reading."),
+            "prose: {:?}",
+            out.prose
+        );
+    }
+
+    // Truncated inner XML tag at EOS -> violation, zero calls (never dispatch a
+    // guessed/truncated call).
+    #[test]
+    fn truncated_inner_xml_tag_is_violation_zero_calls() {
+        let out = parse("<tool_calls>\n<look>\n<file>\nsrc/writer.zig");
+        assert!(out.calls.is_empty(), "calls: {:?}", out.calls);
+        assert_eq!(out.errors.len(), 1);
+        assert!(
+            out.errors[0].contains("<tool_calls>") && out.errors[0].contains("not executed"),
+            "error: {}",
+            out.errors[0]
+        );
+    }
+
+    // Envelope opener with a garbage body -> violation, never silently None.
+    #[test]
+    fn envelope_with_garbage_body_is_violation_not_none() {
+        let out = parse("<tool_code>\nlol this is not json at all\n</tool_code>");
+        assert!(out.calls.is_empty(), "calls: {:?}", out.calls);
+        assert_eq!(out.errors.len(), 1, "errors: {:?}", out.errors);
+        assert!(
+            out.errors[0].contains("not executed"),
+            "error: {}",
+            out.errors[0]
+        );
+    }
+
+    // Prose + canonical ```tool fence still parses (regression pin: the fenced
+    // grammar is untouched by envelope recovery).
+    #[test]
+    fn prose_before_canonical_tool_fence_still_parses() {
+        let out = parse("Here is the call:\n```tool\n{\"name\": \"a\", \"args\": {\"k\": 1}}\n```");
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert!(
+            out.violations.is_empty(),
+            "violations: {:?}",
+            out.violations
+        );
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "a");
+        assert_eq!(arg(&out.calls[0], "k").unwrap(), 1);
+        assert!(
+            out.prose.contains("Here is the call:"),
+            "prose: {:?}",
+            out.prose
+        );
     }
 }
