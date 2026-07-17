@@ -36,6 +36,21 @@ struct CheckoutContract {
     compiler_fingerprint: String,
 }
 
+#[derive(serde::Deserialize)]
+struct WorkspaceManifest {
+    workspace: WorkspaceTable,
+}
+
+#[derive(serde::Deserialize)]
+struct WorkspaceTable {
+    package: WorkspacePackage,
+}
+
+#[derive(serde::Deserialize)]
+struct WorkspacePackage {
+    version: String,
+}
+
 fn main() -> ExitCode {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let (workspace_root, check) = match args.as_slice() {
@@ -87,20 +102,9 @@ fn checkout_contract(workspace_root: &Path) -> Result<CheckoutContract, String> 
     let workspace_manifest_path = workspace_root.join("Cargo.toml");
     let workspace_manifest = fs::read_to_string(&workspace_manifest_path)
         .map_err(|error| format!("read {}: {error}", workspace_manifest_path.display()))?;
-    let workspace_manifest = toml::from_str::<toml::Value>(&workspace_manifest)
+    let workspace_manifest = toml::from_str::<WorkspaceManifest>(&workspace_manifest)
         .map_err(|error| format!("parse {}: {error}", workspace_manifest_path.display()))?;
-    let harn_version = workspace_manifest
-        .get("workspace")
-        .and_then(|workspace| workspace.get("package"))
-        .and_then(|package| package.get("version"))
-        .and_then(toml::Value::as_str)
-        .ok_or_else(|| {
-            format!(
-                "{} has no workspace.package.version",
-                workspace_manifest_path.display()
-            )
-        })?
-        .to_string();
+    let harn_version = workspace_manifest.workspace.package.version;
 
     let vm_manifest_dir = workspace_root.join("crates/harn-vm");
     let compiler_inputs = codegen_fingerprint::compiler_inputs(&vm_manifest_dir);
