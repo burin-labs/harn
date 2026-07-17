@@ -167,6 +167,7 @@ impl Compiler {
                         name: field.name.clone(),
                         type_expr: self.expand_alias_inner(&field.type_expr, visiting),
                         optional: field.optional,
+                        span: field.span,
                     })
                     .collect(),
             ),
@@ -177,6 +178,7 @@ impl Compiler {
                         name: field.name.clone(),
                         type_expr: self.expand_alias_inner(&field.type_expr, visiting),
                         optional: field.optional,
+                        span: field.span,
                     })
                     .collect(),
                 rests: rests

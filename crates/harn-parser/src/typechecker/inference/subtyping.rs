@@ -869,6 +869,7 @@ impl TypeChecker {
                         name: field.name.clone(),
                         type_expr: self.resolve_alias_inner(&field.type_expr, scope, visiting),
                         optional: field.optional,
+                        span: field.span,
                     })
                     .collect(),
             ),
@@ -882,6 +883,7 @@ impl TypeChecker {
                         name: field.name.clone(),
                         type_expr: self.resolve_alias_inner(&field.type_expr, scope, visiting),
                         optional: field.optional,
+                        span: field.span,
                     })
                     .collect();
                 let rests = rests

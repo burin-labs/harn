@@ -171,11 +171,7 @@ impl Compiler {
                     let Some(type_expr) = self.infer_expr_type(&entry.value) else {
                         return Some(TypeExpr::Named("dict".into()));
                     };
-                    fields.push(harn_parser::ShapeField {
-                        name: key,
-                        type_expr,
-                        optional: false,
-                    });
+                    fields.push(harn_parser::ShapeField::synthetic(key, type_expr, false));
                 }
                 if fields.is_empty() {
                     Some(TypeExpr::Named("dict".into()))

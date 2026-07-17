@@ -1003,6 +1003,7 @@ impl TypeChecker {
                         name: field.name.clone(),
                         type_expr: Self::apply_type_bindings(&field.type_expr, bindings),
                         optional: field.optional,
+                        span: field.span,
                     })
                     .collect(),
             ),
@@ -1016,6 +1017,7 @@ impl TypeChecker {
                         name: field.name.clone(),
                         type_expr: Self::apply_type_bindings(&field.type_expr, bindings),
                         optional: field.optional,
+                        span: field.span,
                     })
                     .collect();
                 let rests = rests

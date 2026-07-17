@@ -38,11 +38,7 @@ pub fn ty_to_type_expr(ty: &Ty) -> TypeExpr {
         Ty::Shape(fields) => TypeExpr::Shape(
             fields
                 .iter()
-                .map(|f| ShapeField {
-                    name: f.name.into(),
-                    type_expr: ty_to_type_expr(&f.ty),
-                    optional: f.optional,
-                })
+                .map(|f| ShapeField::synthetic(f.name, ty_to_type_expr(&f.ty), f.optional))
                 .collect(),
         ),
         Ty::SchemaOf(name) => TypeExpr::Applied {

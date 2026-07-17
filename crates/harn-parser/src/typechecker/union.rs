@@ -227,6 +227,7 @@ fn intersect_shapes(
                 name: field.name.clone(),
                 type_expr: intersected,
                 optional: field.optional && schema_field.optional,
+                span: field.span,
             });
         } else {
             merged.push(field.clone());
