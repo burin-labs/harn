@@ -1809,17 +1809,8 @@
           "type": "FIELD",
           "name": "value",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "struct_construct"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "_expression"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_expression"
           }
         }
       ]
@@ -1872,17 +1863,8 @@
           "type": "FIELD",
           "name": "value",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "struct_construct"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "_expression"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_expression"
           }
         }
       ]
@@ -1947,17 +1929,8 @@
           "type": "FIELD",
           "name": "value",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "struct_construct"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "_expression"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_expression"
           }
         }
       ]
@@ -7759,6 +7732,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "struct_construct"
+        },
+        {
+          "type": "SYMBOL",
           "name": "closure"
         },
         {
@@ -9162,10 +9139,6 @@
         {
           "type": "SYMBOL",
           "name": "spread_expression"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "struct_construct"
         },
         {
           "type": "SYMBOL",

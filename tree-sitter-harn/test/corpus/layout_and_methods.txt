@@ -33,6 +33,40 @@ fn edit_tools(
         (identifier)))))
 
 ==================
+Struct Construct Return Expression
+==================
+
+struct Point {
+  x: int
+}
+
+fn origin() -> Point {
+  return Point {x: 0}
+}
+
+---
+
+(source_file
+  (struct_declaration
+    name: (identifier)
+    (struct_field
+      name: (identifier)
+      type: (type_annotation
+        (identifier))))
+  (fn_declaration
+    name: (identifier)
+    (type_annotation
+      (identifier))
+    body: (block
+      (return_statement
+        (struct_construct
+          type_name: (identifier)
+          fields: (dict_literal
+            (dict_entry
+              key: (identifier)
+              value: (integer_literal))))))))
+
+==================
 Multiline Call Arguments
 ==================
 

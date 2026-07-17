@@ -1,0 +1,1 @@
+- Fix tree-sitter parsing for struct constructs used as return expressions.
