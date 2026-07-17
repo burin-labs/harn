@@ -46,6 +46,10 @@ case "$*" in
     touch "$FAKE_AUDIT_ROOT/audit.started"
     sleep 0.1
     if [[ "${FAKE_AUDIT_FAIL-0}" == "1" ]]; then
+      # Exactly how GNU make reports a failing target under `-k`, because the
+      # failure summary parses these lines to name the gates.
+      echo "make: *** [Makefile:314: fmt-harn] Error 123" >&2
+      echo "make: *** [Makefile:705: check-source-file-lengths] Error 1" >&2
       echo "fake audit gates failed" >&2
       exit 43
     fi
@@ -109,6 +113,39 @@ fi
 if ! grep -Fq "FAIL: one or more audit gates failed" "$tmp_root/audit-fail.out"; then
   echo "audit_gates did not report the failing audit fanout" >&2
   cat "$tmp_root/audit-fail.out" >&2
+  exit 1
+fi
+
+# The TAIL must name what failed.
+#
+# Conformance and the audit gates run in parallel, so a failing gate prints its
+# `make: *** [target] Error N` long before the end. Without a summary the tail
+# reads "ok: conformance" plus a bare non-zero exit — byte-identical to the
+# sccache post-job flake documented in ci.yml, and a real two-gate failure has
+# been misread as that flake. The tail is where a reader looks, so the tail must
+# not lie by omission.
+tail_out="$(tail -8 "$tmp_root/audit-fail.out")"
+if ! grep -Fq "=== FAILED: audit gates ===" <<<"$tail_out"; then
+  echo "the tail does not say the job failed; it ends on 'ok: conformance' and an exit code" >&2
+  cat "$tmp_root/audit-fail.out" >&2
+  exit 1
+fi
+for gate in fmt-harn check-source-file-lengths; do
+  if ! grep -Fq "$gate" <<<"$tail_out"; then
+    echo "the failure summary does not name the failing gate: $gate" >&2
+    cat "$tmp_root/audit-fail.out" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq "does NOT mean this job passed" <<<"$tail_out"; then
+  echo "the tail does not warn that a passing conformance line is not a passing job" >&2
+  exit 1
+fi
+
+# A PASSING run must not print a failure summary — a warning that fires on green
+# is noise, and noise is how a real warning stops being read.
+if grep -Fq "=== FAILED:" "$tmp_root/audit.out"; then
+  echo "a passing run printed a failure summary" >&2
   exit 1
 fi
 
