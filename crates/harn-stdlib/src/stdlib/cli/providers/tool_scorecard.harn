@@ -138,6 +138,12 @@ fn __render_human(report: dict) -> string {
     + to_string(__safe_int(summary["warn"], 0))
     + " fail="
     + to_string(__safe_int(summary["fail"], 0))
+    + " trusted="
+    + to_string(__safe_int(summary["trusted"], 0))
+    + " needs_review="
+    + to_string(__safe_int(summary["needs_review"], 0))
+    + " quarantined="
+    + to_string(__safe_int(summary["quarantined"], 0))
     + "\n"
   const best = __safe_dict(summary["best_route"])
   const best_provider = __safe_string(best["provider"], "")
@@ -166,6 +172,8 @@ fn __render_human(report: dict) -> string {
       + to_string(__safe_int(route["quality_score"], 0))
       + " status="
       + __safe_string(route["status"], "")
+      + " trust="
+      + __safe_string(route["trust_status"], "")
       + " mode="
       + __safe_string(route["recommended_tool_mode"], "")
       + " pass="
@@ -180,6 +188,8 @@ fn __render_human(report: dict) -> string {
       + to_string(__safe_int(route["actionless_cases"], 0))
       + " issues="
       + __join_strings(__safe_list(route["issues"]), "-")
+      + " trust_reasons="
+      + __join_strings(__safe_list(route["trust_reasons"]), "-")
       + " catalog_mismatches="
       + __join_dict_field(catalog_mismatches, "code", "-")
       + "\n"
@@ -194,6 +204,13 @@ fn __render_report_markdown(report: dict) -> string {
   out = out + "- Pass: " + to_string(__safe_int(summary["pass"], 0)) + "\n"
   out = out + "- Warn: " + to_string(__safe_int(summary["warn"], 0)) + "\n"
   out = out + "- Fail: " + to_string(__safe_int(summary["fail"], 0)) + "\n"
+  out = out + "- Trusted: " + to_string(__safe_int(summary["trusted"], 0)) + "\n"
+  out = out + "- Needs review: "
+    + to_string(__safe_int(summary["needs_review"], 0))
+    + "\n"
+  out = out + "- Quarantined: "
+    + to_string(__safe_int(summary["quarantined"], 0))
+    + "\n"
   const best = __safe_dict(summary["best_route"])
   const best_provider = __safe_string(best["provider"], "")
   if best_provider != "" {
@@ -205,8 +222,8 @@ fn __render_report_markdown(report: dict) -> string {
   }
   out = out + "\n"
   out = out
-    + "| Provider | Model | Score | Status | Mode | Pass | Parseable | Issues | Catalog mismatches |\n"
-  out = out + "| --- | --- | ---: | --- | --- | ---: | ---: | --- | --- |\n"
+    + "| Provider | Model | Score | Status | Trust | Mode | Pass | Parseable | Issues | Trust reasons | Catalog mismatches |\n"
+  out = out + "| --- | --- | ---: | --- | --- | --- | ---: | ---: | --- | --- | --- |\n"
   const routes = __safe_list(report["routes"])
   for route in routes {
     if type_of(route) != "dict" {
@@ -223,6 +240,8 @@ fn __render_report_markdown(report: dict) -> string {
       + " | "
       + __safe_string(route["status"], "")
       + " | "
+      + __safe_string(route["trust_status"], "")
+      + " | "
       + __safe_string(route["recommended_tool_mode"], "")
       + " | "
       + to_string(__safe_int(route["successful_cases"], 0))
@@ -234,6 +253,8 @@ fn __render_report_markdown(report: dict) -> string {
       + to_string(cases)
       + " | "
       + __join_strings(__safe_list(route["issues"]), "-")
+      + " | "
+      + __join_strings(__safe_list(route["trust_reasons"]), "-")
       + " | "
       + __join_dict_field(catalog_mismatches, "code", "-")
       + " |\n"
@@ -253,6 +274,8 @@ fn __render_plan_human(report: dict) -> string {
     + to_string(__safe_int(report["required_case_count"], 0))
     + " batch_manifest_requests="
     + to_string(__safe_int(report["batch_manifest_request_count"], 0))
+    + " readiness_commands="
+    + to_string(__safe_int(report["readiness_command_count"], 0))
     + "\n"
   out = out + "catalog="
     + __safe_string(catalog["hash_blake3"], "-")
@@ -266,10 +289,17 @@ fn __render_plan_human(report: dict) -> string {
     }
     const claim = __safe_dict(route["catalog_claim"])
     const cases = __safe_list(route["cases"])
+    const readiness = __safe_dict(route["readiness"])
     out = out + "  "
       + __safe_string(route["provider"], "")
       + " "
       + __safe_string(route["model"], "")
+      + " trust="
+      + __safe_string(route["trust_status"], "")
+      + " trust_reasons="
+      + __join_strings(__safe_list(route["trust_reasons"]), "-")
+      + " readiness="
+      + __safe_string(readiness["status"], "")
       + " preferred="
       + __safe_string(claim["preferred_tool_format"], "-")
       + " parity="
@@ -328,14 +358,18 @@ fn __render_plan_markdown(report: dict) -> string {
   out = out + "- Batch manifest requests: "
     + to_string(__safe_int(report["batch_manifest_request_count"], 0))
     + "\n"
+  out = out + "- Readiness commands: "
+    + to_string(__safe_int(report["readiness_command_count"], 0))
+    + "\n"
   out = out + "- Catalog: `"
     + __safe_string(catalog["hash_blake3"], "-")
     + "` (schema "
     + to_string(__safe_int(catalog["schema_version"], 0))
     + ")\n\n"
   out = out
-    + "| Provider | Model | Preferred | Parity | Native | Text | Parallel | Batch | Executable | Missing runner | Cases |\n"
-  out = out + "| --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- |\n"
+    + "| Provider | Model | Trust | Trust reasons | Readiness | Preferred | Parity | Native | Text | Parallel | Batch | Executable | Missing runner | Cases |\n"
+  out = out
+    + "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- |\n"
   const routes = __safe_list(report["routes"])
   for route in routes {
     if type_of(route) != "dict" {
@@ -343,10 +377,17 @@ fn __render_plan_markdown(report: dict) -> string {
     }
     const claim = __safe_dict(route["catalog_claim"])
     const cases = __safe_list(route["cases"])
+    const readiness = __safe_dict(route["readiness"])
     out = out + "| "
       + __safe_string(route["provider"], "")
       + " | "
       + __safe_string(route["model"], "")
+      + " | "
+      + __safe_string(route["trust_status"], "")
+      + " | "
+      + __join_strings(__safe_list(route["trust_reasons"]), "-")
+      + " | "
+      + __safe_string(readiness["status"], "")
       + " | "
       + __safe_string(claim["preferred_tool_format"], "-")
       + " | "

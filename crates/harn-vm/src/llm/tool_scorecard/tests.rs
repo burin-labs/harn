@@ -7,7 +7,7 @@ use crate::llm::tool_conformance::{
 fn scorecard_ranks_successful_native_route_first() {
     let pass = complete_success_reports(
         "anthropic",
-        "claude",
+        "claude-sonnet-5",
         ToolProbeClassification::StructuredNativeToolCall,
     );
     let fail = report(
@@ -20,14 +20,21 @@ fn scorecard_ranks_successful_native_route_first() {
 
     assert_eq!(scorecard.schema_version, TOOL_SCORECARD_SCHEMA_VERSION);
     assert_eq!(scorecard.route_count, 2);
-    assert_eq!(scorecard.summary.pass, 1);
-    assert_eq!(scorecard.summary.warn, 0);
+    assert_eq!(scorecard.summary.pass, 0);
+    assert_eq!(scorecard.summary.warn, 1);
     assert_eq!(scorecard.summary.fail, 1);
+    assert_eq!(scorecard.summary.trusted, 0);
+    assert_eq!(scorecard.summary.needs_review, 1);
+    assert_eq!(scorecard.summary.quarantined, 1);
     assert_eq!(scorecard.routes[0].provider, "anthropic");
-    assert_eq!(scorecard.routes[0].status, "pass");
-    assert_eq!(scorecard.routes[0].evidence_status, "complete");
+    assert_eq!(scorecard.routes[0].status, "warn");
+    assert_eq!(scorecard.routes[0].trust_status, "needs_review");
+    assert!(scorecard.routes[0]
+        .trust_reasons
+        .contains(&"incomplete_required_request_evidence"));
+    assert_eq!(scorecard.routes[0].evidence_status, "partial");
     assert_eq!(scorecard.routes[0].probe_evidence_status, "complete");
-    assert_eq!(scorecard.routes[0].request_evidence_status, "complete");
+    assert_eq!(scorecard.routes[0].request_evidence_status, "partial");
     assert_eq!(scorecard.routes[0].recommended_tool_mode, "native");
     assert_eq!(
         scorecard.routes[1].issues,
@@ -49,6 +56,8 @@ fn scorecard_reports_catalog_drift_without_failing_route() {
 
     let route = &scorecard.routes[0];
     assert_eq!(route.status, "warn");
+    assert_eq!(route.trust_status, "needs_review");
+    assert!(route.trust_reasons.contains(&"catalog_drift"));
     assert_eq!(route.recommended_tool_mode, "text");
     assert!(route.catalog_claim.is_some());
     assert!(route
@@ -72,6 +81,8 @@ fn scorecard_does_not_complete_mode_both_plan_with_non_streaming_only_reports() 
 
     let route = &scorecard.routes[0];
     assert_eq!(route.status, "warn");
+    assert_eq!(route.trust_status, "needs_review");
+    assert!(route.trust_reasons.contains(&"incomplete_evidence"));
     assert_eq!(route.probe_evidence_status, "partial");
     assert_eq!(route.request_evidence_status, "partial");
     assert_eq!(route.quality_score, 100);
@@ -258,6 +269,8 @@ fn scorecard_does_not_suggest_catalog_disable_without_positive_evidence() {
 
     let route = &scorecard.routes[0];
     assert_eq!(route.status, "fail");
+    assert_eq!(route.trust_status, "quarantined");
+    assert!(route.trust_reasons.contains(&"scorecard_failed"));
     assert_eq!(route.recommended_tool_mode, "disabled");
     assert!(route.catalog_mismatches.is_empty());
     assert!(route.suggested_catalog_updates.is_empty());
@@ -298,9 +311,30 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert_eq!(plan.schema_version, TOOL_SCORECARD_PLAN_SCHEMA_VERSION);
     assert_eq!(plan.kind, "plan");
     assert_eq!(plan.route_count, 1);
+    assert_eq!(plan.readiness_command_count, 1);
     assert!(plan.unscorecardable_provider_count > 0);
     assert_eq!(plan.routes[0].provider, "anthropic");
     assert_eq!(plan.routes[0].model, "claude-sonnet-5");
+    assert_eq!(plan.routes[0].trust_status, "needs_review");
+    assert_eq!(plan.routes[0].trust_reasons, vec!["missing_live_evidence"]);
+    assert_eq!(plan.routes[0].readiness.status, "executable");
+    assert_eq!(plan.routes[0].readiness.runner, "provider_probe");
+    assert_eq!(
+        plan.routes[0].readiness.command.as_ref().unwrap(),
+        &vec![
+            "harn".to_string(),
+            "provider".to_string(),
+            "probe".to_string(),
+            "anthropic".to_string(),
+            "--model".to_string(),
+            "claude-sonnet-5".to_string(),
+            "--json".to_string(),
+        ]
+    );
+    assert_eq!(
+        plan.routes[0].readiness.artifact_hint.as_deref(),
+        Some("provider-readiness-anthropic-claude-sonnet-5.json")
+    );
     assert!(plan.catalog.hash_blake3.starts_with("blake3:"));
     let case_ids = plan.routes[0]
         .cases
