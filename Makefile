@@ -27,7 +27,7 @@ setup:
 # build paths and runs the workspace check without installing optional tools or
 # frontend dependencies.
 setup-rust:
-	HARN_DEV_SETUP_PROFILE=rust ./scripts/dev_setup.sh
+	HARN_DEV_SETUP_PROFILE=rust HARN_DEV_TARGET_WORKTREE_PATH="$(CURDIR)" ./scripts/dev_setup.sh
 
 # Reclaim orphaned per-worktree Cargo target dirs under known setup storage
 # roots (left behind when an agent/codex worktree is removed). Add

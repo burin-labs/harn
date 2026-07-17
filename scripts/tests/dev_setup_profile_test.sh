@@ -25,6 +25,15 @@ make_fixture_repo() {
   printf '%s\n' "$repo"
 }
 
+add_available_cargo_tools() {
+  local repo="$1"
+
+  for tool in cargo-nextest sccache; do
+    printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$repo/bin/$tool"
+    chmod +x "$repo/bin/$tool"
+  done
+}
+
 run_setup() {
   local repo="$1"
   local profile="$2"
@@ -62,11 +71,11 @@ if [[ -e "$rust_repo/node_modules" || -e "$rust_repo/crates/harn-cli/portal/node
 fi
 rust_storage_root="$tmp_root/cache-rust/harn/dev-setup"
 rust_target_dir="$rust_storage_root/harn-target/$(basename "$tmp_root")-rust"
-if ! grep -Fxq "target-dir = \"$rust_target_dir\"" "$rust_repo/.cargo/config.toml"; then
+if ! grep -Fxq "target-dir = \"$rust_target_dir\" # harn-dev-setup-managed" "$rust_repo/.cargo/config.toml"; then
   echo "rust setup did not use the durable per-worktree target directory" >&2
   exit 1
 fi
-if ! grep -Fxq "build-dir = \"$rust_storage_root/cargo-build-shared\"" "$rust_repo/.cargo/config.toml"; then
+if ! grep -Fxq "build-dir = \"$rust_storage_root/cargo-build-shared\" # harn-dev-setup-managed" "$rust_repo/.cargo/config.toml"; then
   echo "rust setup did not use the durable shared build directory" >&2
   exit 1
 fi
@@ -91,10 +100,7 @@ if ! grep -Fq "roots=$rust_storage_root/harn-target" <<< "$default_prune_output"
   exit 1
 fi
 
-for tool in cargo-nextest sccache; do
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$rust_repo/bin/$tool"
-  chmod +x "$rust_repo/bin/$tool"
-done
+add_available_cargo_tools "$rust_repo"
 mkdir -p "$tmp_root/tmp-profile-switch"
 PATH="$rust_repo/bin:/usr/bin:/bin" \
   HOME="$tmp_root/home-profile-switch" \
@@ -109,8 +115,48 @@ if grep -Eq '^[[:space:]]*target-dir[[:space:]]*=' "$rust_repo/.cargo/config.tom
   echo "profile switch left a generated target directory in Cargo config" >&2
   exit 1
 fi
-if ! grep -Fxq "build-dir = \"$tmp_root/full-storage-root/cargo-build-shared\"" "$rust_repo/.cargo/config.toml"; then
-  echo "profile switch did not replace the generated shared build directory" >&2
+if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
+  echo "profile switch left a generated shared build directory in Cargo config" >&2
+  exit 1
+fi
+
+user_repo=$(make_fixture_repo user-config)
+mkdir -p "$user_repo/.cargo"
+printf '%s\n' '[build]' 'target-dir = "/mnt/team/harn-target/release"' 'build-dir = "/mnt/team/cargo-build-shared"' > "$user_repo/.cargo/config.toml"
+add_available_cargo_tools "$user_repo"
+mkdir -p "$tmp_root/tmp-user-config"
+PATH="$user_repo/bin:/usr/bin:/bin" \
+  HOME="$tmp_root/home-user-config" \
+  TMPDIR="$tmp_root/tmp-user-config" \
+  HARN_DEV_SETUP_PROFILE=full \
+  HARN_DEV_SETUP_FORCE=1 \
+  HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-user-config" \
+  DEV_SETUP_TEST_CARGO_RECORD="$tmp_root/user-config-cargo.txt" \
+  "$user_repo/scripts/dev_setup.sh" > "$tmp_root/user-config-output.txt" 2>&1
+if ! grep -Fxq 'target-dir = "/mnt/team/harn-target/release"' "$user_repo/.cargo/config.toml"; then
+  echo "setup rewrote a user-owned target directory" >&2
+  exit 1
+fi
+if ! grep -Fxq 'build-dir = "/mnt/team/cargo-build-shared"' "$user_repo/.cargo/config.toml"; then
+  echo "setup rewrote a user-owned build directory" >&2
+  exit 1
+fi
+
+legacy_repo=$(make_fixture_repo legacy-config)
+mkdir -p "$legacy_repo/.cargo"
+printf '%s\n' '[build]' 'target-dir = "/tmp/harn-target/legacy"' 'build-dir = "/tmp/cargo-build-shared"' > "$legacy_repo/.cargo/config.toml"
+add_available_cargo_tools "$legacy_repo"
+mkdir -p "$tmp_root/tmp-legacy-config"
+PATH="$legacy_repo/bin:/usr/bin:/bin" \
+  HOME="$tmp_root/home-legacy-config" \
+  TMPDIR="$tmp_root/tmp-legacy-config" \
+  HARN_DEV_SETUP_PROFILE=full \
+  HARN_DEV_SETUP_FORCE=1 \
+  HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-legacy-config" \
+  DEV_SETUP_TEST_CARGO_RECORD="$tmp_root/legacy-config-cargo.txt" \
+  "$legacy_repo/scripts/dev_setup.sh" > "$tmp_root/legacy-config-output.txt" 2>&1
+if grep -Eq '^[[:space:]]*(target-dir|build-dir)[[:space:]]*=' "$legacy_repo/.cargo/config.toml"; then
+  echo "setup did not remove a legacy generated Cargo configuration" >&2
   exit 1
 fi
 

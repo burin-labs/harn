@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 SETUP_STATE_DIR="${HARN_DEV_SETUP_STATE_DIR:-$ROOT_DIR/.codex/dev-setup}"
 SETUP_PROFILE="${HARN_DEV_SETUP_PROFILE:-full}"
+MANAGED_CARGO_CONFIG_MARKER="harn-dev-setup-managed"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -84,6 +85,7 @@ write_build_config() {
     -v rustc_wrapper="${rustc_wrapper}" \
     -v target_dir="${target_dir}" \
     -v build_dir="${build_dir}" \
+    -v managed_marker="${MANAGED_CARGO_CONFIG_MARKER}" \
     -v drop_generated_target_dir="${drop_generated_target_dir}" \
     -v drop_generated_build_dir="${drop_generated_build_dir}" \
     '
@@ -95,12 +97,22 @@ write_build_config() {
     }
 
     function is_generated_target_dir(value) {
-      return value ~ "(^|/)harn-devsetup-[^/]+$" || \
-        value ~ "(^|/)harn-target/[^/]+$"
+      return value ~ "^(/private)?/tmp/harn-devsetup-[^/]+$" || \
+        value ~ "^(/private)?/tmp/harn-target/[^/]+$" || \
+        value ~ "/T/+harn-target/[^/]+$"
     }
 
     function is_generated_build_dir(value) {
-      return value ~ "(^|/)cargo-build-shared$"
+      return value ~ "^(/private)?/tmp/cargo-build-shared$" || \
+        value ~ "/T/+cargo-build-shared$"
+    }
+
+    function is_managed_line(line) {
+      return line ~ "#[[:space:]]*" managed_marker "[[:space:]]*$"
+    }
+
+    function managed_value_line(key, value) {
+      return key " = \"" value "\" # " managed_marker
     }
 
     function print_missing_build_values() {
@@ -109,11 +121,11 @@ write_build_config() {
         saw_rustc_wrapper = 1
       }
       if (target_dir != "" && !saw_target_dir) {
-        print "target-dir = \"" target_dir "\""
+        print managed_value_line("target-dir", target_dir)
         saw_target_dir = 1
       }
       if (build_dir != "" && !saw_build_dir) {
-        print "build-dir = \"" build_dir "\""
+        print managed_value_line("build-dir", build_dir)
         saw_build_dir = 1
       }
     }
@@ -149,23 +161,23 @@ write_build_config() {
         next
       }
       if (in_build && target_dir != "" && $0 ~ /^[[:space:]]*target-dir[[:space:]]*=/) {
-        print "target-dir = \"" target_dir "\""
+        print managed_value_line("target-dir", target_dir)
         saw_target_dir = 1
         next
       }
       if (in_build && drop_generated_target_dir && $0 ~ /^[[:space:]]*target-dir[[:space:]]*=/) {
-        if (is_generated_target_dir(extract_toml_string($0))) {
+        if (is_managed_line($0) || is_generated_target_dir(extract_toml_string($0))) {
           saw_target_dir = 1
           next
         }
       }
       if (in_build && build_dir != "" && $0 ~ /^[[:space:]]*build-dir[[:space:]]*=/) {
-        print "build-dir = \"" build_dir "\""
+        print managed_value_line("build-dir", build_dir)
         saw_build_dir = 1
         next
       }
       if (in_build && drop_generated_build_dir && $0 ~ /^[[:space:]]*build-dir[[:space:]]*=/) {
-        if (is_generated_build_dir(extract_toml_string($0))) {
+        if (is_managed_line($0) || is_generated_build_dir(extract_toml_string($0))) {
           saw_build_dir = 1
           next
         }
@@ -284,7 +296,7 @@ if [[ -z "${target_dir}" ]]; then
 fi
 
 build_dir="${HARN_DEV_BUILD_DIR:-}"
-if [[ -z "${build_dir}" ]]; then
+if [[ -z "${build_dir}" && -n "${target_dir}" ]]; then
   build_dir="$(derive_build_dir)"
 fi
 
