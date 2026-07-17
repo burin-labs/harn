@@ -567,13 +567,12 @@ hook_run_rust_format_gate() {
   fi
 
   if hook_write_rust_format_packages "$changed_file_list" "$changed_packages"; then
-    package_flags=""
+    set --
     while IFS= read -r package; do
-      package_flags="$package_flags -p $package"
+      set -- "$@" -p "$package"
     done < "$changed_packages"
     echo "=== Pre-commit: checking Rust formatting for changed packages ($(tr '\n' ' ' < "$changed_packages")) ==="
-    # shellcheck disable=SC2086  # intentional word splitting on -p flags
-    cargo fmt $package_flags -- --check
+    cargo fmt "$@" -- --check
   else
     echo "=== Pre-commit: checking workspace Rust formatting (unmapped Rust source) ==="
     cargo fmt --all -- --check
