@@ -426,11 +426,11 @@ portal-demo:
 # compiles harn-vm in Cargo's normal graph; harn-cli's build script only verifies
 # and embeds these outputs.
 gen-cli-aot:
-	$(HARN_CARGO_CMD) run -p harn-cli-aot-gen
+	$(HARN_CARGO_CMD) run -p harn-cli-aot-gen -- --workspace-root "$(CURDIR)"
 
 check-cli-aot:
 	@echo "=== Checking committed CLI AOT artifacts ==="
-	@$(HARN_CARGO_CMD) run -p harn-cli-aot-gen -- --check
+	@$(HARN_CARGO_CMD) run -p harn-cli-aot-gen -- --workspace-root "$(CURDIR)" --check
 	@echo "    CLI AOT artifacts OK."
 
 # Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib.
