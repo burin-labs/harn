@@ -33,10 +33,11 @@ pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml"
 mod audit;
 mod lookup;
 mod model;
+mod overrides;
 mod rule;
 mod tool_format;
 
-pub(crate) use lookup::swap_user_overrides;
+pub(crate) use overrides::swap_user_overrides;
 
 pub use audit::{
     audit_builtin_catalogued_chat_model_tool_capabilities,

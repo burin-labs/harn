@@ -8,8 +8,9 @@
 
 use serde::Serialize;
 
-use super::lookup::{builtin, current_user_overrides};
+use super::lookup::builtin;
 use super::model::CapabilitiesFile;
+use super::overrides::current_user_overrides;
 use super::rule::{
     first_matching_rule, rule_preferred_tool_format, rule_structured_output,
     rule_structured_output_mode, rule_thinking_block_style, rule_thinking_modes,

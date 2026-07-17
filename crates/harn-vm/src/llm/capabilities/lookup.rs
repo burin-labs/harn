@@ -1,23 +1,14 @@
-//! Lookup and user-override facade: owns override slots and public lookup helpers.
+//! Lookup and user-override facade: owns public lookup helpers.
 
-use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 use serde::Deserialize;
 
 use super::model::{Capabilities, CapabilitiesFile, ProviderLimits};
+use super::overrides::{current_user_overrides, set_user_overrides as set_context_overrides};
 use super::rule::lookup_with;
 use super::BUILTIN_TOML;
-
-thread_local! {
-    /// Capability overrides for the currently-polled Harn execution.
-    ///
-    /// The ambient execution scope swaps this context per poll for embedded
-    /// hosts, so a capability decision never crosses from one ACP server into
-    /// another while futures interleave.
-    pub(super) static LLM_CAPABILITY_OVERRIDES_CONTEXT: RefCell<Option<CapabilitiesFile>> = const { RefCell::new(None) };
-}
 
 static BUILTIN: OnceLock<CapabilitiesFile> = OnceLock::new();
 
@@ -45,8 +36,9 @@ pub fn provider_limits_for(provider: &str) -> Option<ProviderLimits> {
             .find(|(name, _)| name.to_ascii_lowercase() == key)
             .map(|(_, limits)| limits.clone())
     };
-    LLM_CAPABILITY_OVERRIDES_CONTEXT
-        .with(|cell| cell.borrow().as_ref().and_then(from_map))
+    current_user_overrides()
+        .as_ref()
+        .and_then(from_map)
         .or_else(|| from_map(builtin()))
 }
 
@@ -60,15 +52,13 @@ pub fn provider_limit_providers() -> Vec<String> {
             .keys()
             .map(|provider| provider.to_ascii_lowercase()),
     );
-    LLM_CAPABILITY_OVERRIDES_CONTEXT.with(|cell| {
-        if let Some(file) = cell.borrow().as_ref() {
-            providers.extend(
-                file.provider_limits
-                    .keys()
-                    .map(|provider| provider.to_ascii_lowercase()),
-            );
-        }
-    });
+    if let Some(file) = current_user_overrides().as_ref() {
+        providers.extend(
+            file.provider_limits
+                .keys()
+                .map(|provider| provider.to_ascii_lowercase()),
+        );
+    }
     providers.into_iter().collect()
 }
 
@@ -76,20 +66,7 @@ pub fn provider_limit_providers() -> Vec<String> {
 /// called once at CLI bootstrap after reading `harn.toml`. Passing
 /// `None` clears any prior override.
 pub fn set_user_overrides(file: Option<CapabilitiesFile>) {
-    LLM_CAPABILITY_OVERRIDES_CONTEXT.with(|cell| *cell.borrow_mut() = file);
-}
-
-/// Swap the per-execution capability overrides and return the previous value.
-///
-/// This is the ambient-scope primitive. Hosts should configure it through
-/// `orchestration::scope_llm_runtime_overrides` rather than retaining a guard
-/// across an asynchronous turn.
-pub(crate) fn swap_user_overrides(next: Option<CapabilitiesFile>) -> Option<CapabilitiesFile> {
-    LLM_CAPABILITY_OVERRIDES_CONTEXT.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), next))
-}
-
-pub(super) fn current_user_overrides() -> Option<CapabilitiesFile> {
-    LLM_CAPABILITY_OVERRIDES_CONTEXT.with(|cell| cell.borrow().clone())
+    set_context_overrides(file);
 }
 
 /// Clear any thread-local user overrides. Used between test runs.
