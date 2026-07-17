@@ -32,6 +32,13 @@ pub struct RunProfile {
     pub top_llm_calls: Vec<SpanRef>,
     pub top_tool_calls: Vec<SpanRef>,
     pub steps: Vec<StepSummary>,
+    /// Costliest builtins, when per-builtin recording was on. The categorical
+    /// buckets above fold every builtin that is not an LLM or tool call into
+    /// `residual`, so a run whose time went into one project scan or one
+    /// subprocess reports `vm/residual 100%` and names nothing. Empty when the
+    /// operator did not ask for a profile.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_builtins: Vec<crate::builtin_profile::BuiltinBucket>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -108,7 +115,16 @@ pub fn build(spans: &[Span]) -> RunProfile {
         top_llm_calls,
         top_tool_calls,
         steps,
+        top_builtins: top_builtins(),
     }
+}
+
+/// The costliest builtins recorded during the run, capped for readability.
+/// Empty unless `builtin_profile` recording was enabled.
+fn top_builtins() -> Vec<crate::builtin_profile::BuiltinBucket> {
+    let mut buckets = crate::builtin_profile::snapshot();
+    buckets.truncate(TOP_N);
+    buckets
 }
 
 /// Build one aggregate profile from independent span snapshots.
@@ -305,6 +321,21 @@ pub fn render(profile: &RunProfile) -> String {
         format_secs(profile.residual_ms),
         pct(profile.residual_ms, profile.total_wall_ms),
     );
+    if !profile.top_builtins.is_empty() {
+        let _ = writeln!(out, "\n  Top builtins (inclusive of nested calls):");
+        for bucket in &profile.top_builtins {
+            let _ = writeln!(
+                out,
+                "    {:<24} {:>10}  {:>5.1}%   ({} call{}, avg {:.1} ms)",
+                bucket.name,
+                format_secs(bucket.total_ms),
+                pct(bucket.total_ms, profile.total_wall_ms),
+                bucket.calls,
+                if bucket.calls == 1 { "" } else { "s" },
+                bucket.avg_ms,
+            );
+        }
+    }
     if !profile.top_llm_calls.is_empty() {
         let _ = writeln!(out, "\n  Top LLM calls:");
         for span in &profile.top_llm_calls {

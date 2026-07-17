@@ -298,3 +298,115 @@ pipeline main() {
         outcome.stderr
     );
 }
+
+#[test]
+fn profile_attributes_wall_time_to_the_builtin_that_spent_it() {
+    let tempdir = TempDir::new().expect("temp dir");
+    let script = tempdir.path().join("builtin_script.harn");
+    // `sleep_ms` is a sync builtin, so it takes the sync fast path rather than
+    // the async dispatch path. Both must be observed: an observer wired to only
+    // one of them reports nothing while looking correct.
+    fs::write(
+        &script,
+        r#"
+pipeline main() {
+  sleep_ms(60)
+  __io_println("done")
+}
+"#,
+    )
+    .expect("write script");
+    let json_path = tempdir.path().join("profile.json");
+
+    let outcome: RunOutcome = run_in_harn_runtime({
+        let json_path = json_path.clone();
+        move || async move {
+            let _env_guard = env_lock::lock_env().lock().await;
+            let _cwd_guard = cwd_lock::lock_cwd_async().await;
+            harn_vm::reset_thread_local_state();
+            execute_run(
+                &script.to_string_lossy(),
+                false,
+                HashSet::new(),
+                Vec::new(),
+                Vec::new(),
+                CliLlmMockMode::Off,
+                None,
+                RunProfileOptions {
+                    text: true,
+                    json_path: Some(json_path.clone()),
+                },
+            )
+            .await
+        }
+    });
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert!(
+        outcome.stderr.contains("Top builtins"),
+        "the text profile must name the builtins it timed, got:\n{}",
+        outcome.stderr
+    );
+
+    let json = fs::read_to_string(&json_path).expect("read profile.json");
+    let profile: RunProfile = serde_json::from_str(&json).expect("parse profile.json");
+    let slept = profile
+        .top_builtins
+        .iter()
+        .find(|bucket| bucket.name == "sleep_ms")
+        .unwrap_or_else(|| {
+            panic!(
+                "the builtin that spent the wall time must be attributed, got: {:?}",
+                profile.top_builtins
+            )
+        });
+    assert_eq!(slept.calls, 1);
+    // The point of the table: the time is attributed to a NAME. Without it this
+    // run reports `vm/residual 100%`, which names nothing.
+    assert!(
+        slept.total_ms >= 50,
+        "sleep_ms(60) must report the time it actually spent, got {}ms",
+        slept.total_ms
+    );
+}
+
+#[test]
+fn profile_disabled_means_no_builtin_attribution() {
+    let tempdir = TempDir::new().expect("temp dir");
+    let script = tempdir.path().join("unprofiled_script.harn");
+    fs::write(
+        &script,
+        r#"
+pipeline main() {
+  sleep_ms(5)
+  __io_println("done")
+}
+"#,
+    )
+    .expect("write script");
+
+    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
+        let _env_guard = env_lock::lock_env().lock().await;
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        execute_run(
+            &script.to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+        )
+        .await
+    });
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    // A run that did not ask for a profile must not pay to build one.
+    assert!(
+        !outcome.stderr.contains("Top builtins"),
+        "unprofiled run leaked a builtin table:\n{}",
+        outcome.stderr
+    );
+}

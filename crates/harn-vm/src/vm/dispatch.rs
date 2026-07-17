@@ -9,6 +9,22 @@ use super::{
     VmBuiltinMetadata,
 };
 
+/// Everything that watches one builtin call, held open for its duration.
+///
+/// A builtin reaches its handler through one of three paths (two sync fast
+/// paths that differ only in where the arguments live, and the async/bridge
+/// path). Each used to open the auto-trace span itself, so an observer added to
+/// one path silently missed the other two — per-builtin cost recording was
+/// added to the async path first and reported nothing, because a `let` binding
+/// in the arm nobody takes looks exactly like a working one.
+///
+/// Opening this is the one thing a dispatch path must do before invoking a
+/// handler. New observers belong here, not at a call site.
+struct BuiltinObservation<'a> {
+    _span: Option<ScopeSpan>,
+    _timer: Option<crate::builtin_profile::BuiltinTimer<'a>>,
+}
+
 impl Vm {
     fn builtin_span_kind(name: &str) -> Option<crate::tracing::SpanKind> {
         match name {
@@ -17,6 +33,15 @@ impl Vm {
             }
             "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
             _ => None,
+        }
+    }
+
+    /// Open the observation scope for one builtin call. Both members are inert
+    /// unless the operator asked for the corresponding output.
+    fn observe_builtin_call(name: &str) -> BuiltinObservation<'_> {
+        BuiltinObservation {
+            _span: Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string())),
+            _timer: crate::builtin_profile::BuiltinTimer::start(name),
         }
     }
 
@@ -487,8 +512,7 @@ impl Vm {
             Ok(builtin) => builtin,
             Err(error) => return Some(Err(error)),
         };
-        let _span =
-            Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+        let _observe = Self::observe_builtin_call(name);
         if let Err(error) = args.with_slice(|slice| self.validate_sync_builtin_args(name, slice)) {
             return Some(Err(error));
         }
@@ -519,8 +543,7 @@ impl Vm {
             )));
         }
 
-        let _span =
-            Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+        let _observe = Self::observe_builtin_call(name);
         if let Err(error) = self.validate_sync_builtin_args(name, &self.stack[args_start..]) {
             return Some(Err(error));
         }
@@ -535,9 +558,7 @@ impl Vm {
         args: Vec<VmValue>,
         direct_id: Option<BuiltinId>,
     ) -> Result<VmValue, VmError> {
-        // Auto-trace LLM calls and tool calls.
-        let _span =
-            Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+        let _observe = Self::observe_builtin_call(name);
 
         // Sandbox check: deny builtins blocked by --deny/--allow flags.
         if self.denied_builtins.contains(name) {

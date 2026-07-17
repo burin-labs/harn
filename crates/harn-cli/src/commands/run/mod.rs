@@ -1575,6 +1575,13 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     if profile.is_enabled() || phase.is_some() {
         harn_vm::tracing::set_tracing_enabled(true);
     }
+    if profile.is_enabled() {
+        // Per-builtin recording is only paid for when a profile is asked for:
+        // the categorical buckets fold every non-LLM, non-tool builtin into
+        // `residual`, which cannot name the project scan or subprocess a slow
+        // run is actually waiting on.
+        harn_vm::builtin_profile::enable();
+    }
     if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
         stderr.push_str(&format!("error: {error}\n"));
         time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);

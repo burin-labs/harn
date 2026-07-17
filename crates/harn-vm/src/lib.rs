@@ -31,6 +31,7 @@ pub mod autonomy;
 pub(crate) mod aws_sigv4;
 pub mod bridge;
 mod builtin_id;
+pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
 pub mod channel_guardrails;
