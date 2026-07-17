@@ -549,6 +549,106 @@ impl std::error::Error for VmError {}
 mod tests {
     use super::*;
 
+    /// Every category. `as_str` already matches exhaustively, so a new
+    /// variant fails to compile until it is spelled there; this list is what
+    /// the round-trip and documentation guards below enumerate.
+    const ALL_CATEGORIES: &[ErrorCategory] = &[
+        ErrorCategory::Timeout,
+        ErrorCategory::Auth,
+        ErrorCategory::RateLimit,
+        ErrorCategory::Overloaded,
+        ErrorCategory::ServerError,
+        ErrorCategory::TransientNetwork,
+        ErrorCategory::SchemaValidation,
+        ErrorCategory::SchemaStreamAborted,
+        ErrorCategory::ToolError,
+        ErrorCategory::ToolRejected,
+        ErrorCategory::EgressBlocked,
+        ErrorCategory::Cancelled,
+        ErrorCategory::ChannelClosed,
+        ErrorCategory::NotFound,
+        ErrorCategory::CircuitOpen,
+        ErrorCategory::BudgetExceeded,
+        ErrorCategory::Internal,
+        ErrorCategory::Generic,
+    ];
+
+    /// A new variant must be added to `ALL_CATEGORIES`, or the guards below
+    /// silently stop covering it. This match is the tripwire: it fails to
+    /// compile until the variant is named, and the arm points at the list.
+    #[test]
+    fn all_categories_is_exhaustive() {
+        for category in ALL_CATEGORIES {
+            match category {
+                ErrorCategory::Timeout
+                | ErrorCategory::Auth
+                | ErrorCategory::RateLimit
+                | ErrorCategory::Overloaded
+                | ErrorCategory::ServerError
+                | ErrorCategory::TransientNetwork
+                | ErrorCategory::SchemaValidation
+                | ErrorCategory::SchemaStreamAborted
+                | ErrorCategory::ToolError
+                | ErrorCategory::ToolRejected
+                | ErrorCategory::EgressBlocked
+                | ErrorCategory::Cancelled
+                | ErrorCategory::ChannelClosed
+                | ErrorCategory::NotFound
+                | ErrorCategory::CircuitOpen
+                | ErrorCategory::BudgetExceeded
+                | ErrorCategory::Internal
+                | ErrorCategory::Generic => {}
+            }
+        }
+        assert_eq!(
+            ALL_CATEGORIES.len(),
+            18,
+            "a category was added or removed — update ALL_CATEGORIES and the \
+             `Error categories` table in docs/src/builtins.md"
+        );
+    }
+
+    #[test]
+    fn every_category_round_trips_through_parse() {
+        for category in ALL_CATEGORIES {
+            assert_eq!(
+                &ErrorCategory::parse(category.as_str()),
+                category,
+                "`{}` does not round-trip — `parse` is missing an arm, so a \
+                 host handing this category back to Harn silently gets \
+                 `generic`",
+                category.as_str()
+            );
+        }
+    }
+
+    /// Scripts branch on these strings, so an undocumented category is a
+    /// caller writing a match that cannot handle a value the runtime emits.
+    /// `error_category()` used to advertise 10 of the 18 — a dead-port probe
+    /// returning `transient_network` fell outside its own documented list.
+    #[test]
+    fn every_category_is_documented_in_builtins_md() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/src/builtins.md");
+        let doc =
+            std::fs::read_to_string(path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"));
+        let table = doc
+            .split_once("### Error categories")
+            .unwrap_or_else(|| {
+                panic!("docs/src/builtins.md lost its `### Error categories` section")
+            })
+            .1;
+        let table = table.split_once("\n## ").map_or(table, |(head, _)| head);
+        for category in ALL_CATEGORIES {
+            let row = format!("| `{}` |", category.as_str());
+            assert!(
+                table.contains(&row),
+                "`{}` is missing from the `Error categories` table in \
+                 docs/src/builtins.md",
+                category.as_str()
+            );
+        }
+    }
+
     #[test]
     fn classifies_cancelled_messages() {
         assert_eq!(
