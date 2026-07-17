@@ -241,29 +241,12 @@ lint-actions:
 		exit 1; \
 	fi
 
-# Lint Harn conformance tests (check for warnings).
-# Skip .harn files that have a paired .error file — those are intentional
-# error tests whose diagnostics are validated by the conformance runner.
+# Reject unreviewed conformance diagnostics while preserving the explicitly
+# triaged baseline. Paired .error/.lint fixtures own their diagnostics in the
+# conformance runner and are excluded here.
 lint-harn:
 	@echo "=== Linting Harn conformance tests ==="
-	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
-	workers=$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8); \
-	tmp=$$(mktemp -d); \
-	status=0; \
-	find conformance/tests -name '*.harn' -print0 | \
-		TMP_RESULTS="$$tmp" xargs -0 -P "$$workers" -I{} sh -c '\
-			error_file="$${1%.harn}.error"; \
-			[ -f "$$error_file" ] && exit 0; \
-			output=$$("$$0" check "$$1" 2>&1); \
-			if echo "$$output" | grep -qE "^.+: (warning|error)\["; then \
-				printf "%s\n" "$$output" | grep -v ": ok$$" > "$$TMP_RESULTS/$$(basename "$$1").out"; \
-				exit 1; \
-			fi' "$$harn_bin" {} || status=$$?; \
-	if ls "$$tmp"/*.out >/dev/null 2>&1; then \
-		cat "$$tmp"/*.out; \
-	fi; \
-	rm -rf "$$tmp"; \
-	if [ "$$status" -ne 0 ]; then echo "Lint issues found in conformance tests"; exit 1; fi
+	@HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh
 	@echo "=== Checking Harn experiment support modules ==="
 	@$(HARN_CMD) check $(EXPERIMENT_HARN_CHECK)
 	@echo "=== Linting Harn-authored scripts ==="
@@ -363,6 +346,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
+	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/release_smoke_workflow_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh

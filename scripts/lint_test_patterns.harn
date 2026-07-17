@@ -252,7 +252,8 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-cli/src/commands/portal/util.rs",
   "crates/harn-cli/src/commands/run/mod.rs",
   "crates/harn-cli/src/commands/supervisor.rs",
-  "crates/harn-cli/src/commands/test.rs",
+  "crates/harn-cli/src/commands/test/mod.rs",
+  "crates/harn-cli/src/commands/test/conformance.rs",
   // `harn time run` measures real wall-clock + per-phase elapsed time
   // for cost/perf debugging — host time is the source of truth, same
   // shape as the allowlisted `run.rs`, `demo.rs`, and `bench.rs`
