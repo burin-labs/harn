@@ -1,0 +1,320 @@
+// @harn-entrypoint-category personas.compiler
+//
+// std/personas/compiler — closed prompt-persona blueprint validation and lowering.
+//
+// The model-facing blueprint intentionally cannot carry TOML, Harn source,
+// capabilities, budgets, model policy, filters, destinations, or authority.
+// The CLI materializer owns those package bytes and atomically publishes only a
+// successfully validated lowering.
+import "std/calendar"
+import "std/schema"
+import { list_providers } from "std/triggers"
+
+const PERSONA_BLUEPRINT_SCHEMA_VERSION: string = "1"
+
+const __PERSONA_TEMPLATE_IDS: list<string> = ["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"]
+
+type PersonaBlueprintCron = {cron: string, timezone: string}
+
+type PersonaBlueprintExternal = {provider: string, event: string}
+
+type PersonaBlueprint = {
+  schema_version: "1",
+  name: string,
+  description: string,
+  goal: string,
+  template: string,
+  cron?: PersonaBlueprintCron,
+  external?: PersonaBlueprintExternal,
+}
+
+type PersonaBlueprintDiagnostic = {code: string, path: string, message: string}
+
+type PersonaBlueprintValidationReport = {
+  valid: bool,
+  schema_version?: string,
+  source_kind?: string,
+  errors: list<PersonaBlueprintDiagnostic>,
+  warnings: list<PersonaBlueprintDiagnostic>,
+}
+
+type PersonaBlueprintTrigger = {
+  id: string,
+  kind: string,
+  provider: string,
+  events: list<string>,
+  schedule?: string,
+  timezone?: string,
+  handler: string,
+}
+
+type PersonaBlueprintLowering = {
+  template: string,
+  persona: {name: string, description: string, goal: string},
+  policy: {autonomy_tier: "suggest", receipt_policy: "required"},
+  triggers: list<PersonaBlueprintTrigger>,
+}
+
+type PersonaBlueprintCompileResult = Result<PersonaBlueprintLowering, PersonaBlueprintValidationReport>
+
+/**
+ * persona_blueprint_schema.
+ *
+ * Returns the closed model-output schema. A blueprint has exactly one source
+ * after semantic validation: either `cron` or `external`, never both.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn persona_blueprint_schema() -> dict {
+  return schema_closed_object(
+    {
+      schema_version: schema_literal(PERSONA_BLUEPRINT_SCHEMA_VERSION),
+      name: schema_string(),
+      description: schema_string(),
+      goal: schema_string(),
+      template: schema_enum(__PERSONA_TEMPLATE_IDS),
+      cron: schema_field(schema_closed_object({cron: schema_string(), timezone: schema_string()}), false),
+      external: schema_field(schema_closed_object({provider: schema_string(), event: schema_string()}), false),
+    },
+  )
+}
+
+fn __persona_blueprint_blank_report(blueprint) -> PersonaBlueprintValidationReport {
+  return {valid: true, schema_version: blueprint?.schema_version, source_kind: nil, errors: [], warnings: []}
+}
+
+fn __persona_blueprint_error(
+  report: PersonaBlueprintValidationReport,
+  code: string,
+  path: string,
+  message: string,
+) -> PersonaBlueprintValidationReport {
+  return report + {errors: report.errors + [{code: code, path: path, message: message}]}
+}
+
+fn __persona_blueprint_finalize(report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
+  return report + {valid: len(report.errors) == 0}
+}
+
+fn __persona_blueprint_identifier(value) -> bool {
+  return type_of(value) == "string" && regex_match("^[A-Za-z_][A-Za-z0-9_]*$", value) != nil
+}
+
+fn __persona_blueprint_nonempty(value) -> bool {
+  return type_of(value) == "string" && trim(value) != ""
+}
+
+fn __persona_blueprint_catalog_entry(providers, provider) {
+  return providers.find({ entry -> entry?.provider == provider })
+}
+
+fn __persona_blueprint_record(blueprint) -> PersonaBlueprint {
+  return {
+    schema_version: "1",
+    name: blueprint.name,
+    description: blueprint.description,
+    goal: blueprint.goal,
+    template: blueprint.template,
+    cron: blueprint.cron,
+    external: blueprint.external,
+  }
+}
+
+fn __persona_blueprint_cron_fields(cron) -> list<string> {
+  return regex_split(trim(cron ?? ""), "\\s+").filter({ field -> field != "" }).to_list()
+}
+
+fn __persona_blueprint_validate_cron(blueprint, providers, report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
+  let out = report
+  const source = blueprint.cron
+  if len(__persona_blueprint_cron_fields(source.cron)) != 5 || !is_valid_cron(source.cron) {
+    out = __persona_blueprint_error(
+      out,
+      "invalid_cron",
+      "cron.cron",
+      "cron source must be a valid five-field cron expression",
+    )
+  }
+  try {
+    parts(0, source.timezone)
+  } catch (e) {
+    out = __persona_blueprint_error(
+      out,
+      "invalid_timezone",
+      "cron.timezone",
+      "cron timezone is not a supported IANA timezone: " + to_string(e),
+    )
+  }
+  const cron_provider = __persona_blueprint_catalog_entry(providers, "cron")
+  if cron_provider == nil || !contains(cron_provider.kinds, "cron") {
+    out = __persona_blueprint_error(
+      out,
+      "cron_unavailable",
+      "cron",
+      "live trigger catalog does not expose the cron transport",
+    )
+  }
+  return out
+}
+
+fn __persona_blueprint_validate_external(
+  blueprint,
+  providers,
+  report: PersonaBlueprintValidationReport,
+) -> PersonaBlueprintValidationReport {
+  let out = report
+  const source = blueprint.external
+  const provider = __persona_blueprint_catalog_entry(providers, source.provider)
+  if provider == nil {
+    return __persona_blueprint_error(
+      out,
+      "unknown_provider",
+      "external.provider",
+      "provider `" + source.provider + "` is not in the live trigger catalog",
+    )
+  }
+  if len(provider.kinds) != 1 {
+    out = __persona_blueprint_error(
+      out,
+      "ambiguous_provider_transport",
+      "external.provider",
+      "provider `" + source.provider + "` must expose exactly one transport kind",
+    )
+  }
+  if !starts_with(source.event, source.provider + ".") {
+    out = __persona_blueprint_error(
+      out,
+      "event_namespace_mismatch",
+      "external.event",
+      "event must begin with the selected provider namespace `" + source.provider + ".`",
+    )
+  }
+  return out
+}
+
+/**
+ * persona_blueprint_validate.
+ *
+ * Validates a closed `PersonaBlueprint` without performing an LLM call or a
+ * filesystem mutation. `providers` exists for deterministic tests; production
+ * callers leave it nil to use `std/triggers::list_providers()`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn persona_blueprint_validate(blueprint, providers = nil) -> PersonaBlueprintValidationReport {
+  if type_of(blueprint) != "dict" {
+    return {
+      valid: false,
+      schema_version: nil,
+      source_kind: nil,
+      errors: [{code: "not_a_dict", path: "", message: "persona blueprint must be a dict"}],
+      warnings: [],
+    }
+  }
+  const shape = schema_check(blueprint, persona_blueprint_schema())
+  let report = __persona_blueprint_blank_report(blueprint)
+  if is_err(shape) {
+    const err = unwrap_err(shape)
+    for entry in err.errors ?? [] {
+      report = __persona_blueprint_error(report, "shape", entry?.path ?? "", entry?.message ?? to_string(entry))
+    }
+    return __persona_blueprint_finalize(report)
+  }
+  if !__persona_blueprint_identifier(blueprint.name) {
+    report = __persona_blueprint_error(
+      report,
+      "invalid_name",
+      "name",
+      "persona name must be an identifier-like token",
+    )
+  }
+  if !__persona_blueprint_nonempty(blueprint.description) {
+    report = __persona_blueprint_error(
+      report,
+      "empty_description",
+      "description",
+      "description must not be blank",
+    )
+  }
+  if !__persona_blueprint_nonempty(blueprint.goal) {
+    report = __persona_blueprint_error(report, "empty_goal", "goal", "goal must not be blank")
+  }
+  const has_cron = blueprint.cron != nil
+  const has_external = blueprint.external != nil
+  if has_cron == has_external {
+    return __persona_blueprint_finalize(
+      __persona_blueprint_error(
+        report,
+        "source_count",
+        "",
+        "persona blueprint must select exactly one source: cron or external",
+      ),
+    )
+  }
+  const catalog = providers ?? list_providers()
+  if has_cron {
+    report = __persona_blueprint_validate_cron(blueprint, catalog, report) + {source_kind: "cron"}
+  } else {
+    report = __persona_blueprint_validate_external(blueprint, catalog, report) + {source_kind: "external"}
+  }
+  return __persona_blueprint_finalize(report)
+}
+
+fn __persona_blueprint_lower_trigger(blueprint, providers) -> PersonaBlueprintTrigger {
+  const handler = "persona://" + blueprint.name
+  if blueprint.cron != nil {
+    return {
+      id: blueprint.name + "-cron",
+      kind: "cron",
+      provider: "cron",
+      events: ["cron.tick"],
+      schedule: blueprint.cron.cron,
+      timezone: blueprint.cron.timezone,
+      handler: handler,
+    }
+  }
+  const provider = __persona_blueprint_catalog_entry(providers, blueprint.external.provider)
+  return {
+    id: blueprint.name + "-" + provider.kinds[0],
+    kind: provider.kinds[0],
+    provider: blueprint.external.provider,
+    events: [blueprint.external.event],
+    schedule: nil,
+    timezone: nil,
+    handler: handler,
+  }
+}
+
+/**
+ * persona_blueprint_compile.
+ *
+ * Lowers a valid blueprint to the fixed prompt-compiled safety profile. This
+ * never emits package bytes; the canonical scaffold transaction materializes
+ * the resulting template, policy, and trigger plan atomically. Returns
+ * `Ok(lowering)` on success or `Err(validation)` without side effects.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn persona_blueprint_compile(blueprint, providers = nil) -> PersonaBlueprintCompileResult {
+  const catalog = providers ?? list_providers()
+  const validation = persona_blueprint_validate(blueprint, catalog)
+  if !validation.valid {
+    return Err(validation)
+  }
+  const typed = __persona_blueprint_record(blueprint)
+  const trigger = __persona_blueprint_lower_trigger(typed, catalog)
+  return Ok(
+    {
+      template: typed.template,
+      persona: {name: typed.name, description: typed.description, goal: typed.goal},
+      policy: {autonomy_tier: "suggest", receipt_policy: "required"},
+      triggers: [trigger],
+    },
+  )
+}

@@ -1,0 +1,7 @@
+import "std/calendar"
+
+pipeline default() {
+  __io_println(is_valid_cron("0 */4 * * *"))
+  __io_println(is_valid_cron("60 0 * * *"))
+  __io_println(is_valid_cron("0 * * *"))
+}

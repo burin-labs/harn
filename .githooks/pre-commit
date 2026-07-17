@@ -5,17 +5,19 @@ hook_dir=$(dirname "$0")
 . "$hook_dir/lib.sh"
 
 hook_timing_start pre-commit
+hook_timing_phase setup-and-guards
 
 changed=$(mktemp)
 harn_format_files=$(mktemp)
 harn_lint_files=$(mktemp)
 markdown_files=$(mktemp)
+rust_format_packages=$(mktemp)
 # Combine into a single EXIT trap (a second `trap ... EXIT` would replace,
 # not stack with, this one): capture the hook's real exit code FIRST (the
 # subsequent `rm` would otherwise clobber $? with its own status), clean up
 # temp files, then let hook_timing_finish append the NDJSON timing line and
 # re-exit with the captured code.
-trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$markdown_files"; hook_timing_finish "$hook_timing_exit_code"' EXIT
+trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$markdown_files" "$rust_format_packages"; hook_timing_finish "$hook_timing_exit_code"' EXIT
 hook_write_staged_files "$changed"
 if ! hook_fast_default_mode; then
   hook_export_cargo_target_dir
@@ -68,16 +70,15 @@ fi
 # Phase-2 sync step yields the same result the sync would produce.
 # ---------------------------------------------------------------------------
 
-# rustfmt does not compile the workspace. Keep this read-only formatting guard
-# in the default hook while leaving build-backed Harn formatting, linting, and
-# generated-artifact work to explicit developer commands and required CI.
-if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
-  echo "=== Pre-commit: checking Rust formatting ==="
-  cargo fmt --all -- --check
-  echo "    Rust formatting OK."
-else
-  echo "=== Pre-commit: skipping Rust formatting (no Rust/Cargo changes) ==="
-fi
+hook_timing_phase rust-format
+
+# Cargo owns the format target set: direct rustfmt would incorrectly inspect
+# intentionally malformed fixtures and generated/seed Rust files. Narrow the
+# Cargo invocation to changed owners, with a workspace fallback for unmatched
+# topology. Required CI remains the full-workspace authority.
+hook_run_rust_format_gate "$changed" "$rust_format_packages"
+
+hook_timing_phase fast-validation
 
 if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
   if hook_skip_no_local_build "pre-commit CI ratchets"; then
@@ -165,6 +166,8 @@ fi
 # Reached only once the fast validators above pass; Rust compilation and
 # linting run once at pre-push.
 # ---------------------------------------------------------------------------
+
+hook_timing_phase full-local
 
 if hook_skip_no_local_build "pre-commit local build/format/lint phases"; then
   exit 0

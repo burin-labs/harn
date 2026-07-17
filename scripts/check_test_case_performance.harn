@@ -1,0 +1,458 @@
+import { shell_quote } from "std/runtime"
+
+const BASELINES = "perf/test-case-performance/baselines.toml"
+
+const SUITE_COUNT = 4
+
+const CASES_PER_SUITE = 16
+
+const WORKLOAD_VERSION = 1
+
+fn number(value) -> float {
+  return to_float(value) ?? 0.0
+}
+
+fn int_number(value) -> int {
+  return to_int(value) ?? 0
+}
+
+fn metric_value(metrics: dict, name: string) -> float {
+  return number(metrics[name])
+}
+
+pub fn percentile(values: list<int>, percent: int) -> int {
+  if values.count == 0 {
+    return 0
+  }
+  const sorted = values.sort()
+  let index = (sorted.count * percent + 99) / 100
+  if index < 1 {
+    index = 1
+  }
+  if index > sorted.count {
+    index = sorted.count
+  }
+  return sorted[index - 1] ?? 0
+}
+
+pub fn parse_diagnose_output(text: string) -> dict {
+  let samples = []
+  let failures = []
+  const pattern = r"(?m)^\[harn test diag\] (ok|FAIL) (.+) setup=(\d+)ms compile=(\d+)ms execute=(\d+)ms teardown=(\d+)ms(?: [^\n]*)? total=(\d+)ms$"
+  for capture in regex_captures(pattern, text) {
+    const groups = capture.groups
+    const sample = {
+      outcome: groups[0],
+      name: groups[1],
+      setup_ms: int_number(groups[2]),
+      compile_ms: int_number(groups[3]),
+      execute_ms: int_number(groups[4]),
+      teardown_ms: int_number(groups[5]),
+      total_ms: int_number(groups[6]),
+    }
+    samples = samples + [sample]
+    if sample.outcome != "ok" {
+      failures = failures + [sample.name]
+    }
+  }
+  return {samples: samples, failures: failures}
+}
+
+fn captured_float(text: string, pattern: string) -> float? {
+  const captures = regex_captures(pattern, text, "m")
+  if captures.count == 0 {
+    return nil
+  }
+  return to_float(captures[0].groups[0])
+}
+
+fn captured_int(text: string, patterns: list<string>) -> int {
+  for pattern in patterns {
+    const captures = regex_captures(pattern, text, "mi")
+    if captures.count > 0 {
+      return int_number(captures[0].groups[0])
+    }
+  }
+  return 0
+}
+
+pub fn parse_time_output(text: string) -> dict {
+  const real_s = captured_float(text, r"^real\s+([0-9.]+)$")
+  const user_s = captured_float(text, r"^user\s+([0-9.]+)$")
+  const sys_s = captured_float(text, r"^sys\s+([0-9.]+)$")
+  const required = real_s != nil && user_s != nil && sys_s != nil
+  const gnu_rss_kb = captured_int(text, [r"Maximum resident set size \(kbytes\):\s*(\d+)"])
+  const bsd_rss_bytes = captured_int(text, [r"^\s*(\d+)\s+maximum resident set size$"])
+  const max_rss_kb = if gnu_rss_kb > 0 {
+    gnu_rss_kb
+  } else {
+    bsd_rss_bytes / 1024
+  }
+  return {
+    ok: required,
+    wall_ms: number(real_s) * 1000.0,
+    user_ms: number(user_s) * 1000.0,
+    sys_ms: number(sys_s) * 1000.0,
+    max_rss_kb: max_rss_kb,
+    major_faults: captured_int(text, [r"Major \(requiring I/O\) page faults:\s*(\d+)", r"^\s*(\d+)\s+page faults$"]),
+    minor_faults: captured_int(
+      text,
+      [r"Minor \(reclaiming a frame\) page faults:\s*(\d+)", r"^\s*(\d+)\s+page reclaims$"],
+    ),
+    voluntary_context_switches: captured_int(
+      text,
+      [r"Voluntary context switches:\s*(\d+)", r"^\s*(\d+)\s+voluntary context switches$"],
+    ),
+    involuntary_context_switches: captured_int(
+      text,
+      [r"Involuntary context switches:\s*(\d+)", r"^\s*(\d+)\s+involuntary context switches$"],
+    ),
+    fs_inputs: captured_int(text, [r"File system inputs:\s*(\d+)", r"^\s*(\d+)\s+block input operations$"]),
+    fs_outputs: captured_int(text, [r"File system outputs:\s*(\d+)", r"^\s*(\d+)\s+block output operations$"]),
+  }
+}
+
+pub fn aggregate_runs(runs: list<dict>) -> dict {
+  let wall_values: list<float> = []
+  let setup_values: list<int> = []
+  let execute_values: list<int> = []
+  let user_ms = 0.0
+  let sys_ms = 0.0
+  let max_rss_kb = 0
+  let major_faults = 0
+  let minor_faults = 0
+  let voluntary_context_switches = 0
+  let involuntary_context_switches = 0
+  let fs_inputs = 0
+  let fs_outputs = 0
+  for run in runs {
+    wall_values = wall_values + [number(run.time.wall_ms)]
+    user_ms = user_ms + number(run.time.user_ms)
+    sys_ms = sys_ms + number(run.time.sys_ms)
+    if int_number(run.time.max_rss_kb) > max_rss_kb {
+      max_rss_kb = int_number(run.time.max_rss_kb)
+    }
+    major_faults = major_faults + int_number(run.time.major_faults)
+    minor_faults = minor_faults + int_number(run.time.minor_faults)
+    voluntary_context_switches = voluntary_context_switches + int_number(run.time.voluntary_context_switches)
+    involuntary_context_switches = involuntary_context_switches + int_number(run.time.involuntary_context_switches)
+    fs_inputs = fs_inputs + int_number(run.time.fs_inputs)
+    fs_outputs = fs_outputs + int_number(run.time.fs_outputs)
+    for sample in run.diagnose.samples {
+      setup_values = setup_values + [sample.setup_ms]
+      execute_values = execute_values + [sample.execute_ms]
+    }
+  }
+  const sorted_wall = wall_values.sort()
+  return {
+    max_child_wall_ms: sorted_wall[sorted_wall.count - 1] ?? 0.0,
+    sum_user_ms: user_ms,
+    sum_sys_ms: sys_ms,
+    setup_p50_ms: percentile(setup_values, 50),
+    setup_p90_ms: percentile(setup_values, 90),
+    execute_p90_ms: percentile(execute_values, 90),
+    test_count: setup_values.count,
+    telemetry: {
+      max_rss_kb: max_rss_kb,
+      major_faults: major_faults,
+      minor_faults: minor_faults,
+      voluntary_context_switches: voluntary_context_switches,
+      involuntary_context_switches: involuntary_context_switches,
+      fs_inputs: fs_inputs,
+      fs_outputs: fs_outputs,
+    },
+  }
+}
+
+fn threshold(reference: float, factor: float, floor: float) -> float {
+  const scaled = reference * factor
+  const additive = reference + floor
+  return if scaled > additive {
+    scaled
+  } else {
+    additive
+  }
+}
+
+pub fn evaluate_metrics(metrics: dict, baseline: dict) -> dict {
+  const factor = number(baseline?.regression_x ?? 2.0)
+  const warn_at = number(baseline?.warn_utilization ?? 0.8)
+  const floors = {
+    max_child_wall_ms: 250.0,
+    sum_user_ms: 250.0,
+    sum_sys_ms: 150.0,
+    setup_p50_ms: 5.0,
+    setup_p90_ms: 10.0,
+    execute_p90_ms: 5.0,
+  }
+  let failures = []
+  let warnings = []
+  let limits = {}
+  for name in floors.keys().sort() {
+    const reference = number(baseline[name])
+    if reference <= 0.0 {
+      failures = failures + ["baseline `${name}` must be positive"]
+      continue
+    }
+    const limit = threshold(reference, factor, number(floors[name]))
+    limits = limits + {[name]: limit}
+    const actual = metric_value(metrics, name)
+    if actual > limit {
+      failures = failures + ["${name}=${actual} exceeded ${limit} (reference ${reference})"]
+    } else if actual >= limit * warn_at {
+      warnings = warnings + ["${name}=${actual} is at least ${warn_at * 100.0}% of ${limit}"]
+    }
+  }
+  const telemetry_factor = number(baseline?.telemetry_warn_x ?? 4.0)
+  const telemetry_baseline = baseline?.telemetry ?? {}
+  for name in telemetry_baseline.keys().sort() {
+    const reference = number(telemetry_baseline[name])
+    const actual = number(metrics.telemetry[name])
+    if reference > 0.0 && actual > reference * telemetry_factor {
+      warnings = warnings
+        + ["telemetry ${name}=${actual} exceeded ${telemetry_factor}x reference ${reference}"]
+    }
+  }
+  return {ok: failures.count == 0, failures: failures, warnings: warnings, limits: limits}
+}
+
+pub fn load_platform_baseline(text: string, platform: string) -> dict {
+  const parsed = toml_parse(text)
+  if int_number(parsed?.schema_version) != 1 {
+    return {ok: false, error: "baseline schema_version must be 1", baseline: {}}
+  }
+  if int_number(parsed?.workload_version) != WORKLOAD_VERSION {
+    return {ok: false, error: "baseline workload_version must be ${WORKLOAD_VERSION}", baseline: {}}
+  }
+  const platforms = parsed?.platform ?? {}
+  const baseline = platforms[platform]
+  if baseline == nil {
+    return {ok: false, error: "no measured baseline for platform `${platform}`", baseline: {}}
+  }
+  return {ok: true, error: "", baseline: baseline}
+}
+
+fn platform_name() -> string {
+  const uname = harness.process.spawn_captured({cmd: "uname", args: ["-s"]})
+  if !uname.success {
+    return "unknown"
+  }
+  const name = uname.stdout.trim().lowercase()
+  return if name == "darwin" {
+    "macos"
+  } else if name == "linux" {
+    "linux"
+  } else {
+    name
+  }
+}
+
+fn harn_argv() -> list<string> {
+  const bin_override = harness.env.get("HARN_CHECK_BIN")
+  if bin_override != nil && bin_override != "" {
+    return [bin_override ?? ""]
+  }
+  const metadata = harness.process
+    .spawn_captured({cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]})
+  if !metadata.success {
+    throw "cargo metadata failed while resolving the measured harn binary"
+  }
+  const parsed = try {
+    json_parse(metadata.stdout)
+  } catch (err) {
+    throw "cargo metadata returned malformed JSON"
+  }
+  const target_dir = parsed?.target_directory ?? ""
+  if target_dir == "" {
+    throw "cargo metadata omitted target_directory"
+  }
+  return [target_dir + "/debug/harn"]
+}
+
+fn mkdir(path: string) -> nil {
+  harness.fs.mkdir(path)
+  return nil
+}
+
+fn materialize_suite(root: string, index: int) -> string {
+  const suite = path_join(root, "suite-${index}")
+  const state = path_join(suite, ".harn")
+  const generation = "perf-v1"
+  const generation_root = path_join(path_join(state, "package-generations"), generation)
+  const packages = path_join(generation_root, "packages")
+  const tests = path_join(suite, "tests")
+  mkdir(suite)
+  mkdir(state)
+  mkdir(generation_root)
+  mkdir(packages)
+  mkdir(tests)
+  let lock_body = "# Generated performance fixture.\nversion = 4\ngenerator_version = \"performance-check\"\nprotocol_artifact_version = \"performance-check\"\n"
+  for item in range(0, 128) {
+    lock_body = lock_body + "# deterministic-padding-${item}=abcdefghijklmnopqrstuvwxyz0123456789\n"
+  }
+  harness.fs.write_text(path_join(generation_root, "harn.lock"), lock_body)
+  harness.fs.write_text(path_join(generation_root, "lease.lock"), "")
+  harness.fs
+    .write_text(
+    path_join(generation_root, "generation.toml"),
+    "schema_version = 1\ngeneration = \"${generation}\"\nlock_digest = \"${sha256(lock_body)}\"\n",
+  )
+  harness.fs
+    .write_text(
+    path_join(state, "package-current.toml"),
+    "schema_version = 1\ngeneration = \"${generation}\"\n",
+  )
+  harness.fs.write_text(path_join(state, "package-generation.lock"), "")
+  harness.fs
+    .write_text(
+    path_join(suite, "support.harn"),
+    "pub fn helper(value: int) -> int { return value + 1 }\n",
+  )
+  let source = "import { with_temp_dir } from \"std/testing\"\nimport { helper } from \"../support.harn\"\n\n"
+  for case_index in range(0, CASES_PER_SUITE) {
+    source = source
+      + "@test\npipeline perf_${index}_${case_index}(task) {\n  assert_eq(helper(${case_index}), ${case_index + 1})\n}\n\n"
+  }
+  const test_file = path_join(tests, "performance.harn")
+  harness.fs.write_text(test_file, source)
+  return test_file
+}
+
+const GNU_TIME_FORMAT = "real %e\nuser %U\nsys %S\nMaximum resident set size (kbytes): %M\nMajor (requiring I/O) page faults: %F\nMinor (reclaiming a frame) page faults: %R\nVoluntary context switches: %w\nInvoluntary context switches: %c\nFile system inputs: %I\nFile system outputs: %O"
+
+pub fn time_args(platform: string) -> list<string> {
+  return if platform == "macos" {
+    ["-p", "-l"]
+  } else {
+    ["-f", GNU_TIME_FORMAT]
+  }
+}
+
+fn invocation(argv: list<string>) -> string {
+  return argv.map({ part -> shell_quote(part) }).to_list().join(" ")
+}
+
+fn run_parallel(root: string, platform: string, test_files: list<string>) -> dict {
+  const prefix = harn_argv()
+  let script = "set -u\npids=\"\"\n"
+  for index in range(0, test_files.count) {
+    const run_root = path_join(root, "run-${index}")
+    const home = path_join(run_root, "home")
+    const cache = path_join(run_root, "cache")
+    mkdir(run_root)
+    mkdir(home)
+    mkdir(cache)
+    const stdout_path = path_join(run_root, "stdout.txt")
+    const stderr_path = path_join(run_root, "stderr.txt")
+    const status_path = path_join(run_root, "status.txt")
+    const argv = prefix
+      + ["test", "--parallel", "--jobs", "4", "--diagnose", "--timeout", "5000", test_files[index]]
+    script = script
+      + "(HOME="
+      + shell_quote(home)
+      + " HARN_CACHE_DIR="
+      + shell_quote(cache)
+      + " HARN_BYTECODE_CACHE=0 "
+      + invocation(["/usr/bin/time"] + time_args(platform) + argv)
+      + " >"
+      + shell_quote(stdout_path)
+      + " 2>"
+      + shell_quote(stderr_path)
+      + "; code=$?; printf '%s\\n' \"$code\" >"
+      + shell_quote(status_path)
+      + "; exit \"$code\") &\npids=\"$pids $!\"\n"
+  }
+  script = script + "failed=0\nfor pid in $pids; do wait \"$pid\" || failed=1; done\nexit \"$failed\"\n"
+  const fanout = harness.process.spawn_captured({cmd: "sh", args: ["-c", script]})
+  let runs = []
+  let errors = []
+  for index in range(0, test_files.count) {
+    const run_root = path_join(root, "run-${index}")
+    const stderr_path = path_join(run_root, "stderr.txt")
+    const status_path = path_join(run_root, "status.txt")
+    if !harness.fs.exists(stderr_path) || !harness.fs.exists(status_path) {
+      errors = errors + ["run ${index} did not produce complete output"]
+      continue
+    }
+    const stderr = harness.fs.read_text(stderr_path)
+    const status = int_number(harness.fs.read_text(status_path).trim())
+    const diagnose = parse_diagnose_output(stderr)
+    const timing = parse_time_output(stderr)
+    harness.process
+      .spawn_captured(
+      {cmd: "rm", args: ["-rf", path_join(run_root, "home"), path_join(run_root, "cache")]},
+    )
+    if status != 0 {
+      errors = errors + ["run ${index} exited ${status}"]
+    }
+    if diagnose.samples.count != CASES_PER_SUITE {
+      errors = errors
+        + ["run ${index} emitted ${diagnose.samples.count}/${CASES_PER_SUITE} diagnostic samples"]
+    }
+    if diagnose.failures.count > 0 {
+      errors = errors + ["run ${index} reported failing tests: ${diagnose.failures.join(", ")}"]
+    }
+    if !timing.ok {
+      errors = errors + ["run ${index} lacked portable real/user/sys telemetry"]
+    }
+    runs = runs + [{diagnose: diagnose, time: timing}]
+  }
+  if !fanout.success && errors.count == 0 {
+    errors = errors + ["parallel child fan-out failed without a child diagnostic"]
+  }
+  return {runs: runs, errors: errors}
+}
+
+pipeline main(task) {
+  const platform = platform_name()
+  if platform != "macos" && platform != "linux" {
+    harness.stdio.eprintln("error: unsupported performance-check platform `${platform}`")
+    return 1
+  }
+  const root = path_join(".harn-runs/test-case-performance", uuid_v7())
+  mkdir(root)
+  let test_files = []
+  for index in range(0, SUITE_COUNT) {
+    test_files = test_files + [materialize_suite(root, index)]
+  }
+  const execution = run_parallel(root, platform, test_files)
+  const metrics = aggregate_runs(execution.runs)
+  const report = {
+    schema_version: 1,
+    workload_version: WORKLOAD_VERSION,
+    platform: platform,
+    suite_count: SUITE_COUNT,
+    cases_per_suite: CASES_PER_SUITE,
+    metrics: metrics,
+    sample_errors: execution.errors,
+  }
+  if execution.errors.count == 0 {
+    harness.process.spawn_captured({cmd: "rm", args: ["-rf", root]})
+  } else {
+    harness.stdio.eprintln("error: preserved failed workload at " + root)
+  }
+  __io_println(json_stringify_pretty(report))
+  if execution.errors.count > 0 {
+    for error in execution.errors {
+      harness.stdio.eprintln("error: ${error}")
+    }
+    return 1
+  }
+  const loaded = load_platform_baseline(harness.fs.read_text(BASELINES), platform)
+  if !loaded.ok {
+    harness.stdio.eprintln("error: ${loaded.error}; use the JSON above to record an honest baseline")
+    return 1
+  }
+  const verdict = evaluate_metrics(metrics, loaded.baseline)
+  for warning in verdict.warnings {
+    harness.stdio.eprintln("warning: ${warning}")
+  }
+  if !verdict.ok {
+    for failure in verdict.failures {
+      harness.stdio.eprintln("error: ${failure}")
+    }
+    return 1
+  }
+  __io_println("parallel test-case performance: OK platform=${platform} tests=${metrics.test_count}")
+  return 0
+}

@@ -493,6 +493,13 @@ impl super::super::Vm {
                             results.push(VmValue::enum_variant("Result", "Ok", vec![val]));
                         }
                         Err(e) => {
+                            // `parallel settle` normally makes branch errors
+                            // available as Result.Err values. VM-wide control
+                            // flow is different: lowering it would let a Harn
+                            // program catch and ignore an explicit exit.
+                            if e.is_uncatchable_control_flow() {
+                                return Err(e);
+                            }
                             failed += 1;
                             // Preserve the structured error value (matching
                             // `try`/`catch` via `handle_error`) so a categorized

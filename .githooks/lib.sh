@@ -94,7 +94,7 @@ hook_skip_no_local_build() {
 # ---------------------------------------------------------------------------
 # Hook duration instrument. Appends one NDJSON line per hook invocation to
 # ~/.burin/hook-timings.ndjson: {ts, repository, repo, hook, profile,
-# duration_ms, exit_code, commit_sha, host}. `repository` is the stable owner;
+# duration_ms, phases, exit_code, commit_sha, host}. `repository` is the stable owner;
 # legacy `repo` remains the checkout basename for worktree forensics. Zero-dep
 # (POSIX sh + date only), never changes the
 # hook's own exit code, and degrades silently if the log directory can't be
@@ -131,6 +131,46 @@ hook_timing_now_ns() {
 hook_timing_start() {
   HOOK_TIMING_HOOK_NAME=$1
   HOOK_TIMING_START_NS=$(hook_timing_now_ns)
+  HOOK_TIMING_PHASE_NAME=""
+  HOOK_TIMING_PHASE_START_NS=""
+  HOOK_TIMING_PHASES=""
+}
+
+# Close the active phase at a caller-supplied timestamp. Phase names are
+# static hook-owned identifiers; rejecting anything else keeps the nested JSON
+# safe without adding jq/Python to the commit path.
+hook_timing_close_phase() {
+  phase_end_ns=$1
+  [ -n "${HOOK_TIMING_PHASE_NAME:-}" ] || return 0
+  case "$HOOK_TIMING_PHASE_NAME" in
+    *[!a-z0-9_-]*)
+      HOOK_TIMING_PHASE_NAME=""
+      HOOK_TIMING_PHASE_START_NS=""
+      return 0
+      ;;
+  esac
+  phase_start_ns="${HOOK_TIMING_PHASE_START_NS:-$phase_end_ns}"
+  phase_duration_ms=$(( (phase_end_ns - phase_start_ns) / 1000000 ))
+  [ "$phase_duration_ms" -lt 0 ] 2>/dev/null && phase_duration_ms=0
+  if [ -n "${HOOK_TIMING_PHASES:-}" ]; then
+    HOOK_TIMING_PHASES="$HOOK_TIMING_PHASES,"
+  fi
+  HOOK_TIMING_PHASES="$HOOK_TIMING_PHASES\"$HOOK_TIMING_PHASE_NAME\":$phase_duration_ms"
+  HOOK_TIMING_PHASE_NAME=""
+  HOOK_TIMING_PHASE_START_NS=""
+}
+
+# Transition from the current top-level phase to the next one. This records
+# broad ownership boundaries, not every command, so hook control flow remains
+# simple and timing overhead stays negligible.
+hook_timing_phase() {
+  phase_now_ns=$(hook_timing_now_ns)
+  hook_timing_close_phase "$phase_now_ns"
+  case "$1" in
+    ""|*[!a-z0-9_-]*) return 0 ;;
+  esac
+  HOOK_TIMING_PHASE_NAME=$1
+  HOOK_TIMING_PHASE_START_NS=$phase_now_ns
 }
 
 # Call via `trap 'hook_timing_finish $?' EXIT` immediately after
@@ -140,6 +180,7 @@ hook_timing_finish() {
   exit_code=$1
   (
     end_ns=$(hook_timing_now_ns)
+    hook_timing_close_phase "$end_ns"
     start_ns="${HOOK_TIMING_START_NS:-$end_ns}"
     duration_ms=$(( (end_ns - start_ns) / 1000000 ))
     [ "$duration_ms" -lt 0 ] 2>/dev/null && duration_ms=0
@@ -158,8 +199,8 @@ hook_timing_finish() {
     mkdir -p "$HOOK_TIMING_LOG_DIR" 2>/dev/null || exit 0
     [ -d "$HOOK_TIMING_LOG_DIR" ] || exit 0
 
-    printf '{"ts":"%s","repository":"burin-labs/harn","repo":"%s","hook":"%s","profile":"%s","duration_ms":%s,"exit_code":%s,"commit_sha":"%s","host":"%s"}\n' \
-      "$ts" "$repo" "${HOOK_TIMING_HOOK_NAME:-unknown}" "$profile" "$duration_ms" "$exit_code" "$commit_sha" "$host" \
+    printf '{"ts":"%s","repository":"burin-labs/harn","repo":"%s","hook":"%s","profile":"%s","duration_ms":%s,"phases":{%s},"exit_code":%s,"commit_sha":"%s","host":"%s"}\n' \
+      "$ts" "$repo" "${HOOK_TIMING_HOOK_NAME:-unknown}" "$profile" "$duration_ms" "${HOOK_TIMING_PHASES:-}" "$exit_code" "$commit_sha" "$host" \
       >> "$HOOK_TIMING_LOG_FILE" 2>/dev/null || true
   ) || true
   exit "$exit_code"
@@ -449,6 +490,30 @@ hook_write_harn_lint_files() {
   done < "$input"
 }
 
+hook_cargo_package_for_path() {
+  path=$1
+  case "$path" in
+    crates/*/*)
+      crate=${path#crates/}
+      crate=${crate%%/*}
+      manifest="crates/$crate/Cargo.toml"
+      [ -f "$manifest" ] || return 1
+      # `cargo -p` cannot target excluded crates. Match the workspace's
+      # single-line exclude list without pulling a TOML parser into hooks.
+      if [ -f "Cargo.toml" ] && \
+         grep -E '^exclude *= *\[' Cargo.toml \
+           | grep -Fq "\"crates/$crate\""; then
+        return 1
+      fi
+      package=$(awk -F '"' '/^name = / { print $2; exit }' "$manifest")
+      [ -n "$package" ] || return 1
+      printf '%s\n' "$package"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 hook_write_changed_cargo_packages() {
   input=$1
   output=$2
@@ -457,30 +522,62 @@ hook_write_changed_cargo_packages() {
     if hook_is_provider_catalog_data_path "$path"; then
       continue
     fi
+    package=$(hook_cargo_package_for_path "$path" || true)
+    [ -n "$package" ] && printf '%s\n' "$package" >> "$output"
+  done < "$input"
+  sort -u -o "$output" "$output"
+}
+
+# Format only the Cargo packages that own staged Rust files. Harn deliberately
+# tracks malformed parser fixtures and generated/seed `.rs` files outside
+# Cargo's format ownership, so invoking rustfmt directly on changed paths is
+# not equivalent to `cargo fmt`. Return false for any unmapped Rust path so the
+# caller preserves the workspace-wide Cargo fallback.
+hook_write_rust_format_packages() {
+  input=$1
+  output=$2
+  : > "$output"
+  while IFS= read -r path; do
     case "$path" in
-      crates/*/*)
-        crate=${path#crates/}
-        crate=${crate%%/*}
-        manifest="crates/$crate/Cargo.toml"
-        if [ -f "$manifest" ]; then
-          # Skip crates listed in the workspace `exclude = [...]` line.
-          # `cargo check -p <name>` cannot target them, so gating the
-          # push on those crates produces a "did not match any packages"
-          # error. Match against the workspace's exclude line directly
-          # rather than parsing all the way to a `]` (the harn workspace
-          # writes it inline on a single line).
-          if [ -f "Cargo.toml" ] && \
-             grep -E '^exclude *= *\[' Cargo.toml \
-               | grep -Fq "\"crates/$crate\""; then
-            continue
-          fi
-          package=$(awk -F '"' '/^name = / { print $2; exit }' "$manifest")
-          [ -n "$package" ] && printf '%s\n' "$package" >> "$output"
+      *.rs|crates/*/Cargo.toml)
+        package=$(hook_cargo_package_for_path "$path" || true)
+        if [ -z "$package" ]; then
+          : > "$output"
+          return 1
         fi
+        printf '%s\n' "$package" >> "$output"
+        ;;
+      Cargo.toml|Cargo.lock)
+        : > "$output"
+        return 1
         ;;
     esac
   done < "$input"
   sort -u -o "$output" "$output"
+  [ -s "$output" ]
+}
+
+hook_run_rust_format_gate() {
+  changed_file_list=$1
+  changed_packages=$2
+
+  if ! hook_paths_match "$changed_file_list" "$HOOK_RUST_PATTERN"; then
+    echo "=== Pre-commit: skipping Rust formatting (no Rust/Cargo changes) ==="
+    return
+  fi
+
+  if hook_write_rust_format_packages "$changed_file_list" "$changed_packages"; then
+    set --
+    while IFS= read -r package; do
+      set -- "$@" -p "$package"
+    done < "$changed_packages"
+    echo "=== Pre-commit: checking Rust formatting for changed packages ($(tr '\n' ' ' < "$changed_packages")) ==="
+    cargo fmt "$@" -- --check
+  else
+    echo "=== Pre-commit: checking workspace Rust formatting (unmapped Rust source) ==="
+    cargo fmt --all -- --check
+  fi
+  echo "    Rust formatting OK."
 }
 
 # Run the one local Rust compilation gate for a commit lifecycle. Pre-commit

@@ -72,22 +72,6 @@ fn __judge_gap_feedback(gaps) {
   return "Address these specific gaps before finishing:\n- " + join(gaps, "\n- ")
 }
 
-fn __judge_checkpoint_raw_object(checkpoint) {
-  let raw = trim(to_string(checkpoint?.raw_text ?? ""))
-  const outputs = checkpoint?.raw_outputs ?? []
-  if raw == "" && len(outputs) > 0 {
-    raw = trim(to_string(outputs[len(outputs) - 1] ?? ""))
-  }
-  if raw == "" {
-    return {}
-  }
-  const parsed = json_parse(raw) ?? {}
-  if type_of(parsed) != "dict" {
-    return {}
-  }
-  return parsed
-}
-
 fn __judge_payload(session, opts, stop_reason, text, iteration) {
   const messages = agent_session_messages(session.session_id)
   const tool_names = __session_tool_names(messages)
@@ -193,19 +177,10 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     }
   }
   const result = checkpoint.data
-  const raw_result = __judge_checkpoint_raw_object(checkpoint)
   const reasoning = to_string(result?.reasoning ?? result?.rationale ?? "")
   const next_step = to_string(result?.next_step ?? result?.nextStep ?? "")
-  const specific_gaps = __judge_string_list(
-    result?.specific_gaps ?? result?.specificGaps ?? raw_result?.specific_gaps
-      ?? raw_result?.specificGaps,
-  )
-  const accepted_evidence = __judge_string_list(
-    result?.accepted_evidence
-      ?? result?.acceptedEvidence
-      ?? raw_result?.accepted_evidence
-      ?? raw_result?.acceptedEvidence,
-  )
+  const specific_gaps = __judge_string_list(result?.specific_gaps ?? result?.specificGaps)
+  const accepted_evidence = __judge_string_list(result?.accepted_evidence ?? result?.acceptedEvidence)
   // The done-judge prompt only ever asks for `done` or `continue`. A reflexive
   // `"yes"` from a cheap model usually means "yes, keep going" (continue), and
   // a bare `"true"` is just as ambiguous — classifying either as DONE

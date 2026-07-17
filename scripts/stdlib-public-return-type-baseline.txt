@@ -17,7 +17,6 @@
 # count    2  crates/harn-stdlib/src/stdlib/agent/governors.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/guardrails.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/host_tools.harn
-# count    5  crates/harn-stdlib/src/stdlib/agent/hypothesis.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/introspection.harn
 # count    6  crates/harn-stdlib/src/stdlib/agent/judge.harn
 # count   10  crates/harn-stdlib/src/stdlib/agent/judge_internals.harn
@@ -139,7 +138,6 @@
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_runtime.harn
 # count   34  crates/harn-stdlib/src/stdlib/stdlib_schema.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_semver.harn
-# count    7  crates/harn-stdlib/src/stdlib/stdlib_session_store.harn
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_signal.harn
 # count    9  crates/harn-stdlib/src/stdlib/stdlib_slug.harn
 # count   25  crates/harn-stdlib/src/stdlib/stdlib_testing.harn
@@ -221,11 +219,6 @@ crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_composition_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_edit_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_host_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_read_tools
-crates/harn-stdlib/src/stdlib/agent/hypothesis.harn::hypothesis_delete
-crates/harn-stdlib/src/stdlib/agent/hypothesis.harn::hypothesis_get
-crates/harn-stdlib/src/stdlib/agent/hypothesis.harn::hypothesis_list
-crates/harn-stdlib/src/stdlib/agent/hypothesis.harn::hypothesis_open
-crates/harn-stdlib/src/stdlib/agent/hypothesis.harn::hypothesis_set_status
 crates/harn-stdlib/src/stdlib/agent/introspection.harn::runtime_introspection_tools
 crates/harn-stdlib/src/stdlib/agent/judge.harn::agent_completion_gate
 crates/harn-stdlib/src/stdlib/agent/judge.harn::agent_completion_gate_veto_counts
@@ -1063,13 +1056,6 @@ crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_string
 crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_union
 crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_validator
 crates/harn-stdlib/src/stdlib/stdlib_semver.harn::bump_type
-crates/harn-stdlib/src/stdlib/stdlib_session_store.harn::session_store_append
-crates/harn-stdlib/src/stdlib/stdlib_session_store.harn::session_store_events
-crates/harn-stdlib/src/stdlib/stdlib_session_store.harn::session_store_path
-crates/harn-stdlib/src/stdlib/stdlib_session_store.harn::session_store_payloads
-crates/harn-stdlib/src/stdlib/stdlib_session_store.harn::session_store_project
-crates/harn-stdlib/src/stdlib/stdlib_session_store.harn::session_store_project_value
-crates/harn-stdlib/src/stdlib/stdlib_session_store.harn::session_store_verify
 crates/harn-stdlib/src/stdlib/stdlib_signal.harn::off_interrupt
 crates/harn-stdlib/src/stdlib/stdlib_signal.harn::on_interrupt
 crates/harn-stdlib/src/stdlib/stdlib_signal.harn::with_interrupt

@@ -53,11 +53,13 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          # Reuse the same cache key as the per-PR Windows smoke job to
-          # piggy-back on whatever artifacts already landed today.
+          # This scheduled default-branch run is the sole writer for the
+          # native Windows workspace cache. Path-gated PR jobs restore it but
+          # never write, avoiding one immutable cache generation per PR.
           shared-key: workspace-windows
           cache-on-failure: true
           cache-bin: false
+          save: true
       - name: Install cargo-nextest
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:

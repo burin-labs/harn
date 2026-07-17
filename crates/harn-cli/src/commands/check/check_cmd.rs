@@ -11,8 +11,11 @@ use super::analysis::{
     analyze_file, render_file_analysis_error_to_string, span_from_lexer_error,
     span_from_parser_error, FileAnalysisError,
 };
+use super::host_capabilities::{resolve_host_capabilities, HostCapabilities};
 use super::outcome::{render_lint_diagnostics, CommandOutcome};
-use super::preflight::{collect_preflight_diagnostics_with_module_graph, is_preflight_allowed};
+use super::preflight::{
+    collect_preflight_diagnostics_with_host_capabilities, is_preflight_allowed,
+};
 
 pub(crate) const CHECK_SCHEMA_VERSION: u32 = 1;
 
@@ -122,6 +125,7 @@ pub(crate) fn check_file_inner(
     module_graph: &harn_modules::ModuleGraph,
     check_invariants: bool,
 ) -> CommandOutcome {
+    let host_capabilities = resolve_host_capabilities(config);
     let mut text = CheckTextOutput::default();
     let report = check_file_report_inner(
         analysis,
@@ -129,6 +133,7 @@ pub(crate) fn check_file_inner(
         config,
         externally_imported_names,
         module_graph,
+        &host_capabilities.capabilities,
         check_invariants,
         Some(&mut text),
     );
@@ -145,12 +150,14 @@ pub(crate) fn check_file_report(
     module_graph: &harn_modules::ModuleGraph,
     check_invariants: bool,
 ) -> CheckFileReport {
+    let host_capabilities = resolve_host_capabilities(config);
     check_file_report_inner(
         analysis,
         path,
         config,
         externally_imported_names,
         module_graph,
+        &host_capabilities.capabilities,
         check_invariants,
         None,
     )
@@ -162,6 +169,7 @@ pub(crate) fn check_file_report_inner(
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
+    host_capabilities: &HostCapabilities,
     check_invariants: bool,
     mut text: Option<&mut CheckTextOutput>,
 ) -> CheckFileReport {
@@ -331,12 +339,13 @@ pub(crate) fn check_file_report_inner(
         help: diag.suggestion.clone(),
     }));
 
-    let preflight_diagnostics = collect_preflight_diagnostics_with_module_graph(
+    let preflight_diagnostics = collect_preflight_diagnostics_with_host_capabilities(
         path,
         &source,
         &program,
         config,
         module_graph,
+        host_capabilities,
     );
     let preflight_severity = PreflightSeverity::from_opt(config.preflight_severity.as_deref());
     if preflight_severity != PreflightSeverity::Off {

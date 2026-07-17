@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::chunk::{Chunk, ChunkRef, Constant};
@@ -13,7 +13,7 @@ use crate::value::{
 use crate::BuiltinId;
 
 use super::debug::DebugHook;
-use super::modules::LoadedModule;
+use super::modules::ModuleCache;
 use super::VmBuiltinMetadata;
 
 /// A lazy callable's resolved export set together with the module graph that
@@ -36,7 +36,7 @@ pub(crate) struct ResolvedLazyCallable {
     /// same liveness role [`crate::value::RetainedModuleScope`] plays for a
     /// single retained closure, generalized across the whole import graph).
     #[allow(dead_code)]
-    pub(crate) retained_module_graph: Arc<BTreeMap<PathBuf, LoadedModule>>,
+    pub(crate) retained_module_graph: ModuleCache,
 }
 
 pub(crate) type LazyCallableResolution = Arc<ResolvedLazyCallable>;
@@ -272,6 +272,44 @@ pub(crate) struct TaskScope {
     pub(crate) env_scope_depth: usize,
 }
 
+/// Terminal exit requested by any VM in one execution tree. A process exit is
+/// global control flow, so child VMs share this latch with their parent rather
+/// than relying on a task being explicitly awaited.
+pub(crate) struct ProcessExitRequest {
+    code: Mutex<Option<i32>>,
+    requested: AtomicBool,
+}
+
+impl ProcessExitRequest {
+    fn new() -> Self {
+        Self {
+            code: Mutex::new(None),
+            requested: AtomicBool::new(false),
+        }
+    }
+
+    fn request(&self, code: i32) {
+        let mut recorded = self
+            .code
+            .lock()
+            .expect("process exit request lock poisoned");
+        if recorded.is_none() {
+            *recorded = Some(code);
+            self.requested.store(true, Ordering::Release);
+        }
+    }
+
+    fn code(&self) -> Option<i32> {
+        if !self.requested.load(Ordering::Acquire) {
+            return None;
+        }
+        *self
+            .code
+            .lock()
+            .expect("process exit request lock poisoned")
+    }
+}
+
 /// Iterator state for for-in loops.
 pub(crate) enum IterState {
     Vec {
@@ -341,6 +379,8 @@ pub struct Vm {
     pub(crate) exception_handlers: Vec<ExceptionHandler>,
     /// Spawned async task handles.
     pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
+    /// Shared terminal process-exit latch for this execution tree.
+    pub(crate) process_exit_request: Arc<ProcessExitRequest>,
     /// Shared process-local synchronization primitives inherited by child VMs.
     pub(crate) sync_runtime: Arc<crate::synchronization::VmSyncRuntime>,
     /// Shared process-local cells, maps, and mailboxes inherited by child VMs.
@@ -352,6 +392,10 @@ pub struct Vm {
     pub(crate) inline_cache_set_by_chunk: HashMap<u64, usize>,
     /// VM-scoped pool registry inherited by child VMs and scoped into Tokio tasks.
     pub(crate) pool_registry: Arc<crate::stdlib::pool::PoolRegistry>,
+    /// Reader leases opened by package_snapshot_open in this execution tree.
+    /// Child VMs share the registry; the final VM drop releases abandoned
+    /// leases without touching concurrent executions.
+    pub(crate) package_snapshot_registry: Arc<crate::stdlib::PackageSnapshotRegistry>,
     /// Shared task/channel wait graph for this VM execution tree.
     pub(crate) wait_for_graph: Arc<crate::wait_for_graph::VmWaitForGraph>,
     /// Permits acquired by lexical synchronization blocks in this VM.
@@ -406,6 +450,9 @@ pub struct Vm {
     pub(crate) last_line: usize,
     /// Source directory for resolving imports.
     pub(crate) source_dir: Option<std::path::PathBuf>,
+    /// Installed-package identity retained for the active lazy pipeline.
+    pub(crate) package_execution_guard:
+        Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
     /// Modules currently being imported (cycle prevention).
     pub(crate) imported_paths: Vec<std::path::PathBuf>,
     /// Imports that hit an in-progress module (an import cycle) and so could
@@ -413,7 +460,7 @@ pub struct Vm {
     /// involved modules finish loading.
     pub(crate) deferred_cyclic_imports: Vec<super::modules::DeferredCyclicImport>,
     /// Loaded module cache keyed by canonical or synthetic module path.
-    pub(crate) module_cache: Arc<BTreeMap<std::path::PathBuf, LoadedModule>>,
+    pub(crate) module_cache: ModuleCache,
     /// Immutable hydrated module bytecode shared across fresh VM isolates.
     /// Runtime closures, registries, state, and init execution are not cached.
     pub(crate) prepared_module_cache: crate::PreparedModuleCache,
@@ -533,11 +580,13 @@ impl VmBaseline {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
+            package_snapshot_registry: Arc::new(Default::default()),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
@@ -555,6 +604,7 @@ impl VmBaseline {
             stopped: false,
             last_line: 0,
             source_dir: self.source_dir.clone(),
+            package_execution_guard: None,
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
@@ -783,11 +833,13 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
+            package_snapshot_registry: Arc::new(Default::default()),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
@@ -805,6 +857,7 @@ impl Vm {
             stopped: false,
             last_line: 0,
             source_dir: None,
+            package_execution_guard: None,
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
@@ -957,11 +1010,13 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            process_exit_request: Arc::clone(&self.process_exit_request),
             sync_runtime: self.sync_runtime.clone(),
             shared_state_runtime: self.shared_state_runtime.clone(),
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: self.pool_registry.clone(),
+            package_snapshot_registry: self.package_snapshot_registry.clone(),
             wait_for_graph: self.wait_for_graph.clone(),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
@@ -979,6 +1034,7 @@ impl Vm {
             stopped: false,
             last_line: 0,
             source_dir: self.source_dir.clone(),
+            package_execution_guard: self.package_execution_guard.clone(),
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::clone(&self.module_cache),
@@ -1013,6 +1069,14 @@ impl Vm {
     /// closures while sharing the parent's builtins, globals, and module state.
     pub(crate) fn child_vm_for_host(&self) -> Vm {
         self.child_vm()
+    }
+
+    pub(crate) fn request_process_exit(&self, code: i32) {
+        self.process_exit_request.request(code);
+    }
+
+    pub(crate) fn requested_process_exit(&self) -> Option<i32> {
+        self.process_exit_request.code()
     }
 
     /// Request cancellation for every outstanding child task owned by this VM

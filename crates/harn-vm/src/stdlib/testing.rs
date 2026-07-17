@@ -66,6 +66,30 @@ async fn testing_call_body_impl(
     result
 }
 
+/// A message argument that stringifies to nil's own JSON encoding, to nil's
+/// own `display()`, or to nothing at all carries the same "no message"
+/// signal as omitting the argument outright. The dominant way test authors
+/// hit this is `assert(cond, json_stringify(maybe_nil_value))`: when the
+/// dumped value turns out to be nil, `json_stringify` is *correct* to return
+/// `"null"` (that's the JSON encoding of nil), but forwarding it verbatim
+/// makes the thrown message read as if "null" were meaningful diagnostic
+/// content rather than the absence of any. Treat that value the same as an
+/// omitted message so the fallback default (which names the failed
+/// assertion) takes over instead.
+fn is_uninformative_message(value: &VmValue) -> bool {
+    matches!(value, VmValue::Nil)
+        || matches!(value, VmValue::String(s) if s.trim().is_empty() || s.as_str() == "null")
+}
+
+/// Resolves the message argument at `index`, falling back to `default` when
+/// the argument is absent or [`is_uninformative_message`].
+fn assert_message(args: &[VmValue], index: usize, default: impl FnOnce() -> String) -> String {
+    match args.get(index) {
+        Some(value) if !is_uninformative_message(value) => value.display(),
+        _ => default(),
+    }
+}
+
 #[harn_builtin(
     sig = "assert(condition: any, message?: string) -> nil",
     category = "testing"
@@ -73,10 +97,7 @@ async fn testing_call_body_impl(
 fn assert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let condition = args.first().unwrap_or(&VmValue::Nil);
     if !condition.is_truthy() {
-        let msg = args
-            .get(1)
-            .map(|a| a.display())
-            .unwrap_or_else(|| "Assertion failed".to_string());
+        let msg = assert_message(args, 1, || "Assertion failed".to_string());
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
     }
     Ok(VmValue::Nil)
@@ -89,7 +110,7 @@ fn assert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn assert_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         if !values_equal(&args[0], &args[1]) {
-            let msg = args.get(2).map(|a| a.display()).unwrap_or_else(|| {
+            let msg = assert_message(args, 2, || {
                 format!(
                     "Assertion failed: expected {}, got {}",
                     args[1].display(),
@@ -113,7 +134,7 @@ fn assert_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 fn assert_ne_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() >= 2 {
         if values_equal(&args[0], &args[1]) {
-            let msg = args.get(2).map(|a| a.display()).unwrap_or_else(|| {
+            let msg = assert_message(args, 2, || {
                 format!(
                     "Assertion failed: values should not be equal: {}",
                     args[0].display()
@@ -260,6 +281,101 @@ mod tests {
         let mut out = String::new();
         let args = [error, VmValue::String(arcstr::ArcStr::from(category))];
         error_is_impl(&args, &mut out)
+    }
+
+    fn thrown_message(result: Result<VmValue, VmError>) -> String {
+        match result.unwrap_err() {
+            VmError::Thrown(VmValue::String(s)) => s.to_string(),
+            other => panic!("expected Thrown(String), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn assert_with_no_message_uses_default() {
+        let mut out = String::new();
+        let args = [VmValue::Bool(false)];
+        assert_eq!(
+            thrown_message(assert_impl(&args, &mut out)),
+            "Assertion failed"
+        );
+    }
+
+    #[test]
+    fn assert_with_nil_message_uses_default_instead_of_literal_nil() {
+        let mut out = String::new();
+        let args = [VmValue::Bool(false), VmValue::Nil];
+        assert_eq!(
+            thrown_message(assert_impl(&args, &mut out)),
+            "Assertion failed"
+        );
+    }
+
+    #[test]
+    fn assert_with_empty_string_message_uses_default() {
+        let mut out = String::new();
+        let args = [
+            VmValue::Bool(false),
+            VmValue::String(arcstr::ArcStr::from("")),
+        ];
+        assert_eq!(
+            thrown_message(assert_impl(&args, &mut out)),
+            "Assertion failed"
+        );
+    }
+
+    /// The realistic footgun this guards: `assert(cond, json_stringify(x))`
+    /// where `x` turns out to be nil. `json_stringify(nil)` correctly
+    /// returns the string `"null"` (issue is NOT with `json_stringify`);
+    /// forwarding it verbatim as the assertion message must not surface the
+    /// bare word `null` as though it were real diagnostic content.
+    #[test]
+    fn assert_with_message_equal_to_json_null_uses_default() {
+        let mut out = String::new();
+        let args = [
+            VmValue::Bool(false),
+            VmValue::String(arcstr::ArcStr::from("null")),
+        ];
+        assert_eq!(
+            thrown_message(assert_impl(&args, &mut out)),
+            "Assertion failed"
+        );
+    }
+
+    #[test]
+    fn assert_with_real_message_is_preserved() {
+        let mut out = String::new();
+        let args = [
+            VmValue::Bool(false),
+            VmValue::String(arcstr::ArcStr::from("receipt was missing a field")),
+        ];
+        assert_eq!(
+            thrown_message(assert_impl(&args, &mut out)),
+            "receipt was missing a field"
+        );
+    }
+
+    #[test]
+    fn assert_eq_with_nil_message_falls_back_to_synthesized_default() {
+        let mut out = String::new();
+        let args = [VmValue::Int(1), VmValue::Int(2), VmValue::Nil];
+        assert_eq!(
+            thrown_message(assert_eq_impl(&args, &mut out)),
+            "Assertion failed: expected 2, got 1"
+        );
+    }
+
+    #[test]
+    fn assert_ne_with_json_null_message_falls_back_to_synthesized_default() {
+        let mut out = String::new();
+        let args = [
+            VmValue::Int(5),
+            VmValue::Int(5),
+            VmValue::String(arcstr::ArcStr::from("null")),
+        ];
+        assert_eq!(
+            thrown_message(assert_ne_impl(&args, &mut out)),
+            "Assertion failed: values should not be equal: 5"
+        );
     }
 
     #[test]

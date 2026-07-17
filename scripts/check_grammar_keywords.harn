@@ -26,7 +26,7 @@ const TOKEN_RS = "crates/harn-lexer/src/token.rs"
 // Position-sensitive words used in the grammar but deliberately NOT reserved
 // (so user code may still use them as identifiers outside their special
 // position). Keep alphabetical.
-const CONTEXTUAL = ["default", "each", "max_concurrent", "out", "settle", "timeout", "where", "with"]
+const CONTEXTUAL = ["block", "default", "each", "max_concurrent", "out", "settle", "timeout", "where", "with"]
 
 /** Extract the body of the `## Grammar` section from the assembled spec. */
 pub fn grammar_section(spec_text: string) -> string? {

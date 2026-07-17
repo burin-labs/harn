@@ -228,6 +228,16 @@ fn utf16_col_to_byte(line: &str, character: u32) -> usize {
 
 /// Get the word at a given position.
 pub(crate) fn word_at_position(source: &str, position: Position) -> Option<String> {
+    word_span_at_position(source, position).map(|(word, _)| word)
+}
+
+/// The word under the cursor together with its absolute byte start offset.
+///
+/// The start offset is what makes it possible to ask what precedes the word
+/// rather than what precedes the cursor. `char_before_position` answers the
+/// latter, which is the wrong question for hover: a hover cursor lands *inside*
+/// a word (`ex|it`), so the character before it is just the previous letter.
+pub(crate) fn word_span_at_position(source: &str, position: Position) -> Option<(String, usize)> {
     let offset = lsp_position_to_offset(source, position);
     let (line_start, line_end) = line_byte_range(source, position.line as usize)?;
     if offset < line_start || offset > line_end {
@@ -261,7 +271,24 @@ pub(crate) fn word_at_position(source: &str, position: Position) -> Option<Strin
     if start == end {
         return None;
     }
-    Some(line[start..end].to_string())
+    Some((line[start..end].to_string(), line_start + start))
+}
+
+/// Whether the word starting at `word_start` is reached through a receiver
+/// (`recv.name`) rather than named in its own right.
+///
+/// A member access and a bare identifier can spell the same word while meaning
+/// unrelated things: `exit` is a global builtin, but `harness.exit` is not a
+/// method at all. Resolving the former for the latter tells a reader a method
+/// exists when the runtime will reject it.
+///
+/// Leading whitespace is skipped so that a wrapped method chain (`value\n
+/// .map(...)`) still reads as a member access. `..` is excluded because a range
+/// bound (`arr[0..len]`) is not a receiver, and treating it as one would hide
+/// the genuine builtin behind it.
+pub(crate) fn is_member_access(source: &str, word_start: usize) -> bool {
+    let before = source[..word_start].trim_end_matches([' ', '\t', '\r', '\n']);
+    before.ends_with('.') && !before.ends_with("..")
 }
 
 /// Check if cursor is right after a `.` (for method completion).

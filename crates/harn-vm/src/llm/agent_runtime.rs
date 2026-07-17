@@ -9,6 +9,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::agent_events::{
@@ -47,8 +48,28 @@ thread_local! {
 /// Registry of hooks called when an agent-loop session ends. Each hook
 /// receives the `session_id` so it can release resources scoped to that
 /// session (e.g. cancelling orphaned long-running handles).
-static SESSION_END_HOOKS: LazyLock<Mutex<Vec<SessionEndHook>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
+static NEXT_SESSION_END_HOOK_ID: AtomicU64 = AtomicU64::new(1);
+static SESSION_END_HOOKS: LazyLock<Mutex<BTreeMap<u64, SessionEndHook>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+/// Owns one session-end hook registration.
+///
+/// The hook stays active exactly as long as this guard does. This makes
+/// registration lifetime explicit for embedders and prevents abandoned
+/// per-run hooks from accumulating in the process-wide registry.
+#[must_use = "dropping the registration unregisters the session-end hook"]
+pub struct SessionEndHookRegistration {
+    id: u64,
+}
+
+impl Drop for SessionEndHookRegistration {
+    fn drop(&mut self) {
+        SESSION_END_HOOKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.id);
+    }
+}
 
 static SESSION_MCP_CLIENTS: LazyLock<Mutex<BTreeMap<String, BTreeMap<String, VmMcpClientHandle>>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
@@ -263,12 +284,15 @@ pub(crate) async fn emit_agent_event_with_ctx(
 
 /// Register a hook that fires when any agent-loop session ends. The
 /// hook receives the session id and must be `Send + Sync` so it can be
-/// stored across threads. Idempotent registration is the caller's
-/// responsibility.
-pub fn register_session_end_hook(hook: SessionEndHook) {
-    if let Ok(mut hooks) = SESSION_END_HOOKS.lock() {
-        hooks.push(hook);
-    }
+/// stored across threads. Retain the returned guard for as long as the hook
+/// should remain active.
+pub fn register_session_end_hook(hook: SessionEndHook) -> SessionEndHookRegistration {
+    let id = NEXT_SESSION_END_HOOK_ID.fetch_add(1, Ordering::Relaxed);
+    SESSION_END_HOOKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(id, hook);
+    SessionEndHookRegistration { id }
 }
 
 /// Fire every registered session-end hook with `session_id`. Called by
@@ -327,10 +351,14 @@ pub(crate) fn fire_session_end_hooks(session_id: &str, abandon_in_flight: bool) 
             audit: None,
         });
     }
-    if let Ok(hooks) = SESSION_END_HOOKS.lock() {
-        for hook in hooks.iter() {
-            hook(session_id);
-        }
+    let hooks = SESSION_END_HOOKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    for hook in hooks {
+        hook(session_id);
     }
 }
 
@@ -404,6 +432,7 @@ mod tests {
     use crate::agent_events::{ToolCallErrorCategory, ToolCallStatus, ToolMutationStatus};
     use serde_json::json;
     use std::collections::BTreeSet;
+    use std::sync::atomic::AtomicUsize;
 
     #[derive(Default)]
     struct RecordingSink {
@@ -451,6 +480,30 @@ mod tests {
             raw_input_partial: None,
             audit: None,
         }
+    }
+
+    #[test]
+    fn session_end_hook_process_global_lifetime_is_guard_owned_across_resets() {
+        const SESSION_ID: &str = "hook-registration-lifetime";
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let registration = register_session_end_hook(Arc::new(move |session_id| {
+            if session_id == SESSION_ID {
+                observed.fetch_add(1, Ordering::Relaxed);
+            }
+        }));
+
+        crate::reset_thread_local_state();
+        fire_session_end_hooks(SESSION_ID, false);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+
+        drop(registration);
+        fire_session_end_hooks(SESSION_ID, false);
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            1,
+            "dropping the owner must unregister its process-global hook"
+        );
     }
 
     #[test]

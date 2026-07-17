@@ -2171,7 +2171,7 @@ pub fn normalize_inbound(_raw) {
   return {type: "reject", status: 400}
 }
 "#,
-                "network ceiling",
+                "network.http ceiling",
             ),
             (
                 "llm",

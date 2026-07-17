@@ -87,6 +87,7 @@ pub mod module_artifact;
 pub mod observability;
 pub mod op_interrupt;
 pub mod orchestration;
+mod persistent_state;
 pub mod personas;
 mod prepared_module;
 pub mod process_sandbox;
@@ -160,6 +161,7 @@ pub mod waitpoints;
 pub mod workspace_anchor;
 pub mod workspace_path;
 
+pub use persistent_state::{register_persistent_state_builtins_at_root, PersistentStateRoot};
 pub use prepared_module::{PreparedModuleCache, PreparedModuleCacheStats};
 
 pub use actor_chain::{
@@ -222,7 +224,7 @@ pub use llm::trigger_predicate::TriggerPredicateBudget;
 pub use llm::{
     current_agent_session_id, install_llm_cost_budget, install_llm_token_budget,
     peek_llm_cost_budget, peek_llm_token_budget, register_session_end_hook, set_llm_cost_budget,
-    set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard,
+    set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard, SessionEndHookRegistration,
 };
 pub use mcp::{connect_mcp_server_from_json, connect_mcp_server_from_spec, register_mcp_builtins};
 pub use mcp_allowlist::{
@@ -579,6 +581,7 @@ fn reset_llm_state_for_thread_reset() {
     // cooldowns that would otherwise stall a later run under a paused clock.
     llm::reset_rate_limit_registry();
     llm_config::clear_user_overrides();
+    llm_config::clear_runtime_provider_endpoint_overrides();
 }
 
 #[cfg(test)]

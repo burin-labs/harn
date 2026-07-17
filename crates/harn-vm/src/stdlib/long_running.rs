@@ -196,10 +196,10 @@ pub(crate) fn cancel_session_handles(session_id: &str) {
 }
 
 pub(crate) fn register_cleanup_hook() {
-    static REGISTERED: OnceLock<()> = OnceLock::new();
+    static REGISTERED: OnceLock<crate::SessionEndHookRegistration> = OnceLock::new();
     REGISTERED.get_or_init(|| {
         let hook: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(cancel_session_handles);
-        crate::llm::register_session_end_hook(hook);
+        crate::llm::register_session_end_hook(hook)
     });
 }
 

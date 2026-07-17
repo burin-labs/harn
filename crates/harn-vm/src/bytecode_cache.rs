@@ -39,6 +39,7 @@
 use std::fs;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
@@ -46,8 +47,12 @@ use crate::chunk::{CachedChunk, Chunk};
 use crate::compiler::CompilerOptions;
 use crate::module_artifact::ModuleArtifact;
 
-type ImportScan = (String, Vec<String>);
-type SharedImportScan = std::sync::Arc<ImportScan>;
+struct ImportScan {
+    content: Arc<str>,
+    imports: Vec<Arc<str>>,
+}
+
+type SharedImportScan = Arc<ImportScan>;
 type ImportsFileMemoKey = (PathBuf, u64, i128);
 type ImportsFileMemo =
     std::sync::Mutex<std::collections::HashMap<ImportsFileMemoKey, SharedImportScan>>;
@@ -739,8 +744,9 @@ fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
 /// re-scans those files hundreds of times in a single cold run. Because the key
 /// includes `(len, mtime_ns)`, any on-disk edit produces a fresh key and the
 /// stale entry is never reused — a warm long-lived process recompiles edited
-/// pipelines correctly. The returned bytes are identical to the un-memoized
-/// path, so cache keys are byte-for-byte unchanged.
+/// pipelines correctly. Source and import strings stay shared across graph
+/// walks, while the returned bytes remain identical to the un-memoized path, so
+/// cache keys are byte-for-byte unchanged.
 fn imports_file_memo() -> &'static ImportsFileMemo {
     use std::sync::OnceLock;
     static MEMO: OnceLock<ImportsFileMemo> = OnceLock::new();
@@ -791,21 +797,34 @@ fn file_stat_identity(path: &Path) -> Option<(u64, i128)> {
     Some((len, mtime_ns))
 }
 
+fn scan_imports(content: String) -> SharedImportScan {
+    let imports = collect_user_imports(&content)
+        .into_iter()
+        .map(Arc::from)
+        .collect();
+    Arc::new(ImportScan {
+        content: Arc::from(content),
+        imports,
+    })
+}
+
 /// Read `path` and scan its user imports, memoized by stat identity. On an I/O
 /// error, returns the `ErrorKind` string the un-memoized path folded in (errors
 /// are not memoized — a transient failure should not be sticky).
-fn read_and_scan_imports_cached(path: &Path) -> Result<(String, Vec<String>), String> {
+fn read_and_scan_imports_cached(path: &Path) -> Result<SharedImportScan, String> {
     if let Some((len, mtime_ns)) = file_stat_identity(path) {
         let key = (path.to_path_buf(), len, mtime_ns);
         if let Some(hit) = imports_file_memo().lock().unwrap().get(&key).cloned() {
-            return Ok((hit.0.clone(), hit.1.clone()));
+            return Ok(hit);
         }
         match fs::read_to_string(path) {
             Ok(content) => {
-                let nested = collect_user_imports(&content);
-                let entry = std::sync::Arc::new((content.clone(), nested.clone()));
-                imports_file_memo().lock().unwrap().insert(key, entry);
-                Ok((content, nested))
+                let entry = scan_imports(content);
+                imports_file_memo()
+                    .lock()
+                    .unwrap()
+                    .insert(key, Arc::clone(&entry));
+                Ok(entry)
             }
             Err(err) => Err(err.kind().to_string()),
         }
@@ -813,10 +832,7 @@ fn read_and_scan_imports_cached(path: &Path) -> Result<(String, Vec<String>), St
         // No stat (file vanished between resolve and read): fall back to a direct
         // read so behavior matches the un-memoized path exactly.
         match fs::read_to_string(path) {
-            Ok(content) => {
-                let nested = collect_user_imports(&content);
-                Ok((content, nested))
-            }
+            Ok(content) => Ok(scan_imports(content)),
             Err(err) => Err(err.kind().to_string()),
         }
     }
@@ -832,9 +848,9 @@ fn hash_transitive_user_imports_fingerprinted(
 ) -> [u8; 32] {
     let mut visited: std::collections::BTreeMap<PathBuf, ImportNode> =
         std::collections::BTreeMap::new();
-    let mut frontier: Vec<(PathBuf, String)> = collect_user_imports(source)
+    let mut frontier: Vec<(PathBuf, Arc<str>)> = collect_user_imports(source)
         .into_iter()
-        .map(|import| (source_path.to_path_buf(), import))
+        .map(|import| (source_path.to_path_buf(), Arc::from(import)))
         .collect();
 
     while let Some((anchor, import)) = frontier.pop() {
@@ -863,10 +879,15 @@ fn hash_transitive_user_imports_fingerprinted(
         // the un-memoized path (same content + same `collect_user_imports` output),
         // so cache keys are unchanged. See `imports_file_memo`.
         match read_and_scan_imports_cached(&resolved) {
-            Ok((content, nested)) => {
-                visited.insert(canonical.clone(), ImportNode::Resolved { content });
-                for nested_import in nested {
-                    frontier.push((resolved.clone(), nested_import));
+            Ok(scan) => {
+                visited.insert(
+                    canonical.clone(),
+                    ImportNode::Resolved {
+                        content: Arc::clone(&scan.content),
+                    },
+                );
+                for nested_import in &scan.imports {
+                    frontier.push((resolved.clone(), Arc::clone(nested_import)));
                 }
             }
             Err(kind) => {
@@ -909,8 +930,8 @@ fn hash_transitive_user_imports_fingerprinted(
 }
 
 enum ImportNode {
-    Resolved { content: String },
-    Unresolved { import: String },
+    Resolved { content: Arc<str> },
+    Unresolved { import: Arc<str> },
     IoError { kind: String },
 }
 
@@ -1169,6 +1190,26 @@ mod tests {
             "a same-length edit to a transitively-imported file must still change \
              the import-graph hash when recomputed in a warm process"
         );
+    }
+
+    #[test]
+    fn import_scan_memo_shares_source_and_import_allocations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source_path = tmp.path().join("module.harn");
+        std::fs::write(
+            &source_path,
+            "import \"./first\"\nimport \"./second\"\npub fn value() -> int { return 7 }\n",
+        )
+        .unwrap();
+
+        let first = read_and_scan_imports_cached(&source_path).unwrap();
+        let second = read_and_scan_imports_cached(&source_path).unwrap();
+
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &second),
+            "a memo hit must reuse the complete scan instead of copying its source and imports"
+        );
+        assert_eq!(first.imports.len(), 2);
     }
 
     #[test]

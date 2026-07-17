@@ -11,7 +11,6 @@ use harn_parser::DiagnosticSeverity;
 use harn_vm::event_log::EventLog;
 use serde::Serialize;
 
-use crate::commands::mcp::{self, AuthResolution};
 use crate::commands::time::{self, PhaseRecord, RunTiming};
 use crate::package;
 use crate::parse_source_file;
@@ -23,9 +22,14 @@ use crate::skill_loader::{
 mod explain_cost;
 pub mod harnpack;
 pub mod json_events;
+mod lifecycle;
+mod manifest_runtime;
 
 use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
 use self::json_events::NdjsonEmitter;
+pub use self::lifecycle::RunProfileOptions;
+use self::lifecycle::{RunExecution, TerminalRun};
+pub(crate) use self::manifest_runtime::connect_mcp_servers;
 
 /// JSON event-stream configuration for `--json` runs.
 #[derive(Clone, Default)]
@@ -578,22 +582,6 @@ pub enum CliLlmMockMode {
 pub struct RunAttestationOptions {
     pub receipt_out: Option<PathBuf>,
     pub agent_id: Option<String>,
-}
-
-/// Opt-in profiling. When `text` is true the run prints a categorical
-/// breakdown to stderr after execution; when `json_path` is set the same
-/// rollup is serialized to that path. Either flag enables span tracing
-/// (i.e. `harn_vm::tracing::set_tracing_enabled(true)`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RunProfileOptions {
-    pub text: bool,
-    pub json_path: Option<PathBuf>,
-}
-
-impl RunProfileOptions {
-    pub fn is_enabled(&self) -> bool {
-        self.text || self.json_path.is_some()
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1650,7 +1638,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         .unwrap_or("default");
     harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
     vm.set_source_info(path, &source);
-    if !denied_builtins.is_empty() {
+    let lazy_manifest_handlers = !denied_builtins.is_empty();
+    if lazy_manifest_handlers {
         vm.set_denied_builtins(denied_builtins);
     }
     if let Some(ref root) = project_root {
@@ -1714,16 +1703,15 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         };
     vm.set_harness(runtime_harness);
 
-    let extensions = package::load_runtime_extensions(Path::new(path));
-    package::install_runtime_extensions(&extensions);
-    if let Some(manifest) = extensions.root_manifest.as_ref() {
-        if !manifest.mcp.is_empty() {
-            connect_mcp_servers(&manifest.mcp, &mut vm).await;
-        }
-    }
-    if let Err(error) = package::install_manifest_triggers(&mut vm, &extensions).await {
+    // An explicit allow/deny policy belongs to the requested target. Defer
+    // unrelated manifest handler graphs until they actually fire under this VM.
+    if let Err(error) =
+        manifest_runtime::install_manifest_runtime(Path::new(path), &mut vm, lazy_manifest_handlers)
+            .await
+    {
         stderr.push_str(&format!(
-            "error: failed to install manifest triggers: {error}\n"
+            "error: failed to install {}: {error}\n",
+            error.label()
         ));
         time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
         return finalize_run_error(
@@ -1738,28 +1726,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             timing.as_deref(),
             0,
             cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-            "manifest_triggers",
-            error.to_string(),
-        );
-    }
-    if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
-        stderr.push_str(&format!(
-            "error: failed to install manifest hooks: {error}\n"
-        ));
-        time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
-        return finalize_run_error(
-            stdout,
-            stderr,
-            json_session,
-            summary.as_ref(),
-            phase.as_ref(),
-            rusage.as_ref(),
-            run_started,
-            None,
-            timing.as_deref(),
-            0,
-            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-            "manifest_hooks",
+            error.phase(),
             error.to_string(),
         );
     }
@@ -1778,11 +1745,15 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let execution = local
         .run_until(async {
             match vm.execute(&chunk).await {
-                Ok(value) => Ok((vm.output(), value)),
-                Err(e) => Err(vm.format_runtime_error(&e)),
+                Ok(value) => RunExecution::Terminal(TerminalRun::Returned(value)),
+                Err(error) => match error.process_exit_code() {
+                    Some(code) => RunExecution::Terminal(TerminalRun::ProcessExited(code)),
+                    None => RunExecution::Failed(vm.format_runtime_error(&error)),
+                },
             }
         })
         .await;
+    let output = vm.output();
     if let Some(t) = timing.as_deref_mut() {
         t.run_main = main_start.elapsed();
     }
@@ -1815,8 +1786,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     stderr.push_str(&buffered_stderr);
 
     let exit_code = match &execution {
-        Ok((_, return_value)) => exit_code_from_return_value(return_value),
-        Err(_) => 1,
+        RunExecution::Terminal(terminal) => terminal.exit_code(),
+        RunExecution::Failed(_) => 1,
     };
 
     if let (Some(options), Some(log)) = (attestation.as_ref(), attestation_log.as_ref()) {
@@ -1859,7 +1830,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     }
 
     match execution {
-        Ok((output, return_value)) => {
+        RunExecution::Terminal(terminal) => {
             stdout.push_str(output);
             let main_events = harn_vm::tracing::peek_spans().len() as u64;
             let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
@@ -1879,8 +1850,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                     stderr.push_str(&format!("warning: failed to write profile: {error}\n"));
                 }
             }
-            if exit_code != 0 {
-                stderr.push_str(&render_return_value_error(&return_value));
+            if let Some(diagnostic) = terminal.nonzero_return_diagnostic() {
+                stderr.push_str(&diagnostic);
             }
             let aux_emission = emit_run_aux_for_exit(
                 summary.as_ref(),
@@ -1906,7 +1877,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                     outcome.stderr = aux_emission.stderr;
                     return outcome;
                 }
-                let value = harn_vm::llm::vm_value_to_json(&return_value);
+                let value = terminal.json_value();
                 let mut outcome = session.finalize_result(value, aux_emission.exit_code);
                 outcome.stderr = aux_emission.stderr;
                 return outcome;
@@ -1917,7 +1888,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 exit_code: aux_emission.exit_code,
             }
         }
-        Err(rendered_error) => {
+        RunExecution::Failed(rendered_error) => {
             stderr.push_str(&rendered_error);
             let main_events = harn_vm::tracing::peek_spans().len() as u64;
             let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
@@ -2493,95 +2464,6 @@ fn render_return_value_error(value: &harn_vm::VmValue) -> String {
     }
 }
 
-/// Connect to MCP servers declared in `harn.toml` and register them as
-/// `mcp.<name>` globals on the VM. Connection failures are warned but do
-/// not abort execution.
-///
-/// Servers with `lazy = true` are registered with the VM-side MCP
-/// registry but NOT booted — their processes start the first time a
-/// skill's `requires_mcp` list names them or user code calls
-/// `mcp_ensure_active("name")` / `mcp_call(mcp.<name>, ...)`.
-pub(crate) async fn connect_mcp_servers(
-    servers: &[package::McpServerConfig],
-    vm: &mut harn_vm::Vm,
-) {
-    use std::collections::BTreeMap;
-    use std::time::Duration;
-
-    let mut mcp_dict: BTreeMap<String, harn_vm::VmValue> = BTreeMap::new();
-    let mut registrations: Vec<harn_vm::RegisteredMcpServer> = Vec::new();
-
-    for server in servers {
-        let resolved_auth = match mcp::resolve_auth_for_server(server).await {
-            Ok(resolution) => resolution,
-            Err(error) => {
-                eprintln!(
-                    "warning: mcp: failed to load auth for '{}': {}",
-                    server.name, error
-                );
-                AuthResolution::None
-            }
-        };
-        let spec = serde_json::json!({
-            "name": server.name,
-            "transport": server.transport.clone().unwrap_or_else(|| "stdio".to_string()),
-            "command": server.command,
-            "args": server.args,
-            "env": server.env,
-            "url": server.url,
-            "auth_token": match resolved_auth {
-                AuthResolution::StaticBearer(token) => Some(token),
-                AuthResolution::OAuthStore => None,
-                AuthResolution::None => server.auth_token.clone(),
-            },
-            "token_exchange": server.token_exchange.clone(),
-            "protocol_version": server.protocol_version,
-            "protocol_mode": server.protocol_mode,
-            "proxy_server_name": server.proxy_server_name,
-        });
-
-        // Register with the VM-side registry regardless of lazy flag —
-        // skill activation and `mcp_ensure_active` look up specs there.
-        registrations.push(harn_vm::RegisteredMcpServer {
-            name: server.name.clone(),
-            spec: spec.clone(),
-            lazy: server.lazy,
-            card: server.card.clone(),
-            keep_alive: server.keep_alive_ms.map(Duration::from_millis),
-        });
-
-        if server.lazy {
-            eprintln!(
-                "[harn] mcp: deferred '{}' (lazy, boots on first use)",
-                server.name
-            );
-            continue;
-        }
-
-        match harn_vm::connect_mcp_server_from_json(&spec).await {
-            Ok(handle) => {
-                eprintln!("[harn] mcp: connected to '{}'", server.name);
-                harn_vm::mcp_install_active(&server.name, handle.clone());
-                mcp_dict.insert(server.name.clone(), harn_vm::VmValue::mcp_client(handle));
-            }
-            Err(e) => {
-                eprintln!(
-                    "warning: mcp: failed to connect to '{}': {}",
-                    server.name, e
-                );
-            }
-        }
-    }
-
-    // Install registrations AFTER eager connects so `install_active`
-    // above doesn't get overwritten.
-    harn_vm::mcp_register_servers(registrations);
-
-    if !mcp_dict.is_empty() {
-        vm.set_global("mcp", harn_vm::VmValue::dict(mcp_dict));
-    }
-}
-
 pub(crate) fn render_trace_summary() -> String {
     use std::fmt::Write;
     let entries = harn_vm::llm::take_trace();
@@ -2684,19 +2566,10 @@ pub(crate) async fn run_file_mcp_serve(
     emit_loader_warnings(&loaded.loader_warnings);
     install_skills_global(&mut vm, &loaded);
 
-    let extensions = package::load_runtime_extensions(Path::new(path));
-    package::install_runtime_extensions(&extensions);
-    if let Some(manifest) = extensions.root_manifest.as_ref() {
-        if !manifest.mcp.is_empty() {
-            connect_mcp_servers(&manifest.mcp, &mut vm).await;
-        }
-    }
-    if let Err(error) = package::install_manifest_triggers(&mut vm, &extensions).await {
-        eprintln!("error: failed to install manifest triggers: {error}");
-        process::exit(1);
-    }
-    if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
-        eprintln!("error: failed to install manifest hooks: {error}");
+    if let Err(error) =
+        manifest_runtime::install_manifest_runtime(Path::new(path), &mut vm, false).await
+    {
+        eprintln!("error: failed to install {}: {error}", error.label());
         process::exit(1);
     }
 
@@ -2710,10 +2583,7 @@ pub(crate) async fn run_file_mcp_serve(
         .run_until(async {
             match vm.execute(&chunk).await {
                 Ok(_) => {}
-                Err(e) => {
-                    eprint!("{}", vm.format_runtime_error(&e));
-                    process::exit(1);
-                }
+                Err(error) => crate::commands::serve::exit_after_mcp_pipeline_error(&vm, &error),
             }
 
             // Pipeline output goes to stderr — stdout is the MCP transport.

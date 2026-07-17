@@ -193,6 +193,7 @@ statement          ::= let_binding
                      | require_stmt
                      | deadline_block
                      | mutex_block
+                     | block_statement
                      | select_expr
                      | break_stmt
                      | continue_stmt
@@ -225,6 +226,7 @@ guard_stmt         ::= 'guard' expression 'else' '{' block '}'
 require_stmt       ::= 'require' expression [',' expression]
 deadline_block     ::= 'deadline' primary '{' block '}'
 mutex_block        ::= 'mutex' '{' block '}'
+block_statement    ::= 'block' '{' block '}'
 select_expr        ::= 'select' '{'
                          (IDENTIFIER 'from' expression '{' block '}'
                          | 'timeout' expression '{' block '}'
@@ -313,6 +315,11 @@ list_pattern_element  ::= '...' IDENTIFIER
 The `expression_statement` rule handles both bare expressions (function calls, method calls)
 and assignments. An assignment is recognized when the left-hand side is an identifier
 followed by `=`.
+
+`block { ... }` introduces an explicit lexical scope. The `block` word is
+contextual: it remains available as an identifier except when immediately followed by `{`
+at statement position. Bare `{ ... }` is not a block statement because braces already
+introduce dict literals in expression position, including dict-valued function tails.
 
 ### Expressions (by precedence, lowest to highest)
 

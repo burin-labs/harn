@@ -38,6 +38,7 @@
 exempt_checks = [
   "check",                          # the umbrella `check: all` alias
   "check-vm-rss-soak",              # perf/RSS soak, not a sync guard
+  "check-test-case-performance",     # parallel per-test performance ratchet, not a generated mirror
   "check-ported-handler-loc",       # LOC ratchet (epic #2293), not a sync guard
   "check-source-file-lengths",      # exact repo source LOC ratchet, not a generated mirror
   "check-python-boundary",          # repo-language boundary ratchet, not a sync guard

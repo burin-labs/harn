@@ -46,7 +46,8 @@ impl Vm {
     /// background script execution, etc.).
     #[inline]
     pub(crate) fn scope_interrupts_clean(&self) -> bool {
-        self.cancel_token.is_none()
+        self.requested_process_exit().is_none()
+            && self.cancel_token.is_none()
             && self.interrupt_signal_token.is_none()
             && self.pending_interrupt_signal.is_none()
             && self.interrupt_handler_deadline.is_none()
@@ -248,7 +249,10 @@ impl Vm {
 
     /// Convert a VmError into either a handled exception (returning Ok) or a propagated error.
     pub(crate) fn handle_error(&mut self, error: VmError) -> Result<Option<VmValue>, VmError> {
-        if matches!(error, VmError::ExecutionDeadlineExceeded) {
+        if let Some(code) = error.process_exit_code() {
+            self.request_process_exit(code);
+        }
+        if error.is_uncatchable_control_flow() {
             return Err(error);
         }
         let thrown_value = error.thrown_value();
@@ -921,7 +925,7 @@ impl crate::vm::Vm {
             // Leave these untouched:
             // - Thrown: user-thrown errors should not be silently modified
             // - CategorizedError: structured errors for agent orchestration
-            // - Return: control flow, not a real error
+            // - Return / ProcessExit: control flow, not a real error
             // - StackUnderflow / InvalidInstruction: internal VM bugs
             other => other,
         }

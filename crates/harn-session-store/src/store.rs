@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::event::{AppendEvent, EventId, StoredEvent};
+use super::redaction::SharedEventRedactor;
 use super::retention::{RetentionPolicy, SharedArchiveSink, Tombstone};
 use super::signing::SessionSigner;
-use harn_vm::redact::RedactionPolicy;
 
 pub type SessionId = String;
 
@@ -79,6 +79,52 @@ pub struct CreateSession {
     pub tags: Vec<String>,
     #[serde(default)]
     pub attributes: BTreeMap<String, serde_json::Value>,
+}
+
+/// One atomic, idempotent import into a new canonical session.
+///
+/// `source_id` names the external source independently of the target session;
+/// its receipt survives session deletion so retired sources cannot resurrect
+/// data. Reusing a source id with a different digest is a conflict.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportSession {
+    pub source_id: String,
+    pub source_digest: String,
+    pub session: CreateSession,
+    #[serde(default)]
+    pub events: Vec<AppendEvent>,
+}
+
+impl ImportSession {
+    /// Validate the backend-independent import contract.
+    pub fn validate(&self) -> StoreResult<()> {
+        if self.source_id.trim().is_empty() || self.source_digest.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "import source_id and source_digest must be non-empty".to_string(),
+            ));
+        }
+        if self
+            .session
+            .id
+            .as_deref()
+            .is_none_or(|session_id| session_id.trim().is_empty())
+        {
+            return Err(StoreError::InvalidInput(
+                "import session id must be explicit and non-empty".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportResult {
+    pub source_id: String,
+    pub source_digest: String,
+    pub session_id: SessionId,
+    pub event_count: usize,
+    /// True only for the call that committed the import.
+    pub imported: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,13 +232,14 @@ pub type StoreResult<T> = Result<T, StoreError>;
 /// Memory + sqlite backends apply this; callers iterate via cursors.
 pub const MAX_READ_BATCH: usize = 1_000;
 
-/// Optional processors a host can plug in. They run inline on append
-/// and finalisation; backends call these hooks from the `SessionStore`
-/// mutation points.
+/// Optional processors a host can plug in. Mutation hooks run inline before
+/// persistence; redaction is also reapplied to public retrieval projections
+/// as defense in depth for older stored data.
 #[derive(Default, Clone)]
 pub struct StoreHooks {
-    /// Applied to event payloads, headers, and tags before persistence.
-    pub redaction: Option<RedactionPolicy>,
+    /// Applied to event payloads and headers before persistence and again
+    /// when events are read, snapshotted, or replayed.
+    pub redaction: Option<SharedEventRedactor>,
     /// If set, every event is signed at append time. Without a signer
     /// only the `Receipt` event minted by [`SessionStore::close`] is
     /// signed (which is enough to verify the chain end-to-end).
@@ -304,6 +351,15 @@ pub trait SessionStore: Send + Sync {
         );
         Ok(result)
     }
+}
+
+/// Atomic, idempotent ingestion for stores that accept external session data.
+///
+/// This remains separate from [`SessionStore`] so downstream backends do not
+/// need to implement migration semantics unless they expose import support.
+#[async_trait]
+pub trait SessionImporter: SessionStore {
+    async fn import(&self, request: ImportSession) -> StoreResult<ImportResult>;
 }
 
 /// Drain every event for a session via repeated paginated reads. Used

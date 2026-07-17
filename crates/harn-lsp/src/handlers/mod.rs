@@ -11,7 +11,7 @@ mod completion;
 mod definition;
 mod folding;
 mod formatting;
-mod hover;
+pub(crate) mod hover;
 mod lifecycle;
 mod symbols;
 

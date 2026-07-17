@@ -42,6 +42,10 @@ use, the Harn module imports those observation, pending, and state records into
 the Harn primitive on launch or first review instead of maintaining a parallel
 store.
 
+Those per-stream files are migration inputs, not the current session-store
+backend. `std/session-store` now writes all streams through the canonical
+`harn-session-store` SQLite database at `.harn/session-store.sqlite`.
+
 The migration is intentionally lazy: projects that never used the old store pay
 no startup cost, and projects that did keep auditability because the imported
 records become ordinary append-only memory events.

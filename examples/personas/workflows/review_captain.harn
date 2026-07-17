@@ -1,3 +1,8 @@
+@persona(name: "review_captain")
+pub fn review_captain_persona(ctx) {
+  return build_review_receipt_step(ctx)
+}
+
 fn sample_review() {
   return {
     repo: "burin-labs/harn",
@@ -15,15 +20,15 @@ fn review_verdict(review) {
   return "low_risk"
 }
 
-pipeline run(task) {
-  const review = sample_review()
+@step(name: "build_review_receipt", receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
+fn build_review_receipt_step(review) {
   const verdict = review_verdict(review)
   const handoff = if verdict == "needs_follow_up" {
     "merge_captain"
   } else {
     nil
   }
-  const result = {
+  return {
     persona: "review_captain",
     execution_mode: "dry_run",
     approval_required: false,
@@ -40,6 +45,10 @@ pipeline run(task) {
     },
     handoff: handoff,
   }
+}
+
+pub pipeline run(task) -> dict {
+  const result = build_review_receipt_step(sample_review())
   __io_println(json_stringify(result))
   return result
 }

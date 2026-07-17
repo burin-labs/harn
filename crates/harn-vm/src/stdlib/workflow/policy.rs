@@ -83,12 +83,17 @@ pub(super) fn apply_runtime_node_overrides(
             .map(|value| value.display())
             .filter(|value| !value.is_empty());
     }
-    if !node.capability_policy.tools.is_empty() {
-        node.tools = filter_workflow_tools(&node.tools, &node.capability_policy.tools);
+    if node.capability_policy.tools_are_restricted() {
+        let allowed_tools = node
+            .capability_policy
+            .allowed_tool_patterns()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        node.tools = filter_workflow_tools(&node.tools, &allowed_tools);
         node.raw_tools = node
             .raw_tools
             .as_ref()
-            .map(|tools| filter_workflow_tools_vm(tools, &node.capability_policy.tools));
+            .map(|tools| filter_workflow_tools_vm(tools, &allowed_tools));
     }
     node
 }

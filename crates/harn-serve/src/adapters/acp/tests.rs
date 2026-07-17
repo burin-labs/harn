@@ -1663,40 +1663,6 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn acp_provider_catalog_method_matches_export_artifact_with_overrides() {
-    let _reset = crate::test_support::LlmOverrideReset;
-    let overlay = crate::test_support::fixture_provider_overlay();
-    let capability_overlay = crate::test_support::fixture_capability_overlay();
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(
-        AcpServerConfig::new(None)
-            .with_llm_overrides(Some(overlay.clone()), Some(capability_overlay.clone())),
-        AcpOutput::Channel(tx),
-    );
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": HARN_PROVIDER_CATALOG_METHOD,
-            "params": {},
-        }))
-        .await;
-    let response = recv_json(&mut rx).await;
-    let expected = serde_json::to_value(harn_vm::provider_catalog::artifact_with_overrides(
-        Some(&overlay),
-        Some(&capability_overlay),
-    ))
-    .expect("expected catalog json");
-    assert_eq!(response["result"], expected);
-    assert!(response["result"]["providers"]
-        .as_array()
-        .expect("providers")
-        .iter()
-        .any(|provider| provider["id"] == "fixture_runtime"));
-}
-
 #[test]
 fn acp_prompt_capabilities_follow_configured_model_aliases() {
     let _guard = acp_env_lock()
@@ -1976,4 +1942,5 @@ fn every_session_dispatch_arm_checks_authentication() {
 
 mod commands;
 mod modes;
+mod runtime_overrides;
 mod sessions;

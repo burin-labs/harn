@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::test_runner::{RunOptions, TestRunSession, TestRunSessionStats, TestShard};
 
 const PROTOCOL_VERSION: &str = "1";
-const TEST_RUN_SCHEMA_VERSION: u32 = 2;
+const TEST_RUN_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -366,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn pins_test_run_response_schema_v2() {
+    fn pins_test_run_response_schema_v3() {
         let response = TestRunResponse {
             schema_version: TEST_RUN_SCHEMA_VERSION,
             worker_id: "worker-1".to_string(),
@@ -387,6 +387,7 @@ mod tests {
                     file: "test_timeout.harn".to_string(),
                     passed: false,
                     error: Some("timed out".to_string()),
+                    captured_output: Some("[harn] probe\n".to_string()),
                     timeout: Some(crate::test_runner::TestTimeout {
                         phase: crate::test_runner::TestPhase::Execute,
                         limit_ms: 10,
@@ -419,7 +420,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(response).unwrap(),
             json!({
-                "schema_version": 2,
+                "schema_version": 3,
                 "worker_id": "worker-1",
                 "process_id": 42,
                 "run_count": 3,
@@ -437,6 +438,7 @@ mod tests {
                         "file": "test_timeout.harn",
                         "passed": false,
                         "error": "timed out",
+                        "captured_output": "[harn] probe\n",
                         "timeout": {"phase": "execute", "limit_ms": 10},
                         "duration_ms": 12,
                         "phases": {

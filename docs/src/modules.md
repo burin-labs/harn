@@ -569,6 +569,7 @@ Path manipulation utilities:
 | `is_absolute(path)` | Check if a path is absolute |
 | `workspace_info(path, workspace_root?)` | Classify a path at the workspace boundary |
 | `workspace_normalize(path, workspace_root?)` | Normalize a path into workspace-relative form when safe |
+| `workspace_canonicalize_existing(path, workspace_root?)` | Canonicalize an existing path and return it only when it remains under the canonical workspace root |
 | `list_files(dir)` | List files in a directory (one level) |
 | `list_dirs(dir)` | List subdirectories in a directory |
 

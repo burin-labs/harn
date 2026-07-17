@@ -99,9 +99,44 @@ if ! grep -Fxq "CARGO_TARGET_DIR=$metadata_target_dir" "$record"; then
   cat "$record" >&2
   exit 1
 fi
-if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$metadata_target_dir" "$record"; then
-  echo "wrapper did not reuse metadata target_directory for Cargo intermediates" >&2
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=__unset__" "$record"; then
+  echo "wrapper overrode Cargo config for a metadata-discovered target_directory" >&2
   cat "$record" >&2
+  exit 1
+fi
+
+real_workspace="$tmp_root/real-workspace"
+configured_target="$tmp_root/configured target dir"
+configured_build="$tmp_root/configured build dir"
+mkdir -p "$real_workspace/.cargo" "$real_workspace/src"
+cat > "$real_workspace/Cargo.toml" <<'TOML'
+[package]
+name = "shared-build-dir-proof"
+version = "0.1.0"
+edition = "2021"
+TOML
+cat > "$real_workspace/src/lib.rs" <<'RS'
+pub fn proof() -> bool {
+    true
+}
+RS
+cat > "$real_workspace/.cargo/config.toml" <<TOML
+[build]
+target-dir = "$configured_target"
+build-dir = "$configured_build"
+TOML
+(
+  cd "$real_workspace"
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" check --quiet
+)
+if [[ ! -d "$configured_build/debug/.fingerprint" ]]; then
+  echo "wrapper did not preserve Cargo's configured shared build-dir" >&2
+  find "$configured_target" "$configured_build" -maxdepth 3 -print >&2 || true
+  exit 1
+fi
+if [[ -d "$configured_target/debug/.fingerprint" ]]; then
+  echo "metadata-discovered target unexpectedly received intermediate artifacts" >&2
+  find "$configured_target" "$configured_build" -maxdepth 3 -print >&2 || true
   exit 1
 fi
 

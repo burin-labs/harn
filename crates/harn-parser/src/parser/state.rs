@@ -256,11 +256,11 @@ impl Parser {
         )
     }
 
-    /// `scope` is contextual so existing identifiers named `scope` (including
-    /// dict keys and property names) keep working. It starts a structured
-    /// concurrency nursery only when immediately followed by `{`.
-    pub(super) fn check_contextual_scope_block(&self) -> bool {
-        if !self.check_identifier("scope") {
+    /// Block-introducing words remain contextual so identically named values,
+    /// dict keys, and properties keep working. They introduce a block only
+    /// when immediately followed by `{` at statement position.
+    pub(super) fn check_contextual_brace_block(&self, name: &str) -> bool {
+        if !self.check_identifier(name) {
             return false;
         }
         matches!(

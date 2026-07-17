@@ -1,0 +1,15 @@
+true
+deterministic-sweeper
+suggest
+required
+cron
+cron.tick
+persona://reply_digest
+0 */4 * * *
+true
+webhook
+slack
+slack.message
+persona://alerts_triage
+false
+true

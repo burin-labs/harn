@@ -502,6 +502,7 @@ statement          ::= let_binding
                      | require_stmt
                      | deadline_block
                      | mutex_block
+                     | block_statement
                      | select_expr
                      | break_stmt
                      | continue_stmt
@@ -534,6 +535,7 @@ guard_stmt         ::= 'guard' expression 'else' '{' block '}'
 require_stmt       ::= 'require' expression [',' expression]
 deadline_block     ::= 'deadline' primary '{' block '}'
 mutex_block        ::= 'mutex' '{' block '}'
+block_statement    ::= 'block' '{' block '}'
 select_expr        ::= 'select' '{'
                          (IDENTIFIER 'from' expression '{' block '}'
                          | 'timeout' expression '{' block '}'
@@ -622,6 +624,11 @@ list_pattern_element  ::= '...' IDENTIFIER
 The `expression_statement` rule handles both bare expressions (function calls, method calls)
 and assignments. An assignment is recognized when the left-hand side is an identifier
 followed by `=`.
+
+`block { ... }` introduces an explicit lexical scope. The `block` word is
+contextual: it remains available as an identifier except when immediately followed by `{`
+at statement position. Bare `{ ... }` is not a block statement because braces already
+introduce dict literals in expression position, including dict-valued function tails.
 
 ### Expressions (by precedence, lowest to highest)
 
@@ -7400,9 +7407,24 @@ they are intended for test pipelines and the linter warns on non-test use:
 
 | Function | Description |
 |---|---|
-| `assert(condition)` | Throws if `condition` is falsy |
-| `assert_eq(a, b)` | Throws if `a != b`, showing both values |
-| `assert_ne(a, b)` | Throws if `a == b`, showing both values |
+| `assert(condition, message?)` | Throws if `condition` is falsy |
+| `assert_eq(a, b, message?)` | Throws if `a != b`, showing both values |
+| `assert_ne(a, b, message?)` | Throws if `a == b`, showing both values |
+
+All three accept an optional custom `message`. If `message` is omitted, nil,
+an empty string, or the literal string `"null"` (the common result of
+`json_stringify`-ing a value that turned out to be nil), the assertion falls
+back to its default message instead of throwing that uninformative value
+verbatim.
+
+### Captured output
+
+`log`, `print`, `println`, and related output builtins write into a
+per-case buffer rather than directly to the terminal. A passing test stays
+quiet by default; a failing test always prints its buffered output
+alongside the failure. Pass `--verbose` to see a passing test's captured
+output too. `--json-out` and `--junit` reports include it under
+`captured_output` (JUnit: `<system-out>`) whenever it is non-empty.
 
 ### Mock LLM provider
 

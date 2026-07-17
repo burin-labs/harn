@@ -1160,6 +1160,16 @@ id = "moonshot/kimi-k2.6"
 provider = "moonshot"
 tool_format = "native"
 
+[aliases."kimi-k3"]
+id = "moonshot/kimi-k3"
+provider = "moonshot"
+tool_format = "native"
+
+[aliases."moonshot-kimi-k3"]
+id = "moonshot/kimi-k3"
+provider = "moonshot"
+tool_format = "native"
+
 [aliases."moonshot-kimi-k2.7-code"]
 id = "moonshot/kimi-k2.7-code"
 provider = "moonshot"
@@ -1402,17 +1412,17 @@ provider = "llamacpp"
 [aliases."llamacpp-qwen3.6-q4"]
 id = "qwen3.6-35b-a3b-ud-q4-k-xl"
 provider = "llamacpp"
-tool_format = "native"
+tool_format = "json"
 
 [aliases."local-qwen3.6"]
 id = "qwen3.6-35b-a3b-ud-q4-k-xl"
 provider = "llamacpp"
-tool_format = "native"
+tool_format = "json"
 
 [aliases."local-qwen3.6-gguf"]
 id = "qwen3.6-35b-a3b-ud-q4-k-xl"
 provider = "llamacpp"
-tool_format = "native"
+tool_format = "json"
 
 # MLX (Apple Silicon). Local MLX routes use the coding-tuned Qwen3.6-35B-A3B
 # MoE served via `mlx_lm.server` (burin #2717). Keep every MLX alias pointed at
@@ -1732,6 +1742,12 @@ max_tokens = 8192
 # Moonshot's direct Kimi K2.5 route accepts only temperature 1.
 [model_defaults."moonshot/kimi-k2.5"]
 temperature = 1.0
+
+# K3 always reasons and accepts only its maximum effort setting. Sampling is
+# omitted by the capability row; this default selects the required effort
+# without leaking Moonshot-specific request logic into callers.
+[model_defaults."moonshot/kimi-k3"]
+reasoning_effort = "max"
 
 # --- source: 40-defaults/qc.toml ---
 # ── QC defaults ──────────────────────────────────────────────────────────────
@@ -3980,6 +3996,25 @@ capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 2.50, cache_read_per_mtok = 0.15 }
 tier = "frontier"
 open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."moonshot/kimi-k3"]
+name = "Kimi K3 (Moonshot direct)"
+provider = "moonshot"
+wire_model = "kimi-k3"
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
+served_variant = "moonshot-direct"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+# Moonshot K3 tariff: $0.30 cache hit / $3.00 cache miss input and $15.00
+# output per MTok. This frontier route is catalogued but intentionally has no
+# automatic/QC/eval placement.
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
+tier = "frontier"
+open_weight = false
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
