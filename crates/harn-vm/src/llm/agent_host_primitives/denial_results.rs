@@ -15,6 +15,9 @@ pub(super) fn agent_primitive_denied_tool(
     let retryable_denial = denial.is_some_and(|denial| denial.retryable);
     let tool_ceiling_denial =
         denial.is_some_and(|denial| denial.gate == crate::agent_events::DenialGate::ToolCeiling);
+    let side_effect_ceiling_details = denial
+        .filter(|denial| denial.gate == crate::agent_events::DenialGate::SideEffectCeiling)
+        .and_then(|denial| denial.side_effect_ceiling.as_ref());
     let approval_unavailable_denial =
         denial.filter(|denial| denial.gate == crate::agent_events::DenialGate::ApprovalUnavailable);
     // `deny_tool_call` is the sole owner of resolving repairs and normalizing
@@ -24,6 +27,8 @@ pub(super) fn agent_primitive_denied_tool(
         repair
     } else if category.is_recoverable() || retryable_denial {
         super::agent_tools::recoverable_tool_result(tool_name, reason.clone())
+    } else if let Some(details) = side_effect_ceiling_details {
+        super::agent_tools::side_effect_ceiling_tool_result(tool_name, reason.clone(), details)
     } else if tool_ceiling_denial {
         super::agent_tools::unavailable_tool_result(tool_name, reason.clone())
     } else if let Some(denial) = approval_unavailable_denial {

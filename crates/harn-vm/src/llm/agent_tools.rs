@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::agent_events::ToolExecutor;
+use crate::agent_events::{SideEffectCeilingDetails, ToolExecutor};
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 
 pub(super) mod approval_denials;
@@ -38,6 +38,31 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
          Make progress with the tools you are allowed to use, or if this capability is \
          essential, briefly tell the user what you need permission for and why.\
          {available_clause}"
+    );
+    serde_json::json!({
+        "error": "permission_denied",
+        "tool": tool_name,
+        "reason": reason,
+        "next_step": next_step,
+    })
+}
+
+/// Build actionable feedback for a hard side-effect ceiling. Unlike a generic
+/// permission denial, this names the typed policy facts so the model can
+/// choose a non-mutating path or ask an operator to change the owned policy.
+pub(super) fn side_effect_ceiling_tool_result(
+    tool_name: &str,
+    reason: impl Into<String>,
+    details: &SideEffectCeilingDetails,
+) -> serde_json::Value {
+    let reason = reason.into();
+    let next_step = format!(
+        "`{tool_name}` requires side-effect level `{}`, but this session permits only through `{}`. \
+         Do not retry the same call. Choose a non-mutating approach, or ask the operator to raise \
+         the session side-effect ceiling to `{}` before retrying.",
+        details.required_level.as_str(),
+        details.ceiling.as_str(),
+        details.required_level.as_str(),
     );
     serde_json::json!({
         "error": "permission_denied",

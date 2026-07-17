@@ -1400,6 +1400,53 @@ fn execution_policy_capability_ceiling_records_gate_and_capability() {
 }
 
 #[test]
+fn side_effect_ceiling_grant_is_exact_to_the_denied_tool_and_effect() {
+    use crate::agent_events::DenialGate;
+    use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
+
+    let mut tool_annotations = BTreeMap::new();
+    tool_annotations.insert(
+        "exec".to_string(),
+        ToolAnnotations {
+            side_effect_level: SideEffectLevel::ProcessExec,
+            ..Default::default()
+        },
+    );
+    tool_annotations.insert(
+        "fetch".to_string(),
+        ToolAnnotations {
+            side_effect_level: SideEffectLevel::Network,
+            ..Default::default()
+        },
+    );
+    push_execution_policy(CapabilityPolicy {
+        tools: vec!["exec".to_string(), "fetch".to_string()],
+        side_effect_level: Some("read_only".to_string()),
+        tool_annotations,
+        ..Default::default()
+    });
+
+    let exec_denial = enforce_current_policy_for_tool("exec").unwrap_err();
+    assert_eq!(exec_denial.gate, DenialGate::SideEffectCeiling);
+    let grant = exec_denial
+        .side_effect_grant_for("exec")
+        .expect("side-effect denial produces an exact one-call grant");
+    assert!(enforce_current_policy_for_tool_with_side_effect_grant("exec", Some(&grant)).is_ok());
+
+    let fetch_denial =
+        enforce_current_policy_for_tool_with_side_effect_grant("fetch", Some(&grant)).unwrap_err();
+    pop_execution_policy();
+    assert_eq!(fetch_denial.gate, DenialGate::SideEffectCeiling);
+    assert_eq!(
+        fetch_denial
+            .side_effect_ceiling
+            .expect("typed side-effect details")
+            .required_level,
+        SideEffectLevel::Network
+    );
+}
+
+#[test]
 fn arg_constraint_denial_records_arg_constraint_gate() {
     use crate::agent_events::DenialGate;
     let policy = CapabilityPolicy {
