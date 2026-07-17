@@ -247,6 +247,33 @@ if ! grep -Fq "xargs -0 env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- fmt
   exit 1
 fi
 
+pure_pr_gate="$tmp_root/pure-pr-gate.txt"
+harn_pr_gate="$tmp_root/harn-pr-gate.txt"
+make -C "$repo_root" -n test-pr-gate-scripts > "$pure_pr_gate"
+if grep -Eq 'nextest_filters_from_paths_test|claude_dev_setup_once_test|publish_script_test|harn_bin\.sh' "$pure_pr_gate"; then
+  echo "test-pr-gate-scripts must stay buildless" >&2
+  cat "$pure_pr_gate" >&2
+  exit 1
+fi
+
+make -C "$repo_root" -n test-pr-gate-harn-scripts HARN_BIN="$fake_harn" > "$harn_pr_gate"
+for expected in \
+  './scripts/tests/nextest_filters_from_paths_test.sh' \
+  './scripts/tests/claude_dev_setup_once_test.sh' \
+  './scripts/tests/publish_script_test.sh'
+do
+  if ! grep -Fq "$expected" "$harn_pr_gate"; then
+    echo "test-pr-gate-harn-scripts omitted Harn-backed regression: $expected" >&2
+    cat "$harn_pr_gate" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq "env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh --print" "$harn_pr_gate"; then
+  echo "test-pr-gate-harn-scripts did not reuse the supplied HARN_BIN" >&2
+  cat "$harn_pr_gate" >&2
+  exit 1
+fi
+
 make_provider_targets="$tmp_root/make-provider-targets.txt"
 make -C "$repo_root" -n \
   gen-provider-catalog check-provider-catalog \

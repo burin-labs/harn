@@ -597,6 +597,8 @@ jobs:
           cache-bin: false
       - name: Warm Harn CLI
         run: ./scripts/ci_warm_harn_bin.sh
+      - name: Run Harn-backed PR gate scripts
+        run: make test-pr-gate-harn-scripts
       # These targets invoke Harn, so keep them after cache restore and the
       # warm HARN_BIN export.
       - name: Check OpenAPI contract

@@ -1,4 +1,4 @@
-.PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy
+.PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts test-pr-gate-harn-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy
 
 HARN_BIN ?=
 HARN_PROTOCOL_ARTIFACT_VERSION ?=
@@ -15,7 +15,7 @@ HARN_PROTOCOL_ARTIFACT_CHECK_ARGS = $(if $(strip $(HARN_PROTOCOL_ARTIFACT_VERSIO
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-cli-aot check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-pr-gate-harn-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-cli-aot check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
 
 check: all
 
@@ -350,7 +350,6 @@ test-pr-gate-scripts:
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_tag_push_idempotent_test.sh
 	./scripts/tests/merge_group_path_gate_test.sh
-	./scripts/tests/nextest_filters_from_paths_test.sh
 	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_fast_default_mode_test.sh
 	./scripts/tests/hook_rust_gate_test.sh
@@ -364,14 +363,21 @@ test-pr-gate-scripts:
 	./scripts/tests/harn_bin_resolver_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/release_smoke_workflow_test.sh
-	./scripts/tests/claude_dev_setup_once_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh
 	./scripts/tests/release_prepare_env_test.sh
-	./scripts/tests/publish_script_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
+
+# These tests execute Harn scripts, so callers that care about build placement
+# should pass a warmed HARN_BIN. Resolve once here for local `make all` users;
+# the CI audit lane invokes this target only after warming its binary.
+test-pr-gate-harn-scripts:
+	@$(HARN_BIN_ASSIGN); \
+	HARN_BIN="$$harn_bin" ./scripts/tests/nextest_filters_from_paths_test.sh; \
+	HARN_BIN="$$harn_bin" ./scripts/tests/claude_dev_setup_once_test.sh; \
+	HARN_BIN="$$harn_bin" ./scripts/tests/publish_script_test.sh
 
 # Format check (no changes, for CI)
 fmt-check:
