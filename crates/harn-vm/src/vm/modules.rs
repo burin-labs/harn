@@ -44,7 +44,6 @@ fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize>
         .map(|artifact| Arc::as_ptr(artifact) as usize)
 }
 
-#[derive(Clone)]
 pub(crate) struct LoadedModule {
     pub(crate) functions: BTreeMap<String, Arc<VmClosure>>,
     pub(crate) public_names: HashSet<String>,
@@ -63,6 +62,15 @@ pub(crate) struct LoadedModule {
     pub(crate) _module_functions: crate::value::ModuleFunctionRegistry,
     pub(crate) _module_state: crate::value::ModuleState,
 }
+
+/// Runtime module cache shared by child VMs within one execution tree.
+///
+/// The map stays copy-on-write so a child can add modules without mutating its
+/// parent. Cache entries are never replaced after instantiation, so cache hits
+/// and map copies share their export maps plus their existing shared
+/// registries/state through a cheap outer [`Arc`] instead of cloning the whole
+/// module.
+pub(crate) type ModuleCache = Arc<BTreeMap<PathBuf, Arc<LoadedModule>>>;
 
 /// An import whose target module was still mid-load (an import cycle) when the
 /// importing module reached it. The target's function closures don't exist yet
@@ -328,7 +336,7 @@ impl Vm {
         &mut self,
         synthetic: PathBuf,
         source: &str,
-    ) -> Result<LoadedModule, VmError> {
+    ) -> Result<Arc<LoadedModule>, VmError> {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
@@ -346,11 +354,11 @@ impl Vm {
         };
 
         self.imported_paths.push(synthetic.clone());
-        let loaded = self.instantiate_module(None, &artifact).await?;
+        let loaded = Arc::new(self.instantiate_module(None, &artifact).await?);
         self.imported_paths.pop();
         {
             let _load_span = self.module_load_span();
-            Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+            Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
         }
         self.record_module_loaded();
         Ok(loaded)
@@ -361,7 +369,7 @@ impl Vm {
         module: &str,
         synthetic: PathBuf,
         source: &'static str,
-    ) -> Result<LoadedModule, VmError> {
+    ) -> Result<Arc<LoadedModule>, VmError> {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
@@ -374,11 +382,11 @@ impl Vm {
             self.module_phase_recorder.as_ref(),
         )?;
         self.imported_paths.push(synthetic.clone());
-        let loaded = self.instantiate_stdlib_module(artifact.as_ref()).await?;
+        let loaded = Arc::new(self.instantiate_stdlib_module(artifact.as_ref()).await?);
         self.imported_paths.pop();
         {
             let _load_span = self.module_load_span();
-            Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+            Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
         }
         self.record_module_loaded();
         Ok(loaded)
@@ -816,13 +824,15 @@ impl Vm {
             };
 
             let module_source_dir = file_path.parent().map(|p| p.to_path_buf());
-            let loaded = self
-                .instantiate_module(module_source_dir, artifact.as_ref())
-                .await?;
+            let loaded = Arc::new(
+                self.instantiate_module(module_source_dir, artifact.as_ref())
+                    .await?,
+            );
             self.imported_paths.pop();
             {
                 let _load_span = self.module_load_span();
-                Arc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
+                Arc::make_mut(&mut self.module_cache)
+                    .insert(canonical.clone(), Arc::clone(&loaded));
             }
             self.record_module_loaded();
             {
@@ -1070,6 +1080,70 @@ mod tests {
     fn cached_stdlib_module_ptr(module: &str) -> Option<usize> {
         let source = harn_stdlib::get_stdlib_source(module).expect("stdlib module source exists");
         stdlib_module_artifact_cache_ptr(module, source)
+    }
+
+    #[test]
+    fn child_cow_module_cache_reuses_loaded_module_arcs_but_fresh_roots_do_not() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+
+        runtime.block_on(async {
+            let primary_key = PathBuf::from("<test>/primary.harn");
+            let primary_source = "pub fn primary() { return 1 }\n";
+            let mut parent = Vm::new();
+            let parent_loaded = parent
+                .load_module_from_source(primary_key.clone(), primary_source)
+                .await
+                .expect("parent module loads");
+            assert!(Arc::ptr_eq(
+                &parent_loaded,
+                parent
+                    .module_cache
+                    .get(&primary_key)
+                    .expect("parent cache holds primary"),
+            ));
+
+            let mut child = parent.child_vm();
+            child
+                .load_module_from_source(
+                    PathBuf::from("<test>/child-only.harn"),
+                    "pub fn child_only() { return 2 }\n",
+                )
+                .await
+                .expect("child-only module loads");
+            let child_loaded = child
+                .load_module_from_source(primary_key.clone(), primary_source)
+                .await
+                .expect("child cache hit succeeds");
+
+            assert!(Arc::ptr_eq(&parent_loaded, &child_loaded));
+            assert!(Arc::ptr_eq(
+                &parent_loaded,
+                parent
+                    .module_cache
+                    .get(&primary_key)
+                    .expect("parent cache remains unchanged"),
+            ));
+            assert!(Arc::ptr_eq(
+                &parent_loaded,
+                child
+                    .module_cache
+                    .get(&primary_key)
+                    .expect("child COW cache retains primary"),
+            ));
+
+            let mut fresh = Vm::new();
+            let fresh_loaded = fresh
+                .load_module_from_source(primary_key, primary_source)
+                .await
+                .expect("fresh root module loads");
+            assert!(
+                !Arc::ptr_eq(&parent_loaded, &fresh_loaded),
+                "fresh roots must still instantiate isolated runtime module state"
+            );
+        });
     }
 
     #[test]
