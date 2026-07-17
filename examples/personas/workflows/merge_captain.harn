@@ -55,7 +55,7 @@ fn build_merge_plan_step(pr) {
   }
 }
 
-pipeline run(task) {
+pub pipeline run(task) -> dict {
   const result = build_merge_plan_step(sample_pull_request())
   __io_println(json_stringify(result))
   return result

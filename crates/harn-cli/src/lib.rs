@@ -1272,7 +1272,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
         },
         Command::Persona(args) => match args.command {
             PersonaCommand::New(new) => {
-                if let Err(error) = commands::persona_scaffold::run_new(&new) {
+                if let Err(error) = commands::persona_scaffold::run_new(&new).await {
                     eprintln!("error: {error}");
                     process::exit(1);
                 }
