@@ -25,6 +25,12 @@ pub(crate) struct RunArgs {
     /// Allow only the listed builtins as a comma-separated list.
     #[arg(long, conflicts_with = "deny")]
     pub allow: Option<String>,
+    /// Explicitly authorize a named risky operation for this run. Repeatable.
+    ///
+    /// This is operator authority, not pipeline configuration: names are exact
+    /// (for example `git.push`) and the resulting receipt records the grant.
+    #[arg(long = "approve-risky", value_name = "OPERATION")]
+    pub approve_risky: Vec<String>,
     /// Disable the default worktree filesystem/process sandbox and
     /// network egress fail-closed guard for this run.
     #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
@@ -228,6 +234,18 @@ pub(crate) struct RunArgs {
     // with `trailing_var_arg = true` panics at clap runtime.
     #[arg(last = true)]
     pub argv: Vec<String>,
+}
+
+impl RunArgs {
+    pub(crate) fn install_operator_approval_grant(
+        &self,
+    ) -> Option<harn_vm::orchestration::OperatorApprovalGrantGuard> {
+        harn_vm::orchestration::OperatorApprovalGrant::from_cli_operations(
+            self.approve_risky.clone(),
+        )
+        .unwrap_or_else(|error| crate::command_error(&error))
+        .map(harn_vm::orchestration::install_operator_approval_grant)
+    }
 }
 
 /// Parse the `--timeout` argument for `harn run`.

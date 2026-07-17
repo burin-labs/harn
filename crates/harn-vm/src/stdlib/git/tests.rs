@@ -256,6 +256,122 @@ async fn git_subprocess_carries_noninteractive_prompt_guard() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn protected_push_requires_operator_grant_and_records_it() {
+    if !require_git() {
+        return;
+    }
+    crate::event_log::reset_active_event_log();
+    crate::stdlib::reset_stdlib_state();
+    let remote = tempfile::tempdir().expect("remote");
+    git(remote.path(), &["init", "--bare"]);
+    let one = tempfile::tempdir().expect("clone one");
+    git(
+        one.path(),
+        &["clone", remote.path().to_str().unwrap(), "repo"],
+    );
+    let one_repo = one.path().join("repo");
+    git(&one_repo, &["checkout", "-b", "main"]);
+    git(&one_repo, &["config", "user.email", "harn@example.test"]);
+    git(&one_repo, &["config", "user.name", "Harn Test"]);
+    fs::write(one_repo.join("file.txt"), "initial\n").expect("write initial");
+    git(&one_repo, &["add", "file.txt"]);
+    git(&one_repo, &["commit", "-m", "initial"]);
+    git(&one_repo, &["push", "origin", "HEAD:refs/heads/main"]);
+    let expected_oid = String::from_utf8(
+        Command::new("git")
+            .args(["rev-parse", "refs/remotes/origin/main"])
+            .current_dir(&one_repo)
+            .output()
+            .expect("rev-parse")
+            .stdout,
+    )
+    .expect("utf8")
+    .trim()
+    .to_string();
+
+    fs::write(one_repo.join("file.txt"), "operator authorized\n").expect("write update");
+    git(&one_repo, &["commit", "-am", "operator authorized"]);
+    let command = GitCommand {
+        operation: "git.push",
+        action: "git.push",
+        cwd: one_repo.clone(),
+        argv: vec![
+            "git".to_string(),
+            "push".to_string(),
+            format!("--force-with-lease=refs/heads/main:{expected_oid}"),
+            "origin".to_string(),
+            "HEAD:refs/heads/main".to_string(),
+        ],
+        mutation: GitMutation::Risky,
+        affected_paths: Vec::new(),
+        data_parser: GitDataParser::Push {
+            refspec: "HEAD:refs/heads/main".to_string(),
+        },
+    };
+
+    run_on_local(async {
+        let rejected = run_git_command(None, command.clone())
+            .await
+            .expect_err("protected push without an operator grant must be rejected");
+        assert!(
+            rejected
+                .to_string()
+                .contains("approval required but no host bridge is attached"),
+            "unexpected rejection: {rejected}"
+        );
+
+        crate::orchestration::push_approval_policy(crate::orchestration::ToolApprovalPolicy {
+            auto_approve: vec!["git.push".to_string()],
+            ..Default::default()
+        });
+        let rejected = run_git_command(None, command.clone())
+            .await
+            .expect_err("pipeline approval policy must not create operator authority");
+        assert!(
+            rejected
+                .to_string()
+                .contains("approval required but no host bridge is attached"),
+            "unexpected policy-source rejection: {rejected}"
+        );
+        crate::orchestration::pop_approval_policy();
+
+        let grant = crate::orchestration::OperatorApprovalGrant::from_cli_operations(vec![
+            "git.push".to_string(),
+        ])
+        .expect("valid operator grant")
+        .expect("non-empty grant");
+        let _grant_guard = crate::orchestration::install_operator_approval_grant(grant);
+
+        crate::orchestration::push_approval_policy(crate::orchestration::ToolApprovalPolicy {
+            auto_deny: vec!["git.push".to_string()],
+            ..Default::default()
+        });
+        let denied = run_git_command(None, command.clone())
+            .await
+            .expect_err("policy denial must override operator authority");
+        assert!(
+            denied.to_string().contains("matches deny pattern"),
+            "unexpected policy denial: {denied}"
+        );
+        crate::orchestration::pop_approval_policy();
+
+        let receipt = run_git_command(None, command.clone())
+            .await
+            .expect("operator grant should authorize exact lease push");
+        let receipt = crate::llm::vm_value_to_json(&receipt);
+        assert_eq!(receipt["success"], true);
+        assert_eq!(receipt["data"]["pushed"], true);
+        assert_eq!(
+            receipt["approval"]["schema"],
+            "harn.operator-approval-grant.v1"
+        );
+        assert_eq!(receipt["approval"]["approver"], "cli");
+        assert_eq!(receipt["approval"]["operation"], "git.push");
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn force_with_lease_detects_advanced_remote_before_push() {
     if !require_git() {
         return;

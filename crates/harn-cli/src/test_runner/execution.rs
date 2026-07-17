@@ -58,9 +58,13 @@ pub(super) async fn execute_case(
     loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
+    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
 ) -> TestResult {
     let _egress_scope = harn_vm::egress::scope_egress_policy_for_current_thread();
     harn_vm::reset_thread_local_state();
+    let _operator_approval_guard = operator_approval_grant
+        .cloned()
+        .map(harn_vm::orchestration::install_operator_approval_grant);
     let _stdio_guard = (!stdio_available).then(harn_vm::reserve_stdio_for_current_thread);
     reset_hostlib_state();
 

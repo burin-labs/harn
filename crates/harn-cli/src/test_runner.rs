@@ -286,13 +286,32 @@ pub fn run_tests_with_session<'a>(
     options: &'a RunOptions,
     session: &'a TestRunSession,
 ) -> Pin<Box<dyn Future<Output = TestSummary> + 'a>> {
-    Box::pin(run_tests_with_session_impl(path, options, session))
+    run_tests_with_session_and_operator_grant(path, options, session, None)
+}
+
+/// Run tests with an explicit operator grant that follows every worker.
+///
+/// `harn test --parallel` uses dedicated OS threads, so a thread-local grant
+/// installed by the CLI must be transported through this runner explicitly.
+pub(crate) fn run_tests_with_session_and_operator_grant<'a>(
+    path: &'a Path,
+    options: &'a RunOptions,
+    session: &'a TestRunSession,
+    operator_approval_grant: Option<&'a harn_vm::orchestration::OperatorApprovalGrant>,
+) -> Pin<Box<dyn Future<Output = TestSummary> + 'a>> {
+    Box::pin(run_tests_with_session_impl(
+        path,
+        options,
+        session,
+        operator_approval_grant,
+    ))
 }
 
 async fn run_tests_with_session_impl(
     path: &Path,
     options: &RunOptions,
     session: &TestRunSession,
+    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
 ) -> TestSummary {
     // Default LLM provider to "mock" in test mode unless caller overrides.
     let _default_llm_provider = ScopedEnvVar::set_if_unset("HARN_LLM_PROVIDER", "mock");
@@ -364,6 +383,7 @@ async fn run_tests_with_session_impl(
             total_tests,
             session,
             skill_contexts,
+            operator_approval_grant,
         )
         .await
     } else {
@@ -475,6 +495,7 @@ async fn run_test_file_with_session_impl(
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
+                None,
             )
             .await,
         );
@@ -1056,6 +1077,7 @@ async fn execute_cases(
     total_tests: usize,
     session: &TestRunSession,
     skill_contexts: PreparedSkillContexts,
+    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
 ) -> CaseExecutionResults {
     if cases.is_empty() {
         return CaseExecutionResults::default();
@@ -1084,6 +1106,7 @@ async fn execute_cases(
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
+                operator_approval_grant,
             )
             .await;
             let result = enforce_case_budgets(result, options.max_test_ms, options.max_execute_ms);
@@ -1129,6 +1152,7 @@ async fn execute_cases(
         let cancelled = Arc::clone(&cancelled);
         let prepared_module_cache = session.prepared_module_cache(worker_idx);
         let stdio_available = session.stdio_available();
+        let operator_approval_grant = operator_approval_grant.cloned();
         let handle = thread::Builder::new()
             .name(format!("harn-test-worker-{worker_idx}"))
             .stack_size(CLI_RUNTIME_STACK_SIZE)
@@ -1179,6 +1203,7 @@ async fn execute_cases(
                         loaded_skills,
                         &prepared_module_cache,
                         stdio_available,
+                        operator_approval_grant.as_ref(),
                     ));
                     let result = enforce_case_budgets(result, max_test_ms, max_execute_ms);
                     if fail_fast && !result.passed {

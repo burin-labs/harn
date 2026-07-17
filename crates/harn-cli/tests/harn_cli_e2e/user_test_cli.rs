@@ -2,6 +2,9 @@
 
 use std::process::Command;
 
+#[path = "user_test_cli/operator_grants.rs"]
+mod operator_grants;
+
 fn binary_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
 }

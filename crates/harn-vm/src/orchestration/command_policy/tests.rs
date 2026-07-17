@@ -883,3 +883,39 @@ async fn policy_present_floor_blocks_full_set_including_workflow() {
     assert_proceed(&preflight_argv(&["ls", "-la"]).await);
     clear_command_policies();
 }
+
+#[tokio::test]
+async fn reviewed_lease_push_still_obeys_explicit_git_force_push_denial() {
+    clear_command_policies();
+    let mut policy = CommandPolicy::default();
+    policy.deny_labels.insert("git_force_push".to_string());
+    push_command_policy(policy);
+
+    let preflight = run_command_policy_preflight_with_origin(
+        None,
+        &argv_params(&[
+            "git",
+            "push",
+            "--force-with-lease=main:abc123",
+            "origin",
+            "HEAD:main",
+        ]),
+        JsonValue::Null,
+        CommandDispatchOrigin::ReviewedGitPushWithLease,
+    )
+    .await
+    .expect("preflight succeeds");
+
+    match preflight {
+        CommandPolicyPreflight::Blocked { decisions, .. } => assert!(
+            decisions
+                .iter()
+                .any(|decision| decision.source == "deny_labels"),
+            "expected an explicit deny_labels decision, got {decisions:?}"
+        ),
+        CommandPolicyPreflight::Proceed { .. } => {
+            panic!("explicit git_force_push policy must override the reviewed origin")
+        }
+    }
+    clear_command_policies();
+}

@@ -15,8 +15,10 @@ use crate::trust_graph::{AutonomyTier, TrustOutcome, TrustRecord};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+mod approval;
 mod read;
 
+use approval::enforce_git_approval;
 use read::{
     describe_argv, ls_remote_argv, parse_describe, parse_ls_remote, parse_tag_list, tag_list_argv,
 };
@@ -805,89 +807,16 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
         "operation": command.operation,
         "session_id": crate::llm::current_agent_session_id(),
     });
-    crate::stdlib::host::dispatch_process_exec(&params, caller).await
-}
-
-async fn enforce_git_approval(
-    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-    command: &GitCommand,
-) -> Result<Option<JsonValue>, VmError> {
-    let args = json!({
-        "operation": command.operation,
-        "argv": command.argv,
-        "cwd": display_path(&command.cwd),
-        "affected_paths": command.affected_paths,
-    });
-    if command.mutation == GitMutation::Risky {
-        let approval = request_permission(ctx, command.operation, &args, None).await?;
-        return Ok(Some(approval));
-    }
-    let Some(policy) = crate::orchestration::current_approval_policy() else {
-        return Ok(None);
-    };
-    let decision = policy.evaluate_detailed(command.operation, &args);
-    if decision.is_allow() {
-        Ok(None)
-    } else if decision.is_deny() {
-        Err(VmError::CategorizedError {
-            message: decision.reason,
-            category: crate::value::ErrorCategory::ToolRejected,
-        })
+    if command.operation == "git.push"
+        && command.mutation == GitMutation::Risky
+        && command
+            .argv
+            .get(2)
+            .is_some_and(|arg| arg.starts_with("--force-with-lease="))
+    {
+        crate::stdlib::host::dispatch_reviewed_git_push_with_lease(&params, caller).await
     } else {
-        request_permission(ctx, command.operation, &args, Some(decision.receipt))
-            .await
-            .map(Some)
-    }
-}
-
-async fn request_permission(
-    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-    operation: &str,
-    args: &JsonValue,
-    policy_decision: Option<JsonValue>,
-) -> Result<JsonValue, VmError> {
-    let Some(bridge) = ctx.and_then(|ctx| ctx.child_vm().bridge.clone()) else {
-        return Err(VmError::CategorizedError {
-            message: format!("{operation}: approval required but no host bridge is attached"),
-            category: crate::value::ErrorCategory::ToolRejected,
-        });
-    };
-    let approval_id = format!("git-{}", Uuid::now_v7());
-    let approval_request = crate::stdlib::hitl::approval_request_for_host_permission(
-        approval_id.clone(),
-        operation.to_string(),
-        args.clone(),
-        crate::llm::current_agent_session_id().unwrap_or_else(|| "harn".to_string()),
-        Vec::new(),
-        policy_decision
-            .as_ref()
-            .map(|decision| json!({"policy_decision": decision}))
-            .unwrap_or(JsonValue::Null),
-        vec![format!("stdlib.{operation}")],
-    );
-    let approval_request_json = serde_json::to_value(&approval_request).unwrap_or(JsonValue::Null);
-    let response = bridge
-        .call(
-            crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
-            crate::llm::acp_permission::request_params(
-                crate::llm::current_agent_session_id().as_deref(),
-                &approval_id,
-                operation,
-                args,
-                approval_request_json,
-                &policy_decision.clone().unwrap_or(JsonValue::Null),
-                None,
-            ),
-        )
-        .await?;
-    match crate::llm::acp_permission::parse_response(&response) {
-        crate::llm::acp_permission::WireOutcome::Allowed => Ok(response),
-        crate::llm::acp_permission::WireOutcome::Rejected { reason } => {
-            Err(VmError::CategorizedError {
-                message: format!("{operation}: approval denied: {reason}"),
-                category: crate::value::ErrorCategory::ToolRejected,
-            })
-        }
+        crate::stdlib::host::dispatch_process_exec(&params, caller).await
     }
 }
 

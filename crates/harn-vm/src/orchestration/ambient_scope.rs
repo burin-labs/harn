@@ -36,8 +36,8 @@ use super::command_policy::{
     swap_command_policy_hook_depth, swap_command_policy_stack, CommandPolicy,
 };
 use super::policy::{
-    swap_approval_policy_stack, swap_execution_policy_stack, swap_trusted_bridge_depth,
-    CapabilityPolicy, ToolApprovalPolicy,
+    swap_approval_policy_stack, swap_execution_policy_stack, swap_operator_approval_grant_stack,
+    swap_trusted_bridge_depth, CapabilityPolicy, OperatorApprovalGrant, ToolApprovalPolicy,
 };
 use super::tool_precheck::{swap_tool_precheck_depth, swap_tool_precheck_stack};
 use super::{swap_mutation_session, MutationSessionRecord, RunExecutionRecord};
@@ -69,6 +69,7 @@ use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderConte
 pub(crate) struct AmbientExecutionScope {
     execution: Vec<CapabilityPolicy>,
     approval: Vec<ToolApprovalPolicy>,
+    operator_approval_grants: Vec<OperatorApprovalGrant>,
     command: Vec<CommandPolicy>,
     permissions: Vec<DynamicPermissionPolicy>,
     runtime_context: Vec<RuntimeContextOverlay>,
@@ -174,7 +175,8 @@ impl AmbientExecutionScope {
     /// this task-local copy, and `swap_in` preserves that breadcrumb across
     /// subsequent awaits.
     ///
-    /// The execution context, source dir, and mutation session ARE inherited:
+    /// The execution context, source dir, mutation session, and operator grants
+    /// ARE inherited:
     /// the worker overwrites all three at the top of `execute_worker_config`,
     /// but it first awaits (`emit_worker_event`) while they still hold the
     /// parent's values — pre-scoping the raw thread-local already read through to
@@ -182,6 +184,7 @@ impl AmbientExecutionScope {
     /// byte-identical while giving each fan-out child its own isolated copy.
     pub(crate) fn capture_inherited() -> Self {
         Self {
+            operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
             command: clone_via_swap(swap_command_policy_stack),
             precheck: clone_via_swap(swap_tool_precheck_stack),
             permissions: clone_via_swap(swap_dynamic_permission_stack),
@@ -237,6 +240,7 @@ impl AmbientExecutionScope {
         Self {
             execution: clone_via_swap(swap_execution_policy_stack),
             approval: clone_via_swap(swap_approval_policy_stack),
+            operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
             command: clone_via_swap(swap_command_policy_stack),
             permissions: clone_via_swap(swap_dynamic_permission_stack),
             runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
@@ -273,6 +277,9 @@ impl AmbientExecutionScope {
         Self {
             execution: swap_execution_policy_stack(self.execution),
             approval: swap_approval_policy_stack(self.approval),
+            operator_approval_grants: swap_operator_approval_grant_stack(
+                self.operator_approval_grants,
+            ),
             command: swap_command_policy_stack(self.command),
             permissions: swap_dynamic_permission_stack(self.permissions),
             runtime_context: swap_runtime_context_overlay_stack(self.runtime_context),
@@ -385,6 +392,7 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     // --- Captured: swapped per-poll into each worker's isolated scope. ---
     ("EXECUTION_POLICY_STACK", AmbientScoping::Captured),
     ("EXECUTION_APPROVAL_POLICY_STACK", AmbientScoping::Captured),
+    ("OPERATOR_APPROVAL_GRANT_STACK", AmbientScoping::Captured),
     ("COMMAND_POLICY_STACK", AmbientScoping::Captured),
     ("DYNAMIC_PERMISSION_STACK", AmbientScoping::Captured),
     ("RUNTIME_CONTEXT_OVERLAY_STACK", AmbientScoping::Captured),
@@ -594,7 +602,10 @@ impl<F: Future> Future for Scoped<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::{current_execution_policy, push_execution_policy};
+    use crate::orchestration::{
+        clear_execution_policy_stacks, current_execution_policy, current_operator_approval_grant,
+        install_operator_approval_grant, push_execution_policy, OperatorApprovalGrant,
+    };
     use crate::stdlib::template::{
         current_llm_render_context, LlmRenderContext, LlmRenderContextGuard,
     };
@@ -713,6 +724,31 @@ mod tests {
             .await;
         // The outer thread is left clean — neither task's policy leaked out.
         assert!(current_execution_policy().is_none());
+    }
+
+    #[tokio::test]
+    async fn inherited_scope_carries_operator_grant_across_awaits() {
+        clear_execution_policy_stacks();
+        let grant = OperatorApprovalGrant::from_cli_operations(["git.push".to_string()])
+            .expect("valid operation")
+            .expect("non-empty grant");
+        let grant_guard = install_operator_approval_grant(grant);
+        let child_scope = AmbientExecutionScope::capture_inherited();
+
+        let local = tokio::task::LocalSet::new();
+        let receipt = local
+            .run_until(scope_ambient(child_scope, async {
+                tokio::task::yield_now().await;
+                tokio::task::yield_now().await;
+                current_operator_approval_grant().and_then(|grant| grant.receipt_for("git.push"))
+            }))
+            .await
+            .expect("child inherited operator grant");
+
+        assert_eq!(receipt["operation"], "git.push");
+        assert!(current_operator_approval_grant().is_some());
+        drop(grant_guard);
+        assert!(current_operator_approval_grant().is_none());
     }
 
     /// Files-written attribution regression: fan-out workers are spawned while a
@@ -1265,6 +1301,7 @@ mod tests {
         let expected: BTreeSet<&str> = [
             "EXECUTION_POLICY_STACK",
             "EXECUTION_APPROVAL_POLICY_STACK",
+            "OPERATOR_APPROVAL_GRANT_STACK",
             "COMMAND_POLICY_STACK",
             "DYNAMIC_PERMISSION_STACK",
             "RUNTIME_CONTEXT_OVERLAY_STACK",

@@ -227,6 +227,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             GuardCommand::Remove(remove_args) => commands::guard::run_remove(&remove_args),
         },
         Command::Run(args) => {
+            let _operator_approval_guard = args.install_operator_approval_grant();
             if !args.explain_cost {
                 match (args.eval.as_deref(), args.file.as_deref()) {
                     (Some(code), None) => {
@@ -282,7 +283,6 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 allow_unsigned: args.allow_unsigned,
                 dry_run_verify: args.dry_run_verify,
             };
-
             if let Some(resume_target) = args.resume.as_deref() {
                 let exit_code = commands::run::run_resume_with_skill_dirs(
                     resume_target,

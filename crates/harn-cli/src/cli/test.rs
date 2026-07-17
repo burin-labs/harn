@@ -33,6 +33,10 @@ pub(crate) struct TestArgs {
     /// pipeline execution; other targets bound their test case or subprocess.
     #[arg(long, default_value_t = 30_000)]
     pub timeout: u64,
+    /// Explicitly authorize a named risky operation for user-test execution.
+    /// Repeatable. Names are exact (for example `git.push`).
+    #[arg(long = "approve-risky", value_name = "OPERATION")]
+    pub approve_risky: Vec<String>,
     /// Fail a passing user test whose total wall-clock time exceeds this
     /// many milliseconds. Also honored via HARN_TEST_MAX_MS.
     #[arg(long = "max-test-ms", value_name = "MS", env = "HARN_TEST_MAX_MS")]

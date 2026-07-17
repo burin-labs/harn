@@ -43,6 +43,29 @@ fn test_run_rejects_deny_allow_conflict() {
 }
 
 #[test]
+fn test_parses_explicit_risky_operation_grants() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--approve-risky",
+        "git.push",
+        "--approve-risky",
+        "git.tag",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(args.approve_risky, vec!["git.push", "git.tag"]);
+
+    let cli = Cli::parse_from(["harn", "test", "--approve-risky", "git.push", "tests"]);
+    let Command::Test(args) = cli.command.unwrap() else {
+        panic!("expected test command");
+    };
+    assert_eq!(args.approve_risky, vec!["git.push"]);
+}
+
+#[test]
 fn test_parses_dap_subcommand() {
     let cli = Cli::parse_from(["harn", "dap"]);
 
