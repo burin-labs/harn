@@ -53,14 +53,14 @@ run_check() {
 assert_rebuilt_for() {
   local label=$1
   local log_path=$2
-  local asset=$3
+  local watched_root=$3
   if ! grep -Fq "Dirty harn-cli" "$log_path"; then
     echo "$label asset change did not dirty harn-cli" >&2
     cat "$log_path" >&2
     exit 1
   fi
-  if ! grep -Fq "$asset" "$log_path"; then
-    echo "$label rebuild did not cite the changed asset: $asset" >&2
+  if ! grep -Fq "$watched_root" "$log_path"; then
+    echo "$label rebuild did not cite the watched root: $watched_root" >&2
     cat "$log_path" >&2
     exit 1
   fi
@@ -73,7 +73,10 @@ run_check "$tmp_root/persona-baseline.log" check --quiet
 sleep 1
 printf '\n# embedded asset rebuild test marker\n' >> "$persona_asset"
 run_check "$tmp_root/persona-dirty.log" -vv check
-assert_rebuilt_for "persona template" "$tmp_root/persona-dirty.log" "$persona_asset"
+assert_rebuilt_for \
+  "persona template" \
+  "$tmp_root/persona-dirty.log" \
+  "crates/harn-cli/assets/persona-templates"
 
 # Refresh after restoration before exercising the second root. Without this,
 # Cargo could cite the first restoration and falsely attribute the dirty build
@@ -89,7 +92,7 @@ run_check "$tmp_root/portal-baseline.log" check --quiet
 sleep 1
 printf '\n// embedded asset rebuild test marker\n' >> "$portal_asset"
 run_check "$tmp_root/portal-dirty.log" -vv check
-assert_rebuilt_for "portal asset" "$tmp_root/portal-dirty.log" "$portal_asset"
+assert_rebuilt_for "portal asset" "$tmp_root/portal-dirty.log" "$portal_dist"
 
 cp -p "$persona_backup" "$persona_asset"
 if ! git diff --quiet -- "$persona_asset"; then
