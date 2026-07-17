@@ -110,6 +110,11 @@ pub enum VmError {
     /// A host-imposed deadline expired while executing the VM. Unlike a Harn
     /// `deadline` block, this control-plane stop cannot be caught by user code.
     ExecutionDeadlineExceeded,
+    /// A Harn program requested that its embedding process terminate with this
+    /// status code. Like a host deadline, this is control flow rather than a
+    /// catchable Harn error; the embedding boundary owns the final cleanup and
+    /// process exit.
+    ProcessExit(i32),
     /// A host dropped a polled top-level execution future. Interpreter state is
     /// intentionally not resumed after arbitrary async cancellation. Discard
     /// this VM; see [`crate::Vm::execute_with_timeout`] for ambient-state
@@ -147,6 +152,21 @@ pub enum VmError {
 }
 
 impl VmError {
+    /// Whether this error is VM control flow that user `catch` blocks and
+    /// error-as-data combinators must propagate unchanged.
+    pub fn is_uncatchable_control_flow(&self) -> bool {
+        matches!(self, Self::ExecutionDeadlineExceeded | Self::ProcessExit(_))
+    }
+
+    /// The requested host-process exit status, when this is an explicit Harn
+    /// `exit(code)` control signal.
+    pub fn process_exit_code(&self) -> Option<i32> {
+        match self {
+            Self::ProcessExit(code) => Some(*code),
+            _ => None,
+        }
+    }
+
     /// The `VmValue` a `catch` binding (or a `parallel settle` result) observes
     /// for this error: the raw thrown value for [`VmError::Thrown`] (so a
     /// structured error — e.g. a `{category, message}` dict from `throw_error` —
@@ -323,6 +343,10 @@ pub fn categorized_error(message: impl Into<String>, category: ErrorCategory) ->
 pub fn error_to_category(err: &VmError) -> ErrorCategory {
     match err {
         VmError::ExecutionDeadlineExceeded => ErrorCategory::Timeout,
+        // ProcessExit is uncatchable control flow rather than an agent-facing
+        // failure. Keep this fallback total for callers that classify an
+        // arbitrary VmError without treating the request as retryable.
+        VmError::ProcessExit(_) => ErrorCategory::Generic,
         VmError::AbandonedExecution => ErrorCategory::Cancelled,
         VmError::CategorizedError { category, .. } => category.clone(),
         VmError::Thrown(VmValue::Dict(d)) => d
@@ -471,6 +495,7 @@ impl std::fmt::Display for VmError {
             VmError::Runtime(msg) => write!(f, "Runtime error: {msg}"),
             VmError::DivisionByZero => write!(f, "Division by zero"),
             VmError::ExecutionDeadlineExceeded => write!(f, "Execution deadline exceeded"),
+            VmError::ProcessExit(code) => write!(f, "Process exit requested: {code}"),
             VmError::AbandonedExecution => write!(
                 f,
                 "Execution future was abandoned; discard this VM and reset its exclusively owned execution context"

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::chunk::{Chunk, ChunkRef, Constant};
@@ -272,6 +272,44 @@ pub(crate) struct TaskScope {
     pub(crate) env_scope_depth: usize,
 }
 
+/// Terminal exit requested by any VM in one execution tree. A process exit is
+/// global control flow, so child VMs share this latch with their parent rather
+/// than relying on a task being explicitly awaited.
+pub(crate) struct ProcessExitRequest {
+    code: Mutex<Option<i32>>,
+    requested: AtomicBool,
+}
+
+impl ProcessExitRequest {
+    fn new() -> Self {
+        Self {
+            code: Mutex::new(None),
+            requested: AtomicBool::new(false),
+        }
+    }
+
+    fn request(&self, code: i32) {
+        let mut recorded = self
+            .code
+            .lock()
+            .expect("process exit request lock poisoned");
+        if recorded.is_none() {
+            *recorded = Some(code);
+            self.requested.store(true, Ordering::Release);
+        }
+    }
+
+    fn code(&self) -> Option<i32> {
+        if !self.requested.load(Ordering::Acquire) {
+            return None;
+        }
+        *self
+            .code
+            .lock()
+            .expect("process exit request lock poisoned")
+    }
+}
+
 /// Iterator state for for-in loops.
 pub(crate) enum IterState {
     Vec {
@@ -341,6 +379,8 @@ pub struct Vm {
     pub(crate) exception_handlers: Vec<ExceptionHandler>,
     /// Spawned async task handles.
     pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
+    /// Shared terminal process-exit latch for this execution tree.
+    pub(crate) process_exit_request: Arc<ProcessExitRequest>,
     /// Shared process-local synchronization primitives inherited by child VMs.
     pub(crate) sync_runtime: Arc<crate::synchronization::VmSyncRuntime>,
     /// Shared process-local cells, maps, and mailboxes inherited by child VMs.
@@ -540,6 +580,7 @@ impl VmBaseline {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
             inline_cache_sets: Vec::new(),
@@ -792,6 +833,7 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
             inline_cache_sets: Vec::new(),
@@ -968,6 +1010,7 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            process_exit_request: Arc::clone(&self.process_exit_request),
             sync_runtime: self.sync_runtime.clone(),
             shared_state_runtime: self.shared_state_runtime.clone(),
             inline_cache_sets: Vec::new(),
@@ -1026,6 +1069,14 @@ impl Vm {
     /// closures while sharing the parent's builtins, globals, and module state.
     pub(crate) fn child_vm_for_host(&self) -> Vm {
         self.child_vm()
+    }
+
+    pub(crate) fn request_process_exit(&self, code: i32) {
+        self.process_exit_request.request(code);
+    }
+
+    pub(crate) fn requested_process_exit(&self) -> Option<i32> {
+        self.process_exit_request.code()
     }
 
     /// Request cancellation for every outstanding child task owned by this VM

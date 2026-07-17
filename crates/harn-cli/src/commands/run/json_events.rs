@@ -376,4 +376,71 @@ mod tests {
             "seq must stay contiguous after quiet filtering"
         );
     }
+
+    #[tokio::test]
+    async fn explicit_exit_emits_stdio_and_one_result_event() {
+        let _guard = SINK_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        harn_vm::reset_thread_local_state();
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let script = temp.path().join("main.harn");
+        std::fs::write(
+            &script,
+            r#"
+fn main(harness: Harness) {
+  harness.stdio.print("before ")
+  harness.stdio.println("exit")
+  harness.stdio.eprintln("diagnostic")
+  exit(2)
+}
+"#,
+        )
+        .expect("write script");
+        let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
+
+        let outcome = super::super::execute_run_json(
+            &script.to_string_lossy(),
+            false,
+            std::collections::HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            super::super::CliLlmMockMode::Off,
+            None,
+            super::super::RunProfileOptions::default(),
+            Box::new(BufWriter(buffer.clone())),
+            super::super::RunJsonOptions::default(),
+        )
+        .await;
+
+        assert_eq!(outcome.exit_code, 2, "stderr:\n{}", outcome.stderr);
+        let events: Vec<serde_json::Value> = String::from_utf8(buffer.lock().unwrap().clone())
+            .expect("utf8")
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_str(line).expect("valid NDJSON event"))
+            .collect();
+        let stdout = events
+            .iter()
+            .filter(|event| event["data"]["event_type"] == "stdout")
+            .map(|event| event["data"]["payload"].as_str().expect("stdout payload"))
+            .collect::<String>();
+        let stderr = events
+            .iter()
+            .filter(|event| event["data"]["event_type"] == "stderr")
+            .map(|event| event["data"]["payload"].as_str().expect("stderr payload"))
+            .collect::<String>();
+        let terminal: Vec<&serde_json::Value> = events
+            .iter()
+            .filter(|event| event["data"]["event_type"] == "result")
+            .collect();
+
+        assert_eq!(stdout, "before exit\n");
+        assert_eq!(stderr, "diagnostic\n");
+        assert_eq!(terminal.len(), 1, "events: {events:#?}");
+        assert_eq!(terminal[0]["data"]["exit_code"], 2);
+        assert!(terminal[0]["data"]["value"].is_null());
+        assert!(events
+            .iter()
+            .all(|event| event["data"]["event_type"] != "error"));
+        harn_vm::reset_thread_local_state();
+    }
 }

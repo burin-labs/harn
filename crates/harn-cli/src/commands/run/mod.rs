@@ -684,6 +684,45 @@ struct ExecuteRunInputs<'a> {
     harnpack: HarnpackRunOptions,
 }
 
+/// Terminal VM outcomes that still complete through the normal CLI cleanup
+/// path. An explicit Harn `exit(code)` is not a runtime error: the CLI must
+/// preserve its captured output and emit the same receipts it would for a
+/// returned value.
+enum TerminalRun {
+    Returned(harn_vm::VmValue),
+    ProcessExited(i32),
+}
+
+impl TerminalRun {
+    fn exit_code(&self) -> i32 {
+        match self {
+            Self::Returned(value) => exit_code_from_return_value(value),
+            Self::ProcessExited(code) => *code,
+        }
+    }
+
+    fn json_value(&self) -> serde_json::Value {
+        match self {
+            Self::Returned(value) => harn_vm::llm::vm_value_to_json(value),
+            Self::ProcessExited(_) => serde_json::Value::Null,
+        }
+    }
+
+    fn nonzero_return_diagnostic(&self) -> Option<String> {
+        match self {
+            Self::Returned(value) if self.exit_code() != 0 => {
+                Some(render_return_value_error(value))
+            }
+            Self::Returned(_) | Self::ProcessExited(_) => None,
+        }
+    }
+}
+
+enum RunExecution {
+    Terminal(TerminalRun),
+    Failed(String),
+}
+
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
 /// instead of spawning the `harn` binary; the binary entry point translates
 /// it into real stdout/stderr writes + `process::exit`.
@@ -1751,11 +1790,15 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let execution = local
         .run_until(async {
             match vm.execute(&chunk).await {
-                Ok(value) => Ok((vm.output(), value)),
-                Err(e) => Err(vm.format_runtime_error(&e)),
+                Ok(value) => RunExecution::Terminal(TerminalRun::Returned(value)),
+                Err(error) => match error.process_exit_code() {
+                    Some(code) => RunExecution::Terminal(TerminalRun::ProcessExited(code)),
+                    None => RunExecution::Failed(vm.format_runtime_error(&error)),
+                },
             }
         })
         .await;
+    let output = vm.output();
     if let Some(t) = timing.as_deref_mut() {
         t.run_main = main_start.elapsed();
     }
@@ -1788,8 +1831,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     stderr.push_str(&buffered_stderr);
 
     let exit_code = match &execution {
-        Ok((_, return_value)) => exit_code_from_return_value(return_value),
-        Err(_) => 1,
+        RunExecution::Terminal(terminal) => terminal.exit_code(),
+        RunExecution::Failed(_) => 1,
     };
 
     if let (Some(options), Some(log)) = (attestation.as_ref(), attestation_log.as_ref()) {
@@ -1832,7 +1875,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     }
 
     match execution {
-        Ok((output, return_value)) => {
+        RunExecution::Terminal(terminal) => {
             stdout.push_str(output);
             let main_events = harn_vm::tracing::peek_spans().len() as u64;
             let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
@@ -1852,8 +1895,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                     stderr.push_str(&format!("warning: failed to write profile: {error}\n"));
                 }
             }
-            if exit_code != 0 {
-                stderr.push_str(&render_return_value_error(&return_value));
+            if let Some(diagnostic) = terminal.nonzero_return_diagnostic() {
+                stderr.push_str(&diagnostic);
             }
             let aux_emission = emit_run_aux_for_exit(
                 summary.as_ref(),
@@ -1879,7 +1922,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                     outcome.stderr = aux_emission.stderr;
                     return outcome;
                 }
-                let value = harn_vm::llm::vm_value_to_json(&return_value);
+                let value = terminal.json_value();
                 let mut outcome = session.finalize_result(value, aux_emission.exit_code);
                 outcome.stderr = aux_emission.stderr;
                 return outcome;
@@ -1890,7 +1933,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 exit_code: aux_emission.exit_code,
             }
         }
-        Err(rendered_error) => {
+        RunExecution::Failed(rendered_error) => {
             stderr.push_str(&rendered_error);
             let main_events = harn_vm::tracing::peek_spans().len() as u64;
             let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
