@@ -706,27 +706,8 @@ pub fn persist_cli_llm_mock_recording(mode: &CliLlmMockMode) -> Result<(), Strin
         harn_vm::llm::clear_cli_llm_mock_mode();
         return Ok(());
     };
-    if let Some(parent) = fixture_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|error| {
-                format!(
-                    "failed to create fixture directory {}: {error}",
-                    parent.display()
-                )
-            })?;
-        }
-    }
-
-    let lines = harn_vm::llm::take_cli_llm_recordings()
-        .into_iter()
-        .map(harn_vm::llm::serialize_llm_mock)
-        .collect::<Result<Vec<_>, _>>()?;
-    let body = if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    };
-    let result = fs::write(fixture_path, body)
+    let body = harn_vm::llm::serialize_llm_mock_fixture(harn_vm::llm::take_cli_llm_recordings())?;
+    let result = harn_vm::atomic_io::atomic_write(fixture_path, body.as_bytes())
         .map_err(|error| format!("failed to write {}: {error}", fixture_path.display()));
     harn_vm::llm::clear_cli_llm_mock_mode();
     result

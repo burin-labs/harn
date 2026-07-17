@@ -1894,7 +1894,8 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |
 | `tiktoken_tokenizer_info(model)` | model: string | dict | Return `{model, model_family, source, exact, known_model_family, encoder}` for the encoder or heuristic fallback used by a model ID |
-| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `scope` (fixture bucket this entry serves; defaults to `default`), `consume` (`once`\|`sticky`), `id` (stable receipt id), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}` (short-circuits the call and surfaces the same structured error dict as live provider failures — useful for testing `llm_call_safe` envelopes and retry loops) |
+| `llm_mock(config)` | config: dict | nil | Queue one legacy v0 mock response. Supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}`. v0 entries always use the shared default scope. |
+| `llm_mock_load_jsonl(text)` | text: string | dict | Parse and atomically replace the deterministic fixture store from a complete JSONL document. Returns `{schema_version, strict_scopes, count, scopes}`. The caller owns filesystem reads; malformed text leaves the active fixture unchanged. |
 | `llm_mock_calls()` | — | list | Return list of `{messages, system, tools}` for all calls made to the mock provider |
 | `llm_mock_receipts()` | — | list | Return the scope-consumption receipts `{scope, matched, entry_id, consume}`, one per mock-provider dispatch while a fixture is active |
 | `llm_mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
@@ -1942,6 +1943,16 @@ llm_mock({text: "step 2", match: "*planner*", consume_match: true})
 // it the same way they would a live provider failure.
 llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
 llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+
+// A v1 fixture is one complete document, installed atomically. Scopes isolate
+// concurrent main/judge calls; strictScopes forbids default fallback.
+const fixture = """
+{"schemaVersion":1,"strictScopes":true}
+{"id":"main-1","scope":"main","consume":"once","text":"Implement the change."}
+{"id":"judge-1","scope":"judge","consume":"sticky","match":"*","text":"PASS"}
+"""
+const loaded = llm_mock_load_jsonl(fixture)
+assert_eq(loaded.count, 2)
 
 // Inspect what was sent
 const calls = llm_mock_calls()

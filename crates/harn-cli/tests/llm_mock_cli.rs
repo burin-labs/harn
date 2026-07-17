@@ -286,7 +286,7 @@ fn llm_mock_record_replays_identical_output() {
         r#"
 pipeline default() {
   const provider = env_or("TEST_PROVIDER", "mock")
-  const result = llm_call("hello world", nil, {provider: provider})
+  const result = llm_call("hello world", nil, {provider: provider, mock_scope: "main"})
   __io_println(transcript_render_full(result.transcript))
 }
 "#,
@@ -311,7 +311,14 @@ pipeline default() {
     );
 
     let recorded_fixture = fs::read_to_string(&fixtures).unwrap();
-    assert_eq!(recorded_fixture.lines().count(), 1);
+    assert_eq!(recorded_fixture.lines().count(), 2, "{recorded_fixture}");
+    let parsed_fixture = harn_vm::llm::load_llm_mocks_jsonl(&fixtures).expect("parse v1 recording");
+    assert_eq!(parsed_fixture.schema_version, 1);
+    assert!(!parsed_fixture.strict_scopes);
+    assert_eq!(parsed_fixture.mocks.len(), 1);
+    assert_eq!(parsed_fixture.mocks[0].entry_id, "record-0");
+    assert_eq!(parsed_fixture.mocks[0].scope, "main");
+    assert!(!parsed_fixture.mocks[0].sticky);
 
     let replayed = run_harn_in_process(
         temp.path().to_path_buf(),
@@ -400,7 +407,7 @@ pub fn build_prompt(task) {
         r#"
 pipeline default() {
   const provider = env_or("TEST_PROVIDER", "mock")
-  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {provider: provider})
+  const result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {provider: provider, mock_scope: "playground"})
   __io_println(transcript_render_full(result.transcript))
 }
 "#,
@@ -423,7 +430,11 @@ pipeline default() {
     .expect("record run succeeds");
 
     let recorded_fixture = fs::read_to_string(&fixtures).unwrap();
-    assert_eq!(recorded_fixture.lines().count(), 1);
+    assert_eq!(recorded_fixture.lines().count(), 2, "{recorded_fixture}");
+    let parsed_fixture = harn_vm::llm::load_llm_mocks_jsonl(&fixtures).expect("parse v1 recording");
+    assert_eq!(parsed_fixture.schema_version, 1);
+    assert_eq!(parsed_fixture.mocks[0].entry_id, "record-0");
+    assert_eq!(parsed_fixture.mocks[0].scope, "playground");
 
     let replayed_stdout = run_playground_in_process(
         temp.path().to_path_buf(),

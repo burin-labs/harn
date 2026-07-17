@@ -8,6 +8,7 @@ use super::{helpers, mock};
 
 const LLM_MOCK_BUILTINS: &[&VmBuiltinDef] = &[
     &LLM_MOCK_BUILTIN_DEF,
+    &LLM_MOCK_LOAD_JSONL_BUILTIN_DEF,
     &LLM_MOCK_CALLS_BUILTIN_DEF,
     &LLM_MOCK_RECEIPTS_BUILTIN_DEF,
     &LLM_MOCK_CLEAR_BUILTIN_DEF,
@@ -15,12 +16,12 @@ const LLM_MOCK_BUILTINS: &[&VmBuiltinDef] = &[
     &LLM_MOCK_POP_SCOPE_BUILTIN_DEF,
 ];
 
-/// Register llm_mock / llm_mock_calls / llm_mock_clear builtins.
+/// Register deterministic LLM mock builtins.
 pub(super) fn register_llm_mock_builtins(vm: &mut Vm) {
     register_builtin_defs(vm, LLM_MOCK_BUILTINS);
 }
 
-/// Register a deterministic LLM mock response for tests.
+/// Register a legacy v0 inline LLM mock response for tests.
 #[harn_builtin(sig = "llm_mock(config: dict) -> nil", category = "llm.mock")]
 fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let config = match args.first() {
@@ -31,235 +32,53 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             ))
         }
     };
-
-    let text = config.get("text").map(|v| v.display()).unwrap_or_default();
-
-    let tool_calls = match config.get("tool_calls") {
-        Some(VmValue::List(list)) => list
-            .iter()
-            .map(helpers::vm_value_to_json)
-            .collect::<Vec<_>>(),
-        _ => Vec::new(),
-    };
-    let logprobs = match config.get("logprobs") {
-        Some(VmValue::List(list)) => list
-            .iter()
-            .map(helpers::vm_value_to_json)
-            .collect::<Vec<_>>(),
-        Some(VmValue::Nil) | None => Vec::new(),
-        _ => {
-            return Err(VmError::Runtime(
-                "llm_mock: logprobs must be a list of token logprob dicts".to_string(),
-            ))
-        }
-    };
-    let blocks = match config.get("blocks") {
-        Some(VmValue::List(list)) => Some(
-            list.iter()
-                .map(helpers::vm_value_to_json)
-                .collect::<Vec<_>>(),
-        ),
-        Some(VmValue::Nil) | None => None,
-        _ => {
-            return Err(VmError::Runtime(
-                "llm_mock: blocks must be a list of response blocks".to_string(),
-            ))
-        }
-    };
-
-    // Optional ordered visible-text chunks for streaming callers. Each entry
-    // is emitted as a separate delta by the streaming delta pump; non-streaming
-    // callers see only the flat `text` (derived from the concatenation when
-    // `text` is omitted).
-    let stream_chunks = match config.get("stream_chunks") {
-        Some(VmValue::List(list)) => {
-            let mut chunks = Vec::with_capacity(list.len());
-            for item in list.iter() {
-                match item {
-                    VmValue::String(s) => chunks.push(s.to_string()),
-                    other => {
-                        return Err(VmError::Runtime(format!(
-                            "llm_mock: stream_chunks entries must be strings; got {}",
-                            other.type_name()
-                        )))
-                    }
-                }
-            }
-            chunks
-        }
-        Some(VmValue::Nil) | None => Vec::new(),
-        _ => {
-            return Err(VmError::Runtime(
-                "llm_mock: stream_chunks must be a list of strings".to_string(),
-            ))
-        }
-    };
-
-    let match_pattern = config.get("match").and_then(|v| {
-        if matches!(v, VmValue::Nil) {
-            None
-        } else {
-            Some(v.display())
-        }
-    });
-    let consume_on_match = matches!(config.get("consume_match"), Some(VmValue::Bool(true)));
-    // Scope/consume parity with the file-fixture contract. `consume` (v1
-    // vocabulary) wins when present; otherwise the legacy shape decides —
-    // reusable glob unless `consume_match`, FIFO always consumed.
-    let scope = match config.get("scope") {
-        None | Some(VmValue::Nil) => mock::DEFAULT_MOCK_SCOPE.to_string(),
-        Some(value) => {
-            let name = value.display();
-            if name.trim().is_empty() {
-                mock::DEFAULT_MOCK_SCOPE.to_string()
-            } else {
-                name
-            }
-        }
-    };
-    let entry_id = match config.get("id") {
-        None | Some(VmValue::Nil) => String::new(),
-        Some(value) => value.display(),
-    };
-    let sticky = match config.get("consume") {
-        None | Some(VmValue::Nil) => match_pattern.is_some() && !consume_on_match,
-        Some(VmValue::String(mode)) => match mode.as_str() {
-            "once" => false,
-            "sticky" => true,
-            other => {
-                return Err(VmError::Runtime(format!(
-                    "llm_mock: consume must be \"once\" or \"sticky\", got {other:?}"
-                )))
-            }
-        },
-        Some(_) => {
-            return Err(VmError::Runtime(
-                "llm_mock: consume must be a string \"once\" or \"sticky\"".to_string(),
-            ))
-        }
-    };
-
-    let input_tokens = config.get("input_tokens").and_then(|v| v.as_int());
-    let output_tokens = config.get("output_tokens").and_then(|v| v.as_int());
-    let cache_read_tokens = config.get("cache_read_tokens").and_then(|v| v.as_int());
-    let cache_write_tokens = config
-        .get("cache_write_tokens")
-        .and_then(|v| v.as_int())
-        .or_else(|| {
-            config
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_int())
-        });
-    let thinking = config.get("thinking").and_then(|v| {
-        if matches!(v, VmValue::Nil) {
-            None
-        } else {
-            Some(v.display())
-        }
-    });
-    let thinking_summary = config.get("thinking_summary").and_then(|v| {
-        if matches!(v, VmValue::Nil) {
-            None
-        } else {
-            Some(v.display())
-        }
-    });
-    let stop_reason = config.get("stop_reason").and_then(|v| {
-        if matches!(v, VmValue::Nil) {
-            None
-        } else {
-            Some(v.display())
-        }
-    });
-    let model = config
-        .get("model")
-        .map(|v| v.display())
-        .unwrap_or_else(|| "mock".to_string());
-    let provider = config.get("provider").and_then(|v| {
-        if matches!(v, VmValue::Nil) {
-            None
-        } else {
-            Some(v.display())
-        }
-    });
-
-    // Optional error injection. Category-only mocks surface as
-    // categorized provider failures; provider-envelope mocks also keep
-    // status/kind/reason on the final thrown dict.
-    let error = match config.get("error") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Dict(err_dict)) => {
-            let category = optional_display_field(err_dict, "category");
-            let message = optional_display_field(err_dict, "message");
-            let status = match err_dict.get("status") {
-                None | Some(VmValue::Nil) => None,
-                Some(value) => match value.as_int() {
-                    Some(n) => Some(
-                        mock::validate_mock_error_status(n)
-                            .map_err(|error| VmError::Runtime(format!("llm_mock: {error}")))?,
-                    ),
-                    None => {
-                        return Err(VmError::Runtime(
-                            "llm_mock: error.status must be an HTTP status code".to_string(),
-                        ));
-                    }
-                },
-            };
-            let kind = optional_display_field(err_dict, "kind");
-            let reason = optional_display_field(err_dict, "reason");
-            let retry_after_ms = match err_dict.get("retry_after_ms") {
-                None | Some(VmValue::Nil) => None,
-                Some(v) => match v.as_int() {
-                    Some(n) if n >= 0 => Some(n as u64),
-                    _ => {
-                        return Err(VmError::Runtime(
-                            "llm_mock: error.retry_after_ms must be a non-negative int".to_string(),
-                        ));
-                    }
-                },
-            };
-            Some(
-                mock::build_mock_error(category, message, status, kind, reason, retry_after_ms)
-                    .map_err(|error| VmError::Runtime(format!("llm_mock: {error}")))?,
-            )
-        }
-        _ => {
-            return Err(VmError::Runtime(
-                "llm_mock: error must be a dict {category?, message?, status?, kind?, reason?, retry_after_ms?}".to_string(),
-            ));
-        }
-    };
-
-    mock::push_llm_mock(mock::LlmMock {
-        text,
-        tool_calls,
-        raw_tool_calls: Vec::new(),
-        match_pattern,
-        scope,
-        entry_id,
-        sticky,
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
-        thinking,
-        thinking_summary,
-        stop_reason,
-        model,
-        provider,
-        blocks,
-        logprobs,
-        error,
-        stream_chunks,
-    });
+    let value = helpers::vm_value_dict_to_json(config);
+    let mock = crate::llm::parse_llm_mock_value(&value)
+        .map_err(|error| VmError::Runtime(format!("llm_mock: {error}")))?;
+    mock::push_inline_llm_mock(mock).map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
 }
 
-fn optional_display_field(dict: &crate::value::DictMap, key: &str) -> Option<String> {
-    match dict.get(key) {
-        None | Some(VmValue::Nil) => None,
-        Some(value) => Some(value.display()),
-    }
+/// Atomically load a complete JSONL fixture document into the builtin mock
+/// store. The caller owns filesystem access; this capability accepts text so
+/// all hosts share the same parser without granting ambient reads to scripts.
+#[harn_builtin(
+    sig = "llm_mock_load_jsonl(text: string) -> dict",
+    category = "llm.mock"
+)]
+fn llm_mock_load_jsonl_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = match args.first() {
+        Some(VmValue::String(text)) => text,
+        _ => {
+            return Err(VmError::Runtime(
+                "llm_mock_load_jsonl: expected fixture text".to_string(),
+            ));
+        }
+    };
+    let fixture = crate::llm::parse_llm_mocks_jsonl(text)
+        .map_err(|error| VmError::Runtime(format!("llm_mock_load_jsonl: {error}")))?;
+    let receipt = mock::install_builtin_llm_mock_fixture(fixture);
+    let mut result = std::collections::BTreeMap::new();
+    result.insert(
+        "schema_version".to_string(),
+        VmValue::Int(i64::from(receipt.schema_version)),
+    );
+    result.insert(
+        "strict_scopes".to_string(),
+        VmValue::Bool(receipt.strict_scopes),
+    );
+    result.insert("count".to_string(), VmValue::Int(receipt.count as i64));
+    result.insert(
+        "scopes".to_string(),
+        VmValue::List(std::sync::Arc::new(
+            receipt
+                .scopes
+                .into_iter()
+                .map(|scope| VmValue::String(arcstr::ArcStr::from(scope)))
+                .collect(),
+        )),
+    );
+    Ok(VmValue::dict(result))
 }
 
 /// Return recorded LLM mock calls.
@@ -415,4 +234,119 @@ fn llm_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<Vm
         ))));
     }
     Ok(VmValue::Nil)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(scope: Option<&str>) -> crate::llm::api::LlmRequestPayload {
+        let mut options = crate::llm::api::options::base_opts("mock");
+        options.messages = vec![serde_json::json!({"role": "user", "content": "prompt"})];
+        options.mock_scope = scope.map(str::to_string);
+        crate::llm::api::LlmRequestPayload::from(&options)
+    }
+
+    #[test]
+    fn whole_document_load_replaces_atomically_and_scopes_restore() {
+        mock::reset_llm_mock_state();
+        let old = crate::llm::parse_llm_mock_value(&serde_json::json!({
+            "match": "*",
+            "text": "OLD"
+        }))
+        .expect("parse old fixture");
+        mock::push_llm_mock(old);
+
+        let mut out = String::new();
+        let err = llm_mock_load_jsonl_builtin(
+            &[VmValue::String(arcstr::ArcStr::from(
+                "{\"schemaVersion\":1,\"strictScopes\":false}\n{not json}\n",
+            ))],
+            &mut out,
+        )
+        .expect_err("malformed document must fail before mutation");
+        assert!(err.to_string().contains("invalid JSON"));
+        assert_eq!(
+            mock::mock_llm_response(&request(None))
+                .expect("old fixture remains")
+                .text,
+            "OLD"
+        );
+
+        let receipt = llm_mock_load_jsonl_builtin(
+            &[VmValue::String(arcstr::ArcStr::from(
+                "{\"schemaVersion\":1,\"strictScopes\":true}\n\
+                 {\"id\":\"judge-1\",\"scope\":\"judge\",\"consume\":\"sticky\",\"match\":\"*\",\"text\":\"JUDGE\"}\n",
+            ))],
+            &mut out,
+        )
+        .expect("valid document installs");
+        let VmValue::Dict(receipt) = receipt else {
+            panic!("load receipt must be a dict");
+        };
+        assert!(matches!(
+            receipt.get("schema_version"),
+            Some(VmValue::Int(1))
+        ));
+        assert!(matches!(
+            receipt.get("strict_scopes"),
+            Some(VmValue::Bool(true))
+        ));
+        assert!(matches!(receipt.get("count"), Some(VmValue::Int(1))));
+
+        assert_eq!(
+            mock::mock_llm_response(&request(Some("judge")))
+                .expect("scoped fixture")
+                .text,
+            "JUDGE"
+        );
+        mock::push_llm_mock_scope();
+        assert!(mock::pop_llm_mock_scope(), "fixture scope restores");
+        assert_eq!(
+            mock::mock_llm_response(&request(Some("judge")))
+                .expect("restored scoped fixture")
+                .text,
+            "JUDGE"
+        );
+
+        let inline = VmValue::dict(std::collections::BTreeMap::from([(
+            "text".to_string(),
+            VmValue::String(arcstr::ArcStr::from("must not mix")),
+        )]));
+        let error = llm_mock_builtin(&[inline], &mut out)
+            .expect_err("inline v0 entry must not mutate a v1 fixture");
+        assert!(error.to_string().contains("active versioned fixture"));
+        mock::reset_llm_mock_state();
+    }
+
+    #[test]
+    fn inline_mock_uses_the_canonical_v0_decoder() {
+        mock::reset_llm_mock_state();
+        let mut out = String::new();
+        let inline = VmValue::dict(std::collections::BTreeMap::from([
+            (
+                "match".to_string(),
+                VmValue::String(arcstr::ArcStr::from("*")),
+            ),
+            (
+                "scope".to_string(),
+                VmValue::String(arcstr::ArcStr::from("judge")),
+            ),
+            (
+                "text".to_string(),
+                VmValue::String(arcstr::ArcStr::from("V0")),
+            ),
+        ]));
+        llm_mock_builtin(&[inline], &mut out).expect("inline v0 mock");
+
+        // v0 ignores the newer scope annotation and retains its historical
+        // default-queue behavior.
+        assert_eq!(
+            mock::mock_llm_response(&request(Some("judge")))
+                .expect("v0 fallback")
+                .text,
+            "V0"
+        );
+        mock::reset_llm_mock_state();
+    }
 }
