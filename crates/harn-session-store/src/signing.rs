@@ -21,6 +21,7 @@ use super::event::{
     canonical_event_bytes, canonical_json_bytes, EventId, EventSignature, SessionEventKind,
     StoredEvent,
 };
+use super::store::{SessionMeta, VerifyFailure, VerifyReport};
 
 pub const ALGORITHM: &str = "ed25519";
 
@@ -137,6 +138,12 @@ impl std::fmt::Display for VerifyError {
 impl std::error::Error for VerifyError {}
 
 pub fn verify_event(event: &StoredEvent, verifying_key: &VerifyingKey) -> Result<(), VerifyError> {
+    if event.is_redacted_projection() {
+        return Err(VerifyError::InvalidShape(format!(
+            "redacted projection cannot authenticate canonical source hash '{}'",
+            event.source_record_hash()
+        )));
+    }
     let computed = compute_record_hash(event);
     if computed != event.record_hash {
         return Err(VerifyError::HashMismatch {
@@ -202,20 +209,70 @@ pub fn verify_event_chain(
     event_verifier: Option<&VerifyingKey>,
     receipt_verifier: Option<&VerifyingKey>,
 ) -> (usize, Vec<(EventId, String)>) {
+    let (signed, failures) = verify_event_chain_detailed(events, event_verifier, receipt_verifier);
+    (
+        signed,
+        failures
+            .into_iter()
+            .map(|failure| (failure.event_id, failure.reason))
+            .collect(),
+    )
+}
+
+struct ChainFailure {
+    event_id: EventId,
+    reason: String,
+}
+
+fn verify_event_chain_detailed(
+    events: &[StoredEvent],
+    event_verifier: Option<&VerifyingKey>,
+    receipt_verifier: Option<&VerifyingKey>,
+) -> (usize, Vec<ChainFailure>) {
     let mut signed = 0usize;
-    let mut failures: Vec<(EventId, String)> = Vec::new();
+    let mut failures = Vec::new();
+    let mut expected_prev_hash: Option<&str> = None;
     for (index, event) in events.iter().enumerate() {
+        let expected_event_id = index as EventId + 1;
+        if event.event_id != expected_event_id {
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: format!(
+                    "event_id sequence gap: expected {expected_event_id}, found {}",
+                    event.event_id
+                ),
+            });
+        }
+        if event.prev_hash.as_deref() != expected_prev_hash {
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: "prev_hash chain break".to_string(),
+            });
+        }
+        if event.is_redacted_projection() {
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: format!(
+                    "redacted projection cannot authenticate canonical source hash '{}'",
+                    event.source_record_hash()
+                ),
+            });
+            expected_prev_hash = Some(event.source_record_hash());
+            continue;
+        }
         let recomputed = compute_record_hash(event);
         if recomputed != event.record_hash {
-            failures.push((
-                event.event_id,
-                format!(
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: format!(
                     "record_hash mismatch: stored '{stored}' vs computed '{recomputed}'",
                     stored = event.record_hash
                 ),
-            ));
+            });
+            expected_prev_hash = Some(event.record_hash.as_str());
             continue;
         }
+        expected_prev_hash = Some(event.record_hash.as_str());
         let Some(signed_by) = event.signed_by.as_ref() else {
             continue;
         };
@@ -237,10 +294,67 @@ pub fn verify_event_chain(
         };
         match result {
             Ok(()) => signed += 1,
-            Err(error) => failures.push((event.event_id, error.to_string())),
+            Err(error) => failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: error.to_string(),
+            }),
         }
     }
     (signed, failures)
+}
+
+/// Verify event bytes, sequence/linkage, signatures, and the persisted session
+/// counters/root as one contract shared by every backend.
+pub fn verify_session_chain(
+    meta: &SessionMeta,
+    events: &[StoredEvent],
+    event_verifier: Option<&VerifyingKey>,
+    receipt_verifier: Option<&VerifyingKey>,
+) -> VerifyReport {
+    let chain_root = chain_root_hash(events);
+    let (signed_event_count, mut failures) =
+        verify_event_chain_detailed(events, event_verifier, receipt_verifier);
+    let tail_id = events.last().map(|event| event.event_id).unwrap_or(0);
+    if meta.event_count != events.len() {
+        failures.push(ChainFailure {
+            event_id: tail_id,
+            reason: format!(
+                "session event_count mismatch: stored {}, found {}",
+                meta.event_count,
+                events.len()
+            ),
+        });
+    }
+    if meta.last_event_id != events.last().map(|event| event.event_id) {
+        failures.push(ChainFailure {
+            event_id: tail_id,
+            reason: "session last_event_id mismatch".to_string(),
+        });
+    }
+    let expected_root = if events.is_empty() {
+        None
+    } else {
+        Some(chain_root.as_str())
+    };
+    if meta.chain_root_hash.as_deref() != expected_root {
+        failures.push(ChainFailure {
+            event_id: tail_id,
+            reason: "session chain_root_hash mismatch".to_string(),
+        });
+    }
+    VerifyReport {
+        session_id: meta.id.clone(),
+        chain_root_hash: chain_root,
+        event_count: events.len(),
+        signed_event_count,
+        failures: failures
+            .into_iter()
+            .map(|failure| VerifyFailure {
+                event_id: failure.event_id,
+                reason: failure.reason,
+            })
+            .collect(),
+    }
 }
 
 /// Initial chain root before any events have been appended. The prefix
@@ -263,12 +377,14 @@ pub fn chain_root_fold(prev_root: &str, record_hash: &str) -> String {
     finalize_sha256(hasher)
 }
 
-/// Build the chain root hash for a list of stored events by replaying
-/// the fold from genesis. Used by `verify` and by snapshot/replay; the
-/// hot append path uses [`chain_root_fold`] directly.
+/// Build the canonical source-chain root for stored events or redacted
+/// retrieval projections. Projection markers retain the canonical source
+/// hash, so snapshot metadata and valid receipt signatures do not become
+/// false corruption reports merely because presentation bytes were scrubbed.
+/// The hot append path uses [`chain_root_fold`] directly.
 pub fn chain_root_hash(events: &[StoredEvent]) -> String {
     events.iter().fold(chain_root_init(), |root, event| {
-        chain_root_fold(&root, &event.record_hash)
+        chain_root_fold(&root, event.source_record_hash())
     })
 }
 
