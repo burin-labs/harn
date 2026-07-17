@@ -115,10 +115,12 @@ max_lora_rank_arg = "--max-lora-rank"
 #[test]
 fn parse_config_rejects_unknown_local_runtime_lifecycle_values() {
     for (field, value) in [("kind", "daemon_shell"), ("stop", "kill_all")] {
-        let kind = (field == "kind")
-            .then_some(value)
-            .unwrap_or("managed_process");
-        let stop = (field == "stop").then_some(value).unwrap_or("pid");
+        let kind = if field == "kind" {
+            value
+        } else {
+            "managed_process"
+        };
+        let stop = if field == "stop" { value } else { "pid" };
         let source = format!(
             r#"
 [providers.demo.local_runtime]
