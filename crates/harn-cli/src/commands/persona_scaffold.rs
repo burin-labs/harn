@@ -912,7 +912,8 @@ mod tests {
                 .get_dir(template)
                 .expect("canonical persona template directory");
             let source = template_dir
-                .get_file("src/template_persona.harn")
+                .get_dir("src")
+                .and_then(|source_dir| source_dir.get_file("template_persona.harn"))
                 .and_then(include_dir::File::contents_utf8)
                 .expect("canonical persona template source");
             let manifest = template_dir
