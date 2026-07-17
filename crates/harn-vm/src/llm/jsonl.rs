@@ -7,14 +7,22 @@
 use std::path::Path;
 
 use crate::llm::api::RawProviderToolCall;
-use crate::llm::mock::{self, LlmMock, MockError};
+use crate::llm::mock::{self, LlmMock, LlmMockFixture, MockError, DEFAULT_MOCK_SCOPE};
 
-/// Parse a JSONL fixture file into a vector of [`LlmMock`] entries.
-/// Empty lines are skipped; every other line must be a JSON object.
-pub fn load_llm_mocks_jsonl(path: &Path) -> Result<Vec<LlmMock>, String> {
+/// Parse a JSONL fixture file into a versioned [`LlmMockFixture`].
+///
+/// The first non-empty line may be a contract header — a JSON object carrying
+/// `schemaVersion` (and optionally `strictScopes`). A file with no header is
+/// contract v0: one default scope, first-match-wins, byte-identical to the
+/// pre-contract behavior. Empty lines are skipped; every other line must be a
+/// JSON object. An unsupported `schemaVersion` fails loudly here rather than
+/// silently mis-replaying.
+pub fn load_llm_mocks_jsonl(path: &Path) -> Result<LlmMockFixture, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let mut mocks = Vec::new();
+    let mut fixture = LlmMockFixture::default();
+    let mut header_slot_seen = false;
+    let mut entry_index = 0usize;
     for (idx, raw_line) in content.lines().enumerate() {
         let line_no = idx + 1;
         let line = raw_line.trim();
@@ -28,30 +36,103 @@ pub fn load_llm_mocks_jsonl(path: &Path) -> Result<Vec<LlmMock>, String> {
                 line_no
             )
         })?;
-        mocks.push(parse_llm_mock_value(&value).map_err(|error| {
-            format!(
-                "invalid LLM mock fixture in {} line {}: {error}",
-                path.display(),
-                line_no
-            )
-        })?);
+        // Only the first non-empty line is eligible to be a version header.
+        if !header_slot_seen {
+            header_slot_seen = true;
+            if let Some((schema_version, strict_scopes)) =
+                parse_fixture_header(&value).map_err(|error| {
+                    format!(
+                        "invalid fixture header in {} line {}: {error}",
+                        path.display(),
+                        line_no
+                    )
+                })?
+            {
+                fixture.schema_version = schema_version;
+                fixture.strict_scopes = strict_scopes;
+                continue;
+            }
+        }
+        let mock = parse_llm_mock_value_versioned(&value, fixture.schema_version, entry_index)
+            .map_err(|error| {
+                format!(
+                    "invalid LLM mock fixture in {} line {}: {error}",
+                    path.display(),
+                    line_no
+                )
+            })?;
+        entry_index += 1;
+        fixture.mocks.push(mock);
     }
-    Ok(mocks)
+    Ok(fixture)
 }
 
-/// Parse a single JSON value into an [`LlmMock`]. Public so callers
-/// that already have parsed JSON (e.g. inline test fixtures) can reuse
-/// the same schema without re-encoding through a file.
+/// Detect and validate a contract header. Returns `Ok(None)` when the line is
+/// an ordinary v0 entry (no `schemaVersion` key) and `Ok(Some((version,
+/// strict)))` for a valid v1 header. An unknown version or malformed header
+/// field is a hard error.
+fn parse_fixture_header(value: &serde_json::Value) -> Result<Option<(u32, bool)>, String> {
+    let Some(object) = value.as_object() else {
+        return Ok(None);
+    };
+    let Some(schema_version_value) = object.get("schemaVersion") else {
+        return Ok(None);
+    };
+    let schema_version = schema_version_value
+        .as_u64()
+        .ok_or_else(|| "schemaVersion must be a non-negative integer".to_string())?;
+    let schema_version = u32::try_from(schema_version).unwrap_or(u32::MAX);
+    if schema_version == 0 || schema_version > mock::MAX_MOCK_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported schemaVersion {schema_version}; this build supports 1..={}",
+            mock::MAX_MOCK_SCHEMA_VERSION
+        ));
+    }
+    let strict_scopes = match object.get("strictScopes") {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::Bool(value)) => *value,
+        Some(_) => return Err("strictScopes must be a boolean".to_string()),
+    };
+    Ok(Some((schema_version, strict_scopes)))
+}
+
+/// Parse a single JSON value into an [`LlmMock`] using the v0 contract. Public
+/// so callers that already have parsed JSON (e.g. inline test fixtures) can
+/// reuse the same schema without re-encoding through a file.
 pub fn parse_llm_mock_value(value: &serde_json::Value) -> Result<LlmMock, String> {
+    parse_llm_mock_value_versioned(value, 0, 0)
+}
+
+/// Parse a single JSON value into an [`LlmMock`] under a specific contract
+/// version. `entry_index` seeds the stable `entry_id` when the entry does not
+/// author its own `id`.
+///
+/// Under v0 the entry is pinned to the [`DEFAULT_MOCK_SCOPE`] and its
+/// consumption is derived exactly as before (reusable glob unless
+/// `consume_match`; FIFO entries always consumed), so v0 files replay
+/// byte-identically. Under v1 the entry reads the optional `scope`, `consume`,
+/// and `id` fields.
+pub fn parse_llm_mock_value_versioned(
+    value: &serde_json::Value,
+    schema_version: u32,
+    entry_index: usize,
+) -> Result<LlmMock, String> {
     let object = value
         .as_object()
         .ok_or_else(|| "fixture line must be a JSON object".to_string())?;
 
     let match_pattern = optional_string_field(object, "match")?;
-    let consume_on_match = object
+    let consume_match = object
         .get("consume_match")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
+    let (scope, entry_id, sticky) = resolve_scope_consume(
+        object,
+        schema_version,
+        entry_index,
+        match_pattern.is_some(),
+        consume_match,
+    )?;
     let text = optional_string_field(object, "text")?.unwrap_or_default();
     let input_tokens = optional_i64_field(object, "input_tokens")?;
     let output_tokens = optional_i64_field(object, "output_tokens")?;
@@ -86,7 +167,9 @@ pub fn parse_llm_mock_value(value: &serde_json::Value) -> Result<LlmMock, String
         tool_calls,
         raw_tool_calls,
         match_pattern,
-        consume_on_match,
+        scope,
+        entry_id,
+        sticky,
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -111,6 +194,17 @@ pub fn serialize_llm_mock(mock: LlmMock) -> Result<String, String> {
         object.insert(
             "match".to_string(),
             serde_json::Value::String(match_pattern),
+        );
+    }
+    // Scope/consume are only emitted when they diverge from the defaults, so a
+    // v0 recording (default scope, one-shot) serializes byte-identically.
+    if mock.scope != DEFAULT_MOCK_SCOPE {
+        object.insert("scope".to_string(), serde_json::Value::String(mock.scope));
+    }
+    if mock.sticky {
+        object.insert(
+            "consume".to_string(),
+            serde_json::Value::String("sticky".to_string()),
         );
     }
     if !mock.text.is_empty() {
@@ -254,6 +348,48 @@ pub fn serialize_llm_mock(mock: LlmMock) -> Result<String, String> {
     }
     serde_json::to_string(&serde_json::Value::Object(object))
         .map_err(|error| format!("failed to serialize recorded fixture: {error}"))
+}
+
+/// Resolve `(scope, entry_id, sticky)` for an entry under the given contract
+/// version. Under v0 the scope is forced to the default and the sticky policy
+/// is derived from the legacy `match`/`consume_match` shape; under v1 the
+/// optional `scope`, `id`, and `consume` fields are honored.
+fn resolve_scope_consume(
+    object: &serde_json::Map<String, serde_json::Value>,
+    schema_version: u32,
+    entry_index: usize,
+    has_match: bool,
+    consume_match: bool,
+) -> Result<(String, String, bool), String> {
+    if schema_version == 0 {
+        // Legacy: reusable glob unless `consume_match`; FIFO always consumed.
+        let sticky = has_match && !consume_match;
+        return Ok((
+            DEFAULT_MOCK_SCOPE.to_string(),
+            entry_index.to_string(),
+            sticky,
+        ));
+    }
+    let scope = optional_string_field(object, "scope")?
+        .filter(|scope| !scope.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_MOCK_SCOPE.to_string());
+    let entry_id = optional_string_field(object, "id")?
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or_else(|| entry_index.to_string());
+    let sticky = match object.get("consume") {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::String(mode)) => match mode.as_str() {
+            "once" => false,
+            "sticky" => true,
+            other => {
+                return Err(format!(
+                    "`consume` must be \"once\" or \"sticky\", got {other:?}"
+                ))
+            }
+        },
+        Some(_) => return Err("`consume` must be a string \"once\" or \"sticky\"".to_string()),
+    };
+    Ok((scope, entry_id, sticky))
 }
 
 fn parse_llm_tool_calls(
@@ -550,5 +686,129 @@ mod tests {
             Err(err) => assert!(err.contains("unknown error kind"), "{err}"),
             Ok(_) => panic!("expected parse failure for unknown error kind"),
         }
+    }
+
+    // --- Versioned mock-fixture contract (bc#4969) ---
+
+    #[test]
+    fn header_detects_v0_when_no_schema_version() {
+        assert_eq!(
+            parse_fixture_header(&serde_json::json!({"text": "hi"})).expect("header"),
+            None,
+            "an ordinary entry is not a header"
+        );
+    }
+
+    #[test]
+    fn header_reads_version_and_strict_scopes() {
+        assert_eq!(
+            parse_fixture_header(&serde_json::json!({"schemaVersion": 1, "strictScopes": true}))
+                .expect("header"),
+            Some((1, true))
+        );
+        assert_eq!(
+            parse_fixture_header(&serde_json::json!({"schemaVersion": 1})).expect("header"),
+            Some((1, false))
+        );
+    }
+
+    #[test]
+    fn header_rejects_unsupported_schema_version() {
+        let err = parse_fixture_header(&serde_json::json!({"schemaVersion": 2}))
+            .expect_err("unsupported version must fail");
+        assert!(err.contains("unsupported schemaVersion"), "{err}");
+    }
+
+    #[test]
+    fn v0_parse_pins_default_scope_and_legacy_consume() {
+        // FIFO entry: always consumed (not sticky).
+        let fifo = parse_llm_mock_value(&serde_json::json!({"text": "x"})).expect("fifo");
+        assert_eq!(fifo.scope, DEFAULT_MOCK_SCOPE);
+        assert!(!fifo.sticky);
+        // Glob entry: reusable (sticky) unless consume_match.
+        let glob = parse_llm_mock_value(&serde_json::json!({"match": "*"})).expect("glob");
+        assert!(glob.sticky, "v0 reusable glob is sticky");
+        let glob_once =
+            parse_llm_mock_value(&serde_json::json!({"match": "*", "consume_match": true}))
+                .expect("glob once");
+        assert!(!glob_once.sticky, "consume_match makes a glob one-shot");
+    }
+
+    #[test]
+    fn v1_parse_reads_scope_consume_and_id() {
+        let entry = parse_llm_mock_value_versioned(
+            &serde_json::json!({"scope": "judge", "consume": "sticky", "id": "j1", "text": "Y"}),
+            1,
+            7,
+        )
+        .expect("v1 entry");
+        assert_eq!(entry.scope, "judge");
+        assert!(entry.sticky);
+        assert_eq!(entry.entry_id, "j1");
+    }
+
+    #[test]
+    fn v1_parse_defaults_scope_to_default_and_consume_to_once() {
+        let entry =
+            parse_llm_mock_value_versioned(&serde_json::json!({"text": "Y"}), 1, 3).expect("v1");
+        assert_eq!(entry.scope, DEFAULT_MOCK_SCOPE);
+        assert!(!entry.sticky, "v1 default consume is once");
+        assert_eq!(entry.entry_id, "3", "entry_id defaults to the load index");
+    }
+
+    #[test]
+    fn v1_parse_rejects_unknown_consume_mode() {
+        let err = parse_llm_mock_value_versioned(&serde_json::json!({"consume": "maybe"}), 1, 0)
+            .expect_err("unknown consume must fail");
+        assert!(err.contains("consume"), "{err}");
+    }
+
+    #[test]
+    fn load_rejects_unsupported_schema_version() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("fixture.jsonl");
+        std::fs::write(
+            &path,
+            "{\"schemaVersion\": 2}\n{\"scope\": \"main\", \"text\": \"MAIN\"}\n",
+        )
+        .expect("write fixture");
+        let err = load_llm_mocks_jsonl(&path).expect_err("unsupported version must fail at load");
+        assert!(err.contains("unsupported schemaVersion"), "{err}");
+    }
+
+    #[test]
+    fn load_parses_v1_header_and_scoped_entries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("fixture.jsonl");
+        std::fs::write(
+            &path,
+            "{\"schemaVersion\": 1, \"strictScopes\": true}\n\
+             {\"scope\": \"main\", \"text\": \"MAIN\"}\n\
+             {\"scope\": \"judge\", \"consume\": \"sticky\", \"match\": \"*\", \"text\": \"JUDGE\"}\n",
+        )
+        .expect("write fixture");
+        let fixture = load_llm_mocks_jsonl(&path).expect("load v1");
+        assert_eq!(fixture.schema_version, 1);
+        assert!(fixture.strict_scopes);
+        assert_eq!(fixture.mocks.len(), 2);
+        assert_eq!(fixture.mocks[0].scope, "main");
+        assert_eq!(fixture.mocks[0].entry_id, "0");
+        assert!(!fixture.mocks[0].sticky);
+        assert_eq!(fixture.mocks[1].scope, "judge");
+        assert_eq!(fixture.mocks[1].entry_id, "1");
+        assert!(fixture.mocks[1].sticky);
+    }
+
+    #[test]
+    fn load_v0_fixture_has_no_header_and_default_scope() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("fixture.jsonl");
+        std::fs::write(&path, "{\"text\": \"first\"}\n{\"text\": \"second\"}\n")
+            .expect("write fixture");
+        let fixture = load_llm_mocks_jsonl(&path).expect("load v0");
+        assert_eq!(fixture.schema_version, 0);
+        assert!(!fixture.strict_scopes);
+        assert_eq!(fixture.mocks.len(), 2);
+        assert!(fixture.mocks.iter().all(|m| m.scope == DEFAULT_MOCK_SCOPE));
     }
 }

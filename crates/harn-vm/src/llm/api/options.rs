@@ -371,6 +371,11 @@ pub(crate) struct LlmCallOptions {
     /// own lifecycle events. `None` for raw `llm_call(...)` invocations
     /// from script context — those have no agent session to attach to.
     pub session_id: Option<String>,
+    /// Mock fixture scope this call declares (`mock_scope` in the options
+    /// dict). Routes the call to a scoped fixture bucket when a mock provider
+    /// serves it; ignored by real providers. `None` resolves to the default
+    /// shared bucket.
+    pub mock_scope: Option<String>,
     /// Where each resolved dispatch field (provider/model/wire_format/
     /// thinking/tool_format) came from. Populated by the pipeline resolver
     /// (via a `dispatch_provenance` entry in the agent-loop options dict) and
@@ -684,6 +689,13 @@ pub(crate) struct LlmRequestPayload {
     /// transport snapshots because it is an in-process harness handle.
     #[serde(skip_serializing)]
     pub cli_llm_mock_scope: Option<u64>,
+    /// Mock fixture scope this call draws from (`main`, `judge`, …). `None`
+    /// resolves to the default shared bucket. Product-set per call so a
+    /// full-loop run can script the main turn and its auxiliary calls without
+    /// them cannibalizing one queue. Skipped in serialized transport snapshots
+    /// because it is an in-process test-harness routing hint.
+    #[serde(skip_serializing)]
+    pub mock_scope: Option<String>,
 }
 
 impl LlmRequestPayload {
@@ -747,6 +759,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             session_id: opts.session_id.clone(),
             reminder_lifecycle: opts.reminder_lifecycle.clone(),
             cli_llm_mock_scope: crate::llm::mock::current_cli_llm_mock_scope(),
+            mock_scope: opts.mock_scope.clone(),
         };
         apply_thinking_disable_directive(&mut payload);
         payload
@@ -805,6 +818,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         routing_policy: None,
         region: None,
         session_id: None,
+        mock_scope: None,
         dispatch_provenance: None,
         reminders: None,
         reminder_lifecycle: Vec::new(),
