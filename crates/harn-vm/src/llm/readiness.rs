@@ -272,7 +272,15 @@ pub async fn probe_provider_readiness_with_options(
                 ok: false,
                 status: ReadinessStatus::ProviderMismatch,
                 message: format!(
-                    "{provider} readiness endpoint at {diagnostic_base_url} is serving `{actual_provider}` runtime metadata; use provider `{actual_provider}` for this endpoint or move the endpoint to the real {provider} server"
+                    concat!(
+                        "{provider} readiness endpoint at {diagnostic_base_url} is serving ",
+                        "`{actual_provider}` runtime metadata; use provider ",
+                        "`{actual_provider}` for this endpoint or move the endpoint ",
+                        "to the real {provider} server",
+                    ),
+                    provider = provider,
+                    diagnostic_base_url = diagnostic_base_url,
+                    actual_provider = actual_provider
                 ),
                 base_url: Some(diagnostic_base_url),
                 url: Some(diagnostic_url),
