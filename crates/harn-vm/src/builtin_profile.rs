@@ -162,17 +162,29 @@ pub fn reset() {
     *TOTALS.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
+/// The one lock serializing tests that touch the process-global recorder.
+///
+/// Lives outside `mod tests` because the lifecycle regression for this module
+/// belongs with `reset_thread_local_state` — the single owner of process-global
+/// resets — not here, and both sides must hold the SAME lock or they race each
+/// other's `enable`/`reset` under cargo's test threads.
+#[cfg(test)]
+pub(crate) fn test_lock() -> &'static Mutex<()> {
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    &TEST_LOCK
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// The global recorder is process-wide, so these run under one lock rather
     /// than racing each other through `enable`/`reset`.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    use super::test_lock as TEST_LOCK;
 
     #[test]
     fn records_nothing_until_enabled() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = TEST_LOCK().lock().unwrap_or_else(|e| e.into_inner());
         reset();
         record("project_fingerprint", Duration::from_millis(10));
         assert!(
@@ -183,7 +195,7 @@ mod tests {
 
     #[test]
     fn aggregates_calls_by_name_and_ranks_by_total() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = TEST_LOCK().lock().unwrap_or_else(|e| e.into_inner());
         enable();
         record("to_string", Duration::from_millis(1));
         record("to_string", Duration::from_millis(3));
@@ -205,7 +217,7 @@ mod tests {
 
     #[test]
     fn enable_discards_a_previous_run() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = TEST_LOCK().lock().unwrap_or_else(|e| e.into_inner());
         enable();
         record("run_shell", Duration::from_millis(5));
         enable();
