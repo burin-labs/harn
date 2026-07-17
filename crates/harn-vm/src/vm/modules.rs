@@ -181,17 +181,85 @@ impl Vm {
                         ))
                     })
             }
+            crate::value::VmCallable::Pipeline(_) => Err(VmError::TypeError(
+                "pipeline callable requires execute_callable".to_string(),
+            )),
         }
     }
 
+    pub async fn execute_callable(
+        &mut self,
+        callable: &crate::value::VmCallable,
+        args: &[crate::value::VmValue],
+    ) -> Result<crate::value::VmValue, VmError> {
+        let crate::value::VmCallable::Pipeline(pipeline) = callable else {
+            let closure = self.resolve_callable(callable).await?;
+            return self.call_closure_pub(&closure, args).await;
+        };
+
+        let (_, module_path) = self.lazy_module_path(&pipeline.module_path);
+        let source = std::fs::read_to_string(&module_path).map_err(|error| {
+            VmError::Runtime(format!("failed to read {}: {error}", module_path.display()))
+        })?;
+        let program = harn_parser::check_source_strict(&source)
+            .map_err(|error| VmError::Runtime(error.to_string()))?;
+        let params = program
+            .iter()
+            .find_map(|node| {
+                let (_, inner) = harn_parser::peel_attributes(node);
+                match &inner.node {
+                    harn_parser::Node::Pipeline {
+                        name,
+                        params,
+                        is_pub: true,
+                        ..
+                    } if name == &pipeline.pipeline_name => Some(params.clone()),
+                    _ => None,
+                }
+            })
+            .ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "pipeline '{}' is not exported by module '{}'",
+                    pipeline.pipeline_name,
+                    module_path.display()
+                ))
+            })?;
+        if params.len() != args.len() {
+            return Err(VmError::Runtime(format!(
+                "pipeline '{}' expects {} argument(s), got {}",
+                pipeline.pipeline_name,
+                params.len(),
+                args.len()
+            )));
+        }
+        let chunk = crate::Compiler::new()
+            .compile_named_with_param_globals(&program, &pipeline.pipeline_name)
+            .map_err(|error| VmError::Runtime(error.to_string()))?;
+        let previous_source_dir = self.source_dir.clone();
+        if let Some(parent) = module_path.parent() {
+            self.set_source_dir(parent);
+        }
+        for (param, value) in params.iter().zip(args) {
+            self.set_global(param, value.clone());
+        }
+        let result = self.execute(&chunk).await;
+        self.source_dir = previous_source_dir;
+        crate::stdlib::set_thread_source_dir_option(self.source_dir.as_deref());
+        result
+    }
+
     fn lazy_callable_module_path(&self, lazy: &crate::value::LazyVmCallable) -> (PathBuf, PathBuf) {
-        let mut module_path = if lazy.module_path.is_absolute() {
-            lazy.module_path.clone()
+        self.lazy_module_path(&lazy.module_path)
+    }
+
+    fn lazy_module_path(&self, path: &std::path::Path) -> (PathBuf, PathBuf) {
+        let mut module_path = if path.is_absolute() {
+            path.to_path_buf()
         } else {
             self.source_dir
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(&lazy.module_path)
+                .join(path)
         };
         if !module_path.exists() && module_path.extension().is_none() {
             module_path.set_extension("harn");

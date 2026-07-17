@@ -47,6 +47,7 @@ pub struct VmClosure {
 pub enum VmCallable {
     Eager(Arc<VmClosure>),
     Lazy(LazyVmCallable),
+    Pipeline(LazyPipelineCallable),
 }
 
 /// Module/export coordinates for a callable whose import graph should not be
@@ -62,6 +63,22 @@ impl LazyVmCallable {
         Self {
             module_path,
             function_name: function_name.into(),
+        }
+    }
+}
+
+/// Module/pipeline coordinates for a pipeline entry compiled on invocation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LazyPipelineCallable {
+    pub(crate) module_path: PathBuf,
+    pub(crate) pipeline_name: String,
+}
+
+impl LazyPipelineCallable {
+    pub fn new(module_path: PathBuf, pipeline_name: impl Into<String>) -> Self {
+        Self {
+            module_path,
+            pipeline_name: pipeline_name.into(),
         }
     }
 }

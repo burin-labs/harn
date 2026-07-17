@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{LazyVmCallable, Vm, VmCallable, VmValue};
+use crate::{LazyPipelineCallable, LazyVmCallable, Vm, VmCallable, VmValue};
 
 #[test]
 fn lazy_callable_reuses_one_vm_module_state_but_isolates_fresh_vms() {
@@ -31,7 +31,7 @@ pub fn current() -> int {
         VmCallable::Lazy(lazy) => {
             VmCallable::Lazy(LazyVmCallable::new(lazy.module_path.clone(), "current"))
         }
-        VmCallable::Eager(_) => unreachable!("test callable is lazy"),
+        VmCallable::Eager(_) | VmCallable::Pipeline(_) => unreachable!("test callable is lazy"),
     };
 
     runtime.block_on(async {
@@ -84,4 +84,34 @@ pub fn current() -> int {
             .expect("fresh VM call succeeds");
         assert!(matches!(fresh_value, VmValue::Int(1)), "{fresh_value:?}");
     });
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_pipeline_callable_binds_arguments_and_returns_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let caller_dir = tempfile::tempdir().expect("caller tempdir");
+    let module_path = dir.path().join("workflow.harn");
+    std::fs::write(
+        &module_path,
+        r"
+pub pipeline run(value) {
+  return {received: value}
+}
+",
+    )
+    .expect("write pipeline module");
+    let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
+    let mut vm = Vm::new();
+    vm.set_source_dir(caller_dir.path());
+
+    let result = vm
+        .execute_callable(&callable, &[VmValue::Int(42)])
+        .await
+        .expect("pipeline executes");
+
+    let VmValue::Dict(result) = result else {
+        panic!("expected pipeline result dict, got {result:?}");
+    };
+    assert!(matches!(result.get("received"), Some(VmValue::Int(42))));
+    assert_eq!(vm.source_dir.as_deref(), Some(caller_dir.path()));
 }

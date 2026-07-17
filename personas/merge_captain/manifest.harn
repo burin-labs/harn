@@ -135,7 +135,7 @@ fn _adapter_for(input) {
   return fixture_adapter(parsed)
 }
 
-pipeline run(task) {
+pub pipeline run(task) -> dict {
   const input = _resolve_input()
   const policies_load = load_policies(input.policy_paths)
   if len(policies_load.errors) > 0 {

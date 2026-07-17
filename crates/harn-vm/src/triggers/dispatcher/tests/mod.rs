@@ -41,5 +41,6 @@ use fixtures::*;
 mod dispatch;
 mod flow_control;
 mod lazy_callable;
+mod persona;
 mod predicate;
 mod retry;

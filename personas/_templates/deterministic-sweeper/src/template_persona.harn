@@ -40,6 +40,6 @@ fn drain_queue(task) {
   )
 }
 
-pipeline run(task) {
+pub pipeline run(task) -> dict {
   return template_persona(task)
 }

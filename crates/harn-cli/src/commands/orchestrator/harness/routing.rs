@@ -147,7 +147,7 @@ pub(super) async fn initialize_connectors(
     provider_overrides: &[ResolvedProviderConnectorConfig],
     clock: Arc<dyn Clock>,
 ) -> Result<ConnectorRuntime, OrchestratorError> {
-    let mut registry = harn_vm::ConnectorRegistry::default();
+    let mut registry = harn_vm::ConnectorRegistry::with_defaults_and_clock(clock.clone());
     let mut trigger_registry = harn_vm::TriggerRegistry::default();
     let mut grouped_kinds: BTreeMap<harn_vm::ProviderId, BTreeSet<String>> = BTreeMap::new();
 

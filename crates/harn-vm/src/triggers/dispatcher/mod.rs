@@ -52,6 +52,7 @@ mod action_graph;
 mod audit;
 mod circuits;
 mod flow_control;
+mod persona;
 mod predicate_eval;
 pub mod retry;
 mod state;
@@ -2321,31 +2322,8 @@ impl Dispatcher {
                 })
             }
             DispatchUri::Persona { .. } => {
-                let TriggerHandlerSpec::Persona {
-                    binding: persona_binding,
-                } = &binding.handler
-                else {
-                    return Err(DispatchError::Local(format!(
-                        "trigger '{}' resolved to a persona dispatch URI but does not carry a persona binding",
-                        binding.id.as_str()
-                    )));
-                };
-                let receipt = crate::fire_persona_trigger(
-                    &self.event_log,
-                    persona_binding,
-                    event.provider.as_str(),
-                    &event.kind,
-                    trigger_event_persona_metadata(event),
-                    crate::PersonaRunCost::default(),
-                    crate::persona_now_ms(),
-                )
-                .await
-                .map_err(DispatchError::Local)?;
-                Ok(DispatchCallResult {
-                    output: serde_json::to_value(receipt)
-                        .map_err(|error| DispatchError::Serde(error.to_string()))?,
-                    metadata: route.dispatch_boundary_metadata(),
-                })
+                self.dispatch_persona(binding, route, event, autonomy_tier, wait_lease, cancel_rx)
+                    .await
             }
             DispatchUri::EvalPack { target, pack_id } => {
                 let TriggerHandlerSpec::EvalPack {
@@ -3312,6 +3290,13 @@ fn dispatch_result_cost_usd_micros(result: &serde_json::Value) -> u64 {
     for field in ["cost_usd", "costUsd", "total_cost_usd", "totalCostUsd"] {
         if let Some(cost) = result.get(field).and_then(json_usd_micros) {
             return cost;
+        }
+    }
+
+    if let Some(nested) = result.get("result") {
+        let nested_cost = dispatch_result_cost_usd_micros(nested);
+        if nested_cost > 0 {
+            return nested_cost;
         }
     }
 

@@ -133,6 +133,121 @@ async fn stream_trigger_route_uses_generic_stream_connector_in_process() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn cron_persona_route_executes_entry_workflow_before_completion() {
+    let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
+    let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
+    let clock = harn_vm::clock::PausedClock::new(
+        time::OffsetDateTime::from_unix_timestamp(1_784_195_970).unwrap(),
+    );
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let marker_path = temp.path().join("persona-ran.json");
+    write_test_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[package]
+name = "persona-cron-fixture"
+
+[[personas]]
+name = "digest"
+description = "Runs the digest workflow."
+entry_workflow = "digest.harn#run"
+autonomy = "suggest"
+receipts = "required"
+
+[[triggers]]
+id = "digest-cron"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "persona://digest"
+schedule = "0 * * * *"
+timezone = "UTC"
+"#,
+    );
+    write_test_file(
+        temp.path(),
+        "digest.harn",
+        &format!(
+            r"
+pub pipeline run(event) {{
+  let result = {{executed: true, provider: event.provider, kind: event.kind}}
+  write_file({marker:?}, json_stringify(result))
+  return result
+}}
+",
+            marker = marker_path.display().to_string()
+        ),
+    );
+
+    let config =
+        OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"))
+            .with_clock(clock.clone());
+    let harness = OrchestratorHarness::start(config)
+        .await
+        .expect("harness start");
+    let event_log = harness.event_log();
+    let topic = Topic::new(harn_vm::personas::PERSONA_RUNTIME_TOPIC).unwrap();
+    let mut stream = event_log.clone().subscribe(&topic, None).await.unwrap();
+    clock.advance(std::time::Duration::from_secs(30));
+    let existing = event_log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .expect("read persona lifecycle");
+    let already_completed = existing
+        .iter()
+        .any(|(_, event)| event.kind == "persona.run.completed");
+    if !already_completed {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let remaining = deadline
+                .checked_duration_since(tokio::time::Instant::now())
+                .expect("timed out waiting for persona completion");
+            let (_, event) = tokio::time::timeout(remaining, stream.next())
+                .await
+                .expect("timed out waiting for persona completion event")
+                .expect("persona event stream ended unexpectedly")
+                .expect("persona event stream error");
+            if event.kind == "persona.run.completed" {
+                break;
+            }
+        }
+    }
+    drop(stream);
+
+    let marker: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&marker_path).unwrap()).unwrap();
+    assert_eq!(marker["executed"], true);
+    assert_eq!(marker["provider"], "cron");
+    assert_eq!(marker["kind"], "tick");
+
+    let lifecycle = event_log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .expect("read completed persona lifecycle");
+    let kinds = lifecycle
+        .iter()
+        .map(|(_, event)| event.kind.as_str())
+        .collect::<Vec<_>>();
+    let started = kinds
+        .iter()
+        .position(|kind| *kind == "persona.run.started")
+        .expect("persona run started");
+    let completed = kinds
+        .iter()
+        .position(|kind| *kind == "persona.run.completed")
+        .expect("persona run completed");
+    assert!(started < completed);
+    assert!(!kinds.contains(&"persona.run.failed"));
+
+    harness
+        .shutdown(std::time::Duration::from_secs(5))
+        .await
+        .expect("harness shutdown");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn harness_start_waits_for_topic_pumps_before_ready() {
     let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
     let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
