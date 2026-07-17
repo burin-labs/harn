@@ -377,7 +377,12 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    // The sink is process-global, so this test must retain its synchronous
+    // serialization guard for the whole async run. Keep it on one thread and
+    // document the intentionally scoped exception instead of dropping the
+    // guard and permitting a concurrent test to corrupt the event stream.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(flavor = "current_thread")]
     async fn explicit_exit_emits_stdio_and_one_result_event() {
         let _guard = SINK_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         harn_vm::reset_thread_local_state();

@@ -22,10 +22,13 @@ use crate::skill_loader::{
 mod explain_cost;
 pub mod harnpack;
 pub mod json_events;
+mod lifecycle;
 mod manifest_runtime;
 
 use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
 use self::json_events::NdjsonEmitter;
+pub use self::lifecycle::RunProfileOptions;
+use self::lifecycle::{RunExecution, TerminalRun};
 pub(crate) use self::manifest_runtime::connect_mcp_servers;
 
 /// JSON event-stream configuration for `--json` runs.
@@ -581,22 +584,6 @@ pub struct RunAttestationOptions {
     pub agent_id: Option<String>,
 }
 
-/// Opt-in profiling. When `text` is true the run prints a categorical
-/// breakdown to stderr after execution; when `json_path` is set the same
-/// rollup is serialized to that path. Either flag enables span tracing
-/// (i.e. `harn_vm::tracing::set_tracing_enabled(true)`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RunProfileOptions {
-    pub text: bool,
-    pub json_path: Option<PathBuf>,
-}
-
-impl RunProfileOptions {
-    pub fn is_enabled(&self) -> bool {
-        self.text || self.json_path.is_some()
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunSandboxOptions {
     /// Install the default `harn run` sandbox for this invocation.
@@ -682,45 +669,6 @@ struct ExecuteRunInputs<'a> {
     aux: RunAuxOptions,
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
-}
-
-/// Terminal VM outcomes that still complete through the normal CLI cleanup
-/// path. An explicit Harn `exit(code)` is not a runtime error: the CLI must
-/// preserve its captured output and emit the same receipts it would for a
-/// returned value.
-enum TerminalRun {
-    Returned(harn_vm::VmValue),
-    ProcessExited(i32),
-}
-
-impl TerminalRun {
-    fn exit_code(&self) -> i32 {
-        match self {
-            Self::Returned(value) => exit_code_from_return_value(value),
-            Self::ProcessExited(code) => *code,
-        }
-    }
-
-    fn json_value(&self) -> serde_json::Value {
-        match self {
-            Self::Returned(value) => harn_vm::llm::vm_value_to_json(value),
-            Self::ProcessExited(_) => serde_json::Value::Null,
-        }
-    }
-
-    fn nonzero_return_diagnostic(&self) -> Option<String> {
-        match self {
-            Self::Returned(value) if self.exit_code() != 0 => {
-                Some(render_return_value_error(value))
-            }
-            Self::Returned(_) | Self::ProcessExited(_) => None,
-        }
-    }
-}
-
-enum RunExecution {
-    Terminal(TerminalRun),
-    Failed(String),
 }
 
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
@@ -2628,10 +2576,7 @@ pub(crate) async fn run_file_mcp_serve(
         .run_until(async {
             match vm.execute(&chunk).await {
                 Ok(_) => {}
-                Err(e) => {
-                    eprint!("{}", vm.format_runtime_error(&e));
-                    process::exit(1);
-                }
+                Err(error) => crate::commands::serve::exit_after_mcp_pipeline_error(&vm, &error),
             }
 
             // Pipeline output goes to stderr — stdout is the MCP transport.

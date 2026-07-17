@@ -394,6 +394,35 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
+fn serve_mcp_preserves_explicit_pipeline_exit_code() {
+    let _guard = lock_harn_serve_mcp_tests();
+    let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("exit.harn"),
+        "pipeline main(task) {\n  __io_eprintln(\"before explicit exit\")\n  exit(17)\n}\n",
+    )
+    .unwrap();
+
+    let output = harn_e2e_command()
+        .current_dir(temp.path())
+        .args(["serve", "mcp", "exit.harn"])
+        .output()
+        .expect("run harn serve mcp");
+
+    assert_eq!(output.status.code(), Some(17));
+    assert!(
+        output.stdout.is_empty(),
+        "stdout is reserved for MCP transport"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("before explicit exit"),
+        "pipeline stderr must flush before exit: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
 fn serve_mcp_stdio_exposes_script_registered_surface() {
     let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
