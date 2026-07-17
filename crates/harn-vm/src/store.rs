@@ -19,9 +19,17 @@ struct StoreState {
 
 impl StoreState {
     fn new(base_dir: &Path) -> Self {
+        Self::at_path(crate::runtime_paths::store_path(base_dir))
+    }
+
+    fn at_state_root(state_root: &Path) -> Self {
+        Self::at_path(state_root.join("store.json"))
+    }
+
+    fn at_path(path: PathBuf) -> Self {
         Self {
             data: BTreeMap::new(),
-            path: crate::runtime_paths::store_path(base_dir),
+            path,
             loaded: false,
         }
     }
@@ -125,7 +133,15 @@ pub fn register_store_builtins(vm: &mut Vm, base_dir: &Path) {
     if let Err(error) = crate::event_log::install_lazy_default_for_base_dir(base_dir) {
         crate::events::log_warn("event_log.init", &error.to_string());
     }
-    let state = Arc::new(parking_lot::Mutex::new(StoreState::new(base_dir)));
+    register_store_state(vm, StoreState::new(base_dir));
+}
+
+pub(crate) fn register_store_builtins_at_state_root(vm: &mut Vm, state_root: &Path) {
+    register_store_state(vm, StoreState::at_state_root(state_root));
+}
+
+fn register_store_state(vm: &mut Vm, state: StoreState) {
+    let state = Arc::new(parking_lot::Mutex::new(state));
 
     let s = Arc::clone(&state);
     vm.register_builtin("store_get", move |args, _out| {

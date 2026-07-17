@@ -30,9 +30,14 @@ struct CheckpointState {
 
 impl CheckpointState {
     fn new(base_dir: &Path, pipeline_name: &str) -> Self {
+        Self::at_state_root(&crate::runtime_paths::state_root(base_dir), pipeline_name)
+    }
+
+    fn at_state_root(state_root: &Path, pipeline_name: &str) -> Self {
         Self {
             data: BTreeMap::new(),
-            path: crate::runtime_paths::checkpoint_dir(base_dir)
+            path: state_root
+                .join("checkpoints")
                 .join(format!("{pipeline_name}.json")),
             loaded: false,
         }
@@ -180,8 +185,21 @@ fn sanitize_pipeline_name(name: &str) -> String {
 /// executes single-threaded per run).
 pub fn register_checkpoint_builtins(vm: &mut Vm, base_dir: &Path, pipeline_name: &str) {
     let safe_name = sanitize_pipeline_name(pipeline_name);
+    register_checkpoint_state(vm, CheckpointState::new(base_dir, &safe_name));
+}
+
+pub(crate) fn register_checkpoint_builtins_at_state_root(
+    vm: &mut Vm,
+    state_root: &Path,
+    pipeline_name: &str,
+) {
+    let safe_name = sanitize_pipeline_name(pipeline_name);
+    register_checkpoint_state(vm, CheckpointState::at_state_root(state_root, &safe_name));
+}
+
+fn register_checkpoint_state(vm: &mut Vm, state: CheckpointState) {
     CHECKPOINT_STATE.with(|cell| {
-        *cell.borrow_mut() = Some(CheckpointState::new(base_dir, &safe_name));
+        *cell.borrow_mut() = Some(state);
     });
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);

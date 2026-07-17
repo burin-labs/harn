@@ -110,17 +110,20 @@ pub(super) async fn execute_case(
                 .prefix("harn-user-test-state-")
                 .tempdir()
                 .map_err(|error| format!("failed to create test state directory: {error}"))?;
-            let store_base = test_state.path();
+            let state_root = test_state.path().join(".harn");
             let source_dir = source_parent.to_string_lossy().into_owned();
             install_user_test_event_log_if_unset();
-            harn_vm::register_store_builtins(&mut vm, store_base);
-            harn_vm::register_metadata_builtins(&mut vm, store_base);
             let pipeline_name = case
                 .file
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("test");
-            harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
+            harn_vm::register_persistent_state_builtins_at_root(
+                &mut vm,
+                test_state.path(),
+                harn_vm::PersistentStateRoot::new(&state_root),
+                pipeline_name,
+            );
             vm.set_source_info(&file_display, &case.source);
             harn_vm::stdlib::process::set_thread_execution_context(Some(
                 harn_vm::orchestration::RunExecutionRecord {
