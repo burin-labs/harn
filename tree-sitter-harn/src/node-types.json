@@ -345,10 +345,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -795,10 +791,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -1418,10 +1410,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -1996,10 +1984,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -2183,10 +2167,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -2393,10 +2373,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -2564,10 +2540,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -2781,10 +2753,6 @@
           "named": true
         },
         {
-          "type": "struct_construct",
-          "named": true
-        },
-        {
           "type": "subscript_expression",
           "named": true
         },
@@ -2957,10 +2925,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -3202,10 +3166,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -3571,10 +3531,6 @@
           "named": true
         },
         {
-          "type": "struct_construct",
-          "named": true
-        },
-        {
           "type": "subscript_expression",
           "named": true
         },
@@ -3884,10 +3840,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -4179,10 +4131,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -4379,10 +4327,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -4551,10 +4495,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -4768,10 +4708,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -5096,10 +5032,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -5499,10 +5431,6 @@
           "named": true
         },
         {
-          "type": "struct_construct",
-          "named": true
-        },
-        {
           "type": "subscript_expression",
           "named": true
         },
@@ -5693,10 +5621,6 @@
           "named": true
         },
         {
-          "type": "struct_construct",
-          "named": true
-        },
-        {
           "type": "subscript_expression",
           "named": true
         },
@@ -5882,10 +5806,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -6057,10 +5977,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -6237,10 +6153,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -6441,10 +6353,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -6671,10 +6579,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -6856,10 +6760,6 @@
           "named": true
         },
         {
-          "type": "struct_construct",
-          "named": true
-        },
-        {
           "type": "subscript_expression",
           "named": true
         },
@@ -7035,10 +6935,6 @@
           "named": true
         },
         {
-          "type": "struct_construct",
-          "named": true
-        },
-        {
           "type": "subscript_expression",
           "named": true
         },
@@ -7211,10 +7107,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -7441,10 +7333,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -7816,10 +7704,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -8188,10 +8072,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -8365,10 +8245,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -8745,10 +8621,6 @@
           "named": true
         },
         {
-          "type": "struct_construct",
-          "named": true
-        },
-        {
           "type": "subscript_expression",
           "named": true
         },
@@ -8921,10 +8793,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -9163,10 +9031,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -9354,10 +9218,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -9555,10 +9415,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -9726,10 +9582,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -9916,10 +9768,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -10343,10 +10191,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -10556,10 +10400,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -10794,10 +10634,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -10984,10 +10820,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -11158,10 +10990,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -11329,10 +11157,6 @@
           },
           {
             "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "struct_construct",
             "named": true
           },
           {
@@ -11707,10 +11531,6 @@
           "named": true
         },
         {
-          "type": "struct_construct",
-          "named": true
-        },
-        {
           "type": "subscript_expression",
           "named": true
         },
@@ -11999,10 +11819,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -12171,10 +11987,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -12353,10 +12165,6 @@
           "named": true
         },
         {
-          "type": "struct_construct",
-          "named": true
-        },
-        {
           "type": "subscript_expression",
           "named": true
         },
@@ -12529,10 +12337,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -12987,10 +12791,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -13164,10 +12964,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -13436,10 +13232,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -13633,10 +13425,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {
@@ -14056,10 +13844,6 @@
             "named": true
           },
           {
-            "type": "struct_construct",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
             "named": true
           },
@@ -14233,10 +14017,6 @@
         },
         {
           "type": "string_literal",
-          "named": true
-        },
-        {
-          "type": "struct_construct",
           "named": true
         },
         {

@@ -341,7 +341,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
-        field("value", $._expression)
+        field("value", choice($.struct_construct, $._expression))
       ),
 
     var_binding: ($) =>
@@ -350,7 +350,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
-        field("value", $._expression)
+        field("value", choice($.struct_construct, $._expression))
       ),
 
     // Immutable binding (`const PATTERN [: Type] = EXPR`). The default,
@@ -364,7 +364,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
-        field("value", $._expression)
+        field("value", choice($.struct_construct, $._expression))
       ),
 
     _binding_pattern: ($) =>
@@ -480,7 +480,8 @@ module.exports = grammar({
     cost_route_option: ($) =>
       seq(field("name", $.identifier), ":", field("value", $._expression)),
 
-    return_statement: ($) => prec.right(seq("return", optional($._expression))),
+    return_statement: ($) =>
+      prec.right(seq("return", optional(choice($.struct_construct, $._expression)))),
 
     throw_statement: ($) => seq("throw", $._expression),
 
@@ -1028,7 +1029,6 @@ module.exports = grammar({
         $.identifier,
         $.list_literal,
         $.dict_literal,
-        $.struct_construct,
         $.closure,
         $.fn_expression
       ),
@@ -1194,6 +1194,7 @@ module.exports = grammar({
     _argument_element: ($) =>
       choice(
         $.spread_expression,
+        $.struct_construct,
         $._expression
       ),
 

@@ -77,10 +77,11 @@ pipeline test(task) {
                 (argument_list
                   (integer_literal)))))))
       (expression_statement
+        (identifier))
+      (ERROR)
+      (expression_statement
         (call_expression
           function: (identifier)
-          (ERROR
-            (identifier))
           (argument_list
             (integer_literal))))))
   (ERROR))
@@ -115,10 +116,11 @@ pipeline test(task) {
                 (argument_list
                   (integer_literal)))))))
       (expression_statement
+        (identifier))
+      (ERROR)
+      (expression_statement
         (call_expression
           function: (identifier)
-          (ERROR
-            (identifier))
           (argument_list
             (integer_literal))))))
   (ERROR))
