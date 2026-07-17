@@ -86,6 +86,7 @@ pub mod module_artifact;
 pub mod observability;
 pub mod op_interrupt;
 pub mod orchestration;
+mod persistent_state;
 pub mod personas;
 mod prepared_module;
 pub mod process_sandbox;
@@ -159,6 +160,7 @@ pub mod waitpoints;
 pub mod workspace_anchor;
 pub mod workspace_path;
 
+pub use persistent_state::{register_persistent_state_builtins_at_root, PersistentStateRoot};
 pub use prepared_module::{PreparedModuleCache, PreparedModuleCacheStats};
 
 pub use actor_chain::{

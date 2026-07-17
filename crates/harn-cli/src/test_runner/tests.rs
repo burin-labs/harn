@@ -921,9 +921,19 @@ pipeline test_b_clock_is_fresh(task) {
     assert_eq!(summary.passed, 2);
 }
 
-#[tokio::test]
+// The synchronous guard serializes process-global state that Harn worker threads
+// consult while this async test runs; dropping it before the runner completes
+// would reintroduce the cross-test state race this fixture covers.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "current_thread")]
 async fn user_tests_isolate_persistent_runtime_state_per_case() {
     let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state();
+    let ambient_state = tempfile::tempdir().expect("ambient state tempdir");
+    let _ambient_state_guard = ScopedEnvVar::set(
+        harn_vm::runtime_paths::HARN_STATE_DIR_ENV,
+        ambient_state.path().to_string_lossy().as_ref(),
+    );
 
     for parallel in [false, true] {
         let temp = TempTestDir::new();
@@ -933,10 +943,17 @@ async fn user_tests_isolate_persistent_runtime_state_per_case() {
 pipeline test_a_sets_store_value(task) {
   store_set("test-only-key", "from-a")
   assert_eq(store_get("test-only-key"), "from-a")
+  metadata_set(".", "test", {value: "from-a"})
+  metadata_save()
+  assert_eq(metadata_get(".", "test").value, "from-a")
+  checkpoint("test-only-key", "from-a")
+  assert_eq(checkpoint_get("test-only-key"), "from-a")
 }
 
 pipeline test_b_has_fresh_store(task) {
   assert_eq(store_get("test-only-key"), nil)
+  assert_eq(metadata_get(".", "test"), nil)
+  assert_eq(checkpoint_get("test-only-key"), nil)
 }
 "#,
         );
@@ -964,6 +981,19 @@ pipeline test_b_has_fresh_store(task) {
             "user tests must not write persistent state into the project root"
         );
     }
+
+    assert!(
+        !ambient_state.path().join("store.json").exists(),
+        "user tests must not write stores to the ambient runtime state root"
+    );
+    assert!(
+        !ambient_state.path().join("metadata").exists(),
+        "user tests must not write metadata to the ambient runtime state root"
+    );
+    assert!(
+        !ambient_state.path().join("checkpoints").exists(),
+        "user tests must not write checkpoints to the ambient runtime state root"
+    );
 }
 
 #[tokio::test]
