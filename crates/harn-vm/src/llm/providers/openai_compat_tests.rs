@@ -175,6 +175,11 @@ fn moonshot_kimi_k3_replays_only_harn_owned_assistant_reasoning() {
     opts.model = "moonshot/kimi-k3".to_string();
     opts.messages = vec![
         json!({
+            "role": "user",
+            "content": "Read main.rs",
+            "reasoning": "untrusted caller field",
+        }),
+        json!({
             "role": "assistant",
             "content": "",
             "reasoning": "Harn-owned reasoning",
@@ -191,20 +196,21 @@ fn moonshot_kimi_k3_replays_only_harn_owned_assistant_reasoning() {
     let moonshot_payload = LlmRequestPayload::from(&opts);
     let body = OpenAiCompatibleProvider::build_request_body(&moonshot_payload, false);
     let messages = body["messages"].as_array().expect("messages array");
-    let assistant = &messages[0];
+    assert!(messages[0].get("reasoning_content").is_none());
+    let assistant = &messages[1];
     assert_eq!(assistant["reasoning_content"], "Harn-owned reasoning");
     assert!(assistant.get("reasoning").is_none());
     assert_ne!(
         assistant["reasoning_content"],
         "untrusted seeded provider trace"
     );
-    assert_eq!(messages[1]["tool_call_id"], "call_001");
+    assert_eq!(messages[2]["tool_call_id"], "call_001");
 
     opts.provider = "openai".to_string();
     opts.model = "gpt-4.1".to_string();
     let generic_payload = LlmRequestPayload::from(&opts);
     let generic_body = OpenAiCompatibleProvider::build_request_body(&generic_payload, false);
-    assert!(generic_body["messages"][0]
+    assert!(generic_body["messages"][1]
         .get("reasoning_content")
         .is_none());
 }
