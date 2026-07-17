@@ -430,6 +430,20 @@ pub fn clear_session_changed_paths(session_id: &str) {
     }
 }
 
+/// Drop EVERY session's recorded mutated paths.
+///
+/// The per-session removals above run at teardown, which a session that errors
+/// or is abandoned never reaches — and this map is process-global while the
+/// session store beside it is thread-local, so its entries outlive the sessions
+/// that made them. A later session reusing an id would then inherit the earlier
+/// one's paths into its `files_written` receipt: a receipt reporting writes that
+/// this run did not make. Reset is the backstop teardown cannot be.
+pub fn clear_all_session_changed_paths() {
+    if let Ok(mut store) = session_changed_paths_store().lock() {
+        store.clear();
+    }
+}
+
 pub struct CurrentSessionGuard {
     active: bool,
 }
@@ -518,6 +532,7 @@ pub fn reset_session_store() {
     SESSIONS.with(|s| s.borrow_mut().clear());
     CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().clear());
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
+    clear_all_session_changed_paths();
     reset_default_transcript_budget_policy();
 }
 

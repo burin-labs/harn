@@ -125,6 +125,31 @@ impl ToolLifecycleStarts {
 static TOOL_LIFECYCLE_STARTS: LazyLock<Mutex<ToolLifecycleStarts>> =
     LazyLock::new(|| Mutex::new(ToolLifecycleStarts::default()));
 
+/// Drop every session's in-flight tool calls and MCP clients.
+///
+/// Both maps are keyed by session id and released per session at session end,
+/// which a run that dies before finalizing never reaches. They are also
+/// process-global, so those entries outlive the run — and session ids are not
+/// guaranteed unique across runs. A later session reusing an id would inherit
+/// the dead run's in-flight calls and be handed a synthesized terminal
+/// `ToolCallUpdate { Failed, AbandonedAtLoopExit }` for a tool call it never
+/// made, or resolve an MCP client belonging to a connection that is gone.
+///
+/// Deliberately silent about terminal updates: a reset means no consumer is
+/// listening for this session's events, so synthesizing them would report a
+/// history to nobody. `clear_session` is the same choice for a suspend.
+pub(crate) fn reset_session_state() {
+    TOOL_LIFECYCLE_STARTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .live
+        .clear();
+    SESSION_MCP_CLIENTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
+}
+
 fn observe_tool_lifecycle(event: &AgentEvent) -> bool {
     TOOL_LIFECYCLE_STARTS
         .lock()
@@ -609,6 +634,37 @@ mod tests {
                 }
             )),
             "a call that already reached a terminal update is not swept at loop exit"
+        );
+    }
+
+    /// A run that dies before finalizing never fires its session-end hooks, and
+    /// this tracker is process-global while session ids are not unique across
+    /// runs. Without a reset drain, the NEXT run to use the id inherits the dead
+    /// run's in-flight calls and is handed an abandoned terminal update for a
+    /// tool call it never made — a fabricated event, which is worse than a
+    /// missing one.
+    #[tokio::test(flavor = "current_thread")]
+    async fn reset_drops_in_flight_calls_so_a_later_session_cannot_inherit_them() {
+        const SESSION_ID: &str = "loop-exit-reset-test";
+        emit_agent_event_sync(&start(SESSION_ID, "call-from-a-dead-run"));
+
+        crate::reset_thread_local_state();
+
+        let sink = Arc::new(RecordingSink::default());
+        let _guard = LoopSinkGuard::install(Some(sink.clone()));
+        // The later run ends the same session id, abandoning in-flight calls.
+        fire_session_end_hooks(SESSION_ID, true);
+
+        let events = sink.events.lock().expect("recorded events");
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                AgentEvent::ToolCallUpdate {
+                    error_category: Some(ToolCallErrorCategory::AbandonedAtLoopExit),
+                    ..
+                }
+            )),
+            "a reset run's in-flight calls must not surface as the next run's abandoned calls"
         );
     }
 
