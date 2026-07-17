@@ -1,6 +1,6 @@
 import { bounded_loop } from "std/personas/prelude"
 
-@persona(name: "template_persona", description: "Deterministic sweeper template persona.", tools: [github], capabilities: ["project.test_commands", "runtime.record_run"], autonomy: "act_with_approval", receipts: "required")
+@persona(name: "template_persona", description: "Deterministic sweeper template persona.", tools: [github], capabilities: ["project.test_commands", "runtime.record_run", "workspace.read_text"], autonomy: "act_with_approval", receipts: "required")
 /** Run the deterministic sweeper template DAG. */
 pub fn template_persona(task) {
   return drain_queue(task)

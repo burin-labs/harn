@@ -589,6 +589,33 @@ fn test_parses_persona_check_flags() {
 }
 
 #[test]
+fn test_parses_persona_materialize_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "materialize",
+        "--blueprint",
+        "persona.blueprint.json",
+        "--output-root",
+        "generated-personas",
+        "--force",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::Materialize(materialize) = args.command else {
+        panic!("expected persona materialize command");
+    };
+    assert_eq!(
+        materialize.blueprint,
+        PathBuf::from("persona.blueprint.json")
+    );
+    assert_eq!(materialize.output_root, PathBuf::from("generated-personas"));
+    assert!(materialize.force);
+}
+
+#[test]
 fn test_parses_persona_activation_attenuation() {
     let cli = Cli::parse_from([
         "harn",

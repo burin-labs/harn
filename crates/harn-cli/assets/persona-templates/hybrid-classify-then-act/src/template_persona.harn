@@ -1,6 +1,6 @@
 import { cheap_classify_then_escalate, with_audit_receipt } from "std/personas/prelude"
 
-@persona(name: "template_persona", description: "Hybrid classify-then-act template persona.", tools: [github, mcp], capabilities: ["project.scan", "runtime.record_run"], autonomy: "act_with_approval", receipts: "required")
+@persona(name: "template_persona", description: "Hybrid classify-then-act template persona.", tools: [github, mcp], capabilities: ["project.scan", "runtime.record_run", "workspace.read_text"], autonomy: "act_with_approval", receipts: "required")
 /** Run the hybrid classify-then-act template DAG. */
 pub fn template_persona(task) {
   const classified = classify_request(task)

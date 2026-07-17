@@ -24,6 +24,7 @@ fn main() {
     ensure_git_hooks_installed();
     emit_cli_script_bytecode();
     emit_demo_sibling_assets();
+    emit_persona_template_watch();
     emit_check_fingerprint();
 
     let manifest_dir =
@@ -300,6 +301,16 @@ fn emit_demo_sibling_assets() {
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     write_demo_assets_table(&out_dir.join("demo_assets_table.rs"), &entries);
+}
+
+/// `persona_scaffold` embeds these source assets with `include_dir!`. Cargo
+/// does not otherwise discover files nested below that macro's directory, so
+/// explicitly watch the tree to keep local materialize/test runs from using
+/// stale template bytes after an asset-only edit.
+fn emit_persona_template_watch() {
+    let manifest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    emit_rerun_if_changed_recursive(&manifest_dir.join("assets/persona-templates"));
 }
 
 /// Recurse `dir`, recording each embeddable sibling file as

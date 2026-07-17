@@ -13,6 +13,7 @@ pipeline main() {
   )
   __io_println(is_ok(digest))
   const digest_lowering = unwrap(digest)
+  __io_println(digest_lowering.profile)
   __io_println(digest_lowering.template)
   __io_println(digest_lowering.policy.autonomy_tier)
   __io_println(digest_lowering.policy.receipt_policy)
@@ -26,7 +27,7 @@ pipeline main() {
       kinds: ["webhook"],
       schema_name: "SlackEventPayload",
       outbound_methods: [],
-      secret_requirements: [],
+      secret_requirements: [{name: "signing_secret", required: true, namespace: "slack"}],
       signature_verification: {kind: "none"},
       runtime: {kind: "placeholder"},
     },
@@ -48,6 +49,7 @@ pipeline main() {
   __io_println(triage_lowering.triggers[0].provider)
   __io_println(triage_lowering.triggers[0].events[0])
   __io_println(triage_lowering.triggers[0].handler)
+  __io_println(triage_lowering.triggers[0].secrets.signing_secret)
   const mixed_sources = persona_blueprint_validate(
     {
       schema_version: "1",
