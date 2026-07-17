@@ -3869,11 +3869,12 @@ Nine opinionated modules wrap common LLM patterns:
   `judge_payload`, `verdict_normalize`, `schema_retry_nudge_for`.
 - `std/llm/prompts` — `system_prelude`, `tool_use_prelude`,
   `structured_output_preface`.
-- `std/llm/catalog` — `model_info(selector)`, `resolved_options(opts)`,
-  `has_capability(model, cap)`, `family_of(model_id)`,
-  `lineage_of(model_id)`, `complementary_reviewer(opts)`. Note:
-  Harn-side names are `model_info` / `resolved_options` to avoid
-  shadowing the same-named builtins.
+- `std/llm/catalog` — `model_info(selector)`, `execution_contract(selector)`,
+  `resolved_options(opts)`, `has_capability(model, cap)`,
+  `family_of(model_id)`, `lineage_of(model_id)`,
+  `complementary_reviewer(opts)`. `execution_contract` is the secret-free
+  durable receipt for an effective model route; it omits arbitrary operator
+  overlays. Harn-side names avoid shadowing the same-named builtins.
 
 Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/stdlib/llm-handlers.html).
 

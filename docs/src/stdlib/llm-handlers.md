@@ -542,6 +542,7 @@ shadow the builtins.
 | Function | Signature | Description |
 |---|---|---|
 | `model_info(selector)` | `(string) -> dict` | Wraps `llm_model_info`. Always returns a dict; `catalog` field is nil for unknown models. |
+| `execution_contract(selector)` | `(string) -> dict` | Wraps `llm_execution_contract`. Returns the resolved route facts safe for durable receipts; `generation_defaults` includes only Harn-validated fields, never arbitrary operator overlays. |
 | `resolved_options(opts)` | `(dict) -> dict` | Wraps `llm_resolved_options`. Required: `opts.model`. |
 | `has_capability(model, capability)` | `(string, string) -> bool` | Capability ∈ `{"thinking", "tool_search", "interleaved_thinking", "prompt_caching", "vision", "audio", "pdf", "files_api", "reasoning_effort", "native_tools"}`. |
 | `family_of(model_id)` | `(string) -> string` | Returns the normalized review-diversity family such as `"anthropic-claude"`, `"openai-gpt"`, `"google-gemini"`, or `"qwen"`. Hosted aliases keep the underlying model family. |
