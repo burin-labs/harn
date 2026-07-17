@@ -62,6 +62,34 @@ pub fn normalize_workspace_path(path: &str, workspace_root: Option<&Path>) -> Op
     classify_workspace_path(path, workspace_root).workspace_path
 }
 
+/// Resolve an existing path through the filesystem and return its canonical
+/// workspace-relative spelling only when it remains beneath an existing
+/// workspace directory. Unlike [`normalize_workspace_path`], this follows
+/// symlinks and never applies leading-slash root-drift recovery.
+pub fn canonicalize_existing_workspace_path(path: &Path, workspace_root: &Path) -> Option<String> {
+    if path.as_os_str().is_empty() {
+        return None;
+    }
+    let canonical_root = std::fs::canonicalize(workspace_root).ok()?;
+    if !canonical_root.is_dir() {
+        return None;
+    }
+
+    let target = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        canonical_root.join(path)
+    };
+    let canonical_target = std::fs::canonicalize(target).ok()?;
+    let relative = canonical_target.strip_prefix(&canonical_root).ok()?;
+    let workspace_path = to_posix(&relative.to_string_lossy());
+    Some(if workspace_path.is_empty() {
+        ".".to_string()
+    } else {
+        workspace_path
+    })
+}
+
 pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> WorkspacePathInfo {
     let input = path.to_string();
     let trimmed = path.trim();
@@ -372,6 +400,93 @@ mod tests {
         assert_eq!(
             normalize_workspace_path("/packages/app", Some(dir.path())).as_deref(),
             Some("packages/app")
+        );
+    }
+
+    #[test]
+    fn canonical_existing_workspace_path_returns_contained_relative_child() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("packages/app/test.harn");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "ok").unwrap();
+
+        assert_eq!(
+            canonicalize_existing_workspace_path(Path::new("packages/app/test.harn"), root.path(),)
+                .as_deref(),
+            Some("packages/app/test.harn")
+        );
+        assert_eq!(
+            canonicalize_existing_workspace_path(&file, root.path()).as_deref(),
+            Some("packages/app/test.harn")
+        );
+    }
+
+    #[test]
+    fn canonical_existing_workspace_path_rejects_missing_and_parent_escape() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("workspace");
+        std::fs::create_dir(&root).unwrap();
+        let secret = parent.path().join("secret.harn");
+        std::fs::write(&secret, "secret").unwrap();
+
+        assert_eq!(
+            canonicalize_existing_workspace_path(Path::new("missing.harn"), &root),
+            None
+        );
+        assert_eq!(
+            canonicalize_existing_workspace_path(Path::new(""), &root),
+            None
+        );
+        assert_eq!(
+            canonicalize_existing_workspace_path(Path::new("../secret.harn"), &root),
+            None
+        );
+        assert_eq!(canonicalize_existing_workspace_path(&secret, &root), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_existing_workspace_path_rejects_outside_symlink_and_projects_inside_one() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.harn");
+        std::fs::write(&secret, "secret").unwrap();
+        std::os::unix::fs::symlink(&secret, root.path().join("outside-link")).unwrap();
+
+        let actual = root.path().join("actual/test.harn");
+        std::fs::create_dir_all(actual.parent().unwrap()).unwrap();
+        std::fs::write(&actual, "ok").unwrap();
+        std::os::unix::fs::symlink("actual", root.path().join("inside-link")).unwrap();
+
+        assert_eq!(
+            canonicalize_existing_workspace_path(&root.path().join("outside-link"), root.path()),
+            None
+        );
+        assert_eq!(
+            canonicalize_existing_workspace_path(
+                &root.path().join("inside-link/test.harn"),
+                root.path(),
+            )
+            .as_deref(),
+            Some("actual/test.harn")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_existing_workspace_path_accepts_a_symlinked_workspace_root() {
+        let parent = tempfile::tempdir().unwrap();
+        let actual_root = parent.path().join("actual-root");
+        let file = actual_root.join("nested/test.harn");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "ok").unwrap();
+        let linked_root = parent.path().join("workspace-link");
+        std::os::unix::fs::symlink("actual-root", &linked_root).unwrap();
+
+        assert_eq!(
+            canonicalize_existing_workspace_path(Path::new("nested/test.harn"), &linked_root)
+                .as_deref(),
+            Some("nested/test.harn")
         );
     }
 }

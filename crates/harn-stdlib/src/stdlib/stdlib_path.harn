@@ -79,6 +79,18 @@ pub fn workspace_normalize(path, workspace_root = nil) {
 }
 
 /**
+ * Canonicalize an existing workspace path without allowing symlink escapes.
+ * Return the canonical workspace-relative path, or nil when either path is
+ * missing or the canonical target falls outside the canonical workspace root.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn workspace_canonicalize_existing(path: string, workspace_root: string? = nil) -> string? {
+  return path_workspace_canonicalize_existing(path, workspace_root)
+}
+
+/**
  * List files in a directory recursively (one level).
  * List the file paths directly under directory `dir`.
  *

@@ -50,6 +50,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "path_workspace_normalize",
         "path_workspace_normalize(path, workspace_root?) -> string | nil",
     ),
+    (
+        "path_workspace_canonicalize_existing",
+        "path_workspace_canonicalize_existing(path, workspace_root?) -> string | nil",
+    ),
     ("temp_dir", "temp_dir() -> string"),
     ("asset_root", "asset_root() -> string"),
     ("execution_root", "execution_root() -> string"),
