@@ -26,6 +26,13 @@ impl TempTestDir {
     }
 }
 
+fn loaded_skills_for(file: &Path) -> crate::skill_loader::LoadedSkills {
+    crate::skill_loader::load_skills(&crate::skill_loader::SkillLoaderInputs {
+        cli_dirs: Vec::new(),
+        source_path: Some(file.to_path_buf()),
+    })
+}
+
 #[tokio::test]
 async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
     let temp = TempTestDir::new();
@@ -50,7 +57,7 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         &case,
         temp.path(),
         0,
-        &[],
+        &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
         0,
@@ -90,7 +97,7 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
         &case,
         temp.path(),
         30_000,
-        &[],
+        &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
         0,
@@ -187,7 +194,7 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
         &case,
         temp.path(),
         100,
-        &[],
+        &loaded_skills_for(&temp.path().join("test_timeout_import.harn")),
         &harn_vm::PreparedModuleCache::default(),
         true,
         0,
@@ -502,20 +509,32 @@ pipeline test_cli_skills(task) {
   const found = skill_find(skills, "review")
   assert_eq(found.name, "review")
 }
+
+pipeline test_cli_skills_again(task) {
+  assert_eq(skill_count(skills), 1)
+  const found = skill_find(skills, "review")
+  assert_eq(found.name, "review")
+}
 "#,
     );
 
+    crate::skill_loader::reset_load_skills_calls();
     let summary = run_tests(
         &temp.path().join("suite"),
         None,
         1_000,
-        false,
+        true,
         &[temp.path().join("skills")],
     )
     .await;
 
     assert_eq!(summary.failed, 0, "{:?}", summary.results[0].error);
-    assert_eq!(summary.passed, 1);
+    assert_eq!(summary.passed, 2);
+    assert_eq!(
+        crate::skill_loader::load_skills_calls(),
+        1,
+        "cases in one source directory must share one discovery result"
+    );
 }
 
 #[tokio::test]
