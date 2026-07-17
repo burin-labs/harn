@@ -1,16 +1,16 @@
 use super::support::{parse_json, run};
 
 #[test]
-fn models_list_human_text_renders_catalog_groups() {
+fn models_list_human_text_renders_default_catalog_table() {
     let harn = run(&["models", "list"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     assert!(
-        harn.stdout.contains("anthropic\n"),
+        harn.stdout.starts_with("provider"),
         "stdout={}",
         harn.stdout
     );
     assert!(
-        harn.stdout.contains("  claude-haiku-4-5-20251001"),
+        harn.stdout.contains("claude-haiku-4-5-20251001"),
         "stdout={}",
         harn.stdout
     );
@@ -20,12 +20,8 @@ fn models_list_human_text_renders_catalog_groups() {
 fn models_list_provider_filter_limits_groups() {
     let harn = run(&["models", "list", "--provider", "openai"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    assert!(
-        harn.stdout.starts_with("openai\n"),
-        "stdout={}",
-        harn.stdout
-    );
-    assert!(!harn.stdout.contains("\nmock\n"), "stdout={}", harn.stdout);
+    assert!(harn.stdout.contains("openai"), "stdout={}", harn.stdout);
+    assert!(!harn.stdout.contains("mock"), "stdout={}", harn.stdout);
 }
 
 #[test]
@@ -36,21 +32,112 @@ fn models_list_installed_only_is_well_formed() {
 }
 
 #[test]
-fn models_list_json_has_provider_array() {
-    let harn = run(&["models", "list", "--json"], &[]);
+fn models_list_json_preserves_full_runtime_rows_and_price_order() {
+    let harn = run(
+        &[
+            "models",
+            "list",
+            "--provider",
+            "anthropic",
+            "--where",
+            "tier=frontier,strengths=coding",
+            "--sort",
+            "pricing.input",
+            "--json",
+        ],
+        &[],
+    );
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    let providers = harn_value["providers"].as_array().expect("providers array");
-    let anthropic = providers
+    assert_eq!(harn_value["schemaVersion"], 1);
+    assert_eq!(harn_value["query"]["provider"], "anthropic");
+    assert_eq!(harn_value["query"]["sort"], "pricing.input");
+    let models = harn_value["models"].as_array().expect("models array");
+    assert!(!models.is_empty(), "models={models:?}");
+    let mut prior = 0.0;
+    for model in models {
+        assert_eq!(model["provider"], "anthropic");
+        assert_eq!(model["tier"], "frontier");
+        assert!(
+            model["strengths"]
+                .as_array()
+                .is_some_and(|strengths| strengths.iter().any(|value| value == "coding")),
+            "strength filter admitted unexpected row: {model:?}"
+        );
+        assert!(model.get("tool_mode_parity").is_some());
+        assert!(model.get("tool_mode_parity_notes").is_some());
+        let price = model["pricing"]["input_per_mtok"]
+            .as_f64()
+            .expect("frontier Anthropic price");
+        assert!(price >= prior, "prices must be ascending: {models:?}");
+        prior = price;
+    }
+    assert!(models
         .iter()
-        .find(|provider| provider["name"] == "anthropic")
-        .expect("anthropic provider group");
-    let models = anthropic["models"].as_array().expect("anthropic models");
+        .any(|model| { model["pricing"]["cache_read_per_mtok"].is_number() }));
+}
+
+#[test]
+fn models_list_filters_tool_parity_and_renders_selected_columns() {
+    let harn = run(
+        &[
+            "models",
+            "list",
+            "--where",
+            "tool_support.parity=native_unreliable",
+            "--sort",
+            "context_window",
+            "--columns",
+            "id,pricing.input,pricing.cache_read,tool_support.parity,tool_support.parity_notes",
+        ],
+        &[],
+    );
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "pricing.input",
+        "pricing.cache_read",
+        "tool parity",
+        "parity notes",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
     assert!(
-        models
-            .iter()
-            .any(|model| model["id"] == "claude-haiku-4-5-20251001"),
-        "anthropic models={models:?}"
+        harn.stdout.contains("native_unreliable"),
+        "stdout={}",
+        harn.stdout
+    );
+}
+
+#[test]
+fn models_list_rejects_unknown_or_ambiguous_query_input() {
+    let unknown = run(
+        &["models", "list", "--where", "provider_name=anthropic"],
+        &[],
+    );
+    assert_ne!(unknown.exit_code, 0);
+    assert!(
+        unknown
+            .stderr
+            .contains("unknown where field 'provider_name'"),
+        "stderr={}",
+        unknown.stderr
+    );
+
+    let incompatible = run(
+        &["models", "list", "--columns", "id,pricing.input", "--json"],
+        &[],
+    );
+    assert_ne!(incompatible.exit_code, 0);
+    assert!(
+        incompatible
+            .stderr
+            .contains("--columns cannot be combined with --json"),
+        "stderr={}",
+        incompatible.stderr
     );
 }
 

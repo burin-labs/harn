@@ -1482,6 +1482,28 @@ Statuses are `preferred`, `experimental`, `vision_only_experimental`,
 `quarantined`, or `unknown`. `harn local switch` refuses experimental and
 quarantined profiles unless the required probes pass or `--force` is supplied.
 
+## harn models list
+
+Query the same provider/model catalog Harn resolves at runtime. The human view
+uses a deterministic table; `--json` returns the complete catalog rows rather
+than a lossy display projection, including `pricing.cache_read_per_mtok`,
+`tool_mode_parity`, and `tool_mode_parity_notes` where known.
+
+```bash
+harn models list --where tier=frontier,strengths=coding --sort pricing.input \
+  --columns id,provider,pricing.input,pricing.cache_read,context_window,tool_support.parity,tool_support.parity_notes
+harn models list --provider anthropic --where open_weight=false --sort context_window
+harn models list --where tool_support.parity=native_unreliable --json
+```
+
+Repeat `--where KEY=VALUE` for additional all-of filters, or separate entries
+with commas. Supported fields are `provider`, `tier`, `strengths` (exact tag
+membership), `tool_support.parity`, and `open_weight`. Sort fields are
+`pricing.input`, `pricing.output`, `pricing.cache_read`, and `context_window`;
+numeric sorts are ascending with missing metadata last. `--columns` selects a
+strict allowlist for the human table and cannot be combined with `--json`,
+which intentionally returns complete authoritative rows.
+
 ## harn models test
 
 Round-trip a small prompt through one resolved model and report model id,
