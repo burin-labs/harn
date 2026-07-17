@@ -13,6 +13,9 @@ impl AcpServer {
     /// wants to drive incoming JSON-RPC messages directly.
     pub fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
         let llm_config_overrides = config.llm_config_overrides.clone();
+        let runtime_provider_endpoint_overrides = config
+            .runtime_configurator
+            .runtime_provider_endpoint_overrides();
         let llm_capability_overrides = config.llm_capability_overrides.clone();
 
         Self {
@@ -37,6 +40,7 @@ impl AcpServer {
             vm_baseline_cache: None,
             profile: config.profile,
             llm_config_overrides,
+            runtime_provider_endpoint_overrides,
             llm_capability_overrides,
             default_budget: config.budget,
             sandbox: config.sandbox,
@@ -51,10 +55,12 @@ impl AcpServer {
     /// worker and suspend independently while a provider request is in flight.
     pub async fn handle_incoming_message(&mut self, msg: serde_json::Value) {
         let provider_overrides = self.llm_config_overrides.clone();
+        let runtime_provider_endpoint_overrides = self.runtime_provider_endpoint_overrides.clone();
         let capability_overrides = self.llm_capability_overrides.clone();
-        harn_vm::orchestration::scope_llm_runtime_overrides(
+        harn_vm::orchestration::scope_llm_runtime_overrides_with_provider_endpoints(
             provider_overrides,
             capability_overrides,
+            runtime_provider_endpoint_overrides,
             self.handle_incoming_message_scoped(msg),
         )
         .await;

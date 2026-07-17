@@ -1698,8 +1698,8 @@ async fn acp_provider_catalog_method_matches_export_artifact_with_overrides() {
         .any(|provider| provider["id"] == "fixture_runtime"));
 }
 
-fn endpoint_overlay(base_url: &str) -> harn_vm::llm_config::ProvidersConfig {
-    let mut overlay = harn_vm::llm_config::parse_config_toml(
+fn endpoint_overlay() -> harn_vm::llm_config::ProvidersConfig {
+    harn_vm::llm_config::parse_config_toml(
         r#"
 [providers.fixture]
 base_url = "http://catalog.invalid/v1"
@@ -1710,11 +1710,7 @@ method = "GET"
 path = "/health"
 "#,
     )
-    .expect("fixture provider overlay parses");
-    overlay.merge_from(
-        &harn_vm::llm_config::ProvidersConfig::runtime_provider_endpoint("fixture", base_url),
-    );
-    overlay
+    .expect("fixture provider overlay parses")
 }
 
 async fn start_health_endpoint() -> (String, tokio::task::JoinHandle<()>) {
@@ -1792,14 +1788,19 @@ async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
             let (first_tx, mut first_rx, first_server, first_session) =
                 start_acp_channel_session_with_config(
                     AcpServerConfig::new(None)
-                        .with_llm_overrides(Some(endpoint_overlay(&first_endpoint)), None),
+                        .with_llm_overrides(Some(endpoint_overlay()), None)
+                        .with_runtime_provider_endpoint("fixture", &first_endpoint)
+                        .expect("first endpoint override")
+                        .with_runtime_configurator(Arc::new(NoopAcpRuntimeConfigurator)),
                     serde_json::json!("."),
                 )
                 .await;
             let (second_tx, mut second_rx, second_server, second_session) =
                 start_acp_channel_session_with_config(
                     AcpServerConfig::new(None)
-                        .with_llm_overrides(Some(endpoint_overlay(&second_endpoint)), None),
+                        .with_llm_overrides(Some(endpoint_overlay()), None)
+                        .with_runtime_provider_endpoint("fixture", &second_endpoint)
+                        .expect("second endpoint override"),
                     serde_json::json!("."),
                 )
                 .await;

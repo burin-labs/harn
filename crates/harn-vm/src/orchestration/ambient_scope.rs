@@ -49,7 +49,10 @@ use crate::llm::capabilities::{
 };
 use crate::llm::permissions::{swap_dynamic_permission_stack, DynamicPermissionPolicy};
 use crate::llm::swap_current_host_bridge;
-use crate::llm_config::{swap_user_overrides as swap_provider_overrides, ProvidersConfig};
+use crate::llm_config::{
+    swap_runtime_provider_endpoint_overrides, swap_user_overrides as swap_provider_overrides,
+    ProvidersConfig, RuntimeProviderEndpointOverrides,
+};
 use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextOverlay};
 use crate::stdlib::process::{swap_source_dir, swap_thread_execution_context};
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
@@ -69,6 +72,8 @@ pub(crate) struct AmbientExecutionScope {
     /// Provider catalog overlay for this execution. An ACP host can install a
     /// verified endpoint without mutating the process or a sibling server.
     provider_overrides: Option<ProvidersConfig>,
+    /// Host-verified endpoint sidecar paired with `provider_overrides`.
+    runtime_provider_endpoint_overrides: RuntimeProviderEndpointOverrides,
     /// Capability matrix overlay paired with `provider_overrides`.
     capability_overrides: Option<CapabilitiesFile>,
     /// Active agent-session breadcrumb. It starts empty for a spawned worker
@@ -141,6 +146,9 @@ impl AmbientExecutionScope {
             mutation_session: clone_via_swap(swap_mutation_session),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             provider_overrides: clone_via_swap(swap_provider_overrides),
+            runtime_provider_endpoint_overrides: clone_via_swap(
+                swap_runtime_provider_endpoint_overrides,
+            ),
             capability_overrides: clone_via_swap(swap_capability_overrides),
             ..Self::default()
         }
@@ -185,6 +193,9 @@ impl AmbientExecutionScope {
             mutation_session: clone_via_swap(swap_mutation_session),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             provider_overrides: clone_via_swap(swap_provider_overrides),
+            runtime_provider_endpoint_overrides: clone_via_swap(
+                swap_runtime_provider_endpoint_overrides,
+            ),
             capability_overrides: clone_via_swap(swap_capability_overrides),
             trusted_depth: clone_via_swap(swap_trusted_bridge_depth),
             command_hook_depth: clone_via_swap(swap_command_policy_hook_depth),
@@ -209,6 +220,9 @@ impl AmbientExecutionScope {
             mutation_session: swap_mutation_session(self.mutation_session),
             host_bridge: swap_current_host_bridge(self.host_bridge),
             provider_overrides: swap_provider_overrides(self.provider_overrides),
+            runtime_provider_endpoint_overrides: swap_runtime_provider_endpoint_overrides(
+                self.runtime_provider_endpoint_overrides,
+            ),
             capability_overrides: swap_capability_overrides(self.capability_overrides),
             trusted_depth: swap_trusted_bridge_depth(self.trusted_depth),
             command_hook_depth: swap_command_policy_hook_depth(self.command_hook_depth),
@@ -227,9 +241,27 @@ pub fn scope_llm_runtime_overrides<F: Future>(
     capability_overrides: Option<CapabilitiesFile>,
     inner: F,
 ) -> impl Future<Output = F::Output> {
+    scope_llm_runtime_overrides_with_provider_endpoints(
+        provider_overrides,
+        capability_overrides,
+        RuntimeProviderEndpointOverrides::default(),
+        inner,
+    )
+}
+
+/// Run `inner` with exact catalog, capability, and host-verified endpoint
+/// overlays. The sidecar is poll-scoped with the catalog, so concurrent ACP
+/// servers cannot cross-route one another while their futures interleave.
+pub fn scope_llm_runtime_overrides_with_provider_endpoints<F: Future>(
+    provider_overrides: Option<ProvidersConfig>,
+    capability_overrides: Option<CapabilitiesFile>,
+    runtime_provider_endpoint_overrides: RuntimeProviderEndpointOverrides,
+    inner: F,
+) -> impl Future<Output = F::Output> {
     let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
     scope.provider_overrides = provider_overrides;
     scope.capability_overrides = capability_overrides;
+    scope.runtime_provider_endpoint_overrides = runtime_provider_endpoint_overrides;
     scope_ambient(scope, inner)
 }
 
@@ -300,6 +332,10 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     // Provider/capability overlays can change transport routing and tool wire
     // policy, so embedded ACP requests carry them across every await.
     ("LLM_CONFIG_OVERRIDES_CONTEXT", AmbientScoping::Captured),
+    (
+        "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
+        AmbientScoping::Captured,
+    ),
     ("LLM_CAPABILITY_OVERRIDES_CONTEXT", AmbientScoping::Captured),
     // --- Uncaptured: audited capability/identity context, same shape, NOT yet
     // read across a fan-out child's awaits. Wire each into the scope the day it
@@ -1101,6 +1137,7 @@ mod tests {
             "CURRENT_HOST_BRIDGE",
             "CURRENT_SESSION_STACK",
             "LLM_CONFIG_OVERRIDES_CONTEXT",
+            "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
             "LLM_CAPABILITY_OVERRIDES_CONTEXT",
         ]
         .into_iter()

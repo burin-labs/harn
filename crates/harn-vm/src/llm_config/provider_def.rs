@@ -17,11 +17,6 @@ pub struct ProviderDef {
     pub protocol: Option<String>,
     pub base_url: String,
     pub base_url_env: Option<String>,
-    /// Ephemeral endpoint selected by an embedding host after readiness.
-    ///
-    /// This is deliberately absent from `ProviderDefWire`: persisted provider
-    /// configuration must not acquire a route that was verified for one run.
-    pub(crate) runtime_base_url: Option<String>,
     /// Optional env var that selects one of this provider's named regional
     /// endpoints. `base_url_env` remains the absolute override when set.
     pub region_env: Option<String>,
@@ -169,7 +164,6 @@ impl<'de> Deserialize<'de> for ProviderDef {
             protocol: wire.protocol,
             base_url: wire.base_url,
             base_url_env: wire.base_url_env,
-            runtime_base_url: None,
             region_env: wire.region_env,
             regions: wire.regions,
             auth_style: wire.auth_style.unwrap_or_else(default_bearer),
@@ -211,7 +205,6 @@ impl Default for ProviderDef {
             protocol: None,
             base_url: String::new(),
             base_url_env: None,
-            runtime_base_url: None,
             region_env: None,
             regions: BTreeMap::new(),
             auth_style: default_bearer(),
@@ -250,7 +243,6 @@ impl ProviderDef {
         merge_option(&mut self.protocol, &overlay.protocol);
         merge_string(&mut self.base_url, &overlay.base_url);
         merge_option(&mut self.base_url_env, &overlay.base_url_env);
-        merge_option(&mut self.runtime_base_url, &overlay.runtime_base_url);
         merge_option(&mut self.region_env, &overlay.region_env);
         self.regions.extend(overlay.regions.clone());
         let overlay_uses_default_auth_style = overlay.auth_style == default_bearer();
@@ -319,13 +311,6 @@ fn default_credential_resolution() -> String {
 }
 
 impl ProviderDef {
-    pub(crate) fn runtime_endpoint(base_url: String) -> Self {
-        Self {
-            runtime_base_url: Some(base_url),
-            ..Default::default()
-        }
-    }
-
     /// Whether this provider resolves its own credentials through a
     /// multi-step chain (AWS SigV4 credential chain, GCP ADC / service
     /// account JSON, etc.) rather than the generic `auth_env` lookup.
@@ -354,18 +339,11 @@ impl AuthEnv {
     }
 }
 
-/// Resolve the effective base URL for a provider, checking a host-verified
-/// runtime endpoint first, then `base_url_env`, any named `region_env`, and
-/// finally the configured `base_url`.
+/// Resolve the configured base URL for a provider, checking `base_url_env`,
+/// any named `region_env`, then the catalog `base_url`. Host-verified runtime
+/// endpoints are applied by [`crate::llm_config::provider_config`] before this
+/// public catalog DTO reaches a transport consumer.
 pub fn resolve_base_url(pdef: &ProviderDef) -> String {
-    if let Some(base_url) = pdef
-        .runtime_base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return base_url.to_string();
-    }
     if let Some(env_name) = &pdef.base_url_env {
         if let Ok(val) = std::env::var(env_name) {
             // Strip surrounding quotes that some .env parsers leave intact.

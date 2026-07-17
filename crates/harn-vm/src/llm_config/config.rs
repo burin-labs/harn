@@ -112,20 +112,6 @@ pub struct SuppressDef {
 }
 
 impl ProvidersConfig {
-    /// Build an ephemeral endpoint overlay for one provider in an embedded
-    /// runtime. The endpoint is intentionally not part of the TOML schema.
-    pub fn runtime_provider_endpoint(
-        provider: impl Into<String>,
-        base_url: impl Into<String>,
-    ) -> Self {
-        let mut config = Self::default();
-        config.providers.insert(
-            provider.into(),
-            ProviderDef::runtime_endpoint(base_url.into()),
-        );
-        config
-    }
-
     pub fn is_empty(&self) -> bool {
         self.default_provider.is_none()
             && self.providers.is_empty()
