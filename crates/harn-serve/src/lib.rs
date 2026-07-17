@@ -136,6 +136,7 @@ pub(crate) mod test_support {
     impl Drop for LlmOverrideReset {
         fn drop(&mut self) {
             harn_vm::llm_config::clear_user_overrides();
+            harn_vm::llm_config::clear_runtime_provider_endpoint_overrides();
             harn_vm::llm::capabilities::clear_user_overrides();
         }
     }

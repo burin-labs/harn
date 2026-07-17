@@ -580,6 +580,7 @@ fn reset_llm_state_for_thread_reset() {
     // cooldowns that would otherwise stall a later run under a paused clock.
     llm::reset_rate_limit_registry();
     llm_config::clear_user_overrides();
+    llm_config::clear_runtime_provider_endpoint_overrides();
 }
 
 #[cfg(test)]

@@ -12,7 +12,16 @@ const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
 
 /// Get provider config for resolving base_url, auth, etc.
 pub fn provider_config(name: &str) -> Option<ProviderDef> {
-    effective_config().providers.get(name).cloned()
+    let mut provider = effective_config().providers.get(name).cloned()?;
+    if let Some(base_url) = runtime_provider_endpoint(name) {
+        // The endpoint was host-verified for this execution. Clear catalog
+        // selectors only on this clone so every transport path resolves the
+        // same endpoint without making runtime state serializable or public.
+        provider.base_url = base_url;
+        provider.base_url_env = None;
+        provider.region_env = None;
+    }
+    Some(provider)
 }
 
 pub fn provider_protocol(name: &str) -> Option<String> {

@@ -83,6 +83,9 @@ pub use policy::*;
 
 mod ambient_scope;
 pub(crate) use ambient_scope::{scope_ambient, AmbientExecutionScope};
+pub use ambient_scope::{
+    scope_llm_runtime_overrides, scope_llm_runtime_overrides_with_provider_endpoints,
+};
 
 mod stage_options;
 pub use stage_options::*;

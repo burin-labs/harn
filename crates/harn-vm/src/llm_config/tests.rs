@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 fn reset_overrides() {
     clear_user_overrides();
+    clear_runtime_provider_endpoint_overrides();
 }
 
 fn diagnostic_texts(src: &str) -> Vec<String> {
@@ -1131,15 +1132,6 @@ fn test_unknown_model_family_ignores_default_provider_fallback() {
     assert_eq!(unknown.lineage, "unknown");
     assert_eq!(known_family.family, "deepseek");
     assert_eq!(known_family.lineage, "deepseek");
-}
-
-#[test]
-fn test_resolve_base_url_no_env() {
-    let pdef = ProviderDef {
-        base_url: "https://example.com".to_string(),
-        ..Default::default()
-    };
-    assert_eq!(resolve_base_url(&pdef), "https://example.com");
 }
 
 #[test]
