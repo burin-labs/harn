@@ -353,10 +353,13 @@ pub use self::healthcheck::{
 };
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::{vm_value_to_json, vm_value_to_json_strict};
-pub use self::jsonl::{load_llm_mocks_jsonl, parse_llm_mock_value, serialize_llm_mock};
+pub use self::jsonl::{
+    load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned, serialize_llm_mock,
+};
 pub use self::mock::{
-    clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mocks, set_replay_mode,
-    take_cli_llm_recordings, LlmMock, LlmReplayMode, MockError,
+    clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mock_fixture,
+    install_cli_llm_mocks, set_replay_mode, take_cli_llm_recordings, LlmMock, LlmMockFixture,
+    LlmReplayMode, MockError,
 };
 pub use self::model_test::{run_model_smoke_test, ModelSmokeTestOptions, ModelSmokeTestResult};
 pub(crate) use self::provider_auth::provider_auth_status_with_definition;
@@ -405,6 +408,7 @@ pub fn reset_llm_state() {
     mock::reset_llm_mock_state();
     autonomy_budget::reset_autonomy_budget_state();
     agent_session_host::reset_agent_session_host_state();
+    agent_runtime::reset_session_state();
     reminder_providers::clear_reminder_providers();
     permissions::clear_dynamic_permission_state();
     crate::orchestration::clear_all_approval_policy_repeat_counts();
@@ -848,6 +852,7 @@ mod tests {
             routing_policy: None,
             region: None,
             session_id: None,
+            mock_scope: None,
             dispatch_provenance: None,
             reminders: None,
             reminder_lifecycle: Vec::new(),
@@ -1020,7 +1025,9 @@ mod tests {
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),
             match_pattern: None,
-            consume_on_match: false,
+            scope: mock::DEFAULT_MOCK_SCOPE.to_string(),
+            entry_id: String::new(),
+            sticky: false,
             input_tokens: None,
             output_tokens: None,
             cache_read_tokens: None,
@@ -1040,7 +1047,9 @@ mod tests {
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),
             match_pattern: None,
-            consume_on_match: false,
+            scope: mock::DEFAULT_MOCK_SCOPE.to_string(),
+            entry_id: String::new(),
+            sticky: false,
             input_tokens: None,
             output_tokens: None,
             cache_read_tokens: None,

@@ -581,6 +581,7 @@ mod tests {
             session_id: None,
             reminder_lifecycle: Vec::new(),
             cli_llm_mock_scope: None,
+            mock_scope: None,
         }
     }
 
@@ -677,6 +678,7 @@ mod tests {
             session_id: None,
             reminder_lifecycle: Vec::new(),
             cli_llm_mock_scope: None,
+            mock_scope: None,
         };
         let body = GeminiProvider::build_request_body(&payload);
         assert_eq!(body["contents"][0]["parts"][0]["text"], "caption");
@@ -739,6 +741,7 @@ mod tests {
             session_id: None,
             reminder_lifecycle: Vec::new(),
             cli_llm_mock_scope: None,
+            mock_scope: None,
         };
         payload.system = Some("system".to_string());
 
@@ -807,6 +810,7 @@ mod tests {
             session_id: None,
             reminder_lifecycle: Vec::new(),
             cli_llm_mock_scope: None,
+            mock_scope: None,
         };
 
         let body = GeminiProvider::build_request_body(&payload);

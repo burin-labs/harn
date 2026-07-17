@@ -148,6 +148,9 @@ pub(crate) fn extract_llm_options(
     let session_id = opt_str(&options, "session_id")
         .filter(|value| !value.is_empty())
         .or_else(crate::agent_sessions::current_session_id);
+    // Mock fixture scope for this call. Consumed only when a mock provider
+    // serves the request; real providers ignore it.
+    let mock_scope = opt_str(&options, "mock_scope").filter(|value| !value.trim().is_empty());
     // Provenance annotation supplied by the pipeline resolver (which resolved
     // field came from a pin vs. was inherited from the primary). Observability
     // only — emitted verbatim into the `resolved_dispatch` transcript record.
@@ -712,6 +715,7 @@ pub(crate) fn extract_llm_options(
         routing_policy,
         region: None,
         session_id,
+        mock_scope,
         dispatch_provenance,
         reminders,
         reminder_lifecycle,

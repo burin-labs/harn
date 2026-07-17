@@ -131,6 +131,7 @@ extra operations declared in `[check.host_capabilities]` or
 
 ```bash
 harn persona new incident_triager --template hybrid-classify-then-act
+harn persona materialize --blueprint incident_triager.blueprint.json
 harn persona list
 harn persona list --json
 harn persona check personas/ship_captain/harn.toml
@@ -154,6 +155,11 @@ the complete package beside its destination, and publishes it only after every
 doctor check and the smoke test pass. `--force` backs up the existing package
 and restores it if publication fails; validation failures never modify the
 destination.
+
+`persona materialize` accepts only a closed JSON blueprint. Harn validates and
+lowers its name, goal, template, and one trigger; the CLI then applies that
+lowering to the same staged template transaction used by `persona new`. It
+never accepts generated source, TOML, credentials, or policy overrides.
 
 `--manifest` accepts a `harn.toml` path or a directory containing one. Without
 it, Harn walks up from the current directory to the nearest `harn.toml`, stopping

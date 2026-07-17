@@ -690,8 +690,8 @@ pub fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), String> {
     match mode {
         CliLlmMockMode::Off => Ok(()),
         CliLlmMockMode::Replay { fixture_path } => {
-            let mocks = harn_vm::llm::load_llm_mocks_jsonl(fixture_path)?;
-            harn_vm::llm::install_cli_llm_mocks(mocks);
+            let fixture = harn_vm::llm::load_llm_mocks_jsonl(fixture_path)?;
+            harn_vm::llm::install_cli_llm_mock_fixture(fixture);
             Ok(())
         }
         CliLlmMockMode::Record { .. } => {
