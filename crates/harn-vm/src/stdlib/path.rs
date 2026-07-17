@@ -9,7 +9,10 @@
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
-use crate::workspace_path::{classify_workspace_path, normalize_workspace_path, WorkspacePathInfo};
+use crate::workspace_path::{
+    canonicalize_existing_workspace_path, classify_workspace_path, normalize_workspace_path,
+    WorkspacePathInfo,
+};
 
 /// Convert all backslashes to forward slashes.
 fn to_posix(s: &str) -> String {
@@ -247,6 +250,14 @@ fn workspace_path_info_to_vm(info: WorkspacePathInfo) -> VmValue {
     VmValue::dict(map)
 }
 
+fn workspace_root_from_args(args: &[VmValue]) -> std::path::PathBuf {
+    args.get(1)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(crate::stdlib::process::execution_root_path)
+}
+
 pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
@@ -381,12 +392,7 @@ fn path_to_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn path_workspace_info_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let workspace_root = args
-        .get(1)
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::stdlib::process::execution_root_path);
+    let workspace_root = workspace_root_from_args(args);
     Ok(workspace_path_info_to_vm(classify_workspace_path(
         &path,
         Some(&workspace_root),
@@ -399,15 +405,44 @@ fn path_workspace_info_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 )]
 fn path_workspace_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let workspace_root = args
-        .get(1)
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(crate::stdlib::process::execution_root_path);
+    let workspace_root = workspace_root_from_args(args);
     Ok(normalize_workspace_path(&path, Some(&workspace_root))
         .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
         .unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig = "path_workspace_canonicalize_existing(path: string?, workspace_root?: string) -> string?",
+    category = "path",
+    doc = "Canonicalize an existing path and return its workspace-relative spelling only when it remains under the existing workspace root."
+)]
+fn path_workspace_canonicalize_existing_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let workspace_root = workspace_root_from_args(args);
+    let target = std::path::PathBuf::from(&path);
+    let scoped_target = if target.is_absolute() {
+        target
+    } else {
+        workspace_root.join(target)
+    };
+    crate::stdlib::sandbox::enforce_fs_path(
+        "path_workspace_canonicalize_existing",
+        &workspace_root,
+        crate::stdlib::sandbox::FsAccess::Read,
+    )?;
+    crate::stdlib::sandbox::enforce_fs_path(
+        "path_workspace_canonicalize_existing",
+        &scoped_target,
+        crate::stdlib::sandbox::FsAccess::Read,
+    )?;
+    Ok(
+        canonicalize_existing_workspace_path(&scoped_target, &workspace_root)
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+            .unwrap_or(VmValue::Nil),
+    )
 }
 
 #[harn_builtin(sig = "path_segments(path: string?) -> list", category = "path")]
@@ -438,6 +473,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &PATH_TO_NATIVE_IMPL_DEF,
     &PATH_WORKSPACE_INFO_IMPL_DEF,
     &PATH_WORKSPACE_NORMALIZE_IMPL_DEF,
+    &PATH_WORKSPACE_CANONICALIZE_EXISTING_IMPL_DEF,
     &PATH_SEGMENTS_IMPL_DEF,
 ];
 

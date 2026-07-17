@@ -34,6 +34,8 @@ pipeline test(task) {
   log(recovered.workspace_path)
   log(recovered.recovered_root_drift)
   log(path_workspace_normalize("/packages/demo/file.txt", root))
+  log(path_workspace_canonicalize_existing("packages/demo/file.txt", root))
+  log(path_workspace_canonicalize_existing("missing.txt", root) == nil)
   const absolute = path_workspace_info(path_join(root, "packages/demo/file.txt"), root)
   log(absolute.kind)
   log(absolute.workspace_path)
