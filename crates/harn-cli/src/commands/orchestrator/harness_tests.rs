@@ -17,6 +17,12 @@ async fn wait_for_persona_completion(event_log: &std::sync::Arc<AnyEventLog>) {
         .read_range(&topic, None, usize::MAX)
         .await
         .expect("read persona lifecycle");
+    if let Some((_, failed)) = existing
+        .iter()
+        .find(|(_, event)| event.kind == "persona.run.failed")
+    {
+        panic!("persona run failed: {}", failed.payload);
+    }
     if !existing
         .iter()
         .any(|(_, event)| event.kind == "persona.run.completed")
@@ -31,8 +37,10 @@ async fn wait_for_persona_completion(event_log: &std::sync::Arc<AnyEventLog>) {
                 .expect("timed out waiting for persona completion event")
                 .expect("persona event stream ended unexpectedly")
                 .expect("persona event stream error");
-            if event.kind == "persona.run.completed" {
-                break;
+            match event.kind.as_str() {
+                "persona.run.completed" => break,
+                "persona.run.failed" => panic!("persona run failed: {}", event.payload),
+                _ => {}
             }
         }
     }
