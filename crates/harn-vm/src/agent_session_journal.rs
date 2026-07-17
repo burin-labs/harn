@@ -768,22 +768,32 @@ pipeline main(task) {{
         assert!(!run_id.is_empty());
         assert!(!turn_id.is_empty());
 
-        assert!(
-            events.iter().any(|event| {
+        let assistant_tool_call = events
+            .iter()
+            .find(|event| {
                 event.kind == SessionEventKind::ToolCall
-                    && event.headers.get("tool_call_id") == Some(&"live-call".to_string())
-            }),
-            "missing durable tool call: {events:#?}"
-        );
+                    && event.payload["raw_message"]["role"] == "assistant"
+            })
+            .expect("assistant tool call must be durable");
+        let tool_call_id = assistant_tool_call
+            .headers
+            .get("tool_call_id")
+            .expect("assistant tool call must carry a correlation id");
+        assert!(!tool_call_id.is_empty());
+        assert!(events.iter().any(|event| {
+            event.kind == SessionEventKind::ToolCall
+                && event.payload["transcript_event"]["kind"] == "tool_call"
+                && event.headers.get("tool_call_id") == Some(tool_call_id)
+        }));
         assert!(events.iter().any(|event| {
             event.kind == SessionEventKind::ToolResult
-                && event.headers.get("tool_call_id") == Some(&"live-call".to_string())
+                && event.headers.get("tool_call_id") == Some(tool_call_id)
         }));
         assert!(events.iter().any(|event| {
             matches!(
                 &event.kind,
                 SessionEventKind::Custom { custom_type } if custom_type == "tool_call_update"
-            ) && event.headers.get("tool_call_id") == Some(&"live-call".to_string())
+            ) && event.headers.get("tool_call_id") == Some(tool_call_id)
         }));
         assert!(events.iter().any(|event| {
             matches!(
