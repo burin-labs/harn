@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 
 use harn_modules::package_snapshot::PackageSnapshot;
 
@@ -8,8 +8,29 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
-static OPEN_PACKAGE_SNAPSHOTS: LazyLock<Mutex<BTreeMap<String, PackageSnapshot>>> =
-    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+#[derive(Default)]
+pub(crate) struct PackageSnapshotRegistry {
+    snapshots: Mutex<BTreeMap<String, PackageSnapshot>>,
+}
+
+impl PackageSnapshotRegistry {
+    fn insert(&self, handle: String, snapshot: PackageSnapshot) -> Result<(), VmError> {
+        self.snapshots
+            .lock()
+            .map_err(|_| VmError::Runtime("package snapshot store is poisoned".to_string()))?
+            .insert(handle, snapshot);
+        Ok(())
+    }
+
+    fn remove(&self, handle: &str) -> Result<bool, VmError> {
+        Ok(self
+            .snapshots
+            .lock()
+            .map_err(|_| VmError::Runtime("package snapshot store is poisoned".to_string()))?
+            .remove(handle)
+            .is_some())
+    }
+}
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &PACKAGE_SNAPSHOT_OPEN_BUILTIN_DEF,
@@ -22,22 +43,16 @@ pub(crate) fn register_package_snapshot_builtins(vm: &mut Vm) {
     }
 }
 
-/// Release every package-generation reader lease left open by the completed
-/// Harn run. Normal scripts close handles with `defer`; this is the error and
-/// cancellation backstop for runs that never reach their defer stack.
-pub(crate) fn reset_package_snapshot_state() {
-    OPEN_PACKAGE_SNAPSHOTS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clear();
-}
-
 #[harn_builtin(
     sig = "package_snapshot_open(project_root: string) -> {handle: string, generation: string, packages_root: string, lock_path: string, lock_digest: string, packages: list<string>}?",
+    kind = "async",
     category = "fs",
     doc = "Open the current immutable package generation and hold its reader lease until package_snapshot_close."
 )]
-fn package_snapshot_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+async fn package_snapshot_open_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let project_root = args
         .first()
         .map(VmValue::display)
@@ -79,25 +94,24 @@ fn package_snapshot_open_builtin(args: &[VmValue], _out: &mut String) -> Result<
                 .collect(),
         )),
     );
-    OPEN_PACKAGE_SNAPSHOTS
-        .lock()
-        .map_err(|_| VmError::Runtime("package snapshot store is poisoned".to_string()))?
-        .insert(handle, snapshot);
+    ctx.package_snapshot_registry().insert(handle, snapshot)?;
     Ok(VmValue::dict(receipt))
 }
 
 #[harn_builtin(
     sig = "package_snapshot_close(handle: string) -> bool",
+    kind = "async",
     category = "fs",
     doc = "Release a package generation reader lease opened by package_snapshot_open."
 )]
-fn package_snapshot_close_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+async fn package_snapshot_close_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
     let handle = args.first().map(VmValue::display).unwrap_or_default();
-    let removed = OPEN_PACKAGE_SNAPSHOTS
-        .lock()
-        .map_err(|_| VmError::Runtime("package snapshot store is poisoned".to_string()))?
-        .remove(&handle);
-    Ok(VmValue::Bool(removed.is_some()))
+    Ok(VmValue::Bool(
+        ctx.package_snapshot_registry().remove(&handle)?,
+    ))
 }
 
 fn display_path(path: &std::path::Path) -> String {
@@ -141,25 +155,62 @@ mod tests {
         generation_root.join(GENERATION_LEASE_FILE)
     }
 
-    #[test]
-    fn package_snapshot_process_global_lifetime_ends_at_thread_reset() {
-        reset_package_snapshot_state();
+    fn open_source(root: &std::path::Path) -> String {
+        format!(
+            "fn main(harness: Harness) {{ return package_snapshot_open({}) }}\nmain(harness)",
+            serde_json::to_string(&root.to_string_lossy()).unwrap()
+        )
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn another_execution_reset_cannot_release_live_snapshot_lease() {
         let temp = tempfile::tempdir().unwrap();
         let lease_path = publish_fixture(temp.path());
-        let snapshot = PackageSnapshot::acquire(temp.path()).unwrap().unwrap();
-        OPEN_PACKAGE_SNAPSHOTS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert("abandoned-run".to_string(), snapshot);
+        let chunk = crate::compile_source(&open_source(temp.path())).unwrap();
+        let mut owner = Vm::new();
+        crate::register_vm_stdlib(&mut owner);
+        let receipt = owner.execute(&chunk).await.unwrap();
+        let VmValue::Dict(_) = receipt else {
+            panic!("package snapshot open must return a receipt");
+        };
 
-        let lease = File::open(lease_path).unwrap();
+        let lease = File::open(&lease_path).unwrap();
         assert!(
             FileExt::try_lock_exclusive(&lease).is_err(),
             "the open snapshot must hold its generation lease"
         );
 
-        crate::reset_thread_local_state();
+        std::thread::spawn(crate::reset_thread_local_state)
+            .join()
+            .unwrap();
+        assert!(
+            FileExt::try_lock_exclusive(&lease).is_err(),
+            "another execution reset must not release the owner's live lease"
+        );
 
-        FileExt::try_lock_exclusive(&lease).expect("reset must release the abandoned reader lease");
+        drop(owner);
+        FileExt::try_lock_exclusive(&lease)
+            .expect("dropping the owning execution must release its abandoned reader lease");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn explicit_close_releases_owning_execution_lease() {
+        let temp = tempfile::tempdir().unwrap();
+        let lease_path = publish_fixture(temp.path());
+        let root = serde_json::to_string(&temp.path().to_string_lossy()).unwrap();
+        let chunk = crate::compile_source(&format!(
+            "fn main(harness: Harness) {{\n  const snapshot = package_snapshot_open({root})\n  return package_snapshot_close(snapshot.handle)\n}}\nmain(harness)"
+        ))
+        .unwrap();
+        let mut owner = Vm::new();
+        crate::register_vm_stdlib(&mut owner);
+
+        assert!(matches!(
+            owner.execute(&chunk).await.unwrap(),
+            VmValue::Bool(true)
+        ));
+        let lease = File::open(lease_path).unwrap();
+        FileExt::try_lock_exclusive(&lease)
+            .expect("explicit close must release the owning execution's reader lease");
     }
 }

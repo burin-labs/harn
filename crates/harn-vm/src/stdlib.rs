@@ -74,6 +74,7 @@ mod oauth_storage;
 pub(crate) mod observability;
 pub(crate) mod options;
 mod package_snapshot;
+pub(crate) use package_snapshot::PackageSnapshotRegistry;
 mod path;
 pub(crate) mod path_scope_guard;
 pub(crate) mod pool;
@@ -442,7 +443,6 @@ pub fn reset_stdlib_state() {
     agents::reset_agent_worker_state();
     agents::workflow::reset_workflow_run_states();
     pool::reset_pool_state();
-    package_snapshot::reset_package_snapshot_state();
     #[cfg(feature = "postgres")]
     postgres::reset_postgres_state();
     #[cfg(feature = "sqlite")]
