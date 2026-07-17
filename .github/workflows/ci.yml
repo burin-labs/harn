@@ -660,7 +660,9 @@ jobs:
           # (hostlib was absent from the pattern) and only surfaced on the
           # main-push backstop. Route the whole crate — the windows job's
           # nextest filter already builds+tests `package(harn-hostlib)`.
-          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|crates/harn-terminal/.*|\.github/release-runner-policy\.json|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_runner_matrix|release_smoke|smoke_installed_binary)\.sh)$'
+          # Package execution, import, and snapshot code are likewise routed
+          # because canonical path identity is platform-specific there.
+          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/.*|\.rs))|vm/tests_runtime\.rs)|crates/harn-modules/src/(package_execution|package_imports|package_snapshot)\.rs|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|crates/harn-terminal/.*|\.github/release-runner-policy\.json|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_runner_matrix|release_smoke|smoke_installed_binary)\.sh)$'
 
           # Pick the diff base per event. push diffs against the previous tip;
           # pull_request diffs against the PR base. merge_group leaves
