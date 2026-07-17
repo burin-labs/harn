@@ -833,7 +833,7 @@ pipeline test_b_clock_is_fresh(task) {
 // consult while this async test runs; dropping it before the runner completes
 // would reintroduce the cross-test state race this fixture covers.
 #[allow(clippy::await_holding_lock)]
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn user_tests_isolate_persistent_runtime_state_per_case() {
     let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
     let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state();
