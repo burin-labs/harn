@@ -9,7 +9,149 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.23
+
+### Breaking
+
+- **Assertion argument order is now uniform: where an assertion weighs a subject
+  against an expectation, the subject comes first (#4899).** Two `std/testing`
+  helpers led with their expectation and have been swapped to match every other
+  assertion that compares two values:
+
+  | Before | After |
+  |--------|-------|
+  | `assert_golden_transcript(expected, actual)` | `assert_golden_transcript(actual, golden)` |
+  | `assert_host_call_count(expected_count, cap, op)` | `assert_host_call_count(cap, op, expected_count)` |
+
+  An inconsistent argument order in an assertion library is worth a breaking
+  change: swap the two sides of an equality assertion and it still passes and
+  fails in all the same cases — it just labels every failure backwards, sending
+  the reader to look for a bug in the value that was correct. The rule is now
+  pinned by a test on the rendered failure text.
+
+  `assert_receipt_field`'s third parameter is renamed `value` to `expected` and
+  it accepts an optional trailing `message`; positional callers are unaffected.
+
+### Added
+
+- **`assert_eq` and `assert_ne` now report a structural diff (#4899).** Instead
+  of printing both values in full and leaving the reader to compare them, a
+  failure names each place the two values differ, addressed by path in ordinary
+  Harn access syntax, and shows only the differing leaves:
+
+  ```text
+  assert_eq failed: the two values differ in 2 places.
+
+    at .user.name
+      expected  "Grace"
+      actual    "Ada"
+
+    at .user.roles[1]
+      expected  "ops"
+      actual    "dev"
+  ```
+
+  The two sides are type-tagged whenever their types disagree, so `1 (int)` and
+  `"1" (string)` can no longer render identically. Long values are abbreviated
+  in the middle, and a mismatch with more than ten differing leaves reports the
+  first ten and counts the rest.
+- **Added `assert_approx(actual, expected, tolerance?)`** for comparing numbers
+  within a tolerance (default `1e-9`). A failing float `assert_eq` now points at
+  it rather than leaving the reader to rediscover that `0.1 + 0.2 != 0.3`.
+- **Added `assert_matches(actual, pattern)`** for asserting text matches a
+  regex. It returns the text, and rejects a non-string subject rather than
+  stringifying it — `assert_matches(1234, "\\d+")` tests the renderer, not the
+  code.
+- **Added `value_diff(actual, expected)`**, the differ on its own: the rendered
+  diff as a string, or `nil` when the values are equal.
+- **`std/testing` now re-exports the Rust-implemented assertions**, so
+  `import { assert_eq } from "std/testing"` resolves. These builtins remain
+  callable with no import; a reader should not have to know which side of the
+  Rust/Harn implementation line a given assertion falls on.
+- **Closed persona blueprint materialization.** `harn persona materialize`
+  now validates a Harn-owned JSON blueprint and atomically publishes a strict,
+  receipt-required persona package with its declared trigger policy (#4988).
+- **Side-effect ceiling denials now explain the active and required effect
+  levels, offer a non-mutating next step, and can request one canonical ACP
+  approval for an exact interactive tool call (#4993).**
+- Versioned, scoped mock/replay fixture contract so one fixture can serve
+  multiple concurrent call sites deterministically. Fixtures may declare a
+  `schemaVersion` header with optional `strictScopes`, and each entry may carry
+  a `scope`, a stable `id`, and a `once`/`sticky` consumption policy; a
+  headerless fixture stays contract v0 and replays byte-identically. A new
+  `llm_mock_receipts()` builtin exposes which scope bucket served each call.
+
+### Changed
+
+- Let runtimes supply session-event redaction without depending the canonical store on `harn-vm`, and add typed run, turn,
+  message, source-event, and tool-call identity over signed event headers. Older stored events are redacted consistently
+  across read, snapshot, and replay projections without presenting modified bytes as still signed.
+- Fast pre-commit Rust formatting now checks only the Cargo packages owning staged
+  Rust files, while unmatched repository topology still falls back to the full
+  workspace format gate and required CI remains authoritative.
+- Route `std/session-store` through the canonical shared SQLite store while
+  preserving parent-event links and the per-stream `session_store_path` contract;
+  the explicit `session_store_database_path` exposes the shared database. Retired
+  JSONL streams import atomically with strict chain, tenant, and metadata
+  validation, including redaction inside preserved source-header envelopes and
+  flattened projections. The retired `options.now` override now fails loudly.
+
+### Fixed
+
+- Reset now drains the session changed-path map and the agent runtime's in-flight
+  tool-call and MCP-client registries. All three are process-global, keyed by
+  session id, and released only at teardown, which a run that errors never
+  reaches — so a later session reusing an id could report writes it never made or
+  be handed an abandoned terminal update for a tool call it never issued.
+- `harn run` now preserves buffered stdout and stderr when a Harn script calls
+  `exit(code)`, while retaining the requested exit status and normal terminal
+  receipts.
+- Release warm prebuilds now recover stale Cargo build-script outputs with one
+  package-scoped clean and retry instead of discarding the full target cache.
+- **Swift AST parsing no longer rejects optional-chained dictionary access with
+  conditional-cast fallbacks (#5007).** Harn pins the Swift grammar to the
+  last verified revision while the upstream regression is resolved.
+- **Text tool-call parser now recovers the common model-native envelope
+  dialects instead of dropping them (#5010).** On `tool_format = "json"` (and
+  the text routes weak local models use), the fenced-JSON recovery now locates a
+  `<tool_calls>` / `<tool_code>` / `<tool_call>` envelope anywhere at the top
+  level of the response (not only as a strict prefix), treats end-of-input as an
+  implicit close when at least one complete call parsed, and accepts the
+  tag-per-call XML dialect (`<look><file>…</file></look>`) as well as
+  tag-wrapped JSON object lists. Prose before and after the envelope survives as
+  prose, and any envelope whose body yields zero complete calls now raises a
+  loud protocol violation (so runtime parse guidance fires) rather than silently
+  misrouting the turn to completion/monologue feedback. Truncated inner tags and
+  garbage bodies stay fail-loud and never dispatch a guessed call. Close-tag
+  recognition is structural (only at a boundary between complete JSON objects or
+  XML call blocks), so a literal `</tool_code>` / `</tool_calls>` inside a JSON
+  string or XML argument value is preserved as content instead of truncating the
+  envelope; a repeated XML argument tag is a loud violation rather than a
+  last-write-wins guess.
+- **The taught tool-call syntax is now rendered from a single owner
+  (#5010).** `agent_tool_call_paradigm` gained `call_noun` / `final_answer`
+  fields, and the loop-completion contract prompt and the no-progress nudge now
+  derive the taught call syntax and final-answer channel from it, matching the
+  parse-guidance feedback. Previously the `json` lane was taught `<tool_call>`
+  blocks and a `<user_response>` final answer even though its real contract is
+  `` ```tool `` JSON blocks and a plain-text final answer.
+- **Toolless-turn recovery now covers fenced-JSON lanes (#5010).** The
+  fenced-call and missing-tool-call recovery nudges were gated to `text` and
+  `native` tool formats, so a `json` lane that narrated a tool action but
+  emitted no parseable call got no corrective nudge. The gate now includes the
+  `json` lane, and both nudges render their taught call syntax from
+  `agent_tool_call_paradigm` — a json lane is told to emit a `` ```tool `` block
+  rather than the hardcoded `<tool_call>` grammar.
+- **Egress policy configuration is now isolated across concurrent runtime
+  clients (#5016).** SSRF policy changes cannot leak between independently
+  configured requests.
+
+### Security
+
+- **Workspace path canonicalization now rejects symlink escapes (#4972).** The
+  new `path_workspace_canonicalize_existing` builtin and `std/path` wrapper
+  return a canonical workspace-relative path only for existing targets that
+  remain within an existing workspace root.
 
 ## v0.10.22
 
