@@ -32,6 +32,8 @@ const REMOTE_CACHE_META_FILE: &str = "catalog.meta.json";
 const FACT_FRESHNESS_WARNING_DAYS: i64 = 180;
 
 mod bindings;
+#[cfg(test)]
+mod local_runtime_tests;
 mod remote;
 mod schema;
 #[cfg(test)]
