@@ -199,6 +199,27 @@ fn persona_manifest_flag_loads_example_personas() {
     assert_eq!(persona["receipt_policy"], "required");
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn committed_persona_template_pack_has_no_doctor_red_checks() {
+    let manifest = workspace_relative_manifest("examples/personas/harn.toml");
+    let personas = persona::list_payload(Some(&manifest)).expect("list template personas");
+
+    for persona in personas {
+        let name = persona["name"].as_str().expect("persona name");
+        let report =
+            match persona_doctor::doctor_report_for_persona(Some(&manifest), name, 10_000).await {
+                Ok(report) | Err(report) => report,
+            };
+        let red = report
+            .checks
+            .iter()
+            .filter(|check| check.status == persona_doctor::DoctorStatus::Red)
+            .map(|check| format!("{}: {}", check.name, check.message))
+            .collect::<Vec<_>>();
+        assert!(red.is_empty(), "persona {name} failed doctor: {red:?}");
+    }
+}
+
 #[test]
 fn persona_inspect_reports_source_declared_steps() {
     let (_temp, path) = write_persona_source(
