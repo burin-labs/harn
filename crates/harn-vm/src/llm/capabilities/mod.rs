@@ -32,6 +32,8 @@ pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml"
 
 mod audit;
 mod lookup;
+#[cfg(test)]
+mod lookup_tests_kimi;
 mod model;
 mod overrides;
 mod rule;
@@ -51,7 +53,7 @@ pub use lookup::{
 };
 pub use model::{
     Capabilities, CapabilitiesFile, ComputerUseStyle, GovernorBackoff, ProviderDefaults,
-    ProviderLimits, ScreenshotScaling, WireDialect,
+    ProviderLimits, ReasoningHistoryWireField, ScreenshotScaling, WireDialect,
 };
 pub use rule::ProviderRule;
 pub use tool_format::{

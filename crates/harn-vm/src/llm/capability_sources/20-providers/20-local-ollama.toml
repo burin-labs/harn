@@ -159,41 +159,6 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Exact Qwen3.6 Q4 route validated with `harn local launch` +
-# `harn provider tool-probe` on 2026-06-05: native and streaming native passed
-# with llama-server `--jinja --reasoning off --reasoning-format deepseek`.
-[[provider.llamacpp]]
-model_match = "qwen3.6-35b-a3b-ud-q4-k-xl"
-native_tools = true
-# This route pins the NATIVE channel (provider JSON tool calling), validated by
-# `harn provider tool-probe` on the llama.cpp :8001 endpoint Burin routes to for
-# local-qwen3.6. `json` (fenced-JSON) is now the GLOBAL text-channel default, so
-# no per-model json pin is needed; the `native` pin below is only kept because
-# this row deliberately selects the native channel over any text format. To run
-# this route on fenced-json text instead, set `preferred_tool_format = "json"`
-# (json swept a clean 1.0/1.0/1.0 emission-fidelity bench here, including the S3
-# delimiter-soup case); to use heredoc text, set `preferred_tool_format = "text"`.
-preferred_tool_format = "native"
-structured_output = "native"
-reserved_tool_call_token = true
-thinking_modes = ["enabled"]
-auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
-preserve_thinking = true
-server_parser = "llamacpp"
-honors_chat_template_kwargs = true
-recommended_endpoint = "/v1/chat/completions"
-text_tool_wire_format_supported = true
-thinking_disable_directive = "/no_think"
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-tool_mode_parity = "native"
-tool_mode_parity_notes = "Harn-managed llama.cpp launch plus one-tool probe passed native and streaming native on 2026-06-05."
-
 # llama.cpp / llama-server speaks OpenAI-compat but is a separate provider
 # entry from Ollama. Broader Qwen/Devstral routes remain on the text-tool
 # contract until their exact runtime/model/template combinations are probed.
@@ -212,6 +177,13 @@ native_tools = false
 # set `preferred_tool_format = "text"`.
 preferred_tool_format = "json"
 structured_output = "native"
+# A single-tool probe must not promote one quant above its family. The 2026-07-17
+# Burin dogfood trace showed constrained native emission omitting required fields
+# from a 13-action edit schema, despite the old Q4 one-tool native smoke. Keep
+# every llama.cpp Qwen3.6 variant on the measurable JSON text channel until a
+# receipted forced-format family sweep proves otherwise.
+tool_mode_parity = "text_only"
+tool_mode_parity_notes = "2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract."
 # Qwen3.6's tokenizer reserves <tool_call>/</tool_call> as single special
 # tokens; reusing them as text-format delimiters collapses the agent loop into
 # opener repetition. Remap to a non-special wire form (validated: 5/5 vs 0/5).

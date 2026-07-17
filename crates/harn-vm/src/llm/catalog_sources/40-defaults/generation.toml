@@ -25,3 +25,9 @@ max_tokens = 8192
 # Moonshot's direct Kimi K2.5 route accepts only temperature 1.
 [model_defaults."moonshot/kimi-k2.5"]
 temperature = 1.0
+
+# K3 always reasons and accepts only its maximum effort setting. Sampling is
+# omitted by the capability row; this default selects the required effort
+# without leaking Moonshot-specific request logic into callers.
+[model_defaults."moonshot/kimi-k3"]
+reasoning_effort = "max"
