@@ -6,7 +6,11 @@ const BASELINE_DIR = "scripts/source-file-length-baseline"
 
 const BASELINE_SUFFIX = ".lines"
 
-const SKIP_DIR_NAMES = [".burin", ".git", ".harn", ".harn-runs", "node_modules", "target"]
+const SKIP_DIR_NAMES = [".burin", ".git", ".harn", ".harn-runs", "node_modules"]
+
+const CARGO_TARGET_DIR_NAMES = [".target", "target"]
+
+const CARGO_TARGET_DIR_PREFIXES = [".target-", "target-"]
 
 const GENERATED_SOURCE_PREFIXES = ["spec/protocol-artifacts/"]
 
@@ -87,8 +91,20 @@ fn source_path_for_baseline(shard_path: string) -> string? {
 }
 
 /** Collect matching files while pruning dependency, build, and runtime trees. */
+fn cargo_target_dir_name(name: string) -> bool {
+  if CARGO_TARGET_DIR_NAMES.contains(name) {
+    return true
+  }
+  for prefix in CARGO_TARGET_DIR_PREFIXES {
+    if name.starts_with(prefix) {
+      return true
+    }
+  }
+  return false
+}
+
 fn skip_dir_name(name: string) -> bool {
-  return SKIP_DIR_NAMES.contains(name) || name == ".target" || name.starts_with(".target-")
+  return SKIP_DIR_NAMES.contains(name) || cargo_target_dir_name(name)
 }
 
 fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
