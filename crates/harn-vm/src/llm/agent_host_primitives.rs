@@ -11,6 +11,9 @@ use super::{
     agent_runtime, agent_session_host, agent_tools, compass_router, helpers, permissions, tools,
 };
 
+mod denial_results;
+use denial_results::agent_primitive_denied_tool;
+
 #[derive(Clone)]
 struct CapturingAgentEventSink {
     session_id: String,
@@ -199,59 +202,6 @@ fn emit_permission_event_with_policy(
         permissions::permission_transcript_event(kind, tool_name, tool_args, reason, escalated)
     };
     let _ = crate::agent_sessions::append_event(session_id, event);
-}
-
-fn agent_primitive_denied_tool(
-    tool_name: &str,
-    tool_call_id: &str,
-    tool_args: &serde_json::Value,
-    reason: impl Into<String>,
-    category: crate::agent_events::ToolCallErrorCategory,
-    denial: Option<&crate::agent_events::ToolDenial>,
-    resolved_repair: Option<serde_json::Value>,
-) -> serde_json::Value {
-    let reason = reason.into();
-    // Recoverable argument failures coach a corrected retry; hard denials do not.
-    // Tool ceilings are name resolution: repair unique calls or list callable names.
-    let retryable_denial = denial.is_some_and(|denial| denial.retryable);
-    let tool_ceiling_denial =
-        denial.is_some_and(|denial| denial.gate == crate::agent_events::DenialGate::ToolCeiling);
-    // `deny_tool_call` is the sole owner of resolving repairs and normalizing
-    // their typed denial. This result builder only projects that contract.
-    let denial_json = denial.map(crate::agent_events::ToolDenial::to_json);
-    let mut result = if let Some(repair) = resolved_repair {
-        repair
-    } else if category.is_recoverable() || retryable_denial {
-        agent_tools::recoverable_tool_result(tool_name, reason.clone())
-    } else if tool_ceiling_denial {
-        agent_tools::unavailable_tool_result(tool_name, reason.clone())
-    } else {
-        agent_tools::denied_tool_result(tool_name, reason.clone())
-    };
-    // Mirror the denial into the result and envelope. A successful name repair
-    // makes both copies retryable, matching the corrected next step.
-    if let Some(denial_json) = denial_json.clone() {
-        if let Some(obj) = result.as_object_mut() {
-            obj.insert("denial".to_string(), denial_json);
-        }
-    }
-    let rendered = agent_tools::render_tool_result(&result);
-    let observation = format!("[result of {tool_name}]\n{rendered}\n[end of {tool_name} result]\n");
-    serde_json::json!({
-        "ok": false,
-        "status": "error",
-        "tool_name": tool_name,
-        "tool_call_id": tool_call_id,
-        "arguments": tool_args,
-        "result": result,
-        "rendered_result": rendered,
-        "observation": observation,
-        "error": reason,
-        "error_category": category.as_str(),
-        "mutation_status": crate::agent_events::ToolMutationStatus::NotApplied.as_str(),
-        "denial": denial_json,
-        "executor": null,
-    })
 }
 
 /// Cause-named feedback for a tool call whose arguments failed validation
@@ -1463,11 +1413,17 @@ pub(super) async fn host_agent_dispatch_tool_call(
         }
         Some(decision) if decision.is_ask() => {
             let Some(bridge) = bridge.as_ref() else {
+                let (denial_class, repeat_count) =
+                    crate::orchestration::next_approval_unavailable_class_repeat_count(
+                        &session_id,
+                        &decision.risk_labels,
+                    );
                 let denial = crate::agent_events::ToolDenial::terminal(
                     crate::agent_events::DenialGate::ApprovalUnavailable,
                     None,
                     "approval required but no host bridge is available",
-                );
+                )
+                .with_denial_class(denial_class, repeat_count);
                 return Ok(deny_tool_call_value(
                     &session_id,
                     &tool_name,
@@ -1545,11 +1501,17 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     }
                 },
                 Err(_) => {
+                    let (denial_class, repeat_count) =
+                        crate::orchestration::next_approval_unavailable_class_repeat_count(
+                            &session_id,
+                            &decision.risk_labels,
+                        );
                     let denial = crate::agent_events::ToolDenial::terminal(
                         crate::agent_events::DenialGate::ApprovalUnavailable,
                         None,
                         "approval request failed or host does not implement session/request_permission",
-                    );
+                    )
+                    .with_denial_class(denial_class, repeat_count);
                     return Ok(deny_tool_call_value(
                         &session_id,
                         &tool_name,
@@ -3273,6 +3235,9 @@ mod parse_tool_call_id_tests {
         assert_eq!(parse_ids(text), vec!["tc_6"]);
     }
 }
+
+#[cfg(test)]
+mod approval_unavailable_tests;
 
 #[cfg(test)]
 mod schema_argument_dispatch_tests {
