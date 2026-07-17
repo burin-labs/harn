@@ -422,7 +422,7 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
     let blocks = normalize_message_blocks(dict.get("content"), &role);
     let text = render_blocks_text(&blocks);
     let visibility = overall_visibility(&blocks, default_visibility_for_role(&role));
-    let kind = if role == "tool_result" {
+    let kind = if matches!(role.as_str(), "tool" | "tool_result") {
         "tool_result"
     } else {
         "message"
@@ -1016,6 +1016,22 @@ fn string_value(value: &VmValue) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_tool_result_roles_use_typed_transcript_events() {
+        for role in ["tool", "tool_result"] {
+            let message = crate::stdlib::json_to_vm_value(&serde_json::json!({
+                "role": role,
+                "content": "tool output",
+            }));
+            let event = transcript_event_from_message(&message);
+            assert_eq!(
+                event.as_dict().and_then(|event| event.get("kind")),
+                Some(&VmValue::string("tool_result")),
+                "{role} results must use the canonical tool_result event"
+            );
+        }
+    }
 
     #[test]
     fn reminder_round_trips_through_serde() {
