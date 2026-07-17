@@ -27,7 +27,7 @@
 //!   children of the harn process (parent pid match), which is enough to
 //!   power the emergency-signaling use case in the issue body.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use serde_json::{json, Value};
@@ -40,27 +40,52 @@ use sysinfo::{
 /// children here so `processes()` can tag them with
 /// `is_harn_owned: true` even after the parent->child link is broken
 /// (e.g. detached agents).
-static HARN_OWNED_PIDS: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
+static HARN_OWNED_PIDS: Mutex<BTreeMap<u32, usize>> = Mutex::new(BTreeMap::new());
 
-/// Register a pid as harn-owned. Idempotent.
-pub fn register_harn_owned_pid(pid: u32) {
-    if let Ok(mut set) = HARN_OWNED_PIDS.lock() {
-        set.insert(pid);
+/// Owns one claim that a child pid belongs to Harn.
+///
+/// Claims are reference-counted because independent runtime components may
+/// observe the same child. The pid stays tagged until the final guard drops.
+#[must_use = "dropping the registration stops claiming the pid as Harn-owned"]
+pub struct HarnOwnedPidRegistration {
+    pid: u32,
+}
+
+impl Drop for HarnOwnedPidRegistration {
+    fn drop(&mut self) {
+        unregister_harn_owned_pid(self.pid);
     }
 }
 
-/// Stop tagging a pid as harn-owned (call when a tracked child exits).
-pub fn unregister_harn_owned_pid(pid: u32) {
-    if let Ok(mut set) = HARN_OWNED_PIDS.lock() {
-        set.remove(&pid);
+/// Register a pid as Harn-owned for the lifetime of the returned guard.
+pub fn register_harn_owned_pid(pid: u32) -> HarnOwnedPidRegistration {
+    let mut set = HARN_OWNED_PIDS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *set.entry(pid).or_default() += 1;
+    HarnOwnedPidRegistration { pid }
+}
+
+fn unregister_harn_owned_pid(pid: u32) {
+    let mut set = HARN_OWNED_PIDS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match set.get_mut(&pid) {
+        Some(claims) if *claims > 1 => *claims -= 1,
+        Some(_) => {
+            set.remove(&pid);
+        }
+        None => {}
     }
 }
 
 fn harn_owned_pids_snapshot() -> BTreeSet<u32> {
     HARN_OWNED_PIDS
         .lock()
-        .map(|set| set.clone())
-        .unwrap_or_default()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .keys()
+        .copied()
+        .collect()
 }
 
 /// Snapshot of CPU topology. `count` reflects logical cores; `frequency_mhz`
@@ -378,12 +403,18 @@ mod tests {
     }
 
     #[test]
-    fn register_and_unregister_harn_owned_pid_round_trip() {
+    fn harn_owned_pid_process_global_lifetime_waits_for_every_owner() {
         // pick a pid that's vanishingly unlikely to collide with self
         let fake = u32::MAX - 1;
-        register_harn_owned_pid(fake);
+        let first = register_harn_owned_pid(fake);
+        let second = register_harn_owned_pid(fake);
         assert!(harn_owned_pids_snapshot().contains(&fake));
-        unregister_harn_owned_pid(fake);
+        drop(first);
+        assert!(
+            harn_owned_pids_snapshot().contains(&fake),
+            "one owner dropping must not erase another owner's live claim"
+        );
+        drop(second);
         assert!(!harn_owned_pids_snapshot().contains(&fake));
     }
 }

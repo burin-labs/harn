@@ -442,6 +442,7 @@ pub fn reset_stdlib_state() {
     agents::reset_agent_worker_state();
     agents::workflow::reset_workflow_run_states();
     pool::reset_pool_state();
+    package_snapshot::reset_package_snapshot_state();
     #[cfg(feature = "postgres")]
     postgres::reset_postgres_state();
     #[cfg(feature = "sqlite")]
