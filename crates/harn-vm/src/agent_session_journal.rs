@@ -649,4 +649,110 @@ mod tests {
             Some(&"tool-1".to_string())
         );
     }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn generic_agent_loop_persists_canonical_transcript_lifecycle() {
+        reset();
+        crate::reset_thread_local_state();
+        let root = tempfile::tempdir().expect("temp root");
+        let root_literal = serde_json::to_string(
+            root.path()
+                .to_str()
+                .expect("temporary path must be valid UTF-8"),
+        )
+        .expect("serialize root literal");
+        let source = format!(
+            r###"
+pipeline main(task) {{
+  llm_mock({{text: "", tool_calls: [{{id: "live-call", name: "noop", arguments: {{}}}}]}})
+  llm_mock({{text: "##DONE##"}})
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "Return a deterministic result.",
+    {{
+      handler: {{ _args -> "ok" }},
+      parameters: {{}},
+      returns: {{type: "string"}},
+    }},
+  )
+  const result = agent_loop(
+    "Use noop, then finish.",
+    nil,
+    {{
+      provider: "mock",
+      model: "mock",
+      root: {root_literal},
+      session_id: "live-journal-agent-loop",
+      tools: tools,
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 4,
+    }},
+  )
+  __io_println(result.status)
+}}
+"###,
+        );
+        let chunk = crate::compile_source(&source).expect("compile agent loop");
+        let local = tokio::task::LocalSet::new();
+        let output = local
+            .run_until(async {
+                let mut vm = crate::Vm::new();
+                crate::register_vm_stdlib(&mut vm);
+                vm.execute(&chunk).await.expect("run agent loop");
+                vm.output().to_string()
+            })
+            .await;
+        assert!(output.lines().any(|line| line.ends_with("done")));
+
+        let session_id = "live-journal-agent-loop";
+        let store = session_store::open_canonical_agent_session(root.path(), session_id)
+            .await
+            .expect("open canonical store");
+        let events = session_store::read_all_events(&store, session_id)
+            .await
+            .expect("read canonical events");
+
+        let user_message = events
+            .iter()
+            .find(|event| {
+                event.kind == SessionEventKind::Message
+                    && event.payload["raw_message"]["role"] == "user"
+            })
+            .expect("user message must be durable");
+        let run_id = user_message
+            .headers
+            .get("run_id")
+            .expect("user message must carry a run identity");
+        let turn_id = user_message
+            .headers
+            .get("turn_id")
+            .expect("user message must carry a turn identity");
+        assert!(!run_id.is_empty());
+        assert!(!turn_id.is_empty());
+
+        assert!(events.iter().any(|event| {
+            event.kind == SessionEventKind::ToolCall
+                && event.headers.get("tool_call_id") == Some(&"live-call".to_string())
+        }));
+        assert!(events.iter().any(|event| {
+            event.kind == SessionEventKind::ToolResult
+                && event.headers.get("tool_call_id") == Some(&"live-call".to_string())
+        }));
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.kind,
+                SessionEventKind::Custom { custom_type } if custom_type == "agent_run_terminal"
+            )
+        }));
+        assert!(events.iter().all(|event| {
+            event.headers.get("run_id") == Some(run_id)
+                && event.headers.get("turn_id") == Some(turn_id)
+        }));
+
+        reset();
+        crate::reset_thread_local_state();
+    }
 }
