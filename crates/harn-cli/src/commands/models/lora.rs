@@ -872,17 +872,17 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             &decision.effective,
             dataset_format,
         ),
-        evaluation: lora_evaluation_recipe(
-            &contract_id,
-            &resolved.id,
-            &provider,
-            &request_model,
-            &decision.effective,
-            &eval_dataset,
-            Some(&trainer_identity),
-            None,
+        evaluation: lora_evaluation_recipe(LoraEvaluationRecipeInput {
+            contract_id: &contract_id,
+            base_model: &resolved.id,
+            provider: &provider,
+            request_model: &request_model,
+            tool_format: &decision.effective,
+            eval_dataset: &eval_dataset,
+            trainer_identity: Some(&trainer_identity),
+            trainer_environment: None,
             eval_command,
-        ),
+        }),
         serving,
         launch: PlanLaunchHints {
             preflight_command,
@@ -2606,17 +2606,30 @@ fn model_aware_selection_recipe(
     }
 }
 
-pub(super) fn lora_evaluation_recipe(
-    contract_id: &str,
-    base_model: &str,
-    provider: &str,
-    request_model: &str,
-    tool_format: &str,
-    eval_dataset: &str,
-    trainer_identity: Option<&TrainerIdentityCheck>,
-    trainer_environment: Option<&TrainerEnvironmentCheck>,
-    eval_command: Vec<String>,
-) -> EvaluationRecipe {
+pub(super) struct LoraEvaluationRecipeInput<'a> {
+    pub(super) contract_id: &'a str,
+    pub(super) base_model: &'a str,
+    pub(super) provider: &'a str,
+    pub(super) request_model: &'a str,
+    pub(super) tool_format: &'a str,
+    pub(super) eval_dataset: &'a str,
+    pub(super) trainer_identity: Option<&'a TrainerIdentityCheck>,
+    pub(super) trainer_environment: Option<&'a TrainerEnvironmentCheck>,
+    pub(super) eval_command: Vec<String>,
+}
+
+pub(super) fn lora_evaluation_recipe(input: LoraEvaluationRecipeInput<'_>) -> EvaluationRecipe {
+    let LoraEvaluationRecipeInput {
+        contract_id,
+        base_model,
+        provider,
+        request_model,
+        tool_format,
+        eval_dataset,
+        trainer_identity,
+        trainer_environment,
+        eval_command,
+    } = input;
     let parser_metric = if matches!(tool_format, "text" | "json") {
         "Harn text parser acceptance rate"
     } else {

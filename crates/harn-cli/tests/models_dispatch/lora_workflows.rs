@@ -7,7 +7,8 @@ use super::lora_fixtures::{
     write_lora_probe_summary, write_lora_probe_summary_with_trials,
 };
 use super::support::{
-    parse_json, run, success_data, HarnCliOutput, LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION,
+    harn_e2e_binary, parse_json, run, success_data, HarnCliOutput,
+    LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION,
 };
 
 fn execute_train_with_observed_identity(
@@ -82,7 +83,7 @@ fn execute_train_with_observed_identity(
             "--execute",
             "--json",
             "--",
-            env!("CARGO_BIN_EXE_harn"),
+            harn_e2e_binary().to_str().expect("utf8 harn binary"),
             "--version",
         ],
         &[],

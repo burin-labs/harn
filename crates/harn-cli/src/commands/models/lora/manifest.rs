@@ -13,9 +13,9 @@ use super::{
     parse_target_metadata, render_embedded_lora_report, resolve_lora_provider, serving_recipe,
     sha256_file, target_module_contract, teacher_report, template_recipe_for_route,
     tool_catalog_contract, trainer_identity_check, trainer_identity_from_args, BaseModelReport,
-    EvaluationRecipe, LoraContractReport, LoraContractReportInput, LoraTrainingContract,
-    PrecisionContract, ServingRecipe, ServingRecipeInput, TeacherReport, TemplateRecipe,
-    ToolCallingReport,
+    EvaluationRecipe, LoraContractReport, LoraContractReportInput, LoraEvaluationRecipeInput,
+    LoraTrainingContract, PrecisionContract, ServingRecipe, ServingRecipeInput, TeacherReport,
+    TemplateRecipe, ToolCallingReport,
 };
 
 const LORA_MANIFEST_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_MANIFEST_PAYLOAD_JSON";
@@ -166,16 +166,16 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         .as_ref()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "TOOL_CALL_EVAL_DATASET".to_string());
-    let promotion = lora_evaluation_recipe(
-        &contract_id,
-        &resolved.id,
-        &provider,
-        &request_model,
-        &decision.effective,
-        &eval_dataset,
-        Some(&trainer_identity),
-        None,
-        vec![
+    let promotion = lora_evaluation_recipe(LoraEvaluationRecipeInput {
+        contract_id: &contract_id,
+        base_model: &resolved.id,
+        provider: &provider,
+        request_model: &request_model,
+        tool_format: &decision.effective,
+        eval_dataset: &eval_dataset,
+        trainer_identity: Some(&trainer_identity),
+        trainer_environment: None,
+        eval_command: vec![
             "harn".to_string(),
             "eval".to_string(),
             "tool-calls".to_string(),
@@ -186,7 +186,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
             "--dataset".to_string(),
             eval_dataset.clone(),
         ],
-    );
+    });
     let teacher = args
         .teacher
         .as_ref()

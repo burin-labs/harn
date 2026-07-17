@@ -22,9 +22,10 @@ use super::{
     template_recipe_for_route, tool_catalog_args, tool_catalog_contract,
     trainer_contract_for_dataset, trainer_environment_check, trainer_identity_args,
     trainer_identity_check, trainer_identity_from_args, BaseModelReport, EvaluationRecipe,
-    LoraContractReport, LoraContractReportInput, LoraTrainingContract, PrecisionContract,
-    ServingRecipe, ServingRecipeInput, TeacherReport, TemplateRecipe, ToolCallingReport,
-    ToolCatalogContract, TrainerEnvironmentCheck, TrainerEnvironmentObservation, TrainerIdentity,
+    LoraContractReport, LoraContractReportInput, LoraEvaluationRecipeInput, LoraTrainingContract,
+    PrecisionContract, ServingRecipe, ServingRecipeInput, TeacherReport, TemplateRecipe,
+    ToolCallingReport, ToolCatalogContract, TrainerEnvironmentCheck, TrainerEnvironmentObservation,
+    TrainerIdentity,
 };
 
 const LORA_TRAIN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON";
@@ -215,16 +216,16 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         tool_catalog: &tool_catalog,
     });
     let eval_dataset = args.dataset.display().to_string();
-    let promotion = lora_evaluation_recipe(
-        &contract_id,
-        &resolved.id,
-        &provider,
-        &request_model,
-        &decision.effective,
-        &eval_dataset,
-        Some(&trainer_identity),
-        Some(&trainer_environment),
-        vec![
+    let promotion = lora_evaluation_recipe(LoraEvaluationRecipeInput {
+        contract_id: &contract_id,
+        base_model: &resolved.id,
+        provider: &provider,
+        request_model: &request_model,
+        tool_format: &decision.effective,
+        eval_dataset: &eval_dataset,
+        trainer_identity: Some(&trainer_identity),
+        trainer_environment: Some(&trainer_environment),
+        eval_command: vec![
             "harn".to_string(),
             "eval".to_string(),
             "tool-calls".to_string(),
@@ -235,7 +236,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
             "--dataset".to_string(),
             eval_dataset.clone(),
         ],
-    );
+    });
     if let Some(correction) = &decision.correction {
         warnings.push(correction.clone());
     }

@@ -1,4 +1,4 @@
-pub(super) use crate::test_util::process::{run_harn_e2e as run, HarnCliOutput};
+pub(super) use crate::test_util::process::{harn_e2e_binary, run_harn_e2e as run, HarnCliOutput};
 
 pub(super) const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 5;
 
