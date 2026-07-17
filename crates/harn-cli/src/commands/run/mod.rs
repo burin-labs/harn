@@ -1643,7 +1643,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         .unwrap_or("default");
     harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
     vm.set_source_info(path, &source);
-    if !denied_builtins.is_empty() {
+    let lazy_manifest_handlers = !denied_builtins.is_empty();
+    if lazy_manifest_handlers {
         vm.set_denied_builtins(denied_builtins);
     }
     if let Some(ref root) = project_root {
@@ -1714,7 +1715,12 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }
     }
-    if let Err(error) = package::install_manifest_triggers(&mut vm, &extensions).await {
+    // An explicit allow/deny policy belongs to the requested target. Defer
+    // unrelated manifest handler graphs until they actually fire under this VM.
+    if let Err(error) =
+        package::install_manifest_triggers_with_mode(&mut vm, &extensions, lazy_manifest_handlers)
+            .await
+    {
         stderr.push_str(&format!(
             "error: failed to install manifest triggers: {error}\n"
         ));
@@ -1735,7 +1741,10 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             error.to_string(),
         );
     }
-    if let Err(error) = package::install_manifest_hooks(&mut vm, &extensions).await {
+    if let Err(error) =
+        package::install_manifest_hooks_with_mode(&mut vm, &extensions, lazy_manifest_handlers)
+            .await
+    {
         stderr.push_str(&format!(
             "error: failed to install manifest hooks: {error}\n"
         ));
