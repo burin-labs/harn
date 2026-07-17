@@ -818,12 +818,12 @@ fn do_kill(killer: Arc<dyn ProcessKiller>, cancel_state: Arc<CancelState>) {
 /// hook is registered exactly once even if `register_builtins` is called
 /// multiple times (e.g. in tests).
 pub(crate) fn register_cleanup_hook() {
-    static REGISTERED: OnceLock<()> = OnceLock::new();
+    static REGISTERED: OnceLock<harn_vm::SessionEndHookRegistration> = OnceLock::new();
     REGISTERED.get_or_init(|| {
         let hook: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|session_id: &str| {
             cancel_session_handles(session_id);
         });
-        harn_vm::register_session_end_hook(hook);
+        harn_vm::register_session_end_hook(hook)
     });
 }
 

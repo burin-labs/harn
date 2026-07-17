@@ -223,6 +223,7 @@ fn readiness_status_label(status: ReadinessStatus) -> String {
         ReadinessStatus::BadStatus => "bad_status",
         ReadinessStatus::BadResponse => "bad_response",
         ReadinessStatus::ModelMissing => "model_missing",
+        ReadinessStatus::ProviderMismatch => "provider_mismatch",
     }
     .to_string()
 }
@@ -394,5 +395,13 @@ mod tests {
         assert_eq!(port_from_base_url("http://127.0.0.1:11434"), Some(11434));
         assert_eq!(port_from_base_url("http://localhost:8001/v1"), Some(8001));
         assert_eq!(port_from_base_url("https://api.example.com"), None);
+    }
+
+    #[test]
+    fn readiness_status_label_projects_provider_mismatch() {
+        assert_eq!(
+            readiness_status_label(ReadinessStatus::ProviderMismatch),
+            "provider_mismatch"
+        );
     }
 }

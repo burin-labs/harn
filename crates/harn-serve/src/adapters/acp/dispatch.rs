@@ -6,7 +6,7 @@ impl AcpServer {
     /// The same router backs stdio, WebSocket, and in-process channel
     /// transports. `msg` must be either a request/notification with `method`
     /// or a response with `id` for a pending host callback.
-    pub async fn handle_incoming_message(&mut self, msg: serde_json::Value) {
+    pub(super) async fn handle_incoming_message_scoped(&mut self, msg: serde_json::Value) {
         if msg.get("method").is_none() && msg.get("id").is_some() {
             if let Some(id) = msg["id"].as_u64() {
                 let mut pending = self.pending.lock().await;

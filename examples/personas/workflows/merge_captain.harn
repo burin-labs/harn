@@ -1,3 +1,8 @@
+@persona(name: "merge_captain")
+pub fn merge_captain_persona(ctx) {
+  return build_merge_plan_step(ctx)
+}
+
 fn sample_pull_request() {
   return {
     repo: "burin-labs/harn",
@@ -20,15 +25,15 @@ fn merge_risk(pr) {
   return "low"
 }
 
-pipeline run(task) {
-  const pr = sample_pull_request()
+@step(name: "build_merge_plan", approval: required, receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
+fn build_merge_plan_step(pr) {
   const risk = merge_risk(pr)
   const handoff = if risk == "high" {
     "review_captain"
   } else {
     nil
   }
-  const result = {
+  return {
     persona: "merge_captain",
     execution_mode: "dry_run",
     approval_required: true,
@@ -48,6 +53,10 @@ pipeline run(task) {
     },
     handoff: handoff,
   }
+}
+
+pub pipeline run(task) -> dict {
+  const result = build_merge_plan_step(sample_pull_request())
   __io_println(json_stringify(result))
   return result
 }

@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 65 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 66 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -316,6 +316,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-063`](#harn-lnt-063) | non-null assertion `!` on an already-non-nil value | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-064`](#harn-lnt-064) | a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race | — | — |
 | [`HARN-LNT-065`](#harn-lnt-065) | nil coalesce fallback repeats the left identifier | `expressions/simplify` | `behavior-preserving` |
+| [`HARN-LNT-066`](#harn-lnt-066) | the result of a pure collection method is discarded, so the call has no effect on the receiver | — | — |
 
 ## FMT — Formatter
 
@@ -3565,6 +3566,68 @@ const value = task
 If a real recovery path is needed, replace the right side with an actual
 default or explicitly handle `nil` before using the value.
 
+### `HARN-LNT-066`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+the result of a pure collection method is discarded, so the call has no effect on the receiver
+
+A `list` / `dict` / `set` / `string` method was called as a statement and its
+result thrown away, so the call has no effect at all.
+
+Every method on Harn's built-in collections is **pure**. They are persistent,
+copy-on-write values: `push` clones the receiver, appends, and returns a *new*
+list. It never modifies the receiver.
+
+```harn
+const l = []
+l.push(1)      // error[HARN-LNT-066]: no effect — `l` is still []
+l.push(2)      // error[HARN-LNT-066]
+// l == []
+```
+
+This reads as a mutation to anyone arriving from Python, JavaScript, or Ruby,
+where `push`/`append` modify the list in place. In Harn it is dead code, and
+without this diagnostic it is invisible: the program typechecks cleanly, runs
+without error, and quietly builds an empty list.
+
+#### How to fix
+
+Assign the result back. Because the binding's value changes, it must be `let`
+rather than `const` (see the binding rule in the language spec — `const` means
+this binding's value never changes):
+
+```harn
+let l = []
+l = l.push(1)
+l = l.push(2)
+// l == [1, 2]
+```
+
+When building a collection in a loop, the same shape applies:
+
+```harn
+let out = []
+for item in items {
+  out = out.push(transform(item))
+}
+```
+
+To call a method purely for a side effect inside it — which only a closure
+argument can produce — the result is not discarded in the same sense, and this
+lint does not fire. Prefer a `for` loop over `map` when you want effects.
+
+#### When it does not fire
+
+- The tail expression of a value-producing block (a closure body, `match` arm,
+  `if`/`else` branch, `try`, or `block { … }`), where the value *is* the
+  block's result rather than a discarded statement.
+- A call taking a closure argument (`items.map({ item -> … })`), which may
+  perform effects and so is not provably inert.
+- A receiver rooted at `harness`, whose methods exist for their effects.
+- A method name the file also declares in an `impl` block, which may be a
+  user-defined method with effects of its own.
+
 ### `HARN-FMT-001`
 
 **Category:** `FMT` (Formatter) &nbsp;·&nbsp; **API stability:** `stable`
@@ -3754,19 +3817,15 @@ fn open_log() -> channel {
   }
   ```
 
-- **Confine the value to a narrower scope** by moving the work into a helper
-  whose return triggers the auto-drop, then returning a non-owned summary from
-  the caller:
+- **Confine the value to a narrower scope** with `block { ... }`. Owned values
+  declared inside the block drop before the enclosing function continues:
 
   ```harn
-  fn send_once(msg: string) -> nil {
-    const ch: owned<channel> = channel("log", 64)
-    send(ch, msg)
-    nil
-  }   // `ch` drops here, when `send_once` returns
-
   fn write_log(msg: string) -> nil {
-    send_once(msg)
+    block {
+      const ch: owned<channel> = channel("log", 64)
+      send(ch, msg)
+    }   // `ch` drops here, before `write_log` continues
     nil
   }
   ```

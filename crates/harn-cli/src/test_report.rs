@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-pub const USER_TEST_REPORT_SCHEMA_VERSION: u32 = 1;
+use crate::test_runner::{AggregateTimings, PhaseTimings, TestTimeout};
+use crate::test_timing::DurationSummary;
+
+pub const USER_TEST_REPORT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,7 +46,16 @@ pub struct TestCaseReport {
     pub outcome: TestOutcome,
     pub duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<TestTimeout>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phases: Option<PhaseTimings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Everything the case wrote via `log`/`print`/`println`/etc, present
+    /// regardless of outcome — a passing case's probes are as valid a
+    /// reason to want this in a JSON/JUnit consumer as a failing case's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captured_output: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -74,6 +86,10 @@ pub struct TestReport {
     pub suite: String,
     pub root: Option<String>,
     pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<DurationSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregate: Option<AggregateTimings>,
     pub summary: TestReportSummary,
     pub cases: Vec<TestCaseReport>,
 }
@@ -85,9 +101,16 @@ impl TestReport {
             suite: suite.into(),
             root: root.map(|p| p.display().to_string()),
             duration_ms: 0,
+            timing: None,
+            aggregate: None,
             summary: TestReportSummary::default(),
             cases: Vec::new(),
         }
+    }
+
+    pub fn set_execution_metrics(&mut self, timing: DurationSummary, aggregate: AggregateTimings) {
+        self.timing = Some(timing);
+        self.aggregate = Some(aggregate);
     }
 
     pub fn push(&mut self, case: TestCaseReport) {
@@ -163,6 +186,12 @@ pub fn write_junit(path: &str, report: &TestReport) -> Result<PathBuf, String> {
             xml.push_str(&format!(
                 "      <failure type=\"{kind}\" message=\"test failed\">{escaped_body}</failure>\n"
             ));
+            if let Some(output) = &case.captured_output {
+                let escaped_output = crate::format::escape_html(output);
+                xml.push_str(&format!(
+                    "      <system-out>{escaped_output}</system-out>\n"
+                ));
+            }
         }
         xml.push_str("    </testcase>\n");
     }
@@ -204,7 +233,10 @@ mod tests {
             classname: "suite/a.harn".into(),
             outcome: TestOutcome::Passed,
             duration_ms: 12,
+            timeout: None,
+            phases: None,
             message: None,
+            captured_output: None,
         });
         report.push(TestCaseReport {
             name: "test_beta".into(),
@@ -212,7 +244,10 @@ mod tests {
             classname: "suite/b.harn".into(),
             outcome: TestOutcome::Failed,
             duration_ms: 34,
+            timeout: None,
+            phases: None,
             message: Some("expected 1 == 2".into()),
+            captured_output: Some("[harn] probing state\n".into()),
         });
         report.push(TestCaseReport {
             name: "test_gamma".into(),
@@ -220,7 +255,16 @@ mod tests {
             classname: "suite/c.harn".into(),
             outcome: TestOutcome::TimedOut,
             duration_ms: 30_000,
+            timeout: Some(TestTimeout {
+                phase: crate::test_runner::TestPhase::Execute,
+                limit_ms: 30_000,
+            }),
+            phases: Some(PhaseTimings {
+                execute_ms: 30_000,
+                ..PhaseTimings::default()
+            }),
             message: Some("timed out after 30000ms".into()),
+            captured_output: None,
         });
         report.push(TestCaseReport {
             name: "test_delta".into(),
@@ -228,7 +272,10 @@ mod tests {
             classname: "suite/d.harn".into(),
             outcome: TestOutcome::Skipped,
             duration_ms: 0,
+            timeout: None,
+            phases: None,
             message: Some("xfail: flaky".into()),
+            captured_output: None,
         });
         report.set_duration_ms(100);
         report
@@ -257,6 +304,10 @@ mod tests {
         assert!(xml.contains(r#"<failure type="AssertionError""#));
         assert!(xml.contains(r#"<failure type="timeout""#));
         assert!(xml.contains("<skipped"));
+        assert!(xml.contains("<system-out>[harn] probing state\n</system-out>"));
+        // The timed-out case carries no captured output in this fixture;
+        // its `<testcase>` must not grow a stray `<system-out>`.
+        assert_eq!(xml.matches("<system-out>").count(), 1);
     }
 
     #[test]
@@ -277,7 +328,11 @@ mod tests {
         assert_eq!(cases.len(), 4);
         assert_eq!(cases[0]["outcome"], "passed");
         assert_eq!(cases[1]["outcome"], "failed");
+        assert_eq!(cases[1]["captured_output"], "[harn] probing state\n");
         assert_eq!(cases[2]["outcome"], "timed_out");
+        assert_eq!(cases[2]["timeout"]["phase"], "execute");
+        assert_eq!(cases[2]["timeout"]["limit_ms"], 30_000);
+        assert_eq!(cases[2]["phases"]["execute_ms"], 30_000);
         assert_eq!(cases[3]["outcome"], "skipped");
     }
 

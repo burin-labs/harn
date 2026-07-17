@@ -51,6 +51,29 @@ mod tests {
     }
 
     #[test]
+    fn parses_lexical_block_and_keeps_block_identifier_contextual() {
+        let program = parse_source(
+            "pipeline default(task) { block { const inner = 1\n log(inner) }\n\
+             let block = {value: 2}\n log(block.value) }",
+        )
+        .unwrap();
+        let mut blocks = 0;
+        crate::visit::walk_program(&program, &mut |node| {
+            if matches!(&node.node, Node::Block(_)) {
+                blocks += 1;
+            }
+        });
+        assert_eq!(blocks, 1, "only `block {{ ... }}` introduces a block");
+
+        let dict_tail = parse_source("fn value() { {value: 2} }").unwrap();
+        assert!(matches!(
+            &dict_tail[0].node,
+            Node::FnDecl { body, .. }
+                if matches!(&body[0].node, Node::DictLiteral(_))
+        ));
+    }
+
+    #[test]
     fn parses_bare_and_keyed_mutex() {
         fn first_mutex_has_key(source: &str) -> Option<bool> {
             let program = parse_source(source).unwrap();

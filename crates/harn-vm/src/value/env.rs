@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
 use crate::chunk::CompiledFunctionRef;
+use crate::orchestration::CapabilityPolicy;
+use crate::trust_graph::AutonomyTier;
 
 use super::{VmError, VmMutex, VmValue};
 
@@ -47,6 +49,18 @@ pub struct VmClosure {
 pub enum VmCallable {
     Eager(Arc<VmClosure>),
     Lazy(LazyVmCallable),
+    Pipeline(LazyPipelineCallable),
+}
+
+impl VmCallable {
+    pub fn effective_autonomy_tier(&self, requested: AutonomyTier) -> AutonomyTier {
+        match self {
+            Self::Pipeline(callable) => callable
+                .autonomy_ceiling()
+                .map_or(requested, |ceiling| requested.min(ceiling)),
+            Self::Eager(_) | Self::Lazy(_) => requested,
+        }
+    }
 }
 
 /// Module/export coordinates for a callable whose import graph should not be
@@ -63,6 +77,60 @@ impl LazyVmCallable {
             module_path,
             function_name: function_name.into(),
         }
+    }
+}
+
+/// Module/pipeline coordinates for a pipeline entry compiled on invocation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LazyPipelineCallable {
+    pub(crate) module_path: PathBuf,
+    pub(crate) pipeline_name: String,
+    execution_policy: Option<Box<CapabilityPolicy>>,
+    autonomy_ceiling: Option<AutonomyTier>,
+    package_execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+}
+
+impl LazyPipelineCallable {
+    pub fn new(module_path: PathBuf, pipeline_name: impl Into<String>) -> Self {
+        Self {
+            module_path,
+            pipeline_name: pipeline_name.into(),
+            execution_policy: None,
+            autonomy_ceiling: None,
+            package_execution_guard: None,
+        }
+    }
+
+    pub fn with_execution_policy(mut self, policy: CapabilityPolicy) -> Self {
+        self.execution_policy = Some(Box::new(policy));
+        self
+    }
+
+    pub fn with_autonomy_ceiling(mut self, ceiling: AutonomyTier) -> Self {
+        self.autonomy_ceiling = Some(ceiling);
+        self
+    }
+
+    pub fn with_package_execution_guard(
+        mut self,
+        guard: Arc<harn_modules::package_execution::PackageExecutionGuard>,
+    ) -> Self {
+        self.package_execution_guard = Some(guard);
+        self
+    }
+
+    pub fn execution_policy(&self) -> Option<&CapabilityPolicy> {
+        self.execution_policy.as_deref()
+    }
+
+    pub fn autonomy_ceiling(&self) -> Option<AutonomyTier> {
+        self.autonomy_ceiling
+    }
+
+    pub fn package_execution_guard_handle(
+        &self,
+    ) -> Option<Arc<harn_modules::package_execution::PackageExecutionGuard>> {
+        self.package_execution_guard.clone()
     }
 }
 

@@ -1,7 +1,9 @@
 //! Config loading and per-run override machinery: the process-wide cached
 //! config, env/home overlays, the runtime-catalog overlay, thread-local user
-//! overrides, and the compiled-in default catalog.
+//! overrides, host-verified endpoint overrides, and the compiled-in default
+//! catalog.
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::sync::{OnceLock, RwLock};
 
 use super::*;
@@ -11,11 +13,79 @@ static CONFIG_PATH: OnceLock<String> = OnceLock::new();
 static RUNTIME_CATALOG_OVERLAY: OnceLock<RwLock<Option<ProvidersConfig>>> = OnceLock::new();
 
 thread_local! {
-    /// Thread-local provider config overlays installed by the CLI after it
-    /// reads the nearest `harn.toml` plus any installed package manifests.
-    /// Kept thread-local so tests and multi-VM hosts can scope extensions to
-    /// the current run without mutating the process-wide default config.
-    static USER_OVERRIDES: RefCell<Option<ProvidersConfig>> = const { RefCell::new(None) };
+    /// Provider config overlays for the currently-polled Harn execution.
+    ///
+    /// CLI bootstrap installs its package overlay here. Embedded hosts use the
+    /// same slot through `orchestration::scope_llm_runtime_overrides`, which
+    /// swaps it for each future poll so concurrent ACP servers cannot inherit
+    /// another server's route configuration.
+    static LLM_CONFIG_OVERRIDES_CONTEXT: RefCell<Option<ProvidersConfig>> = const { RefCell::new(None) };
+    /// Host-verified provider endpoints for the currently-polled execution.
+    ///
+    /// These intentionally do not live in `ProviderDef` or `ProvidersConfig`:
+    /// both are public catalog DTOs that callers construct with struct-update
+    /// syntax, while a verified endpoint is session state rather than catalog
+    /// data. The ambient scope carries this sidecar with the matching config.
+    static LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT: RefCell<RuntimeProviderEndpointOverrides> = RefCell::new(RuntimeProviderEndpointOverrides::default());
+}
+
+/// Ephemeral, host-verified provider endpoints for one runtime execution.
+///
+/// This type is deliberately separate from TOML-backed provider definitions.
+/// Embedders add an endpoint only after their own readiness check; Harn then
+/// makes it authoritative for that provider for the scoped execution without
+/// changing catalog persistence or the public `ProviderDef` shape.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeProviderEndpointOverrides {
+    endpoints: BTreeMap<String, String>,
+}
+
+impl RuntimeProviderEndpointOverrides {
+    /// Create one validated runtime endpoint override.
+    pub fn single(
+        provider: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Result<Self, String> {
+        let mut overrides = Self::default();
+        overrides.insert(provider, base_url)?;
+        Ok(overrides)
+    }
+
+    /// Add or replace one verified provider endpoint.
+    pub fn insert(
+        &mut self,
+        provider: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Result<(), String> {
+        let provider = provider.into().trim().to_string();
+        if provider.is_empty() {
+            return Err("runtime provider endpoint requires a provider name".to_string());
+        }
+        let base_url = base_url.into().trim().to_string();
+        if base_url.is_empty() {
+            return Err(format!(
+                "runtime provider endpoint for `{provider}` must not be empty"
+            ));
+        }
+        let parsed = url::Url::parse(&base_url).map_err(|error| {
+            format!("runtime provider endpoint for `{provider}` is not a URL: {error}")
+        })?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err(format!(
+                "runtime provider endpoint for `{provider}` must be an absolute HTTP(S) URL"
+            ));
+        }
+        self.endpoints.insert(provider, base_url);
+        Ok(())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.endpoints.is_empty()
+    }
+
+    fn endpoint_for(&self, provider: &str) -> Option<&str> {
+        self.endpoints.get(provider).map(String::as_str)
+    }
 }
 
 /// Load and cache the providers config. Called once at VM startup.
@@ -356,7 +426,45 @@ pub fn loaded_config_path() -> Option<std::path::PathBuf> {
 /// `providers.toml`, but lives under `[llm]` in `harn.toml` and package
 /// manifests. Passing `None` clears the overlay.
 pub fn set_user_overrides(config: Option<ProvidersConfig>) {
-    USER_OVERRIDES.with(|cell| *cell.borrow_mut() = config);
+    LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| *cell.borrow_mut() = config);
+}
+
+/// Swap the per-execution provider overrides and return the previous value.
+///
+/// `AmbientExecutionScope` owns the poll-scoped use of this primitive. Normal
+/// callers should use [`set_user_overrides`] or
+/// `orchestration::scope_llm_runtime_overrides` instead of moving this context
+/// themselves.
+pub(crate) fn swap_user_overrides(next: Option<ProvidersConfig>) -> Option<ProvidersConfig> {
+    LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), next))
+}
+
+/// Swap host-verified provider endpoints for the current ambient execution.
+/// `AmbientExecutionScope` owns asynchronous use of this primitive.
+pub(crate) fn swap_runtime_provider_endpoint_overrides(
+    next: RuntimeProviderEndpointOverrides,
+) -> RuntimeProviderEndpointOverrides {
+    LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT
+        .with(|cell| std::mem::replace(&mut *cell.borrow_mut(), next))
+}
+
+/// Install host-verified provider endpoints for the current thread.
+///
+/// Normal async embedders should use
+/// [`crate::orchestration::scope_llm_runtime_overrides_with_provider_endpoints`]
+/// so concurrent executions cannot inherit one another's routes.
+pub fn set_runtime_provider_endpoint_overrides(overrides: RuntimeProviderEndpointOverrides) {
+    let _ = swap_runtime_provider_endpoint_overrides(overrides);
+}
+
+/// Clear host-verified provider endpoints for the current thread.
+pub fn clear_runtime_provider_endpoint_overrides() {
+    set_runtime_provider_endpoint_overrides(RuntimeProviderEndpointOverrides::default());
+}
+
+pub(crate) fn runtime_provider_endpoint(provider: &str) -> Option<String> {
+    LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT
+        .with(|cell| cell.borrow().endpoint_for(provider).map(str::to_string))
 }
 
 /// Clear per-run provider config overlays.
@@ -379,7 +487,7 @@ pub fn clear_runtime_catalog_overlay() {
 }
 
 pub(crate) fn effective_config() -> ProvidersConfig {
-    let user_overrides = USER_OVERRIDES.with(|cell| cell.borrow().clone());
+    let user_overrides = LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| cell.borrow().clone());
     effective_config_with_user_overrides(user_overrides.as_ref())
 }
 

@@ -278,7 +278,7 @@ pub(crate) fn split_trigger_priority(
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ModuleFunctionSignature {
+pub(crate) struct ModuleCallableSignature {
     pub(crate) params: Vec<Option<harn_parser::TypeExpr>>,
     pub(crate) return_type: Option<harn_parser::TypeExpr>,
     pub(crate) is_pub: bool,
@@ -1145,9 +1145,9 @@ pub(crate) fn manifest_module_source_path(
     }
 }
 
-pub(crate) fn load_module_function_signatures(
+pub(crate) fn load_module_callable_signatures(
     path: &Path,
-) -> Result<BTreeMap<String, ModuleFunctionSignature>, PackageError> {
+) -> Result<BTreeMap<String, ModuleCallableSignature>, PackageError> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let program = harn_parser::parse_source(&source)
@@ -1155,22 +1155,40 @@ pub(crate) fn load_module_function_signatures(
     let mut signatures = BTreeMap::new();
     for node in &program {
         let (_, inner) = harn_parser::peel_attributes(node);
-        if let harn_parser::Node::FnDecl {
-            name,
-            params,
-            return_type,
-            is_pub,
-            ..
-        } = &inner.node
-        {
-            signatures.insert(
-                name.clone(),
-                ModuleFunctionSignature {
-                    params: params.iter().map(|param| param.type_expr.clone()).collect(),
-                    return_type: return_type.clone(),
-                    is_pub: *is_pub,
-                },
-            );
+        match &inner.node {
+            harn_parser::Node::FnDecl {
+                name,
+                params,
+                return_type,
+                is_pub,
+                ..
+            } => {
+                signatures.insert(
+                    name.clone(),
+                    ModuleCallableSignature {
+                        params: params.iter().map(|param| param.type_expr.clone()).collect(),
+                        return_type: return_type.clone(),
+                        is_pub: *is_pub,
+                    },
+                );
+            }
+            harn_parser::Node::Pipeline {
+                name,
+                params,
+                return_type,
+                is_pub,
+                ..
+            } => {
+                signatures.insert(
+                    name.clone(),
+                    ModuleCallableSignature {
+                        params: vec![None; params.len()],
+                        return_type: return_type.clone(),
+                        is_pub: *is_pub,
+                    },
+                );
+            }
+            _ => {}
         }
     }
     Ok(signatures)

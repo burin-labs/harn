@@ -8,7 +8,7 @@ import {
   schema_validator,
 } from "std/schema"
 
-pub type CiCacheWriter = {workflow: string, job: string}
+pub type CiCacheWriter = {workflow: string, job: string, shared_key: string}
 
 pub type CiCachePolicy = {
   schema_version: 2,
@@ -25,6 +25,18 @@ const POLICY_PATH = ".github/cache-policy.json"
 const ACTION_PATH = ".github/actions/rust-cache/action.yml"
 
 const NODE_ACTION_PATH = ".github/actions/node-cache/action.yml"
+
+const SCCACHE_ACTION_PATH = ".github/actions/sccache/action.yml"
+
+const SCCACHE_ACTION = "./.github/actions/sccache"
+
+const STICKY_DISK_PREFIX = "useblacksmith/stickydisk@"
+
+const STICKY_DISK_PIN = "useblacksmith/stickydisk@6d373c96a74cbde0c99fedc5ea5d3a7ba66ba494"
+
+const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
+
+const PERSISTENT_SCCACHE_SIZE = "15G"
 
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
@@ -68,6 +80,7 @@ fn policy_schema() {
           {
             workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
             job: schema_string() + {pattern: "^[a-z0-9-]+$"},
+            shared_key: schema_string() + {min_length: 1},
           },
         ),
       ),
@@ -83,8 +96,16 @@ fn policy_from_validated(value) -> CiCachePolicy {
     persistent_ref: "refs/heads/main",
     storage_limit_bytes: value.storage_limit_bytes,
     remote_sccache: false,
-    writers: value.writers.map({ writer -> return {workflow: writer.workflow, job: writer.job} }).to_list(),
+    writers: value.writers
+      .map(
+      { writer -> return {workflow: writer.workflow, job: writer.job, shared_key: writer.shared_key} },
+    )
+      .to_list(),
   }
+}
+
+fn writer_key(workflow: string, job: string, shared_key: string) -> string {
+  return workflow + ":" + job + ":" + shared_key
 }
 
 /** Validate the closed cache-policy document at its owning boundary. */
@@ -94,7 +115,9 @@ pub fn ci_cache_policy_parse(value) -> CiCachePolicy? {
     return nil
   }
   const policy = policy_from_validated(report.value)
-  const writer_keys = policy.writers.map({ writer -> writer.workflow + ":" + writer.job }).to_list()
+  const writer_keys = policy.writers
+    .map({ writer -> writer_key(writer.workflow, writer.job, writer.shared_key) })
+    .to_list()
   if len(writer_keys) == 0 || len(writer_keys) != len(writer_keys.unique()) {
     return nil
   }
@@ -114,8 +137,11 @@ fn save_requested(step) -> bool {
   return value != nil && lowercase(trim(to_string(value))) != "false"
 }
 
-fn writer_allowed(policy: CiCachePolicy, workflow: string, job: string) -> bool {
-  return policy.writers.any({ writer -> writer.workflow == workflow && writer.job == job })
+fn writer_allowed(policy: CiCachePolicy, workflow: string, job: string, shared_key: string) -> bool {
+  return policy.writers
+    .any(
+    { writer -> return writer.workflow == workflow && writer.job == job && writer.shared_key == shared_key },
+  )
 }
 
 fn remote_sccache_errors(value, path: string = "") -> list<string> {
@@ -296,6 +322,138 @@ fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
   return errors
 }
 
+fn matching_steps(job, uses: string) -> list {
+  return (job?.steps ?? []).filter({ step -> step_uses(step) == uses }).to_list()
+}
+
+fn persistent_sccache_job_errors(
+  workflow,
+  job_name: string,
+  expected_runner: string,
+  fallback_condition: string,
+) -> list<string> {
+  const job = workflow?.jobs?.[job_name]
+  if job == nil {
+    return ["ci.yml:${job_name} must define the persistent sccache lane"]
+  }
+  let errors: list<string> = []
+  const runner = trim(job?.["runs-on"] ?? "")
+  if !contains(runner, BLACKSMITH_DISABLE_VAR) || !contains(runner, expected_runner) {
+    errors = errors
+      + ["ci.yml:${job_name} must use ${expected_runner} behind ${BLACKSMITH_DISABLE_VAR}"]
+  }
+  if trim(job?.env?.SCCACHE_CACHE_SIZE ?? "") != PERSISTENT_SCCACHE_SIZE {
+    errors = errors
+      + ["ci.yml:${job_name} must cap persistent sccache at ${PERSISTENT_SCCACHE_SIZE}"]
+  }
+  if !contains(trim(job?.env?.SCCACHE_BASEDIRS ?? ""), "github.workspace") {
+    errors = errors + ["ci.yml:${job_name} must normalize sccache paths to github.workspace"]
+  }
+  const caches = matching_steps(job, SCCACHE_ACTION)
+  if len(caches) != 1 {
+    errors = errors + ["ci.yml:${job_name} must configure ${SCCACHE_ACTION} exactly once"]
+  } else if !contains(trim(caches[0]?.with?.sticky ?? ""), BLACKSMITH_DISABLE_VAR) {
+    errors = errors + ["ci.yml:${job_name} sticky cache must follow ${BLACKSMITH_DISABLE_VAR}"]
+  }
+  const fallback = matching_steps(job, "./.github/actions/rust-cache")
+  if len(fallback) != 1 || trim(fallback[0]?.if ?? "") != fallback_condition {
+    errors = errors
+      + ["ci.yml:${job_name} must retain rust-cache only on the GitHub-hosted fallback"]
+  }
+  const finalizers = (job?.steps ?? [])
+    .filter({ step -> trim(step?.run ?? "") == "./scripts/ci/finalize_sccache.sh" })
+    .to_list()
+  if len(finalizers) != 1 || trim(finalizers[0]?.if ?? "") != "always()" {
+    errors = errors + ["ci.yml:${job_name} must summarize live sccache stats before shutdown"]
+  }
+  return errors
+}
+
+/** Validate the persistent local sccache action and every authorized heavy CI consumer. */
+pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
+  let errors: list<string> = []
+  const action_steps = action?.runs?.steps ?? []
+  const sticky = action_steps
+    .filter({ step -> step_uses(step).starts_with(STICKY_DISK_PREFIX) })
+    .to_list()
+  if len(sticky) != 1 || step_uses(sticky[0]) != STICKY_DISK_PIN {
+    errors = errors + ["${SCCACHE_ACTION_PATH} must use exactly one pinned sticky-disk action"]
+  } else {
+    if trim(sticky[0]?.if ?? "") != "inputs.sticky == 'true'"
+      || !(sticky[0]?.["continue-on-error"] ?? false) {
+      errors = errors + ["${SCCACHE_ACTION_PATH} sticky storage must be optional and non-fatal"]
+    }
+    if trim(sticky[0]?.with?.path ?? "") != "~/.cache/sccache"
+      || !contains(trim(sticky[0]?.with?.key ?? ""), "inputs.cache-key") {
+      errors = errors + ["${SCCACHE_ACTION_PATH} must persist the lane-keyed local sccache directory"]
+    }
+  }
+  const upstream = matching_steps(
+    action?.runs,
+    "mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696",
+  )
+  if len(upstream) != 1
+    || !(upstream[0]?.["continue-on-error"] ?? false)
+    || len(matching_steps(action?.runs, "./.github/actions/configure-cargo-sccache")) != 1 {
+    errors = errors + ["${SCCACHE_ACTION_PATH} must own pinned sccache setup and wrapper configuration"]
+  }
+  errors = errors
+    + persistent_sccache_job_errors(
+    workflow,
+    "package-audit",
+    "blacksmith-4vcpu-ubuntu-2404",
+    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+  )
+    + persistent_sccache_job_errors(
+    workflow,
+    "rust-builds",
+    "matrix.runner",
+    "matrix.kind != 'lint' || vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+  )
+    + persistent_sccache_job_errors(
+    workflow,
+    "audit-scripts",
+    "blacksmith-8vcpu-ubuntu-2404",
+    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+  )
+  const rust_job = workflow?.jobs?.["rust-builds"]
+  const rust_sccache = matching_steps(rust_job, SCCACHE_ACTION)
+  if len(rust_sccache) == 1 {
+    const sticky_condition = trim(rust_sccache[0]?.with?.sticky ?? "")
+    if !contains(sticky_condition, "matrix.kind == 'lint'")
+      || !contains(sticky_condition, BLACKSMITH_DISABLE_VAR) {
+      errors = errors
+        + ["ci.yml:rust-builds must keep persistent storage on the compile-only lint lane"]
+    }
+  }
+  const matrix = rust_job?.strategy?.matrix?.include ?? []
+  const runners = matrix.map({ row -> trim(row?.runner ?? "") }).to_list()
+  const cache_keys = matrix.map({ row -> trim(row?.cache_key ?? "") }).to_list()
+  if runners
+    != ["blacksmith-4vcpu-ubuntu-2404", "ubuntu-latest", "ubuntu-latest"]
+    || cache_keys != ["workspace-lint", "workspace-test", "workspace-audit"] {
+    errors = errors
+      + ["ci.yml:rust-builds must keep behavior proofs on GitHub Ubuntu and distinct lane caches"]
+  }
+  for step_name in [
+    "Run affected-crate tests (PR fast feedback)",
+    "Run full test suite (merge queue + non-metadata push backstop)",
+  ] {
+    const jobs = trim(step_by_name(rust_job?.steps ?? [], step_name)?.env?.CARGO_BUILD_JOBS ?? "")
+    if jobs != "2" {
+      errors = errors
+        + ["ci.yml:rust-builds ${step_name} must keep two-way fan-out on the Landlock-capable runner"]
+    }
+  }
+  const allowed = ["package-audit", "rust-builds", "audit-scripts"]
+  for {key: job_name, value: job} in workflow?.jobs ?? {} {
+    if len(matching_steps(job, SCCACHE_ACTION)) > 0 && !allowed.contains(job_name) {
+      errors = errors + ["ci.yml:${job_name} uses persistent sccache without a lane policy"]
+    }
+  }
+  return errors
+}
+
 /** Return every policy violation without stopping at the first workflow. */
 pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workflows: dict) -> list<string> {
   let errors = cache_action_errors(policy, action)
@@ -318,9 +476,10 @@ pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workfl
           errors = errors + [ephemeral_error]
         }
         if uses == policy.rust_cache_action && save_requested(step) {
-          const writer = workflow + ":" + job
+          const shared_key = trim(step?.with?.["shared-key"] ?? "")
+          const writer = writer_key(workflow, job, shared_key)
           observed_writers = observed_writers + [writer]
-          if !writer_allowed(policy, workflow, job) {
+          if !writer_allowed(policy, workflow, job, shared_key) {
             errors = errors + ["${writer} is not an authorized persistent cache writer"]
           }
         }
@@ -328,7 +487,7 @@ pub fn ci_cache_policy_errors(policy: CiCachePolicy, action, node_action, workfl
     }
   }
   for writer in policy.writers {
-    const key = writer.workflow + ":" + writer.job
+    const key = writer_key(writer.workflow, writer.job, writer.shared_key)
     if !observed_writers.contains(key) {
       errors = errors + ["authorized persistent cache writer is not active: " + key]
     }
@@ -349,11 +508,13 @@ fn main(harness: Harness) {
   }
   const action = read_yaml(ACTION_PATH, nil)
   const node_action = read_yaml(NODE_ACTION_PATH, nil)
+  const sccache_action = read_yaml(SCCACHE_ACTION_PATH, nil)
   let workflows = {}
   for path in harness.fs.glob(WORKFLOW_GLOB).sort() {
     workflows[workflow_name(path)] = read_yaml(path, nil)
   }
   const errors = ci_cache_policy_errors(policy, action, node_action, workflows)
+    + ci_sccache_policy_errors(sccache_action, workflows["ci.yml"])
   if len(errors) > 0 {
     harness.stdio.eprintln("CI cache policy violations:")
     for error in errors {

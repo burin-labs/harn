@@ -8,6 +8,12 @@ use crate::vm::Vm;
 
 use super::helpers::vm_value_to_json;
 
+mod catalog_projection;
+use catalog_projection::{
+    reasoning_history_wire_field_value, tool_mode_parity_notes_value, tool_mode_parity_value,
+    tools_value,
+};
+
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
     register_builtin_defs(vm, LLM_CONFIG_DEFS);
@@ -1240,24 +1246,13 @@ pub(crate) fn capabilities_to_vm_value(
     );
     dict.insert(
         crate::value::intern_key("tool_mode_parity"),
-        caps.tool_mode_parity
-            .as_deref()
-            .map(|status| VmValue::String(arcstr::ArcStr::from(status)))
-            .unwrap_or(VmValue::Nil),
+        tool_mode_parity_value(caps),
     );
     dict.insert(
         crate::value::intern_key("tool_mode_parity_notes"),
-        caps.tool_mode_parity_notes
-            .as_deref()
-            .map(|notes| VmValue::String(arcstr::ArcStr::from(notes)))
-            .unwrap_or(VmValue::Nil),
+        tool_mode_parity_notes_value(caps),
     );
-    // Mirrors the VM's tool-capability gate at llm_config::effective_model_capability_tags:
-    // either native or text-format tool calling counts as tool-capable.
-    dict.insert(
-        crate::value::intern_key("tools"),
-        VmValue::Bool(caps.native_tools || caps.text_tool_wire_format_supported),
-    );
+    dict.insert(crate::value::intern_key("tools"), tools_value(caps));
     dict.insert(
         crate::value::intern_key("defer_loading"),
         VmValue::Bool(caps.defer_loading),
@@ -1458,6 +1453,10 @@ pub(crate) fn capabilities_to_vm_value(
     dict.insert(
         crate::value::intern_key("preserve_thinking"),
         VmValue::Bool(caps.preserve_thinking),
+    );
+    dict.insert(
+        crate::value::intern_key("reasoning_history_wire_field"),
+        reasoning_history_wire_field_value(caps),
     );
     dict.insert(
         crate::value::intern_key("requires_completion_tokens"),

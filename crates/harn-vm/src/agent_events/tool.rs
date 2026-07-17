@@ -289,6 +289,13 @@ pub struct ToolDenial {
     /// Human-readable explanation — the same text the model sees in the
     /// tool result.
     pub reason: String,
+    /// Stable terminal-denial class for gates that should suppress argument
+    /// churn across equivalent call variants in one run.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub denial_class: Option<String>,
+    /// One-based count for this terminal-denial class within the session.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub class_repeat_count: Option<u64>,
 }
 
 impl ToolDenial {
@@ -309,6 +316,8 @@ impl ToolDenial {
             denied_paths: Vec::new(),
             retryable: false,
             reason: reason.into(),
+            denial_class: None,
+            class_repeat_count: None,
         }
     }
 
@@ -330,7 +339,15 @@ impl ToolDenial {
             denied_paths: Vec::new(),
             retryable: true,
             reason: reason.into(),
+            denial_class: None,
+            class_repeat_count: None,
         }
+    }
+
+    pub fn with_denial_class(mut self, denial_class: impl Into<String>, repeat_count: u64) -> Self {
+        self.denial_class = Some(denial_class.into());
+        self.class_repeat_count = Some(repeat_count);
+        self
     }
 
     pub fn to_json(&self) -> serde_json::Value {

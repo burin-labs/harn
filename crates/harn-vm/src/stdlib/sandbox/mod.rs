@@ -2316,7 +2316,7 @@ pub(crate) fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
     target_os = "windows"
 ))]
 pub(crate) fn policy_allows_workspace_write(policy: &CapabilityPolicy) -> bool {
-    policy.capabilities.is_empty()
+    !policy.capabilities_are_restricted()
         || policy_allows_capability(policy, "workspace", &["write_text", "delete"])
 }
 

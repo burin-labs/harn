@@ -32,7 +32,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Hunyuan` | OpenAI-compatible chat completions | `hunyuan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Hyperbolic` | OpenAI-compatible chat completions | `hyperbolic` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Inception` | OpenAI-compatible chat completions | `inception:mercury-2` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
-| `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `native` | yes | yes | `native` / `native_json` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
+| `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `native` | no | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
 | `OpenAI-compatible local server` | OpenAI-compatible chat completions | `local-gemma4` | `text` | yes | yes | `native` / `delimited` | `enabled` | no | No | none | `low` | `not_recorded` |
 | `Minimax` | OpenAI-compatible chat completions | `minimax:MiniMax-M2.5-highspeed` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Mistral via OpenRouter` | OpenAI-compatible chat completions through OpenRouter | `openrouter:mistralai/mistral-small-2603` | `native` | yes | yes | `native` / `native_json` | none | yes | No | none | `medium` | `not_recorded` |
@@ -205,7 +205,7 @@ Notes:
 Caveats:
 
 - Run both provider readiness and tool probes after changing GGUF, context, KV-cache, or chat-template settings.
-- Harn-managed llama.cpp launch plus one-tool probe passed native and streaming native on 2026-06-05.
+- 2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract.
 
 Local setup:
 

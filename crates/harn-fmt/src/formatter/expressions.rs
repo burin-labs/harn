@@ -414,7 +414,7 @@ impl Formatter<'_> {
             }
             Node::BreakStmt => "break".to_string(),
             Node::ContinueStmt => "continue".to_string(),
-            Node::Block(stmts) => self.format_block_expr("{", stmts, indent, node.span.line),
+            Node::Block(stmts) => self.format_block_expr("block {", stmts, indent, node.span.line),
             Node::MatchExpr { value, arms } => {
                 let val = self.format_expr(value, indent);
                 let mut result = format!("match {val} {{\n");

@@ -11,14 +11,17 @@ use uuid::Uuid;
 
 use super::event::{now_ms_and_rfc3339, AppendEvent, EventId, SessionEventKind, StoredEvent};
 use super::memory_helpers::{meta_for_create, validate_open};
+use super::redaction::{
+    prepare_append_event, prepare_stored_events_for_persistence, redact_stored_events,
+};
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
-    verify_event_chain,
+    verify_session_chain,
 };
 use super::store::{
-    CreateSession, EventPage, ForkResult, ListFilter, ReadRange, SessionId, SessionMeta,
-    SessionStatus, SessionStore, Snapshot, SnapshotId, StoreError, StoreHooks, StoreResult,
-    TruncateResult, VerifyFailure, VerifyReport, MAX_READ_BATCH,
+    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
+    SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, Snapshot, SnapshotId,
+    StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport, MAX_READ_BATCH,
 };
 
 struct SessionRecord {
@@ -41,6 +44,7 @@ impl SessionRecord {
 struct Inner {
     sessions: BTreeMap<SessionId, SessionRecord>,
     snapshots: BTreeMap<String, Snapshot>,
+    imports: BTreeMap<String, ImportResult>,
 }
 
 #[derive(Clone)]
@@ -72,15 +76,6 @@ fn lock(inner: &Arc<Mutex<Inner>>) -> std::sync::MutexGuard<'_, Inner> {
     inner.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn apply_redaction(hooks: &StoreHooks, event: &mut AppendEvent) {
-    let Some(policy) = hooks.redaction.as_ref() else {
-        return;
-    };
-    policy.redact_json_in_place(&mut event.payload);
-    let redacted_headers = policy.redact_headers(&event.headers);
-    event.headers = redacted_headers;
-}
-
 /// Core append logic against an already-locked session record. Both
 /// `append` and `close` call this while holding the single store lock, so
 /// `close` can read the chain state, append the receipt, and finalise it
@@ -91,7 +86,7 @@ fn append_locked(
     hooks: &StoreHooks,
     mut event: AppendEvent,
 ) -> StoreResult<StoredEvent> {
-    apply_redaction(hooks, &mut event);
+    prepare_append_event(hooks, &mut event)?;
     validate_open(&record.meta)?;
     validate_parent(record, &event)?;
     let (ts_ms, ts) = now_ms_and_rfc3339();
@@ -130,6 +125,44 @@ fn append_locked(
     record.meta.updated_at = stored.ts.clone();
     record.meta.chain_root_hash = Some(chain_root_fold(&prev_root, &stored.record_hash));
     Ok(stored)
+}
+
+#[async_trait]
+impl SessionImporter for MemorySessionStore {
+    async fn import(&self, request: ImportSession) -> StoreResult<ImportResult> {
+        request.validate()?;
+        let mut guard = lock(&self.inner);
+        if let Some(existing) = guard.imports.get(&request.source_id) {
+            if existing.source_digest != request.source_digest {
+                return Err(StoreError::Conflict(format!(
+                    "import source '{}' changed digest",
+                    request.source_id
+                )));
+            }
+            let mut result = existing.clone();
+            result.imported = false;
+            return Ok(result);
+        }
+
+        let meta = meta_for_create(request.session);
+        if guard.sessions.contains_key(&meta.id) {
+            return Err(StoreError::AlreadyExists(meta.id));
+        }
+        let mut record = SessionRecord::fresh(meta.clone());
+        for event in request.events {
+            append_locked(&mut record, &self.hooks, event)?;
+        }
+        let result = ImportResult {
+            source_id: request.source_id.clone(),
+            source_digest: request.source_digest,
+            session_id: meta.id.clone(),
+            event_count: record.events.len(),
+            imported: true,
+        };
+        guard.sessions.insert(meta.id, record);
+        guard.imports.insert(request.source_id, result.clone());
+        Ok(result)
+    }
 }
 
 #[async_trait]
@@ -209,12 +242,8 @@ impl SessionStore for MemorySessionStore {
         } else {
             None
         };
-        // Defense in depth: re-redact on read if policy demands it.
-        if let Some(policy) = self.hooks.redaction.as_ref() {
-            for event in events.iter_mut() {
-                policy.redact_json_in_place(&mut event.payload);
-            }
-        }
+        // Defense in depth for data imported or written under an older policy.
+        redact_stored_events(&self.hooks, &mut events)?;
         Ok(EventPage {
             events,
             next_cursor,
@@ -258,12 +287,13 @@ impl SessionStore for MemorySessionStore {
         child_meta.closed_at = None;
         child_meta.closed_at_ms = None;
         child_meta.soft_deleted_at_ms = None;
-        let parent_events: Vec<StoredEvent> = parent
+        let mut parent_events: Vec<StoredEvent> = parent
             .events
             .iter()
             .filter(|event| event.event_id <= at_event_id)
             .cloned()
             .collect();
+        prepare_stored_events_for_persistence(&self.hooks, &mut parent_events)?;
         let copied_events = re_anchor_events(&parent_events, &new_id);
         let copied_event_count = copied_events.len();
         child_meta.event_count = copied_event_count;
@@ -332,10 +362,12 @@ impl SessionStore for MemorySessionStore {
             .get(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
         let (ms, text) = now_ms_and_rfc3339();
+        let mut events = record.events.clone();
+        redact_stored_events(&self.hooks, &mut events)?;
         let snapshot = Snapshot {
             id: SnapshotId(format!("snap-{}", Uuid::now_v7())),
             session: record.meta.clone(),
-            events: record.events.clone(),
+            events,
             captured_at_ms: ms,
             captured_at: text,
         };
@@ -347,11 +379,13 @@ impl SessionStore for MemorySessionStore {
 
     async fn replay(&self, snapshot_id: &SnapshotId) -> StoreResult<Snapshot> {
         let guard = lock(&self.inner);
-        guard
+        let mut snapshot = guard
             .snapshots
             .get(&snapshot_id.0)
             .cloned()
-            .ok_or_else(|| StoreError::NotFound(snapshot_id.0.clone()))
+            .ok_or_else(|| StoreError::NotFound(snapshot_id.0.clone()))?;
+        redact_stored_events(&self.hooks, &mut snapshot.events)?;
+        Ok(snapshot)
     }
 
     async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {
@@ -438,7 +472,6 @@ impl SessionStore for MemorySessionStore {
             .sessions
             .get(session_id)
             .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
-        let chain_root = chain_root_hash(&record.events);
         let event_verifier = self
             .hooks
             .event_signer
@@ -450,21 +483,12 @@ impl SessionStore for MemorySessionStore {
             .as_ref()
             .or(self.hooks.event_signer.as_ref())
             .map(|signer| signer.verifying_key());
-        let (signed, failures) = verify_event_chain(
+        Ok(verify_session_chain(
+            &record.meta,
             &record.events,
             event_verifier.as_ref(),
             receipt_verifier.as_ref(),
-        );
-        Ok(VerifyReport {
-            session_id: session_id.to_string(),
-            chain_root_hash: chain_root,
-            event_count: record.events.len(),
-            signed_event_count: signed,
-            failures: failures
-                .into_iter()
-                .map(|(event_id, reason)| VerifyFailure { event_id, reason })
-                .collect(),
-        })
+        ))
     }
 }
 

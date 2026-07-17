@@ -598,6 +598,14 @@ pub trait AcpRuntimeConfigurator: Send + Sync {
     ) -> Result<(), String> {
         Ok(())
     }
+
+    /// Host-verified provider endpoints that travel with this server's
+    /// runtime configuration rather than its serializable provider catalog.
+    fn runtime_provider_endpoint_overrides(
+        &self,
+    ) -> harn_vm::llm_config::RuntimeProviderEndpointOverrides {
+        Default::default()
+    }
 }
 
 #[derive(Clone, Default)]
@@ -605,6 +613,29 @@ pub struct NoopAcpRuntimeConfigurator;
 
 #[async_trait(?Send)]
 impl AcpRuntimeConfigurator for NoopAcpRuntimeConfigurator {}
+
+#[derive(Clone)]
+struct EndpointOverrideRuntimeConfigurator {
+    inner: Arc<dyn AcpRuntimeConfigurator>,
+    endpoints: harn_vm::llm_config::RuntimeProviderEndpointOverrides,
+}
+
+#[async_trait(?Send)]
+impl AcpRuntimeConfigurator for EndpointOverrideRuntimeConfigurator {
+    async fn configure(
+        &self,
+        vm: &mut harn_vm::Vm,
+        source_path: Option<&std::path::Path>,
+    ) -> Result<(), String> {
+        self.inner.configure(vm, source_path).await
+    }
+
+    fn runtime_provider_endpoint_overrides(
+        &self,
+    ) -> harn_vm::llm_config::RuntimeProviderEndpointOverrides {
+        self.endpoints.clone()
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct AcpProfileConfig {
@@ -665,7 +696,17 @@ impl AcpServerConfig {
         mut self,
         runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
     ) -> Self {
-        self.runtime_configurator = runtime_configurator;
+        let endpoints = self
+            .runtime_configurator
+            .runtime_provider_endpoint_overrides();
+        self.runtime_configurator = if endpoints.is_empty() {
+            runtime_configurator
+        } else {
+            Arc::new(EndpointOverrideRuntimeConfigurator {
+                inner: runtime_configurator,
+                endpoints,
+            })
+        };
         self
     }
 
@@ -687,6 +728,25 @@ impl AcpServerConfig {
         self.llm_config_overrides = llm_config;
         self.llm_capability_overrides = llm_capabilities;
         self
+    }
+
+    /// Route one provider through a host-verified endpoint for this ACP
+    /// server. The endpoint is scoped to requests and never enters the TOML
+    /// catalog or provider-catalog projection.
+    pub fn with_runtime_provider_endpoint(
+        mut self,
+        provider: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Result<Self, String> {
+        let mut endpoints = self
+            .runtime_configurator
+            .runtime_provider_endpoint_overrides();
+        endpoints.insert(provider, base_url)?;
+        self.runtime_configurator = Arc::new(EndpointOverrideRuntimeConfigurator {
+            inner: self.runtime_configurator,
+            endpoints,
+        });
+        Ok(self)
     }
 
     pub fn with_profile(mut self, profile: AcpProfileConfig) -> Self {
@@ -841,6 +901,8 @@ pub struct AcpServer {
     profile: AcpProfileConfig,
     /// Provider/catalog overlays installed by the embedder for this server.
     llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
+    /// Host-verified endpoint sidecar paired with the catalog overlay.
+    runtime_provider_endpoint_overrides: harn_vm::llm_config::RuntimeProviderEndpointOverrides,
     llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     /// Server-level budget inherited by sessions unless they override it.
     default_budget: Option<BudgetSpec>,

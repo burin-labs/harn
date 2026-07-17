@@ -41,6 +41,7 @@ GATES=(
   check-highlight
   check-language-spec
   check-grammar-keywords
+  verify-tree-sitter-parse
   check-trigger-quickref
   check-provider-matrix
   check-provider-support
@@ -66,6 +67,7 @@ GATES=(
   check-docs-workflow-quickstart
   check-release-audit-contract
   check-vm-rss-soak
+  check-test-case-performance
 )
 
 nproc_count() { getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4; }
@@ -103,11 +105,18 @@ if make --help 2>&1 | grep -q -- "--output-sync"; then
   output_sync="-Otarget"
 fi
 
+# Capture the audit gates' output as well as streaming it, so the summary at the
+# end can NAME the gates that failed. `set -o pipefail` above is what makes this
+# safe: without it the pipe would report tee's status and every audit failure
+# would read as a pass.
+audit_log="$(mktemp)"
+trap 'rm -f "$audit_log"' EXIT
+
 audit_status=0
 (
   echo "=== audit gates (make -j$concurrency -k${output_sync:+ $output_sync}, HARN_BIN warm) ==="
   gate_started="$(date +%s)"
-  if make -j"$concurrency" -k ${output_sync} "${GATES[@]}"; then
+  if make -j"$concurrency" -k ${output_sync} "${GATES[@]}" 2>&1 | tee "$audit_log"; then
     echo "ok: audit gates ($(( $(date +%s) - gate_started ))s)"
     echo "=== all audit gates passed ==="
   else
@@ -134,10 +143,42 @@ else
   audit_status=$?
 fi
 
+# Say at the TAIL what failed, because the tail is where a reader looks.
+#
+# Conformance and the audit gates run in PARALLEL, so a failing gate prints its
+# `make: *** [target] Error N` minutes before this point and thousands of lines
+# above it. The tail then reads "ok: conformance" followed by a bare non-zero
+# exit — which is byte-identical to the documented sccache post-job flake
+# (ci.yml: "non-zero JOB exit (exit 2) AFTER every gate already passed"). A real
+# two-gate failure has been misread as that flake. A log that makes a real
+# failure look like a known flake is a defect even when every gate is correct.
+failure_summary() {
+  local phase="$1"
+  local names
+  # `|| true`: a gate can fail WITHOUT emitting `make: *** [target]` (a bare
+  # non-zero, a killed process). Under `set -euo pipefail` an empty grep would
+  # abort this function and print nothing at all — the silence this summary
+  # exists to end. Name what we can; always print the rest.
+  names="$(grep -oE 'make: \*\*\* \[[^]]+\]' "$audit_log" 2>/dev/null \
+    | sed -E 's/.*: ([^]]+)\]/\1/' | sort -u | tr '\n' ' ' || true)"
+  {
+    echo ""
+    echo "=== FAILED: ${phase} ==="
+    if [ -n "${names// /}" ]; then
+      echo "failing gate(s): ${names}"
+    fi
+    echo "The failing output is ABOVE, not at this tail: the audit gates run in parallel"
+    echo "with conformance. Search this log for 'make: *** ' and 'FAIL:'."
+    echo "'ok: conformance' near the tail does NOT mean this job passed."
+  } >&2
+}
+
 if [ "$conformance_status" -ne 0 ]; then
+  failure_summary "conformance"
   exit "$conformance_status"
 fi
 if [ "$audit_status" -ne 0 ]; then
+  failure_summary "audit gates"
   exit "$audit_status"
 fi
 echo "=== conformance and audit gates passed ==="

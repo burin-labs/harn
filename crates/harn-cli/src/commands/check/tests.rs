@@ -10,6 +10,7 @@ use crate::package::CheckConfig;
 
 use super::bundle::build_bundle_manifest;
 use super::check_cmd::{check_file_inner, check_file_report};
+use super::collect_preflight_diagnostics_with_module_graph;
 use super::config::collect_harn_targets;
 use super::config::{
     build_module_graph, build_module_graph_and_seed_analysis, collect_cross_file_imports,
@@ -17,9 +18,7 @@ use super::config::{
 use super::host_capabilities::parse_host_capability_value;
 use super::lint::lint_file_inner;
 use super::lint_report::lint_file_report;
-use super::preflight::{
-    collect_preflight_diagnostics_with_module_graph, is_preflight_allowed, PreflightDiagnostic,
-};
+use super::preflight::{is_preflight_allowed, PreflightDiagnostic};
 
 /// Single-file preflight, for tests that have one file and no graph.
 ///

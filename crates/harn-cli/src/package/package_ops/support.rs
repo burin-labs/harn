@@ -146,6 +146,9 @@ pub(crate) fn print_package_check_report(report: &PackageCheckReport) {
     for skill in &report.skills {
         println!("skill {} -> {}", skill.name, skill.path);
     }
+    for persona in &report.personas {
+        println!("persona {} -> {}", persona.name, persona.entry_workflow);
+    }
     if !report.warnings.is_empty() {
         println!("\nwarnings:");
         for warning in &report.warnings {
@@ -230,6 +233,15 @@ pub(crate) fn print_package_list_report(report: &PackageListReport) {
                 .map(|export| export.name.as_str())
                 .collect();
             println!("    skills: {}", skills.join(", "));
+        }
+        if !entry.exports.personas.is_empty() {
+            let personas = entry
+                .exports
+                .personas
+                .iter()
+                .map(|name| format!("{}/{name}", entry.name))
+                .collect::<Vec<_>>();
+            println!("    personas: {}", personas.join(", "));
         }
         if !entry.permissions.is_empty() {
             println!("    permissions: {}", entry.permissions.join(", "));

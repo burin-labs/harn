@@ -339,9 +339,10 @@ impl AuthEnv {
     }
 }
 
-/// Resolve the effective base URL for a provider, checking the `base_url_env`
-/// override first, then any named region selected by `region_env`, then the
-/// configured `base_url`.
+/// Resolve the configured base URL for a provider, checking `base_url_env`,
+/// any named `region_env`, then the catalog `base_url`. Host-verified runtime
+/// endpoints are applied by [`crate::llm_config::provider_config`] before this
+/// public catalog DTO reaches a transport consumer.
 pub fn resolve_base_url(pdef: &ProviderDef) -> String {
     if let Some(env_name) = &pdef.base_url_env {
         if let Ok(val) = std::env::var(env_name) {

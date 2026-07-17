@@ -32,6 +32,11 @@ impl Dispatcher {
         wait_lease: Option<DispatchWaitLease>,
         cancel_rx: &mut broadcast::Receiver<()>,
     ) -> Result<VmValue, DispatchError> {
+        let callable_policy = match callable {
+            crate::value::VmCallable::Pipeline(callable) => callable.execution_policy(),
+            _ => None,
+        };
+        let autonomy_tier = callable.effective_autonomy_tier(autonomy_tier);
         let mut vm = self.base_vm.child_vm();
         let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
         if self.state.shutting_down.load(Ordering::SeqCst) {
@@ -46,11 +51,17 @@ impl Dispatcher {
         let arg = event_to_handler_value(event)?;
         let args = [arg];
         let tier_policy = policy_for_autonomy_tier(autonomy_tier);
-        let effective_policy = match crate::orchestration::current_execution_policy() {
-            Some(parent) => parent
-                .intersect(&tier_policy)
+        let invocation_policy = match callable_policy {
+            Some(policy) => tier_policy
+                .intersect(policy)
                 .map_err(DispatchError::Local)?,
             None => tier_policy,
+        };
+        let effective_policy = match crate::orchestration::current_execution_policy() {
+            Some(parent) => parent
+                .intersect(&invocation_policy)
+                .map_err(DispatchError::Local)?,
+            None => invocation_policy,
         };
         let _execution_context_guard = DispatchProcessContextGuard::install(&vm);
         crate::orchestration::push_execution_policy(effective_policy);
@@ -71,10 +82,7 @@ impl Dispatcher {
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), wait_lease));
         let prior_hitl_state = crate::stdlib::hitl::take_hitl_state();
         crate::stdlib::hitl::reset_hitl_state();
-        let future = async {
-            let closure = vm.resolve_callable(callable).await?;
-            vm.call_closure_pub(&closure, &args).await
-        };
+        let future = async { vm.execute_callable(callable, &args).await };
         pin_mut!(future);
         let mut poll = tokio::time::interval(Duration::from_millis(100));
         let result = loop {

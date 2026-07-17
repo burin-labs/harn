@@ -7,13 +7,12 @@
 //! touching the working tree until `hostlib_fs_commit_staged`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self as stdfs, File, OpenOptions};
+use std::fs::{self as stdfs};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
-use fs2::FileExt;
 use harn_vm::agent_events::AgentEvent;
 use harn_vm::process_sandbox::{check_fs_path_scope, FsAccess};
 use harn_vm::VmValue;
@@ -38,6 +37,13 @@ const EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN: &str = "hostlib_fs_emit_safe_text_pat
 
 const MANIFEST_VERSION: u32 = 1;
 const STATE_REL: &[&str] = &[".harn", "state", "staged"];
+
+mod safe_text_patch_lock;
+
+#[cfg(test)]
+use safe_text_patch_lock::open_safe_text_patch_lock;
+use safe_text_patch_lock::{acquire_safe_text_patch_lock, safe_text_patch_lock_root};
+pub use safe_text_patch_lock::{scope_safe_text_patch_lock_root, ScopedSafeTextPatchLockRoot};
 
 /// Hostlib filesystem capability handle.
 #[derive(Default)]
@@ -795,7 +801,7 @@ fn safe_text_patch_disk(
     overwrite: bool,
     after_hash: String,
 ) -> Result<SafeTextPatchOutcome, HostlibError> {
-    let lock_root = safe_text_patch_lock_root()?;
+    let lock_root = safe_text_patch_lock_root();
     safe_text_patch_disk_with_lock_root(
         path,
         new_bytes,
@@ -902,105 +908,6 @@ fn safe_text_patch_disk_locked(
         created: !existed,
         bytes_written: new_bytes.len(),
     })
-}
-
-fn safe_text_patch_lock_root() -> Result<PathBuf, HostlibError> {
-    harn_vm::user_dirs::home_dir()
-        .map(|home| home.join(".harn/fs-cas-locks"))
-        .ok_or_else(|| HostlibError::Backend {
-            builtin: SAFE_TEXT_PATCH_BUILTIN,
-            message: "cannot resolve the user home for safe-text-patch locks".to_string(),
-        })
-}
-
-fn acquire_safe_text_patch_lock(
-    path: &Path,
-    lock_root: &Path,
-) -> Result<SafeTextPatchLock, HostlibError> {
-    let file = open_safe_text_patch_lock(path, lock_root)?;
-    file.lock_exclusive()
-        .map_err(|error| HostlibError::Backend {
-            builtin: SAFE_TEXT_PATCH_BUILTIN,
-            message: format!("acquire CAS lock for `{}`: {error}", path.display()),
-        })?;
-    Ok(SafeTextPatchLock { file })
-}
-
-fn open_safe_text_patch_lock(path: &Path, lock_root: &Path) -> Result<File, HostlibError> {
-    stdfs::create_dir_all(lock_root).map_err(|error| HostlibError::Backend {
-        builtin: SAFE_TEXT_PATCH_BUILTIN,
-        message: format!(
-            "create CAS lock directory `{}`: {error}",
-            lock_root.display()
-        ),
-    })?;
-    let identity = canonical_lock_identity(path);
-    let lock_name = format!(
-        "{}.lock",
-        hex::encode(Sha256::digest(lock_identity_bytes(&identity)))
-    );
-    let lock_path = lock_root.join(lock_name);
-    OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-        .map_err(|error| HostlibError::Backend {
-            builtin: SAFE_TEXT_PATCH_BUILTIN,
-            message: format!("open CAS lock `{}`: {error}", lock_path.display()),
-        })
-}
-
-fn lock_identity_bytes(identity: &Path) -> Vec<u8> {
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    {
-        // These platforms commonly use case-insensitive filesystems. Folding
-        // only the private lock key safely over-serializes case-sensitive
-        // volumes while preventing two spellings of a missing target from
-        // acquiring different locks before the first create.
-        identity.to_string_lossy().to_lowercase().into_bytes()
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        identity.as_os_str().as_encoded_bytes().to_vec()
-    }
-}
-
-fn canonical_lock_identity(path: &Path) -> PathBuf {
-    if let Ok(canonical) = stdfs::canonicalize(path) {
-        return canonical;
-    }
-    let absolute = normalize_logical(path);
-    let mut ancestor = absolute.as_path();
-    let mut suffix = Vec::new();
-    while let Some(name) = ancestor.file_name() {
-        suffix.push(name.to_os_string());
-        let Some(parent) = ancestor.parent() else {
-            break;
-        };
-        if let Ok(canonical_parent) = stdfs::canonicalize(parent) {
-            let mut identity = canonical_parent;
-            for component in suffix.iter().rev() {
-                identity.push(component);
-            }
-            return identity;
-        }
-        ancestor = parent;
-    }
-    absolute
-}
-
-struct SafeTextPatchLock {
-    file: File,
-}
-
-impl Drop for SafeTextPatchLock {
-    fn drop(&mut self) {
-        // Keep the lock file itself: unlinking it can split waiters across two
-        // inodes. The OS releases ownership automatically when a process exits.
-        let _ = FileExt::unlock(&self.file);
-    }
 }
 
 /// Read the pre-image through the staged-fs overlay (when active),
@@ -1841,7 +1748,8 @@ mod staged_path_tests {
 mod safe_text_patch_lock_tests {
     use super::{
         acquire_safe_text_patch_lock, hash_label, open_safe_text_patch_lock,
-        safe_text_patch_disk_locked, safe_text_patch_disk_with_lock_root, SafeTextPatchResult,
+        safe_text_patch_disk_locked, safe_text_patch_disk_with_lock_root,
+        safe_text_patch_lock_root, scope_safe_text_patch_lock_root, SafeTextPatchResult,
     };
     use fs2::FileExt;
     use std::io::{BufRead, BufReader, Read, Write};
@@ -1853,6 +1761,30 @@ mod safe_text_patch_lock_tests {
     const CHILD_PATH: &str = "HARN_SAFE_TEXT_PATCH_TEST_PATH";
     const CHILD_LOCK_ROOT: &str = "HARN_SAFE_TEXT_PATCH_TEST_LOCK_ROOT";
     const CHILD_EXPECTED_HASH: &str = "HARN_SAFE_TEXT_PATCH_TEST_EXPECTED_HASH";
+
+    #[test]
+    fn scoped_lock_root_is_nested_and_restored() {
+        let dir = tempdir().expect("tempdir");
+        let outer = dir.path().join("outer-locks");
+        let inner = dir.path().join("inner-locks");
+
+        let _outer = scope_safe_text_patch_lock_root(&outer);
+        assert_eq!(safe_text_patch_lock_root(), outer);
+        {
+            let _inner = scope_safe_text_patch_lock_root(&inner);
+            assert_eq!(safe_text_patch_lock_root(), inner);
+        }
+        assert_eq!(safe_text_patch_lock_root(), outer);
+    }
+
+    #[test]
+    fn default_lock_root_follows_runtime_state_root() {
+        let runtime_root = harn_vm::stdlib::process::runtime_root_base();
+        assert_eq!(
+            safe_text_patch_lock_root(),
+            harn_vm::runtime_paths::state_root(&runtime_root).join("fs-cas-locks")
+        );
+    }
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     #[test]

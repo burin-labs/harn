@@ -8,127 +8,27 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Instant;
 
+use crate::env_guard::ScopedEnvVar;
+use crate::test_timing::DurationSummary;
+use crate::CLI_RUNTIME_STACK_SIZE;
 use harn_lexer::Lexer;
 use harn_parser::const_eval::{const_eval, ConstEnv, ConstValue};
 use harn_parser::{Attribute, Node, Parser, SNode};
 use harn_vm::VmValue;
-use serde::Serialize;
-
-use crate::env_guard::ScopedEnvVar;
-use crate::CLI_RUNTIME_STACK_SIZE;
 
 mod execution;
+mod reporting;
 mod session;
+mod skill_context;
 #[cfg(test)]
 mod tests;
 
 use execution::execute_case;
+pub use reporting::{
+    AggregateTimings, PhaseTimings, TestPhase, TestResult, TestSummary, TestTimeout,
+};
 pub use session::{TestRunSession, TestRunSessionStats};
-
-#[derive(Clone, Debug, Serialize)]
-pub struct TestResult {
-    pub name: String,
-    pub file: String,
-    pub passed: bool,
-    pub error: Option<String>,
-    /// Typed timeout metadata. Consumers must use this instead of parsing
-    /// human-readable error text.
-    pub timeout: Option<TestTimeout>,
-    pub duration_ms: u64,
-    /// Per-phase timings. Populated by `execute_case`; default-zero on
-    /// discovery/worker-error rows. Used by `--diagnose` and the
-    /// `--timing` aggregate.
-    pub phases: PhaseTimings,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct TestTimeout {
-    pub phase: TestPhase,
-    pub limit_ms: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TestPhase {
-    Execute,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct TestSummary {
-    pub results: Vec<TestResult>,
-    pub passed: usize,
-    pub failed: usize,
-    pub total: usize,
-    pub duration_ms: u64,
-    /// Aggregated phase costs across the entire run.
-    pub aggregate: AggregateTimings,
-}
-
-/// Wall-clock cost of each phase of a single test execution.
-///
-/// Sums to the test's `duration_ms` modulo measurement overhead. Surfaced
-/// so consumers can attribute cold-start vs assertion cost without
-/// having to instrument the runner externally.
-#[derive(Debug, Default, Clone, Copy, Serialize)]
-pub struct PhaseTimings {
-    /// VM construction + stdlib/hostlib registration + skill install +
-    /// runtime extension install + manifest hooks/triggers install.
-    pub setup_ms: u64,
-    /// `Compiler::compile_named` time for this test's chunk.
-    pub compile_ms: u64,
-    /// `vm.execute(chunk)` wall time, i.e. the actual user-test body.
-    pub execute_ms: u64,
-    /// `reset_thread_local_state` between tests.
-    pub teardown_ms: u64,
-}
-
-/// Aggregated cost across the run. Mirrors [`PhaseTimings`] plus the
-/// suite-level collection cost (discover + parse).
-#[derive(Debug, Default, Clone, Copy, Serialize)]
-pub struct AggregateTimings {
-    pub collection_ms: u64,
-    pub setup_ms: u64,
-    pub compile_ms: u64,
-    pub execute_ms: u64,
-    pub teardown_ms: u64,
-}
-
-impl AggregateTimings {
-    fn from_results(collection_ms: u64, results: &[TestResult]) -> Self {
-        results.iter().map(|r| r.phases).fold(
-            Self {
-                collection_ms,
-                ..Self::default()
-            },
-            |acc, p| Self {
-                collection_ms: acc.collection_ms,
-                setup_ms: acc.setup_ms.saturating_add(p.setup_ms),
-                compile_ms: acc.compile_ms.saturating_add(p.compile_ms),
-                execute_ms: acc.execute_ms.saturating_add(p.execute_ms),
-                teardown_ms: acc.teardown_ms.saturating_add(p.teardown_ms),
-            },
-        )
-    }
-}
-
-impl TestResult {
-    /// Emit a one-line phase breakdown to stderr. Driven by `--diagnose`
-    /// / `HARN_TEST_DIAGNOSE=1`. The format is intentionally
-    /// machine-readable so downstream eval pipelines can grep it.
-    fn emit_diagnose(&self) {
-        let outcome = if self.passed { "ok" } else { "FAIL" };
-        eprintln!(
-            "[harn test diag] {} {} setup={}ms compile={}ms execute={}ms teardown={}ms total={}ms",
-            outcome,
-            self.name,
-            self.phases.setup_ms,
-            self.phases.compile_ms,
-            self.phases.execute_ms,
-            self.phases.teardown_ms,
-            self.duration_ms,
-        );
-    }
-}
+use skill_context::PreparedSkillContexts;
 
 #[derive(Clone, Debug)]
 pub enum TestRunEvent {
@@ -427,6 +327,7 @@ async fn run_tests_with_session_impl(
             discovery.discovery_errors.clear();
         }
     }
+    let skill_contexts = PreparedSkillContexts::prepare(&discovery.cases, &options.cli_skill_dirs);
     let collection_ms = collection_start.elapsed().as_millis() as u64;
     let selected_files_with_tests = if options.shard.is_some() {
         count_files_with_cases(&discovery.cases)
@@ -460,18 +361,36 @@ async fn run_tests_with_session_impl(
 
     let mut all_results = discovery.discovery_errors;
     let total_tests = cases.len();
-    if !options.fail_fast || all_results.is_empty() {
-        all_results.extend(execute_cases(cases, workers, options, total_tests, session).await);
-    }
+    let execution = if !options.fail_fast || all_results.is_empty() {
+        execute_cases(
+            cases,
+            workers,
+            options,
+            total_tests,
+            session,
+            skill_contexts,
+        )
+        .await
+    } else {
+        CaseExecutionResults::default()
+    };
 
+    let timing = DurationSummary::from_samples(
+        &execution
+            .cases
+            .iter()
+            .map(|result| result.duration_ms)
+            .collect::<Vec<_>>(),
+    );
+    if let Some(path) = timings_path.as_deref() {
+        update_timings_cache(path, timings, &execution.cases);
+    }
+    all_results.extend(execution.cases);
+    all_results.extend(execution.infrastructure_errors);
     let total = all_results.len();
-    let passed = all_results.iter().filter(|r| r.passed).count();
+    let passed = all_results.iter().filter(|result| result.passed).count();
     let failed = total - passed;
     let aggregate = AggregateTimings::from_results(collection_ms, &all_results);
-
-    if let Some(path) = timings_path.as_deref() {
-        update_timings_cache(path, timings, &all_results);
-    }
 
     TestSummary {
         results: all_results,
@@ -479,6 +398,7 @@ async fn run_tests_with_session_impl(
         failed,
         total,
         duration_ms: start.elapsed().as_millis() as u64,
+        timing,
         aggregate,
     }
 }
@@ -542,6 +462,7 @@ async fn run_test_file_with_session_impl(
     let program = Arc::new(program);
 
     let cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX)?;
+    let skill_contexts = PreparedSkillContexts::prepare(&cases, cli_skill_dirs);
 
     let mut results = Vec::with_capacity(cases.len());
     let execution_cwd = execution_cwd
@@ -549,12 +470,13 @@ async fn run_test_file_with_session_impl(
         .unwrap_or_else(test_execution_cwd);
     let prepared_module_cache = session.prepared_module_cache(0);
     for case in cases {
+        let loaded_skills = skill_contexts.for_case(&case);
         results.push(
             execute_case(
                 &case,
                 &execution_cwd,
                 timeout_ms,
-                cli_skill_dirs,
+                loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
                 #[cfg(test)]
@@ -718,9 +640,10 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     file: file.display().to_string(),
                     passed: false,
                     error: Some(format!("Failed to read {}: {e}", file.display())),
+                    captured_output: None,
                     timeout: None,
                     duration_ms: 0,
-                    phases: PhaseTimings::default(),
+                    phases: None,
                 });
                 continue;
             }
@@ -734,9 +657,10 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     file: file.display().to_string(),
                     passed: false,
                     error: Some(e),
+                    captured_output: None,
                     timeout: None,
                     duration_ms: 0,
-                    phases: PhaseTimings::default(),
+                    phases: None,
                 });
                 continue;
             }
@@ -756,9 +680,10 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                 file: file.display().to_string(),
                 passed: false,
                 error: Some(error),
+                captured_output: None,
                 timeout: None,
                 duration_ms: 0,
-                phases: PhaseTimings::default(),
+                phases: None,
             }),
         }
     }
@@ -1091,9 +1016,6 @@ fn load_timings_cache(path: &Path) -> BTreeMap<String, u64> {
 
 fn update_timings_cache(path: &Path, mut existing: BTreeMap<String, u64>, results: &[TestResult]) {
     for result in results {
-        if result.name == "<file error>" || result.name == "<join error>" {
-            continue;
-        }
         existing.insert(
             timings_key(Path::new(&result.file), &result.name),
             result.duration_ms,
@@ -1107,21 +1029,29 @@ fn update_timings_cache(path: &Path, mut existing: BTreeMap<String, u64>, result
     }
 }
 
+#[derive(Default)]
+struct CaseExecutionResults {
+    cases: Vec<TestResult>,
+    infrastructure_errors: Vec<TestResult>,
+}
+
 async fn execute_cases(
     cases: Vec<TestCase>,
     workers: usize,
     options: &RunOptions,
     total_tests: usize,
     session: &TestRunSession,
-) -> Vec<TestResult> {
+    skill_contexts: PreparedSkillContexts,
+) -> CaseExecutionResults {
     if cases.is_empty() {
-        return Vec::new();
+        return CaseExecutionResults::default();
     }
     let completed = Arc::new(Mutex::new(0usize));
     if workers <= 1 {
         let prepared_module_cache = session.prepared_module_cache(0);
         let mut results = Vec::with_capacity(cases.len());
         for case in cases {
+            let loaded_skills = skill_contexts.for_case(&case);
             let cwd = case_execution_cwd(&case);
             let test_index = next_test_index(&completed);
             emit_progress(
@@ -1137,7 +1067,7 @@ async fn execute_cases(
                 &case,
                 &cwd,
                 options.timeout_ms,
-                &options.cli_skill_dirs,
+                loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
                 #[cfg(test)]
@@ -1157,26 +1087,32 @@ async fn execute_cases(
                 break;
             }
         }
-        return results;
+        return CaseExecutionResults {
+            cases: results,
+            infrastructure_errors: Vec::new(),
+        };
     }
 
     let queue = Arc::new(Mutex::new(cases));
+    let skill_contexts = Arc::new(skill_contexts);
     let gate = Arc::new(ResourceGate::new(workers));
     let results: Arc<Mutex<Vec<TestResult>>> = Arc::new(Mutex::new(Vec::new()));
+    let infrastructure_errors: Arc<Mutex<Vec<TestResult>>> = Arc::new(Mutex::new(Vec::new()));
     let cancelled = Arc::new(AtomicBool::new(false));
 
     let mut handles = Vec::with_capacity(workers);
     for worker_idx in 0..workers {
         let queue = Arc::clone(&queue);
+        let skill_contexts = Arc::clone(&skill_contexts);
         let gate = Arc::clone(&gate);
         let results = Arc::clone(&results);
+        let infrastructure_errors = Arc::clone(&infrastructure_errors);
         let completed = Arc::clone(&completed);
         let timeout_ms = options.timeout_ms;
         #[cfg(test)]
         let setup_delay_ms = options.setup_delay_ms;
         let max_test_ms = options.max_test_ms;
         let max_execute_ms = options.max_execute_ms;
-        let cli_skill_dirs = options.cli_skill_dirs.clone();
         let progress = options.progress.clone();
         let diagnose = options.diagnose;
         let fail_fast = options.fail_fast;
@@ -1193,14 +1129,15 @@ async fn execute_cases(
                 {
                     Ok(rt) => rt,
                     Err(error) => {
-                        results.lock().unwrap().push(TestResult {
+                        infrastructure_errors.lock().unwrap().push(TestResult {
                             name: "<worker error>".to_string(),
                             file: String::new(),
                             passed: false,
                             error: Some(format!("failed to start test runtime: {error}")),
+                            captured_output: None,
                             timeout: None,
                             duration_ms: 0,
-                            phases: PhaseTimings::default(),
+                            phases: None,
                         });
                         return;
                     }
@@ -1214,6 +1151,7 @@ async fn execute_cases(
                     let Some(case) = case else { break };
                     let _guard = gate.acquire(case.weight, case.serial_group.as_deref());
                     let cwd = case_execution_cwd(&case);
+                    let loaded_skills = skill_contexts.for_case(&case);
                     let test_index = next_test_index(&completed);
                     emit_progress(
                         &progress,
@@ -1228,7 +1166,7 @@ async fn execute_cases(
                         &case,
                         &cwd,
                         timeout_ms,
-                        &cli_skill_dirs,
+                        loaded_skills,
                         &prepared_module_cache,
                         stdio_available,
                         #[cfg(test)]
@@ -1256,9 +1194,16 @@ async fn execute_cases(
     // All workers have joined, so this Arc holds the only remaining
     // reference. The lock-and-clone fallback survives the unlikely case
     // where a panic-unwind kept an extra reference alive.
-    Arc::try_unwrap(results)
+    let cases = Arc::try_unwrap(results)
         .map(|m| m.into_inner().unwrap_or_default())
-        .unwrap_or_else(|arc| arc.lock().unwrap().clone())
+        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
+    let infrastructure_errors = Arc::try_unwrap(infrastructure_errors)
+        .map(|mutex| mutex.into_inner().unwrap_or_default())
+        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
+    CaseExecutionResults {
+        cases,
+        infrastructure_errors,
+    }
 }
 
 fn claim_next_case(
@@ -1283,6 +1228,9 @@ fn enforce_case_budgets(
         return result;
     }
 
+    let phases = result
+        .phases
+        .expect("passed test results always carry measured phases");
     let mut violations = Vec::new();
     if let Some(max_ms) = max_test_ms {
         if result.duration_ms > max_ms {
@@ -1293,10 +1241,10 @@ fn enforce_case_budgets(
         }
     }
     if let Some(max_ms) = max_execute_ms {
-        if result.phases.execute_ms > max_ms {
+        if phases.execute_ms > max_ms {
             violations.push(format!(
                 "exceeded test execute budget: {}ms > {}ms",
-                result.phases.execute_ms, max_ms
+                phases.execute_ms, max_ms
             ));
         }
     }
@@ -1307,10 +1255,10 @@ fn enforce_case_budgets(
 
     violations.push(format!(
         "phase timings: setup={}ms compile={}ms execute={}ms teardown={}ms total={}ms",
-        result.phases.setup_ms,
-        result.phases.compile_ms,
-        result.phases.execute_ms,
-        result.phases.teardown_ms,
+        phases.setup_ms,
+        phases.compile_ms,
+        phases.execute_ms,
+        phases.teardown_ms,
         result.duration_ms
     ));
     result.passed = false;

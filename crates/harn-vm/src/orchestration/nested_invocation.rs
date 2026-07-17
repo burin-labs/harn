@@ -108,9 +108,9 @@ fn collect_violations(
     requested: &CapabilityPolicy,
 ) -> Vec<CapabilityCeilingViolation> {
     let mut violations = Vec::new();
-    if !parent.tools.is_empty() {
-        for tool in &requested.tools {
-            if !parent.tools.contains(tool) {
+    if parent.tools_are_restricted() {
+        for tool in requested.allowed_tool_patterns() {
+            if !parent.tool_pattern_allows(tool) {
                 violations.push(CapabilityCeilingViolation {
                     kind: "tool".to_string(),
                     detail: format!("nested target requests tool '{tool}' outside parent ceiling"),
@@ -118,11 +118,20 @@ fn collect_violations(
             }
         }
     }
-    for (capability, ops) in &requested.capabilities {
-        match parent.capabilities.get(capability) {
+    for (capability, ops) in requested.allowed_capabilities() {
+        match parent.capability_operations(capability) {
             Some(parent_ops) => {
+                if ops.is_empty() && !parent_ops.is_empty() {
+                    violations.push(CapabilityCeilingViolation {
+                        kind: "capability".to_string(),
+                        detail: format!(
+                            "nested target requests every '{capability}' operation outside parent ceiling"
+                        ),
+                    });
+                    continue;
+                }
                 for op in ops {
-                    if !parent_ops.contains(op) {
+                    if !parent_ops.is_empty() && !parent_ops.contains(op) {
                         violations.push(CapabilityCeilingViolation {
                             kind: "capability".to_string(),
                             detail: format!(
@@ -132,7 +141,7 @@ fn collect_violations(
                     }
                 }
             }
-            None if !parent.capabilities.is_empty() => {
+            None if parent.capabilities_are_restricted() => {
                 violations.push(CapabilityCeilingViolation {
                     kind: "capability".to_string(),
                     detail: format!(
@@ -502,6 +511,23 @@ mod tests {
             },
         );
         assert!(report.allowed(), "{report:#?}");
+    }
+
+    #[test]
+    fn pure_harn_script_inherits_restricted_parent_dimensions() {
+        let mut parent = read_only_parent();
+        parent.tools = vec!["read_file".to_string()];
+        let report = enforce_nested_invocation_ceiling(
+            &parent,
+            &NestedInvocationTarget::HarnScript {
+                path: "pure.harn",
+                source: "let answer = 42",
+            },
+        );
+
+        assert!(report.allowed(), "{report:#?}");
+        assert!(report.requested.tools.is_empty());
+        assert!(report.requested.capabilities.is_empty());
     }
 
     #[test]

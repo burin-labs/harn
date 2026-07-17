@@ -16,6 +16,7 @@ const POLICY_RECEIPT_TYPE: &str = "harn.permission_policy_decision.v1";
 
 thread_local! {
     static APPROVAL_CALL_COUNTS: RefCell<BTreeMap<String, u64>> = const { RefCell::new(BTreeMap::new()) };
+    static APPROVAL_UNAVAILABLE_CLASS_COUNTS: RefCell<BTreeMap<String, u64>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -592,9 +593,29 @@ pub fn next_approval_policy_repeat_count(
     })
 }
 
+pub fn next_approval_unavailable_class_repeat_count(
+    session_id: &str,
+    risk_labels: &[String],
+) -> (String, u64) {
+    let class = approval_unavailable_class(risk_labels);
+    let key = format!("{session_id}:{class}");
+    let repeat_count = APPROVAL_UNAVAILABLE_CLASS_COUNTS.with(|counts| {
+        let mut counts = counts.borrow_mut();
+        let count = counts.entry(key).or_insert(0);
+        *count += 1;
+        *count
+    });
+    (class, repeat_count)
+}
+
 pub fn clear_approval_policy_repeat_counts(session_id: &str) {
     let prefix = format!("{session_id}:");
     APPROVAL_CALL_COUNTS.with(|counts| {
+        counts
+            .borrow_mut()
+            .retain(|key, _| !key.starts_with(prefix.as_str()));
+    });
+    APPROVAL_UNAVAILABLE_CLASS_COUNTS.with(|counts| {
         counts
             .borrow_mut()
             .retain(|key, _| !key.starts_with(prefix.as_str()));
@@ -603,6 +624,20 @@ pub fn clear_approval_policy_repeat_counts(session_id: &str) {
 
 pub fn clear_all_approval_policy_repeat_counts() {
     APPROVAL_CALL_COUNTS.with(|counts| counts.borrow_mut().clear());
+    APPROVAL_UNAVAILABLE_CLASS_COUNTS.with(|counts| counts.borrow_mut().clear());
+}
+
+fn approval_unavailable_class(risk_labels: &[String]) -> String {
+    let labels = risk_labels
+        .iter()
+        .map(String::as_str)
+        .filter(|label| !label.trim().is_empty())
+        .collect::<std::collections::BTreeSet<_>>();
+    if labels.is_empty() {
+        "approval_required".to_string()
+    } else {
+        labels.into_iter().collect::<Vec<_>>().join("+")
+    }
 }
 
 pub fn evaluate_tool_approval_policy(
@@ -1412,5 +1447,32 @@ mod tests {
             None,
         );
         assert!(decision.is_deny());
+    }
+
+    #[test]
+    fn approval_unavailable_class_count_uses_sorted_risk_labels() {
+        clear_all_approval_policy_repeat_counts();
+        let labels = vec![
+            "package_install".to_string(),
+            "approval_required".to_string(),
+        ];
+        let reversed = vec![
+            "approval_required".to_string(),
+            "package_install".to_string(),
+        ];
+
+        let (class, count) = next_approval_unavailable_class_repeat_count("s1", &labels);
+        assert_eq!(class, "approval_required+package_install");
+        assert_eq!(count, 1);
+        let (class, count) = next_approval_unavailable_class_repeat_count("s1", &reversed);
+        assert_eq!(class, "approval_required+package_install");
+        assert_eq!(count, 2);
+        let (class, count) = next_approval_unavailable_class_repeat_count("s2", &[]);
+        assert_eq!(class, "approval_required");
+        assert_eq!(count, 1);
+
+        clear_approval_policy_repeat_counts("s1");
+        let (_, count) = next_approval_unavailable_class_repeat_count("s1", &labels);
+        assert_eq!(count, 1);
     }
 }

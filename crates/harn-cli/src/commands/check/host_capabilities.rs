@@ -1,8 +1,19 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use crate::package::CheckConfig;
 
-fn default_host_capabilities() -> HashMap<String, HashSet<String>> {
+pub(super) type HostCapabilities = HashMap<String, HashSet<String>>;
+
+pub(super) struct ResolvedHostCapabilities {
+    pub(super) capabilities: HostCapabilities,
+    pub(super) source_content: Option<String>,
+}
+
+static DEFAULT_HOST_CAPABILITIES: LazyLock<HostCapabilities> =
+    LazyLock::new(default_host_capabilities);
+
+fn default_host_capabilities() -> HostCapabilities {
     HashMap::from([
         (
             "workspace".to_string(),
@@ -111,18 +122,13 @@ fn default_host_capabilities() -> HashMap<String, HashSet<String>> {
     ])
 }
 
-fn merge_host_capability_map(
-    target: &mut HashMap<String, HashSet<String>>,
-    source: HashMap<String, HashSet<String>>,
-) {
+fn merge_host_capability_map(target: &mut HostCapabilities, source: HostCapabilities) {
     for (capability, ops) in source {
         target.entry(capability).or_default().extend(ops);
     }
 }
 
-pub(super) fn parse_host_capability_value(
-    value: &serde_json::Value,
-) -> HashMap<String, HashSet<String>> {
+pub(super) fn parse_host_capability_value(value: &serde_json::Value) -> HostCapabilities {
     let root = value.get("capabilities").unwrap_or(value);
     let mut result = HashMap::new();
     let Some(capabilities) = root.as_object() else {
@@ -162,8 +168,8 @@ pub(super) fn parse_host_capability_value(
     result
 }
 
-pub(crate) fn load_host_capabilities(config: &CheckConfig) -> HashMap<String, HashSet<String>> {
-    let mut capabilities = default_host_capabilities();
+pub(super) fn resolve_host_capabilities(config: &CheckConfig) -> ResolvedHostCapabilities {
+    let mut capabilities = DEFAULT_HOST_CAPABILITIES.clone();
     let inline = config
         .host_capabilities
         .iter()
@@ -175,22 +181,34 @@ pub(crate) fn load_host_capabilities(config: &CheckConfig) -> HashMap<String, Ha
         })
         .collect::<HashMap<_, _>>();
     merge_host_capability_map(&mut capabilities, inline);
-    if let Some(path) = config.host_capabilities_path.as_deref() {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            let parsed_json = serde_json::from_str::<serde_json::Value>(&content).ok();
-            let parsed_toml = toml::from_str::<toml::Value>(&content)
-                .ok()
-                .and_then(|value| serde_json::to_value(value).ok());
-            if let Some(value) = parsed_json.or(parsed_toml) {
-                merge_host_capability_map(&mut capabilities, parse_host_capability_value(&value));
-            }
+    let source_content = config
+        .host_capabilities_path
+        .as_deref()
+        .and_then(|path| std::fs::read_to_string(path).ok());
+    if let Some(content) = source_content.as_deref() {
+        let parsed = serde_json::from_str::<serde_json::Value>(content)
+            .ok()
+            .or_else(|| {
+                toml::from_str::<toml::Value>(content)
+                    .ok()
+                    .and_then(|value| serde_json::to_value(value).ok())
+            });
+        if let Some(value) = parsed {
+            merge_host_capability_map(&mut capabilities, parse_host_capability_value(&value));
         }
     }
-    capabilities
+    ResolvedHostCapabilities {
+        capabilities,
+        source_content,
+    }
+}
+
+pub(crate) fn load_host_capabilities(config: &CheckConfig) -> HostCapabilities {
+    resolve_host_capabilities(config).capabilities
 }
 
 pub(super) fn is_known_host_operation(
-    capabilities: &HashMap<String, HashSet<String>>,
+    capabilities: &HostCapabilities,
     capability: &str,
     operation: &str,
 ) -> bool {

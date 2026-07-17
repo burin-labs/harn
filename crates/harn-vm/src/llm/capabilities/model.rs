@@ -369,6 +369,30 @@ pub enum ScreenshotScaling {
     Original,
 }
 
+/// Provider field that must carry Harn's private reasoning from an assistant
+/// turn into that provider's next request.
+///
+/// This is deliberately an enum, rather than an arbitrary catalog string:
+/// replaying private reasoning changes the provider-visible transcript, so an
+/// unknown field must fail capability loading rather than silently leak or
+/// discard it. The durable Harn transcript keeps this as `reasoning`; the
+/// OpenAI-compatible request boundary projects it only for the selected mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningHistoryWireField {
+    /// Moonshot's OpenAI-compatible API requires this on the prior assistant
+    /// message before matching tool results.
+    ReasoningContent,
+}
+
+impl ReasoningHistoryWireField {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReasoningContent => "reasoning_content",
+        }
+    }
+}
+
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
@@ -437,6 +461,10 @@ pub struct Capabilities {
     pub vision_supported: bool,
     pub image_url_input_supported: bool,
     pub preserve_thinking: bool,
+    /// Provider-specific wire field used to replay Harn's private reasoning
+    /// on the preceding assistant turn. `None` preserves the privacy default:
+    /// reasoning is never sent back to an OpenAI-compatible provider.
+    pub reasoning_history_wire_field: Option<ReasoningHistoryWireField>,
     pub server_parser: String,
     pub honors_chat_template_kwargs: bool,
     pub chat_template_options_field: Option<String>,
@@ -558,6 +586,7 @@ impl Default for Capabilities {
             vision_supported: false,
             image_url_input_supported: true,
             preserve_thinking: false,
+            reasoning_history_wire_field: None,
             server_parser: "none".to_string(),
             honors_chat_template_kwargs: false,
             chat_template_options_field: None,

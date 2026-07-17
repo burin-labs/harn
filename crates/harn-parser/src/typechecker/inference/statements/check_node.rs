@@ -575,11 +575,11 @@ impl TypeChecker {
                 };
                 let context_checked =
                     self.check_node_with_expected(value, expected_value_type.as_ref(), scope);
-                // A field/subscript write through an immutable binding
-                // (`const o = {}; o.a = 1`) is rejected at runtime — Harn's
-                // immutability is deep. Flag it here so `harn check` agrees
-                // with the runtime instead of green-lighting a program that
-                // crashes; the plain-identifier case is handled below.
+                // A field/subscript write through an immutable binding is
+                // rejected at runtime: collections are values, so `o.a = 1` is
+                // sugar for `o = <a new dict>`. (Not deep immutability: `push`
+                // returns a new value, so it stays legal on a `const`.) Flag it
+                // here so `harn check` agrees with the runtime; see LNT-066.
                 if !matches!(&target.node, Node::Identifier(_)) {
                     if let Some(root) = Self::assignment_root_identifier(target) {
                         if scope.get_var(root).is_some() && !scope.is_mutable(root) {
@@ -790,7 +790,7 @@ impl TypeChecker {
                     name.clone(),
                     InterfaceDeclInfo {
                         type_params: type_params.clone(),
-                        associated_types: associated_types.clone(),
+                        associated_types: AssociatedType::bindings(associated_types),
                         methods: methods.clone(),
                     },
                 );

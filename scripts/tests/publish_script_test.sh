@@ -3,6 +3,11 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 publish_script="$repo_root/scripts/publish.sh"
+: "${HARN_BIN:?run this integration through make test-pr-gate-post-warm-integrations}"
+if [[ ! -x "$HARN_BIN" ]]; then
+  echo "HARN_BIN is not executable: $HARN_BIN" >&2
+  exit 1
+fi
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -14,8 +19,7 @@ metadata_file="$tmp_root/metadata.json"
 record_file="$tmp_root/published-order.txt"
 curl_state_dir="$tmp_root/curl-state"
 mkdir -p "$curl_state_dir"
-real_harn_bin="$("$repo_root/scripts/harn_bin.sh" --print)"
-"$real_harn_bin" test "$repo_root/scripts/tests/publish_plan_test.harn" >/dev/null
+real_harn_bin="$HARN_BIN"
 
 cat > "$metadata_file" <<'JSON'
 {

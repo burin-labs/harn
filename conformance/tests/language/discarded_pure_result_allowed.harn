@@ -1,0 +1,55 @@
+/**
+ * The other half of HARN-LNT-066: the shapes it must stay silent on. If any of
+ * these start firing, the diagnostic has become a false positive and this test
+ * fails on the unexpected output rather than on an assertion.
+ */
+struct Basket {
+  items: list<int>
+}
+
+/**
+ * A user-defined method sharing a built-in's name may exist for its effects,
+ * so a same-named call must not be flagged.
+ */
+impl Basket {
+  fn push(self, item: int) -> Basket {
+    return Basket {items: self.items.push(item)}
+  }
+}
+
+pipeline test(task) {
+  // Assigning the result back is the correct spelling, and is never flagged.
+  let built = []
+  built = built.push(1)
+  assert_eq(built.count, 1, "assigned-back push is allowed")
+  // An explicit discard documents that only the effect/error is wanted.
+  const _ = [1, 2].sort()
+  // A closure argument can carry effects, so the call is not provably inert.
+  const seen = [1, 2]
+  seen.map({ x -> x * 2 })
+  // A user `impl` method of the same name is not the built-in.
+  const basket = Basket {items: []}
+  basket.push(1)
+  // Tail of a value-producing block: the value IS the block's result.
+  const from_closure = { -> [3, 1, 2].sort() }
+  assert_eq(from_closure()[0], 1, "closure tail is a value, not a discard")
+  const from_match = match 1 {
+    1 -> { [3, 1, 2].sort() }
+    _ -> { [] }
+  }
+  assert_eq(from_match[0], 1, "match arm tail is a value, not a discard")
+  const truthy = [1].count == 1
+  const from_if = if truthy {
+    [3, 1, 2].sort()
+  } else {
+    []
+  }
+  assert_eq(from_if[0], 1, "if branch tail is a value, not a discard")
+  const from_try = try {
+    [3, 1, 2].sort()
+  } catch (e) {
+    []
+  }
+  assert_eq(from_try[0], 1, "try tail is a value, not a discard")
+  log("discarded pure result allowed: all tests passed")
+}

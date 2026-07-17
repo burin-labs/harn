@@ -8,8 +8,9 @@
 
 use serde::Serialize;
 
-use super::lookup::{builtin, USER_OVERRIDES};
+use super::lookup::builtin;
 use super::model::CapabilitiesFile;
+use super::overrides::current_user_overrides;
 use super::rule::{
     first_matching_rule, rule_preferred_tool_format, rule_structured_output,
     rule_structured_output_mode, rule_thinking_block_style, rule_thinking_modes,
@@ -120,7 +121,7 @@ pub struct ToolCapabilityAuditGap {
 /// override rows, when installed for the current thread, are emitted before
 /// built-in rows so the display mirrors lookup precedence.
 pub fn matrix_rows() -> Vec<ProviderCapabilityMatrixRow> {
-    let user = USER_OVERRIDES.with(|cell| cell.borrow().clone());
+    let user = current_user_overrides();
     let mut rows = Vec::new();
     if let Some(user) = user.as_ref() {
         push_matrix_rows(&mut rows, user, "project");
@@ -133,7 +134,7 @@ pub fn matrix_rows() -> Vec<ProviderCapabilityMatrixRow> {
 /// effective capability rules. This is the user-facing path used by the CLI
 /// when authors are adding provider catalog or capability override rows.
 pub fn audit_catalogued_chat_model_tool_capabilities() -> ToolCapabilityAuditReport {
-    let user = USER_OVERRIDES.with(|cell| cell.borrow().clone());
+    let user = current_user_overrides();
     audit_tool_capability_coverage(
         crate::llm_config::model_catalog_entries(),
         builtin(),

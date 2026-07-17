@@ -19,8 +19,8 @@ pub use core::{
 pub use diff::{diff_values, render_diff, repr, DifferenceKind, ValueDifference};
 pub(crate) use env::Binding;
 pub use env::{
-    closest_match, LazyVmCallable, ModuleFunctionRegistry, ModuleState, VmCallable, VmClosure,
-    VmEnv,
+    closest_match, LazyPipelineCallable, LazyVmCallable, ModuleFunctionRegistry, ModuleState,
+    VmCallable, VmClosure, VmEnv,
 };
 pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,

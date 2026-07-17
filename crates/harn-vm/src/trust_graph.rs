@@ -51,7 +51,7 @@ pub const TRUST_GRAPH_LEGACY_TOPIC_PREFIX: &str = "trust.graph.";
 pub const TRUST_GRAPH_EVENT_KIND: &str = "trust_recorded";
 pub const TRUST_ACTION_RELEASE: &str = "release";
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AutonomyTier {
     Shadow,

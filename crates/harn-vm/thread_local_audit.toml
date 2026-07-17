@@ -171,8 +171,8 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/llm/capabilities/lookup.rs"
-statics = ["USER_OVERRIDES"]
+path = "src/llm/capabilities/overrides.rs"
+statics = ["LLM_CAPABILITY_OVERRIDES_CONTEXT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -256,7 +256,10 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm_config/loading.rs"
-statics = ["USER_OVERRIDES"]
+statics = [
+  "LLM_CONFIG_OVERRIDES_CONTEXT",
+  "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
+]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -346,7 +349,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/orchestration/policy/approval_rules.rs"
-statics = ["APPROVAL_CALL_COUNTS"]
+statics = ["APPROVAL_CALL_COUNTS", "APPROVAL_UNAVAILABLE_CLASS_COUNTS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

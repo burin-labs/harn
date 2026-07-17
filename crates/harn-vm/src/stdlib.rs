@@ -35,6 +35,7 @@ mod compression;
 mod concurrency;
 mod connectors;
 mod cookies;
+mod cron;
 mod crypto;
 mod csv;
 mod datetime;
@@ -74,6 +75,7 @@ mod oauth_storage;
 pub(crate) mod observability;
 pub(crate) mod options;
 mod package_snapshot;
+pub(crate) use package_snapshot::PackageSnapshotRegistry;
 mod path;
 pub(crate) mod path_scope_guard;
 pub(crate) mod pool;
@@ -131,6 +133,10 @@ pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
     process::set_thread_source_dir(dir);
 }
 
+pub(crate) fn set_thread_source_dir_option(dir: Option<&std::path::Path>) {
+    process::set_thread_source_dir_option(dir);
+}
+
 /// Register core builtins: pure/deterministic, no I/O.
 pub fn register_core_stdlib(vm: &mut Vm) {
     crate::runtime_context::register_runtime_context_builtins(vm);
@@ -143,6 +149,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     datetime::register_datetime_builtins(vm);
     document::register_document_builtins(vm);
     calendar::register_calendar_builtins(vm);
+    cron::register_cron_builtins(vm);
     regex::register_regex_builtins(vm);
     bytes::register_bytes_builtins(vm);
     compression::register_compression_builtins(vm);

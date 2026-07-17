@@ -20,7 +20,13 @@ thread_local! {
 
 /// Set the source directory for the current thread (called by VM on file execution).
 pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
-    VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = Some(normalize_context_path(dir)));
+    set_thread_source_dir_option(Some(dir));
+}
+
+pub(crate) fn set_thread_source_dir_option(dir: Option<&std::path::Path>) {
+    VM_SOURCE_DIR.with(|current| {
+        *current.borrow_mut() = dir.map(normalize_context_path);
+    });
 }
 
 pub(crate) fn normalize_context_path(path: &std::path::Path) -> PathBuf {
@@ -257,7 +263,7 @@ fn env_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 #[harn_builtin(sig = "exit(code?: int) -> never", category = "process")]
 fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let code = args.first().and_then(|a| a.as_int()).unwrap_or(0);
-    std::process::exit(code as i32);
+    Err(VmError::ProcessExit(code as i32))
 }
 
 #[harn_builtin(sig = "exec(...command: string) -> dict", category = "process")]

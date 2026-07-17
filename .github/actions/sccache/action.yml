@@ -1,0 +1,25 @@
+name: Configure persistent sccache
+description: Mount a lane-local Blacksmith cache when available, then configure sccache with a cold-safe fallback.
+
+inputs:
+  cache-key:
+    description: Stable lane identity; concurrent jobs must not share a key.
+    required: true
+  sticky:
+    description: Mount Blacksmith sticky storage for the local sccache directory.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Mount persistent sccache directory
+      if: inputs.sticky == 'true'
+      uses: useblacksmith/stickydisk@6d373c96a74cbde0c99fedc5ea5d3a7ba66ba494 # v1.4.0
+      continue-on-error: true
+      with:
+        key: ${{ github.repository }}-sccache-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}
+        path: ~/.cache/sccache
+    - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      continue-on-error: true
+    - uses: ./.github/actions/configure-cargo-sccache

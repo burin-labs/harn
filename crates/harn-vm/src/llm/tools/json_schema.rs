@@ -187,12 +187,14 @@ pub(super) fn vm_build_json_schema(params: Option<&crate::value::DictMap>) -> se
 fn vm_param_to_json_schema(value: &VmValue) -> (serde_json::Value, bool) {
     match value {
         VmValue::String(type_name) => (
-            serde_json::json!({"type": harn_type_to_json_schema(type_name)}),
+            serde_json::json!({
+                "type": crate::schema::json_schema_type_name(type_name).unwrap_or("string")
+            }),
             true,
         ),
         VmValue::Dict(dict) => {
             let mut json = super::super::vm_value_to_json(value);
-            normalize_json_schema_types(&mut json);
+            crate::schema::normalize_json_schema_type_names(&mut json);
             let is_required = dict
                 .get("required")
                 .and_then(|value| match value {
@@ -204,44 +206,5 @@ fn vm_param_to_json_schema(value: &VmValue) -> (serde_json::Value, bool) {
             (json, is_required)
         }
         _ => (serde_json::json!({"type": "string"}), true),
-    }
-}
-
-fn normalize_json_schema_types(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(obj) => {
-            if let Some(serde_json::Value::String(kind)) = obj.get_mut("type") {
-                *kind = harn_type_to_json_schema(kind).to_string();
-            }
-            if let Some(serde_json::Value::Array(values)) = obj.get_mut("type") {
-                for value in values {
-                    if let serde_json::Value::String(kind) = value {
-                        *kind = harn_type_to_json_schema(kind).to_string();
-                    }
-                }
-            }
-            for child in obj.values_mut() {
-                normalize_json_schema_types(child);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                normalize_json_schema_types(item);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn harn_type_to_json_schema(harn_type: &str) -> &str {
-    match harn_type {
-        "str" | "string" => "string",
-        "int" | "integer" => "integer",
-        "long" | "float" | "double" | "number" => "number",
-        "bool" | "boolean" => "boolean",
-        "nil" | "null" | "none" => "null",
-        "list" | "array" | "unknown[]" => "array",
-        "dict" | "map" | "object" => "object",
-        _ => "string",
     }
 }

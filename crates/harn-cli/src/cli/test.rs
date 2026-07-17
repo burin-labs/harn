@@ -17,7 +17,7 @@ pub(crate) struct TestArgs {
     /// Emit structured JSON for conformance or agents-conformance runs.
     #[arg(long, action = ArgAction::SetTrue)]
     pub json: bool,
-    /// Write the agents conformance leaderboard-shaped JSON report to this path.
+    /// Write a user-test or agents-conformance JSON report to this path.
     #[arg(long = "json-out", value_name = "PATH")]
     pub json_out: Option<String>,
     /// Existing workspace id to reuse for agents conformance probes.
@@ -78,15 +78,16 @@ pub(crate) struct TestArgs {
     /// Codecov, `genhtml`, and the VS Code Coverage Gutters extension.
     #[arg(long = "coverage-out", value_name = "PATH")]
     pub coverage_out: Option<String>,
-    /// Show per-test timing and detailed failures.
+    /// Show per-test timing and detailed failures. Also prints a passing
+    /// case's `log`/`print`/`println` output, which is otherwise shown only
+    /// for failing cases.
     #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
     pub verbose: bool,
-    /// Show per-test timing and summary statistics.
+    /// Show detailed timing for user and conformance suites.
     #[arg(long, action = ArgAction::SetTrue)]
     pub timing: bool,
-    /// Emit per-test phase timings (setup / compile / execute /
-    /// teardown) to stderr alongside the standard output. Also honored
-    /// via `HARN_TEST_DIAGNOSE=1`.
+    /// Emit per-test top-level and module-attribution phases to stderr.
+    /// Also honored via `HARN_TEST_DIAGNOSE=1`.
     #[arg(long, action = ArgAction::SetTrue)]
     pub diagnose: bool,
     /// Record LLM fixtures to .harn-fixtures/.

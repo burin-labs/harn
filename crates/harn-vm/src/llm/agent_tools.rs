@@ -5,14 +5,8 @@ use std::sync::Arc;
 use crate::agent_events::ToolExecutor;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 
-/// Hash a serde_json::Value deterministically for dedup purposes.
-pub(super) fn stable_hash(val: &serde_json::Value) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    let canonical = serde_json::to_string(val).unwrap_or_default();
-    canonical.hash(&mut hasher);
-    hasher.finish()
-}
+pub(super) mod approval_denials;
+pub(super) mod hash;
 
 pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> serde_json::Value {
     let reason = reason.into();

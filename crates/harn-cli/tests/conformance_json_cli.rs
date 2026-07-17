@@ -5,7 +5,7 @@ use std::process::{Command, Output};
 use harn_cli::tests::common::json_envelope::assert_envelope;
 use serde_json::Value;
 
-const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 1;
+const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 2;
 
 fn binary_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
@@ -73,6 +73,8 @@ fn conformance_json_reports_pass_and_expected_xfail() {
     assert_eq!(data["summary"]["fail"], 0);
     assert_eq!(data["summary"]["xfail_expected"], 1);
     assert_eq!(data["summary"]["xfail_unexpected_pass"], 0);
+    assert_eq!(data["timing"]["sample_count"], 2);
+    assert!(data["timing"]["p90_ms"].as_u64().is_some());
     assert_eq!(result(data, "pass.harn")["outcome"], "pass");
     assert_eq!(
         result(data, "xfail_expected.harn")["outcome"],

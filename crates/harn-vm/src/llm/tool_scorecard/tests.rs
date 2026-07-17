@@ -1,5 +1,7 @@
 use super::*;
-use crate::llm::tool_conformance::{ToolCallingConformanceSummary, ToolProbeMode, ToolProbeStatus};
+use crate::llm::tool_conformance::{
+    ToolCallingConformanceSummary, ToolProbeMode, ToolProbeStatus, ToolProbeUsage,
+};
 
 #[test]
 fn scorecard_ranks_successful_native_route_first() {
@@ -136,6 +138,61 @@ fn scorecard_splits_evidence_by_transport_mode() {
     assert_eq!(route.mode_evidence[1].mode, "streaming");
     assert_eq!(route.mode_evidence[1].status, "pass");
     assert_eq!(route.mode_evidence[1].recommended_tool_mode, "native");
+}
+
+#[test]
+fn scorecard_aggregates_saved_probe_telemetry_without_guessing_missing_usage() {
+    let mut fast = case_with_mode(
+        ToolProbeMode::NonStreaming,
+        ToolProbeClassification::StructuredNativeToolCall,
+        true,
+    );
+    fast.elapsed_ms = Some(10);
+    fast.usage = Some(ToolProbeUsage {
+        input_tokens: Some(100),
+        output_tokens: Some(20),
+        cost_usd: Some(0.0012),
+    });
+    let mut throttled = case_with_mode(
+        ToolProbeMode::Streaming,
+        ToolProbeClassification::HttpError,
+        false,
+    );
+    throttled.http_status = Some(429);
+    throttled.elapsed_ms = Some(30);
+    throttled.usage = Some(ToolProbeUsage {
+        input_tokens: Some(40),
+        output_tokens: None,
+        cost_usd: None,
+    });
+
+    let scorecard =
+        scorecard_from_tool_reports(vec![report("anthropic", "claude", vec![fast, throttled])]);
+
+    let route = &scorecard.routes[0];
+    assert_eq!(route.observed_latency_case_count, 2);
+    assert_eq!(route.latency_p50_ms, Some(30));
+    assert_eq!(route.latency_p95_ms, Some(30));
+    assert_eq!(route.rate_limited_cases, 1);
+    assert!(route.issues.contains(&"provider_rate_limited"));
+    assert_eq!(route.observed_usage_case_count, 2);
+    assert_eq!(route.input_tokens, Some(140));
+    assert_eq!(route.output_tokens, Some(20));
+    assert_eq!(route.observed_cost_case_count, 1);
+    assert_eq!(route.cost_usd, Some(0.0012));
+    let streaming = route
+        .mode_evidence
+        .iter()
+        .find(|mode| mode.mode == "streaming")
+        .expect("streaming mode evidence");
+    assert_eq!(streaming.observed_latency_case_count, 1);
+    assert_eq!(streaming.latency_p50_ms, Some(30));
+    assert_eq!(streaming.rate_limited_cases, 1);
+    assert_eq!(streaming.observed_usage_case_count, 1);
+    assert_eq!(streaming.input_tokens, Some(40));
+    assert_eq!(streaming.output_tokens, None);
+    assert_eq!(streaming.observed_cost_case_count, 0);
+    assert_eq!(streaming.cost_usd, None);
 }
 
 #[test]
@@ -479,7 +536,6 @@ fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
 
     for case_id in [
         "single_tool_call",
-        "parallel_tool_calls",
         "large_string_argument",
         "tool_result_followup",
         "signed_thinking_tool_result_followup",
@@ -488,10 +544,34 @@ fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
             .iter()
             .find(|case| case.id == case_id)
             .expect("case exists");
+        assert_eq!(case.requirement, "not_applicable", "{case_id}");
+        assert_eq!(
+            case.requirement_reason, "route_declares_no_tool_surface",
+            "{case_id}"
+        );
         assert_eq!(case.execution.status, "not_applicable", "{case_id}");
         assert_eq!(case.execution.runner, "none", "{case_id}");
+        assert_eq!(
+            case.execution.reason, "route_declares_no_tool_surface",
+            "{case_id}"
+        );
         assert!(case.execution.command.is_none(), "{case_id}");
     }
+
+    let parallel = cases
+        .iter()
+        .find(|case| case.id == "parallel_tool_calls")
+        .expect("parallel case exists");
+    assert_eq!(parallel.requirement, "not_applicable");
+    assert_eq!(
+        parallel.requirement_reason,
+        "route_does_not_claim_parallel_tool_calls"
+    );
+    assert_eq!(parallel.execution.status, "not_applicable");
+    assert_eq!(
+        parallel.execution.reason,
+        "route_does_not_claim_parallel_tool_calls"
+    );
 
     let parameter_edges = cases
         .iter()

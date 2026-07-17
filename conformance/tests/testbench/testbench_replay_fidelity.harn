@@ -16,7 +16,7 @@ import { with_llm_script } from "std/testing"
  * REGENERATING THE TAPE: when a deliberate script-observable change
  * adds or removes a host-boundary record, this fixture fails with a
  * "missing_in_recorded" / "missing_in_replay" divergence. To
- * regenerate: temporarily edit crates/harn-cli/src/commands/test.rs to
+ * regenerate: temporarily edit crates/harn-cli/src/commands/test/conformance.rs to
  * `std::fs::copy(tape_path, "/tmp/actual.tape")` on divergence, run
  * the filter, then
  * `cp /tmp/actual.tape conformance/tests/testbench/testbench_replay_fidelity.testbench-tape`

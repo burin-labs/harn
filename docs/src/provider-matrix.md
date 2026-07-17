@@ -104,7 +104,6 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `hyperbolic` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `inception` | `mercury-2` | `any` | `effort` | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `inception` | `mercury-coder-*` | `any` | no | no | no | no | no | yes | no | `delimited` | `plain` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
-| `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `native` | yes | no |
 | `llamacpp` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | no | yes | `text_only` | yes | no |
 | `llamacpp` | `*qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | no | yes | `text_only` | yes | no |
 | `llamacpp` | `*devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
@@ -122,6 +121,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `mistral` | `devstral-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `moonshot` | `*kimi-k3*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `moonshot` | `*kimi-k2.7-code*` | `any` | `enabled` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `moonshot` | `*kimi*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `nebius` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -338,9 +338,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `huggingface` | `Qwen/Qwen3-Coder-480B-A35B-Instruct` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `inception` | `mercury-2` | `native` | `unknown` | - | - | - | - | - | catalog note: Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet. |
 | `inception` | `mercury-coder-small` | `native` | `unknown` | - | - | - | - | - | catalog note: Mercury Coder Small supports tool use on the OpenAI-compatible API; structured object generation was not documented as GA in the source pass. |
-| `llamacpp` | `qwen3.6-35b-a3b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `native` | `native` | - | - | - | - | - | catalog note: Harn-managed llama.cpp launch plus one-tool probe passed native and streaming native on 2026-06-05. |
-| `llamacpp` | `qwen3.6-35b-a3b-ud-q5-k-xl` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `llamacpp` | `qwen3.6-35b-a3b` | `json` | `text_only` | - | - | - | - | - | catalog note: 2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract. |
+| `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `json` | `text_only` | - | - | - | - | - | catalog note: 2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract. |
+| `llamacpp` | `qwen3.6-35b-a3b-ud-q5-k-xl` | `json` | `text_only` | - | - | - | - | - | catalog note: 2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract. |
 | `local` | `gemma-4-12b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -365,6 +365,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `moonshot` | `moonshot/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `moonshot` | `moonshot/kimi-k2.7-code` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
 | `moonshot` | `moonshot/kimi-k2.7-code-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
+| `moonshot` | `moonshot/kimi-k3` | `native` | `unknown` | - | - | - | - | - | catalog note: Moonshot documents native OpenAI-compatible tools; credentialed Harn probe not run because MOONSHOT_API_KEY is unavailable in this lane. |
 | `nvidia` | `nvidia/deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

@@ -332,9 +332,13 @@ impl Formatter<'_> {
                 let val = self.format_expr(value, self.indent);
                 self.writeln(&format!("match {val} {{"));
                 self.indent();
-                for arm in arms {
-                    self.format_match_arm(arm);
-                }
+                self.format_members(
+                    arms,
+                    |a| a.span,
+                    node_line,
+                    Some(node_end_line),
+                    |f, a| f.format_match_arm(a),
+                );
                 self.dedent();
                 self.writeln("}");
             }
@@ -348,9 +352,13 @@ impl Formatter<'_> {
                 let generics = format_type_params(type_params);
                 self.writeln(&format!("{pub_prefix}enum {name}{generics} {{"));
                 self.indent();
-                for v in variants {
-                    self.format_enum_variant(v);
-                }
+                self.format_members(
+                    variants,
+                    |v| v.span,
+                    node_line,
+                    Some(node_end_line),
+                    |f, v| f.format_enum_variant(v),
+                );
                 self.dedent();
                 self.writeln("}");
             }
@@ -364,9 +372,13 @@ impl Formatter<'_> {
                 let generics = format_type_params(type_params);
                 self.writeln(&format!("{pub_prefix}struct {name}{generics} {{"));
                 self.indent();
-                for f in fields {
-                    self.format_struct_field(f);
-                }
+                self.format_members(
+                    fields,
+                    |f| f.span,
+                    node_line,
+                    Some(node_end_line),
+                    |fmt, field| fmt.format_struct_field(field),
+                );
                 self.dedent();
                 self.writeln("}");
             }
@@ -379,33 +391,27 @@ impl Formatter<'_> {
                 let generics = format_type_params(type_params);
                 self.writeln(&format!("interface {name}{generics} {{"));
                 self.indent();
-                for (assoc_name, assoc_type) in associated_types {
-                    if let Some(assoc_type) = assoc_type {
-                        self.writeln(&format!(
-                            "type {assoc_name} = {}",
-                            format_type_expr(assoc_type)
-                        ));
-                    } else {
-                        self.writeln(&format!("type {assoc_name}"));
-                    }
-                }
-                for m in methods {
-                    let method_generics = format_type_params(&m.type_params);
-                    let prefix_len = self.indent * 2 + 3 + m.name.len() + method_generics.len() + 1;
-                    let params =
-                        self.format_typed_params_wrapped(&m.params, prefix_len, self.indent);
-                    if let Some(ret) = &m.return_type {
-                        self.writeln(&format!(
-                            "fn {}{}({}) -> {}",
-                            m.name,
-                            method_generics,
-                            params,
-                            format_type_expr(ret)
-                        ));
-                    } else {
-                        self.writeln(&format!("fn {}{}({})", m.name, method_generics, params));
-                    }
-                }
+                // The parser sorts an interface body into two lists, losing the
+                // order the author wrote. Comment anchoring is bounded by the
+                // PREVIOUS member, so members must be rendered in source order
+                // or a comment binds to the wrong side; interleaving by span
+                // both fixes that and preserves the author's layout.
+                let mut members: Vec<InterfaceMember<'_>> = associated_types
+                    .iter()
+                    .map(InterfaceMember::Assoc)
+                    .chain(methods.iter().map(InterfaceMember::Method))
+                    .collect();
+                members.sort_by_key(|m| m.span().start);
+                self.format_members(
+                    &members,
+                    |m| m.span(),
+                    node_line,
+                    Some(node_end_line),
+                    |f, m| match m {
+                        InterfaceMember::Assoc(a) => f.format_associated_type(a),
+                        InterfaceMember::Method(m) => f.format_interface_method(m),
+                    },
+                );
                 self.dedent();
                 self.writeln("}");
             }
@@ -564,7 +570,7 @@ impl Formatter<'_> {
                 self.writeln(&format!("{pub_prefix}type {name}{params} = {te}"));
             }
             Node::Block(stmts) => {
-                self.writeln("{");
+                self.writeln("block {");
                 self.indent();
                 self.format_body(stmts, node_line, Some(node_end_line));
                 self.dedent();
@@ -643,16 +649,26 @@ impl Formatter<'_> {
         } else {
             String::new()
         };
-        if arm.body.len() == 1 && crate::helpers::is_simple_expr(&arm.body[0]) {
+        // The compact form (`1 -> { x }`) has nowhere to put a comment written
+        // on its own line inside the arm, so an arm carrying one must fall back
+        // to the block form. Choosing the layout first and discovering the
+        // comment afterwards is how it ends up with no home and escapes the
+        // file. A comment trailing on the arm's OWN line is not interior — the
+        // compact form keeps that one, so the range starts below it.
+        let has_interior_comment =
+            self.has_unclaimed_comments_in_range(arm.span.line + 1, arm.span.end_line + 1);
+        if arm.body.len() == 1
+            && crate::helpers::is_simple_expr(&arm.body[0])
+            && !has_interior_comment
+        {
             let expr = self.format_expr(&arm.body[0], self.indent);
             self.writeln(&format!("{pattern}{guard} -> {{ {expr} }}"));
-            // Keep a same-line comment on the arm (`1 -> { x } // c`)
-            // attached; unclaimed it would be flushed to the end of file.
-            self.attach_trailing_comment(arm.body[0].span.end_line);
         } else {
             self.writeln(&format!("{pattern}{guard} -> {{"));
             self.indent();
-            self.format_body(&arm.body, arm.pattern.span.line, None);
+            // Bounded by the arm's own closing brace: without the arm's span
+            // there was no end to flush a trailing interior comment against.
+            self.format_body(&arm.body, arm.span.line, Some(arm.span.end_line));
             self.dedent();
             self.writeln("}");
         }
@@ -675,6 +691,46 @@ impl Formatter<'_> {
             self.writeln(&format!("{}{opt}: {type_str}", f.name));
         } else {
             self.writeln(&format!("{}{opt}", f.name));
+        }
+    }
+
+    fn format_associated_type(&mut self, a: &harn_parser::AssociatedType) {
+        let rendered = match &a.default {
+            Some(default) => format!("type {} = {}", a.name, format_type_expr(default)),
+            None => format!("type {}", a.name),
+        };
+        self.writeln(&rendered);
+    }
+
+    fn format_interface_method(&mut self, m: &harn_parser::InterfaceMethod) {
+        let method_generics = format_type_params(&m.type_params);
+        let prefix_len = self.indent * 2 + 3 + m.name.len() + method_generics.len() + 1;
+        let params = self.format_typed_params_wrapped(&m.params, prefix_len, self.indent);
+        match &m.return_type {
+            Some(ret) => self.writeln(&format!(
+                "fn {}{}({}) -> {}",
+                m.name,
+                method_generics,
+                params,
+                format_type_expr(ret)
+            )),
+            None => self.writeln(&format!("fn {}{}({})", m.name, method_generics, params)),
+        }
+    }
+}
+
+/// A borrowed view over one entry of an interface body, so the two lists the
+/// parser splits it into can be walked back in the order they were written.
+enum InterfaceMember<'a> {
+    Assoc(&'a harn_parser::AssociatedType),
+    Method(&'a harn_parser::InterfaceMethod),
+}
+
+impl InterfaceMember<'_> {
+    fn span(&self) -> harn_lexer::Span {
+        match self {
+            InterfaceMember::Assoc(a) => a.span,
+            InterfaceMember::Method(m) => m.span,
         }
     }
 }

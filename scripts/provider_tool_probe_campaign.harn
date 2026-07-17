@@ -1,6 +1,6 @@
 import { parse_args } from "std/cli"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v4"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v6"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
@@ -11,6 +11,7 @@ pub type ProviderToolProbeRoute = {
   env_keys: list<string>,
   local: bool,
   cheap: bool,
+  metadata: dict,
 }
 
 pub type ProviderToolProbeBehavior = {
@@ -43,7 +44,7 @@ pub type ProviderToolProbeCell = {
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v4",
+  schema_version: "harn.provider_tool_probe_campaign.v6",
   live: bool,
   include_expensive: bool,
   route_count: int,
@@ -52,7 +53,9 @@ pub type ProviderToolProbeCampaignReport = {
   summary: dict,
   runner_summary: dict,
   executable_gap: dict,
+  auth_readiness: dict,
   spend: dict,
+  campaign_slice: dict,
   routes: list<ProviderToolProbeRoute>,
   behaviors: list<ProviderToolProbeBehavior>,
   cells: list<ProviderToolProbeCell>,
@@ -88,6 +91,7 @@ fn __route_from_spec(spec: string) -> ProviderToolProbeRoute? {
     env_keys: [],
     local: false,
     cheap: true,
+    metadata: {source: "explicit"},
   }
 }
 
@@ -111,6 +115,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["FIREWORKS_API_KEY"],
       local: false,
       cheap: true,
+      metadata: {source: "default"},
     },
     {
       id: "cerebras-gpt-oss-120b",
@@ -119,6 +124,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["CEREBRAS_API_KEY"],
       local: false,
       cheap: true,
+      metadata: {source: "default"},
     },
     {
       id: "openrouter-gpt-oss-120b",
@@ -127,6 +133,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["OPENROUTER_API_KEY"],
       local: false,
       cheap: true,
+      metadata: {source: "default"},
     },
     {
       id: "moonshot-kimi",
@@ -135,6 +142,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["MOONSHOT_API_KEY"],
       local: false,
       cheap: true,
+      metadata: {source: "default"},
     },
     {
       id: "local-vllm",
@@ -143,8 +151,17 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: [],
       local: true,
       cheap: true,
+      metadata: {source: "default"},
     },
-    {id: "ollama", provider: "ollama", model: "gemma4:e4b", env_keys: [], local: true, cheap: true},
+    {
+      id: "ollama",
+      provider: "ollama",
+      model: "gemma4:e4b",
+      env_keys: [],
+      local: true,
+      cheap: true,
+      metadata: {source: "default"},
+    },
     {
       id: "xai-grok",
       provider: "xai",
@@ -152,6 +169,7 @@ pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> l
       env_keys: ["XAI_API_KEY"],
       local: false,
       cheap: false,
+      metadata: {source: "default"},
     },
   ]
   if include_expensive {
@@ -197,6 +215,22 @@ fn __has_string(values, target: string) -> bool {
   return false
 }
 
+fn __append_unique_string(values: list<string>, value: string) -> list<string> {
+  const key = trim(value)
+  if key == "" || values.contains(key) {
+    return values
+  }
+  return values + [key]
+}
+
+fn __unique_string_list(values: list<string>) -> list<string> {
+  let out: list<string> = []
+  for value in values {
+    out = __append_unique_string(out, value)
+  }
+  return out
+}
+
 fn __catalog_model_is_cheap(model: dict, local: bool) -> bool {
   if local {
     return true
@@ -209,7 +243,90 @@ fn __catalog_model_is_cheap(model: dict, local: bool) -> bool {
   return input <= 1.0 && output <= 5.0
 }
 
-pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+fn __route_key(provider: string, model: string) -> string {
+  return provider + "\n" + model
+}
+
+fn __catalog_models_by_route(catalog: dict) -> dict {
+  let models = {}
+  for model in catalog.models ?? [] {
+    const provider = trim(to_string(model.provider ?? ""))
+    const model_id = trim(to_string(model.id ?? ""))
+    if provider == "" || model_id == "" {
+      continue
+    }
+    models = models + {[__route_key(provider, model_id)]: model}
+    const wire_model = trim(to_string(model.wire_model ?? ""))
+    if wire_model != "" {
+      models = models + {[__route_key(provider, wire_model)]: model}
+    }
+  }
+  return models
+}
+
+fn __route_env_keys(route: dict, meta: dict) -> list<string> {
+  let keys: list<string> = []
+  const route_secret = trim(to_string(route.secret_env ?? ""))
+  if route_secret != "" {
+    keys = keys + [route_secret]
+  }
+  return __unique_string_list(keys + __as_string_list(meta.auth?.env ?? meta.auth_envs))
+}
+
+fn __catalog_route_from_routing_row(
+  route: dict,
+  providers: dict,
+  models: dict,
+  include_expensive: bool,
+) -> ProviderToolProbeRoute? {
+  const provider = trim(to_string(route.provider ?? ""))
+  const model_id = trim(to_string(route.model ?? ""))
+  if provider == "" || model_id == "" {
+    return nil
+  }
+  const meta = providers[provider] ?? {}
+  const model = models[__route_key(provider, model_id)] ?? {}
+  const local = __route_is_local(provider, meta)
+  const cheap = __catalog_model_is_cheap(model, local)
+  if !include_expensive && !cheap {
+    return nil
+  }
+  return {
+    id: __slug(provider + "-" + model_id),
+    provider: provider,
+    model: model_id,
+    env_keys: __route_env_keys(route, meta),
+    local: local,
+    cheap: cheap,
+    metadata: {
+      source: "routing_route",
+      catalog_model_id: model.id,
+      catalog_wire_model: model.wire_model,
+      route_model: model_id,
+      route_family: route.family,
+      route_label: route.label,
+      route_timeout_ms: route.timeout_ms,
+      route_capabilities: route.capabilities ?? [],
+      route_has_base_url: trim(to_string(route.base_url ?? "")) != "",
+      route_secret_env: route.secret_env,
+    },
+  }
+}
+
+fn __catalog_routes_from_routing_table(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+  const providers = __provider_meta_by_id(catalog)
+  const models = __catalog_models_by_route(catalog)
+  let routes: list<ProviderToolProbeRoute> = []
+  for row in catalog.routing_routes ?? [] {
+    const route = __catalog_route_from_routing_row(row, providers, models, include_expensive)
+    if route != nil {
+      routes = routes + [route]
+    }
+  }
+  return routes
+}
+
+fn __catalog_routes_from_models(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
   const providers = __provider_meta_by_id(catalog)
   let routes: list<ProviderToolProbeRoute> = []
   for model in catalog.models ?? [] {
@@ -233,10 +350,18 @@ pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expens
         env_keys: __as_string_list(meta.auth?.env ?? meta.auth_envs),
         local: local,
         cheap: cheap,
+        metadata: {source: "catalog_model", catalog_model_id: model_id, catalog_wire_model: model.wire_model},
       },
     ]
   }
   return routes
+}
+
+pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+  if len(catalog.routing_routes ?? []) > 0 {
+    return __catalog_routes_from_routing_table(catalog, include_expensive)
+  }
+  return __catalog_routes_from_models(catalog, include_expensive)
 }
 
 pub fn provider_tool_probe_campaign_modes(mode: string) -> list<string> {
@@ -489,7 +614,7 @@ fn __base_cell(
     status: status,
     reason: reason,
     observed: observed,
-    catalog: __provider_catalog_claim(route),
+    catalog: __provider_catalog_claim(route) + {route_metadata: route.metadata},
   }
 }
 
@@ -545,17 +670,71 @@ pub fn provider_tool_probe_campaign_planned_cells_with_options(
   repeat: int,
   timeout_secs: int,
 ) -> list<ProviderToolProbeCell> {
+  return provider_tool_probe_campaign_planned_cells_sliced_with_options(
+    routes,
+    behaviors,
+    harn_bin,
+    repeat,
+    timeout_secs,
+    1,
+    0,
+    0,
+  ).cells
+}
+
+pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  harn_bin: string,
+  repeat: int,
+  timeout_secs: int,
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+) -> dict {
   let cells: list<ProviderToolProbeCell> = []
+  let probe_units_total = 0
+  let probe_units_selected = 0
+  let probe_units_excluded_by_shard = 0
+  let probe_units_excluded_by_cap = 0
+  let executable_units_selected = 0
   for route in routes {
     for behavior in behaviors {
       for mode in behavior.modes {
+        const ordinal = probe_units_total
+        probe_units_total = probe_units_total + 1
+        if !__campaign_slice_selects_unit(ordinal, shard_count, shard_index) {
+          probe_units_excluded_by_shard = probe_units_excluded_by_shard + 1
+          continue
+        }
+        if behavior.runner == "provider_tool_probe" && max_probes > 0
+          && executable_units_selected >= max_probes {
+          probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
+          continue
+        }
+        probe_units_selected = probe_units_selected + 1
+        if behavior.runner == "provider_tool_probe" {
+          executable_units_selected = executable_units_selected + 1
+        }
         for format in behavior.tool_formats {
           cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
         }
       }
     }
   }
-  return cells
+  return {
+    cells: cells,
+    slice: __campaign_slice_receipt(
+      shard_count,
+      shard_index,
+      max_probes,
+      probe_units_total,
+      probe_units_selected,
+      executable_units_selected,
+      probe_units_excluded_by_shard,
+      probe_units_excluded_by_cap,
+    ),
+  }
 }
 
 fn __safe_status(value) -> string {
@@ -633,13 +812,68 @@ fn __probe_cell(
 }
 
 fn __missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
-  let missing: list<string> = []
+  if len(route.env_keys) == 0 {
+    return []
+  }
   for key in route.env_keys {
-    if trim(to_string(env[key] ?? "")) == "" {
-      missing = missing + [key]
+    if trim(to_string(env[key] ?? "")) != "" {
+      return []
     }
   }
-  return missing
+  return route.env_keys
+}
+
+pub fn provider_tool_probe_campaign_missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
+  return __missing_env_keys(route, env)
+}
+
+fn __merge_unique_strings(left: list<string>, right: list<string>) -> list<string> {
+  let out = left
+  for value in right {
+    out = __append_unique_string(out, value)
+  }
+  return out
+}
+
+fn __auth_readiness(routes: list<ProviderToolProbeRoute>, env: dict, env_source: dict) -> dict {
+  let ready_routes = 0
+  let missing_auth_routes = 0
+  let local_routes = 0
+  let hosted_routes = 0
+  let ready_by_provider: dict = {}
+  let missing_by_provider: dict = {}
+  let missing_env_candidates_by_provider: dict = {}
+  for route in routes {
+    if route.local {
+      local_routes = local_routes + 1
+    } else {
+      hosted_routes = hosted_routes + 1
+    }
+    const missing = __missing_env_keys(route, env)
+    if len(missing) == 0 {
+      ready_routes = ready_routes + 1
+      ready_by_provider = __increment_key(ready_by_provider, route.provider)
+    } else {
+      missing_auth_routes = missing_auth_routes + 1
+      missing_by_provider = __increment_key(missing_by_provider, route.provider)
+      missing_env_candidates_by_provider = missing_env_candidates_by_provider
+        + {
+        [route.provider]: __merge_unique_strings(missing_env_candidates_by_provider[route.provider] ?? [], missing),
+      }
+    }
+  }
+  return {
+    env_checked: env_source.checked ?? false,
+    env_source: env_source,
+    route_count: len(routes),
+    ready_routes: ready_routes,
+    missing_auth_routes: missing_auth_routes,
+    local_routes: local_routes,
+    hosted_routes: hosted_routes,
+    ready_by_provider: ready_by_provider,
+    missing_by_provider: missing_by_provider,
+    missing_env_candidates_by_provider: missing_env_candidates_by_provider,
+  }
 }
 
 fn __skipped_cells_for_missing_env(
@@ -658,8 +892,8 @@ fn __skipped_cells_for_missing_env(
         mode,
         format,
         "skip",
-        "missing required environment keys: " + join(missing, ", "),
-        {missing_env_keys: missing},
+        "missing provider environment key; set one of: " + join(missing, ", "),
+        {missing_env_keys: missing, any_env_key_satisfies_route: true},
       ),
     ]
   }
@@ -753,25 +987,87 @@ fn __live_cells(
   repeat: int,
   timeout_secs: int,
   output_dir: string,
-) -> list<ProviderToolProbeCell> {
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+) -> dict {
   let cells: list<ProviderToolProbeCell> = []
+  let probe_units_total = 0
+  let probe_units_selected = 0
+  let probe_units_excluded_by_shard = 0
+  let probe_units_excluded_by_cap = 0
+  let executable_units_selected = 0
   for route in routes {
     for behavior in behaviors {
-      if behavior.runner != "provider_tool_probe" {
-        for mode in behavior.modes {
+      for mode in behavior.modes {
+        const ordinal = probe_units_total
+        probe_units_total = probe_units_total + 1
+        if !__campaign_slice_selects_unit(ordinal, shard_count, shard_index) {
+          probe_units_excluded_by_shard = probe_units_excluded_by_shard + 1
+          continue
+        }
+        const ready_provider_probe = behavior.runner == "provider_tool_probe" && len(__missing_env_keys(route, env)) == 0
+        if ready_provider_probe && max_probes > 0 && executable_units_selected >= max_probes {
+          probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
+          continue
+        }
+        probe_units_selected = probe_units_selected + 1
+        if behavior.runner != "provider_tool_probe" {
           for format in behavior.tool_formats {
             cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
           }
+          continue
         }
-        continue
-      }
-      for mode in behavior.modes {
+        if ready_provider_probe {
+          executable_units_selected = executable_units_selected + 1
+        }
         cells = cells
           + __run_tool_probe(harness, route, behavior, mode, harn_bin, env, repeat, timeout_secs, output_dir)
       }
     }
   }
-  return cells
+  return {
+    cells: cells,
+    slice: __campaign_slice_receipt(
+      shard_count,
+      shard_index,
+      max_probes,
+      probe_units_total,
+      probe_units_selected,
+      executable_units_selected,
+      probe_units_excluded_by_shard,
+      probe_units_excluded_by_cap,
+    ),
+  }
+}
+
+fn __campaign_slice_selects_unit(ordinal: int, shard_count: int, shard_index: int) -> bool {
+  if shard_count <= 1 {
+    return true
+  }
+  return ordinal % shard_count == shard_index
+}
+
+fn __campaign_slice_receipt(
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+  probe_units_total: int,
+  probe_units_selected: int,
+  executable_units_selected: int,
+  probe_units_excluded_by_shard: int,
+  probe_units_excluded_by_cap: int,
+) -> dict {
+  return {
+    shard_count: shard_count,
+    shard_index: shard_index,
+    max_probes: max_probes,
+    probe_units_total: probe_units_total,
+    probe_units_selected: probe_units_selected,
+    executable_units_selected: executable_units_selected,
+    probe_units_excluded_by_shard: probe_units_excluded_by_shard,
+    probe_units_excluded_by_cap: probe_units_excluded_by_cap,
+  }
 }
 
 fn __summary(cells: list<ProviderToolProbeCell>) -> dict {
@@ -832,19 +1128,18 @@ fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {
   }
 }
 
-fn __estimated_spend(
-  live: bool,
-  routes: list<ProviderToolProbeRoute>,
-  behaviors: list<ProviderToolProbeBehavior>,
-  repeat: int,
-) -> dict {
-  let executable = 0
-  for behavior in behaviors {
-    if behavior.runner == "provider_tool_probe" {
-      executable = executable + len(behavior.modes)
+fn __estimated_spend(live: bool, cells: list<ProviderToolProbeCell>, repeat: int) -> dict {
+  let executable_probe_count = 0
+  for cell in cells {
+    if cell.runner != "provider_tool_probe" || cell.tool_format != "native" {
+      continue
+    }
+    if !live && cell.status == "planned" {
+      executable_probe_count = executable_probe_count + repeat
+    } else if live && (cell.status == "pass" || cell.status == "fail" || cell.status == "error") {
+      executable_probe_count = executable_probe_count + repeat
     }
   }
-  const executable_probe_count = len(routes) * executable * repeat
   const base = {
     cap_usd: 10.0,
     estimated_usd_known: false,
@@ -870,6 +1165,9 @@ pub fn provider_tool_probe_campaign_report(
   include_expensive: bool,
   output_dir: string,
   repeat: int,
+  env: dict,
+  env_source: dict,
+  campaign_slice: dict = {},
 ) -> ProviderToolProbeCampaignReport {
   return {
     schema_version: SCHEMA_VERSION,
@@ -881,7 +1179,9 @@ pub fn provider_tool_probe_campaign_report(
     summary: __summary(cells),
     runner_summary: __runner_summary(cells),
     executable_gap: __executable_gap(cells),
-    spend: __estimated_spend(live, routes, behaviors, repeat),
+    auth_readiness: __auth_readiness(routes, env, env_source),
+    spend: __estimated_spend(live, cells, repeat),
+    campaign_slice: campaign_slice,
     routes: routes,
     behaviors: behaviors,
     cells: cells,
@@ -923,6 +1223,8 @@ pub fn provider_tool_probe_campaign_markdown(report: ProviderToolProbeCampaignRe
   out = out + "- Summary: `" + json_stringify(report.summary) + "`\n"
   out = out + "- Runner summary: `" + json_stringify(report.runner_summary) + "`\n"
   out = out + "- Executable gap: `" + json_stringify(report.executable_gap) + "`\n"
+  out = out + "- Auth readiness: `" + json_stringify(report.auth_readiness) + "`\n"
+  out = out + "- Campaign slice: `" + json_stringify(report.campaign_slice) + "`\n"
   out = out + "- Spend: `" + json_stringify(report.spend) + "`\n\n"
   out = out + "| Status | Provider | Model | Behavior | Mode | Tool format | Reason |\n"
   out = out + "| --- | --- | --- | --- | --- | --- | --- |\n"
@@ -996,11 +1298,28 @@ pub fn provider_tool_probe_campaign_env_from_dotenv_text(text: string) -> dict {
   return env
 }
 
-fn __env_for_child(harness: Harness, env_file: string) -> dict {
-  if env_file == "" || !harness.fs.exists(env_file) {
-    return {}
+fn __env_load_receipt(path: string, checked: bool, loaded: bool, key_count: int, reason: string) -> dict {
+  return {path: path, checked: checked, loaded: loaded, parsed_key_count: key_count, reason: reason}
+}
+
+fn __load_env_file(harness: Harness, env_file: string) -> dict {
+  if env_file == "" {
+    return {env: {}, source: __env_load_receipt("", false, false, 0, "no env file requested")}
   }
-  return provider_tool_probe_campaign_env_from_dotenv_text(harness.fs.read_text(env_file))
+  if !harness.fs.exists(env_file) {
+    return {
+      env: {},
+      source: __env_load_receipt(
+        env_file,
+        true,
+        false,
+        0,
+        "env file is not readable in this Harn run; use a worktree-local env snapshot or --no-sandbox for local-only dry-run readiness",
+      ),
+    }
+  }
+  const env = provider_tool_probe_campaign_env_from_dotenv_text(harness.fs.read_text(env_file))
+  return {env: env, source: __env_load_receipt(env_file, true, true, len(env.keys()), "loaded")}
 }
 
 fn __default_env_file(harness: Harness) -> string {
@@ -1024,6 +1343,9 @@ fn __arg_spec() -> list {
     {kind: "option", name: "mode", flags: ["--mode"], default: "both"},
     {kind: "option", name: "repeat", flags: ["--repeat"], parse: "int", default: 1},
     {kind: "option", name: "timeout_secs", flags: ["--timeout-secs"], parse: "int", default: 60},
+    {kind: "option", name: "shard_count", flags: ["--shard-count"], parse: "int", default: 1},
+    {kind: "option", name: "shard_index", flags: ["--shard-index"], parse: "int", default: 0},
+    {kind: "option", name: "max_probes", flags: ["--max-probes"], parse: "int", default: 0},
     {kind: "option", name: "harn_bin", flags: ["--harn-bin"], default: "harn"},
     {kind: "option", name: "env_file", flags: ["--env-file"], default: ""},
     {kind: "option", name: "output_dir", flags: ["--output-dir"], default: DEFAULT_OUTPUT_DIR},
@@ -1043,7 +1365,7 @@ fn main(harness: Harness) {
   if parsed?._help ?? false {
     harness.stdio
       .println(
-      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--include-expensive] [--live] [--markdown]",
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
     )
     return nil
   }
@@ -1085,34 +1407,62 @@ fn main(harness: Harness) {
   const live = parsed?.live ?? false
   const repeat = parsed?.repeat ?? 1
   const timeout_secs = parsed?.timeout_secs ?? 60
+  const shard_count = parsed?.shard_count ?? 1
+  const shard_index = parsed?.shard_index ?? 0
+  const max_probes = parsed?.max_probes ?? 0
+  if shard_count <= 0 {
+    harness.stdio.eprintln("--shard-count must be >= 1")
+    exit(2)
+  }
+  if shard_index < 0 || shard_index >= shard_count {
+    harness.stdio.eprintln("--shard-index must be >= 0 and < --shard-count")
+    exit(2)
+  }
+  if max_probes < 0 {
+    harness.stdio.eprintln("--max-probes must be >= 0")
+    exit(2)
+  }
   const harn_bin = to_string(parsed?.harn_bin ?? "harn")
   const output_dir = to_string(parsed?.output_dir ?? DEFAULT_OUTPUT_DIR)
   __ensure_dir(harness, ".harn-runs")
   __ensure_dir(harness, output_dir)
   const env_file_arg = trim(to_string(parsed?.env_file ?? ""))
-  const env = if live {
-    __env_for_child(
+  const env_file_path = if env_file_arg != "" {
+    env_file_arg
+  } else if live {
+    __default_env_file(harness)
+  } else {
+    ""
+  }
+  const env_load = __load_env_file(harness, env_file_path)
+  const env = env_load.env ?? {}
+  const cell_plan = if live {
+    __live_cells(
       harness,
-      if env_file_arg == "" {
-        __default_env_file(harness)
-      } else {
-        env_file_arg
-      },
+      routes,
+      behaviors,
+      harn_bin,
+      env,
+      repeat,
+      timeout_secs,
+      output_dir,
+      shard_count,
+      shard_index,
+      max_probes,
     )
   } else {
-    {}
-  }
-  const cells = if live {
-    __live_cells(harness, routes, behaviors, harn_bin, env, repeat, timeout_secs, output_dir)
-  } else {
-    provider_tool_probe_campaign_planned_cells_with_options(
+    provider_tool_probe_campaign_planned_cells_sliced_with_options(
       routes,
       behaviors,
       harn_bin,
       repeat,
       timeout_secs,
+      shard_count,
+      shard_index,
+      max_probes,
     )
   }
+  const cells = cell_plan.cells ?? []
   const report = provider_tool_probe_campaign_report(
     routes,
     behaviors,
@@ -1121,6 +1471,9 @@ fn main(harness: Harness) {
     include_expensive,
     output_dir,
     repeat,
+    env,
+    env_load.source ?? {},
+    cell_plan.slice ?? {},
   )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
   harness.fs

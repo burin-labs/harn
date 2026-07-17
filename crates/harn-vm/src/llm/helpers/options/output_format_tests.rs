@@ -31,6 +31,64 @@ fn parses_explicit_json_schema_output_format() {
 }
 
 #[test]
+fn normalizes_harn_schema_types_for_provider_output() {
+    let schema = crate::schema::json_to_vm_value(&serde_json::json!({
+        "type": "dict",
+        "properties": {
+            "items": {
+                "type": "list",
+                "items": {"type": "int"},
+                "x-provider-extension": {"mode": "strict"}
+            }
+        }
+    }));
+
+    let parsed = parse_schema_value(Some(&schema), "output_schema")
+        .expect("valid Harn schema")
+        .expect("present schema");
+
+    assert_eq!(parsed["type"], "object");
+    assert_eq!(parsed["properties"]["items"]["type"], "array");
+    assert_eq!(parsed["properties"]["items"]["items"]["type"], "integer");
+    assert_eq!(
+        parsed["properties"]["items"]["x-provider-extension"]["mode"],
+        "strict"
+    );
+}
+
+#[test]
+fn normalizes_harn_schema_types_in_unions_and_type_arrays() {
+    // The completion-judge schema that regressed llama.cpp nests aliases in
+    // positions the two happy-path tests do not cover: `anyOf` branches, a
+    // union `type` array, and the `float`/`nil` scalar siblings. Pin them so a
+    // future normalizer refactor cannot silently reopen the strict-grammar 400.
+    let schema = crate::schema::json_to_vm_value(&serde_json::json!({
+        "type": "dict",
+        "properties": {
+            "verdict": {"anyOf": [{"type": "bool"}, {"type": "nil"}]},
+            "score": {"type": "float"},
+            "tags": {"type": ["list", "nil"]}
+        }
+    }));
+
+    let parsed = parse_schema_value(Some(&schema), "output_schema")
+        .expect("valid Harn schema")
+        .expect("present schema");
+
+    assert_eq!(parsed["type"], "object");
+    assert_eq!(
+        parsed["properties"]["verdict"]["anyOf"][0]["type"],
+        "boolean"
+    );
+    assert_eq!(parsed["properties"]["verdict"]["anyOf"][1]["type"], "null");
+    assert_eq!(parsed["properties"]["score"]["type"], "number");
+    assert_eq!(
+        parsed["properties"]["tags"]["type"],
+        serde_json::json!(["array", "null"])
+    );
+}
+
+#[test]
 fn legacy_response_format_and_json_schema_map_to_typed_output_format() {
     let schema = serde_json::json!({"type": "object"});
 

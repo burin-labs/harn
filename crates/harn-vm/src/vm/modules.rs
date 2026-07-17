@@ -20,6 +20,15 @@ fn stdlib_module_artifact_cache() -> &'static Mutex<BTreeMap<String, Arc<Prepare
     STDLIB_MODULE_ARTIFACT_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+fn verified_package_source(bytes: Vec<u8>, path: &Path) -> Result<String, VmError> {
+    String::from_utf8(bytes).map_err(|error| {
+        VmError::Runtime(format!(
+            "installed package source {} is not valid UTF-8: {error}",
+            path.display()
+        ))
+    })
+}
+
 #[cfg(test)]
 fn reset_stdlib_module_artifact_cache() {
     stdlib_module_artifact_cache().lock().unwrap().clear();
@@ -35,7 +44,6 @@ fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize>
         .map(|artifact| Arc::as_ptr(artifact) as usize)
 }
 
-#[derive(Clone)]
 pub(crate) struct LoadedModule {
     pub(crate) functions: BTreeMap<String, Arc<VmClosure>>,
     pub(crate) public_names: HashSet<String>,
@@ -54,6 +62,15 @@ pub(crate) struct LoadedModule {
     pub(crate) _module_functions: crate::value::ModuleFunctionRegistry,
     pub(crate) _module_state: crate::value::ModuleState,
 }
+
+/// Runtime module cache shared by child VMs within one execution tree.
+///
+/// The map stays copy-on-write so a child can add modules without mutating its
+/// parent. Cache entries are never replaced after instantiation, so cache hits
+/// and map copies share their export maps plus their existing shared
+/// registries/state through a cheap outer [`Arc`] instead of cloning the whole
+/// module.
+pub(crate) type ModuleCache = Arc<BTreeMap<PathBuf, Arc<LoadedModule>>>;
 
 /// An import whose target module was still mid-load (an import cycle) when the
 /// importing module reached it. The target's function closures don't exist yet
@@ -96,6 +113,7 @@ fn stdlib_module_artifact(
     module: &str,
     synthetic: &Path,
     source: &'static str,
+    recorder: Option<&super::ModulePhaseRecorder>,
 ) -> Result<Arc<PreparedModuleArtifact>, VmError> {
     let key = stdlib_artifact_cache_key(module, source);
     {
@@ -109,11 +127,19 @@ fn stdlib_module_artifact(
     // legitimately change between processes; that means the disk cache
     // for stdlib can use a synthetic source_path. The harn_version field
     // of the cache key gates correctness across releases.
-    let lookup = bytecode_cache::load_module(synthetic, source);
+    let lookup = {
+        let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
+        bytecode_cache::load_module(synthetic, source)
+    };
     let artifact = if let Some(artifact) = lookup.artifact {
         artifact
     } else {
+        let mut compile_span = recorder.map(super::ModulePhaseRecorder::compile_span);
         let compiled = compile_module_artifact_from_source(synthetic, source)?;
+        if let Some(span) = &mut compile_span {
+            span.mark_compile_succeeded();
+        }
+        drop(compile_span);
         if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
             if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
                 eprintln!("[harn] stdlib module cache write skipped for {module}: {err}");
@@ -122,7 +148,10 @@ fn stdlib_module_artifact(
         compiled
     };
 
-    let compiled = Arc::new(PreparedModuleArtifact::from_cached(artifact));
+    let compiled = {
+        let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
+        Arc::new(PreparedModuleArtifact::from_cached(artifact))
+    };
     let mut cache = stdlib_module_artifact_cache().lock().unwrap();
     if let Some(cached) = cache.get(&key) {
         return Ok(Arc::clone(cached));
@@ -132,6 +161,26 @@ fn stdlib_module_artifact(
 }
 
 impl Vm {
+    fn resolve_module_import_path(&self, base: &Path, path: &str) -> Result<PathBuf, VmError> {
+        if let Some(guard) = &self.package_execution_guard {
+            let synthetic_current_file = base.join("__harn_import_base__.harn");
+            if let Some(resolved) =
+                harn_modules::resolve_import_path_with_guard(&synthetic_current_file, path, guard)
+                    .map_err(|error| {
+                    VmError::Runtime(format!("installed package import rejected: {error}"))
+                })?
+            {
+                return Ok(resolved);
+            }
+            let mut file_path = base.join(path);
+            if !file_path.exists() && file_path.extension().is_none() {
+                file_path.set_extension("harn");
+            }
+            return Ok(file_path);
+        }
+        Ok(resolve_module_import_path(base, path))
+    }
+
     /// Resolve a callable against this VM. Lazy callables initialize once per
     /// VM execution tree, then retain that module scope for later child VMs in
     /// the same tree. Fresh VM roots remain isolated.
@@ -181,17 +230,98 @@ impl Vm {
                         ))
                     })
             }
+            crate::value::VmCallable::Pipeline(_) => Err(VmError::TypeError(
+                "pipeline callable requires execute_callable".to_string(),
+            )),
         }
     }
 
+    pub async fn execute_callable(
+        &mut self,
+        callable: &crate::value::VmCallable,
+        args: &[crate::value::VmValue],
+    ) -> Result<crate::value::VmValue, VmError> {
+        let crate::value::VmCallable::Pipeline(pipeline) = callable else {
+            let closure = self.resolve_callable(callable).await?;
+            return self.call_closure_pub(&closure, args).await;
+        };
+
+        let (_, module_path) = self.lazy_module_path(&pipeline.module_path);
+        let next_guard = pipeline
+            .package_execution_guard_handle()
+            .or_else(|| self.package_execution_guard.clone());
+        let source = if let Some(guard) = &next_guard {
+            let bytes = guard.verify_entry_source(&module_path).map_err(|error| {
+                VmError::Runtime(format!("installed package execution rejected: {error}"))
+            })?;
+            verified_package_source(bytes, &module_path)?
+        } else {
+            std::fs::read_to_string(&module_path).map_err(|error| {
+                VmError::Runtime(format!("failed to read {}: {error}", module_path.display()))
+            })?
+        };
+        let program = harn_parser::check_source_strict(&source)
+            .map_err(|error| VmError::Runtime(error.to_string()))?;
+        let params = program
+            .iter()
+            .find_map(|node| {
+                let (_, inner) = harn_parser::peel_attributes(node);
+                match &inner.node {
+                    harn_parser::Node::Pipeline {
+                        name,
+                        params,
+                        is_pub: true,
+                        ..
+                    } if name == &pipeline.pipeline_name => Some(params.clone()),
+                    _ => None,
+                }
+            })
+            .ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "pipeline '{}' is not exported by module '{}'",
+                    pipeline.pipeline_name,
+                    module_path.display()
+                ))
+            })?;
+        if params.len() != args.len() {
+            return Err(VmError::Runtime(format!(
+                "pipeline '{}' expects {} argument(s), got {}",
+                pipeline.pipeline_name,
+                params.len(),
+                args.len()
+            )));
+        }
+        let chunk = crate::Compiler::new()
+            .compile_named_with_param_globals(&program, &pipeline.pipeline_name)
+            .map_err(|error| VmError::Runtime(error.to_string()))?;
+        let previous_source_dir = self.source_dir.clone();
+        if let Some(parent) = module_path.parent() {
+            self.set_source_dir(parent);
+        }
+        for (param, value) in params.iter().zip(args) {
+            self.set_global(param, value.clone());
+        }
+        let previous_package_execution_guard =
+            std::mem::replace(&mut self.package_execution_guard, next_guard);
+        let result = self.execute(&chunk).await;
+        self.package_execution_guard = previous_package_execution_guard;
+        self.source_dir = previous_source_dir;
+        crate::stdlib::set_thread_source_dir_option(self.source_dir.as_deref());
+        result
+    }
+
     fn lazy_callable_module_path(&self, lazy: &crate::value::LazyVmCallable) -> (PathBuf, PathBuf) {
-        let mut module_path = if lazy.module_path.is_absolute() {
-            lazy.module_path.clone()
+        self.lazy_module_path(&lazy.module_path)
+    }
+
+    fn lazy_module_path(&self, path: &std::path::Path) -> (PathBuf, PathBuf) {
+        let mut module_path = if path.is_absolute() {
+            path.to_path_buf()
         } else {
             self.source_dir
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(&lazy.module_path)
+                .join(path)
         };
         if !module_path.exists() && module_path.extension().is_none() {
             module_path.set_extension("harn");
@@ -206,20 +336,31 @@ impl Vm {
         &mut self,
         synthetic: PathBuf,
         source: &str,
-    ) -> Result<LoadedModule, VmError> {
+    ) -> Result<Arc<LoadedModule>, VmError> {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
         Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
 
-        let artifact = PreparedModuleArtifact::from_cached(compile_module_artifact_from_source(
-            &synthetic, source,
-        )?);
+        let mut compile_span = self.module_compile_span();
+        let compiled = compile_module_artifact_from_source(&synthetic, source)?;
+        if let Some(span) = &mut compile_span {
+            span.mark_compile_succeeded();
+        }
+        drop(compile_span);
+        let artifact = {
+            let _load_span = self.module_load_span();
+            PreparedModuleArtifact::from_cached(compiled)
+        };
 
         self.imported_paths.push(synthetic.clone());
-        let loaded = self.instantiate_module(None, &artifact).await?;
+        let loaded = Arc::new(self.instantiate_module(None, &artifact).await?);
         self.imported_paths.pop();
-        Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+        {
+            let _load_span = self.module_load_span();
+            Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
+        }
+        self.record_module_loaded();
         Ok(loaded)
     }
 
@@ -252,18 +393,28 @@ impl Vm {
         module: &str,
         synthetic: PathBuf,
         source: &'static str,
-    ) -> Result<LoadedModule, VmError> {
+    ) -> Result<Arc<LoadedModule>, VmError> {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
         Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
 
-        let artifact = stdlib_module_artifact(module, &synthetic, source)?;
+        let artifact = stdlib_module_artifact(
+            module,
+            &synthetic,
+            source,
+            self.module_phase_recorder.as_ref(),
+        )?;
         self.imported_paths.push(synthetic.clone());
         let mut loaded = self.instantiate_stdlib_module(artifact.as_ref()).await?;
         self.imported_paths.pop();
         Self::add_builtin_reexports(module, &mut loaded);
-        Arc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
+        let loaded = Arc::new(loaded);
+        {
+            let _load_span = self.module_load_span();
+            Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
+        }
+        self.record_module_loaded();
         Ok(loaded)
     }
 
@@ -295,6 +446,10 @@ impl Vm {
             self.execute_import(&import.path, import.selected_names.as_deref())
                 .await?;
         }
+
+        // Nested modules own their own load spans. Start this module's span
+        // only after those imports finish so aggregate load time is additive.
+        let _load_span = self.module_load_span();
 
         let module_state: crate::value::ModuleState = {
             let mut init_env = self.env.clone();
@@ -376,7 +531,7 @@ impl Vm {
         }
 
         for import in artifact.imports.iter().filter(|import| import.is_pub) {
-            let cache_key = self.cache_key_for_import(&import.path);
+            let cache_key = self.cache_key_for_import(&import.path)?;
             let Some(loaded) = self.module_cache.get(&cache_key).cloned() else {
                 // A plain `import`/`import {...}` across a cycle is bound late
                 // by `flush_deferred_cyclic_imports`, but a `pub import`
@@ -558,10 +713,16 @@ impl Vm {
                     if self.imported_paths.contains(&synthetic) {
                         return Ok(());
                     }
+                    if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
+                        return self.export_loaded_module(&synthetic, &loaded, selected_names);
+                    }
                     let loaded = self
                         .load_stdlib_module_from_source(module, synthetic.clone(), source)
                         .await?;
-                    self.export_loaded_module(&synthetic, &loaded, selected_names)?;
+                    {
+                        let _load_span = self.module_load_span();
+                        self.export_loaded_module(&synthetic, &loaded, selected_names)?;
+                    }
                     return Ok(());
                 }
                 return Err(VmError::Runtime(format!(
@@ -573,7 +734,15 @@ impl Vm {
                 .source_dir
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("."));
-            let file_path = resolve_module_import_path(&base, path);
+            let file_path = self.resolve_module_import_path(&base, path)?;
+            let verified_source = if let Some(guard) = &self.package_execution_guard {
+                let bytes = guard.verify_entry_source(&file_path).map_err(|error| {
+                    VmError::Runtime(format!("installed package import rejected: {error}"))
+                })?;
+                Some(verified_package_source(bytes, &file_path)?)
+            } else {
+                None
+            };
 
             let canonical = file_path
                 .canonicalize()
@@ -598,28 +767,46 @@ impl Vm {
                 return Ok(());
             }
             if let Some(loaded) = self.module_cache.get(&canonical).cloned() {
+                if let Some(source) = &verified_source {
+                    let cached_source = self.source_cache.get(&canonical);
+                    if cached_source != Some(source) {
+                        return Err(VmError::Runtime(format!(
+                            "installed package import rejected: cached module {} was not compiled from the verified package bytes",
+                            canonical.display()
+                        )));
+                    }
+                }
                 return self.export_loaded_module(&canonical, &loaded, selected_names);
             }
             self.imported_paths.push(canonical.clone());
 
-            let source = std::fs::read_to_string(&file_path).map_err(|e| {
-                // Name the resolution base: relative imports resolve against the
-                // importing file's dir (or CWD when unset), so an error that
-                // prints only the joined path leaves the author guessing which
-                // base was used.
-                VmError::Runtime(format!(
-                    "Import error: cannot read '{}' (resolved '{path}' relative to {}): {e}",
-                    file_path.display(),
-                    base.display()
-                ))
-            })?;
+            let source = {
+                let _load_span = self.module_load_span();
+                match verified_source {
+                    Some(source) => source,
+                    None => std::fs::read_to_string(&file_path).map_err(|e| {
+                        // Name the resolution base: relative imports resolve against the
+                        // importing file's dir (or CWD when unset), so an error that
+                        // prints only the joined path leaves the author guessing which
+                        // base was used.
+                        VmError::Runtime(format!(
+                            "Import error: cannot read '{}' (resolved '{path}' relative to {}): {e}",
+                            file_path.display(),
+                            base.display()
+                        ))
+                    })?,
+                }
+            };
             Arc::make_mut(&mut self.source_cache).insert(canonical.clone(), source.clone());
             Arc::make_mut(&mut self.source_cache).insert(file_path.clone(), source.clone());
 
-            let prepared = if bytecode_cache::cache_enabled() {
-                self.prepared_module_cache.get(&canonical, &source)
-            } else {
-                None
+            let prepared = {
+                let _load_span = self.module_load_span();
+                if bytecode_cache::cache_enabled() {
+                    self.prepared_module_cache.get(&canonical, &source)
+                } else {
+                    None
+                }
             };
             let artifact = if let Some(prepared) = prepared {
                 prepared
@@ -627,11 +814,19 @@ impl Vm {
                 // Disk cache hits skip parse + compile. The scoped prepared
                 // cache additionally skips deserialization and chunk hydration
                 // on later fresh VMs without sharing any runtime module state.
-                let lookup = bytecode_cache::load_module(&file_path, &source);
+                let lookup = {
+                    let _load_span = self.module_load_span();
+                    bytecode_cache::load_module(&file_path, &source)
+                };
                 let cached = if let Some(artifact) = lookup.artifact {
                     artifact
                 } else {
+                    let mut compile_span = self.module_compile_span();
                     let compiled = compile_module_artifact_from_source(&file_path, &source)?;
+                    if let Some(span) = &mut compile_span {
+                        span.mark_compile_succeeded();
+                    }
+                    drop(compile_span);
                     if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
                         if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
                             eprintln!(
@@ -642,7 +837,10 @@ impl Vm {
                     }
                     compiled
                 };
-                let mut prepared = Arc::new(PreparedModuleArtifact::from_cached(cached));
+                let mut prepared = {
+                    let _load_span = self.module_load_span();
+                    Arc::new(PreparedModuleArtifact::from_cached(cached))
+                };
                 if bytecode_cache::cache_enabled() {
                     prepared =
                         self.prepared_module_cache
@@ -652,17 +850,27 @@ impl Vm {
             };
 
             let module_source_dir = file_path.parent().map(|p| p.to_path_buf());
-            let loaded = self
-                .instantiate_module(module_source_dir, artifact.as_ref())
-                .await?;
+            let loaded = Arc::new(
+                self.instantiate_module(module_source_dir, artifact.as_ref())
+                    .await?,
+            );
             self.imported_paths.pop();
-            Arc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
-            self.export_loaded_module(&canonical, &loaded, selected_names)?;
+            {
+                let _load_span = self.module_load_span();
+                Arc::make_mut(&mut self.module_cache)
+                    .insert(canonical.clone(), Arc::clone(&loaded));
+            }
+            self.record_module_loaded();
+            {
+                let _load_span = self.module_load_span();
+                self.export_loaded_module(&canonical, &loaded, selected_names)?;
+            }
 
             // Once the import stack fully unwinds, every module reachable from
             // this top-level import is cached, so any deferred cyclic imports
             // can now bind against fully-loaded modules.
             if self.imported_paths.is_empty() {
+                let _load_span = self.module_load_span();
                 self.flush_deferred_cyclic_imports()?;
             }
 
@@ -732,19 +940,19 @@ impl Vm {
     /// LoadedModule for this import string. Used by the re-export pass to
     /// look up the already-loaded source module after `execute_import`
     /// has populated [`Vm::module_cache`].
-    fn cache_key_for_import(&self, path: &str) -> PathBuf {
+    fn cache_key_for_import(&self, path: &str) -> Result<PathBuf, VmError> {
         if let Some(module) = path
             .strip_prefix("std/")
             .or_else(|| (path == "observability").then_some("observability"))
         {
-            return PathBuf::from(format!("<stdlib>/{module}.harn"));
+            return Ok(PathBuf::from(format!("<stdlib>/{module}.harn")));
         }
         let base = self
             .source_dir
             .clone()
             .unwrap_or_else(|| PathBuf::from("."));
-        let file_path = resolve_module_import_path(&base, path);
-        file_path.canonicalize().unwrap_or(file_path)
+        let file_path = self.resolve_module_import_path(&base, path)?;
+        Ok(file_path.canonicalize().unwrap_or(file_path))
     }
 
     /// Load a module file and return the exported function closures that
@@ -874,337 +1082,11 @@ impl Vm {
             .source_dir
             .clone()
             .unwrap_or_else(|| PathBuf::from("."));
-        let file_path = resolve_module_import_path(&base, import_path);
+        let file_path = self.resolve_module_import_path(&base, import_path)?;
         self.load_module_exports(&file_path).await
     }
 }
 
 #[cfg(test)]
-mod tests {
-
-    use std::sync::{Mutex, MutexGuard, OnceLock};
-
-    use super::*;
-
-    static CACHE_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn cache_test_guard() -> MutexGuard<'static, ()> {
-        CACHE_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap()
-    }
-
-    fn cached_stdlib_module_ptr(module: &str) -> Option<usize> {
-        let source = harn_stdlib::get_stdlib_source(module).expect("stdlib module source exists");
-        stdlib_module_artifact_cache_ptr(module, source)
-    }
-
-    #[test]
-    fn module_function_can_use_local_type_alias_as_schema_value() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime builds");
-
-        let result = runtime.block_on(async {
-            let mut vm = Vm::new();
-            crate::stdlib::register_vm_stdlib(&mut vm);
-            let loaded = vm
-                .load_module_from_source(
-                    PathBuf::from("<test>/schema_alias_module.harn"),
-                    r#"
-fn accepts_schema(schema) {
-  return schema_report({name: "Ada"}, schema).ok
-}
-
-type UserShape = {name: string}
-
-pub fn works() {
-  return accepts_schema(UserShape)
-}
-"#,
-                )
-                .await
-                .expect("module loads");
-            let closure = Arc::clone(loaded.functions.get("works").expect("works export exists"));
-            vm.call_closure_pub(&closure, &[])
-                .await
-                .expect("module closure executes")
-        });
-
-        assert!(matches!(result, VmValue::Bool(true)), "{result:?}");
-    }
-
-    #[test]
-    fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
-        let _guard = cache_test_guard();
-        reset_stdlib_module_artifact_cache();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime builds");
-
-        let (first_exports, second_exports, first_state_weak, second_state_weak) = runtime
-            .block_on(async {
-                let mut first_vm = Vm::new();
-                let first_exports = first_vm
-                    .load_module_exports_from_import("std/agent/prompts")
-                    .await
-                    .expect("first stdlib import succeeds");
-                let first_state = first_exports
-                    .get("render_agent_prompt")
-                    .expect("first export exists")
-                    .module_state()
-                    .expect("first module state stays live while VM owns module");
-                let first_state_weak = Arc::downgrade(&first_state);
-                let first_state_ptr = Arc::as_ptr(&first_state);
-
-                let mut second_vm = Vm::new();
-                let second_exports = second_vm
-                    .load_module_exports_from_import("std/agent/prompts")
-                    .await
-                    .expect("second stdlib import succeeds");
-                let second_state = second_exports
-                    .get("render_agent_prompt")
-                    .expect("second export exists")
-                    .module_state()
-                    .expect("second module state stays live while VM owns module");
-                let second_state_weak = Arc::downgrade(&second_state);
-
-                assert_ne!(first_state_ptr, Arc::as_ptr(&second_state));
-                (
-                    first_exports,
-                    second_exports,
-                    first_state_weak,
-                    second_state_weak,
-                )
-            });
-        let first_cached =
-            cached_stdlib_module_ptr("agent/prompts").expect("first import cached stdlib artifact");
-        assert_eq!(
-            cached_stdlib_module_ptr("agent/prompts"),
-            Some(first_cached)
-        );
-
-        let first = first_exports
-            .get("render_agent_prompt")
-            .expect("first export exists");
-        let second = second_exports
-            .get("render_agent_prompt")
-            .expect("second export exists");
-
-        assert!(!Arc::ptr_eq(first, second));
-        assert!(Arc::ptr_eq(&first.func, &second.func));
-        assert!(Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
-        assert!(first.module_state().is_none());
-        assert!(second.module_state().is_none());
-        assert!(first_state_weak.upgrade().is_none());
-        assert!(second_state_weak.upgrade().is_none());
-    }
-
-    #[test]
-    fn prepared_user_module_reuses_code_with_fresh_mutable_state() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime builds");
-        let temp = tempfile::tempdir().expect("tempdir");
-        let module = temp.path().join("counter.harn");
-        std::fs::write(
-            &module,
-            r"
-let count = 0
-
-pub fn increment() {
-  count = count + 1
-  return count
-}
-",
-        )
-        .expect("write module");
-        let cache = crate::PreparedModuleCache::default();
-
-        runtime.block_on(async {
-            let mut first_vm = Vm::new();
-            first_vm.set_prepared_module_cache(cache.clone());
-            let first_exports = first_vm
-                .load_module_exports(&module)
-                .await
-                .expect("first module load succeeds");
-            let first = first_exports.get("increment").expect("first export");
-            assert!(matches!(
-                first_vm.call_closure_pub(first, &[]).await,
-                Ok(VmValue::Int(1))
-            ));
-            assert!(matches!(
-                first_vm.call_closure_pub(first, &[]).await,
-                Ok(VmValue::Int(2))
-            ));
-
-            let mut second_vm = Vm::new();
-            second_vm.set_prepared_module_cache(cache.clone());
-            let second_exports = second_vm
-                .load_module_exports(&module)
-                .await
-                .expect("second module load succeeds");
-            let second = second_exports.get("increment").expect("second export");
-
-            assert!(!Arc::ptr_eq(first, second));
-            assert!(Arc::ptr_eq(&first.func, &second.func));
-            assert!(Arc::ptr_eq(&first.func.chunk, &second.func.chunk));
-            assert_ne!(
-                Arc::as_ptr(&first.module_state().expect("first state")),
-                Arc::as_ptr(&second.module_state().expect("second state"))
-            );
-            assert!(matches!(
-                second_vm.call_closure_pub(second, &[]).await,
-                Ok(VmValue::Int(1))
-            ));
-        });
-
-        let stats = cache.stats();
-        assert_eq!(stats.insertions, 1);
-        assert_eq!(stats.hits, 1);
-        assert_eq!(stats.entries, 1);
-    }
-
-    #[test]
-    fn prepared_importer_reloads_changed_dependency() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime builds");
-        let temp = tempfile::tempdir().expect("tempdir");
-        let module = temp.path().join("reader.harn");
-        let dependency = temp.path().join("value.harn");
-        std::fs::write(
-            &module,
-            "import { value } from \"./value\"\npub fn read() { return value() }\n",
-        )
-        .expect("write importer");
-        std::fs::write(&dependency, "pub fn value() { return 1 }\n").expect("write dependency");
-        let cache = crate::PreparedModuleCache::default();
-
-        runtime.block_on(async {
-            let mut first_vm = Vm::new();
-            first_vm.set_prepared_module_cache(cache.clone());
-            let first_exports = first_vm
-                .load_module_exports(&module)
-                .await
-                .expect("first module load succeeds");
-            let first = first_exports.get("read").expect("first export");
-            let first_result = first_vm.call_closure_pub(first, &[]).await;
-            assert!(
-                matches!(first_result, Ok(VmValue::Int(1))),
-                "unexpected first dependency result: {first_result:?}"
-            );
-
-            std::fs::write(&dependency, "pub fn value() { return 2 }\n")
-                .expect("rewrite dependency");
-
-            let mut second_vm = Vm::new();
-            second_vm.set_prepared_module_cache(cache.clone());
-            let second_exports = second_vm
-                .load_module_exports(&module)
-                .await
-                .expect("second module load succeeds");
-            let second = second_exports.get("read").expect("second export");
-            let second_result = second_vm.call_closure_pub(second, &[]).await;
-            assert!(
-                matches!(second_result, Ok(VmValue::Int(2))),
-                "unexpected refreshed dependency result: {second_result:?}"
-            );
-        });
-
-        let stats = cache.stats();
-        assert_eq!(stats.hits, 1);
-        assert_eq!(stats.insertions, 3);
-        assert_eq!(stats.entries, 3);
-    }
-
-    #[test]
-    fn stdlib_artifact_cache_is_process_wide_across_threads() {
-        let _guard = cache_test_guard();
-        reset_stdlib_module_artifact_cache();
-
-        let handle = std::thread::spawn(|| {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("runtime builds");
-            runtime.block_on(async {
-                let mut vm = Vm::new();
-                vm.load_module_exports_from_import("std/agent/prompts")
-                    .await
-                    .expect("thread stdlib import succeeds");
-            });
-        });
-        handle.join().expect("thread joins");
-        let thread_cached = cached_stdlib_module_ptr("agent/prompts")
-            .expect("thread import cached stdlib artifact");
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime builds");
-        runtime.block_on(async {
-            let mut vm = Vm::new();
-            vm.load_module_exports_from_import("std/agent/prompts")
-                .await
-                .expect("main-thread stdlib import succeeds");
-        });
-        assert_eq!(
-            cached_stdlib_module_ptr("agent/prompts"),
-            Some(thread_cached)
-        );
-    }
-
-    #[test]
-    fn module_closures_release_state_after_vm_drop() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime builds");
-
-        let (closure_weak, registry_weak, state_weak) = runtime.block_on(async {
-            let mut vm = Vm::new();
-            let loaded = vm
-                .load_module_from_source(
-                    PathBuf::from("<test>/module_cycle.harn"),
-                    r#"
-let payload = "x" * 1024
-
-pub fn touch() {
-  return len(payload)
-}
-"#,
-                )
-                .await
-                .expect("module loads");
-            let closure = Arc::clone(loaded.functions.get("touch").expect("touch export exists"));
-            let closure_weak = Arc::downgrade(&closure);
-            let registry_weak = Arc::downgrade(&loaded._module_functions);
-            let state_weak = Arc::downgrade(&loaded._module_state);
-
-            drop(closure);
-            drop(loaded);
-            drop(vm);
-
-            (closure_weak, registry_weak, state_weak)
-        });
-
-        assert!(
-            closure_weak.upgrade().is_none(),
-            "module closure should drop with its VM"
-        );
-        assert!(
-            registry_weak.upgrade().is_none(),
-            "module function registry should drop with its VM"
-        );
-        assert!(
-            state_weak.upgrade().is_none(),
-            "module state should drop with its VM"
-        );
-    }
-}
+#[path = "modules_tests.rs"]
+mod tests;

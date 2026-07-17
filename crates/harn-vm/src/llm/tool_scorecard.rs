@@ -8,8 +8,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
-
 use crate::provider_catalog::{CatalogModel, CatalogProvider};
 
 use super::tool_conformance::{
@@ -17,212 +15,10 @@ use super::tool_conformance::{
     ToolProbeFallbackMode,
 };
 
-pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 5;
+pub use super::tool_scorecard_types::*;
+
+pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 6;
 pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 3;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardReport {
-    pub schema_version: u32,
-    pub route_count: usize,
-    pub summary: ToolScorecardSummary,
-    pub routes: Vec<ToolScorecardRoute>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardSummary {
-    pub pass: usize,
-    pub warn: usize,
-    pub fail: usize,
-    pub best_route: Option<ToolScorecardRouteKey>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardRouteKey {
-    pub provider: String,
-    pub model: String,
-    pub quality_score: u16,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardRoute {
-    pub provider: String,
-    pub model: String,
-    pub catalog_claim: Option<ToolScorecardCatalogClaim>,
-    pub report_count: usize,
-    pub case_count: usize,
-    pub successful_cases: usize,
-    pub parseable_tool_call_cases: usize,
-    pub native_tool_call_cases: usize,
-    pub text_tool_call_cases: usize,
-    pub actionless_cases: usize,
-    pub empty_completion_cases: usize,
-    pub malformed_argument_cases: usize,
-    pub http_error_cases: usize,
-    pub transport_error_cases: usize,
-    pub pass_rate: f64,
-    pub parseable_tool_call_rate: f64,
-    pub empty_completion_rate: f64,
-    pub actionless_rate: f64,
-    pub quality_score: u16,
-    pub status: &'static str,
-    pub evidence_status: &'static str,
-    pub probe_evidence_status: &'static str,
-    pub request_evidence_status: &'static str,
-    pub recommended_tool_mode: &'static str,
-    pub observed_probe_cases: Vec<&'static str>,
-    pub missing_required_cases: Vec<&'static str>,
-    pub observed_probe_evidence: Vec<ToolScorecardProbeEvidence>,
-    pub missing_required_probe_evidence: Vec<ToolScorecardProbeEvidence>,
-    pub missing_required_request_cases: Vec<&'static str>,
-    pub observed_wire_dialects: Vec<&'static str>,
-    pub classification_counts: BTreeMap<&'static str, usize>,
-    pub mode_evidence: Vec<ToolScorecardModeEvidence>,
-    pub issues: Vec<&'static str>,
-    pub catalog_mismatches: Vec<ToolScorecardCatalogMismatch>,
-    pub suggested_catalog_updates: Vec<ToolScorecardCatalogUpdate>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardModeEvidence {
-    pub mode: &'static str,
-    pub case_count: usize,
-    pub successful_cases: usize,
-    pub parseable_tool_call_cases: usize,
-    pub native_tool_call_cases: usize,
-    pub text_tool_call_cases: usize,
-    pub actionless_cases: usize,
-    pub empty_completion_cases: usize,
-    pub malformed_argument_cases: usize,
-    pub http_error_cases: usize,
-    pub transport_error_cases: usize,
-    pub pass_rate: f64,
-    pub recommended_tool_mode: &'static str,
-    pub status: &'static str,
-    pub classification_counts: BTreeMap<&'static str, usize>,
-    pub issues: Vec<&'static str>,
-}
-
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct ToolScorecardProbeEvidence {
-    pub case_id: &'static str,
-    pub mode: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardPlan {
-    pub schema_version: u32,
-    pub kind: &'static str,
-    pub catalog: ToolScorecardCatalogProvenance,
-    pub route_count: usize,
-    pub unscorecardable_provider_count: usize,
-    pub case_count: usize,
-    pub required_case_count: usize,
-    pub batch_manifest_request_count: usize,
-    pub routes: Vec<ToolScorecardPlanRoute>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub unscorecardable_providers: Vec<ToolScorecardUnscorecardableProvider>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub batch_manifest_requests: Vec<ToolScorecardBatchManifestRequest>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardCatalogProvenance {
-    pub schema_version: u32,
-    pub generated_by: String,
-    pub hash_blake3: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardPlanRoute {
-    pub provider: String,
-    pub model: String,
-    pub catalog_claim: ToolScorecardCatalogClaim,
-    pub cases: Vec<ToolScorecardPlanCase>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardUnscorecardableProvider {
-    pub provider: String,
-    pub reason: &'static str,
-    pub model_count: usize,
-    pub active_model_count: usize,
-    pub route_count: usize,
-    pub local_runtime: bool,
-    pub auth_required: bool,
-    pub credential_env_names: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardCatalogClaim {
-    pub preferred_tool_format: Option<String>,
-    pub tool_mode_parity: Option<String>,
-    pub native_tools: bool,
-    pub text_tools: bool,
-    pub text_tool_wire_format_supported: bool,
-    pub max_tools: Option<u32>,
-    pub supports_parallel_tool_calls: bool,
-    pub server_parser: String,
-    pub tool_search: Vec<String>,
-    pub batch_api: bool,
-    pub batch_wire_format: Option<String>,
-    pub batch_input_mode: Option<String>,
-    pub batch_discount_percent: Option<u32>,
-    pub provider_rate_limits: bool,
-    pub model_rate_limits: bool,
-    pub provider_rpm: Option<u32>,
-    pub pricing: bool,
-    pub provider_latency_p50_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardCatalogMismatch {
-    pub code: &'static str,
-    pub field: &'static str,
-    pub observed: String,
-    pub catalog: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardCatalogUpdate {
-    pub field: &'static str,
-    pub operation: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<String>,
-    pub reason: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardPlanCase {
-    pub id: &'static str,
-    pub description: &'static str,
-    pub requirement: &'static str,
-    pub requirement_reason: &'static str,
-    pub turn_count: u8,
-    pub batch_eligible: bool,
-    pub probe_focus: Vec<&'static str>,
-    pub execution: ToolScorecardPlanCaseExecution,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardPlanCaseExecution {
-    pub status: &'static str,
-    pub runner: &'static str,
-    pub reason: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub artifact_hint: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ToolScorecardBatchManifestRequest {
-    pub request_id: String,
-    pub provider: String,
-    pub model: String,
-    pub case_id: &'static str,
-    pub batch_wire_format: Option<String>,
-    pub batch_input_mode: Option<String>,
-}
 
 #[derive(Debug, Default)]
 struct RouteAccumulator {
@@ -251,6 +47,15 @@ struct CaseStats {
     malformed_argument_cases: usize,
     http_error_cases: usize,
     transport_error_cases: usize,
+    rate_limited_cases: usize,
+    latency_ms: Vec<u64>,
+    observed_usage_case_count: usize,
+    input_token_case_count: usize,
+    input_tokens: i64,
+    output_token_case_count: usize,
+    output_tokens: i64,
+    observed_cost_case_count: usize,
+    cost_usd: f64,
     classification_counts: BTreeMap<&'static str, usize>,
     observed_wire_dialects: BTreeSet<&'static str>,
 }
@@ -268,6 +73,30 @@ impl CaseStats {
             .or_insert(0) += 1;
         self.observed_wire_dialects
             .insert(wire_dialect_key(&case.classification));
+        if let Some(elapsed_ms) = case.elapsed_ms {
+            self.latency_ms.push(elapsed_ms);
+        }
+        if case.http_status == Some(429) {
+            self.rate_limited_cases += 1;
+        }
+        if let Some(usage) = &case.usage {
+            self.observed_usage_case_count += 1;
+            if let Some(input_tokens) = usage.input_tokens {
+                self.input_token_case_count += 1;
+                self.input_tokens = self.input_tokens.saturating_add(input_tokens.max(0));
+            }
+            if let Some(output_tokens) = usage.output_tokens {
+                self.output_token_case_count += 1;
+                self.output_tokens = self.output_tokens.saturating_add(output_tokens.max(0));
+            }
+            if let Some(cost_usd) = usage
+                .cost_usd
+                .filter(|cost| cost.is_finite() && *cost >= 0.0)
+            {
+                self.observed_cost_case_count += 1;
+                self.cost_usd += cost_usd;
+            }
+        }
         if case.ok {
             self.successful_cases += 1;
         }
@@ -609,6 +438,20 @@ fn fixed_micro_cases_for_route(
     claim: &ToolScorecardCatalogClaim,
 ) -> Vec<ToolScorecardPlanCase> {
     let has_tool_surface = claim.native_tools || claim.text_tools;
+    let single_tool_requirement =
+        tool_surface_requirement(has_tool_surface, "baseline_tool_call_quality");
+    let large_string_requirement =
+        tool_surface_requirement(has_tool_surface, "byte_fidelity_for_edit_payloads");
+    let tool_result_requirement =
+        tool_surface_requirement(has_tool_surface, "multi_turn_agent_loop_quality");
+    let signed_thinking_requirement = if has_tool_surface {
+        (
+            "conditional",
+            "thinking_signature_replay_for_reasoning_tool_models",
+        )
+    } else {
+        ("not_applicable", "route_declares_no_tool_surface")
+    };
     let parallel_requirement = if claim.native_tools && claim.supports_parallel_tool_calls {
         ("required", "route_claims_parallel_tool_calls")
     } else {
@@ -618,8 +461,8 @@ fn fixed_micro_cases_for_route(
         ToolScorecardPlanCase {
             id: "single_tool_call",
             description: "single ordinary tool call with exact JSON arguments",
-            requirement: "required",
-            requirement_reason: "baseline_tool_call_quality",
+            requirement: single_tool_requirement.0,
+            requirement_reason: single_tool_requirement.1,
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["tool_choice", "json_arguments", "wire_dialect"],
@@ -646,8 +489,8 @@ fn fixed_micro_cases_for_route(
         ToolScorecardPlanCase {
             id: "large_string_argument",
             description: "large string/code argument with quotes, unicode, and heredoc-shaped text",
-            requirement: "required",
-            requirement_reason: "byte_fidelity_for_edit_payloads",
+            requirement: large_string_requirement.0,
+            requirement_reason: large_string_requirement.1,
             turn_count: 1,
             batch_eligible: true,
             probe_focus: vec!["byte_fidelity", "escaping", "unicode"],
@@ -660,8 +503,8 @@ fn fixed_micro_cases_for_route(
         ToolScorecardPlanCase {
             id: "tool_result_followup",
             description: "assistant continuation after receiving a tool result",
-            requirement: "required",
-            requirement_reason: "multi_turn_agent_loop_quality",
+            requirement: tool_result_requirement.0,
+            requirement_reason: tool_result_requirement.1,
             turn_count: 2,
             batch_eligible: false,
             probe_focus: vec!["tool_result_adjacency", "continuation", "action_vs_prose"],
@@ -674,8 +517,8 @@ fn fixed_micro_cases_for_route(
         ToolScorecardPlanCase {
             id: "signed_thinking_tool_result_followup",
             description: "provider-native signed thinking replay adjacent to tool-use history",
-            requirement: "conditional",
-            requirement_reason: "thinking_signature_replay_for_reasoning_tool_models",
+            requirement: signed_thinking_requirement.0,
+            requirement_reason: signed_thinking_requirement.1,
             turn_count: 2,
             batch_eligible: false,
             probe_focus: vec![
@@ -742,6 +585,17 @@ fn fixed_micro_cases_for_route(
             execution: executable_parameter_edges_request_case(provider, model, has_tool_surface),
         },
     ]
+}
+
+fn tool_surface_requirement(
+    has_tool_surface: bool,
+    required_reason: &'static str,
+) -> (&'static str, &'static str) {
+    if has_tool_surface {
+        ("required", required_reason)
+    } else {
+        ("not_applicable", "route_declares_no_tool_surface")
+    }
 }
 
 pub(crate) fn signed_thinking_tool_history_supported(provider: &str, model: &str) -> bool {
@@ -997,6 +851,15 @@ fn score_route(
         malformed_argument_cases: stats.malformed_argument_cases,
         http_error_cases: stats.http_error_cases,
         transport_error_cases: stats.transport_error_cases,
+        rate_limited_cases: stats.rate_limited_cases,
+        observed_latency_case_count: stats.latency_ms.len(),
+        latency_p50_ms: upper_percentile_ms(&stats.latency_ms, 50),
+        latency_p95_ms: upper_percentile_ms(&stats.latency_ms, 95),
+        observed_usage_case_count: stats.observed_usage_case_count,
+        input_tokens: observed_i64_sum(stats.input_token_case_count, stats.input_tokens),
+        output_tokens: observed_i64_sum(stats.output_token_case_count, stats.output_tokens),
+        observed_cost_case_count: stats.observed_cost_case_count,
+        cost_usd: observed_cost_sum(stats.observed_cost_case_count, stats.cost_usd),
         pass_rate,
         parseable_tool_call_rate,
         empty_completion_rate,
@@ -1046,6 +909,15 @@ fn mode_evidence(mode: &'static str, stats: CaseStats) -> ToolScorecardModeEvide
         malformed_argument_cases: stats.malformed_argument_cases,
         http_error_cases: stats.http_error_cases,
         transport_error_cases: stats.transport_error_cases,
+        rate_limited_cases: stats.rate_limited_cases,
+        observed_latency_case_count: stats.latency_ms.len(),
+        latency_p50_ms: upper_percentile_ms(&stats.latency_ms, 50),
+        latency_p95_ms: upper_percentile_ms(&stats.latency_ms, 95),
+        observed_usage_case_count: stats.observed_usage_case_count,
+        input_tokens: observed_i64_sum(stats.input_token_case_count, stats.input_tokens),
+        output_tokens: observed_i64_sum(stats.output_token_case_count, stats.output_tokens),
+        observed_cost_case_count: stats.observed_cost_case_count,
+        cost_usd: observed_cost_sum(stats.observed_cost_case_count, stats.cost_usd),
         pass_rate,
         recommended_tool_mode,
         status,
@@ -1232,10 +1104,31 @@ fn route_issues(
     if stats.http_error_cases > 0 {
         issues.push("provider_http_errors");
     }
+    if stats.rate_limited_cases > 0 {
+        issues.push("provider_rate_limited");
+    }
     if stats.transport_error_cases > 0 {
         issues.push("transport_errors");
     }
     issues
+}
+
+fn upper_percentile_ms(samples: &[u64], percentile: usize) -> Option<u64> {
+    if samples.is_empty() {
+        return None;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    let index = (sorted.len() * percentile / 100).min(sorted.len() - 1);
+    Some(sorted[index])
+}
+
+fn observed_i64_sum(observed_count: usize, total: i64) -> Option<i64> {
+    (observed_count > 0).then_some(total)
+}
+
+fn observed_cost_sum(observed_count: usize, total: f64) -> Option<f64> {
+    (observed_count > 0).then_some(total)
 }
 
 fn observed_probe_cases(cases: &[ToolScorecardObservedCase]) -> Vec<&'static str> {

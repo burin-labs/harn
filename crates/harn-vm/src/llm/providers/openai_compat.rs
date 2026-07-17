@@ -139,7 +139,11 @@ impl OpenAiCompatibleProvider {
             msgs.push(serde_json::json!({"role": "system", "content": sys}));
         }
         msgs.extend(opts.messages.iter().cloned().map(|mut message| {
-            sanitize_openai_message_for_request(&mut message, remap_tool_call);
+            sanitize_openai_message_for_request(
+                &mut message,
+                remap_tool_call,
+                caps.reasoning_history_wire_field,
+            );
             message
         }));
         if let Some(ref prefill) = opts.prefill {
@@ -950,7 +954,11 @@ pub(crate) fn apply_openrouter_provider_order(body: &mut serde_json::Value, orde
     );
 }
 
-fn sanitize_openai_message_for_request(message: &mut serde_json::Value, remap_tool_call: bool) {
+fn sanitize_openai_message_for_request(
+    message: &mut serde_json::Value,
+    remap_tool_call: bool,
+    reasoning_history_wire_field: Option<crate::llm::capabilities::ReasoningHistoryWireField>,
+) {
     let Some(object) = message.as_object_mut() else {
         return;
     };
@@ -959,7 +967,26 @@ fn sanitize_openai_message_for_request(message: &mut serde_json::Value, remap_to
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
 
+    // Harn stores private reasoning under its canonical `reasoning` key and
+    // strips every provider-private field by default. A small number of routes
+    // reject a valid tool-result follow-up unless their exact prior assistant
+    // reasoning field is replayed. Project only Harn-owned canonical reasoning
+    // through the typed catalog mode; never pass through arbitrary seeded
+    // `reasoning_content` from transcript/history input.
+    let replay_reasoning = (role.as_deref() == Some("assistant"))
+        .then(|| object.get("reasoning").and_then(serde_json::Value::as_str))
+        .flatten()
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+
     object.retain(|key, _| openai_message_key_allowed(role.as_deref(), key));
+
+    if let (Some(field), Some(reasoning)) = (reasoning_history_wire_field, replay_reasoning) {
+        object.insert(
+            field.as_str().to_string(),
+            serde_json::Value::String(reasoning),
+        );
+    }
 
     if let Some(content) = object.get("content").cloned() {
         let content = if remap_tool_call {
@@ -2728,142 +2755,6 @@ thinking_modes = ["enabled"]
             serialized.contains("[[CALL]]") && serialized.contains("[[/CALL]]"),
             "non-special wire delimiters must be present: {serialized}"
         );
-    }
-
-    #[test]
-    fn build_request_body_strips_storage_only_message_fields() {
-        // The durable transcript carries storage-only fields on prior turns.
-        // Strict OpenAI-compat providers reject unknown top-level message
-        // fields with terminal HTTP 400s, so the chat-completions boundary must
-        // retain only portable OpenAI message keys.
-        let mut payload = base_request_payload();
-        payload.provider = "openai".to_string();
-        payload.model = "gpt-4.1".to_string();
-        payload.messages = vec![
-            json!({
-                "role": "user",
-                "content": "hello",
-                "private_reasoning": "storage only",
-                "cache_control": {"type": "ephemeral"},
-                "reasoning_content": "wrong role",
-                "tool_calls": [{
-                    "id": "wrong_role",
-                    "type": "function",
-                    "function": {"name": "read", "arguments": "{}"},
-                }],
-            }),
-            json!({
-                "role": "assistant",
-                "content": [
-                    {"type": "reasoning", "text": "hidden chain", "visibility": "private"},
-                    {"type": "output_text", "text": "visible answer", "visibility": "public"}
-                ],
-                "reasoning": "let me inspect the file before editing",
-                "private_reasoning": "storage only",
-                "thinking": {"signature": "provider-private"},
-                "cache_control": {"type": "ephemeral"},
-                "tool_call_id": "wrong_role",
-                "reasoning_content": "provider-private trace",
-                "tool_calls": [{
-                    "id": "call_001",
-                    "type": "function",
-                    "function": {
-                        "name": "read",
-                        "arguments": "{\"path\":\"main.rs\"}",
-                        "approxNumTokens": 0,
-                    },
-                    "name": "wrong_top_level_name",
-                    "arguments": {"ignored": true},
-                    "approxNumTokens": 0,
-                    "is_risky": "false",
-                    "index": 0,
-                }, {
-                    "id": "call_002",
-                    "type": "burin-internal",
-                    "name": "write",
-                    "arguments": {"path": "main.rs"},
-                    "approxNumTokens": 0,
-                }],
-            }),
-            json!({
-                "role": "tool",
-                "tool_call_id": "call_001",
-                "content": "{\"ok\":true}",
-                "tool_calls": [{
-                    "id": "wrong_role",
-                    "type": "function",
-                    "function": {"name": "read", "arguments": "{}"},
-                }],
-                "reasoning": "storage only",
-                "reasoning_content": "wrong role",
-            }),
-        ];
-        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
-        let messages = body["messages"].as_array().expect("messages array");
-        for message in messages {
-            for key in [
-                "reasoning",
-                "private_reasoning",
-                "thinking",
-                "cache_control",
-                "reasoning_content",
-            ] {
-                assert!(
-                    message.get(key).is_none(),
-                    "outgoing message must not carry `{key}`: {message}"
-                );
-            }
-        }
-        let user = &messages[0];
-        assert_eq!(user["role"], "user");
-        assert!(user.get("tool_calls").is_none());
-        assert!(user.get("reasoning_content").is_none());
-
-        let assistant = &messages[1];
-        assert_eq!(assistant["role"], "assistant");
-        assert!(assistant.get("tool_call_id").is_none());
-        assert_eq!(assistant["content"][0]["text"], "visible answer");
-        assert!(
-            !assistant["content"].to_string().contains("hidden chain"),
-            "private reasoning content block rode into OpenAI-compatible request: {assistant}"
-        );
-        let first_call = &assistant["tool_calls"][0];
-        assert_eq!(first_call["id"], "call_001");
-        assert_eq!(first_call["type"], "function");
-        assert_eq!(first_call["function"]["name"], "read");
-        assert_eq!(
-            first_call["function"]["arguments"],
-            "{\"path\":\"main.rs\"}"
-        );
-        for key in ["approxNumTokens", "is_risky", "index", "name", "arguments"] {
-            assert!(
-                first_call.get(key).is_none(),
-                "outgoing tool_call must not carry `{key}`: {first_call}"
-            );
-        }
-        assert!(
-            first_call["function"].get("approxNumTokens").is_none(),
-            "outgoing tool_call function must not carry provider-private fields: {first_call}"
-        );
-
-        let second_call = &assistant["tool_calls"][1];
-        assert_eq!(second_call["id"], "call_002");
-        assert_eq!(second_call["type"], "function");
-        assert_eq!(second_call["function"]["name"], "write");
-        assert_eq!(
-            second_call["function"]["arguments"],
-            "{\"path\":\"main.rs\"}"
-        );
-        assert!(
-            second_call.get("approxNumTokens").is_none(),
-            "flat Harn tool-call history must be normalized to OpenAI shape: {second_call}"
-        );
-
-        let tool = &messages[2];
-        assert_eq!(tool["role"], "tool");
-        assert_eq!(tool["tool_call_id"], "call_001");
-        assert!(tool.get("tool_calls").is_none());
-        assert!(tool.get("reasoning_content").is_none());
     }
 
     #[test]

@@ -32,8 +32,8 @@ use self::uri::DispatchUri;
 use super::registry::{
     binding_autonomy_budget_would_exceed, binding_budget_would_exceed, matching_bindings,
     micros_to_usd, note_autonomous_decision, note_binding_budget_cost,
-    note_orchestrator_budget_cost, orchestrator_budget_would_exceed, usd_to_micros, AgentScope,
-    TargetExpr, TriggerBinding, TriggerBudgetExhaustionStrategy, TriggerHandlerSpec,
+    note_orchestrator_budget_cost, orchestrator_budget_would_exceed, AgentScope, TargetExpr,
+    TriggerBinding, TriggerBudgetExhaustionStrategy, TriggerHandlerSpec,
 };
 use super::{
     begin_in_flight, finish_in_flight, TriggerDispatchOutcome, TriggerEvent,
@@ -52,6 +52,7 @@ mod action_graph;
 mod audit;
 mod circuits;
 mod flow_control;
+mod persona;
 mod predicate_eval;
 pub mod retry;
 mod state;
@@ -101,10 +102,10 @@ use types::{
 use util::{
     accepted_at_ms, binding_key_from_parts, build_batched_event, cancelled_dispatch_outcome,
     current_unix_ms, decrement_in_flight, decrement_retry_queue_depth, dispatch_cancel_requested,
-    dispatch_result_status, duration_between_ms, event_headers, extract_event_path,
-    extracted_key_value, extracted_priority_value, json_value_to_gate, maybe_fail_before_outbox,
-    now_rfc3339, now_unix_ms, queue_appended_at_ms, recv_cancel, sleep_or_cancel_or_request,
-    tenant_id, unix_ms, worker_queue_priority,
+    dispatch_result_cost_usd_micros, dispatch_result_status, duration_between_ms, event_headers,
+    extract_event_path, extracted_key_value, extracted_priority_value, json_value_to_gate,
+    maybe_fail_before_outbox, now_rfc3339, now_unix_ms, queue_appended_at_ms, recv_cancel,
+    sleep_or_cancel_or_request, tenant_id, unix_ms, worker_queue_priority,
 };
 
 pub const TRIGGER_ACCEPTED_AT_MS_HEADER: &str = "harn_trigger_accepted_at_ms";
@@ -570,6 +571,7 @@ impl Dispatcher {
         )
         .await
         .unwrap_or(binding.autonomy_tier);
+        let autonomy_tier = binding.handler.effective_autonomy_tier(autonomy_tier);
         let binding_key = binding.binding_key();
         let route = DispatchUri::from(&binding.handler);
         let trigger_id = binding.id.as_str().to_string();
@@ -2321,31 +2323,8 @@ impl Dispatcher {
                 })
             }
             DispatchUri::Persona { .. } => {
-                let TriggerHandlerSpec::Persona {
-                    binding: persona_binding,
-                } = &binding.handler
-                else {
-                    return Err(DispatchError::Local(format!(
-                        "trigger '{}' resolved to a persona dispatch URI but does not carry a persona binding",
-                        binding.id.as_str()
-                    )));
-                };
-                let receipt = crate::fire_persona_trigger(
-                    &self.event_log,
-                    persona_binding,
-                    event.provider.as_str(),
-                    &event.kind,
-                    trigger_event_persona_metadata(event),
-                    crate::PersonaRunCost::default(),
-                    crate::persona_now_ms(),
-                )
-                .await
-                .map_err(DispatchError::Local)?;
-                Ok(DispatchCallResult {
-                    output: serde_json::to_value(receipt)
-                        .map_err(|error| DispatchError::Serde(error.to_string()))?,
-                    metadata: route.dispatch_boundary_metadata(),
-                })
+                self.dispatch_persona(binding, route, event, autonomy_tier, wait_lease, cancel_rx)
+                    .await
             }
             DispatchUri::EvalPack { target, pack_id } => {
                 let TriggerHandlerSpec::EvalPack {
@@ -3306,61 +3285,6 @@ impl Dispatcher {
             .await?;
         Ok(json_value_to_gate(&vm_value_to_json(&value)))
     }
-}
-
-fn dispatch_result_cost_usd_micros(result: &serde_json::Value) -> u64 {
-    for field in ["cost_usd", "costUsd", "total_cost_usd", "totalCostUsd"] {
-        if let Some(cost) = result.get(field).and_then(json_usd_micros) {
-            return cost;
-        }
-    }
-
-    let stats_rows_cost = result
-        .get("stats_rows")
-        .and_then(|rows| rows.as_array())
-        .map(|rows| {
-            rows.iter().fold(0_u64, |acc, row| {
-                acc.saturating_add(
-                    row.get("total_cost_usd")
-                        .or_else(|| row.get("totalCostUsd"))
-                        .and_then(json_usd_micros)
-                        .unwrap_or_default(),
-                )
-            })
-        })
-        .unwrap_or_default();
-    if stats_rows_cost > 0 {
-        return stats_rows_cost;
-    }
-
-    result
-        .get("cases")
-        .and_then(|cases| cases.as_array())
-        .map(|cases| {
-            cases.iter().fold(0_u64, |case_acc, case| {
-                let trial_cost = case
-                    .get("trials")
-                    .and_then(|trials| trials.as_array())
-                    .map(|trials| {
-                        trials.iter().fold(0_u64, |trial_acc, trial| {
-                            trial_acc.saturating_add(
-                                trial
-                                    .get("cost_usd")
-                                    .or_else(|| trial.get("costUsd"))
-                                    .and_then(json_usd_micros)
-                                    .unwrap_or_default(),
-                            )
-                        })
-                    })
-                    .unwrap_or_default();
-                case_acc.saturating_add(trial_cost)
-            })
-        })
-        .unwrap_or_default()
-}
-
-fn json_usd_micros(value: &serde_json::Value) -> Option<u64> {
-    value.as_f64().map(usd_to_micros)
 }
 
 #[cfg(test)]

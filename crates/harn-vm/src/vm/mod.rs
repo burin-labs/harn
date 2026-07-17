@@ -9,10 +9,12 @@ mod format;
 mod interrupts;
 pub mod iter;
 mod methods;
+mod module_phase_timing;
 mod modules;
 pub(crate) mod ops;
 mod scope;
 mod state;
+mod tool_callable;
 
 #[cfg(test)]
 mod depth_regression_tests;
@@ -21,9 +23,13 @@ mod tests_debug;
 #[cfg(test)]
 mod tests_lazy_callable;
 #[cfg(test)]
+mod tests_lexical_block;
+#[cfg(test)]
 mod tests_package_runtime;
 #[cfg(test)]
 mod tests_runtime;
+#[cfg(test)]
+mod tests_runtime_process_exit;
 #[cfg(test)]
 mod tests_typed_op_fallback;
 
@@ -31,6 +37,7 @@ pub(crate) use async_builtin::run_async_builtin_with;
 pub use async_builtin::AsyncBuiltinCtx;
 pub use builtin::{VmBuiltinArity, VmBuiltinKind, VmBuiltinMetadata};
 pub use debug::{DebugAction, DebugState};
+pub use module_phase_timing::{ModulePhaseRecorder, ModulePhaseStats};
 pub use modules::resolve_module_import_path;
 pub use state::{Vm, VmBaseline};
 

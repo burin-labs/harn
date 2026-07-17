@@ -203,6 +203,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/pins" => "stdlib/agent/pins.harn",
     "agent/goal" => "stdlib/agent/goal.harn",
     "agent/task_plan" => "stdlib/agent/task_plan.harn",
+    "personas/compiler" => "stdlib/personas/compiler.harn",
     "agent_state" => "stdlib/stdlib_agent_state.harn",
     "memory" => "stdlib/stdlib_memory.harn",
     "session-store" => "stdlib/stdlib_session_store.harn",

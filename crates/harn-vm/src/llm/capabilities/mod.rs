@@ -32,9 +32,14 @@ pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml"
 
 mod audit;
 mod lookup;
+#[cfg(test)]
+mod lookup_tests_kimi;
 mod model;
+mod overrides;
 mod rule;
 mod tool_format;
+
+pub(crate) use overrides::swap_user_overrides;
 
 pub use audit::{
     audit_builtin_catalogued_chat_model_tool_capabilities,
@@ -48,7 +53,7 @@ pub use lookup::{
 };
 pub use model::{
     Capabilities, CapabilitiesFile, ComputerUseStyle, GovernorBackoff, ProviderDefaults,
-    ProviderLimits, ScreenshotScaling, WireDialect,
+    ProviderLimits, ReasoningHistoryWireField, ScreenshotScaling, WireDialect,
 };
 pub use rule::ProviderRule;
 pub use tool_format::{

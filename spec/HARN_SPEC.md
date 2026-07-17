@@ -502,6 +502,7 @@ statement          ::= let_binding
                      | require_stmt
                      | deadline_block
                      | mutex_block
+                     | block_statement
                      | select_expr
                      | break_stmt
                      | continue_stmt
@@ -534,6 +535,7 @@ guard_stmt         ::= 'guard' expression 'else' '{' block '}'
 require_stmt       ::= 'require' expression [',' expression]
 deadline_block     ::= 'deadline' primary '{' block '}'
 mutex_block        ::= 'mutex' '{' block '}'
+block_statement    ::= 'block' '{' block '}'
 select_expr        ::= 'select' '{'
                          (IDENTIFIER 'from' expression '{' block '}'
                          | 'timeout' expression '{' block '}'
@@ -622,6 +624,11 @@ list_pattern_element  ::= '...' IDENTIFIER
 The `expression_statement` rule handles both bare expressions (function calls, method calls)
 and assignments. An assignment is recognized when the left-hand side is an identifier
 followed by `=`.
+
+`block { ... }` introduces an explicit lexical scope. The `block` word is
+contextual: it remains available as an identifier except when immediately followed by `{`
+at statement position. Bare `{ ... }` is not a block statement because braces already
+introduce dict literals in expression position, including dict-valued function tails.
 
 ### Expressions (by precedence, lowest to highest)
 
@@ -800,34 +807,87 @@ Returns `nil` (which becomes `.nilValue`) if not found anywhere.
 
 ### Variable definition
 
-- `let name = value` -- defines `name` as immutable in the current scope.
-- `const NAME = value` -- defines `NAME` as immutable, with the
-  initializer additionally folded at compile time by the bounded
-  const-evaluator. Only pure expressions are accepted: literal
-  arithmetic, string concatenation, literal lists/dicts, ternary /
-  if-else, subscript access, and calls into a small whitelist of pure
-  stdlib builtins (`len`, `format`, `min`, `max`, `abs`, `floor`,
-  `ceil`, `round`, `lowercase`, `uppercase`, `trim`, `concat`, `join`).
-  Any reference to `harness.*`, runtime constructs (`spawn`, `parallel`,
-  `select`, `try`, `yield`, `emit`, `await`, …), user-defined
-  functions, loops, or assignment is rejected with a `HARN-MET-001`,
-  `HARN-CST-001`, `HARN-CST-002`, `HARN-CST-003`, or `HARN-CST-004`
-  diagnostic depending on the failure mode. Issue #1791 carries the
-  full design and rationale.
-- `var name = value` -- defines `name` as mutable in the current scope.
-- `var name = nil` -- leaves `name` widenable until the first non-`nil`
+- `const name = value` -- defines `name` in the current scope. The
+  binding's **value never changes**.
+- `let name = value` -- defines `name` in the current scope. The
+  binding's value **may** change.
+- `let name = nil` -- leaves `name` widenable until the first non-`nil`
   assignment, which fixes the slot to `T | nil`. The explicit form
-  `var name: T | nil = nil` remains valid when you want to pin `T`
+  `let name: T | nil = nil` remains valid when you want to pin `T`
   up front.
-- `let _ = value` / `var _ = value` -- evaluate `value` and discard it
+- `const _ = value` / `let _ = value` -- evaluate `value` and discard it
   without introducing a variable into scope. `_` can be reused any number
-  of times in the same scope.
+  of times in the same scope. This is also how you deliberately discard a
+  result you do not need — see [Binding mutability](#binding-mutability).
+
+Function parameters are immutable, exactly as if declared `const`.
+
+### Binding mutability
+
+Harn has one rule, and it covers every type:
+
+> **`const` means this binding's value never changes. `let` means it may.**
+
+Harn's collections are **value types** with copy-on-write representation:
+assigning one to a second binding copies the value, so writes through the
+copy are never observable through the original.
+
+```harn
+let original = {k: 1}
+let copy = original
+copy["k"] = 99
+// original["k"] == 1 -- a copy, not an alias
+```
+
+That single fact settles what `const` forbids. Because a collection *is* a
+value, changing part of it changes the binding's whole value:
+
+- **Index, property, nested-path, and struct-field assignment** (`l[0] = x`,
+  `d.k = x`, `d["a"]["b"] = x`, `p.x = 9`) all change the binding's value, so
+  all of them require `let`. Through a `const` binding each is rejected
+  identically, with `HARN-OWN-001`. Read `d["k"] = 1` as sugar for
+  `d = <a new dict differing at k>` and the requirement is self-evident.
+- **Methods** such as `push`, `sort`, and `add` return a *new* value and leave
+  the receiver's value untouched, so they change nothing and are permitted on
+  a `const` binding. They are ordinary expressions, not assignments.
+
+```harn
+const base = [1]
+const appended = base.push(2)   // fine: base is untouched, base == [1]
+
+let built = []
+built = built.push(1)           // this is how a collection is built up
+```
+
+Because the methods are pure, discarding a result silently does nothing;
+`HARN-LNT-066` rejects that as an error. A bare `l.push(1)` leaves `l`
+unchanged and is always a bug.
+
+#### Why this is Swift's rule, not TypeScript's
+
+The rule follows from value semantics, not from the keyword's spelling.
+TypeScript's `const` constrains only the binding, so `const a = []; a.push(1)`
+is legal there — but TypeScript's arrays are *references*, and mutating one is
+observable through every alias. Swift's `let` freezes an `Array` outright,
+because a Swift `Array` is a *value*. Harn's collections are values, so Harn
+takes Swift's position for the same reason.
+
+The two halves are therefore one paradigm, not two: **values are immutable,
+and a binding's value changes only through assignment.** Subscript assignment
+is assignment; a method call is an expression. Swift reaches the same place
+from the other side, defining subscript-set on a value type as a `mutating`
+whole-value reassignment. Harn simply has no `mutating` methods.
 
 ### Variable assignment
 
 `name = value` walks up the scope chain to find the binding. If the binding is found but was
-declared with `let`, throws `HarnRuntimeError.immutableAssignment`. If not found in any scope,
+declared with `const`, throws `HarnRuntimeError.immutableAssignment`. If not found in any scope,
 throws `HarnRuntimeError.undefinedVariable`.
+
+The same applies to every assignment form that changes a binding's value —
+`l[0] = x`, `d.k = x`, `d["a"]["b"] = x`, `p.x = 9` — since under value
+semantics each one reassigns the binding as a whole. See
+[Binding mutability](#binding-mutability).
 
 ### Scope creation
 
@@ -3758,11 +3818,16 @@ only in covariant positions.
 | Constructor | Variance |
 |---|---|
 | `iter<T>` | covariant in `T` (read-only) |
-| `list<T>` | invariant in `T` (mutable: `push`, index assignment) |
-| `dict<K, V>` | invariant in both `K` and `V` (mutable) |
+| `list<T>` | invariant in `T` (index assignment writes `T`) |
+| `dict<K, V>` | invariant in both `K` and `V` (index assignment writes `V`) |
 | `Result<T, E>` | covariant in both `T` and `E` |
 | `fn(P1, ...) -> R` | parameters **contravariant**, return covariant |
 | Shape `{ field: T, ... }` | covariant per field (width subtyping) |
+
+`list` and `dict` are invariant because index assignment can *write* through
+them, which makes them read-write positions. Methods such as `push` are not a
+reason: they return a new collection and never modify the receiver, so they are
+covariant reads. See [Binding mutability](04-scope-rules.md#binding-mutability).
 
 The numeric widening `int <: float` only applies in covariant
 positions. In invariant or contravariant positions it is suppressed —
@@ -7342,9 +7407,24 @@ they are intended for test pipelines and the linter warns on non-test use:
 
 | Function | Description |
 |---|---|
-| `assert(condition)` | Throws if `condition` is falsy |
-| `assert_eq(a, b)` | Throws if `a != b`, showing both values |
-| `assert_ne(a, b)` | Throws if `a == b`, showing both values |
+| `assert(condition, message?)` | Throws if `condition` is falsy |
+| `assert_eq(a, b, message?)` | Throws if `a != b`, showing both values |
+| `assert_ne(a, b, message?)` | Throws if `a == b`, showing both values |
+
+All three accept an optional custom `message`. If `message` is omitted, nil,
+an empty string, or the literal string `"null"` (the common result of
+`json_stringify`-ing a value that turned out to be nil), the assertion falls
+back to its default message instead of throwing that uninformative value
+verbatim.
+
+### Captured output
+
+`log`, `print`, `println`, and related output builtins write into a
+per-case buffer rather than directly to the terminal. A passing test stays
+quiet by default; a failing test always prints its buffered output
+alongside the failure. Pass `--verbose` to see a passing test's captured
+output too. `--json-out` and `--junit` reports include it under
+`captured_output` (JUnit: `<system-out>`) whenever it is non-empty.
 
 ### Mock LLM provider
 
@@ -7391,6 +7471,25 @@ The following environment variables configure runtime behavior:
 | `LOCAL_LLM_MODEL` | Default model ID for the local OpenAI-compatible provider. |
 | `MLX_BASE_URL` | Base URL for the MLX OpenAI-compatible provider. Default `http://127.0.0.1:8002`. |
 | `MLX_MODEL_ID` | Default model ID for the MLX OpenAI-compatible provider readiness probe. |
+
+### Sandbox and egress
+
+These variables affect the confinement `harn run` installs by default. See
+[Sandbox mode](30-sandbox-mode.md) for the run-level sandbox and `egress_policy(config)`
+in the built-in method table for the full rule syntax.
+
+| Variable | Description |
+|---|---|
+| `HARN_HANDLER_SANDBOX` | How the `worktree` sandbox profile reacts when the platform's OS confinement mechanism (Linux Landlock + seccomp, macOS `sandbox-exec`, Windows AppContainer) is unavailable: `enforce`/`required`/`1`/`true` fail the spawn, `warn` (default) logs once and continues with workspace-root path enforcement but **without** OS confinement, and `off`/`none`/`0`/`false` disables the OS portion silently. Workspace-root path enforcement for file builtins is unaffected either way. The `os_hardened` profile always enforces and ignores this variable. |
+| `HARN_EGRESS_ALLOW` | Comma-separated egress allow rules seeding the process egress policy. Rules accept exact hosts, `*.suffix` wildcards, IP literals/CIDR, and an optional `:port`. |
+| `HARN_EGRESS_DENY` | Comma-separated egress deny rules, same syntax as `HARN_EGRESS_ALLOW`. Deny wins over allow. |
+| `HARN_EGRESS_DEFAULT` | Action for destinations matching no rule: `allow` (default) or `deny` (allowlist mode). |
+| `HARN_EGRESS_BLOCK_PRIVATE` | Private-address (SSRF) guard. `private`/`on`/`block`/`true` block DNS-resolved loopback, private, link-local, cloud-metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `off`/`false`/`none` opts out. Under default `harn run` this guard is already on; configured LLM provider endpoints on loopback or a private LAN remain reachable, while link-local and cloud-metadata ranges stay blocked. |
+| `HARN_EGRESS_ALLOW_LOOPBACK` | Set to `1`/`true` to permit loopback destinations while the private-address guard otherwise stays engaged. Default `false`. |
+
+Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}`.
+Any of these variables being set seeds a process-wide egress policy; `egress_policy(config)`
+overrides them at runtime.
 
 ## Known limitations and future work
 

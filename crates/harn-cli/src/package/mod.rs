@@ -14,8 +14,8 @@ use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use url::Url;
 
-const CONTENT_HASH_FILE: &str = ".harn-content-hash";
-const CACHE_METADATA_FILE: &str = ".harn-package-cache.toml";
+const CONTENT_HASH_FILE: &str = harn_modules::package_execution::CONTENT_HASH_FILE;
+const CACHE_METADATA_FILE: &str = harn_modules::package_execution::CACHE_METADATA_FILE;
 const HARN_CACHE_DIR_ENV: &str = "HARN_CACHE_DIR";
 const HARN_PACKAGE_REGISTRY_ENV: &str = "HARN_PACKAGE_REGISTRY";
 const HARN_PACKAGE_REGISTRY_TOKEN_ENV: &str = "HARN_PACKAGE_REGISTRY_TOKEN";
@@ -36,6 +36,8 @@ mod lockfile;
 mod manifest;
 mod maturity;
 mod package_ops;
+mod persona_activation;
+mod persona_runtime;
 mod registry;
 mod skills;
 mod validation;
@@ -59,6 +61,8 @@ pub use maturity::{
     OutdatedStatus,
 };
 pub use package_ops::*;
+pub use persona_activation::*;
+pub(crate) use persona_runtime::*;
 pub(crate) use registry::*;
 pub use registry::{
     clean_package_cache, list_package_cache, search_package_registry, search_rule_package_registry,

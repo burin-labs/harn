@@ -9165,6 +9165,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "text_only",
+        "parity_notes": "2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9250,18 +9251,18 @@
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "native",
-        "parity_notes": "Harn-managed llama.cpp launch plus one-tool probe passed native and streaming native on 2026-06-05.",
+        "preferred_format": "json",
+        "parity": "text_only",
+        "parity_notes": "2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract.",
         "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
         "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
+        "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
@@ -9320,6 +9321,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "text_only",
+        "parity_notes": "2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11270,6 +11272,100 @@
       "open_weight": true,
       "strengths": [
         "speed",
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "moonshot/kimi-k3",
+      "name": "Kimi K3 (Moonshot direct)",
+      "provider": "moonshot",
+      "aliases": [
+        "kimi-k3",
+        "moonshot-kimi-k3"
+      ],
+      "context_window": 1048576,
+      "logical_model": "moonshot-kimi-k3",
+      "equivalence_group": "moonshot-kimi-k3",
+      "served_variant": "moonshot-direct",
+      "wire_model": "kimi-k3",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_notes": "Moonshot documents native OpenAI-compatible tools; credentialed Harn probe not run because MOONSHOT_API_KEY is unavailable in this lane.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
         "coding",
         "agentic",
         "long_context",
@@ -22832,6 +22928,12 @@
       "provider": "openrouter"
     },
     {
+      "name": "kimi-k3",
+      "model_id": "moonshot/kimi-k3",
+      "provider": "moonshot",
+      "tool_format": "native"
+    },
+    {
       "name": "llamacpp-qwen3.6",
       "model_id": "qwen3.6-35b-a3b",
       "provider": "llamacpp"
@@ -22840,7 +22942,7 @@
       "name": "llamacpp-qwen3.6-q4",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "native",
+      "tool_format": "json",
       "tool_calling": {
         "native": "pass",
         "text": "unknown",
@@ -22883,7 +22985,7 @@
       "name": "local-qwen3.6",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "native",
+      "tool_format": "json",
       "tool_calling": {
         "native": "pass",
         "text": "unknown",
@@ -22901,7 +23003,7 @@
       "name": "local-qwen3.6-gguf",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "native",
+      "tool_format": "json",
       "tool_calling": {
         "native": "pass",
         "text": "unknown",
@@ -23001,6 +23103,12 @@
       "model_id": "moonshot/kimi-k2.7-code-highspeed",
       "provider": "moonshot",
       "tool_format": "json"
+    },
+    {
+      "name": "moonshot-kimi-k3",
+      "model_id": "moonshot/kimi-k3",
+      "provider": "moonshot",
+      "tool_format": "native"
     },
     {
       "name": "nvidia-deepseek-v4-pro",
@@ -24866,11 +24974,10 @@
       "label": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
       "family": "qwen",
       "capabilities": [
-        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
-        "structured_output_mode:native_json",
+        "structured_output_mode:delimited",
         "text_tools",
         "thinking",
         "tools"
@@ -25309,6 +25416,28 @@
         "thinking",
         "tools",
         "video",
+        "vision"
+      ]
+    },
+    {
+      "provider": "moonshot",
+      "model": "kimi-k3",
+      "base_url": "https://api.moonshot.ai/v1",
+      "secret_env": "MOONSHOT_API_KEY",
+      "label": "Kimi K3 (Moonshot direct)",
+      "family": "kimi",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
         "vision"
       ]
     },
