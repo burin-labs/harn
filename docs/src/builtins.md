@@ -1,6 +1,9 @@
 # Builtin functions
 
-Complete reference for all built-in functions available in Harn.
+Reference notes for commonly used Harn built-in functions. This page is a
+curated subset, not an exhaustive list. The complete, authoritative builtin
+registry — every function registered via `#[harn_builtin]` — is emitted by
+`harn contracts builtins`.
 
 ## Output
 
@@ -17,7 +20,7 @@ Complete reference for all built-in functions available in Harn.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `type_of(value)` | value: any | string | Returns type name: `"int"`, `"float"`, `"decimal"`, `"string"`, `"bool"`, `"nil"`, `"list"`, `"dict"`, `"closure"`, `"taskHandle"`, `"duration"`, `"enum"`, `"struct"` |
+| `type_of(value)` | value: any | string | Returns the runtime type tag: one of `"string"`, `"bytes"`, `"int"`, `"float"`, `"decimal"`, `"bool"`, `"nil"`, `"list"`, `"dict"`, `"closure"`, `"builtin"`, `"duration"`, `"enum"`, `"struct"`, `"task_handle"`, `"channel"`, `"atomic"`, `"rng"`, `"sync_permit"`, `"mcp_client"`, `"set"`, `"generator"`, `"stream"`, `"range"`, `"iter"`, `"pair"` (harness objects return their own names). The canonical list is `runtime_type_tags::ALL` |
 | `to_string(value)` | value: any | string | Convert to string representation |
 | `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats and decimals truncate, bools become 0/1; non-finite or out-of-range values return `nil` |
 | `to_float(value)` | value: any | float or nil | Parse/convert to float (a decimal converts lossily) |
