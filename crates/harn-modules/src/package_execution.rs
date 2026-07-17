@@ -304,6 +304,11 @@ fn lexical_package_relative_path(
             canonical_packages_root.display()
         ))
     };
+    // Preserve an exact lexical root before falling back to canonical identity.
+    // The caller below must still see `..` to reject an alias-root escape.
+    if let Ok(relative) = entry.strip_prefix(canonical_packages_root) {
+        return Ok(relative.to_path_buf());
+    }
     let mut input_packages_root = None;
     for ancestor in entry.ancestors() {
         if ancestor
@@ -697,6 +702,13 @@ mod tests {
         let entry = snapshot
             .packages_root()
             .join("agents/../shared/helper.harn");
+        assert_eq!(
+            lexical_package_relative_path(&entry, snapshot.packages_root(), snapshot.generation())
+                .unwrap(),
+            PathBuf::from("agents")
+                .join("..")
+                .join("shared/helper.harn")
+        );
         let guard = PackageExecutionGuard::new(snapshot, "agents", content_hash).unwrap();
 
         let error = guard.verify_entry_source(&entry).unwrap_err();
