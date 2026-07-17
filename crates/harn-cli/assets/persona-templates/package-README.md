@@ -1,12 +1,22 @@
-# Persona templates
+# {{persona_title}}
 
-These packages mirror the built-in `harn persona new --template <kind>` layouts.
-They are intentionally Harn-first: each template centers an `@persona` function,
-typed `@step` metadata, prompt assets, a fixture pair, and a smoke test.
+Generated from the `{{template_kind}}` persona template.
 
-The CLI applies the same placeholder vocabulary when scaffolding:
+## Validate
 
-- `{{persona_name}}`
-- `{{persona_ident}}`
-- `{{persona_title}}`
-- `{{template_kind}}`
+```bash
+harn persona doctor {{persona_name}}
+```
+
+## Run The Smoke Test
+
+```bash
+harn test tests/{{persona_name}}_smoke.harn
+```
+
+## Package Layout
+
+- `harn.toml` declares the durable persona manifest and authority defaults.
+- `src/{{persona_name}}.harn` contains the persona and typed step DAG.
+- `prompts/system.harn.prompt` contains model-facing instructions.
+- `fixtures/`, `tests/`, and `evals/` contain deterministic validation assets.

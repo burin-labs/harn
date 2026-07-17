@@ -130,6 +130,7 @@ extra operations declared in `[check.host_capabilities]` or
 ## CLI
 
 ```bash
+harn persona new incident_triager --template hybrid-classify-then-act
 harn persona list
 harn persona list --json
 harn persona check personas/ship_captain/harn.toml
@@ -147,6 +148,12 @@ harn persona --manifest examples/personas/harn.toml pause merge_captain
 harn persona --manifest examples/personas/harn.toml resume merge_captain
 harn persona --manifest examples/personas/harn.toml disable merge_captain
 ```
+
+`persona new` renders from the canonical templates embedded in the CLI, stages
+the complete package beside its destination, and publishes it only after every
+doctor check and the smoke test pass. `--force` backs up the existing package
+and restores it if publication fails; validation failures never modify the
+destination.
 
 `--manifest` accepts a `harn.toml` path or a directory containing one. Without
 it, Harn walks up from the current directory to the nearest `harn.toml`, stopping

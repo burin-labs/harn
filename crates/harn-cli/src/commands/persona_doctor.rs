@@ -145,6 +145,10 @@ pub(crate) async fn doctor_report(
 
     let entry_source = resolve_entry_source(&catalog, persona);
     checks.push(source_shape_check(&entry_source));
+    checks.push(entry_symbol_check(
+        &entry_source,
+        persona.entry_workflow.as_deref(),
+    ));
     checks.push(lint_check(&catalog, &entry_source));
     checks.push(prompt_asset_check(&catalog, &entry_source));
     checks.push(step_metadata_check(persona));
@@ -288,6 +292,70 @@ fn source_shape_check(entry_source: &Option<PathBuf>) -> DoctorCheck {
             DoctorStatus::Red,
             format!("failed to read {}: {error}", path.display()),
         ),
+    }
+}
+
+fn entry_symbol_check(entry_source: &Option<PathBuf>, entry_workflow: Option<&str>) -> DoctorCheck {
+    let Some(path) = entry_source else {
+        return check(
+            "entry-symbol",
+            DoctorStatus::Red,
+            "entry source unavailable",
+        );
+    };
+    let Some((_, symbol)) = entry_workflow.and_then(|entry| entry.split_once('#')) else {
+        return check(
+            "entry-symbol",
+            DoctorStatus::Red,
+            "entry_workflow must include a callable fragment",
+        );
+    };
+    let symbol = symbol.trim();
+    if symbol.is_empty() {
+        return check(
+            "entry-symbol",
+            DoctorStatus::Red,
+            "entry_workflow fragment must not be empty",
+        );
+    }
+    let source = match fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            return check(
+                "entry-symbol",
+                DoctorStatus::Red,
+                format!("failed to read {}: {error}", path.display()),
+            )
+        }
+    };
+    let program = match harn_parser::parse_source(&source) {
+        Ok(program) => program,
+        Err(error) => return check("entry-symbol", DoctorStatus::Red, error.to_string()),
+    };
+    let found = program.iter().any(|node| {
+        let (_, declaration) = harn_parser::peel_attributes(node);
+        match &declaration.node {
+            harn_parser::Node::Pipeline { name, .. }
+            | harn_parser::Node::FnDecl { name, .. }
+            | harn_parser::Node::ToolDecl { name, .. } => name == symbol,
+            _ => false,
+        }
+    });
+    if found {
+        check(
+            "entry-symbol",
+            DoctorStatus::Green,
+            format!("{} exports callable {symbol}", path.display()),
+        )
+    } else {
+        check(
+            "entry-symbol",
+            DoctorStatus::Red,
+            format!(
+                "{} does not declare callable entry symbol {symbol:?}",
+                path.display()
+            ),
+        )
     }
 }
 
