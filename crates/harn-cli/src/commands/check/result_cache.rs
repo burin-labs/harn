@@ -213,6 +213,7 @@ pub(super) fn result_cache_key(
     path_str: &str,
     source: &str,
     config: &CheckConfig,
+    host_capabilities_content: Option<&str>,
     check_invariants: bool,
     lint_exemptions: &[String],
 ) -> [u8; 32] {
@@ -239,14 +240,18 @@ pub(super) fn result_cache_key(
     for name in lint_exemptions {
         fold("lint-exemption", name.as_bytes());
     }
-    fold_config(&mut fold, config);
+    fold_config(&mut fold, config, host_capabilities_content);
     hasher.finalize().into()
 }
 
 /// Fold every `CheckConfig` field into the key. Exhaustive destructuring
 /// makes adding a config field without updating the cache key a compile
 /// error rather than a stale-cache bug.
-fn fold_config(fold: &mut impl FnMut(&str, &[u8]), config: &CheckConfig) {
+fn fold_config(
+    fold: &mut impl FnMut(&str, &[u8]),
+    config: &CheckConfig,
+    host_capabilities_content: Option<&str>,
+) {
     let CheckConfig {
         strict,
         strict_types,
@@ -276,10 +281,13 @@ fn fold_config(fold: &mut impl FnMut(&str, &[u8]), config: &CheckConfig) {
     }
     if let Some(path) = host_capabilities_path {
         fold("host-capabilities-path", path.as_bytes());
-        // The file's *content* feeds preflight decisions; fold it here so an
-        // edited manifest invalidates without waiting for probe replay.
-        let content = std::fs::read_to_string(path).unwrap_or_default();
-        fold("host-capabilities-content", content.as_bytes());
+        // Hash the exact snapshot preflight parsed. The check driver resolves
+        // it once per directory before worker fan-out, avoiding a second read
+        // per file and preventing parse/key TOCTTOU drift.
+        fold(
+            "host-capabilities-content",
+            host_capabilities_content.unwrap_or_default().as_bytes(),
+        );
     }
     if let Some(root) = bundle_root {
         fold("bundle-root", root.as_bytes());
@@ -462,4 +470,57 @@ fn hex(bytes: &[u8; 32]) -> String {
         out.push_str(&format!("{byte:02x}"));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn result_key_hashes_resolved_host_capability_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.harn");
+        let source = "pipeline main() {}\n";
+        std::fs::write(&file, source).unwrap();
+        let manifest = dir.path().join("host-capabilities.json");
+        let first_snapshot = r#"{"capabilities":{"first":{"operations":["read"]}}}"#;
+        let second_snapshot = r#"{"capabilities":{"second":{"operations":["read"]}}}"#;
+        std::fs::write(&manifest, first_snapshot).unwrap();
+        let config = CheckConfig {
+            host_capabilities_path: Some(manifest.display().to_string()),
+            ..CheckConfig::default()
+        };
+
+        let first = result_cache_key(
+            &file,
+            &file.to_string_lossy(),
+            source,
+            &config,
+            Some(first_snapshot),
+            false,
+            &[],
+        );
+        std::fs::write(&manifest, second_snapshot).unwrap();
+        let same_snapshot = result_cache_key(
+            &file,
+            &file.to_string_lossy(),
+            source,
+            &config,
+            Some(first_snapshot),
+            false,
+            &[],
+        );
+        let second = result_cache_key(
+            &file,
+            &file.to_string_lossy(),
+            source,
+            &config,
+            Some(second_snapshot),
+            false,
+            &[],
+        );
+
+        assert_eq!(first, same_snapshot);
+        assert_ne!(first, second);
+    }
 }
