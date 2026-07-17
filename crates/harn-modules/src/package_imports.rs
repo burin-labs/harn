@@ -115,6 +115,7 @@ pub fn resolve_import_path_with_guard(
     import_path: &str,
     guard: &PackageExecutionGuard,
 ) -> Result<Option<PathBuf>, PackageExecutionError> {
+    guard.validate_import_path(current_file, import_path)?;
     match resolve_local_import(current_file, import_path) {
         LocalResolution::Resolved(path) => Ok(Some(path)),
         LocalResolution::Rejected => Ok(None),

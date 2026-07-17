@@ -159,6 +159,97 @@ impl PackageExecutionGuard {
         self.verify_entry_source(entry).map(|_| ())
     }
 
+    /// Reject a relative import that would escape the importing package alias.
+    ///
+    /// This takes the raw import string rather than a `Path`: Windows normalizes
+    /// parent components while constructing a `PathBuf`, so a later entry guard
+    /// cannot distinguish `agents/../shared` from `shared`.
+    pub(crate) fn validate_import_path(
+        &self,
+        current_file: &Path,
+        import_path: &str,
+    ) -> Result<(), PackageExecutionError> {
+        // Internal module loading can pass an already-resolved absolute path;
+        // `verify_entry_source` remains the authority for that representation.
+        if Path::new(import_path).is_absolute() {
+            return Ok(());
+        }
+        if import_path.contains('\\') {
+            return Err(PackageExecutionError::Invalid(format!(
+                "package import '{import_path}' from {} must be a slash-separated relative path",
+                current_file.display()
+            )));
+        }
+        let relative = lexical_package_relative_path(
+            current_file,
+            self.snapshot.packages_root(),
+            self.snapshot.generation(),
+        )?;
+        let mut components = relative.components();
+        let package_alias = match components.next() {
+            Some(Component::Normal(alias)) => alias.to_str().ok_or_else(|| {
+                PackageExecutionError::Invalid(format!(
+                    "importing file {} has a non-UTF-8 package alias",
+                    current_file.display()
+                ))
+            })?,
+            _ => {
+                return Err(PackageExecutionError::Invalid(format!(
+                    "importing file {} has no package alias in generation {}",
+                    current_file.display(),
+                    self.snapshot.generation()
+                )));
+            }
+        };
+        let components = components.collect::<Vec<_>>();
+        let Some((file_name, parent_components)) = components.split_last() else {
+            return Err(PackageExecutionError::Invalid(format!(
+                "importing path {} does not name a file inside package '{package_alias}'",
+                current_file.display()
+            )));
+        };
+        if !matches!(file_name, Component::Normal(_)) {
+            return Err(PackageExecutionError::Invalid(format!(
+                "importing path {} does not name a file inside package '{package_alias}'",
+                current_file.display()
+            )));
+        }
+        let mut depth = 0usize;
+        for component in parent_components {
+            match component {
+                Component::Normal(_) => depth += 1,
+                Component::CurDir => {}
+                Component::ParentDir if depth == 0 => {
+                    return Err(PackageExecutionError::Invalid(format!(
+                        "importing path {} escapes package alias '{package_alias}'",
+                        current_file.display()
+                    )));
+                }
+                Component::ParentDir => depth -= 1,
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err(PackageExecutionError::Invalid(format!(
+                        "importing path {} has an unsafe package-relative path",
+                        current_file.display()
+                    )));
+                }
+            }
+        }
+        for component in import_path.split('/') {
+            match component {
+                "" | "." => {}
+                ".." if depth == 0 => {
+                    return Err(PackageExecutionError::Invalid(format!(
+                        "package import '{import_path}' from {} escapes package alias '{package_alias}'",
+                        current_file.display()
+                    )));
+                }
+                ".." => depth -= 1,
+                _ => depth += 1,
+            }
+        }
+        Ok(())
+    }
+
     /// Return the entry bytes from the same package walk whose digest matched
     /// the pinned content hash. Callers must compile these bytes rather than
     /// reopening the path after verification.
@@ -708,21 +799,58 @@ mod tests {
     #[test]
     fn guard_rejects_parent_import_escaping_alias_root() {
         let (_temp, snapshot, _entry, content_hash) = fixture();
-        let entry = snapshot
-            .packages_root()
-            .join("agents/../shared/helper.harn");
-        assert_eq!(
-            lexical_package_relative_path(&entry, snapshot.packages_root(), snapshot.generation())
-                .unwrap(),
-            PathBuf::from("agents")
-                .join("..")
-                .join("shared/helper.harn")
-        );
+        let entry = snapshot.packages_root().join("agents/run.harn");
         let guard = PackageExecutionGuard::new(snapshot, "agents", content_hash).unwrap();
 
-        let error = guard.verify_entry_source(&entry).unwrap_err();
+        let error = crate::package_imports::resolve_import_path_with_guard(
+            &entry,
+            "../shared/helper",
+            &guard,
+        )
+        .unwrap_err();
 
-        assert!(error.to_string().contains("unsafe package-relative path"));
+        assert!(error.to_string().contains("escapes package alias"));
+    }
+
+    #[test]
+    fn guard_allows_parent_import_within_package_alias() {
+        let (_temp, snapshot, _entry, content_hash) = fixture();
+        let entry = snapshot.packages_root().join("agents/workflows/run.harn");
+        let guard = PackageExecutionGuard::new(snapshot, "agents", content_hash).unwrap();
+
+        let path =
+            crate::package_imports::resolve_import_path_with_guard(&entry, "../helper", &guard)
+                .expect("parent traversal remains inside agents")
+                .expect("helper resolves inside agents");
+        assert_eq!(path, entry.parent().unwrap().join("../helper.harn"));
+    }
+
+    #[test]
+    fn guard_rejects_parent_import_after_normalizing_importer_path() {
+        let (_temp, snapshot, _entry, content_hash) = fixture();
+        let entry = snapshot
+            .packages_root()
+            .join("agents/workflows/../helper.harn");
+        let guard = PackageExecutionGuard::new(snapshot, "agents", content_hash).unwrap();
+
+        let error = crate::package_imports::resolve_import_path_with_guard(
+            &entry,
+            "../shared/helper",
+            &guard,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("escapes package alias"));
+    }
+
+    #[test]
+    fn guard_leaves_absolute_internal_module_paths_to_entry_verification() {
+        let (_temp, snapshot, entry, content_hash) = fixture();
+        let guard = PackageExecutionGuard::new(snapshot, "agents", content_hash).unwrap();
+
+        guard
+            .validate_import_path(&entry, entry.to_str().unwrap())
+            .expect("absolute internal module path is checked by verify_entry_source");
     }
 
     #[cfg(unix)]
