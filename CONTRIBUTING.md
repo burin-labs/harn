@@ -189,12 +189,18 @@ the targeted build-backed local gates; combine it with
 bootstraps dependencies through `./scripts/ensure_portal_deps.sh`; repo-root
 `npm run portal:*` commands reuse the same bootstrap path.
 
+Rust formatting is package-scoped when every staged Rust/Cargo path has a
+workspace-package owner. Root manifests and unmatched repository topology fall
+back to `cargo fmt --all`; Cargo remains the owner so malformed fixtures and
+generated/seed `.rs` files outside its target set are not linted accidentally.
+
 Hooks append profile-tagged timing rows to `~/.burin/hook-timings.ndjson`.
 Inspect invocations with
 `harn run --no-sandbox scripts/hook_timing_summary.harn`; add `-- --budgets` to
 emit sample-gated (`n >= 4`) `p95*1.2` budget observations for the shared fleet
 budget registry. Failed, legacy, and full opt-in hook runs never inflate the
-fast-hook budget.
+fast-hook budget. Pre-commit rows report Rust formatting separately from the
+remaining fast validators so slow-tail regressions retain an actionable owner.
 
 Harn-authored checks run through `scripts/harn_bin.sh`, which reuses
 `$HARN_BIN` or the worktree `target/debug/harn` when that binary is newer than

@@ -64,6 +64,10 @@ impl AsyncBuiltinCtx {
         self.child.lock().wait_for_graph.clone()
     }
 
+    pub(crate) fn package_snapshot_registry(&self) -> Arc<crate::stdlib::PackageSnapshotRegistry> {
+        self.child.lock().package_snapshot_registry.clone()
+    }
+
     /// Create an independent context rooted at a fresh child VM. Long-lived
     /// local tasks use this instead of sharing the parent builtin's output
     /// buffer after the parent future has returned.

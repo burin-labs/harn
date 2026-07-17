@@ -17,6 +17,51 @@ pub(crate) use api::{
 };
 pub use canonicalize::json_to_vm_value;
 
+/// Rewrite Harn type vocabulary inside a JSON-Schema-shaped value without
+/// canonicalizing or dropping any other keyword.
+pub(crate) fn normalize_json_schema_type_names(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if let Some(serde_json::Value::String(kind)) = object.get_mut("type") {
+                if let Some(normalized) = json_schema_type_name(kind) {
+                    *kind = normalized.to_string();
+                }
+            }
+            if let Some(serde_json::Value::Array(kinds)) = object.get_mut("type") {
+                for kind in kinds {
+                    if let serde_json::Value::String(kind) = kind {
+                        if let Some(normalized) = json_schema_type_name(kind) {
+                            *kind = normalized.to_string();
+                        }
+                    }
+                }
+            }
+            for child in object.values_mut() {
+                normalize_json_schema_type_names(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                normalize_json_schema_type_names(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn json_schema_type_name(harn_type: &str) -> Option<&'static str> {
+    match harn_type {
+        "str" | "string" => Some("string"),
+        "int" | "integer" => Some("integer"),
+        "long" | "float" | "double" | "number" => Some("number"),
+        "bool" | "boolean" => Some("boolean"),
+        "nil" | "null" | "none" => Some("null"),
+        "list" | "array" | "unknown[]" => Some("array"),
+        "dict" | "map" | "object" => Some("object"),
+        _ => None,
+    }
+}
+
 /// Canonicalize a JSON-Schema-shaped value for use as an MCP elicitation
 /// `requestedSchema`. Reuses the same canonicalizer the rest of the
 /// language uses for `schema_from_json_schema(...)` so behavior is

@@ -16,7 +16,18 @@
 // overrides the storage root, exactly as in std/session-store.
 import "std/session-store"
 
-fn hypothesis_stream(session_id) {
+pub type HypothesisOptions = {
+  root?: string,
+  tenant_id?: string,
+  actor?: string,
+  tags?: list<string>,
+  headers?: dict<string, string>,
+  status?: string,
+}
+
+pub type HypothesisMutationResult = {ok: bool, record?: any, error?: string}
+
+fn hypothesis_stream(session_id: string?) -> string {
   const sid = to_string(session_id ?? "")
   if sid == "" {
     return "agent.hypotheses"
@@ -24,7 +35,7 @@ fn hypothesis_stream(session_id) {
   return sid
 }
 
-fn hypothesis_options(options) {
+fn hypothesis_options(options: HypothesisOptions?) -> SessionStoreOptions {
   return (options ?? {}) + {kind: "hypothesis"}
 }
 
@@ -33,10 +44,10 @@ fn hypothesis_options(options) {
  * `status` defaults to `"open"`. Returns `{ok, record}` on success, or
  * `{ok: false, error}` when the record has no id.
  *
- * @effects: []
- * @errors: []
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
  */
-pub fn hypothesis_open(session_id, record, options = nil) {
+pub fn hypothesis_open(session_id: string?, record: dict, options: HypothesisOptions? = nil) -> HypothesisMutationResult {
   const id = to_string(record?.id ?? "")
   if id == "" {
     return {ok: false, error: "hypothesis record requires an id"}
@@ -53,10 +64,10 @@ pub fn hypothesis_open(session_id, record, options = nil) {
 /**
  * Return the current record for `id`, or nil if it is unknown or deleted.
  *
- * @effects: []
- * @errors: []
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
  */
-pub fn hypothesis_get(session_id, id, options = nil) {
+pub fn hypothesis_get(session_id: string?, id: string, options: HypothesisOptions? = nil) -> any? {
   const target = to_string(id)
   for record in session_store_project(hypothesis_stream(session_id), options ?? {}) {
     if to_string(record?.id ?? "") == target {
@@ -70,10 +81,15 @@ pub fn hypothesis_get(session_id, id, options = nil) {
  * Update a hypothesis's status in place (append-only). Returns `{ok, record}`,
  * or `{ok: false, error}` when the id is unknown.
  *
- * @effects: []
- * @errors: []
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
  */
-pub fn hypothesis_set_status(session_id, id, status, options = nil) {
+pub fn hypothesis_set_status(
+  session_id: string?,
+  id: string,
+  status: string,
+  options: HypothesisOptions? = nil,
+) -> HypothesisMutationResult {
   const current = hypothesis_get(session_id, id, options)
   if current == nil {
     return {ok: false, error: "unknown hypothesis"}
@@ -90,10 +106,10 @@ pub fn hypothesis_set_status(session_id, id, status, options = nil) {
 /**
  * List the current hypotheses, optionally filtered by `options.status`.
  *
- * @effects: []
- * @errors: []
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
  */
-pub fn hypothesis_list(session_id, options = nil) {
+pub fn hypothesis_list(session_id: string?, options: HypothesisOptions? = nil) -> list<any> {
   const records = session_store_project(hypothesis_stream(session_id), options ?? {})
   const status = to_string((options ?? {})?.status ?? "")
   if status == "" {
@@ -105,10 +121,10 @@ pub fn hypothesis_list(session_id, options = nil) {
 /**
  * Remove a hypothesis from the projected collection (append-only tombstone).
  *
- * @effects: []
- * @errors: []
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
  */
-pub fn hypothesis_delete(session_id, id, options = nil) {
+pub fn hypothesis_delete(session_id: string?, id: string, options: HypothesisOptions? = nil) -> HypothesisMutationResult {
   session_store_append(
     hypothesis_stream(session_id),
     {operation: "delete", id: to_string(id)},

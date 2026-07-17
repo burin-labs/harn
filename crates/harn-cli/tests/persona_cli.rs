@@ -113,6 +113,7 @@ fn persona_list_and_inspect_emit_stable_json() {
     assert_eq!(persona["handoffs"][0], "review_captain");
     assert_eq!(persona["context_packs"][0], "repo_policy");
     assert_eq!(persona["evals"][0], "merge_safety");
+    assert_eq!(persona["source"]["kind"], "root");
 }
 
 #[test]
@@ -320,6 +321,7 @@ async fn persona_scaffolder_creates_doctor_clean_package() {
             &temp.path().join("personas"),
             false,
         )
+        .await
         .expect("scaffold persona");
         assert!(result.root.join("harn.toml").exists());
         assert!(result.root.join("src/my_release_captain.harn").exists());
@@ -334,12 +336,32 @@ async fn persona_scaffolder_creates_doctor_clean_package() {
         assert!(result.root.join("fixtures/happy_path.json").exists());
         assert!(result.root.join("prompts/system.harn.prompt").exists());
         assert!(result.root.join("evals/smoke.eval.json").exists());
+        assert!(result.root.join("README.md").exists());
 
         let manifest = result.root.join("harn.toml");
         let persona =
             persona::inspect_payload(Some(&manifest), "my_release_captain").expect("inspect");
         assert_eq!(persona["name"], "my_release_captain");
         assert!(!persona["steps"].as_array().unwrap().is_empty());
+        let canonical_manifest = workspace_relative_manifest(&format!(
+            "crates/harn-cli/assets/persona-templates/{template}/harn.toml"
+        ));
+        let canonical = persona::inspect_payload(Some(&canonical_manifest), "template_persona")
+            .expect("inspect canonical template");
+        for field in [
+            "tools",
+            "capabilities",
+            "autonomy_tier",
+            "receipt_policy",
+            "triggers",
+            "model_policy",
+            "budget",
+        ] {
+            assert_eq!(
+                persona[field], canonical[field],
+                "{field} drifted from canonical {template} template"
+            );
+        }
 
         let report = persona_doctor::doctor_report_for_persona(
             Some(&manifest),
@@ -352,10 +374,45 @@ async fn persona_scaffolder_creates_doctor_clean_package() {
             report
                 .checks
                 .iter()
-                .all(|check| check.status != persona_doctor::DoctorStatus::Red),
-            "unexpected red check in {template:?}: {report:#?}"
+                .all(|check| check.status == persona_doctor::DoctorStatus::Green),
+            "strict scaffold profile was not green for {template:?}: {report:#?}"
         );
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_doctor_rejects_a_missing_exact_entry_symbol() {
+    let temp = write_manifest(valid_manifest());
+    let workflow_dir = temp.path().join("workflows");
+    fs::create_dir_all(&workflow_dir).unwrap();
+    fs::write(
+        workflow_dir.join("merge.harn"),
+        r#"
+@persona(name: "merge_captain", tools: [github])
+pub fn merge_captain(task) {
+  return task
+}
+
+pipeline typo(task) {
+  return merge_captain(task)
+}
+"#,
+    )
+    .unwrap();
+
+    let report = persona_doctor::doctor_report_for_persona(
+        Some(&manifest_path(&temp)),
+        "merge_captain",
+        10_000,
+    )
+    .await
+    .expect_err("missing #run must fail doctor");
+
+    assert!(report.checks.iter().any(|check| {
+        check.name == "entry-symbol"
+            && check.status == persona_doctor::DoctorStatus::Red
+            && check.message.contains("run")
+    }));
 }
 
 #[test]
@@ -438,6 +495,47 @@ async fn persona_runtime_status_tick_and_budget_are_persisted() {
     assert_eq!(status.value_receipts.len(), 2);
     assert_eq!(status.value_receipts[0].kind.as_str(), "run_started");
     assert_eq!(status.value_receipts[1].kind.as_str(), "run_completed");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_runtime_does_not_fall_back_from_a_missing_explicit_manifest() {
+    let temp = write_manifest(valid_manifest());
+    let missing = temp.path().join("nested/missing-personas.toml");
+    let error = persona::status_payload(
+        Some(&missing),
+        &temp.path().join("state"),
+        "merge_captain",
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.contains("missing-personas.toml"), "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_runtime_uses_an_explicit_standalone_toml_catalog() {
+    let temp = write_manifest(valid_manifest());
+    let standalone = temp.path().join("persona.toml");
+    fs::write(
+        &standalone,
+        valid_manifest().replace(
+            "workflows/merge.harn#run",
+            "workflows/standalone-merge.harn#run",
+        ),
+    )
+    .unwrap();
+
+    let status = persona::status_payload(
+        Some(&standalone),
+        &temp.path().join("state"),
+        "merge_captain",
+        None,
+    )
+    .await
+    .expect("explicit standalone TOML persona should resolve exactly");
+
+    assert_eq!(status.entry_workflow, "workflows/standalone-merge.harn#run");
 }
 
 #[tokio::test(flavor = "current_thread")]

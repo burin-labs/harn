@@ -38,7 +38,7 @@ fn build_verification_plan_step(incident) {
   }
 }
 
-pipeline run(task) {
+pub pipeline run(task) -> dict {
   const result = build_verification_plan_step(sample_incident())
   __io_println(json_stringify(result))
   return result

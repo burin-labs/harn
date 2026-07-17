@@ -414,14 +414,14 @@ test still receives a fresh VM, module state, and persistence root.
 | `--api-key <key>` | Bearer API key for `harn test agents-conformance` |
 | `--category <name>` | Agents conformance category to run; repeatable or comma-separated |
 | `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
-| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 2 includes typed timeout, phase, aggregate, and latency-distribution data |
+| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 3 includes typed timeout, phase, aggregate, latency-distribution, and captured-output data |
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
 | `--parallel` | Run tests concurrently with a bounded worker pool. Slow tests are front-loaded using historical timings from `.harn/test-timings.json` |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). Defaults to available parallelism, capped at 8 |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
-| `--verbose` / `-v` | Show per-test timing and detailed failures |
+| `--verbose` / `-v` | Show per-test timing and detailed failures, including a passing test's captured `log`/`print`/`println` output (a failing test's captured output is always shown) |
 | `--timing` | Show detailed per-test timing, slowest tests/files, and phase totals. Every user-test run prints the concise p50/p90 latency line |
-| `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly |
+| `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly. A failing user test's captured output is included as `<system-out>` |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup is measured separately and does not consume the pipeline-execution budget; other targets bound their test case or subprocess |
 | `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget |
 | `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget |
@@ -605,6 +605,9 @@ harn persona list
 harn persona list --json
 harn persona inspect merge_captain
 harn persona inspect merge_captain --json
+harn persona activate agents/reviewer --autonomy-tier suggest --json
+harn persona activations --json
+harn persona deactivate agents/reviewer --json
 harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
 harn persona --manifest examples/personas/harn.toml status merge_captain --json
 harn persona --manifest examples/personas/harn.toml tick merge_captain --json
@@ -622,7 +625,7 @@ harn persona --manifest examples/personas/harn.toml supervision tail \
 | Flag | Description |
 |---|---|
 | `--manifest <path>` | Use an explicit `harn.toml` path or directory containing one |
-| `--state-dir <dir>` | Store persona runtime events under a durable EventLog base directory, default `.harn/personas` |
+| `--state-dir <dir>` | Store persona runtime events under a durable EventLog base directory, default `.harn/personas`; installed-persona activations always remain project-scoped beside the root manifest |
 | `--json` | Emit stable JSON for list, inspect, status, controls, trigger, tick, and budget receipts. `supervision tail` always emits NDJSON frames and accepts `--json` for host symmetry |
 | `--persona <name>` | Filter `supervision tail` to one persona; omitted streams every persona in the local state directory |
 | `--since-event-id <N>` | Replay `supervision tail` frames with `event_id > N` |
@@ -632,6 +635,15 @@ harn persona --manifest examples/personas/harn.toml supervision tail \
 `harn persona` validates the manifest before printing. It rejects missing entry
 workflows, unknown capabilities, invalid budget fields, invalid schedules, and
 handoffs that point at undeclared personas.
+
+Installed package personas are addressed as `<package-alias>/<persona-name>`.
+`activate` writes an atomic project record that pins package and policy digests;
+its optional autonomy, tool, and capability flags may only reduce runtime
+authority. Budget, model, and receipt policies remain inherited and are pinned
+as part of the full exported persona contract; package permissions and host
+requirements remain install-time contracts. `activations` lists those records and
+`deactivate` removes one even after its package has been removed. Package
+installation alone never activates a persona.
 
 Runtime commands append event-sourced lifecycle records to
 `persona.runtime.events`. `pause` queues matching trigger events,

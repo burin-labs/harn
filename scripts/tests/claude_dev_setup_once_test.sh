@@ -2,12 +2,16 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+: "${HARN_BIN:?run this integration through make test-pr-gate-post-warm-integrations}"
+if [[ ! -x "$HARN_BIN" ]]; then
+  echo "HARN_BIN is not executable: $HARN_BIN" >&2
+  exit 1
+fi
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
 
-real_harn_bin="$("$repo_root/scripts/harn_bin.sh" --print)"
-"$real_harn_bin" test "$repo_root/scripts/tests/claude_dev_setup_hook_test.harn" >/dev/null
+real_harn_bin="$HARN_BIN"
 
 fake_repo="$tmp_root/repo with spaces"
 mkdir -p "$fake_repo/scripts"

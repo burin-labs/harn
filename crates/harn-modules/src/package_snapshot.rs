@@ -136,6 +136,22 @@ pub struct PackageSnapshot {
 }
 
 impl PackageSnapshot {
+    /// Duplicate this snapshot while retaining the same generation lease.
+    pub fn retained_clone(&self) -> Result<Self, PackageSnapshotError> {
+        Ok(Self {
+            project_root: self.project_root.clone(),
+            generation: self.generation.clone(),
+            generation_root: self.generation_root.clone(),
+            packages_root: self.packages_root.clone(),
+            lock_path: self.lock_path.clone(),
+            lock_digest: self.lock_digest.clone(),
+            package_names: self.package_names.clone(),
+            _lease: self._lease.try_clone().map_err(|error| {
+                PackageSnapshotError::io("clone lease", &self.generation_root, error)
+            })?,
+        })
+    }
+
     /// Acquire the currently published package generation for `project_root`.
     ///
     /// The publication lock closes the pointer-to-lease race: GC cannot remove

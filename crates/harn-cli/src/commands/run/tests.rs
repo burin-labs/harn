@@ -1,11 +1,65 @@
 use super::harnpack::HarnpackRunOptions;
 use super::{
-    default_run_workspace_root, eval_source_for_code, execute_explain_cost, execute_run,
-    execute_run_with_harnpack_and_sandbox_options, run_sandbox_attestation, split_eval_header,
-    CliLlmMockMode, RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
+    build_denied_builtins, default_run_workspace_root, eval_source_for_code, execute_explain_cost,
+    execute_run, execute_run_with_harnpack_and_sandbox_options, run_sandbox_attestation,
+    split_eval_header, CliLlmMockMode, RunProfileOptions, RunSandboxOptions,
+    StdoutPassthroughGuard,
 };
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
+    std::fs::write(
+        root.join("harn.toml"),
+        r#"
+[package]
+name = "manifest-trigger-policy-fixture"
+
+[exports]
+trigger_handlers = "trigger_handlers.harn"
+hook_handlers = "hook_handlers.harn"
+
+[[triggers]]
+id = "cron-handler"
+kind = "cron"
+provider = "cron"
+schedule = "* * * * *"
+match = { events = ["cron.tick"] }
+handler = "trigger_handlers::on_tick"
+
+[[hooks]]
+event = "PostTurn"
+handler = "hook_handlers::after_turn"
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("trigger_handlers.harn"),
+        r#"
+let trigger_initializer = hex_decode("00")
+let eager_validation_failure = 1 / 0
+
+pub fn on_tick(_event) -> nil {
+  return nil
+}
+"#,
+    )
+    .expect("write trigger handler");
+    std::fs::write(
+        root.join("hook_handlers.harn"),
+        r#"
+let hook_initializer = hex_decode("00")
+
+pub fn after_turn(_event) -> nil {
+  return nil
+}
+"#,
+    )
+    .expect("write hook handler");
+    let script = root.join("main.harn");
+    std::fs::write(&script, main_source).expect("write main script");
+    script
+}
 
 #[test]
 fn split_eval_header_no_imports_returns_full_body() {
@@ -147,6 +201,46 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["read_only_roots"][0], "/tmp/shared");
     assert_eq!(metadata["profile"], "os_hardened");
     assert_eq!(metadata["egress"], "host_policy");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_exit_flushes_stdio_and_bypasses_catch() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let script = temp.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+fn main(harness: Harness) -> int {
+  harness.stdio.print("before ")
+  harness.stdio.println("exit")
+  try {
+    exit(2)
+  } catch (error) {
+    harness.stdio.eprintln("caught")
+  }
+  harness.stdio.eprintln("after")
+  return 0
+}
+"#,
+    )
+    .expect("write script");
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 2, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout, "before exit\n");
     harn_vm::reset_thread_local_state();
 }
 
@@ -465,6 +559,72 @@ pipeline main() {{
 }
 
 #[tokio::test]
+async fn execute_run_builtin_policy_defers_unrelated_manifest_handler_initialization() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    let script = write_manifest_trigger_project(
+        project.path(),
+        r#"
+fn main(harness: Harness) {
+  harness.stdio.print("target-ran")
+}
+"#,
+    );
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        build_denied_builtins(None, Some("command_run")),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "target-ran");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_without_builtin_policy_eagerly_validates_manifest_handlers() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    let script = write_manifest_trigger_project(
+        project.path(),
+        r#"
+pipeline main() {
+  __io_println("target-ran")
+}
+"#,
+    );
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
+    assert!(
+        outcome
+            .stderr
+            .contains("failed to install manifest triggers"),
+        "stderr:\n{}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
 async fn execute_run_denies_network_by_default() {
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
@@ -493,7 +653,7 @@ pipeline main() {
 
     assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
     assert!(
-        outcome.stderr.contains("exceeds network ceiling"),
+        outcome.stderr.contains("exceeds network.http ceiling"),
         "stderr:\n{}",
         outcome.stderr
     );

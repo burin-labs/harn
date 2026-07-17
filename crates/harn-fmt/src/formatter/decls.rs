@@ -570,7 +570,7 @@ impl Formatter<'_> {
                 self.writeln(&format!("{pub_prefix}type {name}{params} = {te}"));
             }
             Node::Block(stmts) => {
-                self.writeln("{");
+                self.writeln("block {");
                 self.indent();
                 self.format_body(stmts, node_line, Some(node_end_line));
                 self.dedent();

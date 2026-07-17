@@ -1,0 +1,18 @@
+/**
+ * Explicit lexical blocks create a lifetime boundary without inventing a
+ * helper function or pretending there is a control-flow condition.
+ */
+pipeline default(_task) {
+  let events = []
+  const value: string = "outer"
+  block {
+    const inner_value: string = "inner"
+    defer {
+      events = events + ["cleanup"]
+    }
+    events = events + ["body:${inner_value}"]
+  }
+  events = events + ["outer:${value}"]
+  const receipt = {kind: "lexical_block_receipt", events: events, outer_value: value}
+  __io_println(json_stringify(receipt))
+}

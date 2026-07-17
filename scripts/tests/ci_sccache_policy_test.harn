@@ -1,0 +1,116 @@
+import { ci_sccache_policy_errors } from "../check_ci_cache_policy"
+
+fn gha_expression(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+fn sccache_action() {
+  return {
+    runs: {
+      steps: [
+        {
+          uses: "useblacksmith/stickydisk@6d373c96a74cbde0c99fedc5ea5d3a7ba66ba494",
+          if: "inputs.sticky == 'true'",
+          "continue-on-error": true,
+          with: {
+            key: gha_expression("github.repository") + gha_expression("inputs.cache-key"),
+            path: "~/.cache/sccache",
+          },
+        },
+        {
+          uses: "mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696",
+          "continue-on-error": true,
+        },
+        {uses: "./.github/actions/configure-cargo-sccache"},
+      ],
+    },
+  }
+}
+
+fn persistent_job(runner: string, cache_key: string, sticky_if: string, fallback_if: string) {
+  return {
+    "runs-on": runner,
+    env: {SCCACHE_BASEDIRS: gha_expression("github.workspace"), SCCACHE_CACHE_SIZE: "15G"},
+    steps: [
+      {
+        uses: "./.github/actions/sccache",
+        with: {"cache-key": cache_key, sticky: gha_expression(sticky_if)},
+      },
+      {uses: "./.github/actions/rust-cache", if: fallback_if},
+      {run: "./scripts/ci/finalize_sccache.sh", if: "always()"},
+    ],
+  }
+}
+
+fn workflow() {
+  const disable = "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'"
+  const rust = persistent_job(
+    gha_expression(disable + " && 'ubuntu-latest' || matrix.runner"),
+    gha_expression("matrix.cache_key"),
+    "matrix.kind == 'lint' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+    "matrix.kind != 'lint' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+  )
+  return {
+    jobs: {
+      "package-audit": persistent_job(
+        gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'"),
+        "package-audit",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+      ),
+      "rust-builds": {
+        ...rust,
+        strategy: {
+          matrix: {
+            include: [
+              {runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
+              {runner: "ubuntu-latest", cache_key: "workspace-test"},
+              {runner: "ubuntu-latest", cache_key: "workspace-audit"},
+            ],
+          },
+        },
+        steps: rust.steps
+          + [
+          {name: "Run affected-crate tests (PR fast feedback)", env: {CARGO_BUILD_JOBS: "2"}},
+          {
+            name: "Run full test suite (merge queue + non-metadata push backstop)",
+            env: {CARGO_BUILD_JOBS: "2"},
+          },
+        ],
+      },
+      "audit-scripts": persistent_job(
+        gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
+        "audit-scripts",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+      ),
+    },
+  }
+}
+
+@test
+pipeline test_accepts_pinned_lane_local_sticky_cache_with_kill_switch(task) {
+  assert_eq(ci_sccache_policy_errors(sccache_action(), workflow()), [])
+}
+
+@test
+pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(task) {
+  const invalid_action = {runs: {steps: [{uses: "useblacksmith/stickydisk@v1", with: {key: "shared", path: "target"}}]}}
+  const invalid_workflow = {
+    jobs: {
+      "package-audit": {"runs-on": "ubuntu-latest", steps: []},
+      "rust-builds": {"runs-on": "ubuntu-latest", steps: []},
+      "audit-scripts": {"runs-on": "ubuntu-latest", steps: []},
+      surprise: {steps: [{uses: "./.github/actions/sccache"}]},
+    },
+  }
+  const errors = ci_sccache_policy_errors(invalid_action, invalid_workflow)
+  assert(
+    errors.contains(".github/actions/sccache/action.yml must use exactly one pinned sticky-disk action"),
+  )
+  assert(
+    errors.contains("ci.yml:package-audit must retain rust-cache only on the GitHub-hosted fallback"),
+  )
+  assert(errors.contains("ci.yml:package-audit must cap persistent sccache at 15G"))
+  assert(errors.contains("ci.yml:surprise uses persistent sccache without a lane policy"))
+}

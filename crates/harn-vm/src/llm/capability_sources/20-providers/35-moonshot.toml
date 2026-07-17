@@ -6,6 +6,45 @@
 # to cover both the prefixed catalog key and the bare wire id.
 
 [[provider.moonshot]]
+model_match = "*kimi-k3*"
+# Moonshot documents K3 as an OpenAI-compatible native-tool route. Keep text
+# support available as an unmeasured fallback, but do not call the two modes
+# interchangeable until a credentialed probe has evidence.
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Moonshot documents native OpenAI-compatible tools; credentialed Harn probe not run because MOONSHOT_API_KEY is unavailable in this lane."
+structured_output = "native"
+# K3 always reasons through the OpenAI-compatible `reasoning_effort` field;
+# it accepts only the `max` effort below, rather than a generic enabled mode.
+thinking_modes = ["effort"]
+vision = true
+vision_supported = true
+prompt_caching = true
+allowed_tool_choice_modes = ["auto", "none", "required"]
+requires_tool_result_adjacency = true
+# K3 always reasons, accepts only `reasoning_effort: max`, requires
+# `max_completion_tokens`, and rejects fixed sampling/penalty knobs.
+requires_completion_tokens = true
+reasoning_effort_supported = true
+reasoning_effort_levels = ["max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+reasoning_history_wire_field = "reasoning_content"
+temperature_supported = false
+top_p_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.moonshot]]
 model_match = "*kimi-k2.7-code*"
 native_tools = true
 preferred_tool_format = "json"

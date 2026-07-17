@@ -51,9 +51,24 @@ they are intended for test pipelines and the linter warns on non-test use:
 
 | Function | Description |
 |---|---|
-| `assert(condition)` | Throws if `condition` is falsy |
-| `assert_eq(a, b)` | Throws if `a != b`, showing both values |
-| `assert_ne(a, b)` | Throws if `a == b`, showing both values |
+| `assert(condition, message?)` | Throws if `condition` is falsy |
+| `assert_eq(a, b, message?)` | Throws if `a != b`, showing both values |
+| `assert_ne(a, b, message?)` | Throws if `a == b`, showing both values |
+
+All three accept an optional custom `message`. If `message` is omitted, nil,
+an empty string, or the literal string `"null"` (the common result of
+`json_stringify`-ing a value that turned out to be nil), the assertion falls
+back to its default message instead of throwing that uninformative value
+verbatim.
+
+### Captured output
+
+`log`, `print`, `println`, and related output builtins write into a
+per-case buffer rather than directly to the terminal. A passing test stays
+quiet by default; a failing test always prints its buffered output
+alongside the failure. Pass `--verbose` to see a passing test's captured
+output too. `--json-out` and `--junit` reports include it under
+`captured_output` (JUnit: `<system-out>`) whenever it is non-empty.
 
 ### Mock LLM provider
 

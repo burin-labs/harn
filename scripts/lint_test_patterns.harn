@@ -132,6 +132,7 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/orchestrator_cli.rs",
   "crates/harn-cli/tests/orchestrator_cli_e2e.rs",
   "crates/harn-cli/tests/orchestrator_cli_e2e/support.rs",
+  "crates/harn-cli/tests/persona_activation_cli_e2e.rs",
   "crates/harn-cli/tests/persona_cli.rs",
   "crates/harn-cli/tests/test_worker_cli_e2e.rs",
   "crates/harn-cli/tests/run_eval_imports.rs",
@@ -251,7 +252,8 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-cli/src/commands/portal/util.rs",
   "crates/harn-cli/src/commands/run/mod.rs",
   "crates/harn-cli/src/commands/supervisor.rs",
-  "crates/harn-cli/src/commands/test.rs",
+  "crates/harn-cli/src/commands/test/mod.rs",
+  "crates/harn-cli/src/commands/test/conformance.rs",
   // `harn time run` measures real wall-clock + per-phase elapsed time
   // for cost/perf debugging — host time is the source of truth, same
   // shape as the allowlisted `run.rs`, `demo.rs`, and `bench.rs`

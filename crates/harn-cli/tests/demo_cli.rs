@@ -697,6 +697,35 @@ fn pub_type_exports_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn lexical_block_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("lexical-block");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "lexical-block demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    let receipt = outcome
+        .stdout
+        .lines()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .unwrap_or_else(|| {
+            panic!(
+                "lexical-block stdout missing JSON receipt:\n{}",
+                outcome.stdout
+            )
+        });
+    assert_eq!(
+        receipt,
+        serde_json::json!({
+            "events": ["body:inner", "cleanup", "outer:outer"],
+            "kind": "lexical_block_receipt",
+            "outer_value": "outer",
+        }),
+        "block cleanup and bindings must end at the explicit boundary"
+    );
+}
+
+#[test]
 fn catalog_patch_models_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("catalog-patch-models");
     assert_eq!(

@@ -11,23 +11,26 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use uuid::Uuid;
 
 use super::event::{
     now_ms_and_rfc3339, AppendEvent, EventId, EventSignature, SessionEventKind, StoredEvent,
 };
+use super::redaction::{
+    prepare_append_event, prepare_stored_events_for_persistence, redact_stored_events,
+};
 use super::signing::{
     chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
-    verify_event_chain,
+    verify_session_chain,
 };
 use super::store::{
-    CreateSession, EventPage, ForkResult, ListFilter, ReadRange, SessionId, SessionMeta,
-    SessionStatus, SessionStore, Snapshot, SnapshotId, StoreError, StoreHooks, StoreResult,
-    TruncateResult, VerifyFailure, VerifyReport, MAX_READ_BATCH,
+    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
+    SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, Snapshot, SnapshotId,
+    StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport, MAX_READ_BATCH,
 };
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
@@ -63,6 +66,8 @@ impl SqliteSessionStore {
 
     fn initialize(conn: Connection, path: PathBuf, hooks: StoreHooks) -> StoreResult<Self> {
         conn.busy_timeout(DEFAULT_BUSY_TIMEOUT)
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|error| StoreError::Backend(error.to_string()))?;
@@ -119,6 +124,12 @@ impl SqliteSessionStore {
             );
             CREATE INDEX IF NOT EXISTS session_events_ts
                 ON session_events(session_id, ts_ms);
+            CREATE TABLE IF NOT EXISTS session_imports (
+                source_id       TEXT PRIMARY KEY,
+                source_digest   TEXT NOT NULL,
+                session_id      TEXT NOT NULL,
+                event_count     INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS session_tags (
                 session_id  TEXT NOT NULL,
                 tag         TEXT NOT NULL,
@@ -138,6 +149,31 @@ impl SqliteSessionStore {
             ",
         )
         .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let previous_schema_version = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get::<_, Option<i64>>(0)
+            })
+            .map_err(map_sql)?
+            .unwrap_or_default();
+        if previous_schema_version > SCHEMA_VERSION {
+            return Err(StoreError::Backend(format!(
+                "session store schema version {previous_schema_version} is newer than supported version {SCHEMA_VERSION}"
+            )));
+        }
+        if previous_schema_version < SCHEMA_VERSION {
+            // Foreign-key enforcement is connection-local and does not repair
+            // child rows orphaned by v1. This guarded cleanup runs once while
+            // upgrading to v2.
+            conn.execute_batch(
+                "DELETE FROM session_events
+                   WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.id = session_events.session_id);
+                 DELETE FROM session_tags
+                   WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.id = session_tags.session_id);
+                 DELETE FROM session_snapshots
+                   WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.id = session_snapshots.session_id);",
+            )
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        }
         conn.execute(
             "INSERT OR IGNORE INTO schema_version(version) VALUES (?1)",
             params![SCHEMA_VERSION],
@@ -161,6 +197,18 @@ impl SqliteSessionStore {
 
 fn map_sql(error: rusqlite::Error) -> StoreError {
     StoreError::Backend(error.to_string())
+}
+
+fn map_create_sql(error: rusqlite::Error, session_id: &str) -> StoreError {
+    if matches!(
+        error,
+        rusqlite::Error::SqliteFailure(ref inner, _)
+            if inner.code == rusqlite::ErrorCode::ConstraintViolation
+    ) {
+        StoreError::AlreadyExists(session_id.to_string())
+    } else {
+        map_sql(error)
+    }
 }
 
 fn kind_to_sql(kind: &SessionEventKind) -> (String, Option<String>) {
@@ -270,7 +318,7 @@ fn insert_session(
             next_event_id as i64,
         ],
     )
-    .map_err(map_sql)?;
+    .map_err(|error| map_create_sql(error, &meta.id))?;
     insert_session_tags(conn, &meta.id, &meta.tags)?;
     Ok(())
 }
@@ -461,12 +509,23 @@ fn load_all_events(conn: &Connection, session_id: &str) -> StoreResult<Vec<Store
     Ok(out)
 }
 
-fn apply_redaction(hooks: &StoreHooks, event: &mut AppendEvent) {
-    let Some(policy) = hooks.redaction.as_ref() else {
-        return;
-    };
-    policy.redact_json_in_place(&mut event.payload);
-    event.headers = policy.redact_headers(&event.headers);
+fn read_import(conn: &Connection, source_id: &str) -> StoreResult<Option<ImportResult>> {
+    conn.query_row(
+        "SELECT source_digest, session_id, event_count
+         FROM session_imports WHERE source_id = ?1",
+        params![source_id],
+        |row| {
+            Ok(ImportResult {
+                source_id: source_id.to_string(),
+                source_digest: row.get(0)?,
+                session_id: row.get(1)?,
+                event_count: row.get::<_, i64>(2)? as usize,
+                imported: false,
+            })
+        },
+    )
+    .optional()
+    .map_err(map_sql)
 }
 
 /// Core append logic, operating on a caller-owned connection (typically a
@@ -481,7 +540,7 @@ fn append_in_tx(
     session_id: &str,
     mut event: AppendEvent,
 ) -> StoreResult<StoredEvent> {
-    apply_redaction(hooks, &mut event);
+    prepare_append_event(hooks, &mut event)?;
     let (mut meta, next_event_id) = read_session_meta(conn, session_id)?;
     super::memory_helpers::validate_open(&meta)?;
     if let Some(parent_event_id) = event.parent_event_id {
@@ -557,15 +616,25 @@ fn append_in_tx(
 }
 
 #[async_trait]
-impl SessionStore for SqliteSessionStore {
-    fn hooks(&self) -> &StoreHooks {
-        &self.hooks
-    }
+impl SessionImporter for SqliteSessionStore {
+    async fn import(&self, request: ImportSession) -> StoreResult<ImportResult> {
+        request.validate()?;
+        let mut conn = self.lock();
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql)?;
+        if let Some(existing) = read_import(&tx, &request.source_id)? {
+            if existing.source_digest != request.source_digest {
+                return Err(StoreError::Conflict(format!(
+                    "import source '{}' changed digest",
+                    request.source_id
+                )));
+            }
+            return Ok(existing);
+        }
 
-    async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
-        let meta = super::memory_helpers::meta_for_create(request);
-        let conn = self.lock();
-        if conn
+        let meta = super::memory_helpers::meta_for_create(request.session);
+        if tx
             .query_row(
                 "SELECT 1 FROM sessions WHERE id = ?1",
                 params![meta.id],
@@ -577,6 +646,42 @@ impl SessionStore for SqliteSessionStore {
         {
             return Err(StoreError::AlreadyExists(meta.id));
         }
+        insert_session(&tx, &meta, 1)?;
+        let event_count = request.events.len();
+        for event in request.events {
+            append_in_tx(&tx, &self.hooks, &meta.id, event)?;
+        }
+        tx.execute(
+            "INSERT INTO session_imports (source_id, source_digest, session_id, event_count)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                request.source_id,
+                request.source_digest,
+                meta.id,
+                event_count as i64
+            ],
+        )
+        .map_err(map_sql)?;
+        tx.commit().map_err(map_sql)?;
+        Ok(ImportResult {
+            source_id: request.source_id,
+            source_digest: request.source_digest,
+            session_id: meta.id,
+            event_count,
+            imported: true,
+        })
+    }
+}
+
+#[async_trait]
+impl SessionStore for SqliteSessionStore {
+    fn hooks(&self) -> &StoreHooks {
+        &self.hooks
+    }
+
+    async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
+        let meta = super::memory_helpers::meta_for_create(request);
+        let conn = self.lock();
         insert_session(&conn, &meta, 1)?;
         Ok(meta)
     }
@@ -701,11 +806,7 @@ impl SessionStore for SqliteSessionStore {
         for row in rows {
             events.push(row.map_err(map_sql)?);
         }
-        if let Some(policy) = self.hooks.redaction.as_ref() {
-            for event in events.iter_mut() {
-                policy.redact_json_in_place(&mut event.payload);
-            }
-        }
+        redact_stored_events(&self.hooks, &mut events)?;
         let next_cursor = if events.len() as i64 == limit {
             events.last().map(|tail| tail.event_id + 1)
         } else {
@@ -760,10 +861,11 @@ impl SessionStore for SqliteSessionStore {
         child_meta.closed_at_ms = None;
         child_meta.closed_at = None;
         child_meta.soft_deleted_at_ms = None;
-        let inherited: Vec<StoredEvent> = parent_events
+        let mut inherited: Vec<StoredEvent> = parent_events
             .into_iter()
             .filter(|event| event.event_id <= at_event_id)
             .collect();
+        prepare_stored_events_for_persistence(&self.hooks, &mut inherited)?;
         let copied = re_anchor_events(&inherited, &new_id);
         child_meta.event_count = copied.len();
         child_meta.last_event_id = copied.last().map(|tail| tail.event_id);
@@ -867,7 +969,8 @@ impl SessionStore for SqliteSessionStore {
     async fn snapshot(&self, session_id: &str) -> StoreResult<Snapshot> {
         let conn = self.lock();
         let (meta, _) = read_session_meta(&conn, session_id)?;
-        let events = load_all_events(&conn, session_id)?;
+        let mut events = load_all_events(&conn, session_id)?;
+        redact_stored_events(&self.hooks, &mut events)?;
         let (ms, text) = now_ms_and_rfc3339();
         let snapshot = Snapshot {
             id: SnapshotId(format!("snap-{}", Uuid::now_v7())),
@@ -904,7 +1007,10 @@ impl SessionStore for SqliteSessionStore {
             .optional()
             .map_err(map_sql)?;
         let body = body.ok_or_else(|| StoreError::NotFound(snapshot_id.0.clone()))?;
-        serde_json::from_str(&body).map_err(|error| StoreError::Backend(error.to_string()))
+        let mut snapshot: Snapshot =
+            serde_json::from_str(&body).map_err(|error| StoreError::Backend(error.to_string()))?;
+        redact_stored_events(&self.hooks, &mut snapshot.events)?;
+        Ok(snapshot)
     }
 
     async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {
@@ -998,8 +1104,8 @@ impl SessionStore for SqliteSessionStore {
 
     async fn verify(&self, session_id: &str) -> StoreResult<VerifyReport> {
         let conn = self.lock();
+        let (meta, _) = read_session_meta(&conn, session_id)?;
         let events = load_all_events(&conn, session_id)?;
-        let chain_root = chain_root_hash(&events);
         let event_verifier = self
             .hooks
             .event_signer
@@ -1011,17 +1117,11 @@ impl SessionStore for SqliteSessionStore {
             .as_ref()
             .or(self.hooks.event_signer.as_ref())
             .map(|signer| signer.verifying_key());
-        let (signed, failures) =
-            verify_event_chain(&events, event_verifier.as_ref(), receipt_verifier.as_ref());
-        Ok(VerifyReport {
-            session_id: session_id.to_string(),
-            chain_root_hash: chain_root,
-            event_count: events.len(),
-            signed_event_count: signed,
-            failures: failures
-                .into_iter()
-                .map(|(event_id, reason)| VerifyFailure { event_id, reason })
-                .collect(),
-        })
+        Ok(verify_session_chain(
+            &meta,
+            &events,
+            event_verifier.as_ref(),
+            receipt_verifier.as_ref(),
+        ))
     }
 }

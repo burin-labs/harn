@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 fn reset_overrides() {
     clear_user_overrides();
+    clear_runtime_provider_endpoint_overrides();
 }
 
 fn diagnostic_texts(src: &str) -> Vec<String> {
@@ -1134,15 +1135,6 @@ fn test_unknown_model_family_ignores_default_provider_fallback() {
 }
 
 #[test]
-fn test_resolve_base_url_no_env() {
-    let pdef = ProviderDef {
-        base_url: "https://example.com".to_string(),
-        ..Default::default()
-    };
-    assert_eq!(resolve_base_url(&pdef), "https://example.com");
-}
-
-#[test]
 fn test_resolve_base_url_region_env() {
     let _guard = crate::llm::env_guard();
     unsafe {
@@ -1343,7 +1335,7 @@ fn test_default_tool_format_uses_capability_matrix() {
 
     assert_eq!(
         default_tool_format("qwen3.6-35b-a3b-ud-q4-k-xl", "llamacpp"),
-        "native"
+        "json"
     );
     // devstral dropped its stale heredoc `text` pin (it has no reserved-token
     // constraint, so there was no structural reason to stay on heredoc) and

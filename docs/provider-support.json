@@ -1238,12 +1238,12 @@
         ]
       },
       "capabilities": {
-        "native_tools": true,
+        "native_tools": false,
         "text_tools": true,
-        "preferred_tool_format": "native",
-        "tool_mode_parity": "native",
+        "preferred_tool_format": "json",
+        "tool_mode_parity": "text_only",
         "structured_output_transport": "native",
-        "structured_output_mode": "native_json",
+        "structured_output_mode": "delimited",
         "streaming": true,
         "reasoning_knobs": [
           "disable_directive:/no_think",
@@ -1271,7 +1271,7 @@
       ],
       "caveats": [
         "Run both provider readiness and tool probes after changing GGUF, context, KV-cache, or chat-template settings.",
-        "Harn-managed llama.cpp launch plus one-tool probe passed native and streaming native on 2026-06-05."
+        "2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract."
       ],
       "mcp_notes": [],
       "local_setup_notes": [

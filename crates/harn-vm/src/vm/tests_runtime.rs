@@ -14,7 +14,7 @@ use harn_parser::Parser;
 
 use super::*;
 
-fn run_harn(source: &str) -> (String, VmValue) {
+pub(super) fn run_harn(source: &str) -> (String, VmValue) {
     run_harn_with_options(source, CompilerOptions::optimized())
 }
 
@@ -42,7 +42,7 @@ fn run_harn_with_options(source: &str, options: CompilerOptions) -> (String, VmV
     })
 }
 
-fn run_harn_result_display_with_options(
+pub(super) fn run_harn_result_display_with_options(
     source: &str,
     options: CompilerOptions,
 ) -> Result<(String, String), String> {
@@ -324,7 +324,7 @@ fn runtime_error_renderer_normalizes_frame_paths() {
     assert!(!rendered.contains("/../"));
 }
 
-async fn run_harn_result_async(source: &str) -> Result<(String, VmValue), VmError> {
+pub(super) async fn run_harn_result_async(source: &str) -> Result<(String, VmValue), VmError> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);

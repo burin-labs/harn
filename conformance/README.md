@@ -125,13 +125,26 @@ sharing a stem:
 | `.harn`                | The test source (required)                          |
 | `.expected`            | Exact stdout match (test exits 0)                   |
 | `.error`               | Substring match against the error / non-zero exit   |
-| `.lint`                | Substring match against `harn lint` diagnostics     |
+| `.lint`                | Required/forbidden `harn lint` diagnostic substrings |
 | `.llm-mock.jsonl`      | Recorded LLM responses for replay                   |
 | `.process-tape.json`   | Subprocess output tape for the testbench shim       |
 | `.fs-overlay/`         | Files materialized into a tempdir before the test   |
 | `.harness.json`        | Per-test harness sidecar config                     |
 
-A test must have either `.expected` or `.error` (not both).
+A test must have `.expected`, `.error`, or `.lint`. `.expected` and `.error`
+are mutually exclusive; `.lint` is additive to either one, so a fixture can
+assert runtime output and diagnostics without executing the program twice.
+
+Every non-empty `.lint` line is a required substring by default. Prefix a line
+with `!` to assert that substring is absent. Empty `.lint` files are invalid,
+and an error-grade lint on an `.expected` fixture must be declared explicitly
+instead of passing unnoticed.
+
+`make lint-harn` separately checks fixtures without `.error` or `.lint`
+sidecars against `conformance/lint-baseline.tsv`. The baseline records exact
+counts by fixture and diagnostic code, so a new, removed, or duplicated finding
+requires review. After fixing or intentionally accepting a change, regenerate
+it with `HARN_BIN=<path> ./scripts/check-conformance-lint-baseline.sh --update`.
 
 ## Common helpers
 

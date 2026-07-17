@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use super::model::{
     fill_opt, Capabilities, CapabilitiesFile, ComputerUseStyle, ProviderDefaults,
-    ScreenshotScaling, WireDialect,
+    ReasoningHistoryWireField, ScreenshotScaling, WireDialect,
 };
 use crate::llm::providers::anthropic::claude_generation;
 use crate::llm::providers::openai_compat::gpt_generation;
@@ -243,6 +243,10 @@ pub struct ProviderRule {
     /// the same role there.
     #[serde(default)]
     pub preserve_thinking: Option<bool>,
+    /// Provider-specific field that must receive Harn's private reasoning on
+    /// replayed assistant history. Typed so catalog typos fail at load time.
+    #[serde(default)]
+    pub reasoning_history_wire_field: Option<ReasoningHistoryWireField>,
     /// Name of any server-side response parser that can transform model
     /// bytes before Harn sees them. `none` means the provider returns the
     /// model text/tool channel without an implicit parser.
@@ -550,6 +554,7 @@ impl ProviderRule {
             vision_supported,
             image_url_input_supported,
             preserve_thinking,
+            reasoning_history_wire_field,
             server_parser,
             honors_chat_template_kwargs,
             chat_template_options_field,
@@ -651,6 +656,10 @@ impl ProviderRule {
             image_url_input_supported,
         );
         fill_opt(&mut self.preserve_thinking, preserve_thinking);
+        fill_opt(
+            &mut self.reasoning_history_wire_field,
+            reasoning_history_wire_field,
+        );
         fill_opt(&mut self.server_parser, server_parser);
         fill_opt(
             &mut self.honors_chat_template_kwargs,
@@ -1018,6 +1027,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         vision_supported: None,
         image_url_input_supported: None,
         preserve_thinking: None,
+        reasoning_history_wire_field: None,
         server_parser: None,
         honors_chat_template_kwargs: None,
         chat_template_options_field: None,
@@ -1186,6 +1196,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .or(defaults.image_url_input_supported)
             .unwrap_or(true),
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
+        reasoning_history_wire_field: rule.reasoning_history_wire_field,
         server_parser: rule
             .server_parser
             .clone()

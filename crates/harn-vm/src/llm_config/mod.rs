@@ -20,6 +20,8 @@ mod taxonomy;
 #[cfg(test)]
 mod logical_defaults_tests;
 #[cfg(test)]
+mod provider_endpoint_tests;
+#[cfg(test)]
 mod tests;
 
 pub use catalog::*;

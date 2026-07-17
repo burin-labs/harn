@@ -1,7 +1,7 @@
 //! Hermetic per-case VM setup, execution, timeout, and teardown.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use super::{PhaseTimings, TestCase, TestPhase, TestResult, TestTimeout};
@@ -55,7 +55,7 @@ pub(super) async fn execute_case(
     case: &TestCase,
     execution_cwd: &Path,
     timeout_ms: u64,
-    cli_skill_dirs: &[PathBuf],
+    loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
     #[cfg(test)] setup_delay_ms: u64,
@@ -82,6 +82,7 @@ pub(super) async fn execute_case(
                 file: case.file.display().to_string(),
                 passed: false,
                 error: Some(format!("Compile error: {e}")),
+                captured_output: None,
                 timeout: None,
                 duration_ms: total_start.elapsed().as_millis() as u64,
                 phases: Some(phases),
@@ -110,17 +111,23 @@ pub(super) async fn execute_case(
                 .prefix("harn-user-test-state-")
                 .tempdir()
                 .map_err(|error| format!("failed to create test state directory: {error}"))?;
-            let store_base = test_state.path();
+            let state_root = test_state.path().join(".harn");
+            #[cfg(feature = "hostlib")]
+            let _safe_text_patch_lock_root =
+                harn_hostlib::fs::scope_safe_text_patch_lock_root(state_root.join("fs-cas-locks"));
             let source_dir = source_parent.to_string_lossy().into_owned();
             install_user_test_event_log_if_unset();
-            harn_vm::register_store_builtins(&mut vm, store_base);
-            harn_vm::register_metadata_builtins(&mut vm, store_base);
             let pipeline_name = case
                 .file
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("test");
-            harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
+            harn_vm::register_persistent_state_builtins_at_root(
+                &mut vm,
+                test_state.path(),
+                harn_vm::PersistentStateRoot::new(&state_root),
+                pipeline_name,
+            );
             vm.set_source_info(&file_display, &case.source);
             harn_vm::stdlib::process::set_thread_execution_context(Some(
                 harn_vm::orchestration::RunExecutionRecord {
@@ -146,13 +153,7 @@ pub(super) async fn execute_case(
                     vm.set_source_dir(parent);
                 }
             }
-            let loaded =
-                crate::skill_loader::load_skills(&crate::skill_loader::SkillLoaderInputs {
-                    cli_dirs: cli_skill_dirs.to_vec(),
-                    source_path: Some(case.file.clone()),
-                });
-            crate::skill_loader::emit_loader_warnings(&loaded.loader_warnings);
-            crate::skill_loader::install_skills_global(&mut vm, &loaded);
+            crate::skill_loader::install_skills_global(&mut vm, loaded_skills);
             let extensions = crate::package::try_load_runtime_extensions(&case.file)
                 .map_err(|error| format!("failed to load runtime extensions: {error}"))?;
             register_manifest_host_operations(&extensions);
@@ -195,6 +196,15 @@ pub(super) async fn execute_case(
             Ok::<_, String>((outcome, setup_ms, execute_ms))
         })
         .await;
+    // Read before `drop(vm)` below. Populated regardless of outcome: a
+    // timed-out or setup-failed case can still have useful `log()` calls
+    // that ran before the deadline/failure, and withholding them here would
+    // silently discard exactly the probes an author added to find where
+    // execution stalled or diverged.
+    let captured_output = {
+        let raw = vm.take_output();
+        (!raw.trim().is_empty()).then_some(raw)
+    };
     let failed_setup_ms = result
         .as_ref()
         .err()
@@ -242,6 +252,7 @@ pub(super) async fn execute_case(
         file: file_display,
         passed,
         error,
+        captured_output,
         timeout,
         duration_ms,
         phases: Some(phases),
