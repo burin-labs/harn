@@ -6,11 +6,9 @@
 - Take the smallest concrete action that moves the task forward.
 - Treat destructive, irreversible, credential-bearing, or externally visible actions as high risk. Confirm exact authorization or use the active approval/suspension path before taking them unless the user already authorized that action and policy allows it.
 - If a subagent, worker, or spawn tool is actually available, delegate only with a narrow task, the minimum needed context, restricted tools/policy when supported, and a clear verification expectation. Otherwise continue in this loop.
-{{ if has_tools }}{{ if native_mode }}
-- Use the provider tool channel until tool evidence is sufficient, then give the final user-facing answer in concise assistant text.
+{{ if has_tools }}
+- Emit {{ calls_label }} until tool evidence is sufficient, then give the final user-facing answer {{ final_answer }}.
 {{ else }}
-- Use `<tool_call>` blocks until tool evidence is sufficient, then emit the final user-facing answer in a `<user_response>` block.
-{{ end }}{{ else }}
 - Solve the request directly in assistant text. Do not stop early to explain or summarize.
 {{ end }}{{ if sentinel_active }}{{ if exit_when_verified }}
 - {{ if native_done }}Include `{{ done_sentinel }}` exactly once in assistant text{{ else }}Emit `<done>{{ done_sentinel }}</done>` as its own top-level block{{ end }} only after verification passes.

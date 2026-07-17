@@ -1,3 +1,4 @@
+import { agent_render_tool_call_exemplar, agent_tool_call_paradigm } from "std/agent/preflight"
 import { agent_required_tools_missing_from_session } from "std/agent/required_tools"
 import {
   agent_emit_event,
@@ -272,18 +273,21 @@ fn __required_tools_text_completion(opts, has_tool_calls, text) {
 }
 
 /**
- * A turn is "toolless" in TEXT mode when the model dispatched no tools
- * this turn, the loop is in text tool-format, and there is visible prose
- * to inspect. Unlike `__native_completion_context`, this fires for the
- * ~95% text-mode case the native gate excludes. Used to power the
- * fenced-call and missing-tool-call recovery below.
+ * A turn is "toolless" in a TEXT-FAMILY format (`text` or `json`) when the
+ * model dispatched no tools this turn, the loop is in one of the text-based
+ * tool-formats, and there is visible prose to inspect. Unlike
+ * `__native_completion_context`, this fires for the case the native gate
+ * excludes. Used to power the fenced-call and missing-tool-call recovery below.
+ * Both text-based lanes emit their calls in assistant text and are parsed by a
+ * text parser, so both need the same toolless recovery; the corrective wording
+ * renders per active tool_format from `agent_tool_call_paradigm`.
  */
-fn __text_mode_toolless_turn(opts, has_tool_calls, text) {
+fn __text_family_toolless_turn(opts, has_tool_calls, text) {
   if opts?.daemon {
     return false
   }
   const fmt = lowercase(to_string(opts?.tool_format ?? ""))
-  if fmt != "text" {
+  if fmt != "text" && fmt != "json" {
     return false
   }
   if has_tool_calls {
@@ -460,12 +464,16 @@ fn __classify_missing_tool_call(session, text, opts, iteration) {
  * double-injecting on the same turn.
  */
 fn __maybe_inject_action_nudge(session, opts, has_tool_calls, text, iteration) {
-  const text_mode = __text_mode_toolless_turn(opts, has_tool_calls, text)
+  const text_family = __text_family_toolless_turn(opts, has_tool_calls, text)
   const native_mode = __native_completion_context(opts, has_tool_calls, text)
-  if !text_mode && !native_mode {
+  if !text_family && !native_mode {
     return false
   }
-  const fenced = if text_mode {
+  // The corrective wording renders the taught call syntax from the single
+  // format-aware owner, so a `json` lane is told to emit a ```tool block and a
+  // `text` lane a `<tool_call>` block — never the wrong grammar.
+  const paradigm = agent_tool_call_paradigm(opts)
+  const fenced = if text_family {
     __detect_fenced_call_attempt(text)
   } else {
     nil
@@ -476,7 +484,9 @@ fn __maybe_inject_action_nudge(session, opts, has_tool_calls, text, iteration) {
       "fenced_call_attempt",
       "You wrapped a tool call in a ```"
         + fenced
-        + " fence — that is ignored. Emit the call bare inside <tool_call>...</tool_call>, e.g. <tool_call>\nedit({ ... })\n</tool_call>.",
+        + " fence — that is ignored. Emit the call as a "
+        + paradigm.call_noun
+        + " instead.",
     )
     agent_emit_event(
       session.session_id,
@@ -493,9 +503,9 @@ fn __maybe_inject_action_nudge(session, opts, has_tool_calls, text, iteration) {
         + to_string(tool_name)
         + "` now using the available native tool interface. Do not describe the action again."
     } else {
-      "Emit the call now: <tool_call>\n"
-        + to_string(tool_name)
-        + "({ ... })\n</tool_call>. Do not describe the action again."
+      "Emit the call now: "
+        + agent_render_tool_call_exemplar(to_string(tool_name), [], opts)
+        + " (fill in the arguments). Do not describe the action again."
     }
     agent_session_inject_feedback(
       session.session_id,

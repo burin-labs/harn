@@ -24,12 +24,18 @@ fn __agent_tool_format(opts) {
  * single wire format; they reference these paradigm fields (rendered into prompt
  * bindings) and the runtime maps them to whatever the CURRENT model expects.
  *
- * Today the two paradigms are `text` (the canonical `name({ key: value })` form
- * with heredoc bodies — the escape-free body channel weak models need) and
- * `native` (provider JSON tool calls). `body_hint` is the single source of truth
- * for "how do I pass a multi-line / code-bearing field" — heredoc for text, a
- * plain JSON string for native — so the same `.harn.prompt` renders correct
- * guidance for every model. Extend this (not the prompts) to add a new paradigm.
+ * Today the three paradigms are `text` (the canonical `name({ key: value })` form
+ * with heredoc bodies — the escape-free body channel weak models need), `json`
+ * (the ```tool fenced-JSON channel), and `native` (provider JSON tool calls).
+ * `body_hint` is the single source of truth for "how do I pass a multi-line /
+ * code-bearing field"; `call_noun` and `final_answer` are the single source of
+ * truth for the TAUGHT tool-call syntax — the bare noun for one call ("```tool
+ * JSON block", "`<tool_call>` block", "native tool call") and the phrase for the
+ * final-answer channel ("as plain text", "in a `<user_response>` block", "in
+ * concise assistant text"). The loop-completion contract, the no-progress nudge,
+ * and the parse-guidance feedback all render from these fields, so the taught
+ * syntax never drifts across surfaces. Extend this (not the prompts) to add a new
+ * paradigm.
  *
  * @effects: []
  * @errors: []
@@ -44,6 +50,8 @@ pub fn agent_tool_call_paradigm(options = nil) {
       call_close: "",
       body_open: "\"",
       body_close: "\"",
+      call_noun: "native tool call",
+      final_answer: "in concise assistant text",
       body_hint: "Pass multi-line or code-bearing fields (file contents, replacement text) as ordinary JSON string arguments — the runtime handles escaping.",
     }
   }
@@ -54,6 +62,8 @@ pub fn agent_tool_call_paradigm(options = nil) {
       call_close: "\n```",
       body_open: "\"",
       body_close: "\"",
+      call_noun: "```tool JSON block",
+      final_answer: "as plain text",
       body_hint: "Each tool call is one ```tool fenced block containing a single JSON object `{ \"name\": \"...\", \"args\": { ... } }`. Pass multi-line or code-bearing fields (file contents, replacement text, exact-match strings) as ordinary JSON string values — escape newlines as \\n, quotes as \\\", backslashes as \\\\. Backticks, `<<EOF`, `}`, and `</tool>` need NO escaping; they are literal bytes inside the JSON string. Emit one ```tool block per call (N blocks for N calls). Never use a heredoc, a Markdown fence around the call, or a triple-quoted string.",
     }
   }
@@ -63,6 +73,8 @@ pub fn agent_tool_call_paradigm(options = nil) {
     call_close: "</tool_call>",
     body_open: "<<EOF\n",
     body_close: "\nEOF",
+    call_noun: "`<tool_call>` block",
+    final_answer: "in a `<user_response>` block",
     body_hint: "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
   }
 }
@@ -134,6 +146,7 @@ fn __agent_loop_contract_prompt(opts) {
     return ""
   }
   const mode = __agent_tool_format(opts)
+  const paradigm = agent_tool_call_paradigm(opts)
   return loop_until_done_system_prompt(
     {
       loop_until_done: loop_until_done,
@@ -141,6 +154,8 @@ fn __agent_loop_contract_prompt(opts) {
       has_tools: __agent_has_tools(opts),
       native_mode: mode == "native",
       native_done: mode == "native",
+      calls_label: paradigm.call_noun + "s",
+      final_answer: paradigm.final_answer,
       sentinel_active: sentinel != nil,
       done_sentinel: sentinel,
     },
