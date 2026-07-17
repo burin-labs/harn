@@ -47,3 +47,53 @@ pub(crate) fn restore_message_event_ids(
         )
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restores_canonical_ids_without_truncating_unmapped_events() {
+        super::super::reset_session_store();
+        let session_id = super::super::seed_from_messages(
+            Some("restore-event-ids".to_string()),
+            &[
+                serde_json::json!({"role": "user", "content": "first"}),
+                serde_json::json!({"role": "assistant", "content": "second"}),
+            ],
+            serde_json::json!({}),
+            None,
+            None,
+        )
+        .expect("seed session");
+
+        restore_message_event_ids(&session_id, &[Some("canonical-user".to_string()), None])
+            .expect("restore canonical id");
+
+        let transcript = super::super::transcript(&session_id).expect("transcript");
+        let events = transcript
+            .as_dict()
+            .and_then(|transcript| transcript.get("events"))
+            .and_then(|events| match events {
+                VmValue::List(events) => Some(events),
+                _ => None,
+            })
+            .expect("event list");
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0]
+                .as_dict()
+                .and_then(|event| event.get("id"))
+                .map(VmValue::display),
+            Some("canonical-user".to_string())
+        );
+        assert!(
+            events[1]
+                .as_dict()
+                .and_then(|event| event.get("id"))
+                .is_some(),
+            "an unmapped event must remain in the reconstructed transcript"
+        );
+        super::super::reset_session_store();
+    }
+}

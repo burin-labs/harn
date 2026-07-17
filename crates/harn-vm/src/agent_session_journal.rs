@@ -57,7 +57,6 @@ thread_local! {
 pub(crate) struct HydratedTranscript {
     pub messages: Vec<serde_json::Value>,
     pub source_event_ids: Vec<Option<String>>,
-    pub summary: Option<String>,
 }
 
 /// Open the canonical session and install its per-agent-run journal before
@@ -412,7 +411,6 @@ fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTrans
     HydratedTranscript {
         messages,
         source_event_ids,
-        summary,
     }
 }
 
@@ -593,7 +591,6 @@ mod tests {
         )
         .await
         .expect("hydrate replacement");
-        assert_eq!(compacted.summary.as_deref(), Some("compacted context"));
         assert_eq!(compacted.messages.len(), 2);
         assert_eq!(compacted.messages[0]["content"], "compacted context");
         assert_eq!(compacted.messages[1]["content"], "retained turn");
