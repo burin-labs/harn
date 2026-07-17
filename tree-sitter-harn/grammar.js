@@ -341,7 +341,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
-        field("value", choice($.struct_construct, $._expression))
+        field("value", $._expression)
       ),
 
     var_binding: ($) =>
@@ -350,7 +350,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
-        field("value", choice($.struct_construct, $._expression))
+        field("value", $._expression)
       ),
 
     // Immutable binding (`const PATTERN [: Type] = EXPR`). The default,
@@ -364,7 +364,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
-        field("value", choice($.struct_construct, $._expression))
+        field("value", $._expression)
       ),
 
     _binding_pattern: ($) =>
@@ -726,6 +726,16 @@ module.exports = grammar({
         $.retry_statement,
         $.cost_route_block,
         $.match_statement,
+        // Struct construction (`TypeName { field: value }`) is a general
+        // expression, mirroring the runtime parser where it is a postfix on an
+        // identifier primary (crates/harn-parser parse loop +
+        // is_struct_construct_lookahead). Keeping it here — rather than only in
+        // binding initializers and call arguments — lets `return Point {..}`,
+        // ternary arms, and list/dict elements parse. GLR disambiguates it from
+        // a block via the `dict_literal` shape (`{ ident: ... }` or `{}`); a
+        // block of statements is not a dict literal, so `if Foo { stmt }` still
+        // reads `Foo` + block. See conflict `[$._primary, $.struct_construct]`.
+        $.struct_construct,
         $._primary
       ),
 
@@ -1193,7 +1203,6 @@ module.exports = grammar({
     _argument_element: ($) =>
       choice(
         $.spread_expression,
-        $.struct_construct,
         $._expression
       ),
 
