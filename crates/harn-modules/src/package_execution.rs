@@ -304,10 +304,10 @@ fn lexical_package_relative_path(
             canonical_packages_root.display()
         ))
     };
-    // Preserve an exact lexical root before falling back to canonical identity.
-    // The caller below must still see `..` to reject an alias-root escape.
-    if let Ok(relative) = entry.strip_prefix(canonical_packages_root) {
-        return Ok(relative.to_path_buf());
+    // `Path::strip_prefix` compares normalized components on Windows. Walk the
+    // components ourselves so the caller can still reject `alias/../escape`.
+    if let Some(relative) = lexical_relative_suffix(entry, canonical_packages_root) {
+        return Ok(relative);
     }
     let mut input_packages_root = None;
     for ancestor in entry.ancestors() {
@@ -319,10 +319,19 @@ fn lexical_package_relative_path(
         }
     }
     let input_packages_root = input_packages_root.ok_or_else(&outside_generation)?;
-    entry
-        .strip_prefix(input_packages_root)
-        .map(Path::to_path_buf)
-        .map_err(|_| outside_generation())
+    lexical_relative_suffix(entry, input_packages_root).ok_or_else(outside_generation)
+}
+
+fn lexical_relative_suffix(entry: &Path, root: &Path) -> Option<PathBuf> {
+    let mut entry_components = entry.components();
+    for root_component in root.components() {
+        if entry_components.next() != Some(root_component) {
+            return None;
+        }
+    }
+    let mut relative = PathBuf::new();
+    relative.extend(entry_components);
+    Some(relative)
 }
 
 impl fmt::Debug for PackageExecutionGuard {
