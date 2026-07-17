@@ -81,6 +81,13 @@ write_paths windows_source crates/harn-hostlib/src/lib.rs
 assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_source"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_source"
 
+write_paths package_paths \
+  crates/harn-modules/src/package_execution.rs \
+  crates/harn-modules/src/package_imports.rs \
+  crates/harn-modules/src/package_snapshot.rs
+assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/package_paths"
+assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/package_paths"
+
 write_paths release_meta Cargo.lock changelog.d/123.fixed.md
 assert_plan false --platform windows --event push --changed-files "$tmp_dir/release_meta"
 assert_plan false --platform macos --event push --changed-files "$tmp_dir/release_meta"

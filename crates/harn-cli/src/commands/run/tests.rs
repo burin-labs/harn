@@ -493,7 +493,7 @@ pipeline main() {
 
     assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
     assert!(
-        outcome.stderr.contains("exceeds network ceiling"),
+        outcome.stderr.contains("exceeds network.http ceiling"),
         "stderr:\n{}",
         outcome.stderr
     );

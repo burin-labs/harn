@@ -410,6 +410,9 @@ pub struct Vm {
     pub(crate) last_line: usize,
     /// Source directory for resolving imports.
     pub(crate) source_dir: Option<std::path::PathBuf>,
+    /// Installed-package identity retained for the active lazy pipeline.
+    pub(crate) package_execution_guard:
+        Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
     /// Modules currently being imported (cycle prevention).
     pub(crate) imported_paths: Vec<std::path::PathBuf>,
     /// Imports that hit an in-progress module (an import cycle) and so could
@@ -560,6 +563,7 @@ impl VmBaseline {
             stopped: false,
             last_line: 0,
             source_dir: self.source_dir.clone(),
+            package_execution_guard: None,
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
@@ -811,6 +815,7 @@ impl Vm {
             stopped: false,
             last_line: 0,
             source_dir: None,
+            package_execution_guard: None,
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
@@ -986,6 +991,7 @@ impl Vm {
             stopped: false,
             last_line: 0,
             source_dir: self.source_dir.clone(),
+            package_execution_guard: self.package_execution_guard.clone(),
             imported_paths: Vec::new(),
             deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::clone(&self.module_cache),

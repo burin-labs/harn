@@ -113,6 +113,7 @@ fn persona_list_and_inspect_emit_stable_json() {
     assert_eq!(persona["handoffs"][0], "review_captain");
     assert_eq!(persona["context_packs"][0], "repo_policy");
     assert_eq!(persona["evals"][0], "merge_safety");
+    assert_eq!(persona["source"]["kind"], "root");
 }
 
 #[test]
@@ -494,6 +495,47 @@ async fn persona_runtime_status_tick_and_budget_are_persisted() {
     assert_eq!(status.value_receipts.len(), 2);
     assert_eq!(status.value_receipts[0].kind.as_str(), "run_started");
     assert_eq!(status.value_receipts[1].kind.as_str(), "run_completed");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_runtime_does_not_fall_back_from_a_missing_explicit_manifest() {
+    let temp = write_manifest(valid_manifest());
+    let missing = temp.path().join("nested/missing-personas.toml");
+    let error = persona::status_payload(
+        Some(&missing),
+        &temp.path().join("state"),
+        "merge_captain",
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.contains("missing-personas.toml"), "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_runtime_uses_an_explicit_standalone_toml_catalog() {
+    let temp = write_manifest(valid_manifest());
+    let standalone = temp.path().join("persona.toml");
+    fs::write(
+        &standalone,
+        valid_manifest().replace(
+            "workflows/merge.harn#run",
+            "workflows/standalone-merge.harn#run",
+        ),
+    )
+    .unwrap();
+
+    let status = persona::status_payload(
+        Some(&standalone),
+        &temp.path().join("state"),
+        "merge_captain",
+        None,
+    )
+    .await
+    .expect("explicit standalone TOML persona should resolve exactly");
+
+    assert_eq!(status.entry_workflow, "workflows/standalone-merge.harn#run");
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -589,6 +589,68 @@ fn test_parses_persona_check_flags() {
 }
 
 #[test]
+fn test_parses_persona_activation_attenuation() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "--manifest",
+        "workspace/harn.toml",
+        "activate",
+        "agents/reviewer",
+        "--autonomy-tier",
+        "suggest",
+        "--tool",
+        "filesystem",
+        "--capability",
+        "workspace.read_text",
+        "--json",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::Activate(activate) = args.command else {
+        panic!("expected persona activate command");
+    };
+    assert_eq!(activate.name, "agents/reviewer");
+    assert_eq!(activate.autonomy_tier.as_deref(), Some("suggest"));
+    assert_eq!(activate.tools, vec!["filesystem"]);
+    assert_eq!(activate.capabilities, vec!["workspace.read_text"]);
+    assert!(activate.json);
+}
+
+#[test]
+fn test_persona_activation_rejects_unenforced_budget_flags() {
+    let error = Cli::try_parse_from([
+        "harn",
+        "persona",
+        "activate",
+        "agents/reviewer",
+        "--daily-usd",
+        "5",
+    ])
+    .unwrap_err();
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+}
+
+#[test]
+fn test_persona_activation_rejects_conflicting_set_flags() {
+    let error = Cli::try_parse_from([
+        "harn",
+        "persona",
+        "activate",
+        "agents/reviewer",
+        "--tool",
+        "filesystem",
+        "--no-tools",
+    ])
+    .unwrap_err();
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
 fn test_parses_trigger_bulk_cancel_flags() {
     let cli = Cli::parse_from([
         "harn",

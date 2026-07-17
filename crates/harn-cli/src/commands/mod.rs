@@ -49,6 +49,8 @@ pub mod pack;
 pub(crate) mod package_scaffold;
 pub(crate) mod parse_tokens;
 pub mod persona;
+pub mod persona_activation;
+pub mod persona_dispatch;
 pub mod persona_doctor;
 pub mod persona_scaffold;
 pub mod persona_supervision;

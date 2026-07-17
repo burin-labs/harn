@@ -251,6 +251,7 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         | "http_stream_open"
         | "http_stream_read"
         | "http_stream_close"
+        | "http_stream_info"
         | "sse_connect"
         | "sse_receive"
         | "sse_close"
@@ -330,6 +331,13 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
 
         _ => None,
     }
+}
+
+pub(super) fn builtin_has_network_effect(name: &str) -> bool {
+    if matches!(name, "__files_upload" | "upload") {
+        return true;
+    }
+    builtin_effect(name).is_some_and(|effect| matches!(effect.kind, EffectKind::Net))
 }
 
 fn annotate_with_resource(mut effect: EffectRecord, call: &harn_ir::CallSemantics) -> EffectRecord {
@@ -740,7 +748,7 @@ fn child_nodes(node: &SNode) -> Vec<&SNode> {
 }
 
 fn effect_allowed_by_ceiling(effect: &EffectRecord, ceiling: &CapabilityPolicy) -> bool {
-    if !ceiling.capabilities.is_empty() {
+    if ceiling.capabilities_are_restricted() {
         let (capability, op) = effect_capability_op(effect);
         let allowed = ceiling
             .capabilities

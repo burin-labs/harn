@@ -282,61 +282,12 @@ pub(crate) fn write_cache_metadata(
 }
 
 pub(crate) fn normalized_relative_path(path: &Path) -> String {
-    path.components()
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-pub(crate) fn collect_hashable_files(
-    root: &Path,
-    cursor: &Path,
-    out: &mut Vec<PathBuf>,
-) -> Result<(), PackageError> {
-    for entry in fs::read_dir(cursor)
-        .map_err(|error| format!("failed to read {}: {error}", cursor.display()))?
-    {
-        let entry =
-            entry.map_err(|error| format!("failed to read {} entry: {error}", cursor.display()))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|error| format!("failed to stat {}: {error}", path.display()))?;
-        let name = entry.file_name();
-        if name == OsStr::new(".git")
-            || name == OsStr::new(".gitignore")
-            || name == OsStr::new(CONTENT_HASH_FILE)
-            || name == OsStr::new(CACHE_METADATA_FILE)
-        {
-            continue;
-        }
-        if file_type.is_dir() {
-            collect_hashable_files(root, &path, out)?;
-        } else if file_type.is_file() {
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?;
-            out.push(relative.to_path_buf());
-        }
-    }
-    Ok(())
+    harn_modules::package_execution::normalized_package_relative_path(path)
 }
 
 pub(crate) fn compute_content_hash(dir: &Path) -> Result<String, PackageError> {
-    let mut files = Vec::new();
-    collect_hashable_files(dir, dir, &mut files)?;
-    files.sort();
-    let mut hasher = Sha256::new();
-    for relative in files {
-        let normalized = normalized_relative_path(&relative);
-        let contents = fs::read(dir.join(&relative)).map_err(|error| {
-            format!("failed to read {}: {error}", dir.join(&relative).display())
-        })?;
-        hasher.update(normalized.as_bytes());
-        hasher.update([0]);
-        hasher.update(sha256_hex(contents).as_bytes());
-    }
-    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+    harn_modules::package_execution::compute_package_content_hash(dir)
+        .map_err(|error| PackageError::Registry(error.to_string()))
 }
 
 pub(crate) fn verify_content_hash_or_compute(
