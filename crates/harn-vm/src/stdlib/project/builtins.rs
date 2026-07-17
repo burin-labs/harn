@@ -141,21 +141,26 @@ pub(crate) fn project_scan_config_value(dir: &Path) -> VmValue {
     scan_exact_directory(dir, &options).into_vm_value()
 }
 
-fn resolve_existing_directory(path: &str) -> Result<PathBuf, VmError> {
+/// Resolve the directory a project scan should read.
+///
+/// A file path names the directory that contains it, which lets a caller holding
+/// `src/main.rs` scan `src`. A path that does not exist names nothing: walking up
+/// to its parent would answer a question the caller never asked, silently
+/// reporting an unrelated directory's contents as if they were the requested
+/// path's. `project_fingerprint("/tmp/nonexistent")` scanned all of `/tmp`.
+pub(super) fn resolve_existing_directory(path: &str) -> Result<PathBuf, VmError> {
     let resolved = resolve_source_relative_path(path);
     let target = if resolved.is_dir() {
         resolved
-    } else {
+    } else if resolved.is_file() {
         resolved
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."))
-    };
-    if target.exists() {
-        target.canonicalize().map_err(path_error)
     } else {
-        Err(path_missing_error(&target))
-    }
+        return Err(path_missing_error(&resolved));
+    };
+    target.canonicalize().map_err(path_error)
 }
 
 fn path_error(error: std::io::Error) -> VmError {

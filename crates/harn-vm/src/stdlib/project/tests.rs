@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::value::VmValue;
+use crate::VmError;
 
 fn temp_dir(label: &str) -> tempfile::TempDir {
     tempfile::Builder::new()
@@ -880,4 +881,55 @@ fn project_fingerprint_handles_empty_directory() {
     assert!(!fingerprint.has_tests);
     assert!(!fingerprint.has_ci);
     assert!(fingerprint.lockfile_paths.is_empty());
+}
+
+#[test]
+fn scan_path_resolution_rejects_a_missing_path_instead_of_scanning_its_parent() {
+    let dir = temp_dir("missing-path");
+    let missing = dir.path().join("no-such-subdir");
+
+    let error = super::builtins::resolve_existing_directory(&missing.display().to_string())
+        .expect_err("a path that does not exist names no directory to scan");
+
+    // Falling back to the parent silently answers a question the caller never
+    // asked: `project_fingerprint("/tmp/nonexistent")` reported all of `/tmp`.
+    match error {
+        VmError::Thrown(VmValue::String(message)) => {
+            assert!(
+                message.contains("does not exist"),
+                "the error must name the missing path, got: {message}"
+            );
+            assert!(
+                message.contains("no-such-subdir"),
+                "the error must name the path the caller passed, not its parent, got: {message}"
+            );
+        }
+        other => panic!("expected a thrown path error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn scan_path_resolution_maps_a_file_to_its_directory() {
+    let dir = temp_dir("file-path");
+    let file = dir.path().join("main.rs");
+    std::fs::write(&file, "fn main() {}\n").expect("write");
+
+    let resolved = super::builtins::resolve_existing_directory(&file.display().to_string())
+        .expect("a file names the directory that contains it");
+
+    assert_eq!(
+        resolved,
+        dir.path().canonicalize().expect("canonicalize"),
+        "a caller holding a file path scans the directory it lives in"
+    );
+}
+
+#[test]
+fn scan_path_resolution_accepts_a_directory_unchanged() {
+    let dir = temp_dir("dir-path");
+
+    let resolved = super::builtins::resolve_existing_directory(&dir.path().display().to_string())
+        .expect("an existing directory resolves to itself");
+
+    assert_eq!(resolved, dir.path().canonicalize().expect("canonicalize"));
 }
