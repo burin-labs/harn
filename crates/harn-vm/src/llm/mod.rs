@@ -328,7 +328,9 @@ pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
     register_llm_call_with_bridge,
 };
-pub use self::agent_runtime::{current_agent_session_id, register_session_end_hook};
+pub use self::agent_runtime::{
+    current_agent_session_id, register_session_end_hook, SessionEndHookRegistration,
+};
 pub(crate) use self::agent_runtime::{
     current_host_bridge, emit_agent_event_sync as emit_live_agent_event_sync,
     emit_agent_event_with_ctx as emit_live_agent_event_with_ctx, swap_current_host_bridge,
