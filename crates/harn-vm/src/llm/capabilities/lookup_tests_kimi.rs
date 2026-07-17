@@ -15,6 +15,7 @@ fn moonshot_kimi_k3_requires_max_effort_and_catalog_owned_reasoning_replay() {
     );
     assert!(caps.requires_completion_tokens);
     assert!(caps.reasoning_effort_supported);
+    assert_eq!(caps.thinking_modes, vec!["effort"]);
     assert_eq!(caps.reasoning_effort_levels, vec!["max"]);
     assert!(!caps.reasoning_none_supported);
     assert!(!caps.reasoning_disable_supported);

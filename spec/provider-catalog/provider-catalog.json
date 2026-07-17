@@ -11323,7 +11323,7 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "effort"
         ],
         "effort_supported": true,
         "effort_levels": [
@@ -11351,6 +11351,7 @@
         "vision",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "kimi",
@@ -25426,6 +25427,7 @@
       "label": "Kimi K3 (Moonshot direct)",
       "family": "kimi",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",

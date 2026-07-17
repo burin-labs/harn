@@ -15,7 +15,9 @@ preferred_tool_format = "native"
 tool_mode_parity = "unknown"
 tool_mode_parity_notes = "Moonshot documents native OpenAI-compatible tools; credentialed Harn probe not run because MOONSHOT_API_KEY is unavailable in this lane."
 structured_output = "native"
-thinking_modes = ["enabled"]
+# K3 always reasons through the OpenAI-compatible `reasoning_effort` field;
+# it accepts only the `max` effort below, rather than a generic enabled mode.
+thinking_modes = ["effort"]
 vision = true
 vision_supported = true
 prompt_caching = true
