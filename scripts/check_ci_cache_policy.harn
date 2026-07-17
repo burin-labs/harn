@@ -32,7 +32,7 @@ const SCCACHE_ACTION = "./.github/actions/sccache"
 
 const STICKY_DISK_PREFIX = "useblacksmith/stickydisk@"
 
-const STICKY_DISK_PIN = "useblacksmith/stickydisk@5b350170ae4ef55b536b548ef5f5896e76a6b54f"
+const STICKY_DISK_PIN = "useblacksmith/stickydisk@6d373c96a74cbde0c99fedc5ea5d3a7ba66ba494"
 
 const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
 

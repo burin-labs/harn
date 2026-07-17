@@ -9,7 +9,7 @@ fn sccache_action() {
     runs: {
       steps: [
         {
-          uses: "useblacksmith/stickydisk@5b350170ae4ef55b536b548ef5f5896e76a6b54f",
+          uses: "useblacksmith/stickydisk@6d373c96a74cbde0c99fedc5ea5d3a7ba66ba494",
           if: "inputs.sticky == 'true'",
           "continue-on-error": true,
           with: {

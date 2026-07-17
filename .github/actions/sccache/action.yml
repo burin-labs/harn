@@ -15,7 +15,7 @@ runs:
   steps:
     - name: Mount persistent sccache directory
       if: inputs.sticky == 'true'
-      uses: useblacksmith/stickydisk@5b350170ae4ef55b536b548ef5f5896e76a6b54f # v1.4.0
+      uses: useblacksmith/stickydisk@6d373c96a74cbde0c99fedc5ea5d3a7ba66ba494 # v1.4.0
       continue-on-error: true
       with:
         key: ${{ github.repository }}-sccache-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}
