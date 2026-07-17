@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use harn_vm::{VmDictExt, VmValue};
@@ -7,30 +8,41 @@ use crate::error::HostlibError;
 use super::{SchemaKind, SCHEMAS};
 
 struct CompiledSchema {
-    module: &'static str,
-    method: &'static str,
-    kind: SchemaKind,
     body: Result<VmValue, String>,
 }
 
-fn compiled_schemas() -> &'static [CompiledSchema] {
-    static COMPILED: OnceLock<Vec<CompiledSchema>> = OnceLock::new();
+type CompiledSchemaDirections = [Option<CompiledSchema>; 2];
+type CompiledSchemaMethods = HashMap<&'static str, CompiledSchemaDirections>;
+type CompiledSchemaIndex = HashMap<&'static str, CompiledSchemaMethods>;
+
+fn schema_direction_index(kind: SchemaKind) -> usize {
+    match kind {
+        SchemaKind::Request => 0,
+        SchemaKind::Response => 1,
+    }
+}
+
+fn compiled_schemas() -> &'static CompiledSchemaIndex {
+    static COMPILED: OnceLock<CompiledSchemaIndex> = OnceLock::new();
     COMPILED.get_or_init(|| {
-        SCHEMAS
-            .iter()
-            .map(|(module, method, kind, body)| {
-                let body = serde_json::from_str::<serde_json::Value>(body)
-                    .map_err(|err| format!("schema is not valid JSON: {err}"))
-                    .map(|json| harn_vm::json_to_vm_value(&json))
-                    .and_then(|schema| harn_vm::schema::canonicalize_json_schema(&schema));
-                CompiledSchema {
-                    module,
-                    method,
-                    kind: *kind,
-                    body,
-                }
-            })
-            .collect()
+        let mut index = CompiledSchemaIndex::new();
+        for (module, method, kind, body) in SCHEMAS {
+            let body = serde_json::from_str::<serde_json::Value>(body)
+                .map_err(|err| format!("schema is not valid JSON: {err}"))
+                .map(|json| harn_vm::json_to_vm_value(&json))
+                .and_then(|schema| harn_vm::schema::canonicalize_json_schema(&schema));
+            let directions = index
+                .entry(module)
+                .or_default()
+                .entry(method)
+                .or_insert_with(|| [None, None]);
+            let slot = &mut directions[schema_direction_index(*kind)];
+            assert!(
+                slot.replace(CompiledSchema { body }).is_none(),
+                "duplicate {kind:?} schema for {module}.{method}"
+            );
+        }
+        index
     })
 }
 
@@ -40,8 +52,10 @@ fn compiled_schema(
     kind: SchemaKind,
 ) -> Option<&'static CompiledSchema> {
     compiled_schemas()
-        .iter()
-        .find(|schema| schema.module == module && schema.method == method && schema.kind == kind)
+        .get(module)?
+        .get(method)?
+        .get(schema_direction_index(kind))?
+        .as_ref()
 }
 
 pub(crate) fn validate_request_args(
@@ -151,6 +165,18 @@ mod tests {
     use harn_vm::VmValue;
 
     use super::*;
+
+    #[test]
+    fn compiled_schema_index_covers_the_catalog_once() {
+        let indexed = compiled_schemas()
+            .values()
+            .flat_map(HashMap::values)
+            .flat_map(|directions| directions.iter())
+            .filter(|schema| schema.is_some())
+            .count();
+
+        assert_eq!(indexed, SCHEMAS.len());
+    }
 
     #[test]
     fn request_validation_prunes_nil_optional_fields() {
