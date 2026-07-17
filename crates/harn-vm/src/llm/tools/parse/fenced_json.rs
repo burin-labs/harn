@@ -428,9 +428,10 @@ fn parse_bare_json_tool_call(body: &str) -> Result<(String, serde_json::Value), 
 /// ```
 ///
 /// The grammar is intentionally whole-response only. A `<tool_calls>` opener
-/// must have the matching close, at least one `<tool>` marker, and a sequence
-/// of complete JSON objects. This makes the recovery unambiguous while keeping
-/// partial markup fail-loud rather than dispatching a guessed action.
+/// must have the matching close, and every `<tool>` marker must be followed by
+/// a complete JSON object before another marker, a `</tool>` close, or the
+/// wrapper close. This makes the recovery unambiguous while keeping partial
+/// markup fail-loud rather than dispatching a guessed action.
 fn parse_chat_template_json_tool_calls(
     src: &str,
 ) -> Option<Result<Vec<(String, serde_json::Value)>, BlockError>> {
@@ -448,16 +449,50 @@ fn parse_chat_template_json_tool_calls(
     };
 
     let mut saw_tool_marker = false;
+    let mut tool_marker_active = false;
+    let mut pending_tool_object = false;
     let mut calls = Vec::new();
     while !body.is_empty() {
         if let Some(rest) = body.strip_prefix(TOOL_OPEN) {
+            if pending_tool_object {
+                return Some(Err(BlockError::ChatTemplateEnvelope {
+                    detail: "a `<tool>` marker must be followed by a JSON object before another `<tool>` marker"
+                        .to_string(),
+                }));
+            }
             saw_tool_marker = true;
+            tool_marker_active = true;
+            pending_tool_object = true;
             body = rest.trim_start();
             continue;
         }
         if let Some(rest) = body.strip_prefix(TOOL_CLOSE) {
+            if !tool_marker_active {
+                return Some(Err(BlockError::ChatTemplateEnvelope {
+                    detail:
+                        "found an unmatched `</tool>` close without a preceding `<tool>` marker"
+                            .to_string(),
+                }));
+            }
+            if pending_tool_object {
+                return Some(Err(BlockError::ChatTemplateEnvelope {
+                    detail: "a `<tool>` marker must be followed by a JSON object before `</tool>`"
+                        .to_string(),
+                }));
+            }
+            tool_marker_active = false;
             body = rest.trim_start();
             continue;
+        }
+        if !tool_marker_active {
+            let detail = if saw_tool_marker {
+                "expected a `<tool>` marker before this JSON object"
+            } else {
+                "the envelope contained no `<tool>` marker"
+            };
+            return Some(Err(BlockError::ChatTemplateEnvelope {
+                detail: detail.to_string(),
+            }));
         }
         if !body.starts_with('{') {
             return Some(Err(BlockError::ChatTemplateEnvelope {
@@ -504,9 +539,15 @@ fn parse_chat_template_json_tool_calls(
                 }));
             }
         }
+        pending_tool_object = false;
         body = body[consumed..].trim_start();
     }
 
+    if pending_tool_object {
+        return Some(Err(BlockError::ChatTemplateEnvelope {
+            detail: "a `<tool>` marker ended without a complete JSON object".to_string(),
+        }));
+    }
     if !saw_tool_marker {
         return Some(Err(BlockError::ChatTemplateEnvelope {
             detail: "the envelope contained no `<tool>` marker".to_string(),
@@ -859,6 +900,33 @@ mod tests {
             "error: {}",
             out.errors[0]
         );
+    }
+
+    #[test]
+    fn truncated_chat_template_second_marker_never_dispatches_first_call() {
+        let out = parse(
+            "<tool_calls><tool>{\"name\":\"look\",\"file\":\"src/lib.rs\"}<tool></tool_calls>",
+        );
+        assert!(
+            out.calls.is_empty(),
+            "partial calls must not dispatch: {:?}",
+            out.calls
+        );
+        assert_eq!(out.errors.len(), 1);
+        assert!(
+            out.errors[0].contains("ended without a complete JSON object")
+                && out.errors[0].contains("not executed"),
+            "error: {}",
+            out.errors[0]
+        );
+    }
+
+    #[test]
+    fn unmatched_chat_template_tool_close_is_rejected() {
+        let out = parse("<tool_calls></tool></tool_calls>");
+        assert!(out.calls.is_empty());
+        assert_eq!(out.errors.len(), 1);
+        assert!(out.errors[0].contains("unmatched `</tool>`"));
     }
 
     #[test]
