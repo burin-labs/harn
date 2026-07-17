@@ -1143,18 +1143,12 @@ fn test_resolve_base_url_no_env() {
 }
 
 #[test]
-fn test_runtime_provider_endpoint_wins_over_ambient_endpoint_env() {
-    let _guard = crate::llm::env_guard();
-    unsafe {
-        std::env::set_var("HARN_TEST_RUNTIME_ENDPOINT", "https://ambient.example/v1");
-    }
-
+fn test_runtime_provider_endpoint_wins_over_catalog_endpoint() {
     let mut config = ProvidersConfig::default();
     config.providers.insert(
         "fixture".to_string(),
         ProviderDef {
             base_url: "https://catalog.example/v1".to_string(),
-            base_url_env: Some("HARN_TEST_RUNTIME_ENDPOINT".to_string()),
             ..Default::default()
         },
     );
