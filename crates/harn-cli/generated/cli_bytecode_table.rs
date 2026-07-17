@@ -12,6 +12,7 @@ pub(crate) const STDLIB_CLI_SCRIPT_BYTECODE: &[(&str, &[u8])] = &[
     ("eval/prompt", include_bytes!("cli-bytecode/eval-prompt.harnbc")),
     ("explain", include_bytes!("cli-bytecode/explain.harnbc")),
     ("graph", include_bytes!("cli-bytecode/graph.harnbc")),
+    ("personas/materialize", include_bytes!("cli-bytecode/personas-materialize.harnbc")),
     ("models/batch_plan", include_bytes!("cli-bytecode/models-batch_plan.harnbc")),
     ("models/list", include_bytes!("cli-bytecode/models-list.harnbc")),
     ("models/lora_inspect", include_bytes!("cli-bytecode/models-lora_inspect.harnbc")),

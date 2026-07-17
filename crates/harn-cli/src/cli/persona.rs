@@ -25,6 +25,8 @@ pub(crate) struct PersonaArgs {
 pub(crate) enum PersonaCommand {
     /// Scaffold a new Harn-first persona package from a template.
     New(PersonaNewArgs),
+    /// Materialize a closed persona blueprint through the canonical scaffold transaction.
+    Materialize(PersonaMaterializeArgs),
     /// Validate a persona package end-to-end.
     Doctor(PersonaDoctorArgs),
     /// Validate a persona manifest with the canonical harn-modules schema.
@@ -68,6 +70,19 @@ pub(crate) struct PersonaNewArgs {
     #[arg(long, value_name = "DIR", default_value = "personas")]
     pub output_root: PathBuf,
     /// Replace an existing generated package.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaMaterializeArgs {
+    /// Path to a JSON persona blueprint compiled by Harn at the materialization boundary.
+    #[arg(long, value_name = "JSON")]
+    pub blueprint: PathBuf,
+    /// Directory under which the persona package is created.
+    #[arg(long, value_name = "DIR", default_value = "personas")]
+    pub output_root: PathBuf,
+    /// Replace an existing generated package after strict validation succeeds.
     #[arg(long)]
     pub force: bool,
 }
