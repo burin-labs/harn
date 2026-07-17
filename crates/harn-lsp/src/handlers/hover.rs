@@ -5,12 +5,101 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
 use crate::constants::{builtin_doc, builtin_signature, keyword_doc};
-use crate::helpers::{lsp_position_to_offset, offset_to_position, word_at_position};
+use crate::helpers::{
+    is_member_access, lsp_position_to_offset, offset_to_position, word_span_at_position,
+};
 use crate::symbols::{
     format_flow_attributes_block, format_shape_expanded, format_union_shapes_expanded,
     HarnSymbolKind, SymbolInfo,
 };
 use crate::HarnLsp;
+
+/// What the word under the cursor resolves to.
+///
+/// Resolution is separated from rendering so hover tests drive the order in
+/// which the handler consults builtins, keywords and symbols, rather than a
+/// copy of it.
+#[derive(Debug, Clone)]
+pub(crate) enum HoverTarget {
+    Builtin(String),
+    Keyword(String),
+    Symbol(Box<SymbolInfo>),
+}
+
+/// Resolve the word under the cursor. `None` means nothing is known about it,
+/// which is the honest answer for an unresolved member access.
+pub(crate) fn resolve_hover_target(
+    source: &str,
+    symbols: &[SymbolInfo],
+    position: Position,
+) -> Option<HoverTarget> {
+    let (word, word_start) = word_span_at_position(source, position)?;
+
+    // A member access names something on its receiver, so no global namespace
+    // applies to it: not builtins, not keywords, and not top-level bindings. A
+    // member that resolves to a global describes something the receiver does not
+    // have, which makes a call the runtime rejects look implemented.
+    let member_access = is_member_access(source, word_start);
+
+    if !member_access {
+        if let Some(doc) = builtin_doc(&word) {
+            return Some(HoverTarget::Builtin(doc));
+        }
+        if let Some(doc) = keyword_doc(&word) {
+            return Some(HoverTarget::Keyword(doc));
+        }
+    }
+
+    // Prefer the innermost scope that contains the cursor position so that
+    // shadowed bindings resolve to the closest definition.
+    let cursor_offset = lsp_position_to_offset(source, position);
+    let mut best: Option<&SymbolInfo> = None;
+    for sym in symbols {
+        if sym.name != word {
+            continue;
+        }
+        // Only a receiver-owned symbol can answer a member access. A top-level
+        // binding carries no scope span and would otherwise pass the scope check
+        // below, so `value.greet` would resolve to a global `fn greet`. Until
+        // receiver types are inferred, an impl-block method is the only symbol
+        // that can be receiver-owned; anything else is a name collision.
+        if member_access && sym.impl_type.is_none() {
+            continue;
+        }
+        // Impl-block methods are visible through dot syntax from anywhere, so a
+        // cursor-position scope check does not apply to them.
+        let in_scope = if sym.impl_type.is_some() {
+            true
+        } else {
+            match sym.scope_span {
+                Some(sp) => cursor_offset >= sp.start && cursor_offset <= sp.end,
+                None => true,
+            }
+        };
+        if !in_scope {
+            continue;
+        }
+        // Tightest-scope wins on shadowing.
+        match best {
+            None => best = Some(sym),
+            Some(prev) => {
+                let prev_scope_size = match prev.scope_span {
+                    Some(sp) => sp.end.saturating_sub(sp.start),
+                    None => usize::MAX,
+                };
+                let this_scope_size = match sym.scope_span {
+                    Some(sp) => sp.end.saturating_sub(sp.start),
+                    None => usize::MAX,
+                };
+                if this_scope_size < prev_scope_size {
+                    best = Some(sym);
+                }
+            }
+        }
+    }
+
+    best.map(|sym| HoverTarget::Symbol(Box::new(sym.clone())))
+}
 
 fn line_prefix_at_position(source: &str, position: Position) -> Option<&str> {
     let offset = lsp_position_to_offset(source, position);
@@ -38,71 +127,26 @@ impl HarnLsp {
         let symbols = state.symbols.clone();
         drop(docs);
 
-        let word = match word_at_position(&source, position) {
-            Some(w) => w,
-            None => return Ok(None),
+        let markup = |value: String| {
+            Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value,
+                }),
+                range: None,
+            }))
         };
 
-        if let Some(doc) = builtin_doc(&word) {
-            return Ok(Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: doc,
-                }),
-                range: None,
-            }));
-        }
+        let sym = match resolve_hover_target(&source, &symbols, position) {
+            None => return Ok(None),
+            Some(HoverTarget::Builtin(doc)) | Some(HoverTarget::Keyword(doc)) => {
+                return markup(doc)
+            }
+            Some(HoverTarget::Symbol(sym)) => sym,
+        };
 
-        if let Some(doc) = keyword_doc(&word) {
-            return Ok(Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: doc,
-                }),
-                range: None,
-            }));
-        }
-
-        // Check user-defined symbols — prefer the innermost scope that
-        // contains the cursor position so that shadowed bindings resolve
-        // to the closest definition.
-        let cursor_offset = lsp_position_to_offset(&source, position);
-        let mut best: Option<&SymbolInfo> = None;
-        for sym in &symbols {
-            if sym.name != word {
-                continue;
-            }
-            // Impl-block methods are globally visible via dot syntax — skip scope check.
-            let in_scope = if sym.impl_type.is_some() {
-                true
-            } else {
-                match sym.scope_span {
-                    Some(sp) => cursor_offset >= sp.start && cursor_offset <= sp.end,
-                    None => true,
-                }
-            };
-            if !in_scope {
-                continue;
-            }
-            // Tightest-scope wins on shadowing.
-            match best {
-                None => best = Some(sym),
-                Some(prev) => {
-                    let prev_scope_size = match prev.scope_span {
-                        Some(sp) => sp.end.saturating_sub(sp.start),
-                        None => usize::MAX,
-                    };
-                    let this_scope_size = match sym.scope_span {
-                        Some(sp) => sp.end.saturating_sub(sp.start),
-                        None => usize::MAX,
-                    };
-                    if this_scope_size < prev_scope_size {
-                        best = Some(sym);
-                    }
-                }
-            }
-        }
-        if let Some(sym) = best {
+        {
+            let sym = sym.as_ref();
             let mut hover_text = String::new();
 
             if let Some(ref sig) = sym.signature {
@@ -179,16 +223,8 @@ impl HarnLsp {
                 hover_text.push_str(&block);
             }
 
-            return Ok(Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: hover_text,
-                }),
-                range: None,
-            }));
+            markup(hover_text)
         }
-
-        Ok(None)
     }
 
     pub(super) async fn handle_signature_help(
