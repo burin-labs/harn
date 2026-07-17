@@ -1,6 +1,6 @@
 import { bounded_loop } from "std/personas/prelude"
 
-@persona(name: "template_persona", description: "Frontier judgment loop template persona.", tools: [github, mcp], capabilities: ["project.scan", "runtime.record_run", "interaction.ask"], autonomy: "suggest", receipts: "required")
+@persona(name: "template_persona", description: "Frontier judgment loop template persona.", tools: [github, mcp], capabilities: ["project.scan", "runtime.record_run", "interaction.ask", "workspace.read_text"], autonomy: "suggest", receipts: "required")
 /** Run the frontier judgment loop template DAG. */
 pub fn template_persona(task) {
   return judge_until_confident(task)

@@ -901,6 +901,43 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn prompt_rendering_templates_declare_their_read_capability() {
+        for template in [
+            "deterministic-sweeper",
+            "hybrid-classify-then-act",
+            "frontier-judgment-loop",
+        ] {
+            let template_dir = PERSONA_TEMPLATE_ASSETS
+                .get_dir(template)
+                .expect("canonical persona template directory");
+            let source = template_dir
+                .get_file("src/template_persona.harn")
+                .and_then(include_dir::File::contents_utf8)
+                .expect("canonical persona template source");
+            let manifest = template_dir
+                .get_file("harn.toml")
+                .and_then(include_dir::File::contents_utf8)
+                .expect("canonical persona template manifest");
+            let manifest = toml::from_str::<toml::Value>(manifest)
+                .expect("canonical persona template manifest is valid TOML");
+            let capabilities = manifest["personas"][0]["capabilities"]
+                .as_array()
+                .expect("canonical persona template capabilities");
+
+            assert!(
+                source.contains("render_prompt("),
+                "{template} renders a prompt"
+            );
+            assert!(
+                capabilities
+                    .iter()
+                    .any(|capability| capability.as_str() == Some("workspace.read_text")),
+                "{template} must declare workspace.read_text for render_prompt"
+            );
+        }
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn materialize_compiles_a_closed_blueprint_through_the_strict_scaffold() {
         let temp = tempfile::tempdir().unwrap();
