@@ -71,4 +71,16 @@ pipeline main() {
   )
   __io_println(malformed_five_field_cron.valid)
   __io_println(has_code(malformed_five_field_cron, "invalid_cron"))
+  const tab_separated_cron = persona_blueprint_validate(
+    {
+      schema_version: "1",
+      name: "tab_clock",
+      description: "Uses valid whitespace between cron fields.",
+      goal: "Must remain parser-aligned.",
+      template: "deterministic-sweeper",
+      cron: {cron: "0\t*/4\t*\t*\t*", timezone: "UTC"},
+    },
+    [{provider: "cron", kinds: ["cron"]}],
+  )
+  __io_println(tab_separated_cron.valid)
 }

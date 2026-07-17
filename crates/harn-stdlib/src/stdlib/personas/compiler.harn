@@ -123,7 +123,7 @@ fn __persona_blueprint_record(blueprint) -> PersonaBlueprint {
 }
 
 fn __persona_blueprint_cron_fields(cron) -> list<string> {
-  return trim(cron ?? "").split(" ").filter({ field -> field != "" }).to_list()
+  return regex_split(trim(cron ?? ""), "\\s+").filter({ field -> field != "" }).to_list()
 }
 
 fn __persona_blueprint_validate_cron(blueprint, providers, report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
