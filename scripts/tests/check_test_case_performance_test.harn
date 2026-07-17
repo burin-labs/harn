@@ -26,6 +26,21 @@ pipeline test_diagnose_parser_requires_exact_lines(task) {
 }
 
 @test
+pipeline test_diagnose_parser_accepts_additive_fields(task) {
+  const parsed = parse_diagnose_output(
+    "[harn test diag] ok perf_0_8 setup=10ms compile=0ms execute=37ms teardown=1ms module_compile=14ms module_load=21ms modules_compiled=5 modules_loaded=5 total=51ms\n",
+  )
+  assert_eq(parsed.samples.count, 1)
+  const sample = parsed.samples[0]
+  assert_eq(sample.name, "perf_0_8")
+  assert_eq(sample.setup_ms, 10)
+  assert_eq(sample.compile_ms, 0)
+  assert_eq(sample.execute_ms, 37)
+  assert_eq(sample.teardown_ms, 1)
+  assert_eq(sample.total_ms, 51)
+}
+
+@test
 pipeline test_linux_time_uses_one_explicit_combined_format(task) {
   const args = time_args("linux")
   assert_eq(args.count, 2)
