@@ -129,15 +129,13 @@ pub(super) fn parse_schema_value(
 ) -> Result<Option<serde_json::Value>, VmError> {
     match raw {
         None | Some(VmValue::Nil) => Ok(None),
-        Some(value) => value
-            .as_dict()
-            .map(vm_value_dict_to_json)
-            .map(Some)
-            .ok_or_else(|| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                    "{field}: expected a JSON Schema object"
-                ))))
-            }),
+        Some(value @ VmValue::Dict(_)) => {
+            crate::schema::schema_to_json_schema_value(value)
+                .map(|schema| Some(vm_value_to_json(&schema)))
+        }
+        Some(_) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            format!("{field}: expected a JSON Schema object"),
+        )))),
     }
 }
 
