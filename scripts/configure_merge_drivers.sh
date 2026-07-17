@@ -4,11 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-# `harn-generated` is wired to `true` so noisy generated files
-# (`spec/HARN_SPEC.md`, `docs/src/language-spec.md`, `docs/theme/harn-keywords.js`)
-# never produce conflict markers during merge — the driver succeeds without
-# writing %A, so git keeps the current side and trusts the user (or a
-# follow-up hook) to regenerate from the authoring source.
+# `harn-generated` is wired to `true` so noisy generated files (the language
+# spec mirrors, syntax keywords, and CLI AOT bytecode) never produce conflict
+# markers during merge. The driver succeeds without writing %A, so git keeps
+# the current side and trusts the user (or a follow-up hook) to regenerate
+# from the authoring source.
 #
 # WARNING: this is only safe when something else regenerates the mirror
 # afterwards. The pre-commit hook handles plain commits; the
