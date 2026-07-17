@@ -9854,10 +9854,6 @@
       "parallel_settle_expression"
     ],
     [
-      "_primary",
-      "struct_construct"
-    ],
-    [
       "struct_declaration"
     ],
     [

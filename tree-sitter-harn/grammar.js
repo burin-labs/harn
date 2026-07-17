@@ -30,7 +30,6 @@ module.exports = grammar({
     [$.select_block],
     [$.parallel_each_expression],
     [$.parallel_settle_expression],
-    [$._primary, $.struct_construct],
     [$.struct_declaration],
     [$.tool_declaration],
     [$.impl_block],
