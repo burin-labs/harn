@@ -29,8 +29,8 @@ setup:
 setup-rust:
 	HARN_DEV_SETUP_PROFILE=rust ./scripts/dev_setup.sh
 
-# Reclaim orphaned per-worktree Cargo target dirs under the active setup
-# storage root (left behind when an agent/codex worktree is removed). Add
+# Reclaim orphaned per-worktree Cargo target dirs under known setup storage
+# roots (left behind when an agent/codex worktree is removed). Add
 # --dry-run to preview: make clean-stale-targets ARGS=--dry-run
 clean-stale-targets:
 	./scripts/prune_stale_targets.sh $(ARGS)

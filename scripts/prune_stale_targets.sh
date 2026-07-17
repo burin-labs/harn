@@ -28,17 +28,39 @@
 #                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
 #   HARN_TARGET_GC_FIND_DEPTH   max depth for nested worktree discovery (default 3)
 #   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before deletion (default 10800)
-#   HARN_DEV_SETUP_STORAGE_ROOT base for harn-target (default: $TMPDIR or the
-#                               Rust-only setup cache root)
+#   HARN_DEV_SETUP_STORAGE_ROOT one base for harn-target; when unset, sweep
+#                               both the legacy $TMPDIR and Rust-only cache roots
 set -euo pipefail
 
 dry_run=0
 [[ "${1:-}" == "--dry-run" ]] && dry_run=1
 
-storage_root="${HARN_DEV_SETUP_STORAGE_ROOT:-${TMPDIR:-/tmp}}"
-target_root="${storage_root}/harn-target"
-target_root="${target_root//\/\///}"   # collapse accidental double slash
-[[ -d "$target_root" ]] || { echo "no harn-target dir at $target_root; nothing to prune"; exit 0; }
+storage_roots() {
+  if [[ -n "${HARN_DEV_SETUP_STORAGE_ROOT:-}" ]]; then
+    printf '%s\n' "${HARN_DEV_SETUP_STORAGE_ROOT}"
+    return
+  fi
+
+  printf '%s\n' "${TMPDIR:-/tmp}"
+  printf '%s/harn/dev-setup\n' "${XDG_CACHE_HOME:-$HOME/.cache}"
+}
+
+target_roots=()
+while IFS= read -r storage_root; do
+  target_root="${storage_root}/harn-target"
+  target_root="${target_root//\/\///}"   # collapse accidental double slash
+  [[ -d "$target_root" ]] || continue
+  if [[ "$(basename "$target_root")" != "harn-target" ]]; then
+    echo "refusing to prune: root '$target_root' basename is not 'harn-target'" >&2
+    exit 1
+  fi
+  target_roots+=("$target_root")
+done < <(storage_roots | awk '!seen[$0]++')
+
+if [[ "${#target_roots[@]}" -eq 0 ]]; then
+  echo "no harn-target dirs at configured setup storage roots; nothing to prune"
+  exit 0
+fi
 
 default_roots() {
   printf '%s\n' "$HOME/projects"
@@ -79,15 +101,6 @@ mtime_epoch() {
   stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0
 }
 
-# Refuse to sweep anything but a harn-target root. This keeps the rm loop
-# away from siblings under the storage root — most importantly the
-# machine-shared "cargo-build-shared" build-dir — even if target-root
-# derivation changes.
-if [ "$(basename "$target_root")" != "harn-target" ]; then
-  echo "refusing to prune: root '$target_root' basename is not 'harn-target'" >&2
-  exit 1
-fi
-
 removed=0; kept=0; summary_printed=0
 
 print_summary() {
@@ -95,7 +108,9 @@ print_summary() {
   summary_printed=1
   suffix=""
   [ "$dry_run" -eq 1 ] && suffix=" (dry-run)"
-  echo "harn-target GC: kept=$kept removed=$removed (root=$target_root)$suffix"
+  local roots
+  roots="$(IFS=,; echo "${target_roots[*]}")"
+  echo "harn-target GC: kept=$kept removed=$removed (roots=$roots)$suffix"
 }
 
 # Build the keep-set: the basename of every harn-target dir that a live
@@ -120,22 +135,24 @@ done | sort -u | while read -r wt; do
   # derived-name fallback (matches dev_setup.sh::derive_target_dir)
   printf '%s-%s\n' "$(basename "$(dirname "$wt")")" "$(basename "$wt")"
 done | sort -u > "$keep_file" || true
-for d in "$target_root"/*; do
-  [ -d "$d" ] || continue
-  name="$(basename "$d")"
-  if grep -qxF "$name" "$keep_file"; then kept=$((kept+1)); continue; fi
-  m="$(mtime_epoch "$d")"
-  if [ "${m:-0}" -ge "$cutoff" ]; then
-    echo "skip (recently active): $name"; kept=$((kept+1)); continue
-  fi
-  sz=$(du -sh "$d" 2>/dev/null | cut -f1 || true)
-  if [ "$dry_run" -eq 1 ]; then
-    echo "would remove orphan: $name (${sz:-?})"
-  else
-    echo "removing orphan: $name (${sz:-?})"
-    rm -rf "$d" || true
-  fi
-  removed=$((removed+1))
+for target_root in "${target_roots[@]}"; do
+  for d in "$target_root"/*; do
+    [ -d "$d" ] || continue
+    name="$(basename "$d")"
+    if grep -qxF "$name" "$keep_file"; then kept=$((kept+1)); continue; fi
+    m="$(mtime_epoch "$d")"
+    if [ "${m:-0}" -ge "$cutoff" ]; then
+      echo "skip (recently active): $name"; kept=$((kept+1)); continue
+    fi
+    sz=$(du -sh "$d" 2>/dev/null | cut -f1 || true)
+    if [ "$dry_run" -eq 1 ]; then
+      echo "would remove orphan: $name (${sz:-?})"
+    else
+      echo "removing orphan: $name (${sz:-?})"
+      rm -rf "$d" || true
+    fi
+    removed=$((removed+1))
+  done
 done
 
 print_summary

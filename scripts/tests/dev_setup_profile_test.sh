@@ -75,8 +75,19 @@ prune_output="$(
     HARN_TARGET_GC_ROOTS="$tmp_root/no-repos" \
     "$repo_root/scripts/prune_stale_targets.sh" --dry-run
 )"
-if ! grep -Fq "root=$rust_storage_root/harn-target" <<< "$prune_output"; then
+if ! grep -Fq "roots=$rust_storage_root/harn-target" <<< "$prune_output"; then
   echo "stale-target pruning did not use the setup storage root" >&2
+  exit 1
+fi
+default_prune_output="$(
+  HOME="$tmp_root/home-prune-default" \
+    XDG_CACHE_HOME="$tmp_root/cache-rust" \
+    TMPDIR="$tmp_root/tmp-rust" \
+    HARN_TARGET_GC_ROOTS="$tmp_root/no-repos" \
+    "$repo_root/scripts/prune_stale_targets.sh" --dry-run
+)"
+if ! grep -Fq "roots=$rust_storage_root/harn-target" <<< "$default_prune_output"; then
+  echo "default stale-target pruning did not discover the Rust setup cache root" >&2
   exit 1
 fi
 
