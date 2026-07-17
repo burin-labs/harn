@@ -19,10 +19,10 @@ pub mod skill_loader;
 pub mod skill_provenance;
 pub mod test_report;
 pub mod test_runner;
+pub mod test_timing;
 #[doc(hidden)]
 pub mod tests;
 mod typecheck_imports;
-
 pub use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, SkillFrontmatter};
 
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};

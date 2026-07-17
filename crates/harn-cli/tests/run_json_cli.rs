@@ -480,7 +480,7 @@ pipeline main(_) {
     );
     assert_eq!(phase["event"], "run_phase");
     let phases = phase["phases"].as_array().expect("phase rows");
-    assert_eq!(phases.len(), 5, "{phase}");
+    assert_eq!(phases.len(), 7, "{phase}");
     let names: Vec<&str> = phases
         .iter()
         .map(|row| row["name"].as_str().expect("phase name"))
@@ -492,10 +492,16 @@ pipeline main(_) {
             "typecheck",
             "bytecode_compile",
             "run_setup",
-            "run_main"
+            "run_main",
+            "module_compile",
+            "module_load"
         ]
     );
     assert_eq!(phases[2]["cache"], "miss");
+    assert!(phases[..5].iter().all(|phase| phase["kind"] == "top_level"));
+    assert!(phases[5..]
+        .iter()
+        .all(|phase| phase["kind"] == "attribution"));
     assert!(phases[4]["events"].as_u64().is_some(), "{phase}");
 }
 
@@ -561,7 +567,7 @@ pipeline main(_) {
         phase["schema_version"].as_u64(),
         Some(u64::from(RUN_PHASE_SCHEMA_VERSION))
     );
-    assert_eq!(phase["phases"].as_array().expect("phases").len(), 5);
+    assert_eq!(phase["phases"].as_array().expect("phases").len(), 7);
 
     let rusage = read_json_file(&rusage_path);
     assert_eq!(rusage["event"], "run_rusage");

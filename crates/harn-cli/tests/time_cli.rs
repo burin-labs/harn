@@ -15,10 +15,15 @@ fn binary_path() -> std::path::PathBuf {
 }
 
 fn write_hello_script(dir: &std::path::Path) -> std::path::PathBuf {
+    std::fs::write(
+        dir.join("helper.harn"),
+        "pub fn greeting() { return \"hello from harn time\" }\n",
+    )
+    .expect("write helper.harn");
     let path = dir.join("hello.harn");
     std::fs::write(
         &path,
-        "pipeline default(task) {\n  log(\"hello from harn time\")\n}\n",
+        "import { greeting } from \"./helper\"\n\npipeline default(task) {\n  log(greeting())\n}\n",
     )
     .expect("write hello.harn");
     path
@@ -44,12 +49,12 @@ fn run_time(script: &std::path::Path, cache_dir: &std::path::Path) -> std::proce
 }
 
 #[test]
-fn time_run_json_smoke_emits_five_phases_with_cache_miss_then_hit() {
+fn time_run_json_smoke_emits_module_attribution_with_cache_miss_then_hit() {
     let workdir = tempfile::tempdir().expect("workdir");
     let cache_dir = tempfile::tempdir().expect("cache dir");
     let script = write_hello_script(workdir.path());
 
-    // First run: cache miss. All five phases recorded.
+    // First run: cache miss. Top-level and overlapping module phases recorded.
     let first = run_time(&script, cache_dir.path());
     assert!(
         first.status.success(),
@@ -84,6 +89,26 @@ fn time_run_json_smoke_emits_five_phases_with_cache_miss_then_hit() {
         names.contains(&"run_main"),
         "missing run_main phase: {names:?}"
     );
+    assert!(
+        names.contains(&"module_compile"),
+        "missing module_compile attribution: {names:?}"
+    );
+    assert!(
+        names.contains(&"module_load"),
+        "missing module_load attribution: {names:?}"
+    );
+    let module_compile = phases
+        .iter()
+        .find(|phase| phase["name"] == "module_compile")
+        .expect("module_compile attribution");
+    let module_load = phases
+        .iter()
+        .find(|phase| phase["name"] == "module_load")
+        .expect("module_load attribution");
+    assert_eq!(module_compile["events"], 1, "{module_compile}");
+    assert_eq!(module_compile["kind"], "attribution", "{module_compile}");
+    assert_eq!(module_load["events"], 1, "{module_load}");
+    assert_eq!(module_load["kind"], "attribution", "{module_load}");
 
     let compile_phase = phases
         .iter()
@@ -124,6 +149,69 @@ fn time_run_json_smoke_emits_five_phases_with_cache_miss_then_hit() {
     );
     assert_eq!(data2["totals"]["cache_hits"], 1);
     assert_eq!(data2["totals"]["cache_misses"], 0);
+    let phases2 = data2["phases"].as_array().expect("phases array");
+    let module_compile2 = phases2
+        .iter()
+        .find(|phase| phase["name"] == "module_compile")
+        .expect("module_compile attribution");
+    assert_eq!(module_compile2["duration_ms"], 0, "{module_compile2}");
+    assert_eq!(module_compile2["events"], 0, "{module_compile2}");
+    let module_load2 = phases2
+        .iter()
+        .find(|phase| phase["name"] == "module_load")
+        .expect("module_load attribution");
+    assert_eq!(module_load2["events"], 1, "{module_load2}");
+}
+
+#[test]
+fn time_run_setup_error_reconciles_module_attribution_to_run_setup() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    let cache_dir = tempfile::tempdir().expect("cache dir");
+    std::fs::write(
+        workdir.path().join("harn.toml"),
+        r#"
+[package]
+name = "timed-setup-error"
+
+[exports]
+handlers = "hooks.harn"
+
+[[hooks]]
+event = "PostTurn"
+handler = "handlers::valid"
+
+[[hooks]]
+event = "SessionEnd"
+handler = "handlers::missing"
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        workdir.path().join("hooks.harn"),
+        "pub fn valid(_event) {}\n",
+    )
+    .expect("write hook module");
+    let script = workdir.path().join("main.harn");
+    std::fs::write(&script, "pipeline default(_task) {}\n").expect("write script");
+
+    let output = run_time(&script, cache_dir.path());
+    assert!(!output.status.success(), "setup must fail on missing hook");
+    let parsed = parse_envelope(&output);
+    let data = assert_envelope(&parsed, TIME_RUN_SCHEMA_VERSION);
+    let phases = data["phases"].as_array().expect("phases array");
+    let phase = |name| {
+        phases
+            .iter()
+            .find(|phase| phase["name"] == name)
+            .unwrap_or_else(|| panic!("missing {name}: {phases:?}"))
+    };
+    let run_setup = phase("run_setup");
+    let module_load = phase("module_load");
+
+    assert_eq!(data["exit_code"], 1);
+    assert_eq!(run_setup["kind"], "top_level", "{run_setup}");
+    assert_eq!(module_load["events"], 1, "{module_load}");
+    assert_eq!(module_load["kind"], "attribution", "{module_load}");
 }
 
 #[test]

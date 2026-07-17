@@ -10,6 +10,8 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::test_timing::DurationSummary;
+
 mod wire;
 
 const REPORT_SCHEMA: &str = "harn-agents-conformance-2026-04-25";
@@ -1236,18 +1238,13 @@ fn build_leaderboard_report(
     }
 }
 
-fn percentiles(mut durations: Vec<u64>) -> Percentiles {
-    if durations.is_empty() {
-        return Percentiles::default();
-    }
-    durations.sort_unstable();
-    let len = durations.len();
-    let avg = durations.iter().sum::<u64>() / len as u64;
+fn percentiles(durations: Vec<u64>) -> Percentiles {
+    let summary = DurationSummary::from_samples(&durations);
     Percentiles {
-        avg,
-        p50: durations[len * 50 / 100],
-        p95: durations[(len * 95 / 100).min(len - 1)],
-        p99: durations[(len * 99 / 100).min(len - 1)],
+        avg: summary.average_ms.unwrap_or_default(),
+        p50: summary.p50_ms.unwrap_or_default(),
+        p95: summary.p95_ms.unwrap_or_default(),
+        p99: summary.p99_ms.unwrap_or_default(),
     }
 }
 

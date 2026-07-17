@@ -325,14 +325,14 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "test conformance",
             schema_version: crate::commands::test::CONFORMANCE_TEST_SCHEMA_VERSION,
             description:
-                "Conformance test results with xfail accounting and a stable fixture snapshot key.",
+                "Conformance results with xfail accounting, fixture snapshot key, and duration distribution.",
             schema_json: None,
         },
         SchemaEntry {
             command: "test --json-out",
             schema_version: crate::test_report::USER_TEST_REPORT_SCHEMA_VERSION,
             description:
-                "User-test report (`--json-out`): per-case name/file/classname/outcome/duration plus suite-level summary.",
+                "User-test report with typed timeout, per-case and aggregate phases, module attribution, and duration distribution.",
             schema_json: None,
         },
         SchemaEntry {

@@ -80,7 +80,7 @@ versions.
 | `harn run --emit-phase-json`   | One terminal raw NDJSON phase object on stderr/file/fd    |
 | `harn run --emit-rusage-json`  | One terminal raw NDJSON CPU sample on stderr/file/fd      |
 | `harn replay --json`           | Per-stage replay summary + embedded fixture verdict      |
-| `harn test conformance --json` | Conformance results with xfail accounting                |
+| `harn test conformance --json` | Conformance results, xfail accounting, and duration distribution |
 | `harn graph --json`            | Static module graph: symbols, imports, capabilities      |
 | `harn routes --json`           | Trigger route + budget + capability inventory            |
 | `harn dev --watch --json`      | Streaming NDJSON incremental rebuild events              |
@@ -196,6 +196,125 @@ concatenated into one cumulative `edit.dry_run`. The field is omitted for
 a plain replay. A plan that fails to load or evaluate exits non-zero with
 `error.code: "replay_counterfactual_failed"`.
 
+### `harn test --json-out`
+
+User-test reports are standalone JSON documents rather than envelopes. Schema
+v2 adds typed timeout and phase records plus suite-level timing and aggregate
+work attribution:
+
+```json
+{
+  "schemaVersion": 2,
+  "suite": "user",
+  "root": "/workspace/tests",
+  "duration_ms": 31,
+  "timing": {
+    "sample_count": 1,
+    "average_ms": 30,
+    "p50_ms": 30,
+    "p90_ms": 30,
+    "p95_ms": 30,
+    "p99_ms": 30
+  },
+  "aggregate": {
+    "collection_ms": 1,
+    "setup_ms": 0,
+    "compile_ms": 0,
+    "execute_ms": 30,
+    "teardown_ms": 0,
+    "modules": {
+      "module_compile_ms": 4,
+      "module_load_ms": 7,
+      "modules_compiled": 1,
+      "modules_loaded": 2
+    }
+  },
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "failed": 0,
+    "timed_out": 1,
+    "skipped": 0
+  },
+  "cases": [{
+    "name": "test_timeout",
+    "file": "test_timeout.harn",
+    "classname": "test_timeout.harn",
+    "outcome": "timed_out",
+    "duration_ms": 30,
+    "timeout": { "phase": "execute", "limit_ms": 30 },
+    "phases": {
+      "setup_ms": 0,
+      "compile_ms": 0,
+      "execute_ms": 30,
+      "teardown_ms": 0,
+      "modules": {
+        "module_compile_ms": 4,
+        "module_load_ms": 7,
+        "modules_compiled": 1,
+        "modules_loaded": 2
+      }
+    },
+    "message": "execute phase timed out after 30ms"
+  }]
+}
+```
+
+`timeout`, `phases`, and `message` are omitted when unavailable. An empty
+distribution has `sample_count: 0` and `null` for every duration statistic.
+Discovery and worker-start error rows are not duration samples. Aggregate
+phases are cumulative worker-time and can exceed suite wall time under parallel
+execution. Nested module values overlap setup/execute and are never additive.
+
+### `harn test conformance --json`
+
+Conformance schema v2 retains the standard envelope and adds the same typed
+duration distribution under `data.timing`:
+
+```json
+{
+  "schemaVersion": 2,
+  "ok": true,
+  "data": {
+    "snapshotKey": "<blake3-hex>",
+    "results": [{
+      "name": "pass.harn",
+      "outcome": "pass",
+      "duration_ms": 12,
+      "message": null,
+      "diagnostic_codes": []
+    }],
+    "summary": {
+      "pass": 1,
+      "fail": 0,
+      "xfail_expected": 0,
+      "xfail_unexpected_pass": 0,
+      "skipped": 0
+    },
+    "timing": {
+      "sample_count": 1,
+      "average_ms": 12,
+      "p50_ms": 12,
+      "p90_ms": 12,
+      "p95_ms": 12,
+      "p99_ms": 12
+    }
+  },
+  "error": null,
+  "warnings": []
+}
+```
+
+### `harn serve test`
+
+The JSON-RPC `initialize` result advertises
+`capabilities.test_run.schema_version: 2`. Each `test/run` result uses
+snake-case `schema_version: 2` and contains worker identity, run/cache counters,
+and `summary`. The summary is the user-runner shape above: `results`, verdict
+counts, wall duration, `timing`, and cumulative `aggregate`. Each executed result
+carries optional typed `timeout` and measured `phases` with nested module
+attribution; discovery and worker-start errors omit unavailable phases.
+
 ### `harn run --emit-summary-json`
 
 The post-run summary is a raw NDJSON line, not a `JsonEnvelope`, because
@@ -236,7 +355,7 @@ LLM time, and accumulated cost.
 ### `harn run --emit-phase-json`
 
 The phase sink is also a raw NDJSON line. It preserves the same
-five-row phase contract as `harn time run --json`, but routes it to a
+seven-row contract as `harn time run --json`, but routes it to a
 separate sink so a parent wrapper can spawn `harn run` and recover
 parse/typecheck/compile/setup/main timing without parsing stdout.
 `--phase-file <path>` overwrites the file with the one-line phase
@@ -245,22 +364,28 @@ file descriptor.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "event": "run_phase",
   "phases": [
-    { "name": "parse", "duration_ms": 12, "input_bytes": 4096 },
-    { "name": "typecheck", "duration_ms": 80 },
-    { "name": "bytecode_compile", "duration_ms": 35, "cache": "miss" },
-    { "name": "run_setup", "duration_ms": 8 },
-    { "name": "run_main", "duration_ms": 1200, "events": 14 }
+    { "name": "parse", "kind": "top_level", "duration_ms": 12, "input_bytes": 4096 },
+    { "name": "typecheck", "kind": "top_level", "duration_ms": 80 },
+    { "name": "bytecode_compile", "kind": "top_level", "duration_ms": 35, "cache": "miss" },
+    { "name": "run_setup", "kind": "top_level", "duration_ms": 8 },
+    { "name": "run_main", "kind": "top_level", "duration_ms": 1200, "events": 14 },
+    { "name": "module_compile", "kind": "attribution", "duration_ms": 40, "events": 3 },
+    { "name": "module_load", "kind": "attribution", "duration_ms": 75, "events": 8 }
   ]
 }
 ```
 
 The phase order is fixed: `parse`, `typecheck`, `bytecode_compile`,
-`run_setup`, `run_main`. Cache hits keep all five rows and switch the
+`run_setup`, `run_main`, `module_compile`, `module_load`. Cache hits keep all
+seven rows and switch the
 `bytecode_compile` row to `"cache": "hit"` while leaving `parse` and
-`typecheck` at `duration_ms: 0`.
+`typecheck` at `duration_ms: 0`. `kind` is the machine-readable addition rule:
+only `top_level` rows reconcile wall time. The final two `attribution` rows
+overlap top-level phases; their `events` values count successful compiles and
+unique fresh-VM loads.
 
 ### `harn run --emit-rusage-json`
 

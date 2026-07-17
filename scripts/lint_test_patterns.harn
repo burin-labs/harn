@@ -268,6 +268,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/a2a/mod.rs",
   "crates/harn-vm/src/agent_events/sinks.rs",
   "crates/harn-vm/src/agent_sessions.rs",
+  // Module phase attribution measures real compile/load work for CLI timing
+  // reports; host monotonic time is the observation being recorded.
+  "crates/harn-vm/src/vm/module_phase_timing.rs",
   // Durable rate limiting retries real SQLite writer-lock contention and bounds
   // wall-clock backoff with host monotonic time; VM clock injection would not
   // model the blocking rusqlite calls it is defending.

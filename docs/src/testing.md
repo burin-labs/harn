@@ -67,6 +67,36 @@ performance requirement, or `--max-execute-ms` to ratchet execution cost.
 Conformance and other non-user targets continue to apply `--timeout` to their
 whole test case or subprocess.
 
+Per-case top-level phases are disjoint: `compile` builds the selected test
+chunk; `setup` constructs and configures its fresh VM; `execute` is the
+inclusive `vm.execute_with_timeout` envelope; and `teardown` cancels/drops
+remaining VM tasks and resets case-local runtime state. Their sum reconciles
+with case wall time modulo measurement overhead.
+
+Every user-test run prints p50/p90 latency from the runner's typed distribution.
+`--timing` adds average, p95/p99, slowest tests/files, and aggregate phases.
+Empty suites print `p50=n/a  p90=n/a (0 samples)`. Detailed timing prints module
+compile/load attribution separately and labels it as overlapping the phases.
+User JSON report schema v2 carries the same distribution, typed timeout
+metadata, and per-case phases. Conformance JSON schema v2 uses the same typed
+distribution owner. Module compile/load values overlap setup and execution and
+must not be added to total wall time.
+
+Aggregate phase totals are cumulative worker-time. They reconcile with serial
+case work, but parallel cases overlap, so aggregate setup/compile/execute/
+teardown can exceed suite wall time. Discovery and worker-start failures remain
+typed result rows but are not samples in the per-test duration distribution.
+Module attribution is cumulative work-time too: concurrent child-VM spans are
+additive and can exceed their enclosing phase wall time. A prepared-artifact
+hit records load/instantiate with zero compiles; an existing per-VM module-cache
+hit records neither because it performs no fresh load.
+
+Percentiles preserve Harn's existing test-renderer convention: sort ascending,
+select the zero-based index `floor(sample_count * percentile / 100)`, and clamp
+to the final sample. Thus p50 selects the upper middle value for an even-sized
+population. An empty population serializes every statistic as `null` with
+`sample_count: 0`, distinguishing no measurement from a measured zero.
+
 ### Writing a conformance test
 
 Create a `.harn` file with a `pipeline default(task)` entry point and use

@@ -5,7 +5,7 @@ use std::process::{self, Stdio};
 
 use clap::{error::ErrorKind, CommandFactory};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 
@@ -20,7 +20,14 @@ use crate::test_report::{self, TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
 use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness, ExecError};
 
+mod reporting;
 mod watch;
+
+pub(crate) use reporting::CONFORMANCE_TEST_SCHEMA_VERSION;
+use reporting::{
+    print_per_test_timing, print_test_results, user_test_report_from_summary,
+    ConformanceJsonOutcome, ConformanceJsonReport, ConformanceJsonResult, ConformanceJsonSummary,
+};
 
 pub(crate) async fn run_command(args: TestArgs) {
     if args.watch && (args.junit.is_some() || args.json_out.is_some()) {
@@ -321,58 +328,6 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub timing: bool,
     pub diagnose: bool,
     pub cli_skill_dirs: &'a [PathBuf],
-}
-
-pub(crate) const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum ConformanceJsonOutcome {
-    Pass,
-    Fail,
-    XfailExpected,
-    XfailUnexpectedPass,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ConformanceJsonResult {
-    name: String,
-    outcome: ConformanceJsonOutcome,
-    duration_ms: u64,
-    message: Option<String>,
-    diagnostic_codes: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-struct ConformanceJsonSummary {
-    pass: u64,
-    fail: u64,
-    xfail_expected: u64,
-    xfail_unexpected_pass: u64,
-    skipped: u64,
-}
-
-impl ConformanceJsonSummary {
-    fn record(&mut self, outcome: ConformanceJsonOutcome) {
-        match outcome {
-            ConformanceJsonOutcome::Pass => self.pass += 1,
-            ConformanceJsonOutcome::Fail => self.fail += 1,
-            ConformanceJsonOutcome::XfailExpected => self.xfail_expected += 1,
-            ConformanceJsonOutcome::XfailUnexpectedPass => self.xfail_unexpected_pass += 1,
-        }
-    }
-
-    fn is_success(&self) -> bool {
-        self.fail == 0 && self.xfail_unexpected_pass == 0
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ConformanceJsonReport {
-    #[serde(rename = "snapshotKey")]
-    snapshot_key: String,
-    results: Vec<ConformanceJsonResult>,
-    summary: ConformanceJsonSummary,
 }
 
 fn normalize_expected_output(text: &str) -> String {
@@ -1769,6 +1724,8 @@ pub(crate) async fn run_conformance_tests(
                     TestOutcome::Failed
                 },
                 duration_ms: evaluation.duration_ms,
+                timeout: None,
+                phases: None,
                 message: if junit_passed { None } else { message.clone() },
             });
             json_results.push(ConformanceJsonResult {
@@ -1796,6 +1753,8 @@ pub(crate) async fn run_conformance_tests(
                 classname: rel_path.clone(),
                 outcome: TestOutcome::Passed,
                 duration_ms: evaluation.duration_ms,
+                timeout: None,
+                phases: None,
                 message: None,
             });
             passed += 1;
@@ -1818,6 +1777,8 @@ pub(crate) async fn run_conformance_tests(
                 classname: rel_path.clone(),
                 outcome: TestOutcome::Failed,
                 duration_ms: evaluation.duration_ms,
+                timeout: None,
+                phases: None,
                 message: Some(msg),
             });
             failed += 1;
@@ -1845,11 +1806,11 @@ pub(crate) async fn run_conformance_tests(
         let envelope = JsonEnvelope {
             schema_version: CONFORMANCE_TEST_SCHEMA_VERSION,
             ok,
-            data: Some(ConformanceJsonReport {
+            data: Some(ConformanceJsonReport::new(
                 snapshot_key,
-                results: json_results,
-                summary: json_summary,
-            }),
+                json_results,
+                json_summary,
+            )),
             error,
             warnings: Vec::new(),
         };
@@ -1966,203 +1927,6 @@ fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress {
     })
 }
 
-/// Print avg/p50/p95/p99 and the slowest-10 from a finalized
-/// [`TestReport`]. Used by the conformance path; the user-test path
-/// has its own variant that also groups by file (see
-/// [`print_user_test_timing`]).
-fn print_per_test_timing(report: &TestReport) {
-    let mut durations: Vec<u64> = report.cases.iter().map(|c| c.duration_ms).collect();
-    if durations.is_empty() {
-        return;
-    }
-    durations.sort();
-    let n = durations.len();
-    let p50 = durations[n * 50 / 100];
-    let p95 = durations[n * 95 / 100];
-    let p99 = durations[(n * 99 / 100).min(n - 1)];
-    let avg = durations.iter().sum::<u64>() / n as u64;
-    println!("Per-test: avg={avg} ms  p50={p50} ms  p95={p95} ms  p99={p99} ms");
-
-    let mut by_time: Vec<&TestCaseReport> = report.cases.iter().collect();
-    by_time.sort_by_key(|case| std::cmp::Reverse(case.duration_ms));
-    let top_n = by_time.len().min(10);
-    if top_n > 0 {
-        println!();
-        println!("Slowest {top_n} tests:");
-        for case in &by_time[..top_n] {
-            println!("  {:>6} ms  {}", case.duration_ms, case.name);
-        }
-    }
-}
-
-/// Convert a [`TestSummary`] (raw runner output) into the
-/// machine-readable [`TestReport`] shape consumed by `--junit` and
-/// `--json-out`. File paths are made relative to `suite_root` so CI
-/// uploads and snapshot diffs are portable across machines.
-fn user_test_report_from_summary(
-    suite_root: &Path,
-    summary: &test_runner::TestSummary,
-) -> TestReport {
-    let mut report = TestReport::new("user", Some(suite_root));
-    for result in &summary.results {
-        let outcome = if result.passed {
-            TestOutcome::Passed
-        } else if result.timeout.is_some() {
-            TestOutcome::TimedOut
-        } else {
-            TestOutcome::Failed
-        };
-        let file_path = PathBuf::from(&result.file);
-        let relative = file_path
-            .strip_prefix(suite_root)
-            .ok()
-            .map(logical_path)
-            .unwrap_or_else(|| result.file.clone());
-        report.push(TestCaseReport {
-            name: result.name.clone(),
-            file: relative.clone(),
-            classname: relative,
-            outcome,
-            duration_ms: result.duration_ms,
-            message: result.error.clone(),
-        });
-    }
-    report.set_duration_ms(summary.duration_ms);
-    report
-}
-
-fn print_test_results(summary: &test_runner::TestSummary, options: UserTestOutputOptions) {
-    let file_count = summary
-        .results
-        .iter()
-        .map(|r| r.file.as_str())
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-
-    if !options.progress && summary.total > 0 {
-        println!(
-            "Running {} test{} from {} file{}...\n",
-            summary.total,
-            if summary.total == 1 { "" } else { "s" },
-            file_count,
-            if file_count == 1 { "" } else { "s" },
-        );
-    }
-
-    if !options.progress {
-        for result in &summary.results {
-            if result.passed {
-                println!(
-                    "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
-                    result.name, result.file, result.duration_ms
-                );
-            } else {
-                println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
-                if let Some(err) = &result.error {
-                    for line in err.lines() {
-                        println!("        {line}");
-                    }
-                }
-            }
-        }
-    }
-
-    println!();
-    if summary.failed > 0 {
-        println!(
-            "\x1b[31m{} passed, {} failed, {} total ({} ms)\x1b[0m",
-            summary.passed, summary.failed, summary.total, summary.duration_ms
-        );
-    } else if summary.total == 0 {
-        println!("No test pipelines found");
-    } else {
-        println!(
-            "\x1b[32m{} passed, {} total ({} ms)\x1b[0m",
-            summary.passed, summary.total, summary.duration_ms
-        );
-    }
-
-    if options.timing {
-        print_user_test_timing(summary);
-    }
-
-    if options.progress && summary.failed > 0 {
-        println!();
-        println!("Failures:");
-        for result in summary.results.iter().filter(|result| !result.passed) {
-            if let Some(err) = &result.error {
-                println!("  {} [{}]", result.name, result.file);
-                for line in err.lines() {
-                    println!("        {line}");
-                }
-            }
-        }
-    }
-}
-
-fn print_user_test_timing(summary: &test_runner::TestSummary) {
-    if summary.total == 0 {
-        return;
-    }
-
-    println!();
-    println!("Total time: {} ms", summary.duration_ms);
-
-    let mut durations = summary
-        .results
-        .iter()
-        .map(|result| result.duration_ms)
-        .collect::<Vec<_>>();
-    durations.sort();
-
-    if !durations.is_empty() {
-        let n = durations.len();
-        let p50 = durations[n * 50 / 100];
-        let p95 = durations[n * 95 / 100];
-        let p99 = durations[(n * 99 / 100).min(n - 1)];
-        let avg = durations.iter().sum::<u64>() / n as u64;
-        println!("Per-test: avg={avg} ms  p50={p50} ms  p95={p95} ms  p99={p99} ms");
-    }
-
-    let mut by_test = summary.results.iter().collect::<Vec<_>>();
-    by_test.sort_by_key(|result| std::cmp::Reverse(result.duration_ms));
-    let top_test_count = by_test.len().min(10);
-    if top_test_count > 0 {
-        println!();
-        println!("Slowest {top_test_count} tests:");
-        for result in &by_test[..top_test_count] {
-            println!(
-                "  {:>6} ms  {} [{}]",
-                result.duration_ms, result.name, result.file
-            );
-        }
-    }
-
-    let mut file_totals = BTreeMap::<&str, u64>::new();
-    for result in &summary.results {
-        *file_totals.entry(result.file.as_str()).or_default() += result.duration_ms;
-    }
-    let mut by_file = file_totals.into_iter().collect::<Vec<_>>();
-    by_file.sort_by_key(|(_, duration_ms)| std::cmp::Reverse(*duration_ms));
-    let top_file_count = by_file.len().min(10);
-    if top_file_count > 0 {
-        println!();
-        println!("Slowest {top_file_count} files:");
-        for (file, duration_ms) in &by_file[..top_file_count] {
-            println!("  {duration_ms:>6} ms  {file}");
-        }
-    }
-
-    // Phase-level aggregate. Useful for downstream callers (eg.
-    // an IDE host's preflight) that want to attribute cold-start vs.
-    // assertion cost without running with `--diagnose` per test.
-    let agg = summary.aggregate;
-    println!();
-    println!(
-        "Phase totals: collection={} ms  setup={} ms  compile={} ms  execute={} ms  teardown={} ms",
-        agg.collection_ms, agg.setup_ms, agg.compile_ms, agg.execute_ms, agg.teardown_ms,
-    );
-}
 async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_runner::TestSummary {
     run_user_tests_once_with_session(path, args, &test_runner::TestRunSession::default()).await
 }
