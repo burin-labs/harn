@@ -29,6 +29,85 @@ configure_release_gate_cargo_env() {
   fi
 }
 
+release_gate_stale_out_dir_packages() {
+  local diagnostics="$1"
+  local output="$2"
+  local build_prefix="${CARGO_BUILD_BUILD_DIR%/}/debug/build/"
+  local line remainder component package
+  : > "$output"
+  while IFS= read -r line; do
+    [[ "$line" == *"No such file or directory"* ]] || continue
+    remainder="${line#*"$build_prefix"}"
+    [[ "$remainder" != "$line" ]] || continue
+    component="${remainder%%/out/*}"
+    [[ "$component" != "$remainder" ]] || continue
+    if [[ ! "$component" =~ ^(.+)-[0-9a-f]{16}$ ]]; then
+      echo "error: refused malformed stale build-script path component: $component" >&2
+      : > "$output"
+      return 2
+    fi
+    package="${BASH_REMATCH[1]}"
+    if [[ ! "$package" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then
+      echo "error: refused malformed Cargo package name from stale build-script path: $package" >&2
+      : > "$output"
+      return 2
+    fi
+    printf '%s\n' "$package" >> "$output"
+  done < "$diagnostics"
+  sort -u -o "$output" "$output"
+  [[ -s "$output" ]]
+}
+
+release_gate_warm_prebuild() {
+  local first_diagnostics packages retry_diagnostics
+  first_diagnostics="$(mktemp)"
+  packages="$(mktemp)"
+  retry_diagnostics="$(mktemp)"
+  if cargo build -p harn-cli --bin harn --quiet 2> "$first_diagnostics"; then
+    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
+    return 0
+  fi
+  cat "$first_diagnostics" >&2
+
+  local classification_status=0
+  release_gate_stale_out_dir_packages "$first_diagnostics" "$packages" || classification_status=$?
+  if [[ "$classification_status" -eq 1 ]]; then
+    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
+    echo "error: warm prebuild failed without a recoverable stale build-script output" >&2
+    return 1
+  fi
+  if [[ "$classification_status" -ne 0 ]]; then
+    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
+    echo "error: warm prebuild stale-output classification failed closed" >&2
+    return 1
+  fi
+
+  local -a clean_args=(clean)
+  local package
+  while IFS= read -r package; do
+    clean_args+=(-p "$package")
+  done < "$packages"
+  local recovery_started recovery_elapsed
+  recovery_started="$(date +%s)"
+  printf 'recovery: stale Cargo build-script outputs detected (packages=%s)\n' "$(paste -sd, "$packages")"
+  if ! cargo "${clean_args[@]}"; then
+    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
+    echo "error: package-scoped stale build-script cleanup failed" >&2
+    return 1
+  fi
+  recovery_elapsed=$(( $(date +%s) - recovery_started ))
+  printf 'recovery: package-scoped Cargo cleanup complete (%ss); retrying warm prebuild once\n' "$recovery_elapsed"
+  if cargo build -p harn-cli --bin harn --quiet 2> "$retry_diagnostics"; then
+    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
+    echo "recovery: warm prebuild succeeded after package-scoped cleanup"
+    return 0
+  fi
+  cat "$retry_diagnostics" >&2
+  rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
+  echo "error: warm prebuild retry failed after package-scoped stale-output cleanup" >&2
+  return 1
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -459,8 +538,7 @@ cmd_audit() {
     echo ">>> warm-prebuild (reuse exact receipt-warmed HARN_BIN)"
   else
     echo ">>> warm-prebuild (cargo build -p harn-cli --bin harn)"
-    if ! cargo build -p harn-cli --bin harn --quiet; then
-      echo "error: warm prebuild failed; rerun without --quiet for details"
+    if ! release_gate_warm_prebuild; then
       exit 1
     fi
     cargo_harn_bin="$("$SCRIPT_DIR/harn_bin.sh" --no-build --print)"
