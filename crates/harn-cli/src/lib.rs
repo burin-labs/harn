@@ -34,8 +34,8 @@ use cli::{
     refresh_provider_catalog_if_requested, Cli, Command, CompletionShell, EvalCommand,
     GuardCommand, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
-    PersonaCommand, PersonaSupervisionCommand, PgCommand, ProviderCatalogCommand, ProviderCommand,
-    RunsCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, TimeCommand, ToolCommand,
+    PgCommand, ProviderCatalogCommand, ProviderCommand, RunsCommand, SkillCommand, SkillKeyCommand,
+    SkillTrustCommand, TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -1270,123 +1270,12 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 }
             }
         },
-        Command::Persona(args) => match args.command {
-            PersonaCommand::New(new) => {
-                if let Err(error) = commands::persona_scaffold::run_new(&new).await {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
+        Command::Persona(args) => {
+            if let Err(error) = commands::persona_dispatch::run(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
             }
-            PersonaCommand::Doctor(doctor) => {
-                if let Err(error) =
-                    commands::persona_doctor::run_doctor(args.manifest.as_deref(), &doctor).await
-                {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
-            }
-            PersonaCommand::Check(check) => {
-                commands::persona::run_check(args.manifest.as_deref(), &check);
-            }
-            PersonaCommand::List(list) => {
-                commands::persona::run_list(args.manifest.as_deref(), &list);
-            }
-            PersonaCommand::Inspect(inspect) => {
-                commands::persona::run_inspect(args.manifest.as_deref(), &inspect);
-            }
-            PersonaCommand::Status(status) => {
-                if let Err(error) = commands::persona::run_status(
-                    args.manifest.as_deref(),
-                    &args.state_dir,
-                    &status,
-                )
-                .await
-                {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
-            }
-            PersonaCommand::Pause(control) => {
-                if let Err(error) = commands::persona::run_pause(
-                    args.manifest.as_deref(),
-                    &args.state_dir,
-                    &control,
-                )
-                .await
-                {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
-            }
-            PersonaCommand::Resume(control) => {
-                if let Err(error) = commands::persona::run_resume(
-                    args.manifest.as_deref(),
-                    &args.state_dir,
-                    &control,
-                )
-                .await
-                {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
-            }
-            PersonaCommand::Disable(control) => {
-                if let Err(error) = commands::persona::run_disable(
-                    args.manifest.as_deref(),
-                    &args.state_dir,
-                    &control,
-                )
-                .await
-                {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
-            }
-            PersonaCommand::Tick(tick) => {
-                if let Err(error) =
-                    commands::persona::run_tick(args.manifest.as_deref(), &args.state_dir, &tick)
-                        .await
-                {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
-            }
-            PersonaCommand::Trigger(trigger) => {
-                if let Err(error) = commands::persona::run_trigger(
-                    args.manifest.as_deref(),
-                    &args.state_dir,
-                    &trigger,
-                )
-                .await
-                {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
-            }
-            PersonaCommand::Spend(spend) => {
-                if let Err(error) =
-                    commands::persona::run_spend(args.manifest.as_deref(), &args.state_dir, &spend)
-                        .await
-                {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                }
-            }
-            PersonaCommand::Supervision(supervision) => match supervision.command {
-                PersonaSupervisionCommand::Tail(tail) => {
-                    if let Err(error) = commands::persona_supervision::run_tail(
-                        args.manifest.as_deref(),
-                        &args.state_dir,
-                        &tail,
-                    )
-                    .await
-                    {
-                        eprintln!("error: {error}");
-                        process::exit(1);
-                    }
-                }
-            },
-        },
+        }
         Command::Tool(args) => match args.command {
             ToolCommand::New(new_args) => {
                 if let Err(error) = commands::tool::run_new(&new_args).await {

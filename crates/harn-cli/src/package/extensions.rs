@@ -45,7 +45,8 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
     validate_handoff_routes(&handoff_routes, &root_manifest)?;
     let mut provider_connectors =
         resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
-    let package_snapshot = dependency_package_snapshot(&root_manifest, &manifest_dir)?;
+    let package_snapshot =
+        dependency_package_snapshot(&root_manifest, &manifest_dir)?.map(Arc::new);
     if let Some(snapshot) = package_snapshot.as_ref() {
         provider_connectors.extend(installed_package_provider_connectors(
             snapshot,
@@ -53,11 +54,19 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
         )?);
     }
     provider_connectors = dedupe_provider_connectors(provider_connectors);
+    let root_manifest_path = manifest_dir.join(MANIFEST);
+    let runtime_personas = resolve_runtime_personas(
+        root_manifest.clone(),
+        root_manifest_path.clone(),
+        manifest_dir.clone(),
+        package_snapshot,
+    )?;
 
     Ok(RuntimeExtensions {
-        root_manifest_path: Some(manifest_dir.join(MANIFEST)),
+        root_manifest_path: Some(root_manifest_path),
         root_manifest_dir: Some(manifest_dir),
         root_manifest: Some(root_manifest),
+        runtime_personas,
         llm: (!llm.is_empty()).then_some(llm),
         capabilities: (!is_empty_capabilities(&capabilities)).then_some(capabilities),
         hooks,
@@ -65,6 +74,30 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
         handoff_routes,
         provider_connectors,
     })
+}
+
+/// Load runtime extensions only when `manifest_path` is an exact package
+/// manifest. Standalone persona source/manifest files return `None` so their
+/// callers can use the already validated persona catalog without searching an
+/// ancestor project.
+pub fn try_load_runtime_extensions_from_manifest(
+    manifest_path: &Path,
+) -> Result<Option<RuntimeExtensions>, PackageError> {
+    let manifest_path = if manifest_path.is_dir() {
+        manifest_path.join(MANIFEST)
+    } else {
+        manifest_path.to_path_buf()
+    };
+    if manifest_path.extension().and_then(|value| value.to_str()) == Some("harn") {
+        return Ok(None);
+    }
+    if manifest_path.file_name() != Some(OsStr::new(MANIFEST)) {
+        return Ok(None);
+    }
+    if read_manifest_from_path(&manifest_path).is_err() {
+        return Ok(None);
+    }
+    try_load_runtime_extensions(&manifest_path).map(Some)
 }
 
 fn installed_package_provider_connectors(
@@ -272,6 +305,7 @@ async fn collect_manifest_triggers_with_mode(
     let mut collected = Vec::new();
 
     for (trigger, declarations) in extensions.triggers.iter().zip(validated) {
+        let mut effective_config = trigger.clone();
         let collected_handler = match declarations.handler {
             TriggerHandlerUri::Local(reference) => {
                 let module_path = declarations
@@ -301,8 +335,10 @@ async fn collect_manifest_triggers_with_mode(
             },
             TriggerHandlerUri::Worker { queue } => CollectedTriggerHandler::Worker { queue },
             TriggerHandlerUri::Persona { name } => {
-                let (binding, callable) =
+                let (binding, callable, autonomy_ceiling) =
                     persona_runtime_handler_for_trigger(extensions, trigger, &name)?;
+                effective_config.autonomy_tier =
+                    effective_config.autonomy_tier.min(autonomy_ceiling);
                 CollectedTriggerHandler::Persona { binding, callable }
             }
             TriggerHandlerUri::EvalPack { target } => {
@@ -339,7 +375,7 @@ async fn collect_manifest_triggers_with_mode(
         let flow_control = collect_trigger_flow_control(vm, trigger).await?;
 
         collected.push(CollectedManifestTrigger {
-            config: trigger.clone(),
+            config: effective_config,
             handler: collected_handler,
             when: collected_when,
             flow_control,
@@ -614,36 +650,6 @@ pub(crate) async fn collect_trigger_flow_control(
     }
 
     Ok(flow)
-}
-
-fn persona_runtime_handler_for_trigger(
-    extensions: &RuntimeExtensions,
-    trigger: &ResolvedTriggerConfig,
-    name: &str,
-) -> Result<(harn_vm::PersonaRuntimeBinding, harn_vm::VmCallable), PackageError> {
-    let Some(manifest) = extensions.root_manifest.as_ref() else {
-        return Err(trigger_error(
-            trigger,
-            format!("handler persona://{name} requires a root manifest"),
-        ));
-    };
-    let Some(persona) = manifest
-        .personas
-        .iter()
-        .find(|persona| persona.name.as_deref() == Some(name))
-    else {
-        return Err(trigger_error(
-            trigger,
-            format!("handler persona://{name} does not match a declared persona"),
-        ));
-    };
-    let manifest_dir = extensions
-        .root_manifest_dir
-        .as_deref()
-        .unwrap_or(trigger.manifest_dir.as_path());
-    let callable = persona_runtime_callable(name, persona, manifest_dir)
-        .map_err(|error| trigger_error(trigger, error.to_string()))?;
-    Ok((persona_runtime_binding(name, persona), callable))
 }
 
 fn eval_pack_manifest_for_handler(
@@ -1041,126 +1047,6 @@ pub async fn install_collected_manifest_triggers(
         .map_err(|error| PackageError::Extensions(error.to_string()))
 }
 
-pub fn collect_persona_trigger_binding_specs(
-    extensions: &RuntimeExtensions,
-) -> Result<Vec<harn_vm::TriggerBindingSpec>, PackageError> {
-    let Some(manifest) = extensions.root_manifest.clone() else {
-        return Ok(Vec::new());
-    };
-    let manifest_path = extensions
-        .root_manifest_path
-        .clone()
-        .unwrap_or_else(|| PathBuf::from(MANIFEST));
-    let manifest_dir = extensions
-        .root_manifest_dir
-        .clone()
-        .or_else(|| manifest_path.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| PathBuf::from("."));
-    let resolved =
-        validate_and_resolve_personas(manifest, manifest_path, manifest_dir).map_err(|errors| {
-            errors
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n")
-        })?;
-    let mut bindings = Vec::new();
-    for persona in resolved.personas {
-        let Some(name) = persona.name.clone() else {
-            continue;
-        };
-        for trigger in &persona.triggers {
-            let Some((provider, kind)) = trigger.split_once('.') else {
-                continue;
-            };
-            let provider = provider.trim();
-            let kind = kind.trim();
-            if provider.is_empty() || kind.is_empty() {
-                continue;
-            }
-            bindings.push(persona_trigger_binding_spec(
-                &resolved.manifest_path,
-                &resolved.manifest_dir,
-                &name,
-                provider,
-                kind,
-                &persona,
-            )?);
-        }
-    }
-    Ok(bindings)
-}
-
-fn persona_trigger_binding_spec(
-    manifest_path: &Path,
-    manifest_dir: &Path,
-    name: &str,
-    provider: &str,
-    kind: &str,
-    persona: &PersonaManifestEntry,
-) -> Result<harn_vm::TriggerBindingSpec, PackageError> {
-    let runtime_binding = persona_runtime_binding(name, persona);
-    let callable = persona_runtime_callable(name, persona, manifest_dir)?;
-    let id = format!("persona.{name}.{provider}.{kind}");
-    let handler = harn_vm::TriggerHandlerSpec::Persona {
-        binding: runtime_binding.clone(),
-        callable,
-    };
-    let fingerprint = serde_json::to_string(&serde_json::json!({
-        "id": &id,
-        "kind": kind,
-        "provider": provider,
-        "handler": {
-            "kind": "persona",
-            "name": name,
-            "entry_workflow": runtime_binding.entry_workflow,
-        },
-        "budget": runtime_binding.budget,
-        "manifest_path": manifest_path,
-    }))
-    .unwrap_or_else(|_| format!("{id}:{provider}:{kind}:{name}"));
-
-    Ok(harn_vm::TriggerBindingSpec {
-        id,
-        source: harn_vm::TriggerBindingSource::Manifest,
-        kind: kind.to_string(),
-        provider: harn_vm::ProviderId::from(provider.to_string()),
-        autonomy_tier: persona
-            .autonomy_tier
-            .map(persona_autonomy_to_vm)
-            .unwrap_or(harn_vm::AutonomyTier::Suggest),
-        handler,
-        dispatch_priority: harn_vm::WorkerQueuePriority::Normal,
-        when: None,
-        when_budget: None,
-        retry: harn_vm::TriggerRetryConfig::default(),
-        match_events: vec![kind.to_string()],
-        dedupe_key: None,
-        filter: None,
-        dedupe_retention_days: 7,
-        daily_cost_usd: persona.budget.daily_usd,
-        hourly_cost_usd: persona.budget.hourly_usd,
-        max_autonomous_decisions_per_hour: None,
-        max_autonomous_decisions_per_day: None,
-        on_budget_exhausted: harn_vm::TriggerBudgetExhaustionStrategy::RetryLater,
-        max_concurrent: None,
-        flow_control: harn_vm::TriggerFlowControlConfig::default(),
-        aggregation: None,
-        manifest_path: Some(manifest_path.to_path_buf()),
-        package_name: None,
-        definition_fingerprint: fingerprint,
-    })
-}
-
-fn persona_autonomy_to_vm(value: PersonaAutonomyTier) -> harn_vm::AutonomyTier {
-    match value {
-        PersonaAutonomyTier::Shadow => harn_vm::AutonomyTier::Shadow,
-        PersonaAutonomyTier::Suggest => harn_vm::AutonomyTier::Suggest,
-        PersonaAutonomyTier::ActWithApproval => harn_vm::AutonomyTier::ActWithApproval,
-        PersonaAutonomyTier::ActAuto => harn_vm::AutonomyTier::ActAuto,
-    }
-}
-
 pub fn load_personas_from_manifest_path(
     manifest_path: &Path,
 ) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
@@ -1226,6 +1112,25 @@ pub fn load_personas_from_manifest_path(
             }
         }
     }
+    validate_and_resolve_personas(manifest, manifest_path, manifest_dir)
+}
+
+pub(crate) fn load_personas_from_verified_package_manifest(
+    manifest_path: &Path,
+    source: &str,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
+    let manifest_path = manifest_path.to_path_buf();
+    let manifest_dir = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let manifest = toml::from_str::<Manifest>(source).map_err(|error| {
+        vec![PersonaValidationError {
+            manifest_path: manifest_path.clone(),
+            field_path: "harn.toml".to_string(),
+            message: format!("failed to parse {}: {error}", manifest_path.display()),
+        }]
+    })?;
     validate_and_resolve_personas(manifest, manifest_path, manifest_dir)
 }
 

@@ -248,8 +248,7 @@ impl ProcessSandboxPolicy {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CapabilityPolicy {
     pub tools: Vec<String>,
     pub capabilities: BTreeMap<String, Vec<String>>,
@@ -261,7 +260,6 @@ pub struct CapabilityPolicy {
     /// `workspace_roots` (which are read-write); cloud mounts lower
     /// their `FilesystemAccess::ReadOnly` entries here so a "read-only"
     /// mount is actually unwritable inside the sandbox.
-    #[serde(default)]
     pub read_only_roots: Vec<String>,
     pub side_effect_level: Option<String>,
     /// Remaining Harn-side nested-execution depth. The
@@ -273,25 +271,178 @@ pub struct CapabilityPolicy {
     /// disables the budget gate entirely.
     pub recursion_limit: Option<usize>,
     /// Argument-level constraints for specific tools.
-    #[serde(default)]
     pub tool_arg_constraints: Vec<ToolArgConstraint>,
     /// Per-tool annotations (kind, arg schema, capabilities, side-effect
     /// level). Pipelines own the registry; the VM reads it.
-    #[serde(default)]
     pub tool_annotations: BTreeMap<String, ToolAnnotations>,
     /// Confinement strength applied to subprocesses spawned under this
     /// policy. Defaults to [`SandboxProfile::Worktree`]; pipelines opt
     /// into [`SandboxProfile::OsHardened`] when the workload should
     /// refuse to run if the platform sandbox is unavailable.
-    #[serde(default)]
     pub sandbox_profile: SandboxProfile,
     /// Process-only filesystem allowances layered into OS subprocess
     /// sandboxes without widening Harn file builtins.
-    #[serde(default)]
     pub process_sandbox: ProcessSandboxPolicy,
 }
 
+const DENY_ALL_SENTINEL: &str = "\0harn:deny-all";
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct CapabilityPolicyWire {
+    tools: Vec<String>,
+    #[serde(skip_serializing_if = "is_false")]
+    tools_restricted: bool,
+    capabilities: BTreeMap<String, Vec<String>>,
+    #[serde(skip_serializing_if = "is_false")]
+    capabilities_restricted: bool,
+    workspace_roots: Vec<String>,
+    read_only_roots: Vec<String>,
+    side_effect_level: Option<String>,
+    recursion_limit: Option<usize>,
+    tool_arg_constraints: Vec<ToolArgConstraint>,
+    tool_annotations: BTreeMap<String, ToolAnnotations>,
+    sandbox_profile: SandboxProfile,
+    process_sandbox: ProcessSandboxPolicy,
+}
+
+impl From<&CapabilityPolicy> for CapabilityPolicyWire {
+    fn from(policy: &CapabilityPolicy) -> Self {
+        let tools_restricted = policy.tools_deny_all();
+        let capabilities_restricted = policy.capabilities_deny_all();
+        Self {
+            tools: if tools_restricted {
+                Vec::new()
+            } else {
+                policy.tools.clone()
+            },
+            tools_restricted,
+            capabilities: if capabilities_restricted {
+                BTreeMap::new()
+            } else {
+                policy.capabilities.clone()
+            },
+            capabilities_restricted,
+            workspace_roots: policy.workspace_roots.clone(),
+            read_only_roots: policy.read_only_roots.clone(),
+            side_effect_level: policy.side_effect_level.clone(),
+            recursion_limit: policy.recursion_limit,
+            tool_arg_constraints: policy.tool_arg_constraints.clone(),
+            tool_annotations: policy.tool_annotations.clone(),
+            sandbox_profile: policy.sandbox_profile,
+            process_sandbox: policy.process_sandbox.clone(),
+        }
+    }
+}
+
+impl From<CapabilityPolicyWire> for CapabilityPolicy {
+    fn from(wire: CapabilityPolicyWire) -> Self {
+        let tools =
+            if wire.tools_restricted || wire.tools.iter().any(|tool| tool == DENY_ALL_SENTINEL) {
+                encode_restricted_tools(wire.tools)
+            } else {
+                wire.tools
+            };
+        let capabilities =
+            if wire.capabilities_restricted || wire.capabilities.contains_key(DENY_ALL_SENTINEL) {
+                encode_restricted_capabilities(wire.capabilities)
+            } else {
+                wire.capabilities
+            };
+        Self {
+            tools,
+            capabilities,
+            workspace_roots: wire.workspace_roots,
+            read_only_roots: wire.read_only_roots,
+            side_effect_level: wire.side_effect_level,
+            recursion_limit: wire.recursion_limit,
+            tool_arg_constraints: wire.tool_arg_constraints,
+            tool_annotations: wire.tool_annotations,
+            sandbox_profile: wire.sandbox_profile,
+            process_sandbox: wire.process_sandbox,
+        }
+    }
+}
+
+impl Serialize for CapabilityPolicy {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        CapabilityPolicyWire::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CapabilityPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        CapabilityPolicyWire::deserialize(deserializer).map(Self::from)
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 impl CapabilityPolicy {
+    pub fn is_unbounded(&self) -> bool {
+        self == &Self::default()
+    }
+
+    pub fn tools_are_restricted(&self) -> bool {
+        !self.tools.is_empty()
+    }
+
+    pub fn tools_deny_all(&self) -> bool {
+        self.tools.iter().any(|tool| tool == DENY_ALL_SENTINEL)
+    }
+
+    pub fn allowed_tool_patterns(&self) -> impl Iterator<Item = &str> {
+        self.tools
+            .iter()
+            .map(String::as_str)
+            .filter(|_| !self.tools_deny_all())
+    }
+
+    pub fn restrict_tools(&mut self, tools: Vec<String>) {
+        self.tools = encode_restricted_tools(tools);
+    }
+
+    pub fn tool_pattern_allows(&self, tool: &str) -> bool {
+        !self.tools_are_restricted()
+            || (!self.tools_deny_all()
+                && self.tools.iter().any(|pattern| glob_match(pattern, tool)))
+    }
+
+    pub fn capabilities_are_restricted(&self) -> bool {
+        !self.capabilities.is_empty()
+    }
+
+    pub fn capabilities_deny_all(&self) -> bool {
+        self.capabilities.contains_key(DENY_ALL_SENTINEL)
+    }
+
+    pub fn allowed_capabilities(&self) -> impl Iterator<Item = (&str, &[String])> {
+        self.capabilities
+            .iter()
+            .filter(|_| !self.capabilities_deny_all())
+            .map(|(capability, operations)| (capability.as_str(), operations.as_slice()))
+    }
+
+    pub fn capability_operations(&self, capability: &str) -> Option<&[String]> {
+        if self.capabilities_deny_all() {
+            None
+        } else {
+            self.capabilities.get(capability).map(Vec::as_slice)
+        }
+    }
+
+    pub fn restrict_capabilities(&mut self, capabilities: BTreeMap<String, Vec<String>>) {
+        self.capabilities = encode_restricted_capabilities(capabilities);
+    }
+
     pub fn intersect(&self, requested: &CapabilityPolicy) -> Result<CapabilityPolicy, String> {
         let side_effect_level = match (&self.side_effect_level, &requested.side_effect_level) {
             (Some(a), Some(b)) => Some(min_side_effect(a, b).to_string()),
@@ -300,11 +451,18 @@ impl CapabilityPolicy {
             (None, None) => None,
         };
 
-        if !self.tools.is_empty() {
+        let self_tools_restricted = self.tools_are_restricted();
+        let requested_tools_restricted = requested.tools_are_restricted();
+        if self_tools_restricted && !requested.tools_deny_all() {
             let denied: Vec<String> = requested
                 .tools
                 .iter()
-                .filter(|tool| !self.tools.contains(*tool))
+                .filter(|tool| tool.as_str() != DENY_ALL_SENTINEL)
+                .filter(|tool| {
+                    !self
+                        .allowed_tool_patterns()
+                        .any(|allowed| tool_pattern_within_ceiling(allowed, tool))
+                })
                 .cloned()
                 .collect();
             if !denied.is_empty() {
@@ -315,58 +473,73 @@ impl CapabilityPolicy {
             }
         }
 
-        for (capability, requested_ops) in &requested.capabilities {
-            if let Some(allowed_ops) = self.capabilities.get(capability) {
-                let denied: Vec<String> = requested_ops
-                    .iter()
-                    .filter(|op| !allowed_ops.contains(*op))
-                    .cloned()
-                    .collect();
-                if !denied.is_empty() {
+        if !requested.capabilities_deny_all() {
+            for (capability, requested_ops) in &requested.capabilities {
+                if let Some(allowed_ops) = self.capability_operations(capability) {
+                    let denied: Vec<String> = requested_ops
+                        .iter()
+                        .filter(|op| !allowed_ops.is_empty() && !allowed_ops.contains(*op))
+                        .cloned()
+                        .collect();
+                    if !denied.is_empty() {
+                        return Err(format!(
+                            "requested capability operations exceed host ceiling: {}.{}",
+                            capability,
+                            denied.join(",")
+                        ));
+                    }
+                } else if self.capabilities_are_restricted() {
                     return Err(format!(
-                        "requested capability operations exceed host ceiling: {}.{}",
-                        capability,
-                        denied.join(",")
+                        "requested capability exceeds host ceiling: {capability}"
                     ));
                 }
-            } else if !self.capabilities.is_empty() {
-                return Err(format!(
-                    "requested capability exceeds host ceiling: {capability}"
-                ));
             }
         }
 
-        let tools = if self.tools.is_empty() {
+        let tools = if !self_tools_restricted {
             requested.tools.clone()
-        } else if requested.tools.is_empty() {
+        } else if !requested_tools_restricted {
             self.tools.clone()
+        } else if self.tools_deny_all() || requested.tools_deny_all() {
+            encode_restricted_tools(Vec::new())
         } else {
             requested
                 .tools
                 .iter()
-                .filter(|tool| self.tools.contains(*tool))
+                .filter(|tool| {
+                    self.allowed_tool_patterns()
+                        .any(|allowed| tool_pattern_within_ceiling(allowed, tool))
+                })
                 .cloned()
                 .collect()
         };
 
-        let capabilities = if self.capabilities.is_empty() {
+        let self_capabilities_restricted = self.capabilities_are_restricted();
+        let requested_capabilities_restricted = requested.capabilities_are_restricted();
+        let capabilities = if !self_capabilities_restricted {
             requested.capabilities.clone()
-        } else if requested.capabilities.is_empty() {
+        } else if !requested_capabilities_restricted {
             self.capabilities.clone()
+        } else if self.capabilities_deny_all() || requested.capabilities_deny_all() {
+            encode_restricted_capabilities(BTreeMap::new())
         } else {
             requested
                 .capabilities
                 .iter()
                 .filter_map(|(capability, requested_ops)| {
-                    self.capabilities.get(capability).map(|allowed_ops| {
-                        (
-                            capability.clone(),
+                    self.capability_operations(capability).map(|allowed_ops| {
+                        let operations = if allowed_ops.is_empty() {
+                            requested_ops.clone()
+                        } else if requested_ops.is_empty() {
+                            allowed_ops.to_vec()
+                        } else {
                             requested_ops
                                 .iter()
                                 .filter(|op| allowed_ops.contains(*op))
                                 .cloned()
-                                .collect::<Vec<_>>(),
-                        )
+                                .collect()
+                        };
+                        (capability.clone(), operations)
                     })
                 })
                 .collect()
@@ -429,42 +602,67 @@ impl CapabilityPolicy {
     /// empty `tools` / `workspace_roots` / `read_only_roots` / `capabilities`
     /// ceiling imposes no bound on that dimension, so anything passes.
     pub fn assert_within_ceiling(&self, requested: &CapabilityPolicy) -> Result<(), String> {
-        if !self.tools.is_empty() {
-            let widened: Vec<String> = requested
-                .tools
-                .iter()
-                .filter(|tool| !self.tools.contains(*tool))
-                .cloned()
-                .collect();
-            if !widened.is_empty() {
-                return Err(format!(
-                    "flattened stage policy widened tools beyond the stage grant: {}",
-                    widened.join(", ")
-                ));
+        if self.tools_are_restricted() {
+            if !requested.tools_are_restricted() {
+                return Err("flattened stage policy dropped the stage tool ceiling".to_string());
+            }
+            if requested.tools_deny_all() {
+                // An explicit deny-all is always a valid narrowing, including
+                // malformed marker-plus-grant inputs which fail closed.
+            } else if self.tools_deny_all() {
+                return Err("flattened stage policy widened a deny-all tool ceiling".to_string());
+            } else {
+                let widened: Vec<String> = requested
+                    .tools
+                    .iter()
+                    .filter(|tool| tool.as_str() != DENY_ALL_SENTINEL)
+                    .filter(|tool| {
+                        !self
+                            .allowed_tool_patterns()
+                            .any(|allowed| tool_pattern_within_ceiling(allowed, tool))
+                    })
+                    .cloned()
+                    .collect();
+                if !widened.is_empty() {
+                    return Err(format!(
+                        "flattened stage policy widened tools beyond the stage grant: {}",
+                        widened.join(", ")
+                    ));
+                }
             }
         }
 
-        for (capability, requested_ops) in &requested.capabilities {
-            match self.capabilities.get(capability) {
-                Some(allowed_ops) => {
-                    let widened: Vec<String> = requested_ops
-                        .iter()
-                        .filter(|op| !allowed_ops.contains(*op))
-                        .cloned()
-                        .collect();
-                    if !widened.is_empty() {
+        if self.capabilities_are_restricted() && !requested.capabilities_are_restricted() {
+            return Err("flattened stage policy dropped the stage capability ceiling".to_string());
+        }
+        if !requested.capabilities_deny_all() {
+            for (capability, requested_ops) in &requested.capabilities {
+                match self.capability_operations(capability) {
+                    Some(allowed_ops) => {
+                        if requested_ops.is_empty() && !allowed_ops.is_empty() {
+                            return Err(format!(
+                                "flattened stage policy widened capability `{capability}` to every operation"
+                            ));
+                        }
+                        let widened: Vec<String> = requested_ops
+                            .iter()
+                            .filter(|op| !allowed_ops.is_empty() && !allowed_ops.contains(*op))
+                            .cloned()
+                            .collect();
+                        if !widened.is_empty() {
+                            return Err(format!(
+                                "flattened stage policy widened capability `{capability}` beyond the stage grant: {}",
+                                widened.join(",")
+                            ));
+                        }
+                    }
+                    None if self.capabilities_are_restricted() => {
                         return Err(format!(
-                            "flattened stage policy widened capability `{capability}` beyond the stage grant: {}",
-                            widened.join(",")
+                            "flattened stage policy added capability `{capability}` beyond the stage grant"
                         ));
                     }
+                    None => {}
                 }
-                None if !self.capabilities.is_empty() => {
-                    return Err(format!(
-                        "flattened stage policy added capability `{capability}` beyond the stage grant"
-                    ));
-                }
-                None => {}
             }
         }
 
@@ -626,7 +824,9 @@ impl CapabilityPolicy {
         // lowered `side_effect_level` slips past the effect ceiling). For every
         // tool the ceiling still grants, its annotation must survive unchanged.
         let tool_still_granted = |tool: &str| {
-            requested.tools.is_empty() || requested.tools.iter().any(|granted| granted == tool)
+            !requested.tools_are_restricted()
+                || (!requested.tools_deny_all()
+                    && requested.tools.iter().any(|granted| granted == tool))
         };
         for (tool, annotation) in &self.tool_annotations {
             if !tool_still_granted(tool) {
@@ -656,6 +856,33 @@ impl CapabilityPolicy {
 /// is treated as "no ceiling on this dimension", so the other side passes
 /// through untouched. When both are populated the result keeps only the
 /// roots present in both.
+fn encode_restricted_tools(tools: Vec<String>) -> Vec<String> {
+    if tools.is_empty() || tools.iter().any(|tool| tool == DENY_ALL_SENTINEL) {
+        vec![DENY_ALL_SENTINEL.to_string()]
+    } else {
+        tools
+    }
+}
+
+fn tool_pattern_within_ceiling(ceiling: &str, requested: &str) -> bool {
+    ceiling == "*"
+        || ceiling == requested
+        || (!requested
+            .chars()
+            .any(|character| matches!(character, '*' | '?' | '[' | ']' | '{' | '}'))
+            && glob_match(ceiling, requested))
+}
+
+fn encode_restricted_capabilities(
+    mut capabilities: BTreeMap<String, Vec<String>>,
+) -> BTreeMap<String, Vec<String>> {
+    if capabilities.is_empty() || capabilities.contains_key(DENY_ALL_SENTINEL) {
+        capabilities.clear();
+        capabilities.insert(DENY_ALL_SENTINEL.to_string(), Vec::new());
+    }
+    capabilities
+}
+
 fn intersect_roots(host: &[String], requested: &[String]) -> Vec<String> {
     if host.is_empty() {
         requested.to_vec()

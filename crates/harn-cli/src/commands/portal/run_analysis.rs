@@ -912,11 +912,10 @@ pub(super) fn build_policy_summary(run: &harn_vm::orchestration::RunRecord) -> P
     });
     let capabilities = run
         .policy
-        .capabilities
-        .iter()
+        .allowed_capabilities()
         .flat_map(|(capability, ops)| {
             if ops.is_empty() {
-                vec![capability.clone()]
+                vec![capability.to_string()]
             } else {
                 ops.iter()
                     .map(|op| format!("{capability}.{op}"))
@@ -942,7 +941,11 @@ pub(super) fn build_policy_summary(run: &harn_vm::orchestration::RunRecord) -> P
         .collect::<Vec<_>>();
 
     PortalPolicySummary {
-        tools: run.policy.tools.clone(),
+        tools: run
+            .policy
+            .allowed_tool_patterns()
+            .map(str::to_string)
+            .collect(),
         capabilities,
         workspace_roots: run.policy.workspace_roots.clone(),
         side_effect_level: run.policy.side_effect_level.clone(),

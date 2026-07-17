@@ -132,6 +132,7 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/orchestrator_cli.rs",
   "crates/harn-cli/tests/orchestrator_cli_e2e.rs",
   "crates/harn-cli/tests/orchestrator_cli_e2e/support.rs",
+  "crates/harn-cli/tests/persona_activation_cli_e2e.rs",
   "crates/harn-cli/tests/persona_cli.rs",
   "crates/harn-cli/tests/test_worker_cli_e2e.rs",
   "crates/harn-cli/tests/run_eval_imports.rs",

@@ -231,8 +231,7 @@ pub async fn status_payload(
     name: &str,
     at: Option<&str>,
 ) -> Result<harn_vm::PersonaStatus, String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, name)?;
+    let binding = runtime_binding_or_err(manifest, name)?;
     let log = open_persona_log(state_dir)?;
     let now_ms = timestamp_arg(at)?;
     harn_vm::persona_status(&log, &binding, now_ms).await
@@ -255,8 +254,7 @@ pub async fn pause_payload(
     name: &str,
     at: Option<&str>,
 ) -> Result<harn_vm::PersonaStatus, String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, name)?;
+    let binding = runtime_binding_or_err(manifest, name)?;
     let log = open_persona_log(state_dir)?;
     let now_ms = timestamp_arg(at)?;
     harn_vm::pause_persona(&log, &binding, now_ms).await
@@ -279,8 +277,7 @@ pub async fn resume_payload(
     name: &str,
     at: Option<&str>,
 ) -> Result<harn_vm::PersonaStatus, String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, name)?;
+    let binding = runtime_binding_or_err(manifest, name)?;
     let log = open_persona_log(state_dir)?;
     let now_ms = timestamp_arg(at)?;
     harn_vm::resume_persona(&log, &binding, now_ms).await
@@ -303,8 +300,7 @@ pub async fn disable_payload(
     name: &str,
     at: Option<&str>,
 ) -> Result<harn_vm::PersonaStatus, String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, name)?;
+    let binding = runtime_binding_or_err(manifest, name)?;
     let log = open_persona_log(state_dir)?;
     let now_ms = timestamp_arg(at)?;
     harn_vm::disable_persona(&log, &binding, now_ms).await
@@ -330,8 +326,7 @@ pub async fn tick_payload(
     cost_usd: f64,
     tokens: u64,
 ) -> Result<harn_vm::PersonaRunReceipt, String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, name)?;
+    let binding = runtime_binding_or_err(manifest, name)?;
     let log = open_persona_log(state_dir)?;
     let now_ms = timestamp_arg(at)?;
     let receipt = harn_vm::fire_persona_schedule(
@@ -381,8 +376,7 @@ pub async fn trigger_payload(
     cost_usd: f64,
     tokens: u64,
 ) -> Result<harn_vm::PersonaRunReceipt, String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, name)?;
+    let binding = runtime_binding_or_err(manifest, name)?;
     let log = open_persona_log(state_dir)?;
     let now_ms = timestamp_arg(at)?;
     let metadata = parse_metadata(metadata_pairs)?;
@@ -434,8 +428,7 @@ pub async fn spend_payload(
     cost_usd: f64,
     tokens: u64,
 ) -> Result<harn_vm::PersonaBudgetStatus, String> {
-    let catalog = load_catalog_result(manifest)?;
-    let binding = runtime_binding_or_err(&catalog, name)?;
+    let binding = runtime_binding_or_err(manifest, name)?;
     let log = open_persona_log(state_dir)?;
     let now_ms = timestamp_arg(at)?;
     let budget = harn_vm::record_persona_spend(
@@ -482,10 +475,6 @@ pub(crate) async fn run_spend(
     Ok(())
 }
 
-fn load_catalog_result(manifest: Option<&Path>) -> Result<ResolvedPersonaManifest, String> {
-    load_catalog_validation(manifest).map_err(|errors| validation_errors_to_string(&errors))
-}
-
 fn load_catalog_validation(
     manifest: Option<&Path>,
 ) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
@@ -506,32 +495,51 @@ fn load_catalog_validation(
     }
 }
 
-fn validation_errors_to_string(errors: &[PersonaValidationError]) -> String {
-    errors
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn runtime_binding_or_err(
-    catalog: &ResolvedPersonaManifest,
+    manifest: Option<&Path>,
     name: &str,
 ) -> Result<harn_vm::PersonaRuntimeBinding, String> {
-    let persona = catalog
-        .personas
-        .iter()
-        .find(|persona| persona.name.as_deref() == Some(name))
-        .ok_or_else(|| {
-            format!(
-                "persona '{}' not found in {}",
-                name,
-                catalog.manifest_path.display()
-            )
+    if let Some(manifest) = manifest {
+        let catalog = package::load_personas_from_manifest_path(manifest).map_err(|errors| {
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
         })?;
+        if let Some(extensions) =
+            package::try_load_runtime_extensions_from_manifest(&catalog.manifest_path)
+                .map_err(|error| error.to_string())?
+        {
+            if let Some(resolved) = extensions
+                .runtime_personas
+                .iter()
+                .find(|persona| persona.id == name)
+            {
+                return Ok(crate::package::persona_runtime_binding(
+                    &resolved.id,
+                    &resolved.persona,
+                ));
+            }
+        }
+        let persona = catalog
+            .personas
+            .iter()
+            .find(|persona| persona.name.as_deref() == Some(name))
+            .ok_or_else(|| format!("active runtime persona '{name}' not found"))?;
+        return Ok(crate::package::persona_runtime_binding(name, persona));
+    }
+
+    let extensions =
+        package::try_load_runtime_extensions(Path::new(".")).map_err(|error| error.to_string())?;
+    let resolved = extensions
+        .runtime_personas
+        .iter()
+        .find(|persona| persona.id == name)
+        .ok_or_else(|| format!("active runtime persona '{name}' not found"))?;
     Ok(crate::package::persona_runtime_binding(
-        persona.name.as_deref().unwrap_or_default(),
-        persona,
+        &resolved.id,
+        &resolved.persona,
     ))
 }
 

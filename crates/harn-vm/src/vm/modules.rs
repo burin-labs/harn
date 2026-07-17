@@ -20,6 +20,15 @@ fn stdlib_module_artifact_cache() -> &'static Mutex<BTreeMap<String, Arc<Prepare
     STDLIB_MODULE_ARTIFACT_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+fn verified_package_source(bytes: Vec<u8>, path: &Path) -> Result<String, VmError> {
+    String::from_utf8(bytes).map_err(|error| {
+        VmError::Runtime(format!(
+            "installed package source {} is not valid UTF-8: {error}",
+            path.display()
+        ))
+    })
+}
+
 #[cfg(test)]
 fn reset_stdlib_module_artifact_cache() {
     stdlib_module_artifact_cache().lock().unwrap().clear();
@@ -144,6 +153,26 @@ fn stdlib_module_artifact(
 }
 
 impl Vm {
+    fn resolve_module_import_path(&self, base: &Path, path: &str) -> Result<PathBuf, VmError> {
+        if let Some(guard) = &self.package_execution_guard {
+            let synthetic_current_file = base.join("__harn_import_base__.harn");
+            if let Some(resolved) =
+                harn_modules::resolve_import_path_with_guard(&synthetic_current_file, path, guard)
+                    .map_err(|error| {
+                    VmError::Runtime(format!("installed package import rejected: {error}"))
+                })?
+            {
+                return Ok(resolved);
+            }
+            let mut file_path = base.join(path);
+            if !file_path.exists() && file_path.extension().is_none() {
+                file_path.set_extension("harn");
+            }
+            return Ok(file_path);
+        }
+        Ok(resolve_module_import_path(base, path))
+    }
+
     /// Resolve a callable against this VM. Lazy callables initialize once per
     /// VM execution tree, then retain that module scope for later child VMs in
     /// the same tree. Fresh VM roots remain isolated.
@@ -210,9 +239,19 @@ impl Vm {
         };
 
         let (_, module_path) = self.lazy_module_path(&pipeline.module_path);
-        let source = std::fs::read_to_string(&module_path).map_err(|error| {
-            VmError::Runtime(format!("failed to read {}: {error}", module_path.display()))
-        })?;
+        let next_guard = pipeline
+            .package_execution_guard_handle()
+            .or_else(|| self.package_execution_guard.clone());
+        let source = if let Some(guard) = &next_guard {
+            let bytes = guard.verify_entry_source(&module_path).map_err(|error| {
+                VmError::Runtime(format!("installed package execution rejected: {error}"))
+            })?;
+            verified_package_source(bytes, &module_path)?
+        } else {
+            std::fs::read_to_string(&module_path).map_err(|error| {
+                VmError::Runtime(format!("failed to read {}: {error}", module_path.display()))
+            })?
+        };
         let program = harn_parser::check_source_strict(&source)
             .map_err(|error| VmError::Runtime(error.to_string()))?;
         let params = program
@@ -254,7 +293,10 @@ impl Vm {
         for (param, value) in params.iter().zip(args) {
             self.set_global(param, value.clone());
         }
+        let previous_package_execution_guard =
+            std::mem::replace(&mut self.package_execution_guard, next_guard);
         let result = self.execute(&chunk).await;
+        self.package_execution_guard = previous_package_execution_guard;
         self.source_dir = previous_source_dir;
         crate::stdlib::set_thread_source_dir_option(self.source_dir.as_deref());
         result
@@ -455,7 +497,7 @@ impl Vm {
         }
 
         for import in artifact.imports.iter().filter(|import| import.is_pub) {
-            let cache_key = self.cache_key_for_import(&import.path);
+            let cache_key = self.cache_key_for_import(&import.path)?;
             let Some(loaded) = self.module_cache.get(&cache_key).cloned() else {
                 // A plain `import`/`import {...}` across a cycle is bound late
                 // by `flush_deferred_cyclic_imports`, but a `pub import`
@@ -658,7 +700,15 @@ impl Vm {
                 .source_dir
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("."));
-            let file_path = resolve_module_import_path(&base, path);
+            let file_path = self.resolve_module_import_path(&base, path)?;
+            let verified_source = if let Some(guard) = &self.package_execution_guard {
+                let bytes = guard.verify_entry_source(&file_path).map_err(|error| {
+                    VmError::Runtime(format!("installed package import rejected: {error}"))
+                })?;
+                Some(verified_package_source(bytes, &file_path)?)
+            } else {
+                None
+            };
 
             let canonical = file_path
                 .canonicalize()
@@ -683,23 +733,35 @@ impl Vm {
                 return Ok(());
             }
             if let Some(loaded) = self.module_cache.get(&canonical).cloned() {
+                if let Some(source) = &verified_source {
+                    let cached_source = self.source_cache.get(&canonical);
+                    if cached_source != Some(source) {
+                        return Err(VmError::Runtime(format!(
+                            "installed package import rejected: cached module {} was not compiled from the verified package bytes",
+                            canonical.display()
+                        )));
+                    }
+                }
                 return self.export_loaded_module(&canonical, &loaded, selected_names);
             }
             self.imported_paths.push(canonical.clone());
 
             let source = {
                 let _load_span = self.module_load_span();
-                std::fs::read_to_string(&file_path).map_err(|e| {
-                    // Name the resolution base: relative imports resolve against the
-                    // importing file's dir (or CWD when unset), so an error that
-                    // prints only the joined path leaves the author guessing which
-                    // base was used.
-                    VmError::Runtime(format!(
-                        "Import error: cannot read '{}' (resolved '{path}' relative to {}): {e}",
-                        file_path.display(),
-                        base.display()
-                    ))
-                })?
+                match verified_source {
+                    Some(source) => source,
+                    None => std::fs::read_to_string(&file_path).map_err(|e| {
+                        // Name the resolution base: relative imports resolve against the
+                        // importing file's dir (or CWD when unset), so an error that
+                        // prints only the joined path leaves the author guessing which
+                        // base was used.
+                        VmError::Runtime(format!(
+                            "Import error: cannot read '{}' (resolved '{path}' relative to {}): {e}",
+                            file_path.display(),
+                            base.display()
+                        ))
+                    })?,
+                }
             };
             Arc::make_mut(&mut self.source_cache).insert(canonical.clone(), source.clone());
             Arc::make_mut(&mut self.source_cache).insert(file_path.clone(), source.clone());
@@ -842,19 +904,19 @@ impl Vm {
     /// LoadedModule for this import string. Used by the re-export pass to
     /// look up the already-loaded source module after `execute_import`
     /// has populated [`Vm::module_cache`].
-    fn cache_key_for_import(&self, path: &str) -> PathBuf {
+    fn cache_key_for_import(&self, path: &str) -> Result<PathBuf, VmError> {
         if let Some(module) = path
             .strip_prefix("std/")
             .or_else(|| (path == "observability").then_some("observability"))
         {
-            return PathBuf::from(format!("<stdlib>/{module}.harn"));
+            return Ok(PathBuf::from(format!("<stdlib>/{module}.harn")));
         }
         let base = self
             .source_dir
             .clone()
             .unwrap_or_else(|| PathBuf::from("."));
-        let file_path = resolve_module_import_path(&base, path);
-        file_path.canonicalize().unwrap_or(file_path)
+        let file_path = self.resolve_module_import_path(&base, path)?;
+        Ok(file_path.canonicalize().unwrap_or(file_path))
     }
 
     /// Load a module file and return the exported function closures that
@@ -984,7 +1046,7 @@ impl Vm {
             .source_dir
             .clone()
             .unwrap_or_else(|| PathBuf::from("."));
-        let file_path = resolve_module_import_path(&base, import_path);
+        let file_path = self.resolve_module_import_path(&base, import_path)?;
         self.load_module_exports(&file_path).await
     }
 }
