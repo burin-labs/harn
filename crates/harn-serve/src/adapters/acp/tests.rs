@@ -1698,6 +1698,45 @@ async fn acp_provider_catalog_method_matches_export_artifact_with_overrides() {
 }
 
 #[test]
+fn acp_runtime_provider_endpoint_wins_over_ambient_endpoint_env() {
+    let _guard = acp_env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _env = EnvSnapshot::capture(&["HARN_TEST_ACP_ENDPOINT"]);
+    let _reset = crate::test_support::LlmOverrideReset;
+    unsafe {
+        std::env::set_var("HARN_TEST_ACP_ENDPOINT", "https://ambient.example/v1");
+    }
+
+    let mut overlay = harn_vm::llm_config::parse_config_toml(
+        r#"
+[providers.fixture]
+base_url = "https://catalog.example/v1"
+base_url_env = "HARN_TEST_ACP_ENDPOINT"
+"#,
+    )
+    .expect("fixture provider overlay parses");
+    overlay.merge_from(
+        &harn_vm::llm_config::ProvidersConfig::runtime_provider_endpoint(
+            "fixture",
+            "https://verified.example/v1",
+        ),
+    );
+
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let _server = AcpServer::new_with_output(
+        AcpServerConfig::new(None).with_llm_overrides(Some(overlay), None),
+        AcpOutput::Channel(tx),
+    );
+    let provider = harn_vm::llm_config::provider_config("fixture")
+        .expect("ACP runtime endpoint provider override");
+    assert_eq!(
+        harn_vm::llm_config::resolve_base_url(&provider),
+        "https://verified.example/v1"
+    );
+}
+
+#[test]
 fn acp_prompt_capabilities_follow_configured_model_aliases() {
     let _guard = acp_env_lock()
         .lock()
