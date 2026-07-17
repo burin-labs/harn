@@ -908,16 +908,12 @@ mod tests {
             "hybrid-classify-then-act",
             "frontier-judgment-loop",
         ] {
-            let template_dir = PERSONA_TEMPLATE_ASSETS
-                .get_dir(template)
-                .expect("canonical persona template directory");
-            let source = template_dir
-                .get_dir("src")
-                .and_then(|source_dir| source_dir.get_file("template_persona.harn"))
+            let source = PERSONA_TEMPLATE_ASSETS
+                .get_file(format!("{template}/src/template_persona.harn"))
                 .and_then(include_dir::File::contents_utf8)
                 .expect("canonical persona template source");
-            let manifest = template_dir
-                .get_file("harn.toml")
+            let manifest = PERSONA_TEMPLATE_ASSETS
+                .get_file(format!("{template}/harn.toml"))
                 .and_then(include_dir::File::contents_utf8)
                 .expect("canonical persona template manifest");
             let manifest = toml::from_str::<toml::Value>(manifest)
