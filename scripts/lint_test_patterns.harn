@@ -268,6 +268,11 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/a2a/mod.rs",
   "crates/harn-vm/src/agent_events/sinks.rs",
   "crates/harn-vm/src/agent_sessions.rs",
+  // Per-builtin profiling reports how long a builtin really took; elapsed host
+  // time IS the observation, and an injected clock would report logical time
+  // instead of the ten seconds the operator is trying to find. Same shape as
+  // the `module_phase_timing.rs` entry below.
+  "crates/harn-vm/src/builtin_profile.rs",
   // Module phase attribution measures real compile/load work for CLI timing
   // reports; host monotonic time is the observation being recorded.
   "crates/harn-vm/src/vm/module_phase_timing.rs",
