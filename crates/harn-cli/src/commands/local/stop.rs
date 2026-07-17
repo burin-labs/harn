@@ -1,20 +1,20 @@
 //! `harn local stop` — unload local models and stop Harn-managed servers.
 //!
 //! For Ollama, "stop" means `keep_alive=0` over `/api/generate`, which
-//! matches the semantics of `ollama stop <model>`. For llama.cpp / MLX /
-//! local / vLLM, "stop" means SIGTERM the PID Harn stored when it launched
-//! the server itself. We don't kill processes Harn didn't start: that's
-//! the host's job, not ours.
+//! matches the semantics of `ollama stop <model>`. Managed-process runtimes
+//! stop only the PID Harn stored when it launched the server. Externally
+//! managed runtimes are explicitly left to the host.
 
 use std::path::Path;
 
+use harn_vm::llm_config::LocalRuntimeStop;
 use serde::Serialize;
 
 use crate::cli::LocalStopArgs;
 
 use super::runtime::{
-    local_provider_ids, normalize_local_provider_id, ollama_unload_model, snapshot_provider,
-    terminate_pid,
+    local_provider_ids, local_runtime_for_provider, normalize_local_provider_id,
+    ollama_unload_model, snapshot_provider, terminate_pid,
 };
 use super::state::{clear_pid_record, read_pid_record, read_selection};
 
@@ -40,9 +40,25 @@ pub(crate) async fn run(args: LocalStopArgs, base_dir: &Path) -> Result<(), Stri
     let mut outcomes = Vec::with_capacity(targets.len());
     for provider in targets {
         let mut actions = Vec::new();
-        match provider.as_str() {
-            "ollama" => stop_ollama(&provider, base_dir, &mut actions).await,
-            _ => stop_managed_pid(&provider, base_dir, &mut actions),
+        let runtime = local_runtime_for_provider(&provider)
+            .ok_or_else(|| format!("'{provider}' has no local runtime catalog row"))?;
+        match runtime.stop {
+            Some(LocalRuntimeStop::KeepAliveZero) if provider == "ollama" => {
+                stop_ollama(&provider, base_dir, &mut actions).await;
+            }
+            Some(LocalRuntimeStop::Pid) => stop_managed_pid(&provider, base_dir, &mut actions),
+            Some(LocalRuntimeStop::External) => actions.push(StopAction {
+                target: "runtime".to_string(),
+                outcome: "externally managed; Harn did not stop it".to_string(),
+            }),
+            Some(LocalRuntimeStop::KeepAliveZero) => actions.push(StopAction {
+                target: "runtime".to_string(),
+                outcome: "keep_alive_zero requires an Ollama-compatible runtime".to_string(),
+            }),
+            None => actions.push(StopAction {
+                target: "runtime".to_string(),
+                outcome: "missing catalog stop strategy".to_string(),
+            }),
         }
         outcomes.push(ProviderStopOutcome { provider, actions });
     }

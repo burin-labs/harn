@@ -1,9 +1,9 @@
 //! `harn local launch` — bring a local model up through Harn's catalog.
 //!
 //! Ollama is daemon-managed, so launch means "load/warm this model through
-//! the API." llama.cpp and MLX are managed processes, so launch spawns the
-//! configured server command, records its PID, waits for `/v1/models`, and
-//! lets `harn local stop` own cleanup.
+//! the API." Managed-process runtimes spawn their catalog-configured server
+//! command, record its PID, wait for `/v1/models`, and let `harn local stop`
+//! own cleanup. External runtimes remain user-managed and can only be selected.
 
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use harn_vm::llm::readiness::probe_provider_readiness;
-use harn_vm::llm_config::{self, LocalMemoryDef, LocalRuntimeDef};
+use harn_vm::llm_config::{self, LocalMemoryDef, LocalRuntimeDef, LocalRuntimeKind};
 use serde::Serialize;
 use serde_json::json;
 use time::{format_description, OffsetDateTime};
@@ -139,6 +139,11 @@ pub(crate) async fn run(args: LocalLaunchArgs, base_dir: &Path) -> Result<(), St
     let runtime = def.local_runtime.clone().ok_or_else(|| {
         format!("provider '{provider}' has no [providers.{provider}.local_runtime] catalog row")
     })?;
+    if runtime.kind == Some(LocalRuntimeKind::External) {
+        return Err(format!(
+            "provider '{provider}' is externally managed; Harn can inspect or select it but cannot launch its process"
+        ));
+    }
     let catalog_url = llm_config::resolve_base_url(&def);
     let port = args
         .port
@@ -163,7 +168,7 @@ pub(crate) async fn run(args: LocalLaunchArgs, base_dir: &Path) -> Result<(), St
         .map(|memory| launch_memory_plan(&resolved.id, &memory, ctx, &args, &hardware))
         .transpose()?;
 
-    if runtime.kind.as_deref() == Some("daemon_api") || provider == "ollama" {
+    if runtime.kind == Some(LocalRuntimeKind::DaemonApi) || provider == "ollama" {
         return launch_daemon(
             args,
             resolved,
@@ -239,11 +244,10 @@ async fn launch_managed_process(
     plan: ManagedLaunchPlan,
     base_dir: &Path,
 ) -> Result<(), String> {
-    if plan.runtime.kind.as_deref() != Some("managed_process") {
+    if plan.runtime.kind != Some(LocalRuntimeKind::ManagedProcess) {
         return Err(format!(
-            "provider '{}' local runtime kind '{}' is not launchable",
-            plan.provider,
-            plan.runtime.kind.as_deref().unwrap_or("(unset)")
+            "provider '{}' local runtime is not a managed process",
+            plan.provider
         ));
     }
     let model_source = resolve_model_source(&args, &plan.runtime, &plan.provider, &resolved.id)?;
@@ -866,7 +870,7 @@ mod tests {
 
     fn runtime() -> LocalRuntimeDef {
         LocalRuntimeDef {
-            kind: Some("managed_process".to_string()),
+            kind: Some(LocalRuntimeKind::ManagedProcess),
             command: Some("llama-server".to_string()),
             model_arg: Some("--model".to_string()),
             served_model_arg: Some("--alias".to_string()),
@@ -911,6 +915,43 @@ mod tests {
             built.iter().filter(|a| *a == "--jinja").count(),
             1,
             "--jinja must not be duplicated: {built:?}"
+        );
+    }
+
+    #[test]
+    fn tgi_catalog_runtime_builds_launcher_args_from_declared_shape() {
+        let runtime = llm_config::provider_config("tgi")
+            .and_then(|provider| provider.local_runtime)
+            .expect("TGI local runtime catalog row");
+        let mut args = cli_args();
+        args.reasoning = None;
+        args.reasoning_format = None;
+        args.flash_attn = None;
+        args.jinja = false;
+        args.metrics = false;
+        args.server_args.clear();
+
+        let built = build_managed_args(
+            &args,
+            &runtime,
+            "HuggingFaceH4/zephyr-7b-beta",
+            "zephyr-7b-beta",
+            "127.0.0.1",
+            8080,
+            8192,
+        )
+        .expect("TGI launcher args");
+
+        assert_eq!(
+            built,
+            vec![
+                "--model-id",
+                "HuggingFaceH4/zephyr-7b-beta",
+                "--hostname",
+                "127.0.0.1",
+                "--port",
+                "8080",
+            ]
         );
     }
 

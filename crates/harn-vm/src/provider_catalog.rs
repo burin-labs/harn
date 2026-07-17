@@ -1154,18 +1154,13 @@ fn validate_local_runtime(
     result: &mut ProviderCatalogValidation,
 ) {
     let owner = format!("provider {provider_id}");
-    if let Some(kind) = runtime.kind.as_deref() {
-        if !matches!(kind, "daemon_api" | "managed_process" | "external") {
-            result.errors.push(format!(
-                "{owner} local_runtime.kind must be daemon_api, managed_process, or external"
-            ));
-        }
-    } else {
+    let Some(kind) = runtime.kind else {
         result
             .errors
             .push(format!("{owner} local_runtime.kind cannot be empty"));
-    }
-    if runtime.kind.as_deref() == Some("managed_process")
+        return;
+    };
+    if kind == llm_config::LocalRuntimeKind::ManagedProcess
         && runtime
             .command
             .as_deref()
@@ -1196,7 +1191,6 @@ fn validate_local_runtime(
             runtime.lora_modules_value_format.as_deref(),
         ),
         ("max_lora_rank_arg", runtime.max_lora_rank_arg.as_deref()),
-        ("stop", runtime.stop.as_deref()),
         ("source_url", runtime.source_url.as_deref()),
         ("last_verified", runtime.last_verified.as_deref()),
         ("notes", runtime.notes.as_deref()),
@@ -1207,12 +1201,10 @@ fn validate_local_runtime(
                 .push(format!("{owner} local_runtime.{field} cannot be empty"));
         }
     }
-    if let Some(stop) = runtime.stop.as_deref() {
-        if !matches!(stop, "keep_alive_zero" | "pid" | "external") {
-            result.errors.push(format!(
-                "{owner} local_runtime.stop must be keep_alive_zero, pid, or external"
-            ));
-        }
+    if runtime.stop.is_none() {
+        result
+            .errors
+            .push(format!("{owner} local_runtime.stop cannot be empty"));
     }
     if let Some(format) = runtime.lora_modules_value_format.as_deref() {
         if !matches!(format, "name_path" | "json_with_base_model") {

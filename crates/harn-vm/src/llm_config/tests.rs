@@ -113,6 +113,30 @@ max_lora_rank_arg = "--max-lora-rank"
 }
 
 #[test]
+fn parse_config_rejects_unknown_local_runtime_lifecycle_values() {
+    for (field, value) in [("kind", "daemon_shell"), ("stop", "kill_all")] {
+        let kind = (field == "kind")
+            .then_some(value)
+            .unwrap_or("managed_process");
+        let stop = (field == "stop").then_some(value).unwrap_or("pid");
+        let source = format!(
+            r#"
+[providers.demo.local_runtime]
+kind = "{kind}"
+stop = "{stop}"
+"#,
+        );
+        let error = parse_config_toml(&source)
+            .expect_err("unknown local runtime lifecycle value must fail at the config boundary");
+        let message = error.to_string();
+        assert!(
+            message.contains(value),
+            "expected invalid {field} value in parse error, got {message:?}"
+        );
+    }
+}
+
+#[test]
 fn presentation_rows_replace_whole_same_id_records_across_overlays() {
     let mut base = parse_config_toml(
         r#"

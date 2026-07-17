@@ -1,6 +1,12 @@
 # Local runtime lifecycle metadata for `harn local`.
 # These rows describe provider mechanics, not machine-specific model paths.
 
+[providers.local.local_runtime]
+kind = "external"
+default_port = 8000
+stop = "external"
+notes = "User-managed generic OpenAI-compatible local endpoint. Harn can inspect and select it, but does not launch or stop its process."
+
 [providers.ollama.local_runtime]
 kind = "daemon_api"
 command = "ollama"
@@ -63,3 +69,16 @@ stop = "pid"
 source_url = "https://docs.vllm.ai/en/stable/cli/serve/"
 last_verified = "2026-07-02"
 notes = "OpenAI-compatible vLLM server. `harn local launch --lora-adapter name=path` maps to vLLM's startup LoRA module flags with base-model lineage so the adapter appears as a request model."
+
+[providers.tgi.local_runtime]
+kind = "managed_process"
+command = "text-generation-launcher"
+model_source_env = "TGI_MODEL"
+default_port = 8080
+model_arg = "--model-id"
+host_arg = "--hostname"
+port_arg = "--port"
+stop = "pid"
+source_url = "https://huggingface.co/docs/text-generation-inference/en/basic_tutorials/using_cli"
+last_verified = "2026-07-17"
+notes = "OpenAI-compatible Hugging Face Text Generation Inference server. Use --model-source or TGI_MODEL for the Hugging Face model id or local model directory; Harn records the launched PID for local stop."

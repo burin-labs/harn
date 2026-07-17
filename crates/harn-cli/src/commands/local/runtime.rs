@@ -1,6 +1,6 @@
 //! Shared helpers for `harn local …` subcommands: provider enumeration,
 //! readiness snapshots, Ollama `/api/ps` loaded-model details, and PID-file
-//! tracking for self-launched llama.cpp / MLX processes.
+//! tracking for Harn-launched processes.
 
 use std::path::Path;
 use std::time::Duration;
@@ -13,10 +13,6 @@ use serde::Serialize;
 use crate::net;
 
 use super::state::{read_pid_record, PidRecord};
-
-/// Provider ids Harn treats as "local LLM runtimes" for lifecycle purposes.
-/// Order is canonical for output stability.
-pub(crate) const LOCAL_PROVIDERS: &[&str] = &["ollama", "llamacpp", "mlx", "local", "vllm"];
 
 pub(crate) fn normalize_local_provider_id(provider: &str) -> String {
     let trimmed = provider.trim();
@@ -67,20 +63,28 @@ pub(crate) struct LoadedModel {
 }
 
 pub(crate) fn local_provider_ids(filter: Option<&str>) -> Vec<String> {
-    let mut ids = Vec::new();
     if let Some(name) = filter.map(str::trim).filter(|name| !name.is_empty()) {
         let id = normalize_local_provider_id(name);
-        if llm_config::provider_config(&id).is_some() {
-            ids.push(id);
-        }
-        return ids;
+        return local_runtime_for_provider(&id)
+            .is_some()
+            .then_some(id)
+            .into_iter()
+            .collect();
     }
-    for id in LOCAL_PROVIDERS {
-        if llm_config::provider_config(id).is_some() {
-            ids.push((*id).to_string());
-        }
-    }
-    ids
+    llm_config::provider_names()
+        .into_iter()
+        .filter(|id| local_runtime_for_provider(id).is_some())
+        .collect()
+}
+
+/// Return lifecycle metadata from the effective provider catalog. Local
+/// commands use this rather than a parallel provider-name list so catalog
+/// additions are listable, launchable when managed, and never mis-owned.
+pub(crate) fn local_runtime_for_provider(
+    provider: &str,
+) -> Option<harn_vm::llm_config::LocalRuntimeDef> {
+    let provider = normalize_local_provider_id(provider);
+    llm_config::provider_config(&provider).and_then(|def| def.local_runtime)
 }
 
 pub(crate) async fn snapshot_provider(
@@ -358,11 +362,13 @@ fn local_http_client() -> Result<reqwest::Client, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_vm::llm_config::{LocalRuntimeKind, LocalRuntimeStop};
 
     #[test]
     fn local_provider_ids_filters_unknown_filter() {
         let ids = local_provider_ids(Some("ollama"));
         assert_eq!(ids, vec!["ollama".to_string()]);
+        assert!(local_provider_ids(Some("openai")).is_empty());
     }
 
     #[test]
@@ -383,11 +389,29 @@ mod tests {
     }
 
     #[test]
-    fn local_provider_ids_returns_canonical_list() {
+    fn local_provider_ids_derive_sorted_catalog_lifecycle_rows() {
         let ids = local_provider_ids(None);
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(ids.contains(&"ollama".to_string()));
         assert!(ids.contains(&"llamacpp".to_string()));
         assert!(ids.contains(&"mlx".to_string()));
+        assert!(ids.contains(&"local".to_string()));
+        assert!(ids.contains(&"tgi".to_string()));
+        assert!(ids.contains(&"vllm".to_string()));
+        for id in ids {
+            assert!(
+                local_runtime_for_provider(&id).is_some(),
+                "{id} must be catalog-declared"
+            );
+        }
+    }
+
+    #[test]
+    fn generic_local_runtime_is_explicitly_external() {
+        let runtime = local_runtime_for_provider("local")
+            .expect("generic local provider has catalog lifecycle metadata");
+        assert_eq!(runtime.kind, Some(LocalRuntimeKind::External));
+        assert_eq!(runtime.stop, Some(LocalRuntimeStop::External));
     }
 
     #[test]

@@ -16,12 +16,42 @@ pub struct HealthcheckDef {
     pub body: Option<String>,
 }
 
+/// How Harn interacts with a catalog-declared local provider runtime.
+///
+/// The snake-case wire values are part of the checked-in provider catalog.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalRuntimeKind {
+    /// A runtime with its own resident daemon that Harn can warm through an API.
+    DaemonApi,
+    /// A server process Harn starts and tracks by PID.
+    ManagedProcess,
+    /// A user-managed endpoint Harn can inspect and select but never owns.
+    External,
+}
+
+/// How Harn can safely stop a catalog-declared local provider runtime.
+///
+/// This remains distinct from [`LocalRuntimeKind`]: a future daemon API may
+/// acquire a different stop protocol without changing process ownership.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalRuntimeStop {
+    /// Ask a daemon API to unload its resident model without killing a process.
+    KeepAliveZero,
+    /// Stop only the PID Harn recorded when it launched the process.
+    Pid,
+    /// Leave the runtime entirely under user or host management.
+    External,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LocalRuntimeDef {
     /// Lifecycle style: `daemon_api` for runtimes with their own resident
-    /// daemon (Ollama), `managed_process` for Harn-spawned servers.
+    /// daemon (Ollama), `managed_process` for Harn-spawned servers, or
+    /// `external` for a user-managed endpoint Harn can inspect and select.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
+    pub kind: Option<LocalRuntimeKind>,
     /// Command Harn should execute for managed-process runtimes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -77,7 +107,7 @@ pub struct LocalRuntimeDef {
     pub default_args: Vec<String>,
     /// Stop strategy: `keep_alive_zero`, `pid`, or `external`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stop: Option<String>,
+    pub stop: Option<LocalRuntimeStop>,
     /// Official docs/source URL for the lifecycle contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>,

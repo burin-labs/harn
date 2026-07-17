@@ -18,7 +18,7 @@ use serde::Serialize;
 use crate::cli::{
     ProviderCacheProbeArgs, ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolScorecardArgs,
 };
-use crate::commands::local::runtime::{fetch_ollama_ps, LoadedModel, LOCAL_PROVIDERS};
+use crate::commands::local::runtime::{fetch_ollama_ps, local_runtime_for_provider, LoadedModel};
 use crate::commands::provider_report::{dispatch_provider_report, ProviderReportDispatch};
 
 /// Env var carrying the JSON `ProviderProbe` envelope handed across to
@@ -148,18 +148,19 @@ async fn aggregate_provider_probe(args: &ProviderProbeArgs) -> ProviderProbe {
         provider: args.provider.clone(),
         base_url,
         readiness,
-        runtime_profile: if LOCAL_PROVIDERS.contains(&args.provider.as_str()) {
-            args.model.as_deref().map(|model| {
-                harn_vm::llm::local_profiles::local_runtime_profile_report(
-                    model,
-                    Some(&args.provider),
-                )
-            })
-        } else {
-            None
-        },
+        runtime_profile: local_runtime_profile(&args.provider, args.model.as_deref()),
         loaded_models,
     }
+}
+
+fn local_runtime_profile(
+    provider: &str,
+    model: Option<&str>,
+) -> Option<harn_vm::llm::local_profiles::LocalRuntimeProfileReport> {
+    local_runtime_for_provider(provider)?;
+    model.map(|model| {
+        harn_vm::llm::local_profiles::local_runtime_profile_report(model, Some(provider))
+    })
 }
 
 pub(crate) async fn run_tool_probe(args: ProviderToolProbeArgs) {
@@ -334,4 +335,16 @@ async fn dispatch_provider_cache_probe(args: ProviderCacheProbeArgs) -> i32 {
     // A supported route that never caches, or contradictory provider fields, is
     // a real conformance failure; a non-cache provider is not.
     i32::from(dogfood_failure)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_runtime_profile;
+
+    #[test]
+    fn provider_probe_profiles_catalog_declared_local_runtimes() {
+        assert!(local_runtime_profile("tgi", Some("zephyr-7b-beta")).is_some());
+        assert!(local_runtime_profile("local", Some("zephyr-7b-beta")).is_some());
+        assert!(local_runtime_profile("openai", Some("gpt-4.1")).is_none());
+    }
 }

@@ -4,9 +4,9 @@ use clap::{Args, Subcommand};
 
 use super::util::llm_model_completion_parser;
 
-/// `harn local` — manage local LLM runtimes (Ollama, llama.cpp,
-/// MLX, generic OpenAI-compatible servers) through one stable
-/// abstraction while underlying CLIs keep changing.
+/// `harn local` — inspect, select, and when supported launch
+/// catalog-declared local LLM runtimes through one stable abstraction while
+/// underlying CLIs keep changing.
 #[derive(Debug, Args)]
 pub(crate) struct LocalArgs {
     #[command(subcommand)]
@@ -38,7 +38,7 @@ pub(crate) struct LocalListArgs {
     /// Emit a structured JSON snapshot instead of a human table.
     #[arg(long)]
     pub json: bool,
-    /// Restrict to one provider id (e.g. `ollama`, `llamacpp`, `mlx`).
+    /// Restrict to one catalog-declared local provider id.
     #[arg(long)]
     pub provider: Option<String>,
 }
@@ -51,7 +51,9 @@ pub(crate) struct LocalLaunchArgs {
         hide_possible_values = true
     )]
     pub model: String,
-    /// Local provider runtime to launch or warm (`ollama`, `llamacpp`, `mlx`).
+    /// Catalog-declared local provider to launch or warm. Externally managed
+    /// providers can be selected with `harn local switch`, but Harn does not
+    /// launch their process.
     #[arg(long)]
     pub provider: Option<String>,
     /// Local model file, directory, or Hugging Face repo id for launched servers.

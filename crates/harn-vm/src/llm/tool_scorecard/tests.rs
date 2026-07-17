@@ -377,6 +377,14 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert!(vllm.local_runtime);
     assert!(!vllm.auth_required);
     assert!(vllm.credential_env_names.is_empty());
+    let tgi = unscorecardable_by_provider
+        .get("tgi")
+        .expect("TGI provider state should be explicit");
+    assert_eq!(tgi.reason, "requires_runtime_model");
+    assert_eq!(tgi.model_count, 0);
+    assert!(tgi.local_runtime);
+    assert!(!tgi.auth_required);
+    assert!(tgi.credential_env_names.is_empty());
     let bedrock = unscorecardable_by_provider
         .get("bedrock")
         .expect("Bedrock provider state should be explicit");
