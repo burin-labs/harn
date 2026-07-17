@@ -779,6 +779,12 @@ pipeline main(task) {{
         assert!(events.iter().any(|event| {
             matches!(
                 &event.kind,
+                SessionEventKind::Custom { custom_type } if custom_type == "tool_call_update"
+            ) && event.headers.get("tool_call_id") == Some(&"live-call".to_string())
+        }));
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.kind,
                 SessionEventKind::Custom { custom_type } if custom_type == "agent_run_terminal"
             )
         }));
