@@ -1,0 +1,4 @@
+Stopped provider tool-scorecard plans from counting native/text tool-call probes as
+required for catalog routes that explicitly declare no tool surface. Provider
+tool-probe request audits now also surface structured warnings when
+provider-compatible request builders omit supplied generation sampling parameters.

@@ -536,7 +536,6 @@ fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
 
     for case_id in [
         "single_tool_call",
-        "parallel_tool_calls",
         "large_string_argument",
         "tool_result_followup",
         "signed_thinking_tool_result_followup",
@@ -545,10 +544,34 @@ fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
             .iter()
             .find(|case| case.id == case_id)
             .expect("case exists");
+        assert_eq!(case.requirement, "not_applicable", "{case_id}");
+        assert_eq!(
+            case.requirement_reason, "route_declares_no_tool_surface",
+            "{case_id}"
+        );
         assert_eq!(case.execution.status, "not_applicable", "{case_id}");
         assert_eq!(case.execution.runner, "none", "{case_id}");
+        assert_eq!(
+            case.execution.reason, "route_declares_no_tool_surface",
+            "{case_id}"
+        );
         assert!(case.execution.command.is_none(), "{case_id}");
     }
+
+    let parallel = cases
+        .iter()
+        .find(|case| case.id == "parallel_tool_calls")
+        .expect("parallel case exists");
+    assert_eq!(parallel.requirement, "not_applicable");
+    assert_eq!(
+        parallel.requirement_reason,
+        "route_does_not_claim_parallel_tool_calls"
+    );
+    assert_eq!(parallel.execution.status, "not_applicable");
+    assert_eq!(
+        parallel.execution.reason,
+        "route_does_not_claim_parallel_tool_calls"
+    );
 
     let parameter_edges = cases
         .iter()

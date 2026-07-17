@@ -144,6 +144,25 @@ fn request_catalog_audit_validates_every_catalog_route_in_process() {
     );
     assert_eq!(report.validation_fail_count, 0, "{:#?}", report.failures);
     assert_eq!(
+        report.warning_count,
+        report
+            .warnings
+            .iter()
+            .map(|row| row.warnings.len())
+            .sum::<usize>(),
+        "{:#?}",
+        report.warnings
+    );
+    assert!(
+        report.warnings.iter().any(|row| row.provider == "anthropic"
+            && row.warnings.iter().any(|warning| matches!(
+                warning,
+                ToolConformanceRequestWarning::SamplingParamsOmitted { .. }
+            ))),
+        "request audit should surface Anthropic sampling sanitization warnings: {:#?}",
+        report.warnings
+    );
+    assert_eq!(
         report.request_count,
         report.validation_pass_count + report.not_applicable_count
     );
