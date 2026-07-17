@@ -51,7 +51,6 @@ const HOST_SESSION_PROJECT_TURN: &str = "__host_agent_session_project_turn";
 const HOST_SESSION_CLAIM_TOOL_FORMAT: &str = "__host_agent_session_claim_tool_format";
 const HOST_DAEMON_SNAPSHOT: &str = "__host_agent_daemon_snapshot";
 const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
-const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
 const HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK: &str = "__host_agent_record_native_tool_fallback";
 const HOST_AGENT_RECORD_COMPACTION: &str = "__host_agent_record_compaction";
 
@@ -2707,74 +2706,6 @@ fn host_agent_budget_pre_call_builtin(
     Ok(VmValue::Bool(false))
 }
 
-/// Emit an agent event and record transcript-backed event types.
-#[harn_builtin(
-    sig = "__host_agent_emit_event(session_id: string, event_type: string, payload: dict) -> nil",
-    kind = "async",
-    category = "agent.host",
-    runtime_only = true
-)]
-async fn host_agent_emit_event(
-    ctx: crate::vm::AsyncBuiltinCtx,
-    args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    let session_id = match args.first() {
-        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-        _ => {
-            return Err(VmError::Runtime(format!(
-                "{HOST_AGENT_EMIT_EVENT}: session_id must be a non-empty string"
-            )))
-        }
-    };
-    let event_type = match args.get(1) {
-        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-        _ => {
-            return Err(VmError::Runtime(format!(
-                "{HOST_AGENT_EMIT_EVENT}: event_type must be a non-empty string"
-            )))
-        }
-    };
-    let payload_value = args.get(2).cloned().unwrap_or(VmValue::Nil);
-    let payload = vm_to_json(&payload_value);
-    let event =
-        crate::agent_events::AgentEvent::from_host_payload(&session_id, &event_type, &payload)?;
-    if matches!(
-        event_type.as_str(),
-        "tool_search_query"
-            | "tool_search_result"
-            | "tool_call"
-            | "tool_call_update"
-            | "typed_checkpoint"
-            | "skill_narrow"
-            | "agent_loop_stall_warning"
-            | "tool_format_override"
-            | "tool_call_audit"
-            | "budget_exhausted"
-            | "budget_circuit_breaker"
-            | "loop_stuck"
-            | "reserved_terminal_verify"
-            | "context_overflow_recovery"
-            | "loop_checkpoint"
-    ) {
-        let role = if matches!(
-            event_type.as_str(),
-            "tool_search_result" | "tool_call_audit"
-        ) {
-            "tool"
-        } else {
-            "assistant"
-        };
-        let transcript_event =
-            super::helpers::transcript_event(&event_type, role, "internal", "", Some(payload));
-        if crate::agent_sessions::exists(&session_id) {
-            crate::agent_sessions::append_event(&session_id, transcript_event)
-                .map_err(VmError::Runtime)?;
-        }
-    }
-    crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &event).await;
-    Ok(VmValue::Nil)
-}
-
 /// Record a native→text tool-call fallback as a transcript event and trace counter.
 #[harn_builtin(
     sig = "__host_agent_record_native_tool_fallback(session_id: string, payload: dict) -> nil",
@@ -3779,7 +3710,6 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     // async
     &HOST_AGENT_SESSION_INIT_DEF,
     &HOST_AGENT_SESSION_FINALIZE_DEF,
-    &HOST_AGENT_EMIT_EVENT_DEF,
     &HOST_SKILL_SCORE_DEF,
     &HOST_AUTONOMY_BUDGET_CHECK_DEF,
     &HOST_AGENT_SESSION_DRAIN_BRIDGE_INJECTIONS_DEF,
