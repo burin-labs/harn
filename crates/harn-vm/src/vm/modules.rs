@@ -364,6 +364,30 @@ impl Vm {
         Ok(loaded)
     }
 
+    /// Widen a stdlib module's export surface with the builtins it re-exports
+    /// (see [`harn_stdlib::builtin_reexports`]), so a Rust-implemented member of
+    /// the module imports exactly like a Harn-implemented one.
+    ///
+    /// The name binds to a [`VmValue::BuiltinRef`], which is what a bare mention
+    /// of a builtin already evaluates to — so an imported `assert_eq` and a
+    /// global `assert_eq` are the same function reached two ways, not two
+    /// implementations that can drift.
+    fn add_builtin_reexports(module: &str, loaded: &mut LoadedModule) {
+        for name in harn_stdlib::builtin_reexports(module) {
+            // A `pub fn` in the module's Harn source wins: it is the more
+            // specific declaration, and silently shadowing it here would make
+            // the source of an export unguessable from reading the module.
+            if loaded.public_names.contains(*name) {
+                continue;
+            }
+            loaded.public_names.insert((*name).to_string());
+            loaded.public_values.insert(
+                (*name).to_string(),
+                VmValue::BuiltinRef(arcstr::ArcStr::from(*name)),
+            );
+        }
+    }
+
     async fn load_stdlib_module_from_source(
         &mut self,
         module: &str,
@@ -382,8 +406,10 @@ impl Vm {
             self.module_phase_recorder.as_ref(),
         )?;
         self.imported_paths.push(synthetic.clone());
-        let loaded = Arc::new(self.instantiate_stdlib_module(artifact.as_ref()).await?);
+        let mut loaded = self.instantiate_stdlib_module(artifact.as_ref()).await?;
         self.imported_paths.pop();
+        Self::add_builtin_reexports(module, &mut loaded);
+        let loaded = Arc::new(loaded);
         {
             let _load_span = self.module_load_span();
             Arc::make_mut(&mut self.module_cache).insert(synthetic, Arc::clone(&loaded));
