@@ -601,14 +601,10 @@ jobs:
       - run: make check-generated-registry
       - run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/verify_release_metadata.harn'
       - name: Check no retroactive CHANGELOG edits
-        run: |
-          # checkout already fetched full history + tags. Pass the PR base
-          # explicitly so the script doesn't have to guess.
-          base="${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}"
-          if [ -n "$base" ]; then
-            export CHANGELOG_GUARD_BASE="$base"
-          fi
-          "${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn
+        # GitHub checks out PRs and merge groups as synthetic merge commits.
+        # HEAD^1 is the current base, while the event payload's PR-open base
+        # SHA can become stale as main advances.
+        run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn -- --base HEAD^1'
       # Gracefully stop the sccache daemon so the post-job orphan-cleanup phase
       # has nothing to terminate (see the Stop-sccache note in rust-builds).
       - name: Stop sccache server
