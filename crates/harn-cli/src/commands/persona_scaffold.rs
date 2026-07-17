@@ -209,6 +209,10 @@ struct MaterializeCompileResponse {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PromptCompiledPersonaLowering {
+    // Closed enum decoding is the boundary validation for this fixed profile.
+    // The materializer projects its one supported policy; consumers do not
+    // reinterpret it.
+    #[allow(dead_code)]
     profile: PromptCompiledProfile,
     template: String,
     persona: PromptCompiledPersona,
@@ -233,7 +237,9 @@ struct PromptCompiledPersona {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PromptCompiledPolicy {
+    #[allow(dead_code)]
     autonomy_tier: SuggestAutonomyTier,
+    #[allow(dead_code)]
     receipt_policy: RequiredReceiptPolicy,
 }
 
@@ -264,9 +270,6 @@ struct PromptCompiledTrigger {
 
 impl PromptCompiledPersonaLowering {
     fn validate_materialization_contract(&self) -> Result<(), String> {
-        let _profile = &self.profile;
-        let _autonomy_tier = &self.policy.autonomy_tier;
-        let _receipt_policy = &self.policy.receipt_policy;
         if self.triggers.len() != 1 {
             return Err("prompt_compiled_v1 lowering must contain exactly one trigger".to_string());
         }
