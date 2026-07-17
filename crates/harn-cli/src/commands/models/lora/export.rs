@@ -260,6 +260,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         &target.harn_tool_format,
         &eval_dataset,
         None,
+        None,
         vec![
             "harn".to_string(),
             "eval".to_string(),

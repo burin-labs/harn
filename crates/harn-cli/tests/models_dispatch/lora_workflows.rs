@@ -1,11 +1,112 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use super::lora_fixtures::{
     write_lora_adapter_fixture, write_lora_adapter_fixture_with_contract_and_modules,
     write_lora_corpus_fixture, write_lora_generic_placeholder_corpus_fixture,
     write_lora_probe_summary, write_lora_probe_summary_with_trials,
 };
-use super::support::{parse_json, run, success_data, LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION};
+use super::support::{
+    parse_json, run, success_data, HarnCliOutput, LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION,
+};
+
+fn execute_train_with_observed_identity(
+    root: &Path,
+    observed_trainer_version: &str,
+) -> (HarnCliOutput, PathBuf, PathBuf) {
+    fs::create_dir_all(root).expect("train fixture root");
+    let dataset = root.join("train.jsonl");
+    fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+    let backend_result = root.join("backend.result.json");
+    fs::write(
+        &backend_result,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "trainer_identity": {
+                "schema_version": 1,
+                "kind": "version",
+                "value": observed_trainer_version
+            },
+            "trainer_environment_observation": {
+                "schema_version": 1,
+                "resolver": {
+                    "lock_digest": "sha256:trainer-lock",
+                    "tool": "uv 0.7.0"
+                },
+                "runtime": {
+                    "implementation": "CPython",
+                    "version": "3.12.3"
+                },
+                "packages": {
+                    "torch": "2.8.0",
+                    "transformers": "4.54.0"
+                },
+                "optional_extensions": {
+                    "flash_attn": "absent",
+                    "unsloth": "present"
+                }
+            },
+            "runtime": {
+                "backend_log_path": root.join("backend.log").display().to_string()
+            },
+            "tokenizer": {},
+            "artifacts": {},
+            "target_metadata": {},
+            "warnings": []
+        }))
+        .expect("backend result JSON"),
+    )
+    .expect("backend result");
+    let receipt = root.join("train.receipt.json");
+    let trained = run(
+        &[
+            "models",
+            "lora",
+            "train",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "local-vllm",
+            "--tool-format",
+            "json",
+            "--dataset",
+            dataset.to_str().expect("utf8 dataset"),
+            "--output-dir",
+            root.join("adapter").to_str().expect("utf8 output dir"),
+            "--receipt-out",
+            receipt.to_str().expect("utf8 receipt"),
+            "--backend-result-out",
+            backend_result.to_str().expect("utf8 backend result"),
+            "--trainer-version",
+            "trainer-2026.7",
+            "--execute",
+            "--json",
+            "--",
+            env!("CARGO_BIN_EXE_harn"),
+            "--version",
+        ],
+        &[],
+    );
+    (trained, receipt, dataset)
+}
+
+fn write_executed_train_receipt(root: &Path) -> (PathBuf, PathBuf) {
+    let (trained, receipt, dataset) = execute_train_with_observed_identity(root, "trainer-2026.7");
+    assert_eq!(trained.exit_code, 0, "train stderr={}", trained.stderr);
+    let value = parse_json(&trained.stdout, "train");
+    let report = success_data(&value);
+    assert_eq!(report["mode"], "execute");
+    assert_eq!(report["backend"]["exit_code"], 0);
+    assert_eq!(
+        report["training"]["trainer_environment"]["promotable"],
+        true
+    );
+    assert_eq!(
+        report["backend"]["result"]["runtime"]["backend_log_path"],
+        root.join("backend.log").display().to_string()
+    );
+    (receipt, dataset)
+}
 
 #[test]
 fn models_lora_export_check_reports_native_shape() {
@@ -889,44 +990,7 @@ fn models_lora_train_json_writes_dry_run_receipt() {
 #[test]
 fn models_lora_promote_json_collects_probe_matrix_receipt() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let dataset = tmp.path().join("train.jsonl");
-    fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
-    let export_manifest = tmp.path().join("export.manifest.json");
-    fs::write(&export_manifest, "{}\n").expect("export manifest");
-    let adapter = write_lora_adapter_fixture();
-    let manifest_path = tmp.path().join("adapter.manifest.json");
-    let manifest = run(
-        &[
-            "models",
-            "lora",
-            "manifest",
-            "--base",
-            "local-gemma4-e4b",
-            "--provider",
-            "local-vllm",
-            "--tool-format",
-            "json",
-            "--dataset",
-            dataset.to_str().expect("utf8 dataset path"),
-            "--export-manifest",
-            export_manifest.to_str().expect("utf8 export manifest path"),
-            "--out",
-            manifest_path.to_str().expect("utf8 manifest path"),
-            "--adapter-name",
-            "burin-tools",
-            "--adapter-path",
-            adapter.path().to_str().expect("utf8 adapter path"),
-            "--request-model",
-            "burin-tools",
-            "--trainer-version",
-            "trainer-2026.7",
-            "--observed-trainer-identity",
-            "version=trainer-2026.7",
-            "--json",
-        ],
-        &[],
-    );
-    assert_eq!(manifest.exit_code, 0, "manifest stderr={}", manifest.stderr);
+    let (train_receipt, dataset) = write_executed_train_receipt(tmp.path());
 
     let probe_root = tmp.path().join("PROMOTION_PROBES");
     let base_probe_root = tmp.path().join("BASE_PROMOTION_PROBES");
@@ -947,8 +1011,8 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
             "models",
             "lora",
             "promote",
-            "--manifest",
-            manifest_path.to_str().expect("utf8 manifest path"),
+            "--train-receipt",
+            train_receipt.to_str().expect("utf8 train receipt path"),
             "--probe-root",
             probe_root.to_str().expect("utf8 probe root"),
             "--base-probe-root",
@@ -964,7 +1028,7 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
     assert_eq!(promoted.exit_code, 0, "promote stderr={}", promoted.stderr);
     let promoted_value = parse_json(&promoted.stdout, "promote");
     let report = success_data(&promoted_value);
-    assert_eq!(report["producer"], "harn_models_lora_promote_v2");
+    assert_eq!(report["producer"], "harn_models_lora_promote_v3");
     assert_eq!(report["receipt_kind"], "promotion_evidence_bundle_receipt");
     assert_eq!(report["ok"], true);
     assert_eq!(
@@ -973,6 +1037,14 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
     );
     assert_eq!(report["contract"]["trainer_identity"]["status"], "matched");
     assert_eq!(report["contract"]["trainer_identity"]["promotable"], true);
+    assert_eq!(
+        report["contract"]["trainer_environment"]["status"],
+        "attested"
+    );
+    assert_eq!(
+        report["contract"]["trainer_environment"]["promotable"],
+        true
+    );
     assert_eq!(report["totals"]["required_cases"], 6);
     assert_eq!(report["totals"]["evidence_records"], 12);
     assert_eq!(report["totals"]["adapter_passed"], 6);
@@ -1010,51 +1082,169 @@ fn models_lora_promote_json_collects_probe_matrix_receipt() {
         &fs::read_to_string(&receipt).expect("read promotion receipt"),
         "promotion receipt",
     );
-    assert_eq!(receipt_value["producer"], "harn_models_lora_promote_v2");
+    assert_eq!(receipt_value["producer"], "harn_models_lora_promote_v3");
     assert_eq!(receipt_value["totals"]["adapter_passed"], 6);
+
+    let mut dry_run = parse_json(
+        &fs::read_to_string(&train_receipt).expect("read train receipt"),
+        "train receipt",
+    );
+    dry_run["mode"] = serde_json::Value::String("dry_run".to_string());
+    dry_run["request"]["execute"] = serde_json::Value::Bool(false);
+    dry_run["backend"]["execute"] = serde_json::Value::Bool(false);
+    dry_run["backend"]["status"] = serde_json::Value::String("dry_run".to_string());
+    dry_run["backend"]["exit_code"] = serde_json::Value::Null;
+    let dry_run_path = tmp.path().join("dry-run.receipt.json");
+    fs::write(
+        &dry_run_path,
+        serde_json::to_string_pretty(&dry_run).expect("dry-run receipt JSON"),
+    )
+    .expect("dry-run receipt");
+    let rejected = run(
+        &[
+            "models",
+            "lora",
+            "promote",
+            "--train-receipt",
+            dry_run_path.to_str().expect("utf8 dry-run receipt"),
+            "--probe-root",
+            probe_root.to_str().expect("utf8 probe root"),
+            "--check",
+            "--json",
+        ],
+        &[],
+    );
+    assert_ne!(rejected.exit_code, 0);
+
+    let mut missing_environment = parse_json(
+        &fs::read_to_string(&train_receipt).expect("read train receipt"),
+        "train receipt",
+    );
+    missing_environment["promotion"]["evidence_contract"]["trainer_environment"] = serde_json::json!({
+        "schema_version": 1,
+        "status": "missing_observation",
+        "promotable": false,
+        "attestation": null,
+        "errors": ["trainer environment observation is missing"]
+    });
+    let missing_environment_path = tmp.path().join("missing-environment.receipt.json");
+    fs::write(
+        &missing_environment_path,
+        serde_json::to_string_pretty(&missing_environment).expect("missing environment JSON"),
+    )
+    .expect("missing environment receipt");
+    let missing_environment_promotion = run(
+        &[
+            "models",
+            "lora",
+            "promote",
+            "--train-receipt",
+            missing_environment_path
+                .to_str()
+                .expect("utf8 missing environment receipt"),
+            "--probe-root",
+            probe_root.to_str().expect("utf8 probe root"),
+            "--base-probe-root",
+            base_probe_root.to_str().expect("utf8 base probe root"),
+            "--check",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(missing_environment_promotion.exit_code, 1);
+    let missing_environment_value = parse_json(
+        &missing_environment_promotion.stdout,
+        "missing environment promotion",
+    );
+    assert_eq!(
+        missing_environment_value["ok"],
+        serde_json::Value::Bool(false)
+    );
+    assert_eq!(
+        missing_environment_value["error"]["details"]["contract"]["trainer_environment"]
+            ["promotable"],
+        false
+    );
+
+    let mismatch_root = tmp.path().join("mismatched-identity");
+    let (mismatched_train, mismatched_identity_path, _) =
+        execute_train_with_observed_identity(&mismatch_root, "trainer-2026.8");
+    assert_eq!(
+        mismatched_train.exit_code, 1,
+        "mismatched train stderr={}",
+        mismatched_train.stderr
+    );
+    let mismatched_train_value = parse_json(&mismatched_train.stdout, "mismatched train");
+    let mismatched_train_report = &mismatched_train_value["error"]["details"];
+    assert_eq!(
+        mismatched_train_report["training"]["trainer_identity"]["status"],
+        "mismatched"
+    );
+    assert_eq!(
+        mismatched_train_report["promotion"]["evidence_contract"]["trainer_identity"]["status"],
+        "mismatched"
+    );
+    let mismatched_identity_promotion = run(
+        &[
+            "models",
+            "lora",
+            "promote",
+            "--train-receipt",
+            mismatched_identity_path
+                .to_str()
+                .expect("utf8 mismatched identity receipt"),
+            "--probe-root",
+            probe_root.to_str().expect("utf8 probe root"),
+            "--base-probe-root",
+            base_probe_root.to_str().expect("utf8 base probe root"),
+            "--check",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(mismatched_identity_promotion.exit_code, 1);
+    let mismatched_identity_value = parse_json(
+        &mismatched_identity_promotion.stdout,
+        "mismatched identity promotion",
+    );
+    assert_eq!(
+        mismatched_identity_value["error"]["details"]["contract"]["trainer_identity"]["status"],
+        "mismatched"
+    );
+
+    let bypassed = run(
+        &[
+            "models",
+            "lora",
+            "promote",
+            "--train-receipt",
+            missing_environment_path
+                .to_str()
+                .expect("utf8 missing environment receipt"),
+            "--probe-root",
+            probe_root.to_str().expect("utf8 probe root"),
+            "--base-probe-root",
+            base_probe_root.to_str().expect("utf8 base probe root"),
+            "--trainer-provenance-exception",
+            "manual attestation review #4977",
+            "--check",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(bypassed.exit_code, 0, "bypass stderr={}", bypassed.stderr);
+    let bypassed_value = parse_json(&bypassed.stdout, "bypassed promotion");
+    let bypassed_report = success_data(&bypassed_value);
+    assert_eq!(
+        bypassed_report["request"]["trainer_provenance_exception"],
+        "manual attestation review #4977"
+    );
 }
 
 #[test]
 fn models_lora_promote_check_rejects_single_trial_probe_receipts() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let dataset = tmp.path().join("train.jsonl");
-    fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
-    let export_manifest = tmp.path().join("export.manifest.json");
-    fs::write(&export_manifest, "{}\n").expect("export manifest");
-    let adapter = write_lora_adapter_fixture();
-    let manifest_path = tmp.path().join("adapter.manifest.json");
-    let manifest = run(
-        &[
-            "models",
-            "lora",
-            "manifest",
-            "--base",
-            "local-gemma4-e4b",
-            "--provider",
-            "local-vllm",
-            "--tool-format",
-            "json",
-            "--dataset",
-            dataset.to_str().expect("utf8 dataset path"),
-            "--export-manifest",
-            export_manifest.to_str().expect("utf8 export manifest path"),
-            "--out",
-            manifest_path.to_str().expect("utf8 manifest path"),
-            "--adapter-name",
-            "burin-tools",
-            "--adapter-path",
-            adapter.path().to_str().expect("utf8 adapter path"),
-            "--request-model",
-            "burin-tools",
-            "--trainer-version",
-            "trainer-2026.7",
-            "--observed-trainer-identity",
-            "version=trainer-2026.7",
-            "--json",
-        ],
-        &[],
-    );
-    assert_eq!(manifest.exit_code, 0, "manifest stderr={}", manifest.stderr);
+    let (train_receipt, _) = write_executed_train_receipt(tmp.path());
 
     let probe_root = tmp.path().join("PROMOTION_PROBES");
     let base_probe_root = tmp.path().join("BASE_PROMOTION_PROBES");
@@ -1074,8 +1264,8 @@ fn models_lora_promote_check_rejects_single_trial_probe_receipts() {
             "models",
             "lora",
             "promote",
-            "--manifest",
-            manifest_path.to_str().expect("utf8 manifest path"),
+            "--train-receipt",
+            train_receipt.to_str().expect("utf8 train receipt path"),
             "--probe-root",
             probe_root.to_str().expect("utf8 probe root"),
             "--base-probe-root",
@@ -1090,7 +1280,7 @@ fn models_lora_promote_check_rejects_single_trial_probe_receipts() {
     let promoted_value = parse_json(&promoted.stdout, "failed promote");
     assert_eq!(promoted_value["ok"], serde_json::Value::Bool(false));
     let details = &promoted_value["error"]["details"];
-    assert_eq!(details["producer"], "harn_models_lora_promote_v2");
+    assert_eq!(details["producer"], "harn_models_lora_promote_v3");
     assert!(
         details["errors"]
             .as_array()
@@ -1106,41 +1296,7 @@ fn models_lora_promote_check_rejects_single_trial_probe_receipts() {
 #[test]
 fn models_lora_promote_check_fails_when_probe_matrix_is_missing() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let dataset = tmp.path().join("train.jsonl");
-    fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
-    let export_manifest = tmp.path().join("export.manifest.json");
-    fs::write(&export_manifest, "{}\n").expect("export manifest");
-    let manifest_path = tmp.path().join("adapter.manifest.json");
-    let manifest = run(
-        &[
-            "models",
-            "lora",
-            "manifest",
-            "--base",
-            "local-gemma4-e4b",
-            "--provider",
-            "local-vllm",
-            "--tool-format",
-            "json",
-            "--dataset",
-            dataset.to_str().expect("utf8 dataset path"),
-            "--export-manifest",
-            export_manifest.to_str().expect("utf8 export manifest path"),
-            "--out",
-            manifest_path.to_str().expect("utf8 manifest path"),
-            "--adapter-name",
-            "burin-tools",
-            "--request-model",
-            "burin-tools",
-            "--trainer-version",
-            "trainer-2026.7",
-            "--observed-trainer-identity",
-            "version=trainer-2026.7",
-            "--json",
-        ],
-        &[],
-    );
-    assert_eq!(manifest.exit_code, 0, "manifest stderr={}", manifest.stderr);
+    let (train_receipt, _) = write_executed_train_receipt(tmp.path());
 
     let probe_root = tmp.path().join("empty-probes");
     fs::create_dir_all(&probe_root).expect("probe root");
@@ -1149,8 +1305,8 @@ fn models_lora_promote_check_fails_when_probe_matrix_is_missing() {
             "models",
             "lora",
             "promote",
-            "--manifest",
-            manifest_path.to_str().expect("utf8 manifest path"),
+            "--train-receipt",
+            train_receipt.to_str().expect("utf8 train receipt path"),
             "--probe-root",
             probe_root.to_str().expect("utf8 probe root"),
             "--check",
@@ -1167,7 +1323,7 @@ fn models_lora_promote_check_fails_when_probe_matrix_is_missing() {
         "lora_promotion_probe_matrix_failed"
     );
     let report = &promoted_value["error"]["details"];
-    assert_eq!(report["producer"], "harn_models_lora_promote_v2");
+    assert_eq!(report["producer"], "harn_models_lora_promote_v3");
     assert_eq!(report["totals"]["missing"], 12);
     assert!(
         report["errors"]

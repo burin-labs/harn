@@ -100,6 +100,32 @@ pub fn render_trainer_identity_check(harness: Harness, value: unknown) {
   print_list(harness, "trainer identity errors", safe_list(check["errors"]))
 }
 
+/**
+ * Render the Harn-normalized trainer-environment attestation gate.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_trainer_environment_check(harness: Harness, value: unknown) {
+  const check = safe_dict(value)
+  const status = safe_string(check["status"], "")
+  if status == "" {
+    return
+  }
+  const promotable = if safe_bool(check["promotable"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  harness.stdio.println("  trainer environment: " + status + " promotable=" + promotable)
+  const attestation = safe_dict(check["attestation"])
+  const digest = safe_string(attestation["digest"], "")
+  if digest != "" {
+    harness.stdio.println("  trainer environment attestation: " + digest)
+  }
+  print_list(harness, "trainer environment errors", safe_list(check["errors"]))
+}
+
 fn __probe_case_line(value: unknown) -> string {
   const probe = safe_dict(value)
   const id = safe_string(probe["id"], "")

@@ -448,9 +448,9 @@ pub(crate) struct ModelsLoraPlanArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct ModelsLoraPromoteArgs {
-    /// LoRA manifest, train receipt, or plan report containing a promotion evidence contract.
-    #[arg(long, value_name = "PATH")]
-    pub manifest: std::path::PathBuf,
+    /// Finalized `models lora train --execute` receipt authorizing promotion.
+    #[arg(long = "train-receipt", value_name = "PATH")]
+    pub train_receipt: std::path::PathBuf,
     /// Directory containing per-case `<case_id>/summary.json` probe outputs.
     #[arg(
         long = "probe-root",
@@ -467,9 +467,9 @@ pub(crate) struct ModelsLoraPromoteArgs {
     /// Exit non-zero when required probe evidence is missing or failing.
     #[arg(long)]
     pub check: bool,
-    /// Typed audit exception allowing promotion despite a missing or mismatched trainer identity.
-    #[arg(long = "trainer-identity-exception", value_name = "REASON")]
-    pub trainer_identity_exception: Option<String>,
+    /// Typed audit exception allowing promotion despite non-promotable trainer provenance.
+    #[arg(long = "trainer-provenance-exception", value_name = "REASON")]
+    pub trainer_provenance_exception: Option<String>,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,

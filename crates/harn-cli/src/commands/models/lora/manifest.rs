@@ -174,6 +174,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         &decision.effective,
         &eval_dataset,
         Some(&trainer_identity),
+        None,
         vec![
             "harn".to_string(),
             "eval".to_string(),
