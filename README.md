@@ -179,8 +179,9 @@ Capabilities are grouped below with pointers to the docs for depth. The full API
   child run lineage, persisted snapshots, per-worker execution scoping, and explicit continuation policy
   (`inherit` / `fork` / `reset` / `compact`) for what each worker carries.
 - **Permissions & sandboxing** — capability ceilings that internal plans can narrow but never exceed,
-  rule-based [approval policies](docs/src/sandboxing.md), argument-level tool constraints, and a per-platform
-  OS sandbox by default (Linux Landlock + seccomp, macOS sandbox-exec, Windows AppContainer).
+  rule-based [approval policies](docs/src/builtins.md#declarative-tool-approval), argument-level tool
+  constraints, and a per-platform [OS sandbox](docs/src/sandboxing.md) by default (Linux Landlock + seccomp,
+  macOS sandbox-exec, Windows AppContainer).
 - **Context & transcripts** — typed artifacts and resources as the real context boundary, budget-aware
   adaptive selection, automatic microcompaction and summarization, and structured transcript lifecycle
   (continue, fork, compact, render public-only or full history).
