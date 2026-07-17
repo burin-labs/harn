@@ -473,3 +473,57 @@ gen fn numbers() -> Stream<int> {
         (integer_literal))
       (emit_expression
         (integer_literal)))))
+
+==================
+Struct Construct In Return Expression
+==================
+
+struct Basket {
+  items: list<int>
+}
+
+impl Basket {
+  fn push(self, item: int) -> Basket {
+    return Basket {items: self.items.push(item)}
+  }
+}
+
+---
+
+(source_file
+  (struct_declaration
+    name: (identifier)
+    (struct_field
+      name: (identifier)
+      type: (type_annotation
+        (identifier)
+        (type_annotation
+          (identifier)))))
+  (impl_block
+    type_name: (identifier)
+    (fn_declaration
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier))
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier))
+      body: (block
+        (return_statement
+          (struct_construct
+            type_name: (identifier)
+            fields: (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (call_expression
+                  function: (property_access
+                    object: (property_access
+                      object: (identifier)
+                      property: (identifier))
+                    property: (identifier))
+                  (argument_list
+                    (identifier)))))))))))
