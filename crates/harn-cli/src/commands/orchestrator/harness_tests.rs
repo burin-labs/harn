@@ -1,6 +1,6 @@
 use super::*;
 use futures::StreamExt;
-use harn_vm::event_log::{EventLog, Topic};
+use harn_vm::event_log::{AnyEventLog, EventLog, Topic};
 
 fn write_test_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -8,6 +8,34 @@ fn write_test_file(dir: &Path, relative: &str, contents: &str) {
         std::fs::create_dir_all(parent).unwrap();
     }
     std::fs::write(path, contents).unwrap();
+}
+
+async fn wait_for_persona_completion(event_log: &std::sync::Arc<AnyEventLog>) {
+    let topic = Topic::new(harn_vm::personas::PERSONA_RUNTIME_TOPIC).unwrap();
+    let mut stream = event_log.clone().subscribe(&topic, None).await.unwrap();
+    let existing = event_log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .expect("read persona lifecycle");
+    if !existing
+        .iter()
+        .any(|(_, event)| event.kind == "persona.run.completed")
+    {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let remaining = deadline
+                .checked_duration_since(tokio::time::Instant::now())
+                .expect("timed out waiting for persona completion");
+            let (_, event) = tokio::time::timeout(remaining, stream.next())
+                .await
+                .expect("timed out waiting for persona completion event")
+                .expect("persona event stream ended unexpectedly")
+                .expect("persona event stream error");
+            if event.kind == "persona.run.completed" {
+                break;
+            }
+        }
+    }
 }
 
 fn stream_manifest_fixture() -> &'static str {
@@ -191,32 +219,8 @@ pub pipeline run(event) {{
         .expect("harness start");
     let event_log = harness.event_log();
     let topic = Topic::new(harn_vm::personas::PERSONA_RUNTIME_TOPIC).unwrap();
-    let mut stream = event_log.clone().subscribe(&topic, None).await.unwrap();
     clock.advance(std::time::Duration::from_secs(30));
-    let existing = event_log
-        .read_range(&topic, None, usize::MAX)
-        .await
-        .expect("read persona lifecycle");
-    let already_completed = existing
-        .iter()
-        .any(|(_, event)| event.kind == "persona.run.completed");
-    if !already_completed {
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            let remaining = deadline
-                .checked_duration_since(tokio::time::Instant::now())
-                .expect("timed out waiting for persona completion");
-            let (_, event) = tokio::time::timeout(remaining, stream.next())
-                .await
-                .expect("timed out waiting for persona completion event")
-                .expect("persona event stream ended unexpectedly")
-                .expect("persona event stream error");
-            if event.kind == "persona.run.completed" {
-                break;
-            }
-        }
-    }
-    drop(stream);
+    wait_for_persona_completion(&event_log).await;
 
     let marker: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&marker_path).unwrap()).unwrap();
@@ -242,6 +246,69 @@ pub pipeline run(event) {{
         .expect("persona run completed");
     assert!(started < completed);
     assert!(!kinds.contains(&"persona.run.failed"));
+
+    harness
+        .shutdown(std::time::Duration::from_secs(5))
+        .await
+        .expect("harness shutdown");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn materialized_cron_persona_executes_its_generated_entry_workflow() {
+    let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
+    let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
+    let clock = harn_vm::clock::PausedClock::new(
+        time::OffsetDateTime::from_unix_timestamp(1_784_195_970).unwrap(),
+    );
+    let temp = tempfile::TempDir::new().unwrap();
+    let blueprint = temp.path().join("blueprint.json");
+    std::fs::write(
+        &blueprint,
+        serde_json::json!({
+            "schema_version": "1",
+            "name": "reply_digest",
+            "description": "Summarizes follow-up work.",
+            "goal": "Surface replies every hour.",
+            "template": "deterministic-sweeper",
+            "cron": {"cron": "0 * * * *", "timezone": "UTC"},
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let package = crate::commands::persona_scaffold::materialize_persona_package(
+        &blueprint,
+        &temp.path().join("personas"),
+        false,
+    )
+    .await
+    .expect("materialize cron persona");
+
+    let config =
+        OrchestratorConfig::for_test(package.root.join("harn.toml"), temp.path().join("state"))
+            .with_clock(clock.clone());
+    let harness = OrchestratorHarness::start(config)
+        .await
+        .expect("harness start");
+    let event_log = harness.event_log();
+    let topic = Topic::new(harn_vm::personas::PERSONA_RUNTIME_TOPIC).unwrap();
+    clock.advance(std::time::Duration::from_secs(30));
+    wait_for_persona_completion(&event_log).await;
+
+    let lifecycle = event_log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .expect("read materialized persona lifecycle");
+    let completed = lifecycle
+        .iter()
+        .find(|(_, event)| event.kind == "persona.run.completed")
+        .expect("materialized persona completed");
+    assert_eq!(
+        completed.1.payload["entry_workflow"].as_str(),
+        Some("src/reply_digest.harn#run")
+    );
+    assert!(!lifecycle
+        .iter()
+        .any(|(_, event)| event.kind == "persona.run.failed"));
 
     harness
         .shutdown(std::time::Duration::from_secs(5))

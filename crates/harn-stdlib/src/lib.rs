@@ -347,6 +347,7 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliSc
     "eval/prompt" => "stdlib/cli/eval/prompt.harn",
     "explain" => "stdlib/cli/explain.harn",
     "graph" => "stdlib/cli/graph.harn",
+    "personas/materialize" => "stdlib/cli/personas/materialize.harn",
     "models/batch_plan" => "stdlib/cli/models/batch_plan.harn",
     "models/list" => "stdlib/cli/models/list.harn",
     "models/lora_inspect" => "stdlib/cli/models/lora_inspect.harn",

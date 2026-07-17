@@ -1,9 +1,19 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use include_dir::{include_dir, Dir};
+use serde::Deserialize;
 
-use crate::cli::{PersonaNewArgs, PersonaTemplateKind};
+use crate::cli::{PersonaMaterializeArgs, PersonaNewArgs, PersonaTemplateKind};
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
+
+const PERSONA_BLUEPRINT_ENV: &str = "HARN_PERSONA_BLUEPRINT_JSON";
+
+// Embedded CLI scripts receive their input through scoped process environment.
+// Keep that bridge serialized so concurrent in-process callers cannot cross wires.
+static MATERIALIZE_DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersonaScaffoldResult {
@@ -44,6 +54,34 @@ pub async fn scaffold_persona_package(
     scaffold_persona(&args).await
 }
 
+async fn materialize_persona(
+    args: &PersonaMaterializeArgs,
+) -> Result<PersonaScaffoldResult, String> {
+    materialize_persona_package(&args.blueprint, &args.output_root, args.force).await
+}
+
+pub async fn materialize_persona_package(
+    blueprint_path: &Path,
+    output_root: &Path,
+    force: bool,
+) -> Result<PersonaScaffoldResult, String> {
+    let lowering = compile_prompt_compiled_lowering(blueprint_path).await?;
+    let name = normalize_name(&lowering.persona.name)?;
+    let template = parse_template_kind(&lowering.template)?;
+    let target_root = output_root.join(&name);
+    if target_root.exists() && !force {
+        return Err(format!(
+            "{} already exists; pass --force to replace it after validation",
+            target_root.display()
+        ));
+    }
+
+    let mut prepared = prepare_persona_package(output_root, &name, template)?;
+    apply_prompt_compiled_overlay(&mut prepared, &lowering)?;
+    validate_prepared_persona(&prepared, &name).await?;
+    publish_prepared_persona(prepared, target_root, force)
+}
+
 pub(crate) async fn run_new(args: &PersonaNewArgs) -> Result<(), String> {
     let result = scaffold_persona(args).await?;
     println!("created persona package {}", result.root.display());
@@ -53,6 +91,53 @@ pub(crate) async fn run_new(args: &PersonaNewArgs) -> Result<(), String> {
     println!();
     println!("  harn persona doctor {}", normalize_name(&args.name)?);
     Ok(())
+}
+
+pub(crate) async fn run_materialize(args: &PersonaMaterializeArgs) -> Result<(), String> {
+    let result = materialize_persona(args).await?;
+    println!("materialized persona package {}", result.root.display());
+    for file in &result.files {
+        println!("  create {}", file.display());
+    }
+    Ok(())
+}
+
+async fn compile_prompt_compiled_lowering(
+    blueprint_path: &Path,
+) -> Result<PromptCompiledPersonaLowering, String> {
+    let bytes = fs::read(blueprint_path)
+        .map_err(|error| format!("failed to read {}: {error}", blueprint_path.display()))?;
+    let blueprint = String::from_utf8(bytes).map_err(|error| {
+        format!(
+            "persona blueprint {} must be UTF-8 JSON: {error}",
+            blueprint_path.display()
+        )
+    })?;
+
+    let _dispatch = MATERIALIZE_DISPATCH_LOCK.lock().await;
+    let _blueprint = ScopedEnvVar::set(PERSONA_BLUEPRINT_ENV, &blueprint);
+    let outcome = dispatch::run_embedded_script("personas/materialize", Vec::new(), true).await;
+    if outcome.exit_code != 0 {
+        let detail = outcome.stderr.trim();
+        return Err(if detail.is_empty() {
+            "persona blueprint compiler failed".to_string()
+        } else {
+            format!("persona blueprint compiler failed: {detail}")
+        });
+    }
+
+    let response = serde_json::from_str::<MaterializeCompileResponse>(outcome.stdout.trim())
+        .map_err(|error| format!("persona blueprint compiler returned invalid JSON: {error}"))?;
+    if !response.ok {
+        return Err(response
+            .error
+            .unwrap_or_else(|| "persona blueprint failed Harn validation".to_string()));
+    }
+    let lowering = response
+        .lowering
+        .ok_or_else(|| "persona blueprint compiler returned no lowering".to_string())?;
+    lowering.validate_materialization_contract()?;
+    Ok(lowering)
 }
 
 fn normalize_name(raw: &str) -> Result<String, String> {
@@ -111,6 +196,92 @@ struct TemplateIdentity {
 struct PreparedPersonaPackage {
     staging: tempfile::TempDir,
     relative_files: Vec<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MaterializeCompileResponse {
+    ok: bool,
+    lowering: Option<PromptCompiledPersonaLowering>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PromptCompiledPersonaLowering {
+    profile: PromptCompiledProfile,
+    template: String,
+    persona: PromptCompiledPersona,
+    policy: PromptCompiledPolicy,
+    triggers: Vec<PromptCompiledTrigger>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PromptCompiledProfile {
+    PromptCompiledV1,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PromptCompiledPersona {
+    name: String,
+    description: String,
+    goal: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PromptCompiledPolicy {
+    autonomy_tier: SuggestAutonomyTier,
+    receipt_policy: RequiredReceiptPolicy,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SuggestAutonomyTier {
+    Suggest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RequiredReceiptPolicy {
+    Required,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PromptCompiledTrigger {
+    id: String,
+    kind: String,
+    provider: String,
+    events: Vec<String>,
+    secrets: BTreeMap<String, String>,
+    schedule: Option<String>,
+    timezone: Option<String>,
+    handler: String,
+}
+
+impl PromptCompiledPersonaLowering {
+    fn validate_materialization_contract(&self) -> Result<(), String> {
+        let _profile = &self.profile;
+        let _autonomy_tier = &self.policy.autonomy_tier;
+        let _receipt_policy = &self.policy.receipt_policy;
+        if self.triggers.len() != 1 {
+            return Err("prompt_compiled_v1 lowering must contain exactly one trigger".to_string());
+        }
+        let trigger = &self.triggers[0];
+        if trigger.events.is_empty() {
+            return Err("prompt_compiled_v1 lowering trigger must include an event".to_string());
+        }
+        let expected_handler = format!("persona://{}", self.persona.name);
+        if trigger.handler != expected_handler {
+            return Err(format!(
+                "prompt_compiled_v1 lowering handler must be {expected_handler:?}"
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl TemplateIdentity {
@@ -467,11 +638,382 @@ fn render_manifest(template: &str, identity: &TemplateIdentity) -> Result<String
         .map_err(|error| format!("failed to render persona manifest: {error}"))
 }
 
+fn apply_prompt_compiled_overlay(
+    prepared: &mut PreparedPersonaPackage,
+    lowering: &PromptCompiledPersonaLowering,
+) -> Result<(), String> {
+    let root = prepared.staging.path();
+    let manifest_path = root.join("harn.toml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
+    fs::write(
+        &manifest_path,
+        render_prompt_compiled_manifest(&manifest, lowering)?,
+    )
+    .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
+
+    let source_path = root
+        .join("src")
+        .join(format!("{}.harn", lowering.persona.name));
+    let source = fs::read_to_string(&source_path)
+        .map_err(|error| format!("failed to read {}: {error}", source_path.display()))?;
+    fs::write(
+        &source_path,
+        render_prompt_compiled_source(&source, lowering)?,
+    )
+    .map_err(|error| format!("failed to write {}: {error}", source_path.display()))?;
+
+    let prompt_path = root.join("prompts/system.harn.prompt");
+    let prompt = fs::read_to_string(&prompt_path)
+        .map_err(|error| format!("failed to read {}: {error}", prompt_path.display()))?;
+    if prompt.contains("{{persona_goal}}") {
+        return Err("canonical persona prompt already defines persona_goal".to_string());
+    }
+    fs::write(
+        &prompt_path,
+        format!("{}\n\nGoal: {{{{persona_goal}}}}\n", prompt.trim_end()),
+    )
+    .map_err(|error| format!("failed to write {}: {error}", prompt_path.display()))?;
+
+    Ok(())
+}
+
+fn render_prompt_compiled_manifest(
+    rendered_template: &str,
+    lowering: &PromptCompiledPersonaLowering,
+) -> Result<String, String> {
+    let mut manifest = toml::from_str::<toml::Value>(rendered_template)
+        .map_err(|error| format!("generated persona manifest is invalid: {error}"))?;
+    {
+        let package = manifest
+            .get_mut("package")
+            .and_then(toml::Value::as_table_mut)
+            .ok_or_else(|| "generated persona manifest is missing [package]".to_string())?;
+        package.insert(
+            "name".to_string(),
+            toml::Value::String(format!(
+                "harn-{}-persona",
+                to_package_slug(&lowering.persona.name)
+            )),
+        );
+        package.insert(
+            "description".to_string(),
+            toml::Value::String(lowering.persona.description.clone()),
+        );
+    }
+    {
+        let persona = manifest
+            .get_mut("personas")
+            .and_then(toml::Value::as_array_mut)
+            .and_then(|personas| personas.first_mut())
+            .and_then(toml::Value::as_table_mut)
+            .ok_or_else(|| "generated persona manifest is missing [[personas]]".to_string())?;
+        persona.insert(
+            "name".to_string(),
+            toml::Value::String(lowering.persona.name.clone()),
+        );
+        persona.insert(
+            "description".to_string(),
+            toml::Value::String(lowering.persona.description.clone()),
+        );
+        persona.insert(
+            "entry_workflow".to_string(),
+            toml::Value::String(format!("src/{}.harn#run", lowering.persona.name)),
+        );
+        persona.insert(
+            "autonomy_tier".to_string(),
+            toml::Value::String("suggest".to_string()),
+        );
+        persona.insert(
+            "receipt_policy".to_string(),
+            toml::Value::String("required".to_string()),
+        );
+        persona.remove("triggers");
+        persona.remove("schedules");
+    }
+
+    let trigger = lowering
+        .triggers
+        .first()
+        .ok_or_else(|| "prompt_compiled_v1 lowering has no trigger".to_string())?;
+    let mut root_trigger = toml::map::Map::new();
+    root_trigger.insert("id".to_string(), toml::Value::String(trigger.id.clone()));
+    root_trigger.insert(
+        "kind".to_string(),
+        toml::Value::String(trigger.kind.clone()),
+    );
+    root_trigger.insert(
+        "provider".to_string(),
+        toml::Value::String(trigger.provider.clone()),
+    );
+    root_trigger.insert(
+        "match".to_string(),
+        toml::Value::Table(toml::map::Map::from_iter([(
+            "events".to_string(),
+            toml::Value::Array(
+                trigger
+                    .events
+                    .iter()
+                    .cloned()
+                    .map(toml::Value::String)
+                    .collect(),
+            ),
+        )])),
+    );
+    root_trigger.insert(
+        "handler".to_string(),
+        toml::Value::String(trigger.handler.clone()),
+    );
+    if !trigger.secrets.is_empty() {
+        root_trigger.insert(
+            "secrets".to_string(),
+            toml::Value::Table(
+                trigger
+                    .secrets
+                    .iter()
+                    .map(|(name, reference)| (name.clone(), toml::Value::String(reference.clone())))
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(schedule) = &trigger.schedule {
+        root_trigger.insert(
+            "schedule".to_string(),
+            toml::Value::String(schedule.clone()),
+        );
+    }
+    if let Some(timezone) = &trigger.timezone {
+        root_trigger.insert(
+            "timezone".to_string(),
+            toml::Value::String(timezone.clone()),
+        );
+    }
+    let root = manifest
+        .as_table_mut()
+        .ok_or_else(|| "generated persona manifest root is not a table".to_string())?;
+    root.remove("triggers");
+    root.insert(
+        "triggers".to_string(),
+        toml::Value::Array(vec![toml::Value::Table(root_trigger)]),
+    );
+
+    toml::to_string_pretty(&manifest)
+        .map_err(|error| format!("failed to render prompt-compiled manifest: {error}"))
+}
+
+fn render_prompt_compiled_source(
+    rendered_template: &str,
+    lowering: &PromptCompiledPersonaLowering,
+) -> Result<String, String> {
+    let needle = "template_kind:";
+    if rendered_template.matches(needle).count() != 1 {
+        return Err(
+            "canonical persona template must render exactly one prompt binding".to_string(),
+        );
+    }
+    // Liquid renders variable values as data, so a goal such as `{{name}}`
+    // remains literal text rather than becoming executable template syntax.
+    let goal = serde_json::to_string(&lowering.persona.goal)
+        .map_err(|error| format!("failed to encode persona goal: {error}"))?;
+    let source = rendered_template.replacen(
+        needle,
+        &format!("persona_goal: {goal},\n      template_kind:"),
+        1,
+    );
+    let source = rewrite_persona_annotation(&source, &lowering.persona)?;
+    Ok(source)
+}
+
+fn rewrite_persona_annotation(
+    source: &str,
+    persona: &PromptCompiledPersona,
+) -> Result<String, String> {
+    let name = serde_json::to_string(&persona.name)
+        .map_err(|error| format!("failed to encode persona name: {error}"))?;
+    let description = serde_json::to_string(&persona.description)
+        .map_err(|error| format!("failed to encode persona description: {error}"))?;
+    let mut rewritten = String::with_capacity(source.len());
+    let mut found = false;
+    for line in source.split_inclusive('\n') {
+        let (body, newline) = line
+            .strip_suffix('\n')
+            .map_or((line, ""), |body| (body, "\n"));
+        let trimmed = body.trim_start();
+        if !trimmed.starts_with("@persona(") {
+            rewritten.push_str(line);
+            continue;
+        }
+        if found {
+            return Err(
+                "canonical persona source declares more than one @persona annotation".to_string(),
+            );
+        }
+        found = true;
+        let indentation = &body[..body.len() - trimmed.len()];
+        let (_, after_description) = trimmed
+            .split_once(", description: ")
+            .ok_or_else(|| "canonical @persona annotation is missing description".to_string())?;
+        let (_, after_tools) = after_description.split_once("\", tools: ").ok_or_else(|| {
+            "canonical @persona annotation has an unsupported description form".to_string()
+        })?;
+        let (tools, after_autonomy) = after_tools
+            .split_once(", autonomy: ")
+            .ok_or_else(|| "canonical @persona annotation is missing autonomy".to_string())?;
+        let (_, receipts) = after_autonomy
+            .split_once(", receipts: ")
+            .ok_or_else(|| "canonical @persona annotation is missing receipts".to_string())?;
+        rewritten.push_str(indentation);
+        rewritten.push_str("@persona(name: ");
+        rewritten.push_str(&name);
+        rewritten.push_str(", description: ");
+        rewritten.push_str(&description);
+        rewritten.push_str(", tools: ");
+        rewritten.push_str(tools);
+        rewritten.push_str(", autonomy: \"suggest\", receipts: ");
+        rewritten.push_str(receipts);
+        rewritten.push_str(newline);
+    }
+    if !found {
+        return Err("canonical persona source is missing an @persona annotation".to_string());
+    }
+    Ok(rewritten)
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn materialize_compiles_a_closed_blueprint_through_the_strict_scaffold() {
+        let temp = tempfile::tempdir().unwrap();
+        let blueprint = temp.path().join("blueprint.json");
+        let goal = "Keep literal {{not_a_liquid_expression}} text.";
+        fs::write(
+            &blueprint,
+            serde_json::json!({
+                "schema_version": "1",
+                "name": "reply_digest",
+                "description": "Summarizes follow-up work.",
+                "goal": goal,
+                "template": "deterministic-sweeper",
+                "cron": {"cron": "0 */4 * * *", "timezone": "America/Los_Angeles"},
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let output_root = temp.path().join("personas");
+
+        let result = materialize_persona_package(&blueprint, &output_root, false)
+            .await
+            .expect("materialize closed blueprint");
+
+        let manifest = toml::from_str::<toml::Value>(
+            &fs::read_to_string(result.root.join("harn.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["package"]["name"].as_str(),
+            Some("harn-reply-digest-persona")
+        );
+        assert_eq!(
+            manifest["personas"][0]["autonomy_tier"].as_str(),
+            Some("suggest")
+        );
+        assert_eq!(
+            manifest["personas"][0]["receipt_policy"].as_str(),
+            Some("required")
+        );
+        assert!(manifest["personas"][0].get("triggers").is_none());
+        assert!(manifest["personas"][0].get("schedules").is_none());
+        let triggers = manifest["triggers"].as_array().unwrap();
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers[0]["kind"].as_str(), Some("cron"));
+        assert_eq!(
+            triggers[0]["handler"].as_str(),
+            Some("persona://reply_digest")
+        );
+        assert_eq!(triggers[0]["schedule"].as_str(), Some("0 */4 * * *"));
+
+        let source = fs::read_to_string(result.root.join("src/reply_digest.harn")).unwrap();
+        assert!(source.contains("persona_goal: \"Keep literal {{not_a_liquid_expression}} text.\""));
+        assert!(source.contains("autonomy: \"suggest\""));
+        let prompt = fs::read_to_string(result.root.join("prompts/system.harn.prompt")).unwrap();
+        assert!(prompt.contains("Goal: {{persona_goal}}"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn materialize_preserves_an_external_trigger_without_cron_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let blueprint = temp.path().join("blueprint.json");
+        fs::write(
+            &blueprint,
+            serde_json::json!({
+                "schema_version": "1",
+                "name": "slack_triage",
+                "description": "Classifies Slack follow-up.",
+                "goal": "Classify every incoming message.",
+                "template": "hybrid-classify-then-act",
+                "external": {"provider": "slack", "event": "slack.message"},
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let result = materialize_persona_package(&blueprint, &temp.path().join("personas"), false)
+            .await
+            .expect("materialize external blueprint");
+
+        let manifest = toml::from_str::<toml::Value>(
+            &fs::read_to_string(result.root.join("harn.toml")).unwrap(),
+        )
+        .unwrap();
+        let triggers = manifest["triggers"].as_array().unwrap();
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers[0]["provider"].as_str(), Some("slack"));
+        assert_eq!(triggers[0]["kind"].as_str(), Some("webhook"));
+        assert_eq!(
+            triggers[0]["match"]["events"][0].as_str(),
+            Some("slack.message")
+        );
+        assert!(triggers[0].get("schedule").is_none());
+        assert!(triggers[0].get("timezone").is_none());
+        assert_eq!(
+            triggers[0]["secrets"]["signing_secret"].as_str(),
+            Some("slack/signing_secret")
+        );
+        assert_eq!(
+            triggers[0]["handler"].as_str(),
+            Some("persona://slack_triage")
+        );
+    }
+
+    #[test]
+    fn materializer_rejects_a_foreign_lowering_profile_before_any_publish() {
+        let response = r#"{
+          "ok": true,
+          "lowering": {
+            "profile": "foreign_profile",
+            "template": "deterministic-sweeper",
+            "persona": {"name": "reply_digest", "description": "Digest", "goal": "Goal"},
+            "policy": {"autonomy_tier": "suggest", "receipt_policy": "required"},
+            "triggers": [{
+              "id": "reply_digest-cron",
+              "kind": "cron",
+              "provider": "cron",
+              "events": ["cron.tick"],
+              "secrets": {},
+              "schedule": "0 * * * *",
+              "timezone": "UTC",
+              "handler": "persona://reply_digest"
+            }]
+          },
+          "error": null
+        }"#;
+
+        assert!(serde_json::from_str::<MaterializeCompileResponse>(response).is_err());
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn strict_validation_rejects_a_missing_entry_symbol_before_publish() {
