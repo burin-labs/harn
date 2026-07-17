@@ -11,8 +11,12 @@ use super::rule::lookup_with;
 use super::BUILTIN_TOML;
 
 thread_local! {
-    /// Per-thread user overrides installed by CLI bootstrap.
-    pub(super) static USER_OVERRIDES: RefCell<Option<CapabilitiesFile>> = const { RefCell::new(None) };
+    /// Capability overrides for the currently-polled Harn execution.
+    ///
+    /// The ambient execution scope swaps this context per poll for embedded
+    /// hosts, so a capability decision never crosses from one ACP server into
+    /// another while futures interleave.
+    pub(super) static LLM_CAPABILITY_OVERRIDES_CONTEXT: RefCell<Option<CapabilitiesFile>> = const { RefCell::new(None) };
 }
 
 static BUILTIN: OnceLock<CapabilitiesFile> = OnceLock::new();
@@ -41,7 +45,7 @@ pub fn provider_limits_for(provider: &str) -> Option<ProviderLimits> {
             .find(|(name, _)| name.to_ascii_lowercase() == key)
             .map(|(_, limits)| limits.clone())
     };
-    USER_OVERRIDES
+    LLM_CAPABILITY_OVERRIDES_CONTEXT
         .with(|cell| cell.borrow().as_ref().and_then(from_map))
         .or_else(|| from_map(builtin()))
 }
@@ -56,7 +60,7 @@ pub fn provider_limit_providers() -> Vec<String> {
             .keys()
             .map(|provider| provider.to_ascii_lowercase()),
     );
-    USER_OVERRIDES.with(|cell| {
+    LLM_CAPABILITY_OVERRIDES_CONTEXT.with(|cell| {
         if let Some(file) = cell.borrow().as_ref() {
             providers.extend(
                 file.provider_limits
@@ -72,7 +76,20 @@ pub fn provider_limit_providers() -> Vec<String> {
 /// called once at CLI bootstrap after reading `harn.toml`. Passing
 /// `None` clears any prior override.
 pub fn set_user_overrides(file: Option<CapabilitiesFile>) {
-    USER_OVERRIDES.with(|cell| *cell.borrow_mut() = file);
+    LLM_CAPABILITY_OVERRIDES_CONTEXT.with(|cell| *cell.borrow_mut() = file);
+}
+
+/// Swap the per-execution capability overrides and return the previous value.
+///
+/// This is the ambient-scope primitive. Hosts should configure it through
+/// `orchestration::scope_llm_runtime_overrides` rather than retaining a guard
+/// across an asynchronous turn.
+pub(crate) fn swap_user_overrides(next: Option<CapabilitiesFile>) -> Option<CapabilitiesFile> {
+    LLM_CAPABILITY_OVERRIDES_CONTEXT.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), next))
+}
+
+pub(super) fn current_user_overrides() -> Option<CapabilitiesFile> {
+    LLM_CAPABILITY_OVERRIDES_CONTEXT.with(|cell| cell.borrow().clone())
 }
 
 /// Clear any thread-local user overrides. Used between test runs.
@@ -128,7 +145,7 @@ pub fn set_user_overrides_from_manifest_toml(src: &str) -> Result<(), String> {
 /// fields it explicitly sets and resolution continues to later matching
 /// rules (and ultimately provider / built-in defaults) to fill the rest.
 pub fn lookup(provider: &str, model: &str) -> Capabilities {
-    let user = USER_OVERRIDES.with(|cell| cell.borrow().clone());
+    let user = current_user_overrides();
     lookup_with_user_overrides(provider, model, user.as_ref())
 }
 

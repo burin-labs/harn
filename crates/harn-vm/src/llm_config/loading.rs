@@ -11,11 +11,13 @@ static CONFIG_PATH: OnceLock<String> = OnceLock::new();
 static RUNTIME_CATALOG_OVERLAY: OnceLock<RwLock<Option<ProvidersConfig>>> = OnceLock::new();
 
 thread_local! {
-    /// Thread-local provider config overlays installed by the CLI after it
-    /// reads the nearest `harn.toml` plus any installed package manifests.
-    /// Kept thread-local so tests and multi-VM hosts can scope extensions to
-    /// the current run without mutating the process-wide default config.
-    static USER_OVERRIDES: RefCell<Option<ProvidersConfig>> = const { RefCell::new(None) };
+    /// Provider config overlays for the currently-polled Harn execution.
+    ///
+    /// CLI bootstrap installs its package overlay here. Embedded hosts use the
+    /// same slot through `orchestration::scope_llm_runtime_overrides`, which
+    /// swaps it for each future poll so concurrent ACP servers cannot inherit
+    /// another server's route configuration.
+    static LLM_CONFIG_OVERRIDES_CONTEXT: RefCell<Option<ProvidersConfig>> = const { RefCell::new(None) };
 }
 
 /// Load and cache the providers config. Called once at VM startup.
@@ -356,7 +358,17 @@ pub fn loaded_config_path() -> Option<std::path::PathBuf> {
 /// `providers.toml`, but lives under `[llm]` in `harn.toml` and package
 /// manifests. Passing `None` clears the overlay.
 pub fn set_user_overrides(config: Option<ProvidersConfig>) {
-    USER_OVERRIDES.with(|cell| *cell.borrow_mut() = config);
+    LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| *cell.borrow_mut() = config);
+}
+
+/// Swap the per-execution provider overrides and return the previous value.
+///
+/// `AmbientExecutionScope` owns the poll-scoped use of this primitive. Normal
+/// callers should use [`set_user_overrides`] or
+/// `orchestration::scope_llm_runtime_overrides` instead of moving this context
+/// themselves.
+pub(crate) fn swap_user_overrides(next: Option<ProvidersConfig>) -> Option<ProvidersConfig> {
+    LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), next))
 }
 
 /// Clear per-run provider config overlays.
@@ -379,7 +391,7 @@ pub fn clear_runtime_catalog_overlay() {
 }
 
 pub(crate) fn effective_config() -> ProvidersConfig {
-    let user_overrides = USER_OVERRIDES.with(|cell| cell.borrow().clone());
+    let user_overrides = LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| cell.borrow().clone());
     effective_config_with_user_overrides(user_overrides.as_ref())
 }
 

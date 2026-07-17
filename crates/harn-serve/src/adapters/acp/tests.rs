@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc;
+use tokio::task::LocalSet;
 
 fn acp_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1697,43 +1698,145 @@ async fn acp_provider_catalog_method_matches_export_artifact_with_overrides() {
         .any(|provider| provider["id"] == "fixture_runtime"));
 }
 
-#[test]
-fn acp_runtime_provider_endpoint_wins_over_ambient_endpoint_env() {
-    let _guard = acp_env_lock()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let _env = EnvSnapshot::capture(&["HARN_TEST_ACP_ENDPOINT"]);
-    let _reset = crate::test_support::LlmOverrideReset;
-    unsafe {
-        std::env::set_var("HARN_TEST_ACP_ENDPOINT", "https://ambient.example/v1");
-    }
-
+fn endpoint_overlay(base_url: &str) -> harn_vm::llm_config::ProvidersConfig {
     let mut overlay = harn_vm::llm_config::parse_config_toml(
         r#"
 [providers.fixture]
-base_url = "https://catalog.example/v1"
-base_url_env = "HARN_TEST_ACP_ENDPOINT"
+base_url = "http://catalog.invalid/v1"
+auth_style = "none"
+
+[providers.fixture.healthcheck]
+method = "GET"
+path = "/health"
 "#,
     )
     .expect("fixture provider overlay parses");
     overlay.merge_from(
-        &harn_vm::llm_config::ProvidersConfig::runtime_provider_endpoint(
-            "fixture",
-            "https://verified.example/v1",
-        ),
+        &harn_vm::llm_config::ProvidersConfig::runtime_provider_endpoint("fixture", base_url),
     );
+    overlay
+}
 
-    let (tx, _rx) = mpsc::unbounded_channel();
-    let _server = AcpServer::new_with_output(
-        AcpServerConfig::new(None).with_llm_overrides(Some(overlay), None),
-        AcpOutput::Channel(tx),
+async fn start_health_endpoint() -> (String, tokio::task::JoinHandle<()>) {
+    let app = axum::Router::new().route(
+        "/health",
+        axum::routing::get(|| async { axum::http::StatusCode::NO_CONTENT }),
     );
-    let provider = harn_vm::llm_config::provider_config("fixture")
-        .expect("ACP runtime endpoint provider override");
-    assert_eq!(
-        harn_vm::llm_config::resolve_base_url(&provider),
-        "https://verified.example/v1"
-    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("health listener");
+    let address = listener.local_addr().expect("health listener address");
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("health endpoint serves");
+    });
+    (format!("http://{address}"), task)
+}
+
+async fn prompt_healthcheck(
+    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    session_id: &str,
+    request_id: i64,
+) -> String {
+    request_tx
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{
+                    "type": "text",
+                    "text": "const result = llm_healthcheck(\"fixture\")\n__io_println(result.valid)\n__io_println(result.metadata.url)",
+                }],
+            },
+        }))
+        .expect("send healthcheck prompt");
+
+    let mut output = String::new();
+    loop {
+        let message = recv_json(response_rx).await;
+        if message["method"] == "host/capabilities" {
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": message["id"].clone(),
+                    "result": {},
+                }))
+                .expect("send host capabilities response");
+            continue;
+        }
+        if message["method"] == "session/update"
+            && message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+        {
+            if let Some(text) = message["params"]["update"]["content"]["text"].as_str() {
+                output.push_str(text);
+            }
+        }
+        if message["id"] == serde_json::json!(request_id) {
+            return output;
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_runtime_provider_endpoints_are_scoped_per_live_server() {
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let (first_endpoint, first_endpoint_task) = start_health_endpoint().await;
+            let (second_endpoint, second_endpoint_task) = start_health_endpoint().await;
+
+            let (first_tx, mut first_rx, first_server, first_session) =
+                start_acp_channel_session_with_config(
+                    AcpServerConfig::new(None)
+                        .with_llm_overrides(Some(endpoint_overlay(&first_endpoint)), None),
+                    serde_json::json!("."),
+                )
+                .await;
+            let (second_tx, mut second_rx, second_server, second_session) =
+                start_acp_channel_session_with_config(
+                    AcpServerConfig::new(None)
+                        .with_llm_overrides(Some(endpoint_overlay(&second_endpoint)), None),
+                    serde_json::json!("."),
+                )
+                .await;
+
+            let (first_output, second_output) = tokio::join!(
+                prompt_healthcheck(&first_tx, &mut first_rx, &first_session, 10),
+                prompt_healthcheck(&second_tx, &mut second_rx, &second_session, 20),
+            );
+            assert!(
+                first_output.contains(&format!("{first_endpoint}/health")),
+                "first server must use its verified endpoint: {first_output}"
+            );
+            assert!(
+                first_output.contains("true"),
+                "first server healthcheck must succeed: {first_output}"
+            );
+            assert!(
+                second_output.contains(&format!("{second_endpoint}/health")),
+                "second server must use its verified endpoint: {second_output}"
+            );
+            assert!(
+                second_output.contains("true"),
+                "second server healthcheck must succeed: {second_output}"
+            );
+
+            drop(first_tx);
+            drop(second_tx);
+            first_server.abort();
+            second_server.abort();
+            first_endpoint_task.abort();
+            second_endpoint_task.abort();
+            let _ = first_server.await;
+            let _ = second_server.await;
+            let _ = first_endpoint_task.await;
+            let _ = second_endpoint_task.await;
+        })
+        .await;
 }
 
 #[test]

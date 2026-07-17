@@ -12,8 +12,6 @@ impl AcpServer {
     /// unless the host already owns the compatible current-thread runtime and
     /// wants to drive incoming JSON-RPC messages directly.
     pub fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
-        harn_vm::llm_config::set_user_overrides(config.llm_config_overrides.clone());
-        harn_vm::llm::capabilities::set_user_overrides(config.llm_capability_overrides.clone());
         let llm_config_overrides = config.llm_config_overrides.clone();
         let llm_capability_overrides = config.llm_capability_overrides.clone();
 
@@ -44,6 +42,22 @@ impl AcpServer {
             sandbox: config.sandbox,
             active_bulk_auth: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Dispatch an ACP request with this server's LLM routing context.
+    ///
+    /// Provider and capability overlays are per-request ambient state, not
+    /// constructor-time thread state: two embedded servers may share a Tokio
+    /// worker and suspend independently while a provider request is in flight.
+    pub async fn handle_incoming_message(&mut self, msg: serde_json::Value) {
+        let provider_overrides = self.llm_config_overrides.clone();
+        let capability_overrides = self.llm_capability_overrides.clone();
+        harn_vm::orchestration::scope_llm_runtime_overrides(
+            provider_overrides,
+            capability_overrides,
+            self.handle_incoming_message_scoped(msg),
+        )
+        .await;
     }
 
     /// Compile `source` for `target_pipeline` (or the default entry point

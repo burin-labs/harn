@@ -36,6 +36,8 @@ mod model;
 mod rule;
 mod tool_format;
 
+pub(crate) use lookup::swap_user_overrides;
+
 pub use audit::{
     audit_builtin_catalogued_chat_model_tool_capabilities,
     audit_catalogued_chat_model_tool_capabilities, matrix_rows, ProviderCapabilityMatrixRow,
