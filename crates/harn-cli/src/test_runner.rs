@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Instant;
 
 use crate::env_guard::ScopedEnvVar;
+use crate::test_timing::DurationSummary;
 use crate::CLI_RUNTIME_STACK_SIZE;
 use harn_lexer::Lexer;
 use harn_parser::const_eval::{const_eval, ConstEnv, ConstValue};
