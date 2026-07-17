@@ -490,6 +490,30 @@ hook_write_harn_lint_files() {
   done < "$input"
 }
 
+hook_cargo_package_for_path() {
+  path=$1
+  case "$path" in
+    crates/*/*)
+      crate=${path#crates/}
+      crate=${crate%%/*}
+      manifest="crates/$crate/Cargo.toml"
+      [ -f "$manifest" ] || return 1
+      # `cargo -p` cannot target excluded crates. Match the workspace's
+      # single-line exclude list without pulling a TOML parser into hooks.
+      if [ -f "Cargo.toml" ] && \
+         grep -E '^exclude *= *\[' Cargo.toml \
+           | grep -Fq "\"crates/$crate\""; then
+        return 1
+      fi
+      package=$(awk -F '"' '/^name = / { print $2; exit }' "$manifest")
+      [ -n "$package" ] || return 1
+      printf '%s\n' "$package"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 hook_write_changed_cargo_packages() {
   input=$1
   output=$2
@@ -498,30 +522,62 @@ hook_write_changed_cargo_packages() {
     if hook_is_provider_catalog_data_path "$path"; then
       continue
     fi
+    package=$(hook_cargo_package_for_path "$path" || true)
+    [ -n "$package" ] && printf '%s\n' "$package" >> "$output"
+  done < "$input"
+  sort -u -o "$output" "$output"
+}
+
+# Format only the Cargo packages that own staged Rust files. Harn deliberately
+# tracks malformed parser fixtures and generated/seed `.rs` files outside
+# Cargo's format ownership, so invoking rustfmt directly on changed paths is
+# not equivalent to `cargo fmt`. Return false for any unmapped Rust path so the
+# caller preserves the workspace-wide Cargo fallback.
+hook_write_rust_format_packages() {
+  input=$1
+  output=$2
+  : > "$output"
+  while IFS= read -r path; do
     case "$path" in
-      crates/*/*)
-        crate=${path#crates/}
-        crate=${crate%%/*}
-        manifest="crates/$crate/Cargo.toml"
-        if [ -f "$manifest" ]; then
-          # Skip crates listed in the workspace `exclude = [...]` line.
-          # `cargo check -p <name>` cannot target them, so gating the
-          # push on those crates produces a "did not match any packages"
-          # error. Match against the workspace's exclude line directly
-          # rather than parsing all the way to a `]` (the harn workspace
-          # writes it inline on a single line).
-          if [ -f "Cargo.toml" ] && \
-             grep -E '^exclude *= *\[' Cargo.toml \
-               | grep -Fq "\"crates/$crate\""; then
-            continue
-          fi
-          package=$(awk -F '"' '/^name = / { print $2; exit }' "$manifest")
-          [ -n "$package" ] && printf '%s\n' "$package" >> "$output"
+      *.rs|crates/*/Cargo.toml)
+        package=$(hook_cargo_package_for_path "$path" || true)
+        if [ -z "$package" ]; then
+          : > "$output"
+          return 1
         fi
+        printf '%s\n' "$package" >> "$output"
+        ;;
+      Cargo.toml|Cargo.lock)
+        : > "$output"
+        return 1
         ;;
     esac
   done < "$input"
   sort -u -o "$output" "$output"
+  [ -s "$output" ]
+}
+
+hook_run_rust_format_gate() {
+  changed_file_list=$1
+  changed_packages=$2
+
+  if ! hook_paths_match "$changed_file_list" "$HOOK_RUST_PATTERN"; then
+    echo "=== Pre-commit: skipping Rust formatting (no Rust/Cargo changes) ==="
+    return
+  fi
+
+  if hook_write_rust_format_packages "$changed_file_list" "$changed_packages"; then
+    set --
+    while IFS= read -r package; do
+      set -- "$@" -p "$package"
+    done < "$changed_packages"
+    echo "=== Pre-commit: checking Rust formatting for changed packages ($(tr '\n' ' ' < "$changed_packages")) ==="
+    cargo fmt "$@" -- --check
+  else
+    echo "=== Pre-commit: checking workspace Rust formatting (unmapped Rust source) ==="
+    cargo fmt --all -- --check
+  fi
+  echo "    Rust formatting OK."
 }
 
 # Run the one local Rust compilation gate for a commit lifecycle. Pre-commit
