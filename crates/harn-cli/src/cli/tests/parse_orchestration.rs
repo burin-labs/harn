@@ -599,17 +599,9 @@ fn test_parses_persona_activation_attenuation() {
         "agents/reviewer",
         "--autonomy-tier",
         "suggest",
-        "--daily-usd",
-        "5",
-        "--max-tokens",
-        "2048",
         "--tool",
         "filesystem",
         "--capability",
-        "workspace.read_text",
-        "--permission",
-        "workspace:read_text",
-        "--host-requirement",
         "workspace.read_text",
         "--json",
     ]);
@@ -622,13 +614,24 @@ fn test_parses_persona_activation_attenuation() {
     };
     assert_eq!(activate.name, "agents/reviewer");
     assert_eq!(activate.autonomy_tier.as_deref(), Some("suggest"));
-    assert_eq!(activate.daily_usd, Some(5.0));
-    assert_eq!(activate.max_tokens, Some(2048));
     assert_eq!(activate.tools, vec!["filesystem"]);
     assert_eq!(activate.capabilities, vec!["workspace.read_text"]);
-    assert_eq!(activate.permissions, vec!["workspace:read_text"]);
-    assert_eq!(activate.host_requirements, vec!["workspace.read_text"]);
     assert!(activate.json);
+}
+
+#[test]
+fn test_persona_activation_rejects_unenforced_budget_flags() {
+    let error = Cli::try_parse_from([
+        "harn",
+        "persona",
+        "activate",
+        "agents/reviewer",
+        "--daily-usd",
+        "5",
+    ])
+    .unwrap_err();
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
 }
 
 #[test]

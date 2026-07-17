@@ -6,12 +6,12 @@ async fn persona_dispatcher(
     module_path: &Path,
     function_name: &str,
     retry: TriggerRetryConfig,
+    autonomy_ceiling: crate::AutonomyTier,
     execution_policy: crate::orchestration::CapabilityPolicy,
+    max_autonomous_decisions_per_day: Option<u64>,
 ) -> (Arc<crate::event_log::AnyEventLog>, Dispatcher) {
     let persona = crate::PersonaRuntimeBinding {
         name: "merge_captain".to_string(),
-        autonomy_tier: crate::AutonomyTier::ActAuto,
-        execution_policy: Box::new(execution_policy),
         template_ref: Some("software_factory@v0".to_string()),
         entry_workflow: format!("{}#{function_name}", module_path.display()),
         schedules: Vec::new(),
@@ -27,10 +27,11 @@ async fn persona_dispatcher(
         autonomy_tier: crate::AutonomyTier::ActAuto,
         handler: TriggerHandlerSpec::Persona {
             binding: persona,
-            callable: crate::value::VmCallable::Pipeline(crate::value::LazyPipelineCallable::new(
-                module_path.to_path_buf(),
-                function_name,
-            )),
+            callable: crate::value::VmCallable::Pipeline(
+                crate::value::LazyPipelineCallable::new(module_path.to_path_buf(), function_name)
+                    .with_execution_policy(execution_policy)
+                    .with_autonomy_ceiling(autonomy_ceiling),
+            ),
         },
         dispatch_priority: crate::WorkerQueuePriority::Normal,
         when: None,
@@ -43,7 +44,7 @@ async fn persona_dispatcher(
         daily_cost_usd: None,
         hourly_cost_usd: None,
         max_autonomous_decisions_per_hour: None,
-        max_autonomous_decisions_per_day: None,
+        max_autonomous_decisions_per_day,
         on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
         max_concurrent: None,
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
@@ -85,7 +86,9 @@ pub pipeline run(event) {
                 &module_path,
                 "run",
                 TriggerRetryConfig::default(),
+                crate::AutonomyTier::ActAuto,
                 crate::orchestration::CapabilityPolicy::default(),
+                None,
             )
             .await;
 
@@ -135,6 +138,48 @@ pub pipeline run(event) {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn persona_callable_autonomy_ceiling_survives_higher_dispatch_tier() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            crate::reset_thread_local_state();
+            let dir = tempfile::tempdir().expect("tempdir");
+            let module_path = dir.path().join("bounded_persona.harn");
+            std::fs::write(
+                &module_path,
+                r#"
+import "std/triggers"
+
+pub pipeline run(_event) {
+  return handler_context()
+}
+"#,
+            )
+            .expect("write persona workflow");
+            let (_log, dispatcher) = persona_dispatcher(
+                &module_path,
+                "run",
+                TriggerRetryConfig::default(),
+                crate::AutonomyTier::Suggest,
+                crate::orchestration::CapabilityPolicy::default(),
+                Some(0),
+            )
+            .await;
+
+            let outcomes = dispatcher
+                .dispatch_event(trigger_event("issues.opened", "persona-autonomy-ceiling"))
+                .await
+                .expect("persona dispatch succeeds");
+            assert_eq!(outcomes[0].status, DispatchStatus::Succeeded);
+            assert_eq!(
+                outcomes[0].result.as_ref().unwrap()["result"]["autonomy_tier"],
+                "suggest"
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn persona_dispatch_enforces_explicit_deny_all_capability_policy() {
     let local = tokio::task::LocalSet::new();
     local
@@ -157,11 +202,14 @@ pub pipeline run(_event) {
                 &module_path,
                 "run",
                 TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
-                crate::orchestration::CapabilityPolicy {
-                    tools_restricted: true,
-                    capabilities_restricted: true,
-                    ..Default::default()
+                crate::AutonomyTier::ActAuto,
+                {
+                    let mut policy = crate::orchestration::CapabilityPolicy::default();
+                    policy.restrict_tools(Vec::new());
+                    policy.restrict_capabilities(std::collections::BTreeMap::new());
+                    policy
                 },
+                None,
             )
             .await;
 
@@ -207,7 +255,9 @@ pub pipeline run(_event) {
                 &module_path,
                 "run",
                 TriggerRetryConfig::new(2, RetryPolicy::Linear { delay_ms: 0 }),
+                crate::AutonomyTier::ActAuto,
                 crate::orchestration::CapabilityPolicy::default(),
+                None,
             )
             .await;
 
@@ -287,7 +337,9 @@ pub pipeline run(_event) {
                 &module_path,
                 "run",
                 TriggerRetryConfig::new(1, RetryPolicy::Linear { delay_ms: 0 }),
+                crate::AutonomyTier::ActAuto,
                 crate::orchestration::CapabilityPolicy::default(),
+                None,
             )
             .await;
             let binding =

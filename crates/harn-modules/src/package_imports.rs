@@ -3,6 +3,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::package_execution::{PackageExecutionError, PackageExecutionGuard};
 use crate::package_snapshot::PackageSnapshot;
 
 #[derive(Debug, Default, Deserialize)]
@@ -92,6 +93,39 @@ pub(crate) fn resolve_import_path_with_snapshots(
     }
 }
 
+pub fn resolve_import_path_with_snapshot(
+    current_file: &Path,
+    import_path: &str,
+    package_snapshot: &PackageSnapshot,
+) -> Option<PathBuf> {
+    match resolve_local_import(current_file, import_path) {
+        LocalResolution::Resolved(path) => Some(path),
+        LocalResolution::Rejected => None,
+        // An explicit snapshot is caller-owned resolution authority. Unlike
+        // lazy discovery it also covers generation-owned path-package
+        // symlinks whose canonical source is outside the project root.
+        LocalResolution::NotPackage => {
+            resolve_from_packages_root(package_snapshot.packages_root(), import_path)
+        }
+    }
+}
+
+pub fn resolve_import_path_with_guard(
+    current_file: &Path,
+    import_path: &str,
+    guard: &PackageExecutionGuard,
+) -> Result<Option<PathBuf>, PackageExecutionError> {
+    match resolve_local_import(current_file, import_path) {
+        LocalResolution::Resolved(path) => Ok(Some(path)),
+        LocalResolution::Rejected => Ok(None),
+        LocalResolution::NotPackage => resolve_from_packages_root_with_guard(
+            guard.snapshot().packages_root(),
+            import_path,
+            guard,
+        ),
+    }
+}
+
 /// Acquire one snapshot per DISTINCT project root among `files`.
 ///
 /// Dedupe on the root before acquiring, not after. Acquiring is the expensive
@@ -162,6 +196,52 @@ fn resolve_from_packages_root(packages_root: &Path, import_path: &str) -> Option
     let manifest = read_package_manifest(&package_root.join("harn.toml"))?;
     let safe_export_path = safe_package_relative_path(manifest.exports.get(export_name)?)?;
     finalize_package_target(&package_root, &package_root.join(safe_export_path))
+}
+
+fn resolve_from_packages_root_with_guard(
+    packages_root: &Path,
+    import_path: &str,
+    guard: &PackageExecutionGuard,
+) -> Result<Option<PathBuf>, PackageExecutionError> {
+    let Some(safe_import_path) = safe_package_relative_path(import_path) else {
+        return Ok(None);
+    };
+    let Some(package_name) = package_name_from_relative_path(&safe_import_path) else {
+        return Ok(None);
+    };
+    let package_root = packages_root.join(package_name);
+    let direct_path = packages_root.join(&safe_import_path);
+    if let Some(path) = finalize_package_target(&package_root, &direct_path) {
+        return Ok(Some(path));
+    }
+
+    let Some(export_name) = export_name_from_relative_path(&safe_import_path) else {
+        return Ok(None);
+    };
+    let manifest_path = package_root.join("harn.toml");
+    let bytes = guard.verify_entry_source(&manifest_path)?;
+    let source = std::str::from_utf8(&bytes).map_err(|error| {
+        PackageExecutionError::Invalid(format!(
+            "package manifest {} is not valid UTF-8: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let manifest = toml::from_str::<PackageManifest>(source).map_err(|error| {
+        PackageExecutionError::Invalid(format!(
+            "failed to parse package exports from {}: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let Some(export_path) = manifest.exports.get(export_name) else {
+        return Ok(None);
+    };
+    let Some(safe_export_path) = safe_package_relative_path(export_path) else {
+        return Ok(None);
+    };
+    Ok(finalize_package_target(
+        &package_root,
+        &package_root.join(safe_export_path),
+    ))
 }
 
 fn read_package_manifest(path: &Path) -> Option<PackageManifest> {

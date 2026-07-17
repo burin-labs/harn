@@ -594,7 +594,7 @@ harn persona list
 harn persona list --json
 harn persona inspect merge_captain
 harn persona inspect merge_captain --json
-harn persona activate agents/reviewer --autonomy-tier suggest --daily-usd 5 --json
+harn persona activate agents/reviewer --autonomy-tier suggest --json
 harn persona activations --json
 harn persona deactivate agents/reviewer --json
 harn persona --manifest examples/personas/harn.toml inspect merge_captain --json
@@ -627,8 +627,10 @@ handoffs that point at undeclared personas.
 
 Installed package personas are addressed as `<package-alias>/<persona-name>`.
 `activate` writes an atomic project record that pins package and policy digests;
-its optional autonomy, budget, tool, capability, permission, and host-requirement
-flags may only reduce exported authority. `activations` lists those records and
+its optional autonomy, tool, and capability flags may only reduce runtime
+authority. Budget, model, and receipt policies remain inherited and are pinned
+as part of the full exported persona contract; package permissions and host
+requirements remain install-time contracts. `activations` lists those records and
 `deactivate` removes one even after its package has been removed. Package
 installation alone never activates a persona.
 

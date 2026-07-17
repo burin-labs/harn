@@ -20,6 +20,7 @@ pub(crate) struct InstalledPersonaProvenance {
     pub package_alias: String,
     pub package_version: Option<String>,
     pub content_hash: Option<String>,
+    pub lock_digest: Option<String>,
     pub integrity: String,
     pub source: String,
     pub permissions: Vec<String>,
@@ -41,7 +42,9 @@ impl DiscoverablePersona {
         persona: PersonaManifestEntry,
         catalog: &ResolvedPersonaManifest,
         entry: &LockEntry,
+        content_hash: Option<String>,
         integrity: &str,
+        lock_digest: Option<String>,
     ) -> Self {
         let name = persona.name.clone().unwrap_or_default();
         Self {
@@ -52,7 +55,8 @@ impl DiscoverablePersona {
             provenance: PersonaCatalogProvenance::Installed(InstalledPersonaProvenance {
                 package_alias: entry.name.clone(),
                 package_version: entry.package_version.clone(),
-                content_hash: entry.content_hash.clone(),
+                content_hash,
+                lock_digest,
                 integrity: integrity.to_string(),
                 source: entry.source.clone(),
                 permissions: entry.permissions.clone(),
@@ -141,7 +145,78 @@ fn load_installed_package_personas(
         return;
     };
 
-    let catalog = match load_personas_from_manifest_path(&package_path) {
+    let content_hash = match entry.content_hash.clone() {
+        Some(content_hash) => Some(content_hash),
+        None if package_path.is_dir() => match compute_content_hash(&package_path) {
+            Ok(content_hash) => Some(content_hash),
+            Err(error) => {
+                out.issues.push(PersonaCatalogIssue {
+                    package_alias: entry.name.clone(),
+                    code: "persona-package-observation-failed",
+                    message: error.to_string(),
+                });
+                return;
+            }
+        },
+        None => None,
+    };
+    let lock_digest = snapshot.map(|snapshot| snapshot.lock_digest().to_string());
+    let catalog_result = match snapshot.zip(content_hash.as_deref()) {
+        Some((snapshot, content_hash)) if package_path.is_dir() => {
+            let retained_snapshot = match snapshot.retained_clone() {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    out.issues.push(PersonaCatalogIssue {
+                        package_alias: entry.name.clone(),
+                        code: "persona-package-integrity-failed",
+                        message: error.to_string(),
+                    });
+                    return;
+                }
+            };
+            let guard = match harn_modules::package_execution::PackageExecutionGuard::new(
+                Arc::new(retained_snapshot),
+                entry.name.clone(),
+                content_hash,
+            ) {
+                Ok(guard) => guard,
+                Err(error) => {
+                    out.issues.push(PersonaCatalogIssue {
+                        package_alias: entry.name.clone(),
+                        code: "persona-package-integrity-failed",
+                        message: error.to_string(),
+                    });
+                    return;
+                }
+            };
+            let manifest_path = package_path.join(MANIFEST);
+            let bytes = match guard.verify_entry_source(&manifest_path) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    out.issues.push(PersonaCatalogIssue {
+                        package_alias: entry.name.clone(),
+                        code: "persona-package-integrity-failed",
+                        message: error.to_string(),
+                    });
+                    return;
+                }
+            };
+            let source = match std::str::from_utf8(&bytes) {
+                Ok(source) => source,
+                Err(error) => {
+                    out.issues.push(PersonaCatalogIssue {
+                        package_alias: entry.name.clone(),
+                        code: "persona-manifest-invalid",
+                        message: format!("{} is not valid UTF-8: {error}", manifest_path.display()),
+                    });
+                    return;
+                }
+            };
+            load_personas_from_verified_package_manifest(&manifest_path, source)
+        }
+        _ => load_personas_from_manifest_path(&package_path),
+    };
+    let catalog = match catalog_result {
         Ok(catalog) => catalog,
         Err(errors) => {
             out.issues.push(PersonaCatalogIssue {
@@ -186,14 +261,24 @@ fn load_installed_package_personas(
         return;
     }
 
-    let integrity = package_integrity_status(snapshot, entry);
-    out.personas.extend(
-        catalog
-            .personas
-            .iter()
-            .cloned()
-            .map(|persona| DiscoverablePersona::installed(persona, &catalog, entry, &integrity)),
-    );
+    let integrity = if entry.content_hash.is_some() {
+        "ok"
+    } else if content_hash.is_some() {
+        "observed"
+    } else {
+        "not_checked"
+    };
+    out.personas
+        .extend(catalog.personas.iter().cloned().map(|persona| {
+            DiscoverablePersona::installed(
+                persona,
+                &catalog,
+                entry,
+                content_hash.clone(),
+                integrity,
+                lock_digest.clone(),
+            )
+        }));
 }
 
 fn validate_entry_workflows(catalog: &ResolvedPersonaManifest) -> Result<(), String> {
@@ -285,6 +370,14 @@ pub(crate) fn resolve_discoverable_persona_in_root(
     root: &ResolvedPersonaManifest,
     name: &str,
 ) -> Result<DiscoverablePersona, String> {
+    resolve_discoverable_persona_in_root_with_snapshot(root, name, None)
+}
+
+pub(crate) fn resolve_discoverable_persona_in_root_with_snapshot(
+    root: &ResolvedPersonaManifest,
+    name: &str,
+    snapshot: Option<&harn_modules::package_snapshot::PackageSnapshot>,
+) -> Result<DiscoverablePersona, String> {
     if let Some(persona) = root
         .personas
         .iter()
@@ -299,7 +392,24 @@ pub(crate) fn resolve_discoverable_persona_in_root(
             root.manifest_path.display()
         ));
     };
-    let installed = load_one_installed_catalog_for_root(root, package_alias)?;
+    let installed = if let Some(snapshot) = snapshot {
+        let lock = LockFile::load(snapshot.lock_path())
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("{} is missing", snapshot.lock_path().display()))?;
+        let entry = lock
+            .packages
+            .iter()
+            .find(|entry| entry.name == package_alias)
+            .ok_or_else(|| format!("package '{package_alias}' is not installed"))?;
+        if entry.exports.personas.is_empty() {
+            return Err(format!("package '{package_alias}' exports no personas"));
+        }
+        let mut catalog = InstalledPersonaCatalog::default();
+        load_installed_package_personas(Some(snapshot), entry, &mut catalog);
+        catalog
+    } else {
+        load_one_installed_catalog_for_root(root, package_alias)?
+    };
     fail_on_catalog_issues(&installed.issues)?;
     installed
         .personas

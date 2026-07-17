@@ -95,19 +95,15 @@ fn installed_persona_activation_is_explicit_attenuated_and_reversible() {
             "agents/reviewer",
             "--autonomy-tier",
             "suggest",
-            "--daily-usd",
-            "5",
             "--tool",
             "filesystem",
-            "--permission",
-            "workspace:read_text",
-            "--no-host-requirements",
             "--at",
             "2026-07-16T12:00:00Z",
             "--json",
         ],
     ));
     assert_eq!(activated["action"], "activate");
+    assert_eq!(activated["schema_version"], 2);
     assert_eq!(activated["changed"], true);
     assert_eq!(
         activated["activation"]["effective_policy"]["autonomy_tier"],
@@ -118,10 +114,14 @@ fn installed_persona_activation_is_explicit_attenuated_and_reversible() {
         serde_json::json!(["filesystem"])
     );
     assert_eq!(
-        activated["activation"]["effective_policy"]["permissions"],
-        serde_json::json!(["workspace:read_text"])
+        activated["activation"]["effective_policy"],
+        serde_json::json!({
+            "autonomy_tier": "suggest",
+            "tools": ["filesystem"],
+            "capabilities": ["llm.call", "workspace.read_text"]
+        })
     );
-
+    assert!(activated["activation"].get("migration").is_none());
     let activations = json(run(root, &["persona", "activations", "--json"]));
     assert_eq!(activations.as_array().unwrap().len(), 1);
     assert_eq!(activations[0]["persona_id"], "agents/reviewer");

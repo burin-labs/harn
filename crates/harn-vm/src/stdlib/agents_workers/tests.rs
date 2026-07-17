@@ -806,7 +806,6 @@ fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
         resolved,
         Some(CapabilityPolicy {
             tools: vec!["read".to_string()],
-            tools_restricted: true,
             side_effect_level: Some("workspace_write".to_string()),
             ..Default::default()
         })

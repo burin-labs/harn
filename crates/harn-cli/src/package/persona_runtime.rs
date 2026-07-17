@@ -4,15 +4,17 @@ use super::*;
 pub(crate) struct ResolvedRuntimePersona {
     pub id: String,
     pub persona: PersonaManifestEntry,
-    pub execution_policy: harn_vm::orchestration::CapabilityPolicy,
     pub manifest_path: PathBuf,
     pub manifest_dir: PathBuf,
+    pub execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+    capabilities_materialized: bool,
 }
 
 pub(crate) fn resolve_runtime_personas(
     manifest: Manifest,
     manifest_path: PathBuf,
     manifest_dir: PathBuf,
+    package_snapshot: Option<Arc<harn_modules::package_snapshot::PackageSnapshot>>,
 ) -> Result<Vec<ResolvedRuntimePersona>, PackageError> {
     let root =
         validate_and_resolve_personas(manifest, manifest_path, manifest_dir).map_err(|errors| {
@@ -27,18 +29,16 @@ pub(crate) fn resolve_runtime_personas(
     let mut resolved = root
         .personas
         .iter()
-        .map(|persona| {
-            let execution_policy = persona_execution_policy(persona);
-            ResolvedRuntimePersona {
-                id: persona
-                    .name
-                    .clone()
-                    .expect("validated persona has a required name"),
-                persona: persona.clone(),
-                execution_policy,
-                manifest_path: root.manifest_path.clone(),
-                manifest_dir: root.manifest_dir.clone(),
-            }
+        .map(|persona| ResolvedRuntimePersona {
+            id: persona
+                .name
+                .clone()
+                .expect("validated persona has a required name"),
+            persona: persona.clone(),
+            manifest_path: root.manifest_path.clone(),
+            manifest_dir: root.manifest_dir.clone(),
+            execution_guard: None,
+            capabilities_materialized: false,
         })
         .collect::<Vec<_>>();
 
@@ -46,20 +46,36 @@ pub(crate) fn resolve_runtime_personas(
         let ledger = load_activation_ledger(&root.manifest_dir)
             .map_err(|error| PackageError::Manifest(error.to_string()))?;
         for activation in ledger.activations.into_values() {
-            let discovered = resolve_discoverable_persona_in_root(&root, &activation.persona_id)
-                .map_err(PackageError::Manifest)?;
-            let execution_policy = capability_policy(
-                &activation.effective_policy.tools,
-                &activation.effective_policy.capabilities,
-            );
+            let discovered = resolve_discoverable_persona_in_root_with_snapshot(
+                &root,
+                &activation.persona_id,
+                package_snapshot.as_deref(),
+            )
+            .map_err(PackageError::Manifest)?;
             let persona = materialize_activated_persona(&discovered, &activation)
+                .map_err(|error| PackageError::Manifest(error.to_string()))?;
+            let snapshot = package_snapshot.as_ref().ok_or_else(|| {
+                PackageError::Manifest(format!(
+                    "activated persona '{}' has no installed package generation",
+                    activation.persona_id
+                ))
+            })?;
+            let execution_guard =
+                harn_modules::package_execution::PackageExecutionGuard::new_with_lock_digest(
+                    Arc::clone(snapshot),
+                    activation.package.alias.clone(),
+                    activation.package.content_hash.clone(),
+                    activation.package.lock_digest.clone(),
+                )
+                .map(Arc::new)
                 .map_err(|error| PackageError::Manifest(error.to_string()))?;
             resolved.push(ResolvedRuntimePersona {
                 id: discovered.id,
                 persona,
-                execution_policy,
                 manifest_path: discovered.manifest_path,
                 manifest_dir: discovered.manifest_dir,
+                execution_guard: Some(execution_guard),
+                capabilities_materialized: true,
             });
         }
     }
@@ -71,7 +87,14 @@ pub(crate) fn persona_runtime_handler_for_trigger(
     extensions: &RuntimeExtensions,
     trigger: &ResolvedTriggerConfig,
     name: &str,
-) -> Result<(harn_vm::PersonaRuntimeBinding, harn_vm::VmCallable), PackageError> {
+) -> Result<
+    (
+        harn_vm::PersonaRuntimeBinding,
+        harn_vm::VmCallable,
+        harn_vm::AutonomyTier,
+    ),
+    PackageError,
+> {
     let Some(resolved) = extensions
         .runtime_personas
         .iter()
@@ -82,11 +105,18 @@ pub(crate) fn persona_runtime_handler_for_trigger(
             format!("handler persona://{name} does not match an active persona"),
         ));
     };
-    let callable = persona_runtime_callable(name, &resolved.persona, &resolved.manifest_dir)
-        .map_err(|error| trigger_error(trigger, error.to_string()))?;
+    let callable = persona_runtime_callable_with_guard(
+        name,
+        &resolved.persona,
+        &resolved.manifest_dir,
+        resolved.execution_guard.clone(),
+        resolved.capabilities_materialized,
+    )
+    .map_err(|error| trigger_error(trigger, error.to_string()))?;
     Ok((
-        persona_runtime_binding_with_policy(name, &resolved.persona, &resolved.execution_policy),
+        persona_runtime_binding(name, &resolved.persona),
         callable,
+        persona_autonomy_ceiling(&resolved.persona),
     ))
 }
 
@@ -112,13 +142,14 @@ fn persona_trigger_binding_spec(
     provider: &str,
     kind: &str,
 ) -> Result<harn_vm::TriggerBindingSpec, PackageError> {
-    let runtime_binding = persona_runtime_binding_with_policy(
+    let runtime_binding = persona_runtime_binding(&resolved.id, &resolved.persona);
+    let callable = persona_runtime_callable_with_guard(
         &resolved.id,
         &resolved.persona,
-        &resolved.execution_policy,
-    );
-    let callable =
-        persona_runtime_callable(&resolved.id, &resolved.persona, &resolved.manifest_dir)?;
+        &resolved.manifest_dir,
+        resolved.execution_guard.clone(),
+        resolved.capabilities_materialized,
+    )?;
     let id = format!("persona.{}.{provider}.{kind}", resolved.id);
     let handler = harn_vm::TriggerHandlerSpec::Persona {
         binding: runtime_binding.clone(),
@@ -143,7 +174,7 @@ fn persona_trigger_binding_spec(
         source: harn_vm::TriggerBindingSource::Manifest,
         kind: kind.to_string(),
         provider: harn_vm::ProviderId::from(provider.to_string()),
-        autonomy_tier: runtime_binding.autonomy_tier,
+        autonomy_tier: persona_autonomy_ceiling(&resolved.persona),
         handler,
         dispatch_priority: harn_vm::WorkerQueuePriority::Normal,
         when: None,
@@ -172,21 +203,8 @@ pub(crate) fn persona_runtime_binding(
     name: &str,
     persona: &PersonaManifestEntry,
 ) -> harn_vm::PersonaRuntimeBinding {
-    persona_runtime_binding_with_policy(name, persona, &persona_execution_policy(persona))
-}
-
-fn persona_runtime_binding_with_policy(
-    name: &str,
-    persona: &PersonaManifestEntry,
-    execution_policy: &harn_vm::orchestration::CapabilityPolicy,
-) -> harn_vm::PersonaRuntimeBinding {
     harn_vm::PersonaRuntimeBinding {
         name: name.to_string(),
-        autonomy_tier: persona
-            .autonomy_tier
-            .map(persona_autonomy_to_vm)
-            .unwrap_or(harn_vm::AutonomyTier::Suggest),
-        execution_policy: Box::new(execution_policy.clone()),
         template_ref: persona_template_ref(persona),
         entry_workflow: persona.entry_workflow.clone().unwrap_or_default(),
         schedules: persona.schedules.clone(),
@@ -207,31 +225,30 @@ fn persona_runtime_binding_with_policy(
 
 fn persona_execution_policy(
     persona: &PersonaManifestEntry,
-) -> harn_vm::orchestration::CapabilityPolicy {
+) -> Result<harn_vm::orchestration::CapabilityPolicy, PackageError> {
     capability_policy(&persona.tools, &normalized_persona_capabilities(persona))
 }
 
 fn capability_policy(
     tools: &[String],
     persona_capabilities: &[String],
-) -> harn_vm::orchestration::CapabilityPolicy {
+) -> Result<harn_vm::orchestration::CapabilityPolicy, PackageError> {
     let mut capabilities = BTreeMap::new();
     for capability in persona_capabilities {
-        let (name, operation) = capability
-            .split_once('.')
-            .expect("validated persona capability has capability.operation form");
+        let (name, operation) = capability.split_once('.').ok_or_else(|| {
+            PackageError::Manifest(format!(
+                "persona capability '{capability}' must have capability.operation form"
+            ))
+        })?;
         capabilities
             .entry(name.to_string())
             .or_insert_with(Vec::new)
             .push(operation.to_string());
     }
-    harn_vm::orchestration::CapabilityPolicy {
-        tools: tools.to_vec(),
-        tools_restricted: true,
-        capabilities,
-        capabilities_restricted: true,
-        ..Default::default()
-    }
+    let mut policy = harn_vm::orchestration::CapabilityPolicy::default();
+    policy.restrict_tools(tools.to_vec());
+    policy.restrict_capabilities(capabilities);
+    Ok(policy)
 }
 
 pub(crate) fn persona_autonomy_to_vm(value: PersonaAutonomyTier) -> harn_vm::AutonomyTier {
@@ -243,10 +260,27 @@ pub(crate) fn persona_autonomy_to_vm(value: PersonaAutonomyTier) -> harn_vm::Aut
     }
 }
 
+fn persona_autonomy_ceiling(persona: &PersonaManifestEntry) -> harn_vm::AutonomyTier {
+    persona
+        .autonomy_tier
+        .map(persona_autonomy_to_vm)
+        .unwrap_or(harn_vm::AutonomyTier::Suggest)
+}
+
 pub(crate) fn persona_runtime_callable(
     name: &str,
     persona: &PersonaManifestEntry,
     manifest_dir: &Path,
+) -> Result<harn_vm::VmCallable, PackageError> {
+    persona_runtime_callable_with_guard(name, persona, manifest_dir, None, false)
+}
+
+fn persona_runtime_callable_with_guard(
+    name: &str,
+    persona: &PersonaManifestEntry,
+    manifest_dir: &Path,
+    execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+    capabilities_materialized: bool,
 ) -> Result<harn_vm::VmCallable, PackageError> {
     let entry_workflow = persona.entry_workflow.as_deref().ok_or_else(|| {
         PackageError::Manifest(format!("persona '{name}' is missing entry_workflow"))
@@ -271,9 +305,18 @@ pub(crate) fn persona_runtime_callable(
             "persona '{name}' entry_workflow '{entry_workflow}' is not exported by the resolved module"
         )));
     }
-    Ok(harn_vm::VmCallable::Pipeline(
-        harn_vm::LazyPipelineCallable::new(module_path, function_name),
-    ))
+    let execution_policy = if capabilities_materialized {
+        capability_policy(&persona.tools, &persona.capabilities)?
+    } else {
+        persona_execution_policy(persona)?
+    };
+    let mut callable = harn_vm::LazyPipelineCallable::new(module_path, function_name)
+        .with_execution_policy(execution_policy)
+        .with_autonomy_ceiling(persona_autonomy_ceiling(persona));
+    if let Some(execution_guard) = execution_guard {
+        callable = callable.with_package_execution_guard(execution_guard);
+    }
+    Ok(harn_vm::VmCallable::Pipeline(callable))
 }
 
 fn persona_stage_decl_to_runtime(stage: &PersonaStageDecl) -> harn_vm::StageDecl {

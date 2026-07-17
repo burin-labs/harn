@@ -109,14 +109,8 @@ fn collect_violations(
 ) -> Vec<CapabilityCeilingViolation> {
     let mut violations = Vec::new();
     if parent.tools_are_restricted() {
-        if parent.tools_restricted && !requested.tools_are_restricted() {
-            violations.push(CapabilityCeilingViolation {
-                kind: "tool".to_string(),
-                detail: "nested target drops the parent tool ceiling".to_string(),
-            });
-        }
-        for tool in &requested.tools {
-            if !parent.tools.contains(tool) {
+        for tool in requested.allowed_tool_patterns() {
+            if !parent.tool_pattern_allows(tool) {
                 violations.push(CapabilityCeilingViolation {
                     kind: "tool".to_string(),
                     detail: format!("nested target requests tool '{tool}' outside parent ceiling"),
@@ -124,17 +118,20 @@ fn collect_violations(
             }
         }
     }
-    if parent.capabilities_restricted && !requested.capabilities_are_restricted() {
-        violations.push(CapabilityCeilingViolation {
-            kind: "capability".to_string(),
-            detail: "nested target drops the parent capability ceiling".to_string(),
-        });
-    }
-    for (capability, ops) in &requested.capabilities {
-        match parent.capabilities.get(capability) {
+    for (capability, ops) in requested.allowed_capabilities() {
+        match parent.capability_operations(capability) {
             Some(parent_ops) => {
+                if ops.is_empty() && !parent_ops.is_empty() {
+                    violations.push(CapabilityCeilingViolation {
+                        kind: "capability".to_string(),
+                        detail: format!(
+                            "nested target requests every '{capability}' operation outside parent ceiling"
+                        ),
+                    });
+                    continue;
+                }
                 for op in ops {
-                    if !parent_ops.contains(op) {
+                    if !parent_ops.is_empty() && !parent_ops.contains(op) {
                         violations.push(CapabilityCeilingViolation {
                             kind: "capability".to_string(),
                             detail: format!(
@@ -229,12 +226,10 @@ fn scan_harn_script_ceiling(source: &str) -> CapabilityPolicy {
 
     CapabilityPolicy {
         tools: Vec::new(),
-        tools_restricted: false,
         capabilities: capabilities
             .into_iter()
             .map(|(k, v)| (k, v.into_iter().collect()))
             .collect(),
-        capabilities_restricted: false,
         workspace_roots: Vec::new(),
         read_only_roots: Vec::new(),
         side_effect_level: max_side_effect.map(|level| level.to_string()),
@@ -265,9 +260,7 @@ fn scan_burin_manifest_ceiling(manifest: &serde_json::Value) -> CapabilityPolicy
 
     CapabilityPolicy {
         tools,
-        tools_restricted: false,
         capabilities: std::collections::BTreeMap::new(),
-        capabilities_restricted: false,
         workspace_roots: Vec::new(),
         read_only_roots: Vec::new(),
         side_effect_level: Some("network".to_string()),
@@ -468,9 +461,7 @@ mod tests {
         capabilities.insert("llm".to_string(), vec!["call".to_string()]);
         CapabilityPolicy {
             tools: Vec::new(),
-            tools_restricted: false,
             capabilities,
-            capabilities_restricted: false,
             workspace_roots: Vec::new(),
             read_only_roots: Vec::new(),
             side_effect_level: Some("network".to_string()),
@@ -494,9 +485,7 @@ mod tests {
         );
         CapabilityPolicy {
             tools: Vec::new(),
-            tools_restricted: false,
             capabilities,
-            capabilities_restricted: false,
             workspace_roots: Vec::new(),
             read_only_roots: Vec::new(),
             side_effect_level: Some("read_only".to_string()),
@@ -522,6 +511,23 @@ mod tests {
             },
         );
         assert!(report.allowed(), "{report:#?}");
+    }
+
+    #[test]
+    fn pure_harn_script_inherits_restricted_parent_dimensions() {
+        let mut parent = read_only_parent();
+        parent.tools = vec!["read_file".to_string()];
+        let report = enforce_nested_invocation_ceiling(
+            &parent,
+            &NestedInvocationTarget::HarnScript {
+                path: "pure.harn",
+                source: "let answer = 42",
+            },
+        );
+
+        assert!(report.allowed(), "{report:#?}");
+        assert!(report.requested.tools.is_empty());
+        assert!(report.requested.capabilities.is_empty());
     }
 
     #[test]

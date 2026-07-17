@@ -721,7 +721,7 @@ async fn installed_persona_catalog_is_qualified_sorted_and_directly_resolvable()
     fs::write(
         tmp.path().join(MANIFEST),
         format!(
-            "[package]\nname = \"consumer\"\n\n{}",
+            "[package]\nname = \"consumer\"\n\n[dependencies]\nagents = {{ path = \"vendor/agents\" }}\n\n{}",
             persona_manifest("reviewer", "root.harn#run")
         ),
     )
@@ -731,12 +731,29 @@ async fn installed_persona_catalog_is_qualified_sorted_and_directly_resolvable()
         "pub pipeline run(task) -> dict { return {root: true} }\n",
     )
     .unwrap();
-    install_test_persona_package(
+    let mut lock = install_test_persona_package(
         tmp.path(),
         "agents",
         vec!["reviewer".to_string(), "archivist".to_string()],
         &["reviewer", "archivist"],
     );
+    let dependency_source = tmp.path().join("vendor/agents");
+    fs::create_dir_all(&dependency_source).unwrap();
+    let installed_package = current_packages_dir(tmp.path()).join("agents");
+    fs::copy(
+        installed_package.join(MANIFEST),
+        dependency_source.join(MANIFEST),
+    )
+    .unwrap();
+    fs::copy(
+        installed_package.join("workflow.harn"),
+        dependency_source.join("workflow.harn"),
+    )
+    .unwrap();
+    lock.packages[0].source = path_source_uri(&dependency_source.canonicalize().unwrap()).unwrap();
+    let lock_body = toml::to_string_pretty(&lock).unwrap();
+    fs::write(tmp.path().join(LOCK_FILE), &lock_body).unwrap();
+    write_test_generation_lock(tmp.path(), &lock_body);
 
     let personas = load_discoverable_personas(Some(&tmp.path().join(MANIFEST))).unwrap();
     let ids = personas
@@ -786,7 +803,10 @@ async fn installed_persona_catalog_is_qualified_sorted_and_directly_resolvable()
     )
     .await
     .unwrap_err();
-    assert!(status_error.contains("persona 'agents/reviewer' not found"));
+    assert_eq!(
+        status_error,
+        "active runtime persona 'agents/reviewer' not found"
+    );
 
     let workspace = TestWorkspace::new(tmp.path());
     let report = list_packages_in(workspace.env()).unwrap();
@@ -931,6 +951,7 @@ fn package_doctor_rejects_missing_persona_manifest_and_entry_workflow() {
     let workspace = TestWorkspace::new(tmp.path());
 
     fs::remove_file(package_dir.join("workflow.harn")).unwrap();
+    refresh_test_package_hash(tmp.path(), &package_dir);
     let report = doctor_packages_in(workspace.env()).unwrap();
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "persona-entry-workflow-invalid"
@@ -942,6 +963,7 @@ fn package_doctor_rejects_missing_persona_manifest_and_entry_workflow() {
         "pipeline run(task) -> dict { return {ok: true} }\n",
     )
     .unwrap();
+    refresh_test_package_hash(tmp.path(), &package_dir);
     let report = doctor_packages_in(workspace.env()).unwrap();
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "persona-entry-workflow-invalid"
@@ -964,6 +986,7 @@ receipt_policy = "required"
 "#,
     )
     .unwrap();
+    refresh_test_package_hash(tmp.path(), &package_dir);
     let report = doctor_packages_in(workspace.env()).unwrap();
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "persona-manifest-invalid"
@@ -971,10 +994,22 @@ receipt_policy = "required"
     }));
 
     fs::remove_file(package_dir.join(MANIFEST)).unwrap();
+    refresh_test_package_hash(tmp.path(), &package_dir);
     let report = doctor_packages_in(workspace.env()).unwrap();
     assert!(report.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "persona-manifest-invalid" && diagnostic.message.contains(MANIFEST)
+        diagnostic.code == "persona-package-integrity-failed"
+            && diagnostic.message.contains(MANIFEST)
     }));
+}
+
+fn refresh_test_package_hash(project_root: &Path, package_dir: &Path) {
+    let mut lock = LockFile::load(&project_root.join(LOCK_FILE))
+        .unwrap()
+        .unwrap();
+    lock.packages[0].content_hash = Some(compute_content_hash(package_dir).unwrap());
+    let body = toml::to_string_pretty(&lock).unwrap();
+    fs::write(project_root.join(LOCK_FILE), &body).unwrap();
+    write_test_generation_lock(project_root, &body);
 }
 
 fn write_release_changelog(root: &Path, version: &str) {

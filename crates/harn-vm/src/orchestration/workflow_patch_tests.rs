@@ -16,9 +16,7 @@ fn parent_ceiling_act_with_approval() -> CapabilityPolicy {
     capabilities.insert("process".to_string(), vec!["exec".to_string()]);
     CapabilityPolicy {
         tools: vec!["read_file".to_string(), "github_search".to_string()],
-        tools_restricted: false,
         capabilities,
-        capabilities_restricted: false,
         workspace_roots: Vec::new(),
         read_only_roots: Vec::new(),
         side_effect_level: Some("process_exec".to_string()),
@@ -35,9 +33,7 @@ fn parent_ceiling_read_only() -> CapabilityPolicy {
     capabilities.insert("workspace".to_string(), vec!["read_text".to_string()]);
     CapabilityPolicy {
         tools: vec!["read_file".to_string()],
-        tools_restricted: false,
         capabilities,
-        capabilities_restricted: false,
         workspace_roots: Vec::new(),
         read_only_roots: Vec::new(),
         side_effect_level: Some("read_only".to_string()),

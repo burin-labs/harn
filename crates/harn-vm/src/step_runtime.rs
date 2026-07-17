@@ -595,31 +595,32 @@ fn stage_policy_for_active_step(step_name: &str) -> Option<CapabilityPolicy> {
     let Some(parent) = current_execution_policy() else {
         return Some(stage_policy);
     };
-    // `intersect` is conservative: failure means the stage referenced a tool
-    // the ambient policy already denied. Fall back to a narrowed copy that
-    // drops those entries so the stage can never widen the ceiling.
-    Some(parent.intersect(&stage_policy).unwrap_or_else(|_| {
-        let intersected_tools: Vec<String> = stage_policy
+    let mut stage_policy = stage_policy;
+    if stage_policy.tools_are_restricted() {
+        let tools = stage_policy
             .tools
             .iter()
-            .filter(|tool| !parent.tools_are_restricted() || parent.tools.contains(*tool))
+            .filter(|tool| parent.tool_pattern_allows(tool))
             .cloned()
             .collect();
-        CapabilityPolicy {
-            tools: intersected_tools,
-            tools_restricted: stage_policy.tools_restricted,
-            ..stage_policy
-        }
-    }))
+        stage_policy.restrict_tools(tools);
+    }
+    Some(
+        parent
+            .intersect(&stage_policy)
+            .expect("pre-narrowed stage policy must fit the parent ceiling"),
+    )
 }
 
 fn stage_decl_to_policy(stage: &StageDecl) -> CapabilityPolicy {
-    CapabilityPolicy {
-        tools: stage.allowed_tools.clone().unwrap_or_default(),
-        tools_restricted: stage.allowed_tools.is_some(),
+    let mut policy = CapabilityPolicy {
         side_effect_level: stage.side_effect_level.clone(),
         ..CapabilityPolicy::default()
+    };
+    if let Some(tools) = &stage.allowed_tools {
+        policy.restrict_tools(tools.clone());
     }
+    policy
 }
 
 fn persona_matches(pattern: &str, persona: &str) -> bool {
@@ -1241,6 +1242,12 @@ mod tests {
 
         push_execution_policy(CapabilityPolicy {
             tools: vec!["read".to_string()],
+            capabilities: std::collections::BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["read_text".to_string()],
+            )]),
+            workspace_roots: vec!["/workspace".to_string()],
+            side_effect_level: Some("workspace_read".to_string()),
             ..CapabilityPolicy::default()
         });
         assert!(maybe_push_active_persona("scoped_persona", 1));
@@ -1248,6 +1255,15 @@ mod tests {
         let policy = current_execution_policy().expect("stage policy active");
         // `edit` is filtered out because the parent already denied it.
         assert_eq!(policy.tools, vec!["read".to_string()]);
+        assert_eq!(
+            policy.capabilities,
+            std::collections::BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["read_text".to_string()],
+            )])
+        );
+        assert_eq!(policy.workspace_roots, vec!["/workspace".to_string()]);
+        assert_eq!(policy.side_effect_level.as_deref(), Some("workspace_read"));
 
         prune_below_frame(0);
         pop_execution_policy();
@@ -1263,7 +1279,7 @@ mod tests {
         });
 
         assert!(policy.tools_are_restricted());
-        assert!(policy.tools.is_empty());
+        assert!(policy.tools_deny_all());
     }
 
     #[test]

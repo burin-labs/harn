@@ -325,12 +325,10 @@ mod tests {
     fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
         CapabilityPolicy {
             tools: Vec::new(),
-            tools_restricted: false,
             capabilities: std::collections::BTreeMap::from([(
                 "workspace".to_string(),
                 ops.iter().map(|op| op.to_string()).collect(),
             )]),
-            capabilities_restricted: false,
             workspace_roots: vec!["/tmp/harn-workspace".to_string()],
             read_only_roots: Vec::new(),
             side_effect_level: Some("read_only".to_string()),

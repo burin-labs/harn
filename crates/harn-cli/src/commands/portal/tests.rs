@@ -1384,12 +1384,10 @@ fn build_policy_summary_reads_validation_metadata() {
     let run = harn_vm::orchestration::RunRecord {
         policy: harn_vm::orchestration::CapabilityPolicy {
             tools: vec!["read".to_string(), "exec".to_string()],
-            tools_restricted: false,
             capabilities: BTreeMap::from([(
                 "workspace".to_string(),
                 vec!["read_text".to_string(), "list".to_string()],
             )]),
-            capabilities_restricted: false,
             workspace_roots: vec!["/tmp/project".to_string()],
             read_only_roots: Vec::new(),
             side_effect_level: Some("workspace_write".to_string()),

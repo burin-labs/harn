@@ -421,6 +421,47 @@ async fn persona_runtime_status_tick_and_budget_are_persisted() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn persona_runtime_does_not_fall_back_from_a_missing_explicit_manifest() {
+    let temp = write_manifest(valid_manifest());
+    let missing = temp.path().join("nested/missing-personas.toml");
+    let error = persona::status_payload(
+        Some(&missing),
+        &temp.path().join("state"),
+        "merge_captain",
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.contains("missing-personas.toml"), "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persona_runtime_uses_an_explicit_standalone_toml_catalog() {
+    let temp = write_manifest(valid_manifest());
+    let standalone = temp.path().join("persona.toml");
+    fs::write(
+        &standalone,
+        valid_manifest().replace(
+            "workflows/merge.harn#run",
+            "workflows/standalone-merge.harn#run",
+        ),
+    )
+    .unwrap();
+
+    let status = persona::status_payload(
+        Some(&standalone),
+        &temp.path().join("state"),
+        "merge_captain",
+        None,
+    )
+    .await
+    .expect("explicit standalone TOML persona should resolve exactly");
+
+    assert_eq!(status.entry_workflow, "workflows/standalone-merge.harn#run");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn persona_pause_resume_disable_trigger_controls_are_durable() {
     let temp = write_manifest(valid_manifest());
     let manifest = manifest_path(&temp);
@@ -612,8 +653,6 @@ async fn persona_supervision_tail_projects_multiplexed_ndjson_contract() {
         .expect("open persona event log");
     let merge_binding = harn_vm::PersonaRuntimeBinding {
         name: "merge_captain".to_string(),
-        autonomy_tier: harn_vm::AutonomyTier::ActAuto,
-        execution_policy: Box::default(),
         template_ref: Some("merge_captain@1.4.0".to_string()),
         entry_workflow: "workflows/merge.harn#run".to_string(),
         schedules: Vec::new(),

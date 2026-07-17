@@ -22,16 +22,8 @@ fn activation_attenuates_and_pins_the_installed_policy_idempotently() {
     let manifest = install_one(tmp.path());
     let attenuation = PersonaAttenuation {
         autonomy_tier: Some(PersonaAutonomyTier::Suggest),
-        daily_usd: Some(5.0),
-        hourly_usd: Some(2.0),
-        run_usd: Some(1.0),
-        frontier_escalations: Some(1),
-        max_tokens: Some(2048),
-        max_runtime_seconds: Some(300),
         tools: Some(vec!["shell".to_string()]),
         capabilities: Some(Vec::new()),
-        permissions: Some(vec!["workspace:read_text".to_string()]),
-        host_requirements: Some(Vec::new()),
     };
 
     let first = activate_persona(Some(&manifest), "agents/reviewer", &attenuation, 100).unwrap();
@@ -39,6 +31,7 @@ fn activation_attenuates_and_pins_the_installed_policy_idempotently() {
 
     assert!(first.changed);
     assert!(!second.changed);
+    assert_eq!(second.schema_version, ACTIVATION_RECEIPT_SCHEMA_VERSION);
     let activation = second.activation.unwrap();
     assert_eq!(activation.activated_at_ms, 100);
     assert_eq!(
@@ -47,29 +40,26 @@ fn activation_attenuates_and_pins_the_installed_policy_idempotently() {
     );
     assert_eq!(activation.effective_policy.tools, vec!["shell"]);
     assert!(activation.effective_policy.capabilities.is_empty());
-    assert_eq!(
-        activation.effective_policy.permissions,
-        vec!["workspace:read_text"]
-    );
-    assert_eq!(
-        activation.effective_policy.host_requirements,
-        Vec::<String>::new()
-    );
-    assert_eq!(
-        activation
-            .effective_policy
-            .model_policy
-            .default_model
-            .as_deref(),
-        Some("cheap")
-    );
-    assert_eq!(activation.effective_policy.budget.daily_usd, Some(5.0));
+    assert!(activation.migration.is_none());
     assert_ne!(
         activation.exported_policy_digest,
         activation.effective_policy_digest
     );
     assert!(activation.package.content_hash.starts_with("sha256:"));
     assert_eq!(activation.package.alias, "agents");
+
+    let root = load_root_persona_catalog(Some(&manifest)).unwrap();
+    let discovered = resolve_discoverable_persona_in_root(&root, "agents/reviewer").unwrap();
+    let materialized = materialize_activated_persona(&discovered, &activation).unwrap();
+    assert_eq!(
+        materialized.model_policy.default_model.as_deref(),
+        Some("cheap")
+    );
+    assert_eq!(materialized.budget.daily_usd, Some(10.0));
+    assert_eq!(
+        materialized.receipt_policy,
+        Some(PersonaReceiptPolicy::Required)
+    );
 
     let listed = list_persona_activations(Some(&manifest)).unwrap();
     assert_eq!(listed, vec![activation]);
@@ -125,48 +115,6 @@ fn activation_rejects_every_authority_expansion_without_writing_state() {
             },
         ),
         (
-            "daily_usd",
-            PersonaAttenuation {
-                daily_usd: Some(10.01),
-                ..PersonaAttenuation::default()
-            },
-        ),
-        (
-            "hourly_usd",
-            PersonaAttenuation {
-                hourly_usd: Some(4.01),
-                ..PersonaAttenuation::default()
-            },
-        ),
-        (
-            "run_usd",
-            PersonaAttenuation {
-                run_usd: Some(2.01),
-                ..PersonaAttenuation::default()
-            },
-        ),
-        (
-            "frontier_escalations",
-            PersonaAttenuation {
-                frontier_escalations: Some(4),
-                ..PersonaAttenuation::default()
-            },
-        ),
-        (
-            "max_tokens",
-            PersonaAttenuation {
-                max_tokens: Some(4097),
-                ..PersonaAttenuation::default()
-            },
-        ),
-        (
-            "max_runtime_seconds",
-            PersonaAttenuation {
-                max_runtime_seconds: Some(601),
-                ..PersonaAttenuation::default()
-            },
-        ),
-        (
             "tool",
             PersonaAttenuation {
                 tools: Some(vec!["network".to_string()]),
@@ -187,20 +135,6 @@ fn activation_rejects_every_authority_expansion_without_writing_state() {
                 ..PersonaAttenuation::default()
             },
         ),
-        (
-            "permission",
-            PersonaAttenuation {
-                permissions: Some(vec!["network:fetch".to_string()]),
-                ..PersonaAttenuation::default()
-            },
-        ),
-        (
-            "host requirement",
-            PersonaAttenuation {
-                host_requirements: Some(vec!["network.fetch".to_string()]),
-                ..PersonaAttenuation::default()
-            },
-        ),
     ];
 
     for (label, attenuation) in expansions {
@@ -217,7 +151,7 @@ fn activation_rejects_every_authority_expansion_without_writing_state() {
 }
 
 #[test]
-fn activation_requires_content_hash_and_matching_materialized_content() {
+fn activation_observes_unhashed_content_and_rejects_invalid_or_tampered_packages() {
     let missing_hash = tempfile::tempdir().unwrap();
     let manifest = write_root(missing_hash.path());
     let mut lock = install_test_persona_package(
@@ -228,17 +162,16 @@ fn activation_requires_content_hash_and_matching_materialized_content() {
     );
     lock.packages[0].content_hash = None;
     write_lock(missing_hash.path(), &lock);
-    let error = activate_persona(
+    let activation = activate_persona(
         Some(&manifest),
         "agents/reviewer",
         &PersonaAttenuation::default(),
         100,
     )
-    .unwrap_err();
-    assert!(matches!(
-        error,
-        PersonaActivationError::MissingContentHash(_)
-    ));
+    .unwrap()
+    .activation
+    .unwrap();
+    assert!(activation.package.content_hash.starts_with("sha256:"));
 
     lock.packages[0].content_hash = Some(" ".to_string());
     write_lock(missing_hash.path(), &lock);
@@ -249,10 +182,7 @@ fn activation_requires_content_hash_and_matching_materialized_content() {
         100,
     )
     .unwrap_err();
-    assert!(matches!(
-        error,
-        PersonaActivationError::MissingContentHash(_)
-    ));
+    assert!(error.to_string().contains("content hash"), "{error}");
 
     let tampered = tempfile::tempdir().unwrap();
     let manifest = install_one(tampered.path());
@@ -268,10 +198,24 @@ fn activation_requires_content_hash_and_matching_materialized_content() {
         100,
     )
     .unwrap_err();
-    assert!(matches!(
-        error,
-        PersonaActivationError::PackageIntegrity { .. }
-    ));
+    assert!(error.to_string().contains("content changed"), "{error}");
+}
+
+#[test]
+fn exported_contract_digest_covers_runtime_entry_and_triggers() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = install_one(tmp.path());
+    let root = load_root_persona_catalog(Some(&manifest)).unwrap();
+    let discovered = resolve_discoverable_persona_in_root(&root, "agents/reviewer").unwrap();
+    let provenance = discovered.installed_provenance().unwrap();
+    let original =
+        policy_digest(&exported_policy_contract(&discovered.persona, provenance).unwrap()).unwrap();
+    let mut changed = discovered.persona.clone();
+    changed.entry_workflow = Some("alternate.harn#run".to_string());
+    changed.triggers.push("github.issue_opened".to_string());
+    let changed = policy_digest(&exported_policy_contract(&changed, provenance).unwrap()).unwrap();
+
+    assert_ne!(original, changed);
 }
 
 #[test]
@@ -337,7 +281,11 @@ fn activation_ledger_rejects_malformed_unknown_and_tampered_state() {
         PersonaActivationError::InvalidLedger { .. }
     ));
 
-    fs::write(&ledger_path, b"{\"schema_version\":2,\"activations\":{}}\n").unwrap();
+    fs::write(
+        &ledger_path,
+        b"{\"schema_version\":999,\"activations\":{}}\n",
+    )
+    .unwrap();
     assert!(matches!(
         load_activation_ledger(tmp.path()).unwrap_err(),
         PersonaActivationError::UnsupportedSchema { .. }
@@ -362,6 +310,89 @@ fn activation_ledger_rejects_malformed_unknown_and_tampered_state() {
         PersonaActivationError::InvalidLedger { .. }
     ));
     assert!(error.to_string().contains("digest"));
+}
+
+#[test]
+fn schema_v1_activation_is_auditable_but_requires_reactivation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest = install_one(tmp.path());
+    let current = activate_persona(
+        Some(&manifest),
+        "agents/reviewer",
+        &PersonaAttenuation::default(),
+        100,
+    )
+    .unwrap()
+    .activation
+    .unwrap();
+    let root = load_root_persona_catalog(Some(&manifest)).unwrap();
+    let discovered = resolve_discoverable_persona_in_root(&root, "agents/reviewer").unwrap();
+    let provenance = discovered.installed_provenance().unwrap();
+    let legacy_policy = LegacyPersonaEffectivePolicyV1 {
+        autonomy_tier: discovered.persona.autonomy_tier.unwrap(),
+        receipt_policy: discovered.persona.receipt_policy.unwrap(),
+        tools: normalize_set(&discovered.persona.tools),
+        capabilities: normalized_persona_capabilities(&discovered.persona),
+        permissions: normalize_set(&provenance.permissions),
+        host_requirements: normalize_set(&provenance.host_requirements),
+        model_policy: discovered.persona.model_policy.clone(),
+        budget: discovered.persona.budget.clone(),
+    };
+    let legacy_digest = policy_digest(&legacy_policy).unwrap();
+    let legacy = LegacyPersonaActivationLedgerV1 {
+        schema_version: LEGACY_ACTIVATION_SCHEMA_VERSION,
+        activations: std::collections::BTreeMap::from([(
+            current.persona_id.clone(),
+            LegacyPersonaActivationRecordV1 {
+                persona_id: current.persona_id.clone(),
+                package: current.package.clone(),
+                exported_policy_digest: current.exported_policy_digest.clone(),
+                effective_policy_digest: legacy_digest.clone(),
+                effective_policy: legacy_policy,
+                activated_at_ms: current.activated_at_ms,
+            },
+        )]),
+    };
+    let ledger_path = activation_ledger_path(tmp.path());
+    let mut legacy_value = serde_json::to_value(&legacy).unwrap();
+    legacy_value["activations"]["agents/reviewer"]["package"]
+        .as_object_mut()
+        .unwrap()
+        .remove("lock_digest");
+    fs::write(
+        &ledger_path,
+        serde_json::to_vec_pretty(&legacy_value).unwrap(),
+    )
+    .unwrap();
+
+    let migrated = load_activation_ledger(tmp.path()).unwrap();
+    assert_eq!(migrated.schema_version, ACTIVATION_SCHEMA_VERSION);
+    let activation = migrated.activations.get("agents/reviewer").unwrap();
+    let migration = activation.migration.as_ref().unwrap();
+    assert_eq!(
+        migration.status,
+        PersonaActivationMigrationStatus::ReactivationRequired
+    );
+    assert_eq!(migration.legacy_effective_policy_digest, legacy_digest);
+    assert!(activation.package.lock_digest.is_empty());
+    assert!(matches!(
+        materialize_activated_persona(&discovered, activation).unwrap_err(),
+        PersonaActivationError::StaleActivation { .. }
+    ));
+
+    let refreshed = activate_persona(
+        Some(&manifest),
+        "agents/reviewer",
+        &PersonaAttenuation::default(),
+        200,
+    )
+    .unwrap();
+    assert!(refreshed.changed);
+    assert!(refreshed.activation.unwrap().migration.is_none());
+    assert_eq!(
+        load_activation_ledger(tmp.path()).unwrap().schema_version,
+        2
+    );
 }
 
 #[test]

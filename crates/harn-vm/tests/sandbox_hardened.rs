@@ -18,9 +18,7 @@ use harn_vm::process_sandbox;
 fn policy_with(profile: SandboxProfile, workspace: &std::path::Path) -> CapabilityPolicy {
     CapabilityPolicy {
         tools: Vec::new(),
-        tools_restricted: false,
         capabilities: BTreeMap::new(),
-        capabilities_restricted: false,
         workspace_roots: vec![workspace.display().to_string()],
         read_only_roots: Vec::new(),
         side_effect_level: Some("workspace_write".to_string()),

@@ -71,16 +71,8 @@ fn attenuation_from_args(args: &PersonaActivateArgs) -> Result<PersonaAttenuatio
         .map_err(|()| "invalid autonomy tier".to_string())?;
     Ok(PersonaAttenuation {
         autonomy_tier,
-        daily_usd: args.daily_usd,
-        hourly_usd: args.hourly_usd,
-        run_usd: args.run_usd,
-        frontier_escalations: args.frontier_escalations,
-        max_tokens: args.max_tokens,
-        max_runtime_seconds: args.max_runtime_seconds,
         tools: selected_set(&args.tools, args.no_tools),
         capabilities: selected_set(&args.capabilities, args.no_capabilities),
-        permissions: selected_set(&args.permissions, args.no_permissions),
-        host_requirements: selected_set(&args.host_requirements, args.no_host_requirements),
     })
 }
 
@@ -122,12 +114,18 @@ fn print_activations(activations: &[PersonaActivationRecord]) {
     }
     println!("Installed persona activations:");
     for activation in activations {
+        let status = activation
+            .migration
+            .as_ref()
+            .map(|_| " reactivation-required")
+            .unwrap_or("");
         println!(
-            "  {}  package={} digest={} autonomy={}",
+            "  {}  package={} digest={} autonomy={}{}",
             activation.persona_id,
             activation.package.alias,
             activation.package.content_hash,
-            activation.effective_policy.autonomy_tier.as_str()
+            activation.effective_policy.autonomy_tier.as_str(),
+            status
         );
     }
 }

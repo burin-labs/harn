@@ -47,11 +47,14 @@ pub(crate) fn write_test_generation_lock(root: &Path, body: &str) {
         GENERATION_MANIFEST_FILE,
     };
 
-    let generation = "generation-test";
-    let generation_root = generation_root(root, generation);
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(root)
+        .unwrap()
+        .expect("published test package generation");
+    let generation = snapshot.generation().to_string();
+    let generation_root = generation_root(root, &generation);
     fs::write(generation_root.join(GENERATION_LOCK_FILE), body).unwrap();
     let manifest =
-        PackageGenerationManifest::new(generation, package_lock_digest(body.as_bytes())).unwrap();
+        PackageGenerationManifest::new(&generation, package_lock_digest(body.as_bytes())).unwrap();
     fs::write(
         generation_root.join(GENERATION_MANIFEST_FILE),
         toml::to_string_pretty(&manifest).unwrap(),

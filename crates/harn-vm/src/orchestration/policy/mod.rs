@@ -126,7 +126,7 @@ pub fn current_allowed_tool_names() -> Vec<String> {
         return Vec::new();
     };
     if policy.tools_are_restricted() {
-        return policy.tools;
+        return policy.allowed_tool_patterns().map(str::to_string).collect();
     }
     policy.tool_annotations.keys().cloned().collect()
 }
@@ -156,7 +156,7 @@ impl Drop for TrustedBridgeCallGuard {
 }
 
 fn policy_allows_tool(policy: &CapabilityPolicy, tool: &str) -> bool {
-    !policy.tools_are_restricted() || policy.tools.iter().any(|allowed| allowed == tool)
+    policy.tool_pattern_allows(tool)
 }
 
 fn policy_grants_capability(policy: &CapabilityPolicy, capability: &str, op: &str) -> bool {
@@ -170,6 +170,9 @@ fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, op: &st
     if !policy.capabilities_are_restricted() {
         // Empty capability map = allow-all (e.g. the root agent policy).
         return true;
+    }
+    if policy.capabilities_deny_all() {
+        return false;
     }
     if policy_grants_capability(policy, capability, op) {
         return true;
@@ -309,6 +312,12 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
+    if effects::builtin_has_network_effect(name)
+        && (!policy_allows_capability(&policy, "network", "http")
+            || !policy_allows_side_effect(&policy, "network"))
+    {
+        return reject_policy(format!("builtin '{name}' exceeds network.http ceiling"));
+    }
     match name {
         "find_text"
             if !policy_allows_capability(&policy, "workspace", "read_text")
@@ -392,39 +401,10 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         // ceiling, so it stays a distinct arm ahead of the shared network arm
         // below (its name never overlaps the network patterns, so ordering is
         // immaterial to correctness).
-        "__files_upload"
-            if !policy_allows_capability(&policy, "workspace", "read_text")
-                || !policy_allows_side_effect(&policy, "network") =>
-        {
+        "__files_upload" if !policy_allows_capability(&policy, "workspace", "read_text") => {
             return reject_policy(
                 "builtin '__files_upload' exceeds workspace.read_text/network ceiling".to_string(),
             );
-        }
-        "http_get"
-        | "http_post"
-        | "http_put"
-        | "http_patch"
-        | "http_delete"
-        | "http_download"
-        | "http_request"
-        | "unix_socket_json_request"
-        | "__net_unix_socket_json_request"
-        | "http_session_request"
-        | "http_stream_open"
-        | "http_stream_read"
-        | "http_stream_close"
-        | "http_stream_info"
-        | "sse_connect"
-        | "sse_receive"
-        | "websocket_accept"
-        | "websocket_connect"
-        | "websocket_route"
-        | "websocket_send"
-        | "websocket_receive"
-        | "websocket_server"
-            if !policy_allows_side_effect(&policy, "network") =>
-        {
-            return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
         }
         "llm_call" | "llm_call_safe" | "llm_completion" | "llm_stream" | "llm_stream_call"
         | "llm_healthcheck" | "agent_loop"
@@ -722,9 +702,7 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         // is the sole authority, and an allowlist here would silently block
         // any capability the host adds later.
         tools: Vec::new(),
-        tools_restricted: false,
         capabilities: BTreeMap::new(),
-        capabilities_restricted: false,
         workspace_roots: Vec::new(),
         read_only_roots: Vec::new(),
         // The builtin ceiling is the runtime's OUTERMOST bound — the top of the
@@ -1249,7 +1227,7 @@ mod approval_policy_tests {
         let error =
             enforce_current_policy_for_builtin("__net_unix_socket_json_request", &[]).unwrap_err();
         assert!(
-            error.to_string().contains("network ceiling"),
+            error.to_string().contains("network.http ceiling"),
             "unexpected error: {error}"
         );
 
@@ -1260,23 +1238,26 @@ mod approval_policy_tests {
     fn files_upload_requires_workspace_read_and_network_side_effect() {
         clear_execution_policy_stacks();
         push_execution_policy(CapabilityPolicy {
-            capabilities: BTreeMap::from([(
-                "workspace".to_string(),
-                vec!["read_text".to_string()],
-            )]),
+            capabilities: BTreeMap::from([
+                ("workspace".to_string(), vec!["read_text".to_string()]),
+                ("network".to_string(), vec!["http".to_string()]),
+            ]),
             side_effect_level: Some("read_only".to_string()),
             ..CapabilityPolicy::default()
         });
 
         let network_error = enforce_current_policy_for_builtin("__files_upload", &[]).unwrap_err();
         assert!(
-            network_error.to_string().contains("network ceiling"),
+            network_error.to_string().contains("network.http ceiling"),
             "unexpected error: {network_error}"
         );
         pop_execution_policy();
 
         push_execution_policy(CapabilityPolicy {
-            capabilities: BTreeMap::from([("workspace".to_string(), vec!["exists".to_string()])]),
+            capabilities: BTreeMap::from([
+                ("workspace".to_string(), vec!["exists".to_string()]),
+                ("network".to_string(), vec!["http".to_string()]),
+            ]),
             side_effect_level: Some("network".to_string()),
             ..CapabilityPolicy::default()
         });

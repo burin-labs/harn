@@ -13,8 +13,9 @@ use sha2::{Digest, Sha256};
 
 use super::{load_root_persona_catalog, resolve_discoverable_persona_in_root, DiscoverablePersona};
 
-const ACTIVATION_SCHEMA_VERSION: u32 = 1;
-const ACTIVATION_RECEIPT_SCHEMA_VERSION: u32 = 1;
+const ACTIVATION_SCHEMA_VERSION: u32 = 2;
+const LEGACY_ACTIVATION_SCHEMA_VERSION: u32 = 1;
+const ACTIVATION_RECEIPT_SCHEMA_VERSION: u32 = 2;
 const ACTIVATION_DIR: &str = ".harn/personas";
 const ACTIVATION_FILE: &str = "activations.json";
 const ACTIVATION_LOCK_FILE: &str = "activations.lock";
@@ -29,6 +30,8 @@ pub enum PersonaActivationError {
         "installed persona '{0}' has no package content hash; run `harn install` before activation"
     )]
     MissingContentHash(String),
+    #[error("installed persona '{0}' has no pinned package-generation lock digest")]
+    MissingLockDigest(String),
     #[error("installed persona '{persona_id}' failed package integrity validation: {integrity}")]
     PackageIntegrity {
         persona_id: String,
@@ -59,36 +62,28 @@ pub enum PersonaActivationError {
     Serialize(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PersonaAttenuation {
     pub autonomy_tier: Option<PersonaAutonomyTier>,
-    pub daily_usd: Option<f64>,
-    pub hourly_usd: Option<f64>,
-    pub run_usd: Option<f64>,
-    pub frontier_escalations: Option<u32>,
-    pub max_tokens: Option<u64>,
-    pub max_runtime_seconds: Option<u64>,
     /// `None` inherits the exported set; `Some([])` denies the entire set.
     pub tools: Option<Vec<String>>,
     /// `None` inherits the exported set; `Some([])` denies the entire set.
     pub capabilities: Option<Vec<String>>,
-    /// `None` inherits the package grant; `Some([])` denies the entire set.
-    pub permissions: Option<Vec<String>>,
-    /// `None` inherits the package requirements; `Some([])` denies the entire set.
-    pub host_requirements: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersonaEffectivePolicy {
     pub autonomy_tier: PersonaAutonomyTier,
-    pub receipt_policy: PersonaReceiptPolicy,
     pub tools: Vec<String>,
     pub capabilities: Vec<String>,
-    pub permissions: Vec<String>,
-    pub host_requirements: Vec<String>,
-    pub model_policy: PersonaModelPolicy,
-    pub budget: PersonaBudget,
+}
+
+#[derive(Serialize)]
+struct PersonaExportContract {
+    persona: PersonaManifestEntry,
+    permissions: Vec<String>,
+    host_requirements: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,11 +92,13 @@ pub struct PersonaActivationPackage {
     pub alias: String,
     pub version: Option<String>,
     pub content_hash: String,
+    #[serde(default)]
+    pub lock_digest: String,
     pub source: String,
     pub manifest_path: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersonaActivationRecord {
     pub persona_id: String,
@@ -109,14 +106,69 @@ pub struct PersonaActivationRecord {
     pub exported_policy_digest: String,
     pub effective_policy_digest: String,
     pub effective_policy: PersonaEffectivePolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migration: Option<PersonaActivationMigration>,
     pub activated_at_ms: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonaActivationMigration {
+    pub status: PersonaActivationMigrationStatus,
+    pub source_schema_version: u32,
+    pub legacy_effective_policy_digest: String,
+    /// Validated schema-v1 policy retained for audit only. None of these
+    /// archived values are treated as an active runtime grant.
+    pub not_enforced_policy: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonaActivationMigrationStatus {
+    ReactivationRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersonaActivationLedger {
     pub schema_version: u32,
     pub activations: BTreeMap<String, PersonaActivationRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyPersonaEffectivePolicyV1 {
+    autonomy_tier: PersonaAutonomyTier,
+    receipt_policy: PersonaReceiptPolicy,
+    tools: Vec<String>,
+    capabilities: Vec<String>,
+    permissions: Vec<String>,
+    host_requirements: Vec<String>,
+    model_policy: PersonaModelPolicy,
+    budget: PersonaBudget,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyPersonaActivationRecordV1 {
+    persona_id: String,
+    package: PersonaActivationPackage,
+    exported_policy_digest: String,
+    effective_policy_digest: String,
+    effective_policy: LegacyPersonaEffectivePolicyV1,
+    activated_at_ms: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyPersonaActivationLedgerV1 {
+    schema_version: u32,
+    activations: BTreeMap<String, LegacyPersonaActivationRecordV1>,
+}
+
+#[derive(Deserialize)]
+struct ActivationLedgerVersion {
+    schema_version: u32,
 }
 
 impl Default for PersonaActivationLedger {
@@ -135,7 +187,7 @@ pub enum PersonaActivationAction {
     Deactivate,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersonaActivationReceipt {
     pub schema_version: u32,
@@ -226,11 +278,7 @@ pub fn load_activation_ledger(
         }
         Err(source) => return Err(io_error("read", &path, source)),
     };
-    let ledger: PersonaActivationLedger =
-        serde_json::from_slice(&bytes).map_err(|error| PersonaActivationError::InvalidLedger {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        })?;
+    let ledger = decode_activation_ledger(&path, &bytes)?;
     validate_ledger(&path, &ledger)?;
     Ok(ledger)
 }
@@ -243,6 +291,12 @@ pub(crate) fn materialize_activated_persona(
     discovered: &DiscoverablePersona,
     activation: &PersonaActivationRecord,
 ) -> Result<PersonaManifestEntry, PersonaActivationError> {
+    if activation.migration.is_some() {
+        return Err(stale_activation(
+            activation,
+            "schema-v1 policy requires explicit reactivation".to_string(),
+        ));
+    }
     let provenance = discovered
         .installed_provenance()
         .ok_or_else(|| PersonaActivationError::RootPersona(discovered.id.clone()))?;
@@ -252,7 +306,7 @@ pub(crate) fn materialize_activated_persona(
             format!("resolved identity is '{}'", discovered.id),
         ));
     }
-    if provenance.integrity != "ok" {
+    if !matches!(provenance.integrity.as_str(), "ok" | "observed") {
         return Err(PersonaActivationError::PackageIntegrity {
             persona_id: discovered.id.clone(),
             integrity: provenance.integrity.clone(),
@@ -268,6 +322,11 @@ pub(crate) fn materialize_activated_persona(
             "content hash",
             activation.package.content_hash.as_str(),
             provenance.content_hash.as_deref().unwrap_or(""),
+        ),
+        (
+            "package-generation lock digest",
+            activation.package.lock_digest.as_str(),
+            provenance.lock_digest.as_deref().unwrap_or(""),
         ),
         (
             "package source",
@@ -292,7 +351,7 @@ pub(crate) fn materialize_activated_persona(
         ));
     }
 
-    let exported = effective_policy(&discovered.persona, provenance, &Default::default())?;
+    let exported = exported_policy_contract(&discovered.persona, provenance)?;
     if policy_digest(&exported)? != activation.exported_policy_digest {
         return Err(stale_activation(
             activation,
@@ -302,19 +361,10 @@ pub(crate) fn materialize_activated_persona(
     let effective = &activation.effective_policy;
     let recomputed = effective_policy(
         &discovered.persona,
-        provenance,
         &PersonaAttenuation {
             autonomy_tier: Some(effective.autonomy_tier),
-            daily_usd: effective.budget.daily_usd,
-            hourly_usd: effective.budget.hourly_usd,
-            run_usd: effective.budget.run_usd,
-            frontier_escalations: effective.budget.frontier_escalations,
-            max_tokens: effective.budget.max_tokens,
-            max_runtime_seconds: effective.budget.max_runtime_seconds,
             tools: Some(effective.tools.clone()),
             capabilities: Some(effective.capabilities.clone()),
-            permissions: Some(effective.permissions.clone()),
-            host_requirements: Some(effective.host_requirements.clone()),
         },
     )?;
     if &recomputed != effective {
@@ -326,11 +376,8 @@ pub(crate) fn materialize_activated_persona(
 
     let mut persona = discovered.persona.clone();
     persona.autonomy_tier = Some(effective.autonomy_tier);
-    persona.receipt_policy = Some(effective.receipt_policy);
     persona.tools.clone_from(&effective.tools);
     persona.capabilities.clone_from(&effective.capabilities);
-    persona.model_policy.clone_from(&effective.model_policy);
-    persona.budget.clone_from(&effective.budget);
     Ok(persona)
 }
 
@@ -357,33 +404,39 @@ fn activation_record(
         .clone()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| PersonaActivationError::MissingContentHash(discovered.id.clone()))?;
-    if provenance.integrity != "ok" {
+    let lock_digest = provenance
+        .lock_digest
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| PersonaActivationError::MissingLockDigest(discovered.id.clone()))?;
+    if !matches!(provenance.integrity.as_str(), "ok" | "observed") {
         return Err(PersonaActivationError::PackageIntegrity {
             persona_id: discovered.id.clone(),
             integrity: provenance.integrity.clone(),
         });
     }
-    let exported_policy = effective_policy(&discovered.persona, provenance, &Default::default())?;
-    let effective_policy = effective_policy(&discovered.persona, provenance, attenuation)?;
+    let exported_policy = exported_policy_contract(&discovered.persona, provenance)?;
+    let effective_policy = effective_policy(&discovered.persona, attenuation)?;
     Ok(PersonaActivationRecord {
         persona_id: discovered.id.clone(),
         package: PersonaActivationPackage {
             alias: provenance.package_alias.clone(),
             version: provenance.package_version.clone(),
             content_hash,
+            lock_digest,
             source: provenance.source.clone(),
             manifest_path: discovered.manifest_path.display().to_string(),
         },
         exported_policy_digest: policy_digest(&exported_policy)?,
         effective_policy_digest: policy_digest(&effective_policy)?,
         effective_policy,
+        migration: None,
         activated_at_ms: now_ms,
     })
 }
 
 fn effective_policy(
     persona: &PersonaManifestEntry,
-    provenance: &super::InstalledPersonaProvenance,
     attenuation: &PersonaAttenuation,
 ) -> Result<PersonaEffectivePolicy, PersonaActivationError> {
     let exported_autonomy = persona.autonomy_tier.ok_or_else(|| {
@@ -397,31 +450,35 @@ fn effective_policy(
             exported_autonomy.as_str()
         )));
     }
-    let receipt_policy = persona.receipt_policy.ok_or_else(|| {
-        PersonaActivationError::InvalidAttenuation("exported receipt policy is missing".to_string())
-    })?;
     let exported_capabilities = normalized_persona_capabilities(persona);
     Ok(PersonaEffectivePolicy {
         autonomy_tier,
-        receipt_policy,
         tools: attenuate_set("tool", &persona.tools, attenuation.tools.as_deref())?,
         capabilities: attenuate_set(
             "capability",
             &exported_capabilities,
             attenuation.capabilities.as_deref(),
         )?,
-        permissions: attenuate_set(
-            "permission",
-            &provenance.permissions,
-            attenuation.permissions.as_deref(),
-        )?,
-        host_requirements: attenuate_set(
-            "host requirement",
-            &provenance.host_requirements,
-            attenuation.host_requirements.as_deref(),
-        )?,
-        model_policy: persona.model_policy.clone(),
-        budget: activation_budget(&persona.budget, attenuation)?,
+    })
+}
+
+fn exported_policy_contract(
+    persona: &PersonaManifestEntry,
+    provenance: &super::InstalledPersonaProvenance,
+) -> Result<PersonaExportContract, PersonaActivationError> {
+    persona.autonomy_tier.ok_or_else(|| {
+        PersonaActivationError::InvalidAttenuation("exported autonomy tier is missing".to_string())
+    })?;
+    persona.receipt_policy.ok_or_else(|| {
+        PersonaActivationError::InvalidAttenuation("exported receipt policy is missing".to_string())
+    })?;
+    let mut persona = persona.clone();
+    persona.tools = normalize_set(&persona.tools);
+    persona.capabilities = normalized_persona_capabilities(&persona);
+    Ok(PersonaExportContract {
+        persona,
+        permissions: normalize_set(&provenance.permissions),
+        host_requirements: normalize_set(&provenance.host_requirements),
     })
 }
 
@@ -434,73 +491,6 @@ pub(crate) fn normalized_persona_capabilities(persona: &PersonaManifestEntry) ->
         capabilities.push("llm.call".to_string());
     }
     normalize_set(&capabilities)
-}
-
-fn activation_budget(
-    exported: &PersonaBudget,
-    attenuation: &PersonaAttenuation,
-) -> Result<PersonaBudget, PersonaActivationError> {
-    Ok(PersonaBudget {
-        daily_usd: attenuate_cost("daily_usd", exported.daily_usd, attenuation.daily_usd)?,
-        hourly_usd: attenuate_cost("hourly_usd", exported.hourly_usd, attenuation.hourly_usd)?,
-        run_usd: attenuate_cost("run_usd", exported.run_usd, attenuation.run_usd)?,
-        frontier_escalations: attenuate_count(
-            "frontier_escalations",
-            exported.frontier_escalations,
-            attenuation.frontier_escalations,
-        )?,
-        max_tokens: attenuate_count("max_tokens", exported.max_tokens, attenuation.max_tokens)?,
-        max_runtime_seconds: attenuate_count(
-            "max_runtime_seconds",
-            exported.max_runtime_seconds,
-            attenuation.max_runtime_seconds,
-        )?,
-        extra: exported.extra.clone(),
-    })
-}
-
-fn attenuate_cost(
-    field: &str,
-    exported: Option<f64>,
-    requested: Option<f64>,
-) -> Result<Option<f64>, PersonaActivationError> {
-    let Some(requested) = requested else {
-        return Ok(exported);
-    };
-    if !requested.is_finite() || requested < 0.0 {
-        return Err(PersonaActivationError::InvalidAttenuation(format!(
-            "{field} must be a finite non-negative number"
-        )));
-    }
-    if let Some(limit) = exported {
-        if requested > limit {
-            return Err(PersonaActivationError::InvalidAttenuation(format!(
-                "{field} {requested} exceeds exported limit {limit}"
-            )));
-        }
-    }
-    Ok(Some(requested))
-}
-
-fn attenuate_count<T>(
-    field: &str,
-    exported: Option<T>,
-    requested: Option<T>,
-) -> Result<Option<T>, PersonaActivationError>
-where
-    T: Copy + Ord + std::fmt::Display,
-{
-    let Some(requested) = requested else {
-        return Ok(exported);
-    };
-    if let Some(limit) = exported {
-        if requested > limit {
-            return Err(PersonaActivationError::InvalidAttenuation(format!(
-                "{field} {requested} exceeds exported limit {limit}"
-            )));
-        }
-    }
-    Ok(Some(requested))
 }
 
 fn attenuate_set(
@@ -538,9 +528,98 @@ fn normalize_set(values: &[String]) -> Vec<String> {
     values
 }
 
-fn policy_digest(policy: &PersonaEffectivePolicy) -> Result<String, PersonaActivationError> {
+fn policy_digest(policy: &impl Serialize) -> Result<String, PersonaActivationError> {
     let bytes = serde_json::to_vec(policy)?;
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
+}
+
+fn decode_activation_ledger(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<PersonaActivationLedger, PersonaActivationError> {
+    let probe: ActivationLedgerVersion =
+        serde_json::from_slice(bytes).map_err(|error| invalid_ledger(path, error.to_string()))?;
+    match probe.schema_version {
+        ACTIVATION_SCHEMA_VERSION => {
+            serde_json::from_slice(bytes).map_err(|error| invalid_ledger(path, error.to_string()))
+        }
+        LEGACY_ACTIVATION_SCHEMA_VERSION => {
+            let legacy: LegacyPersonaActivationLedgerV1 = serde_json::from_slice(bytes)
+                .map_err(|error| invalid_ledger(path, error.to_string()))?;
+            migrate_legacy_activation_ledger(path, legacy)
+        }
+        actual => Err(PersonaActivationError::UnsupportedSchema {
+            path: path.display().to_string(),
+            actual,
+            expected: ACTIVATION_SCHEMA_VERSION,
+        }),
+    }
+}
+
+fn migrate_legacy_activation_ledger(
+    path: &Path,
+    legacy: LegacyPersonaActivationLedgerV1,
+) -> Result<PersonaActivationLedger, PersonaActivationError> {
+    if legacy.schema_version != LEGACY_ACTIVATION_SCHEMA_VERSION {
+        return Err(PersonaActivationError::UnsupportedSchema {
+            path: path.display().to_string(),
+            actual: legacy.schema_version,
+            expected: ACTIVATION_SCHEMA_VERSION,
+        });
+    }
+    let mut activations = BTreeMap::new();
+    for (id, record) in legacy.activations {
+        if id != record.persona_id {
+            return Err(invalid_ledger(
+                path,
+                format!(
+                    "activation key '{id}' does not match record id '{}'",
+                    record.persona_id
+                ),
+            ));
+        }
+        if record.package.content_hash.trim().is_empty() {
+            return Err(invalid_ledger(
+                path,
+                format!("activation '{id}' has an empty content hash"),
+            ));
+        }
+        let legacy_digest = policy_digest(&record.effective_policy)?;
+        if legacy_digest != record.effective_policy_digest {
+            return Err(invalid_ledger(
+                path,
+                format!("activation '{id}' legacy effective policy digest does not match"),
+            ));
+        }
+        let effective_policy = PersonaEffectivePolicy {
+            autonomy_tier: record.effective_policy.autonomy_tier,
+            tools: normalize_set(&record.effective_policy.tools),
+            capabilities: normalize_set(&record.effective_policy.capabilities),
+        };
+        let effective_policy_digest = policy_digest(&effective_policy)?;
+        let not_enforced_policy = serde_json::to_value(&record.effective_policy)?;
+        activations.insert(
+            id,
+            PersonaActivationRecord {
+                persona_id: record.persona_id,
+                package: record.package,
+                exported_policy_digest: record.exported_policy_digest,
+                effective_policy_digest,
+                effective_policy,
+                migration: Some(PersonaActivationMigration {
+                    status: PersonaActivationMigrationStatus::ReactivationRequired,
+                    source_schema_version: LEGACY_ACTIVATION_SCHEMA_VERSION,
+                    legacy_effective_policy_digest: legacy_digest,
+                    not_enforced_policy,
+                }),
+                activated_at_ms: record.activated_at_ms,
+            },
+        );
+    }
+    Ok(PersonaActivationLedger {
+        schema_version: ACTIVATION_SCHEMA_VERSION,
+        activations,
+    })
 }
 
 fn validate_ledger(
@@ -570,12 +649,39 @@ fn validate_ledger(
                 format!("activation '{id}' has an empty content hash"),
             ));
         }
+        if activation.migration.is_none() && activation.package.lock_digest.trim().is_empty() {
+            return Err(invalid_ledger(
+                path,
+                format!("activation '{id}' has an empty package-generation lock digest"),
+            ));
+        }
         let actual_digest = policy_digest(&activation.effective_policy)?;
         if actual_digest != activation.effective_policy_digest {
             return Err(invalid_ledger(
                 path,
                 format!("activation '{id}' effective policy digest does not match its policy"),
             ));
+        }
+        if let Some(migration) = &activation.migration {
+            if migration.source_schema_version != LEGACY_ACTIVATION_SCHEMA_VERSION {
+                return Err(invalid_ledger(
+                    path,
+                    format!(
+                        "activation '{id}' migration has unsupported source schema version {}",
+                        migration.source_schema_version
+                    ),
+                ));
+            }
+            let legacy_policy: LegacyPersonaEffectivePolicyV1 =
+                serde_json::from_value(migration.not_enforced_policy.clone())
+                    .map_err(|error| invalid_ledger(path, error.to_string()))?;
+            let legacy_digest = policy_digest(&legacy_policy)?;
+            if legacy_digest != migration.legacy_effective_policy_digest {
+                return Err(invalid_ledger(
+                    path,
+                    format!("activation '{id}' migrated policy digest does not match its archive"),
+                ));
+            }
         }
     }
     Ok(())

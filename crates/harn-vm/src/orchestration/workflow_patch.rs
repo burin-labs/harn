@@ -335,11 +335,11 @@ pub fn bundle_capability_ceiling(bundle: &WorkflowBundle) -> CapabilityPolicy {
     let mut max_side_effect: Option<&'static str> = None;
 
     for node in bundle.workflow.nodes.values() {
-        for tool in &node.capability_policy.tools {
-            tools.insert(tool.clone());
+        for tool in node.capability_policy.allowed_tool_patterns() {
+            tools.insert(tool.to_string());
         }
-        for (capability, ops) in &node.capability_policy.capabilities {
-            let entry = capabilities.entry(capability.clone()).or_default();
+        for (capability, ops) in node.capability_policy.allowed_capabilities() {
+            let entry = capabilities.entry(capability.to_string()).or_default();
             for op in ops {
                 entry.insert(op.clone());
             }
@@ -391,12 +391,10 @@ pub fn bundle_capability_ceiling(bundle: &WorkflowBundle) -> CapabilityPolicy {
 
     CapabilityPolicy {
         tools: tools.into_iter().collect(),
-        tools_restricted: false,
         capabilities: capabilities
             .into_iter()
             .map(|(k, v)| (k, v.into_iter().collect()))
             .collect(),
-        capabilities_restricted: false,
         workspace_roots: workspace_roots.into_iter().collect(),
         read_only_roots: read_only_roots.into_iter().collect(),
         side_effect_level: max_side_effect.map(|level| level.to_string()),
@@ -894,14 +892,8 @@ fn collect_ceiling_violations(
 ) -> Vec<CapabilityCeilingViolation> {
     let mut violations = Vec::new();
     if parent.tools_are_restricted() {
-        if parent.tools_restricted && !requested.tools_are_restricted() {
-            violations.push(CapabilityCeilingViolation {
-                kind: "tool".to_string(),
-                detail: "patch drops the parent tool ceiling".to_string(),
-            });
-        }
-        for tool in &requested.tools {
-            if !parent.tools.contains(tool) {
+        for tool in requested.allowed_tool_patterns() {
+            if !parent.tool_pattern_allows(tool) {
                 violations.push(CapabilityCeilingViolation {
                     kind: "tool".to_string(),
                     detail: format!("tool '{tool}' is not in parent tool ceiling"),
@@ -909,17 +901,20 @@ fn collect_ceiling_violations(
             }
         }
     }
-    if parent.capabilities_restricted && !requested.capabilities_are_restricted() {
-        violations.push(CapabilityCeilingViolation {
-            kind: "capability".to_string(),
-            detail: "patch drops the parent capability ceiling".to_string(),
-        });
-    }
-    for (capability, ops) in &requested.capabilities {
-        match parent.capabilities.get(capability) {
+    for (capability, ops) in requested.allowed_capabilities() {
+        match parent.capability_operations(capability) {
             Some(parent_ops) => {
+                if ops.is_empty() && !parent_ops.is_empty() {
+                    violations.push(CapabilityCeilingViolation {
+                        kind: "capability".to_string(),
+                        detail: format!(
+                            "capability '{capability}' requests every operation beyond parent ceiling"
+                        ),
+                    });
+                    continue;
+                }
                 for op in ops {
-                    if !parent_ops.contains(op) {
+                    if !parent_ops.is_empty() && !parent_ops.contains(op) {
                         violations.push(CapabilityCeilingViolation {
                             kind: "capability".to_string(),
                             detail: format!(

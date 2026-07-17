@@ -238,6 +238,33 @@ fn package_export_map_allows_symlinked_path_dependencies() {
 }
 
 #[test]
+fn explicit_snapshot_resolves_from_a_path_dependency_outside_the_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("consumer");
+    let source = tmp.path().join("source-package");
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(source.join("runtime")).unwrap();
+    fs::write(
+        source.join("runtime/capabilities.harn"),
+        "pub fn exported_capability() { 1 }\n",
+    )
+    .unwrap();
+    let packages_root = package_fixture(&root);
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&source, packages_root.join("acme")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&source, packages_root.join("acme")).unwrap();
+    let importing_file = write_file(&source, "entry.harn", "");
+    let snapshot = PackageSnapshot::acquire(&root).unwrap().unwrap();
+
+    let resolved =
+        resolve_import_path_with_snapshot(&importing_file, "acme/runtime/capabilities", &snapshot)
+            .expect("the caller-owned snapshot should resolve its path dependency");
+
+    assert!(resolved.ends_with("runtime/capabilities.harn"));
+}
+
+#[test]
 fn package_imports_resolve_from_nested_package_module() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

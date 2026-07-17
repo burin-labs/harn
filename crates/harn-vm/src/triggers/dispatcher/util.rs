@@ -23,7 +23,69 @@ use super::{
     TRIGGER_ACCEPTED_AT_MS_HEADER, TRIGGER_CANCEL_REQUESTS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC,
     TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_QUEUE_APPENDED_AT_MS_HEADER,
 };
-use crate::triggers::registry::TriggerBinding;
+use crate::triggers::registry::{usd_to_micros, TriggerBinding};
+
+pub(super) fn dispatch_result_cost_usd_micros(result: &serde_json::Value) -> u64 {
+    for field in ["cost_usd", "costUsd", "total_cost_usd", "totalCostUsd"] {
+        if let Some(cost) = result.get(field).and_then(json_usd_micros) {
+            return cost;
+        }
+    }
+
+    if let Some(nested) = result.get("result") {
+        let nested_cost = dispatch_result_cost_usd_micros(nested);
+        if nested_cost > 0 {
+            return nested_cost;
+        }
+    }
+
+    let stats_rows_cost = result
+        .get("stats_rows")
+        .and_then(|rows| rows.as_array())
+        .map(|rows| {
+            rows.iter().fold(0_u64, |acc, row| {
+                acc.saturating_add(
+                    row.get("total_cost_usd")
+                        .or_else(|| row.get("totalCostUsd"))
+                        .and_then(json_usd_micros)
+                        .unwrap_or_default(),
+                )
+            })
+        })
+        .unwrap_or_default();
+    if stats_rows_cost > 0 {
+        return stats_rows_cost;
+    }
+
+    result
+        .get("cases")
+        .and_then(|cases| cases.as_array())
+        .map(|cases| {
+            cases.iter().fold(0_u64, |case_acc, case| {
+                let trial_cost = case
+                    .get("trials")
+                    .and_then(|trials| trials.as_array())
+                    .map(|trials| {
+                        trials.iter().fold(0_u64, |trial_acc, trial| {
+                            trial_acc.saturating_add(
+                                trial
+                                    .get("cost_usd")
+                                    .or_else(|| trial.get("costUsd"))
+                                    .and_then(json_usd_micros)
+                                    .unwrap_or_default(),
+                            )
+                        })
+                    })
+                    .unwrap_or_default();
+                case_acc.saturating_add(trial_cost)
+            })
+        })
+        .unwrap_or_default()
+}
+
+fn json_usd_micros(value: &serde_json::Value) -> Option<u64> {
+    value.as_f64().map(usd_to_micros)
+}
 
 pub(super) async fn dispatch_cancel_requested(
     event_log: &Arc<AnyEventLog>,

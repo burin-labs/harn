@@ -45,7 +45,8 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
     validate_handoff_routes(&handoff_routes, &root_manifest)?;
     let mut provider_connectors =
         resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
-    let package_snapshot = dependency_package_snapshot(&root_manifest, &manifest_dir)?;
+    let package_snapshot =
+        dependency_package_snapshot(&root_manifest, &manifest_dir)?.map(Arc::new);
     if let Some(snapshot) = package_snapshot.as_ref() {
         provider_connectors.extend(installed_package_provider_connectors(
             snapshot,
@@ -58,6 +59,7 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
         root_manifest.clone(),
         root_manifest_path.clone(),
         manifest_dir.clone(),
+        package_snapshot,
     )?;
 
     Ok(RuntimeExtensions {
@@ -72,6 +74,30 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
         handoff_routes,
         provider_connectors,
     })
+}
+
+/// Load runtime extensions only when `manifest_path` is an exact package
+/// manifest. Standalone persona source/manifest files return `None` so their
+/// callers can use the already validated persona catalog without searching an
+/// ancestor project.
+pub fn try_load_runtime_extensions_from_manifest(
+    manifest_path: &Path,
+) -> Result<Option<RuntimeExtensions>, PackageError> {
+    let manifest_path = if manifest_path.is_dir() {
+        manifest_path.join(MANIFEST)
+    } else {
+        manifest_path.to_path_buf()
+    };
+    if manifest_path.extension().and_then(|value| value.to_str()) == Some("harn") {
+        return Ok(None);
+    }
+    if manifest_path.file_name() != Some(OsStr::new(MANIFEST)) {
+        return Ok(None);
+    }
+    if read_manifest_from_path(&manifest_path).is_err() {
+        return Ok(None);
+    }
+    try_load_runtime_extensions(&manifest_path).map(Some)
 }
 
 fn installed_package_provider_connectors(
@@ -279,6 +305,7 @@ async fn collect_manifest_triggers_with_mode(
     let mut collected = Vec::new();
 
     for (trigger, declarations) in extensions.triggers.iter().zip(validated) {
+        let mut effective_config = trigger.clone();
         let collected_handler = match declarations.handler {
             TriggerHandlerUri::Local(reference) => {
                 let module_path = declarations
@@ -308,8 +335,10 @@ async fn collect_manifest_triggers_with_mode(
             },
             TriggerHandlerUri::Worker { queue } => CollectedTriggerHandler::Worker { queue },
             TriggerHandlerUri::Persona { name } => {
-                let (binding, callable) =
+                let (binding, callable, autonomy_ceiling) =
                     persona_runtime_handler_for_trigger(extensions, trigger, &name)?;
+                effective_config.autonomy_tier =
+                    effective_config.autonomy_tier.min(autonomy_ceiling);
                 CollectedTriggerHandler::Persona { binding, callable }
             }
             TriggerHandlerUri::EvalPack { target } => {
@@ -346,7 +375,7 @@ async fn collect_manifest_triggers_with_mode(
         let flow_control = collect_trigger_flow_control(vm, trigger).await?;
 
         collected.push(CollectedManifestTrigger {
-            config: trigger.clone(),
+            config: effective_config,
             handler: collected_handler,
             when: collected_when,
             flow_control,
@@ -1083,6 +1112,25 @@ pub fn load_personas_from_manifest_path(
             }
         }
     }
+    validate_and_resolve_personas(manifest, manifest_path, manifest_dir)
+}
+
+pub(crate) fn load_personas_from_verified_package_manifest(
+    manifest_path: &Path,
+    source: &str,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
+    let manifest_path = manifest_path.to_path_buf();
+    let manifest_dir = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let manifest = toml::from_str::<Manifest>(source).map_err(|error| {
+        vec![PersonaValidationError {
+            manifest_path: manifest_path.clone(),
+            field_path: "harn.toml".to_string(),
+            message: format!("failed to parse {}: {error}", manifest_path.display()),
+        }]
+    })?;
     validate_and_resolve_personas(manifest, manifest_path, manifest_dir)
 }
 
