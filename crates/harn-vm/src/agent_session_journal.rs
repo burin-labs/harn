@@ -768,10 +768,13 @@ pipeline main(task) {{
         assert!(!run_id.is_empty());
         assert!(!turn_id.is_empty());
 
-        assert!(events.iter().any(|event| {
-            event.kind == SessionEventKind::ToolCall
-                && event.headers.get("tool_call_id") == Some(&"live-call".to_string())
-        }));
+        assert!(
+            events.iter().any(|event| {
+                event.kind == SessionEventKind::ToolCall
+                    && event.headers.get("tool_call_id") == Some(&"live-call".to_string())
+            }),
+            "missing durable tool call: {events:#?}"
+        );
         assert!(events.iter().any(|event| {
             event.kind == SessionEventKind::ToolResult
                 && event.headers.get("tool_call_id") == Some(&"live-call".to_string())
