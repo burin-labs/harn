@@ -408,6 +408,7 @@ pub fn reset_llm_state() {
     mock::reset_llm_mock_state();
     autonomy_budget::reset_autonomy_budget_state();
     agent_session_host::reset_agent_session_host_state();
+    agent_runtime::reset_session_state();
     reminder_providers::clear_reminder_providers();
     permissions::clear_dynamic_permission_state();
     crate::orchestration::clear_all_approval_policy_repeat_counts();

@@ -18,10 +18,9 @@
 
 use crate::value::VmDictExt;
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use crate::actor_chain::ActorChain;
@@ -39,6 +38,12 @@ use crate::tool_annotations::ToolKind;
 use crate::value::VmValue;
 use crate::workspace_anchor::{
     MountMode, MountedRoot, WorkspaceAnchor, WorkspacePolicy, WORKSPACE_ANCHOR_METADATA_KEY,
+};
+
+mod changed_paths;
+pub use changed_paths::{
+    clear_all_session_changed_paths, clear_session_changed_paths, record_session_changed_path,
+    session_changed_paths, take_session_changed_paths,
 };
 
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
@@ -367,69 +372,6 @@ thread_local! {
 tokio::task_local! {
     static CURRENT_TOOL_CALL_TASK: String;
 }
-
-/// Per-session set of filesystem paths a session has mutated (written or
-/// deleted) via the deterministic hostlib write surface. Keyed by session id
-/// and process-global (not thread-local like [`SESSIONS`]) so a background
-/// fan-out child's writes are attributed correctly regardless of which runtime
-/// thread serviced them. Fed by the single hostlib write chokepoint
-/// (`harn-hostlib`'s `fs_snapshot::auto_capture_for_write`), which is reached
-/// only AFTER a write is policy-approved and about to touch disk — so this
-/// reflects ACTUAL committed mutations, not denied/aborted attempts. The
-/// authoritative source for a sub-agent's `files_written` receipt field.
-static SESSION_CHANGED_PATHS: OnceLock<Mutex<BTreeMap<String, BTreeSet<String>>>> = OnceLock::new();
-
-fn session_changed_paths_store() -> &'static Mutex<BTreeMap<String, BTreeSet<String>>> {
-    SESSION_CHANGED_PATHS.get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
-/// Record that `path` was mutated (written/deleted) by `session_id`. Called from
-/// the hostlib write chokepoint; a no-op when either argument is empty.
-pub fn record_session_changed_path(session_id: &str, path: &str) {
-    if session_id.is_empty() || path.is_empty() {
-        return;
-    }
-    if let Ok(mut store) = session_changed_paths_store().lock() {
-        store
-            .entry(session_id.to_string())
-            .or_default()
-            .insert(path.to_string());
-    }
-}
-
-/// The sorted set of paths `session_id` has mutated so far (empty when none).
-/// Non-draining: safe to call for introspection without disturbing the record.
-pub fn session_changed_paths(session_id: &str) -> Vec<String> {
-    session_changed_paths_store()
-        .lock()
-        .ok()
-        .and_then(|store| {
-            store
-                .get(session_id)
-                .map(|set| set.iter().cloned().collect())
-        })
-        .unwrap_or_default()
-}
-
-/// Read AND remove a session's mutated-path set. Used at sub-agent teardown so
-/// the receipt captures the child's writes exactly once and the global map does
-/// not grow unbounded across a long-lived daemon's many fan-outs.
-pub fn take_session_changed_paths(session_id: &str) -> Vec<String> {
-    session_changed_paths_store()
-        .lock()
-        .ok()
-        .and_then(|mut store| store.remove(session_id))
-        .map(|set| set.into_iter().collect())
-        .unwrap_or_default()
-}
-
-/// Drop a session's recorded mutated paths (explicit teardown / test reset).
-pub fn clear_session_changed_paths(session_id: &str) {
-    if let Ok(mut store) = session_changed_paths_store().lock() {
-        store.remove(session_id);
-    }
-}
-
 pub struct CurrentSessionGuard {
     active: bool,
 }
@@ -518,6 +460,7 @@ pub fn reset_session_store() {
     SESSIONS.with(|s| s.borrow_mut().clear());
     CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().clear());
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
+    clear_all_session_changed_paths();
     reset_default_transcript_budget_policy();
 }
 
