@@ -78,7 +78,9 @@ pub(crate) struct TestArgs {
     /// Codecov, `genhtml`, and the VS Code Coverage Gutters extension.
     #[arg(long = "coverage-out", value_name = "PATH")]
     pub coverage_out: Option<String>,
-    /// Show per-test timing and detailed failures.
+    /// Show per-test timing and detailed failures. Also prints a passing
+    /// case's `log`/`print`/`println` output, which is otherwise shown only
+    /// for failing cases.
     #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
     pub verbose: bool,
     /// Show detailed timing for user and conformance suites.

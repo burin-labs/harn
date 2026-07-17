@@ -71,6 +71,97 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
     );
 }
 
+async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> TestResult {
+    let file_name = format!("{name}.harn");
+    temp.write(&file_name, source_body);
+    let file = temp.path().join(&file_name);
+    let source = Arc::new(fs::read_to_string(&file).unwrap());
+    let case = TestCase {
+        name: name.to_string(),
+        pipeline_name: name.to_string(),
+        program: Arc::new(parse_program(&source).unwrap()),
+        source,
+        file: file.clone(),
+        bindings: Vec::new(),
+        weight: 1,
+        serial_group: None,
+    };
+    execute_case(
+        &case,
+        temp.path(),
+        30_000,
+        &[],
+        &harn_vm::PreparedModuleCache::default(),
+        true,
+        0,
+    )
+    .await
+}
+
+/// `log`/`print`/`println` write into the VM's per-case output buffer
+/// (`Vm::output`). That buffer must survive past `drop(vm)` into the
+/// `TestResult` for both outcomes below — a passing case's probes are the
+/// entire point of adding them, and a failing case is exactly when an
+/// author most needs them.
+#[tokio::test]
+async fn execute_case_captures_log_output_for_a_passing_case() {
+    let temp = TempTestDir::new();
+    let result = run_single_case(
+        &temp,
+        "test_probe",
+        "pipeline test_probe(_task) { log(\"HELLO_PROBE\"); return 1 }",
+    )
+    .await;
+
+    assert!(result.passed, "case should pass: {:?}", result.error);
+    let output = result
+        .captured_output
+        .expect("a case that calls log() must carry captured_output");
+    assert!(
+        output.contains("HELLO_PROBE"),
+        "captured output missing log() text: {output:?}"
+    );
+}
+
+#[tokio::test]
+async fn execute_case_captures_log_output_for_a_failing_case() {
+    let temp = TempTestDir::new();
+    let result = run_single_case(
+        &temp,
+        "test_probe_fail",
+        "pipeline test_probe_fail(_task) { log(\"HELLO_FAIL_PROBE\"); assert(false, \"boom\") }",
+    )
+    .await;
+
+    assert!(!result.passed);
+    assert!(result.error.unwrap_or_default().contains("boom"));
+    let output = result
+        .captured_output
+        .expect("a failing case that calls log() must still carry captured_output");
+    assert!(
+        output.contains("HELLO_FAIL_PROBE"),
+        "captured output missing log() text: {output:?}"
+    );
+}
+
+#[tokio::test]
+async fn execute_case_leaves_captured_output_absent_when_nothing_was_written() {
+    let temp = TempTestDir::new();
+    let result = run_single_case(
+        &temp,
+        "test_silent",
+        "pipeline test_silent(_task) { return 1 }",
+    )
+    .await;
+
+    assert!(result.passed);
+    assert!(
+        result.captured_output.is_none(),
+        "a silent case must not carry a captured_output value: {:?}",
+        result.captured_output
+    );
+}
+
 #[tokio::test]
 async fn execution_timeout_captures_lazy_module_load_attribution() {
     let temp = TempTestDir::new();
@@ -522,6 +613,7 @@ fn passing_result_with_timings(total_ms: u64, execute_ms: u64) -> TestResult {
         file: "tests/test_budget.harn".to_string(),
         passed: true,
         error: None,
+        captured_output: None,
         timeout: None,
         duration_ms: total_ms,
         phases: Some(PhaseTimings {

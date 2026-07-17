@@ -17,7 +17,7 @@ use serde::Serialize;
 use crate::test_runner::{AggregateTimings, PhaseTimings, TestTimeout};
 use crate::test_timing::DurationSummary;
 
-pub const USER_TEST_REPORT_SCHEMA_VERSION: u32 = 2;
+pub const USER_TEST_REPORT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +51,11 @@ pub struct TestCaseReport {
     pub phases: Option<PhaseTimings>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Everything the case wrote via `log`/`print`/`println`/etc, present
+    /// regardless of outcome — a passing case's probes are as valid a
+    /// reason to want this in a JSON/JUnit consumer as a failing case's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captured_output: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -181,6 +186,12 @@ pub fn write_junit(path: &str, report: &TestReport) -> Result<PathBuf, String> {
             xml.push_str(&format!(
                 "      <failure type=\"{kind}\" message=\"test failed\">{escaped_body}</failure>\n"
             ));
+            if let Some(output) = &case.captured_output {
+                let escaped_output = crate::format::escape_html(output);
+                xml.push_str(&format!(
+                    "      <system-out>{escaped_output}</system-out>\n"
+                ));
+            }
         }
         xml.push_str("    </testcase>\n");
     }
@@ -225,6 +236,7 @@ mod tests {
             timeout: None,
             phases: None,
             message: None,
+            captured_output: None,
         });
         report.push(TestCaseReport {
             name: "test_beta".into(),
@@ -235,6 +247,7 @@ mod tests {
             timeout: None,
             phases: None,
             message: Some("expected 1 == 2".into()),
+            captured_output: Some("[harn] probing state\n".into()),
         });
         report.push(TestCaseReport {
             name: "test_gamma".into(),
@@ -251,6 +264,7 @@ mod tests {
                 ..PhaseTimings::default()
             }),
             message: Some("timed out after 30000ms".into()),
+            captured_output: None,
         });
         report.push(TestCaseReport {
             name: "test_delta".into(),
@@ -261,6 +275,7 @@ mod tests {
             timeout: None,
             phases: None,
             message: Some("xfail: flaky".into()),
+            captured_output: None,
         });
         report.set_duration_ms(100);
         report
@@ -289,6 +304,10 @@ mod tests {
         assert!(xml.contains(r#"<failure type="AssertionError""#));
         assert!(xml.contains(r#"<failure type="timeout""#));
         assert!(xml.contains("<skipped"));
+        assert!(xml.contains("<system-out>[harn] probing state\n</system-out>"));
+        // The timed-out case carries no captured output in this fixture;
+        // its `<testcase>` must not grow a stray `<system-out>`.
+        assert_eq!(xml.matches("<system-out>").count(), 1);
     }
 
     #[test]
@@ -309,6 +328,7 @@ mod tests {
         assert_eq!(cases.len(), 4);
         assert_eq!(cases[0]["outcome"], "passed");
         assert_eq!(cases[1]["outcome"], "failed");
+        assert_eq!(cases[1]["captured_output"], "[harn] probing state\n");
         assert_eq!(cases[2]["outcome"], "timed_out");
         assert_eq!(cases[2]["timeout"]["phase"], "execute");
         assert_eq!(cases[2]["timeout"]["limit_ms"], 30_000);

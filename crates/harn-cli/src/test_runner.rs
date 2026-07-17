@@ -32,6 +32,12 @@ pub struct TestResult {
     pub file: String,
     pub passed: bool,
     pub error: Option<String>,
+    /// Everything the case wrote via `log`/`print`/`println`/etc, in
+    /// execution order. `None` when nothing was written — keeps quiet,
+    /// passing cases from padding reports. Discovery and worker-start
+    /// errors never reach a VM and always leave this absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captured_output: Option<String>,
     /// Typed timeout metadata. Consumers must use this instead of parsing
     /// human-readable error text.
     pub timeout: Option<TestTimeout>,
@@ -746,6 +752,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     file: file.display().to_string(),
                     passed: false,
                     error: Some(format!("Failed to read {}: {e}", file.display())),
+                    captured_output: None,
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
@@ -762,6 +769,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     file: file.display().to_string(),
                     passed: false,
                     error: Some(e),
+                    captured_output: None,
                     timeout: None,
                     duration_ms: 0,
                     phases: None,
@@ -784,6 +792,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                 file: file.display().to_string(),
                 passed: false,
                 error: Some(error),
+                captured_output: None,
                 timeout: None,
                 duration_ms: 0,
                 phases: None,
@@ -1234,6 +1243,7 @@ async fn execute_cases(
                             file: String::new(),
                             passed: false,
                             error: Some(format!("failed to start test runtime: {error}")),
+                            captured_output: None,
                             timeout: None,
                             duration_ms: 0,
                             phases: None,

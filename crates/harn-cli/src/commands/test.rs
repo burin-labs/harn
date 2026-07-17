@@ -25,7 +25,7 @@ mod watch;
 
 pub(crate) use reporting::CONFORMANCE_TEST_SCHEMA_VERSION;
 use reporting::{
-    print_per_test_timing, print_test_results, user_test_report_from_summary,
+    print_per_test_timing, print_test_results, user_test_progress, user_test_report_from_summary,
     ConformanceJsonOutcome, ConformanceJsonReport, ConformanceJsonResult, ConformanceJsonSummary,
 };
 
@@ -1727,6 +1727,7 @@ pub(crate) async fn run_conformance_tests(
                 timeout: None,
                 phases: None,
                 message: if junit_passed { None } else { message.clone() },
+                captured_output: None,
             });
             json_results.push(ConformanceJsonResult {
                 name: rel_path.clone(),
@@ -1756,6 +1757,7 @@ pub(crate) async fn run_conformance_tests(
                 timeout: None,
                 phases: None,
                 message: None,
+                captured_output: None,
             });
             passed += 1;
         } else {
@@ -1780,6 +1782,7 @@ pub(crate) async fn run_conformance_tests(
                 timeout: None,
                 phases: None,
                 message: Some(msg),
+                captured_output: None,
             });
             failed += 1;
         }
@@ -1866,65 +1869,6 @@ pub(crate) async fn run_conformance_tests(
 struct UserTestOutputOptions {
     timing: bool,
     progress: bool,
-}
-
-fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress {
-    std::sync::Arc::new(move |event| match event {
-        test_runner::TestRunEvent::SuiteDiscovered {
-            total_tests,
-            total_files,
-            parallel,
-            workers,
-        } => {
-            if total_tests > 0 {
-                let mode = if parallel { "dynamic" } else { "sequential" };
-                println!(
-                    "Running {} test{} from {} file{} with {} worker{} ({mode} scheduling)\n",
-                    total_tests,
-                    if total_tests == 1 { "" } else { "s" },
-                    total_files,
-                    if total_files == 1 { "" } else { "s" },
-                    workers,
-                    if workers == 1 { "" } else { "s" },
-                );
-            }
-        }
-        test_runner::TestRunEvent::LargeSequentialSuite {
-            total_tests,
-            total_files,
-        } => {
-            println!(
-                "\x1b[33mwarning\x1b[0m: large suite discovered ({total_tests} tests across {total_files} files); running sequentially. Use `--parallel` to enable the bounded worker pool.\n"
-            );
-        }
-        test_runner::TestRunEvent::TestStarted {
-            name,
-            file,
-            test_index,
-            total_tests,
-        } => {
-            if verbose {
-                println!("    RUN   {name} [{file}] ({test_index}/{total_tests})");
-            }
-        }
-        test_runner::TestRunEvent::TestFinished(result) => {
-            if result.passed {
-                println!(
-                    "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
-                    result.name, result.file, result.duration_ms
-                );
-            } else {
-                println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
-                if verbose {
-                    if let Some(err) = &result.error {
-                        for line in err.lines() {
-                            println!("        {line}");
-                        }
-                    }
-                }
-            }
-        }
-    })
 }
 
 async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_runner::TestSummary {
