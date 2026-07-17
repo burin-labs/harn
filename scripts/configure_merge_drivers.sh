@@ -13,8 +13,9 @@ cd "$ROOT_DIR"
 # WARNING: this is only safe when something else regenerates the mirror
 # afterwards. The pre-commit hook handles plain commits; the
 # `.githooks/post-rewrite` hook handles single-commit rebases; the
-# pre-push hook (`make check-language-spec`) is the final guard before
-# CI. Without one of those, a rebase silently drops mirror updates.
+# pre-push generated-artifact checks (including `make check-language-spec`
+# and `make check-cli-aot`) are the final guard before CI. Without one of
+# those, a rebase silently drops regenerated updates.
 git config merge.harn-generated.name "Keep current generated file during merge; regenerate after merge"
 git config merge.harn-generated.driver true
 
