@@ -513,6 +513,27 @@ jobs:
       # connector-schema + session-bundle + run-view-fixture drift, provider
       # catalog + refresh workflow, workflow quickstart, vm rss soak).
       # mcp-rc-conformance stays pruned (subset of the parallel nextest lane).
+      # The `verify-tree-sitter-parse` gate (in audit_gates.sh) loads the
+      # compiled tree-sitter grammar. Install Node + the tree-sitter CLI and
+      # compile the shared library from the committed tree-sitter-harn/src
+      # BEFORE the audit fanout so the sweep only has to parse. `touch
+      # src/parser.c` keeps the sweep from treating the just-checked-out
+      # (equal-mtime) parser.c as stale and paying the multi-minute
+      # `tree-sitter generate` fallback — the committed parser.c is
+      # authoritative here, so we compile it directly (~1s) rather than
+      # regenerate it.
+      - uses: ./.github/actions/node-cache
+        if: matrix.kind == 'audit'
+        with:
+          node-version: "22"
+          cache-dependency-path: tree-sitter-harn/package-lock.json
+      - name: Build tree-sitter grammar for the parse sweep
+        if: matrix.kind == 'audit'
+        working-directory: tree-sitter-harn
+        run: |
+          npm ci
+          touch src/parser.c
+          ./scripts/tree-sitter-cli.sh build
       - name: Run Harn conformance and audit
         id: release-audit-harn
         if: matrix.kind == 'audit'
