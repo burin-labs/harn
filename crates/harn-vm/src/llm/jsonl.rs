@@ -269,24 +269,7 @@ fn serialize_llm_mock_value(
         let tool_calls = mock
             .tool_calls
             .into_iter()
-            .map(|tool_call| {
-                let object = tool_call
-                    .as_object()
-                    .ok_or_else(|| "recorded tool call must be an object".to_string())?;
-                let name = object
-                    .get("name")
-                    .and_then(|value| value.as_str())
-                    .ok_or_else(|| "recorded tool call is missing `name`".to_string())?;
-                let arguments = object
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!({}));
-                if versioned {
-                    Ok(serde_json::json!({"name": name, "arguments": arguments}))
-                } else {
-                    Ok(serde_json::json!({"name": name, "args": arguments}))
-                }
-            })
+            .map(|tool_call| serialize_llm_mock_tool_call(tool_call, versioned))
             .collect::<Result<Vec<_>, String>>()?;
         object.insert(
             "tool_calls".to_string(),
@@ -397,6 +380,66 @@ fn serialize_llm_mock_value(
     Ok(serde_json::Value::Object(object))
 }
 
+fn serialize_llm_mock_tool_call(
+    tool_call: serde_json::Value,
+    versioned: bool,
+) -> Result<serde_json::Value, String> {
+    let object = tool_call
+        .as_object()
+        .ok_or_else(|| "recorded tool call must be an object".to_string())?;
+    let name = object
+        .get("name")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "recorded tool call is missing `name`".to_string())?;
+    let arguments = object
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !versioned {
+        // Preserve the legacy v0 serialization byte shape.
+        return Ok(serde_json::json!({"name": name, "args": arguments}));
+    }
+
+    let mut serialized = serde_json::Map::new();
+    for field in ["id", "type"] {
+        if let Some(value) = object.get(field) {
+            serialized.insert(field.to_string(), value.clone());
+        }
+    }
+    serialized.insert(
+        "name".to_string(),
+        serde_json::Value::String(name.to_string()),
+    );
+    serialized.insert("arguments".to_string(), arguments);
+    if let Some(provider_metadata) = serialize_tool_call_provider_metadata(object)? {
+        serialized.insert("provider_metadata".to_string(), provider_metadata);
+    }
+    Ok(serde_json::Value::Object(serialized))
+}
+
+fn serialize_tool_call_provider_metadata(
+    tool_call: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<serde_json::Value>, String> {
+    let mut metadata = match tool_call.get("provider_metadata") {
+        None => serde_json::Map::new(),
+        Some(serde_json::Value::Object(metadata)) => metadata.clone(),
+        Some(_) => return Err("recorded provider_metadata must be an object".to_string()),
+    };
+    let call = serde_json::Value::Object(tool_call.clone());
+    if let Some(signature) = crate::llm::providers::gemini_tool_call_thought_signature(&call) {
+        let gemini = metadata
+            .entry("gemini".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        let gemini = gemini
+            .as_object_mut()
+            .ok_or_else(|| "recorded provider_metadata.gemini must be an object".to_string())?;
+        gemini
+            .entry("thought_signature".to_string())
+            .or_insert_with(|| serde_json::Value::String(signature.to_string()));
+    }
+    Ok((!metadata.is_empty()).then_some(serde_json::Value::Object(metadata)))
+}
+
 /// Resolve `(scope, entry_id, sticky)` for an entry under the given contract
 /// version. Under v0 the scope is forced to the default and the sticky policy
 /// is derived from the legacy `match`/`consume_match` shape; under v1 the
@@ -474,7 +517,7 @@ const V1_ENTRY_FIELDS: &[&str] = &[
     "stream_chunks",
 ];
 
-const V1_TOOL_CALL_FIELDS: &[&str] = &["id", "type", "name", "arguments"];
+const V1_TOOL_CALL_FIELDS: &[&str] = &["id", "type", "name", "arguments", "provider_metadata"];
 const V1_ERROR_FIELDS: &[&str] = &[
     "category",
     "message",
@@ -515,6 +558,19 @@ fn validate_v1_tool_calls(value: Option<&serde_json::Value>) -> Result<(), Strin
         if !object.contains_key("arguments") {
             return Err(format!(
                 "tool_calls[{index}] requires canonical `arguments`; legacy `args` is v0-only"
+            ));
+        }
+        for field in ["id", "type"] {
+            if object.get(field).is_some_and(|value| !value.is_string()) {
+                return Err(format!("tool_calls[{index}].{field} must be a string"));
+            }
+        }
+        if object
+            .get("provider_metadata")
+            .is_some_and(|value| !value.is_object())
+        {
+            return Err(format!(
+                "tool_calls[{index}].provider_metadata must be an object"
             ));
         }
     }
@@ -574,10 +630,19 @@ fn normalize_llm_tool_call(value: &serde_json::Value) -> Result<serde_json::Valu
         .cloned()
         .or_else(|| object.get("args").cloned())
         .unwrap_or_else(|| serde_json::json!({}));
-    Ok(serde_json::json!({
-        "name": name,
-        "arguments": arguments,
-    }))
+
+    // V0 inline fixtures historically carried provider-specific normalized
+    // metadata (for example Gemini's `thought_signature`) alongside the
+    // portable call fields. Canonicalize only the legacy arguments alias; v1
+    // validation owns the closed authoring surface before this function runs.
+    let mut normalized = object.clone();
+    normalized.insert(
+        "name".to_string(),
+        serde_json::Value::String(name.to_string()),
+    );
+    normalized.insert("arguments".to_string(), arguments);
+    normalized.remove("args");
+    Ok(serde_json::Value::Object(normalized))
 }
 
 fn parse_llm_mock_error(value: Option<&serde_json::Value>) -> Result<Option<MockError>, String> {
@@ -751,6 +816,28 @@ mod tests {
             mock.raw_tool_calls.is_empty(),
             "normalized tool_calls must not be promoted to provider-native raw_tool_calls"
         );
+    }
+
+    #[test]
+    fn v0_tool_call_normalization_preserves_provider_metadata() {
+        let mock = parse_llm_mock_value(&serde_json::json!({
+            "tool_calls": [{
+                "id": "gemini_call_1",
+                "type": "function",
+                "name": "lookup",
+                "args": {"query": "harn"},
+                "thought_signature": "opaque-gemini-signature"
+            }]
+        }))
+        .expect("parse legacy provider metadata");
+
+        let call = &mock.tool_calls[0];
+        assert_eq!(call["id"], "gemini_call_1");
+        assert_eq!(call["type"], "function");
+        assert_eq!(call["name"], "lookup");
+        assert_eq!(call["arguments"], serde_json::json!({"query": "harn"}));
+        assert_eq!(call["thought_signature"], "opaque-gemini-signature");
+        assert!(call.get("args").is_none(), "legacy alias is canonicalized");
     }
 
     #[test]
@@ -934,6 +1021,51 @@ mod tests {
                 "id":"main-1",
                 "scope":"main",
                 "consume":"once",
+                "tool_calls":[{
+                    "name":"look",
+                    "arguments":{},
+                    "thought_signature":"opaque-gemini-signature"
+                }]
+            }),
+            1,
+            0,
+        )
+        .expect_err("provider-specific metadata is v0-only until the v1 contract owns it");
+        assert!(
+            error.contains("unknown tool_calls[0] field `thought_signature`"),
+            "{error}"
+        );
+
+        let entry = parse_llm_mock_value_versioned(
+            &serde_json::json!({
+                "id":"main-1",
+                "scope":"main",
+                "consume":"once",
+                "tool_calls":[{
+                    "id":"gemini_call_1",
+                    "type":"function",
+                    "name":"look",
+                    "arguments":{},
+                    "provider_metadata": {
+                        "gemini": {"thought_signature":"opaque-gemini-signature"}
+                    }
+                }]
+            }),
+            1,
+            0,
+        )
+        .expect("v1 accepts namespaced provider metadata");
+        assert_eq!(entry.tool_calls[0]["id"], "gemini_call_1");
+        assert_eq!(
+            entry.tool_calls[0]["provider_metadata"]["gemini"]["thought_signature"],
+            "opaque-gemini-signature"
+        );
+
+        let error = parse_llm_mock_value_versioned(
+            &serde_json::json!({
+                "id":"main-1",
+                "scope":"main",
+                "consume":"once",
                 "text":"ok",
                 "texte":"typo"
             }),
@@ -962,11 +1094,30 @@ mod tests {
     fn v1_serializer_emits_a_closed_document_that_reparses() {
         let mock = parse_llm_mock_value(&serde_json::json!({
             "text": "hello",
-            "tool_calls": [{"name": "look", "args": {"file": "src/lib.harn"}}],
+            "tool_calls": [{
+                "id": "gemini_call_1",
+                "type": "function",
+                "name": "look",
+                "args": {"file": "src/lib.harn"},
+                "thought_signature": "opaque-gemini-signature"
+            }],
         }))
         .expect("parse legacy source entry");
 
         let document = serialize_llm_mock_fixture(vec![mock]).expect("serialize v1 document");
+        let serialized_entry: serde_json::Value = serde_json::from_str(
+            document
+                .lines()
+                .nth(1)
+                .expect("fixture contains one serialized entry"),
+        )
+        .expect("serialized entry is JSON");
+        assert_eq!(serialized_entry["tool_calls"][0]["id"], "gemini_call_1");
+        assert_eq!(serialized_entry["tool_calls"][0]["type"], "function");
+        assert_eq!(
+            serialized_entry["tool_calls"][0]["provider_metadata"]["gemini"]["thought_signature"],
+            "opaque-gemini-signature"
+        );
         let fixture = parse_llm_mocks_jsonl(&document).expect("reparse v1 document");
         assert_eq!(fixture.schema_version, 1);
         assert!(!fixture.strict_scopes);
@@ -977,6 +1128,11 @@ mod tests {
         assert_eq!(
             fixture.mocks[0].tool_calls[0]["arguments"]["file"].as_str(),
             Some("src/lib.harn")
+        );
+        assert_eq!(fixture.mocks[0].tool_calls[0]["id"], "gemini_call_1");
+        assert_eq!(
+            fixture.mocks[0].tool_calls[0]["provider_metadata"]["gemini"]["thought_signature"],
+            "opaque-gemini-signature"
         );
     }
 

@@ -31,7 +31,7 @@ pub(crate) use acp::AcpProvider;
 pub(crate) use anthropic::AnthropicProvider;
 pub(crate) use azure_openai::AzureOpenAiProvider;
 pub(crate) use bedrock::BedrockProvider;
-pub(crate) use gemini::GeminiProvider;
+pub(crate) use gemini::{gemini_tool_call_thought_signature, GeminiProvider};
 // Vertex delegates response parsing to the canonical Gemini parser (see
 // `gemini::parse_response`), mirroring its request-building delegation.
 pub(crate) use gemini::parse_response as parse_gemini_response;
