@@ -205,6 +205,46 @@ fn run_sandbox_attestation_reports_effective_policy() {
 }
 
 #[tokio::test]
+async fn execute_run_exit_flushes_stdio_and_bypasses_catch() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let script = temp.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+fn main(harness: Harness) -> int {
+  harness.stdio.print("before ")
+  harness.stdio.println("exit")
+  try {
+    exit(2)
+  } catch (error) {
+    harness.stdio.eprintln("caught")
+  }
+  harness.stdio.eprintln("after")
+  return 0
+}
+"#,
+    )
+    .expect("write script");
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 2, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout, "before exit\n");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
 async fn execute_run_allows_read_from_explicit_read_only_root_but_denies_write() {
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");

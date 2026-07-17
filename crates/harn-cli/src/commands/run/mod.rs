@@ -22,10 +22,13 @@ use crate::skill_loader::{
 mod explain_cost;
 pub mod harnpack;
 pub mod json_events;
+mod lifecycle;
 mod manifest_runtime;
 
 use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
 use self::json_events::NdjsonEmitter;
+pub use self::lifecycle::RunProfileOptions;
+use self::lifecycle::{RunExecution, TerminalRun};
 pub(crate) use self::manifest_runtime::connect_mcp_servers;
 
 /// JSON event-stream configuration for `--json` runs.
@@ -579,22 +582,6 @@ pub enum CliLlmMockMode {
 pub struct RunAttestationOptions {
     pub receipt_out: Option<PathBuf>,
     pub agent_id: Option<String>,
-}
-
-/// Opt-in profiling. When `text` is true the run prints a categorical
-/// breakdown to stderr after execution; when `json_path` is set the same
-/// rollup is serialized to that path. Either flag enables span tracing
-/// (i.e. `harn_vm::tracing::set_tracing_enabled(true)`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RunProfileOptions {
-    pub text: bool,
-    pub json_path: Option<PathBuf>,
-}
-
-impl RunProfileOptions {
-    pub fn is_enabled(&self) -> bool {
-        self.text || self.json_path.is_some()
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1751,11 +1738,15 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let execution = local
         .run_until(async {
             match vm.execute(&chunk).await {
-                Ok(value) => Ok((vm.output(), value)),
-                Err(e) => Err(vm.format_runtime_error(&e)),
+                Ok(value) => RunExecution::Terminal(TerminalRun::Returned(value)),
+                Err(error) => match error.process_exit_code() {
+                    Some(code) => RunExecution::Terminal(TerminalRun::ProcessExited(code)),
+                    None => RunExecution::Failed(vm.format_runtime_error(&error)),
+                },
             }
         })
         .await;
+    let output = vm.output();
     if let Some(t) = timing.as_deref_mut() {
         t.run_main = main_start.elapsed();
     }
@@ -1788,8 +1779,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     stderr.push_str(&buffered_stderr);
 
     let exit_code = match &execution {
-        Ok((_, return_value)) => exit_code_from_return_value(return_value),
-        Err(_) => 1,
+        RunExecution::Terminal(terminal) => terminal.exit_code(),
+        RunExecution::Failed(_) => 1,
     };
 
     if let (Some(options), Some(log)) = (attestation.as_ref(), attestation_log.as_ref()) {
@@ -1832,7 +1823,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     }
 
     match execution {
-        Ok((output, return_value)) => {
+        RunExecution::Terminal(terminal) => {
             stdout.push_str(output);
             let main_events = harn_vm::tracing::peek_spans().len() as u64;
             let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
@@ -1852,8 +1843,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                     stderr.push_str(&format!("warning: failed to write profile: {error}\n"));
                 }
             }
-            if exit_code != 0 {
-                stderr.push_str(&render_return_value_error(&return_value));
+            if let Some(diagnostic) = terminal.nonzero_return_diagnostic() {
+                stderr.push_str(&diagnostic);
             }
             let aux_emission = emit_run_aux_for_exit(
                 summary.as_ref(),
@@ -1879,7 +1870,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                     outcome.stderr = aux_emission.stderr;
                     return outcome;
                 }
-                let value = harn_vm::llm::vm_value_to_json(&return_value);
+                let value = terminal.json_value();
                 let mut outcome = session.finalize_result(value, aux_emission.exit_code);
                 outcome.stderr = aux_emission.stderr;
                 return outcome;
@@ -1890,7 +1881,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 exit_code: aux_emission.exit_code,
             }
         }
-        Err(rendered_error) => {
+        RunExecution::Failed(rendered_error) => {
             stderr.push_str(&rendered_error);
             let main_events = harn_vm::tracing::peek_spans().len() as u64;
             let cpu_ms_total = cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start));
@@ -2585,10 +2576,7 @@ pub(crate) async fn run_file_mcp_serve(
         .run_until(async {
             match vm.execute(&chunk).await {
                 Ok(_) => {}
-                Err(e) => {
-                    eprint!("{}", vm.format_runtime_error(&e));
-                    process::exit(1);
-                }
+                Err(error) => crate::commands::serve::exit_after_mcp_pipeline_error(&vm, &error),
             }
 
             // Pipeline output goes to stderr — stdout is the MCP transport.

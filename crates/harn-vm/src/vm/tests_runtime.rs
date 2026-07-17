@@ -324,7 +324,7 @@ fn runtime_error_renderer_normalizes_frame_paths() {
     assert!(!rendered.contains("/../"));
 }
 
-async fn run_harn_result_async(source: &str) -> Result<(String, VmValue), VmError> {
+pub(super) async fn run_harn_result_async(source: &str) -> Result<(String, VmValue), VmError> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
