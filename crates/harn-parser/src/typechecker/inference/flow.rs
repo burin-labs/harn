@@ -1002,10 +1002,8 @@ impl TypeChecker {
                         .map(|f| {
                             if f.name == *key {
                                 ShapeField {
-                                    name: f.name.clone(),
-                                    type_expr: f.type_expr.clone(),
                                     optional: false,
-                                    span: f.span,
+                                    ..f.clone()
                                 }
                             } else {
                                 f.clone()

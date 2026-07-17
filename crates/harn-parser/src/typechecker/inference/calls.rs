@@ -1000,10 +1000,8 @@ impl TypeChecker {
                 fields
                     .iter()
                     .map(|field| ShapeField {
-                        name: field.name.clone(),
                         type_expr: Self::apply_type_bindings(&field.type_expr, bindings),
-                        optional: field.optional,
-                        span: field.span,
+                        ..field.clone()
                     })
                     .collect(),
             ),
@@ -1014,10 +1012,8 @@ impl TypeChecker {
                 let fields = fields
                     .iter()
                     .map(|field| ShapeField {
-                        name: field.name.clone(),
                         type_expr: Self::apply_type_bindings(&field.type_expr, bindings),
-                        optional: field.optional,
-                        span: field.span,
+                        ..field.clone()
                     })
                     .collect();
                 let rests = rests
