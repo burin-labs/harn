@@ -171,7 +171,7 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/llm/capabilities/lookup.rs"
+path = "src/llm/capabilities/overrides.rs"
 statics = ["LLM_CAPABILITY_OVERRIDES_CONTEXT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
