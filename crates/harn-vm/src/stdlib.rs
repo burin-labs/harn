@@ -490,4 +490,33 @@ fn main(harness: Harness) {
             .expect("execute harness clock probe");
         assert!(matches!(result, crate::value::VmValue::Bool(true)));
     }
+
+    /// `harn_stdlib::builtin_reexports` names builtins from a crate that
+    /// cannot see the builtin registry, so nothing there can catch a typo or a
+    /// rename. This is that check: every re-exported name must resolve to a
+    /// real builtin, or `import { … } from "std/…"` binds a reference to
+    /// nothing and fails at the call site instead of the import.
+    #[test]
+    fn every_stdlib_builtin_reexport_names_a_registered_builtin() {
+        let registered: std::collections::HashSet<&str> = all_builtin_defs()
+            .iter()
+            .flat_map(|def| std::iter::once(def.sig.name).chain(def.aliases.iter().copied()))
+            .collect();
+
+        let mut checked = 0;
+        for entry in harn_stdlib::STDLIB_SOURCES {
+            for name in harn_stdlib::builtin_reexports(entry.module) {
+                assert!(
+                    registered.contains(name),
+                    "std/{} re-exports '{name}', which is not a registered builtin",
+                    entry.module
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 0,
+            "no re-exports were checked — the table or the module list is not being read"
+        );
+    }
 }

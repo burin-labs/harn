@@ -29,7 +29,7 @@ pipeline default() {
   assert_eq(step.tail, "hello")
   assert(step.command_id != nil)
   assert(step.output_path != nil)
-  assert(step.artifacts.combined == step.output_path)
+  assert_eq(step.artifacts.combined, step.output_path)
   const tail = command_output_tail(step, {length: 3})
   assert_eq(tail.content, "llo")
   assert_eq(tail.eof, true)

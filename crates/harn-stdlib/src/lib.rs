@@ -381,6 +381,39 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         .find_map(|entry| (entry.module == module).then_some(entry.source))
 }
 
+/// Builtins a stdlib module re-exports under its own name, so
+/// `import { assert_eq } from "std/testing"` resolves.
+///
+/// Some of the standard library is implemented in Rust rather than Harn — the
+/// value differ behind `assert_eq` needs to walk the runtime representation of
+/// a value, which Harn source cannot do. Those builtins are callable without an
+/// import, but a reader who has just typed `import { assert_throws } from
+/// "std/testing"` has every reason to expect its sibling `assert_eq` to come
+/// from the same place, and no reason to know which side of the Rust/Harn line
+/// a given assertion happens to fall on. This table erases that seam: the
+/// module's export surface is its `pub fn`s plus the names listed here.
+///
+/// The list is explicit rather than derived from the builtins' `category`
+/// metadata: a category is a free-form label for docs and observability, and an
+/// export surface is an API contract. Deriving one from the other would let an
+/// unrelated metadata edit silently add or remove a public export.
+///
+/// `harn_vm::stdlib::tests` pins every name here to a registered builtin, so an
+/// entry cannot rot into a name that no longer exists.
+pub fn builtin_reexports(module: &str) -> &'static [&'static str] {
+    match module {
+        "testing" => &[
+            "assert",
+            "assert_approx",
+            "assert_eq",
+            "assert_matches",
+            "assert_ne",
+            "value_diff",
+        ],
+        _ => &[],
+    }
+}
+
 /// Find an embedded CLI subcommand script by name. Returns the embedded
 /// source string when present, or `None` if no script with that name is
 /// registered in [`STDLIB_CLI_SCRIPTS`].

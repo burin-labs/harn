@@ -31,7 +31,6 @@ pipeline test() {
   assert_step_emitted("checked_step", { event -> event.output.result.value == "input:done" })
   assert_receipt_field(result.receipt, "/status", "success")
   assert_golden_transcript(
-    {events: [{type: "step", elapsed_ms: "<ms>", id: "<uuid>", payload: {value: "input:done"}}]},
     {
       events: [
         {
@@ -42,6 +41,7 @@ pipeline test() {
         },
       ],
     },
+    {events: [{type: "step", elapsed_ms: "<ms>", id: "<uuid>", payload: {value: "input:done"}}]},
   )
   step_assertions_end()
   __io_println("testing_step_assertions ok")
