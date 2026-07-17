@@ -76,6 +76,7 @@ import {
   agent_session_drain_feedback,
   agent_session_drain_host_injections,
   agent_session_finalize,
+  agent_session_flush,
   agent_session_init,
   agent_session_inject_feedback,
   agent_session_messages,
@@ -266,6 +267,7 @@ fn __invoke_llm_with_autocontinue(
   iteration_index,
 ) {
   const retry_llm_opts = llm_clear_one_shot_prefill(llm_opts)
+  agent_session_flush(session_id)
   let call = agent_invoke_llm(message, turn_system, llm_opts)
   const max_continuations = __autocontinue_max_continuations(llm_opts)
   let attempts = 0

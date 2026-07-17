@@ -30,6 +30,7 @@ use super::tools::{
 use super::{emit_live_agent_event_sync as emit_event, permissions};
 
 const HOST_SESSION_FINALIZE: &str = "__host_agent_session_finalize";
+const HOST_SESSION_FLUSH: &str = "__host_agent_session_flush";
 const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assistant";
 const HOST_SESSION_RECORD_TOOL_RESULTS: &str = "__host_agent_session_record_tool_results";
 const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
@@ -389,11 +390,36 @@ async fn host_agent_session_init(
         .or_else(crate::agent_sessions::current_session_id)
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
 
-    // Open the session record up front so hook tape capture works even
-    // when `user_prompt_submit` vetoes the turn — the resulting blocked
-    // result still surfaces a transcript with `hook_call`/`hook_vetoed`
-    // entries.
-    let prompt_session_id = crate::agent_sessions::open_or_create(Some(session_id.clone()));
+    // Configure canonical persistence before hooks run. A cold session with
+    // durable history is seeded before the hook so its context is available
+    // to the rest of initialization; a live session keeps its VM state.
+    let has_live_session = crate::agent_sessions::exists(&session_id);
+    let hydrated = crate::agent_session_journal::hydrate_and_configure(
+        &session_id,
+        &opts_map,
+        format!("agent_run_{}", now_id()),
+        format!("agent_turn_{}", now_id()),
+    )
+    .await?;
+    let has_canonical_history = !hydrated.messages.is_empty();
+    let prompt_session_id = if has_canonical_history && !has_live_session {
+        let seeded_session_id = crate::agent_sessions::seed_from_messages(
+            Some(session_id.clone()),
+            &hydrated.messages,
+            serde_json::json!({}),
+            system.clone(),
+            None,
+        )
+        .map_err(VmError::Runtime)?;
+        crate::agent_sessions::restore_message_event_ids(
+            &seeded_session_id,
+            &hydrated.source_event_ids,
+        )
+        .map_err(VmError::Runtime)?;
+        seeded_session_id
+    } else {
+        crate::agent_sessions::open_or_create(Some(session_id.clone()))
+    };
 
     let prompt_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::UserPromptSubmit.as_str(),
@@ -409,6 +435,7 @@ async fn host_agent_session_init(
         )
         .await?
     {
+        flush_init_terminal(&prompt_session_id, "blocked", "user_prompt_submit_blocked").await?;
         let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
         return Ok(agent_init_control_done(
             &prompt_session_id,
@@ -422,6 +449,7 @@ async fn host_agent_session_init(
         AutonomyCheck::NoBudget => None,
         AutonomyCheck::Approved(config) => Some(config),
         AutonomyCheck::Denied(result) => {
+            flush_init_terminal(&prompt_session_id, "blocked", "autonomy_budget_denied").await?;
             return Ok(agent_init_control_done(
                 &session_id,
                 &message,
@@ -443,6 +471,7 @@ async fn host_agent_session_init(
         Ok(guard) => Some(guard),
         Err(error) => {
             let denial = build_nested_budget_denial(&resolved, &message, &error);
+            flush_init_terminal(&resolved, "blocked", "nested_policy_denied").await?;
             return Ok(agent_init_control_done(
                 &resolved,
                 &message,
@@ -484,8 +513,12 @@ async fn host_agent_session_init(
     // exactly as `llm_call`'s `messages` array would. The caller owns this
     // history — it is transient seeding, not session persistence. See
     // `seed_history_messages`.
-    let seeded_history = seed_history_messages(&opts_map)?;
-    let has_history = !seeded_history.is_empty();
+    let seeded_history = if has_canonical_history {
+        Vec::new()
+    } else {
+        seed_history_messages(&opts_map)?
+    };
+    let has_history = has_canonical_history || !seeded_history.is_empty();
     for history_msg in seeded_history {
         crate::agent_sessions::inject_message(&resolved, history_msg).map_err(VmError::Runtime)?;
     }
@@ -566,6 +599,7 @@ async fn host_agent_session_init(
         super::reminder_providers::options_map_to_json(&opts_map),
     )
     .await?;
+    crate::agent_session_journal::flush(&resolved).await?;
 
     let mut control = crate::value::DictMap::new();
     control.put_str("session_id", resolved);
@@ -586,6 +620,51 @@ async fn host_agent_session_init(
     );
     control.insert(crate::value::intern_key("done"), VmValue::Bool(false));
     Ok(VmValue::dict(control))
+}
+
+async fn flush_init_terminal(
+    session_id: &str,
+    final_status: &str,
+    stop_reason: &str,
+) -> Result<(), VmError> {
+    let event = super::helpers::transcript_event(
+        "agent_run_terminal",
+        "assistant",
+        "internal",
+        "Agent loop did not enter its provider phase",
+        Some(serde_json::json!({
+            "final_status": final_status,
+            "stop_reason": stop_reason,
+        })),
+    );
+    crate::agent_sessions::append_event(session_id, event).map_err(VmError::Runtime)?;
+    crate::agent_session_journal::flush(session_id).await?;
+    crate::agent_session_journal::clear(session_id);
+    Ok(())
+}
+
+/// Flush the live transcript journal at the common pre-provider boundary.
+#[harn_builtin(
+    sig = "__host_agent_session_flush(session_id: string) -> nil",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
+async fn host_agent_session_flush(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let session_id = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    if session_id.trim().is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_FLUSH}: session_id must be a non-empty string"
+        )));
+    }
+    crate::agent_session_journal::flush(&session_id).await?;
+    Ok(VmValue::Nil)
 }
 
 enum AutonomyCheck {
@@ -824,6 +903,21 @@ async fn host_agent_session_finalize(
         crate::agent_sessions::append_event(&session_id, transcript_event)
             .map_err(VmError::Runtime)?;
     }
+    let terminal_event = super::helpers::transcript_event(
+        "agent_run_terminal",
+        "assistant",
+        "internal",
+        "Agent loop reached a terminal state",
+        Some(serde_json::json!({
+            "final_status": canonical_status,
+            "stop_reason": stop_reason,
+            "terminal_class": terminal_class,
+            "error": terminal_error,
+        })),
+    );
+    crate::agent_sessions::append_event(&session_id, terminal_event).map_err(VmError::Runtime)?;
+    crate::agent_session_journal::flush(&session_id).await?;
+    crate::agent_session_journal::clear(&session_id);
     let snapshot = crate::agent_sessions::transcript(&session_id);
     let transcript_json = snapshot
         .as_ref()

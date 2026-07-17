@@ -461,6 +461,7 @@ pub fn reset_session_store() {
     CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().clear());
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
     clear_all_session_changed_paths();
+    crate::agent_session_journal::reset();
     reset_default_transcript_budget_policy();
 }
 
@@ -1577,46 +1578,10 @@ fn truncate_state(state: &mut SessionState, keep_first: usize) -> Option<Session
     })
 }
 
-/// Pop the trailing message iff it is an assistant message. Used by
-/// `agent_step_judge` to remove a vetoed assistant turn before
-/// regeneration (the "replace" on_veto path). Returns `true` if a
-/// message was popped, `false` if the transcript was empty, and an
-/// error if the trailing message was not an assistant turn —
-/// signalling a call-site discipline bug rather than a runtime error.
-pub fn pop_last_if_assistant(id: &str) -> Result<bool, String> {
-    SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let Some(state) = map.get_mut(id) else {
-            return Err(format!(
-                "pop_last_if_assistant: unknown session id '{id}'"
-            ));
-        };
-        let messages: Vec<VmValue> = match state.transcript.as_dict() {
-            Some(dict) => match dict.get("messages") {
-                Some(VmValue::List(list)) => list.iter().cloned().collect(),
-                _ => Vec::new(),
-            },
-            None => Vec::new(),
-        };
-        if messages.is_empty() {
-            return Ok(false);
-        }
-        let trailing_role = messages
-            .last()
-            .and_then(|m| m.as_dict())
-            .and_then(|d| d.get("role"))
-            .map(|v| v.display())
-            .unwrap_or_default();
-        if trailing_role != "assistant" {
-            return Err(format!(
-                "pop_last_if_assistant: trailing message role is '{trailing_role}', expected 'assistant'"
-            ));
-        }
-        let keep = messages.len() - 1;
-        truncate_state(state, keep);
-        Ok(true)
-    })
-}
+mod pop_last_assistant;
+pub use pop_last_assistant::pop_last_if_assistant;
+mod restore_message_event_ids;
+pub(crate) use restore_message_event_ids::restore_message_event_ids;
 
 pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
     SESSIONS.with(|s| {
@@ -1679,9 +1644,8 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
         };
         let new_message = VmValue::dict(msg_dict);
         let message_index = messages.len();
-        events.push(crate::llm::helpers::transcript_event_from_message(
-            &new_message,
-        ));
+        let transcript_event = crate::llm::helpers::transcript_event_from_message(&new_message);
+        events.push(transcript_event.clone());
         messages.push(new_message);
         let mut next = dict;
         next.insert(
@@ -1700,6 +1664,11 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
             })
             .unwrap_or(VmValue::Nil);
         apply_transcript_with_budget(state, VmValue::dict(next), "inject_message")?;
+        crate::agent_session_journal::enqueue_message(
+            id,
+            crate::llm::helpers::vm_value_to_json(&transcript_event),
+            crate::llm::helpers::vm_value_to_json(&persisted_message),
+        );
         emit_identified_user_message_event(id, &persisted_message);
         emit_llm_message_event(id, message_index, &persisted_message);
         Ok(())
@@ -2143,6 +2112,7 @@ fn inject_typed_message(
         };
         let new_message = VmValue::dict(msg_dict);
         let message_index = messages.len();
+        let journal_event = transcript_event.clone();
         events.push(transcript_event);
         messages.push(new_message);
         let mut next = dict;
@@ -2162,6 +2132,11 @@ fn inject_typed_message(
             })
             .unwrap_or(VmValue::Nil);
         apply_transcript_with_budget(state, VmValue::dict(next), "inject_host_event")?;
+        crate::agent_session_journal::enqueue_message(
+            id,
+            crate::llm::helpers::vm_value_to_json(&journal_event),
+            crate::llm::helpers::vm_value_to_json(&persisted_message),
+        );
         emit_identified_user_message_event(id, &persisted_message);
         emit_llm_message_event(id, message_index, &persisted_message);
         crate::agent_events::emit_event(&agent_event);
@@ -2957,6 +2932,7 @@ fn append_event_to_state(
     event: VmValue,
     action: &str,
 ) -> Result<(), String> {
+    let journal_event = crate::llm::helpers::vm_value_to_json(&event);
     let dict = state
         .transcript
         .as_dict()
@@ -2979,7 +2955,9 @@ fn append_event_to_state(
         crate::value::intern_key("events"),
         VmValue::List(std::sync::Arc::new(events)),
     );
-    apply_transcript_with_budget(state, VmValue::dict(next), action)
+    apply_transcript_with_budget(state, VmValue::dict(next), action)?;
+    crate::agent_session_journal::enqueue_audit_event(&state.id, journal_event);
+    Ok(())
 }
 
 /// Replace the transcript's message list wholesale. Used by the
@@ -3013,12 +2991,20 @@ pub fn replace_messages_with_summary(
             .iter()
             .map(crate::stdlib::json_to_vm_value)
             .collect();
+        let replacement_events = crate::llm::helpers::transcript_events_from_messages(&vm_messages);
+        let source_event_ids = replacement_events
+            .iter()
+            .map(|event| {
+                event
+                    .as_dict()
+                    .and_then(|event| event.get("id"))
+                    .map(VmValue::display)
+            })
+            .collect();
         let mut next = dict;
         next.insert(
             crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(
-                crate::llm::helpers::transcript_events_from_messages(&vm_messages),
-            )),
+            VmValue::List(std::sync::Arc::new(replacement_events)),
         );
         next.insert(
             crate::value::intern_key("messages"),
@@ -3030,6 +3016,12 @@ pub fn replace_messages_with_summary(
             next.remove("summary");
         }
         apply_transcript_with_budget(state, VmValue::dict(next), "replace_messages")?;
+        crate::agent_session_journal::enqueue_messages_replaced(
+            id,
+            messages.to_vec(),
+            summary.map(str::to_string),
+            source_event_ids,
+        );
         Ok(())
     })
 }
