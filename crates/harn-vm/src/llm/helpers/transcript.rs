@@ -1026,8 +1026,12 @@ mod tests {
             }));
             let event = transcript_event_from_message(&message);
             assert_eq!(
-                event.as_dict().and_then(|event| event.get("kind")),
-                Some(&VmValue::string("tool_result")),
+                event
+                    .as_dict()
+                    .and_then(|event| event.get("kind"))
+                    .map(VmValue::display)
+                    .as_deref(),
+                Some("tool_result"),
                 "{role} results must use the canonical tool_result event"
             );
         }
