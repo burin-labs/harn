@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use crate::event_log::EventLog;
 
+mod side_effect_ceiling;
+
 #[test]
 fn capability_intersection_rejects_privilege_expansion() {
     let ceiling = CapabilityPolicy {
@@ -1306,42 +1308,6 @@ fn myers_diff_equal() {
     let ops = myers_diff(&["a", "b", "c"], &["a", "b", "c"]);
     assert_eq!(ops.len(), 3);
     assert!(ops.iter().all(|(op, _)| *op == DiffOp::Equal));
-}
-
-#[test]
-fn execution_policy_rejects_process_exec_when_read_only() {
-    push_execution_policy(CapabilityPolicy {
-        side_effect_level: Some("read_only".to_string()),
-        capabilities: BTreeMap::from([("process".to_string(), vec!["exec".to_string()])]),
-        ..Default::default()
-    });
-    let result = enforce_current_policy_for_builtin("exec", &[]);
-    pop_execution_policy();
-    assert!(result.is_err());
-}
-
-#[test]
-fn execution_policy_allows_llm_call_under_read_only_side_effect_ceiling() {
-    push_execution_policy(CapabilityPolicy {
-        side_effect_level: Some("read_only".to_string()),
-        capabilities: BTreeMap::from([("llm".to_string(), vec!["call".to_string()])]),
-        ..Default::default()
-    });
-    let result = enforce_current_policy_for_builtin("llm_call", &[]);
-    pop_execution_policy();
-    assert!(result.is_ok());
-}
-
-#[test]
-fn execution_policy_rejects_llm_call_without_llm_capability() {
-    push_execution_policy(CapabilityPolicy {
-        side_effect_level: Some("network".to_string()),
-        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
-        ..Default::default()
-    });
-    let result = enforce_current_policy_for_builtin("llm_call", &[]);
-    pop_execution_policy();
-    assert!(result.is_err());
 }
 
 #[test]
