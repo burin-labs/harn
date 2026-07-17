@@ -678,6 +678,21 @@ mod reset_leak_tests {
     use super::*;
     use crate::value::VmValue;
 
+    /// The changed-path map is the authoritative source for a sub-agent's
+    /// `files_written` receipt, is process-global, and is drained only at
+    /// teardown — which a session that errors never reaches. A later session
+    /// reusing the id would report writes it never made.
+    #[test]
+    fn reset_drains_session_changed_paths() {
+        agent_sessions::record_session_changed_path("sess-leak", "/tmp/written-by-a-dead-run.txt");
+        assert!(!agent_sessions::session_changed_paths("sess-leak").is_empty());
+        reset_thread_local_state();
+        assert!(
+            agent_sessions::session_changed_paths("sess-leak").is_empty(),
+            "a receipt must not inherit an abandoned session's writes"
+        );
+    }
+
     #[test]
     fn reset_drains_agent_inbox() {
         orchestration::agent_inbox::reset();

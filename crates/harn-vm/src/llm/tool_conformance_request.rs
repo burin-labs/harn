@@ -129,6 +129,7 @@ pub(super) fn probe_request_payload(
         session_id: None,
         reminder_lifecycle: Vec::new(),
         cli_llm_mock_scope: None,
+        mock_scope: None,
     };
     payload.messages = probe_messages(provider, probe_case, marker);
     apply_request_profile(&mut payload, request_profile);

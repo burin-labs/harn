@@ -9,6 +9,7 @@ pub(crate) async fn run(args: PersonaArgs) -> Result<(), String> {
     let manifest = manifest.as_deref();
     match command {
         PersonaCommand::New(args) => super::persona_scaffold::run_new(&args).await,
+        PersonaCommand::Materialize(args) => super::persona_scaffold::run_materialize(&args).await,
         PersonaCommand::Doctor(args) => super::persona_doctor::run_doctor(manifest, &args).await,
         PersonaCommand::Check(args) => {
             super::persona::run_check(manifest, &args);

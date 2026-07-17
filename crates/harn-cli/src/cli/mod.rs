@@ -180,7 +180,7 @@ pub(crate) use parse_tokens::{ParseArgs, TokensArgs};
 pub(crate) use persona::{
     PersonaActivateArgs, PersonaActivationsArgs, PersonaArgs, PersonaCheckArgs, PersonaCommand,
     PersonaControlArgs, PersonaDeactivateArgs, PersonaDoctorArgs, PersonaInspectArgs,
-    PersonaListArgs, PersonaNewArgs, PersonaSpendArgs, PersonaStatusArgs,
+    PersonaListArgs, PersonaMaterializeArgs, PersonaNewArgs, PersonaSpendArgs, PersonaStatusArgs,
     PersonaSupervisionCommand, PersonaSupervisionTailArgs, PersonaTemplateKind, PersonaTickArgs,
     PersonaTriggerArgs,
 };

@@ -227,6 +227,46 @@ pub struct PolicyDenial {
     pub gate: crate::agent_events::DenialGate,
     pub capability: Option<String>,
     pub reason: String,
+    /// Typed side-effect facts for a ceiling refusal. The agent dispatch
+    /// boundary converts this into its public denial payload and, only after
+    /// an explicit ACP approval, may use it to construct an exact one-call
+    /// exception.
+    pub side_effect_ceiling: Option<SideEffectCeilingViolation>,
+}
+
+/// The policy-owned portion of a side-effect ceiling refusal. It deliberately
+/// excludes presentation and approval transport details, which belong at the
+/// agent dispatch boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SideEffectCeilingViolation {
+    pub ceiling: SideEffectLevel,
+    pub required_level: SideEffectLevel,
+}
+
+/// A dispatch-local exception produced only after a host approves one exact
+/// side-effect ceiling refusal. It is not serializable or stored, preventing a
+/// transient ACP choice from becoming an ambient or durable grant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SideEffectCeilingGrant {
+    tool_name: String,
+    violation: SideEffectCeilingViolation,
+}
+
+impl PolicyDenial {
+    /// Build the one-call exception corresponding to this exact denial.
+    pub(crate) fn side_effect_grant_for(&self, tool_name: &str) -> Option<SideEffectCeilingGrant> {
+        self.side_effect_ceiling
+            .map(|violation| SideEffectCeilingGrant {
+                tool_name: tool_name.to_string(),
+                violation,
+            })
+    }
+}
+
+impl SideEffectCeilingGrant {
+    fn matches(&self, tool_name: &str, violation: SideEffectCeilingViolation) -> bool {
+        self.tool_name == tool_name && self.violation == violation
+    }
 }
 
 impl From<PolicyDenial> for VmError {
@@ -247,6 +287,7 @@ pub(super) fn reject_tool(
         gate,
         capability,
         reason,
+        side_effect_ceiling: None,
     })
 }
 
@@ -530,6 +571,17 @@ pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmErr
 }
 
 pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), PolicyDenial> {
+    enforce_current_policy_for_tool_with_side_effect_grant(tool_name, None)
+}
+
+/// Enforce the active tool policy, optionally honoring one exact
+/// dispatch-local side-effect grant. Tool and capability ceilings remain hard
+/// requirements, and argument constraints are enforced by the caller after
+/// this function returns.
+pub(crate) fn enforce_current_policy_for_tool_with_side_effect_grant(
+    tool_name: &str,
+    side_effect_grant: Option<&SideEffectCeilingGrant>,
+) -> Result<(), PolicyDenial> {
     use crate::agent_events::DenialGate;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
@@ -557,14 +609,28 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), PolicyDeni
         if requested_level != SideEffectLevel::None
             && !policy_allows_side_effect(&policy, requested_level.as_str())
         {
-            return reject_tool(
-                DenialGate::SideEffectCeiling,
-                None,
-                format!(
-                    "tool '{tool_name}' exceeds side-effect ceiling: {}",
-                    requested_level.as_str()
+            let ceiling = policy
+                .side_effect_level
+                .as_deref()
+                .map(SideEffectLevel::parse)
+                .expect("a side-effect refusal requires an active policy ceiling");
+            let violation = SideEffectCeilingViolation {
+                ceiling,
+                required_level: requested_level,
+            };
+            if side_effect_grant.is_some_and(|grant| grant.matches(tool_name, violation)) {
+                return Ok(());
+            }
+            return Err(PolicyDenial {
+                gate: DenialGate::SideEffectCeiling,
+                capability: None,
+                reason: format!(
+                    "tool '{tool_name}' requires side-effect level '{}' but the active ceiling is '{}'",
+                    requested_level.as_str(),
+                    ceiling.as_str(),
                 ),
-            );
+                side_effect_ceiling: Some(violation),
+            });
         }
     }
     Ok(())

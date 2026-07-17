@@ -53,6 +53,7 @@ pub use registry::{
 pub use sinks::{AgentEventSink, EventLogSink, JsonlEventSink, MultiSink, PersistedAgentEvent};
 pub use terminal::{classify_agent_terminal, AgentTerminalKind, AgentTerminalOutcome};
 pub use tool::{
-    DenialGate, ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
+    DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, ToolCallErrorCategory,
+    ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
 };
 pub use worker::{FsWatchEvent, WorkerEvent};

@@ -43,12 +43,14 @@ type PersonaBlueprintTrigger = {
   kind: string,
   provider: string,
   events: list<string>,
+  secrets: dict,
   schedule?: string,
   timezone?: string,
   handler: string,
 }
 
 type PersonaBlueprintLowering = {
+  profile: "prompt_compiled_v1",
   template: string,
   persona: {name: string, description: string, goal: string},
   policy: {autonomy_tier: "suggest", receipt_policy: "required"},
@@ -264,6 +266,18 @@ pub fn persona_blueprint_validate(blueprint, providers = nil) -> PersonaBlueprin
   return __persona_blueprint_finalize(report)
 }
 
+fn __persona_blueprint_required_secret_refs(provider) -> dict {
+  let secrets = {}
+  for requirement in provider.secret_requirements {
+    if requirement.required {
+      // A lowering carries stable identifiers, never secret material. Package
+      // validation owns the check that each provider-scoped reference is valid.
+      secrets = secrets + {[requirement.name]: provider.provider + "/" + requirement.name}
+    }
+  }
+  return secrets
+}
+
 fn __persona_blueprint_lower_trigger(blueprint, providers) -> PersonaBlueprintTrigger {
   const handler = "persona://" + blueprint.name
   if blueprint.cron != nil {
@@ -272,6 +286,7 @@ fn __persona_blueprint_lower_trigger(blueprint, providers) -> PersonaBlueprintTr
       kind: "cron",
       provider: "cron",
       events: ["cron.tick"],
+      secrets: {},
       schedule: blueprint.cron.cron,
       timezone: blueprint.cron.timezone,
       handler: handler,
@@ -283,6 +298,7 @@ fn __persona_blueprint_lower_trigger(blueprint, providers) -> PersonaBlueprintTr
     kind: provider.kinds[0],
     provider: blueprint.external.provider,
     events: [blueprint.external.event],
+    secrets: __persona_blueprint_required_secret_refs(provider),
     schedule: nil,
     timezone: nil,
     handler: handler,
@@ -311,6 +327,7 @@ pub fn persona_blueprint_compile(blueprint, providers = nil) -> PersonaBlueprint
   const trigger = __persona_blueprint_lower_trigger(typed, catalog)
   return Ok(
     {
+      profile: "prompt_compiled_v1",
       template: typed.template,
       persona: {name: typed.name, description: typed.description, goal: typed.goal},
       policy: {autonomy_tier: "suggest", receipt_policy: "required"},
