@@ -11,8 +11,6 @@ keeps condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
-## v0.10.22
-
 ### Breaking
 
 - **Discarding the result of a pure collection method is now an error
@@ -59,17 +57,7 @@ keeps condensed series summaries instead of full per-patch history.
   Package-generation reader leases left open by an aborted run are released
   during runtime reset.
 
-### Added
 
-- Surface the agent loop's typed terminal outcome on the ACP agent-event stream so headless hosts can distinguish
-  natural completion from policy, budget, and error stops, including the live natural-completion reasons.
-- Apply classifier-backed missing-tool-call recovery to native-tool turns before accepting prose as natural completion.
-- `release_ship.sh --finalize` now skips a redundant `git push origin <tag>` when
-  origin already has the release tag at `HEAD`, avoiding pre-push hook failures
-  during tag-triggered release finalization.
-- `wait_command(timeout_ms)` now synchronizes directly with live background
-  handles, so it can return a completed result after process output is visible but
-  before the session feedback inbox wakes.
 
 - Add experimental `std/calendar::is_valid_cron` and `std/personas/compiler` primitives for
   parser-aligned, deterministic prompt-persona trigger lowering.
@@ -249,6 +237,20 @@ keeps condensed series summaries instead of full per-patch history.
   Previously it was only recognized in binding initializers and call
   arguments, so a passing program such as `return Basket { items: ... }`
   produced a spurious `ERROR` node.
+
+## v0.10.22
+
+### Added
+
+- Surface the agent loop's typed terminal outcome on the ACP agent-event stream so headless hosts can distinguish
+  natural completion from policy, budget, and error stops, including the live natural-completion reasons.
+- Apply classifier-backed missing-tool-call recovery to native-tool turns before accepting prose as natural completion.
+- `release_ship.sh --finalize` now skips a redundant `git push origin <tag>` when
+  origin already has the release tag at `HEAD`, avoiding pre-push hook failures
+  during tag-triggered release finalization.
+- `wait_command(timeout_ms)` now synchronizes directly with live background
+  handles, so it can return a completed result after process output is visible but
+  before the session feedback inbox wakes.
 
 ## v0.10.21
 
