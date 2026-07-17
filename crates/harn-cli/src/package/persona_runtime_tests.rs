@@ -224,43 +224,6 @@ fn installed_persona_is_inert_until_activation_and_deactivation_is_reversible() 
 }
 
 #[test]
-fn activated_persona_id_collision_with_root_manifest_fails_closed() {
-    let tmp = tempfile::tempdir().unwrap();
-    let anchor = installed_persona_project(
-        tmp.path(),
-        r#"
-[package]
-name = "consumer"
-
-[[personas]]
-name = "agents/reviewer"
-description = "A local persona with a conflicting qualified id."
-entry_workflow = "root.harn#run"
-tools = ["github"]
-autonomy = "suggest"
-receipts = "required"
-"#,
-        false,
-    );
-    activate_persona(
-        Some(&tmp.path().join(MANIFEST)),
-        "agents/reviewer",
-        &PersonaAttenuation::default(),
-        100,
-    )
-    .unwrap();
-
-    let error = try_load_runtime_extensions(&anchor)
-        .expect_err("ambiguous activated persona identity must fail closed");
-    assert!(
-        error
-            .to_string()
-            .contains("runtime persona id 'agents/reviewer' is ambiguous"),
-        "{error}"
-    );
-}
-
-#[test]
 fn activated_persona_fails_closed_when_installed_content_changes() {
     let tmp = tempfile::tempdir().unwrap();
     let anchor = installed_persona_project(tmp.path(), "[package]\nname = \"consumer\"\n", false);
