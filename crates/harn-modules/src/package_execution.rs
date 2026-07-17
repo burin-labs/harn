@@ -173,17 +173,11 @@ impl PackageExecutionGuard {
                 self.snapshot.generation()
             )));
         }
-        let relative_to_generation =
-            entry
-                .strip_prefix(self.snapshot.packages_root())
-                .map_err(|_| {
-                    PackageExecutionError::Invalid(format!(
-                        "entry {} is outside package generation {} rooted at '{}'",
-                        entry.display(),
-                        self.snapshot.generation(),
-                        self.snapshot.packages_root().display()
-                    ))
-                })?;
+        let relative_to_generation = lexical_package_relative_path(
+            entry,
+            self.snapshot.packages_root(),
+            self.snapshot.generation(),
+        )?;
         let mut components = relative_to_generation.components();
         let package_alias = match components.next() {
             Some(Component::Normal(alias)) => alias.to_str().ok_or_else(|| {
@@ -295,6 +289,35 @@ impl PackageExecutionGuard {
     pub fn package_alias(&self) -> &str {
         &self.package_alias
     }
+}
+
+fn lexical_package_relative_path(
+    entry: &Path,
+    canonical_packages_root: &Path,
+    generation: &str,
+) -> Result<PathBuf, PackageExecutionError> {
+    let outside_generation = || {
+        PackageExecutionError::Invalid(format!(
+            "entry {} is outside package generation {} rooted at '{}'",
+            entry.display(),
+            generation,
+            canonical_packages_root.display()
+        ))
+    };
+    let mut input_packages_root = None;
+    for ancestor in entry.ancestors() {
+        if ancestor
+            .canonicalize()
+            .is_ok_and(|canonical| canonical == canonical_packages_root)
+        {
+            input_packages_root = Some(ancestor);
+        }
+    }
+    let input_packages_root = input_packages_root.ok_or_else(&outside_generation)?;
+    entry
+        .strip_prefix(input_packages_root)
+        .map(Path::to_path_buf)
+        .map_err(|_| outside_generation())
 }
 
 impl fmt::Debug for PackageExecutionGuard {
@@ -726,5 +749,23 @@ mod tests {
 
         let error = compute_package_content_hash(temp.path()).unwrap_err();
         assert!(error.to_string().contains("unsupported symlink"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn guard_accepts_equivalent_root_alias_without_losing_escape_detection() {
+        let (temp, snapshot, entry, content_hash) = fixture();
+        let alias = temp.path().join("project-alias");
+        std::os::unix::fs::symlink(".", &alias).unwrap();
+        let aliased_entry = alias.join(entry.strip_prefix(temp.path()).unwrap());
+        let guard = PackageExecutionGuard::new(snapshot, "agents", content_hash).unwrap();
+
+        let source = guard.verify_entry_source(&aliased_entry).unwrap();
+
+        assert_eq!(source, b"pub pipeline run() { return 1 }\n");
+        let aliased_packages_root = aliased_entry.parent().unwrap().parent().unwrap();
+        let escape = aliased_packages_root.join("agents/../shared/helper.harn");
+        let error = guard.verify_entry_source(&escape).unwrap_err();
+        assert!(error.to_string().contains("unsafe package-relative path"));
     }
 }
