@@ -866,10 +866,8 @@ impl TypeChecker {
                 fields
                     .iter()
                     .map(|field| ShapeField {
-                        name: field.name.clone(),
                         type_expr: self.resolve_alias_inner(&field.type_expr, scope, visiting),
-                        optional: field.optional,
-                        span: field.span,
+                        ..field.clone()
                     })
                     .collect(),
             ),
@@ -880,10 +878,8 @@ impl TypeChecker {
                 let fields = fields
                     .iter()
                     .map(|field| ShapeField {
-                        name: field.name.clone(),
                         type_expr: self.resolve_alias_inner(&field.type_expr, scope, visiting),
-                        optional: field.optional,
-                        span: field.span,
+                        ..field.clone()
                     })
                     .collect();
                 let rests = rests

@@ -224,10 +224,9 @@ fn intersect_shapes(
         if let Some(schema_field) = schema_fields.iter().find(|f| f.name == field.name) {
             let intersected = intersect_types(&field.type_expr, &schema_field.type_expr)?;
             merged.push(ShapeField {
-                name: field.name.clone(),
                 type_expr: intersected,
                 optional: field.optional && schema_field.optional,
-                span: field.span,
+                ..field.clone()
             });
         } else {
             merged.push(field.clone());
