@@ -9,6 +9,7 @@ use super::{helpers, mock};
 const LLM_MOCK_BUILTINS: &[&VmBuiltinDef] = &[
     &LLM_MOCK_BUILTIN_DEF,
     &LLM_MOCK_CALLS_BUILTIN_DEF,
+    &LLM_MOCK_RECEIPTS_BUILTIN_DEF,
     &LLM_MOCK_CLEAR_BUILTIN_DEF,
     &LLM_MOCK_PUSH_SCOPE_BUILTIN_DEF,
     &LLM_MOCK_POP_SCOPE_BUILTIN_DEF,
@@ -102,6 +103,41 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
     });
     let consume_on_match = matches!(config.get("consume_match"), Some(VmValue::Bool(true)));
+    // Scope/consume parity with the file-fixture contract. `consume` (v1
+    // vocabulary) wins when present; otherwise the legacy shape decides —
+    // reusable glob unless `consume_match`, FIFO always consumed.
+    let scope = match config.get("scope") {
+        None | Some(VmValue::Nil) => mock::DEFAULT_MOCK_SCOPE.to_string(),
+        Some(value) => {
+            let name = value.display();
+            if name.trim().is_empty() {
+                mock::DEFAULT_MOCK_SCOPE.to_string()
+            } else {
+                name
+            }
+        }
+    };
+    let entry_id = match config.get("id") {
+        None | Some(VmValue::Nil) => String::new(),
+        Some(value) => value.display(),
+    };
+    let sticky = match config.get("consume") {
+        None | Some(VmValue::Nil) => match_pattern.is_some() && !consume_on_match,
+        Some(VmValue::String(mode)) => match mode.as_str() {
+            "once" => false,
+            "sticky" => true,
+            other => {
+                return Err(VmError::Runtime(format!(
+                    "llm_mock: consume must be \"once\" or \"sticky\", got {other:?}"
+                )))
+            }
+        },
+        Some(_) => {
+            return Err(VmError::Runtime(
+                "llm_mock: consume must be a string \"once\" or \"sticky\"".to_string(),
+            ))
+        }
+    };
 
     let input_tokens = config.get("input_tokens").and_then(|v| v.as_int());
     let output_tokens = config.get("output_tokens").and_then(|v| v.as_int());
@@ -199,7 +235,9 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         tool_calls,
         raw_tool_calls: Vec::new(),
         match_pattern,
-        consume_on_match,
+        scope,
+        entry_id,
+        sticky,
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -321,6 +359,26 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 "max_tool_calls".to_string(),
                 c.max_tool_calls.map(VmValue::Int).unwrap_or(VmValue::Nil),
             );
+            VmValue::dict(dict)
+        })
+        .collect();
+    Ok(VmValue::List(std::sync::Arc::new(result)))
+}
+
+/// Return the scope-consumption receipts emitted since the last clear.
+/// Each receipt is `{ scope, matched, entry_id, consume }`, letting a test
+/// assert which scope bucket served each call without reading engine state.
+#[harn_builtin(sig = "llm_mock_receipts() -> list", category = "llm.mock")]
+fn llm_mock_receipts_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let receipts = mock::get_llm_mock_receipts();
+    let result: Vec<VmValue> = receipts
+        .iter()
+        .map(|receipt| {
+            let mut dict = std::collections::BTreeMap::new();
+            dict.put_str("scope", receipt.scope.as_str());
+            dict.insert("matched".to_string(), VmValue::Bool(receipt.matched));
+            dict.put_str("entry_id", receipt.entry_id.as_str());
+            dict.put_str("consume", receipt.consume.as_str());
             VmValue::dict(dict)
         })
         .collect();
