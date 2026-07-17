@@ -10,7 +10,11 @@ const SKIP_DIR_NAMES = [".burin", ".git", ".harn", ".harn-runs", "node_modules"]
 
 const CARGO_TARGET_DIR_NAMES = [".target", "target"]
 
-const CARGO_TARGET_DIR_PREFIXES = [".target-", "target-"]
+const CARGO_TARGET_DIR_PREFIXES = [".target-"]
+
+const WORKTREE_CARGO_TARGET_DIR_PREFIX = "target-"
+
+const CARGO_TARGET_ARTIFACT_DIR_NAMES = ["debug", "release"]
 
 const GENERATED_SOURCE_PREFIXES = ["spec/protocol-artifacts/"]
 
@@ -90,8 +94,8 @@ fn source_path_for_baseline(shard_path: string) -> string? {
   return source_path
 }
 
-/** Collect matching files while pruning dependency, build, and runtime trees. */
-fn cargo_target_dir_name(name: string) -> bool {
+/** Identify generated Cargo target directories without hiding similarly named source trees. */
+fn standard_cargo_target_dir_name(name: string) -> bool {
   if CARGO_TARGET_DIR_NAMES.contains(name) {
     return true
   }
@@ -103,8 +107,23 @@ fn cargo_target_dir_name(name: string) -> bool {
   return false
 }
 
-fn skip_dir_name(name: string) -> bool {
-  return SKIP_DIR_NAMES.contains(name) || cargo_target_dir_name(name)
+fn root_worktree_cargo_target_dir(root: string, rel_dir: string, name: string) -> bool {
+  if rel_dir != "" || !name.starts_with(WORKTREE_CARGO_TARGET_DIR_PREFIX) {
+    return false
+  }
+  const dir = path_join(root, name)
+  for artifact_dir in CARGO_TARGET_ARTIFACT_DIR_NAMES {
+    if harness.fs.exists(path_join(dir, artifact_dir)) {
+      return true
+    }
+  }
+  return false
+}
+
+fn skip_dir(root: string, rel_dir: string, name: string) -> bool {
+  return SKIP_DIR_NAMES.contains(name)
+    || standard_cargo_target_dir_name(name)
+    || root_worktree_cargo_target_dir(root, rel_dir, name)
 }
 
 fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
@@ -124,7 +143,7 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
     .sort_by({ entry -> entry.path })
   for entry in entries {
     const name = basename(entry.path)
-    if skip_dir_name(name) {
+    if skip_dir(root, rel_dir, name) {
       continue
     }
     const rel = normalize_source_path(
