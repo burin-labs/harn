@@ -55,9 +55,27 @@ pub struct LoadedSkills {
 
 const REQUIRE_SIGNED_SKILLS_ENV: &str = "HARN_REQUIRE_SIGNED_SKILLS";
 
+#[cfg(test)]
+thread_local! {
+    static LOAD_SKILLS_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_load_skills_calls() {
+    LOAD_SKILLS_CALLS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn load_skills_calls() -> usize {
+    LOAD_SKILLS_CALLS.get()
+}
+
 /// Build a [`LoadedSkills`] from CLI inputs. Does no I/O unless one of
 /// the input layers has a directory to walk.
 pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
+    #[cfg(test)]
+    LOAD_SKILLS_CALLS.set(LOAD_SKILLS_CALLS.get() + 1);
+
     let mut cfg = FsLayerConfig {
         cli_dirs: inputs.cli_dirs.clone(),
         ..FsLayerConfig::default()

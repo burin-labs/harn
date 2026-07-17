@@ -1,7 +1,7 @@
 //! Hermetic per-case VM setup, execution, timeout, and teardown.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use super::{PhaseTimings, TestCase, TestPhase, TestResult, TestTimeout};
@@ -55,7 +55,7 @@ pub(super) async fn execute_case(
     case: &TestCase,
     execution_cwd: &Path,
     timeout_ms: u64,
-    cli_skill_dirs: &[PathBuf],
+    loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
     #[cfg(test)] setup_delay_ms: u64,
@@ -150,13 +150,7 @@ pub(super) async fn execute_case(
                     vm.set_source_dir(parent);
                 }
             }
-            let loaded =
-                crate::skill_loader::load_skills(&crate::skill_loader::SkillLoaderInputs {
-                    cli_dirs: cli_skill_dirs.to_vec(),
-                    source_path: Some(case.file.clone()),
-                });
-            crate::skill_loader::emit_loader_warnings(&loaded.loader_warnings);
-            crate::skill_loader::install_skills_global(&mut vm, &loaded);
+            crate::skill_loader::install_skills_global(&mut vm, loaded_skills);
             let extensions = crate::package::try_load_runtime_extensions(&case.file)
                 .map_err(|error| format!("failed to load runtime extensions: {error}"))?;
             register_manifest_host_operations(&extensions);

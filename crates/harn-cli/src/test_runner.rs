@@ -19,12 +19,15 @@ use crate::test_timing::DurationSummary;
 use crate::CLI_RUNTIME_STACK_SIZE;
 
 mod execution;
+mod reporting;
 mod session;
+mod skill_context;
 #[cfg(test)]
 mod tests;
 
 use execution::execute_case;
 pub use session::{TestRunSession, TestRunSessionStats};
+use skill_context::PreparedSkillContexts;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TestResult {
@@ -124,32 +127,6 @@ impl AggregateTimings {
                 modules: acc.modules.saturating_add(p.modules),
             },
         )
-    }
-}
-
-impl TestResult {
-    /// Emit a one-line phase breakdown to stderr. Driven by `--diagnose`
-    /// / `HARN_TEST_DIAGNOSE=1`. The format is intentionally
-    /// machine-readable so downstream eval pipelines can grep it.
-    fn emit_diagnose(&self) {
-        let outcome = if self.passed { "ok" } else { "FAIL" };
-        let phases = self
-            .phases
-            .expect("diagnostics are emitted only for executed cases");
-        eprintln!(
-            "[harn test diag] {} {} setup={}ms compile={}ms execute={}ms teardown={}ms module_compile={}ms module_load={}ms modules_compiled={} modules_loaded={} total={}ms",
-            outcome,
-            self.name,
-            phases.setup_ms,
-            phases.compile_ms,
-            phases.execute_ms,
-            phases.teardown_ms,
-            phases.modules.module_compile_ms,
-            phases.modules.module_load_ms,
-            phases.modules.modules_compiled,
-            phases.modules.modules_loaded,
-            self.duration_ms,
-        );
     }
 }
 
@@ -450,6 +427,7 @@ async fn run_tests_with_session_impl(
             discovery.discovery_errors.clear();
         }
     }
+    let skill_contexts = PreparedSkillContexts::prepare(&discovery.cases, &options.cli_skill_dirs);
     let collection_ms = collection_start.elapsed().as_millis() as u64;
     let selected_files_with_tests = if options.shard.is_some() {
         count_files_with_cases(&discovery.cases)
@@ -484,7 +462,15 @@ async fn run_tests_with_session_impl(
     let mut all_results = discovery.discovery_errors;
     let total_tests = cases.len();
     let execution = if !options.fail_fast || all_results.is_empty() {
-        execute_cases(cases, workers, options, total_tests, session).await
+        execute_cases(
+            cases,
+            workers,
+            options,
+            total_tests,
+            session,
+            skill_contexts,
+        )
+        .await
     } else {
         CaseExecutionResults::default()
     };
@@ -576,6 +562,7 @@ async fn run_test_file_with_session_impl(
     let program = Arc::new(program);
 
     let cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX)?;
+    let skill_contexts = PreparedSkillContexts::prepare(&cases, cli_skill_dirs);
 
     let mut results = Vec::with_capacity(cases.len());
     let execution_cwd = execution_cwd
@@ -583,12 +570,13 @@ async fn run_test_file_with_session_impl(
         .unwrap_or_else(test_execution_cwd);
     let prepared_module_cache = session.prepared_module_cache(0);
     for case in cases {
+        let loaded_skills = skill_contexts.for_case(&case);
         results.push(
             execute_case(
                 &case,
                 &execution_cwd,
                 timeout_ms,
-                cli_skill_dirs,
+                loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
                 #[cfg(test)]
@@ -1153,6 +1141,7 @@ async fn execute_cases(
     options: &RunOptions,
     total_tests: usize,
     session: &TestRunSession,
+    skill_contexts: PreparedSkillContexts,
 ) -> CaseExecutionResults {
     if cases.is_empty() {
         return CaseExecutionResults::default();
@@ -1162,6 +1151,7 @@ async fn execute_cases(
         let prepared_module_cache = session.prepared_module_cache(0);
         let mut results = Vec::with_capacity(cases.len());
         for case in cases {
+            let loaded_skills = skill_contexts.for_case(&case);
             let cwd = case_execution_cwd(&case);
             let test_index = next_test_index(&completed);
             emit_progress(
@@ -1177,7 +1167,7 @@ async fn execute_cases(
                 &case,
                 &cwd,
                 options.timeout_ms,
-                &options.cli_skill_dirs,
+                loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
                 #[cfg(test)]
@@ -1204,6 +1194,7 @@ async fn execute_cases(
     }
 
     let queue = Arc::new(Mutex::new(cases));
+    let skill_contexts = Arc::new(skill_contexts);
     let gate = Arc::new(ResourceGate::new(workers));
     let results: Arc<Mutex<Vec<TestResult>>> = Arc::new(Mutex::new(Vec::new()));
     let infrastructure_errors: Arc<Mutex<Vec<TestResult>>> = Arc::new(Mutex::new(Vec::new()));
@@ -1212,6 +1203,7 @@ async fn execute_cases(
     let mut handles = Vec::with_capacity(workers);
     for worker_idx in 0..workers {
         let queue = Arc::clone(&queue);
+        let skill_contexts = Arc::clone(&skill_contexts);
         let gate = Arc::clone(&gate);
         let results = Arc::clone(&results);
         let infrastructure_errors = Arc::clone(&infrastructure_errors);
@@ -1221,7 +1213,6 @@ async fn execute_cases(
         let setup_delay_ms = options.setup_delay_ms;
         let max_test_ms = options.max_test_ms;
         let max_execute_ms = options.max_execute_ms;
-        let cli_skill_dirs = options.cli_skill_dirs.clone();
         let progress = options.progress.clone();
         let diagnose = options.diagnose;
         let fail_fast = options.fail_fast;
@@ -1260,6 +1251,7 @@ async fn execute_cases(
                     let Some(case) = case else { break };
                     let _guard = gate.acquire(case.weight, case.serial_group.as_deref());
                     let cwd = case_execution_cwd(&case);
+                    let loaded_skills = skill_contexts.for_case(&case);
                     let test_index = next_test_index(&completed);
                     emit_progress(
                         &progress,
@@ -1274,7 +1266,7 @@ async fn execute_cases(
                         &case,
                         &cwd,
                         timeout_ms,
-                        &cli_skill_dirs,
+                        loaded_skills,
                         &prepared_module_cache,
                         stdio_available,
                         #[cfg(test)]
