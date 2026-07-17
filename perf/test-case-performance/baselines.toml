@@ -1,0 +1,53 @@
+# Parallel test-case performance baselines. Values are observations, not
+# aspirational ceilings. A platform row is added only from a successful run on
+# that platform; the checker fails closed when its platform is uncalibrated.
+schema_version = 1
+workload_version = 1
+
+[platform.macos]
+measured_at = "2026-07-16T04:39:56Z"
+source_commit = "9b2a72438d9ebcdd5c630e52f57951d8535c3c64"
+host = "macOS 26.5.1 arm64"
+sample_count = 7
+regression_x = 2.0
+warn_utilization = 0.8
+telemetry_warn_x = 4.0
+max_child_wall_ms = 80.0
+sum_user_ms = 760.0
+sum_sys_ms = 110.0
+setup_p50_ms = 6.0
+setup_p90_ms = 8.0
+execute_p90_ms = 30.0
+
+[platform.macos.telemetry]
+max_rss_kb = 92832
+major_faults = 0
+minor_faults = 32097
+voluntary_context_switches = 0
+involuntary_context_switches = 2081
+fs_inputs = 0
+fs_outputs = 0
+
+[platform.linux]
+measured_at = "2026-07-16T05:22:23Z"
+source_commit = "1c4461a24cdc068c1b4f6ba003e3430c61a338d9"
+host = "GitHub Actions ubuntu-24.04 20260714.240.1 amd64"
+sample_count = 1
+regression_x = 2.0
+warn_utilization = 0.8
+telemetry_warn_x = 4.0
+max_child_wall_ms = 1770.0
+sum_user_ms = 3070.0
+sum_sys_ms = 120.0
+setup_p50_ms = 121.0
+setup_p90_ms = 154.0
+execute_p90_ms = 875.0
+
+[platform.linux.telemetry]
+max_rss_kb = 197028
+major_faults = 1
+minor_faults = 27022
+voluntary_context_switches = 77
+involuntary_context_switches = 1421
+fs_inputs = 0
+fs_outputs = 96

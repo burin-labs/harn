@@ -6,7 +6,7 @@ const BASELINE_DIR = "scripts/source-file-length-baseline"
 
 const BASELINE_SUFFIX = ".lines"
 
-const SKIP_DIR_NAMES = [".burin", ".git", ".harn", "node_modules", "target"]
+const SKIP_DIR_NAMES = [".burin", ".git", ".harn", ".harn-runs", "node_modules", "target"]
 
 const GENERATED_SOURCE_PREFIXES = ["spec/protocol-artifacts/"]
 
