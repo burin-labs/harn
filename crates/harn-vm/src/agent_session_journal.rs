@@ -285,6 +285,7 @@ fn append_event_for_mutation(
 fn event_kind_for_transcript(event: &serde_json::Value, message_default: bool) -> SessionEventKind {
     match json_string(event, "kind").as_deref() {
         Some("tool_result") => SessionEventKind::ToolResult,
+        Some("tool_call") => SessionEventKind::ToolCall,
         Some("plan") => SessionEventKind::Plan,
         Some("compaction") => SessionEventKind::Compaction,
         Some("system_reminder") => SessionEventKind::SystemReminder,
@@ -426,21 +427,29 @@ fn message_id(payload: &serde_json::Value) -> Option<String> {
 }
 
 fn tool_call_id(payload: &serde_json::Value) -> Option<String> {
-    let message = payload.get("raw_message");
-    let direct = message.and_then(|message| {
-        json_string(message, "tool_call_id")
-            .or_else(|| json_string(message, "tool_use_id"))
-            .or_else(|| json_string(message, "toolUseId"))
-    });
-    if direct.is_some() {
-        return direct;
-    }
-    let calls = message
-        .and_then(|message| message.get("tool_calls"))
-        .and_then(serde_json::Value::as_array)?;
-    (calls.len() == 1)
-        .then(|| calls.first().and_then(|call| json_string(call, "id")))
-        .flatten()
+    let transcript_event = payload.get("transcript_event");
+    [
+        payload.get("raw_message"),
+        transcript_event,
+        transcript_event.and_then(|event| event.get("metadata")),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(tool_call_id_from_value)
+}
+
+fn tool_call_id_from_value(value: &serde_json::Value) -> Option<String> {
+    json_string(value, "tool_call_id")
+        .or_else(|| json_string(value, "tool_use_id"))
+        .or_else(|| json_string(value, "toolUseId"))
+        .or_else(|| {
+            value
+                .get("tool_calls")
+                .and_then(serde_json::Value::as_array)
+                .filter(|calls| calls.len() == 1)
+                .and_then(|calls| calls.first())
+                .and_then(|call| json_string(call, "id"))
+        })
 }
 
 fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
@@ -642,6 +651,32 @@ mod tests {
             },
         )
         .expect("map tool call");
+
+        assert_eq!(event.kind, SessionEventKind::ToolCall);
+        assert_eq!(
+            event.headers.get("tool_call_id"),
+            Some(&"tool-1".to_string())
+        );
+    }
+
+    #[test]
+    fn tool_lifecycle_event_uses_tool_call_row_and_metadata_identity() {
+        let event = append_event_for_mutation(
+            &JournalConfig {
+                root: PathBuf::new(),
+                run_id: "run-tool".to_string(),
+                turn_id: "turn-tool".to_string(),
+            },
+            TranscriptMutation::AuditEventAdded {
+                transcript_event: serde_json::json!({
+                    "id": "event-call",
+                    "kind": "tool_call",
+                    "role": "assistant",
+                    "metadata": {"tool_call_id": "tool-1", "tool_name": "look"},
+                }),
+            },
+        )
+        .expect("map lifecycle tool call");
 
         assert_eq!(event.kind, SessionEventKind::ToolCall);
         assert_eq!(

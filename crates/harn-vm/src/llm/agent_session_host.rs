@@ -2742,6 +2742,8 @@ async fn host_agent_emit_event(
         event_type.as_str(),
         "tool_search_query"
             | "tool_search_result"
+            | "tool_call"
+            | "tool_call_update"
             | "typed_checkpoint"
             | "skill_narrow"
             | "agent_loop_stall_warning"
