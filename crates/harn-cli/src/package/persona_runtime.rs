@@ -80,6 +80,12 @@ pub(crate) fn resolve_runtime_personas(
         }
     }
     resolved.sort_by(|left, right| left.id.cmp(&right.id));
+    if let Some(duplicate) = resolved.windows(2).find(|pair| pair[0].id == pair[1].id) {
+        return Err(PackageError::Manifest(format!(
+            "runtime persona id '{}' is ambiguous; manifest and activated personas must be uniquely named",
+            duplicate[0].id
+        )));
+    }
     Ok(resolved)
 }
 
