@@ -352,6 +352,7 @@ test-pr-gate-scripts:
 	./scripts/tests/cargo_build_dir_isolation_test.sh
 	./scripts/tests/cli_aot_merge_driver_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh
+	./scripts/tests/release_gate_stale_out_dir_test.sh
 	./scripts/tests/release_prepare_env_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
 
