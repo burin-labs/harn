@@ -457,6 +457,11 @@ struct LocatedEnvelope {
     result: Result<Vec<(String, serde_json::Value)>, BlockError>,
 }
 
+/// The outcome of parsing one envelope body: the parsed calls plus the input
+/// slice past the structurally-recognized close tag (empty at end-of-input), or
+/// a `ChatTemplateEnvelope` violation.
+type EnvelopeBody<'a> = Result<(Vec<(String, serde_json::Value)>, &'a str), BlockError>;
+
 fn env_err(detail: String) -> BlockError {
     BlockError::ChatTemplateEnvelope { detail }
 }
@@ -471,33 +476,42 @@ fn env_err(detail: String) -> BlockError {
 /// calls returns a `ChatTemplateEnvelope` violation (fail-loud) rather than
 /// `None`, so runtime parse guidance fires instead of misrouting the turn to
 /// completion/monologue feedback.
+///
+/// Close recognition is STRUCTURAL, never a raw substring scan: the body
+/// parsers consume one complete top-level JSON object (or one complete XML call
+/// block) at a time and only match the closing tag at a boundary BETWEEN those
+/// units. A literal `</tool_code>` / `</tool_calls>` byte inside a JSON string
+/// value or an XML argument value is therefore preserved as content — exactly
+/// what the fenced-JSON contract promises for code-bearing arguments — instead
+/// of truncating the envelope. Whatever survives past the recognized close is
+/// returned as trailing prose.
 fn locate_and_parse_tool_envelope(src: &str) -> Option<LocatedEnvelope> {
     let (opener_start, kind, content_start) = find_top_level_opener(src)?;
-
-    let close = kind.close();
-    let (inner, after) = match src[content_start..].find(close) {
-        Some(rel) => (
-            &src[content_start..content_start + rel],
-            &src[content_start + rel + close.len()..],
-        ),
-        None => (&src[content_start..], ""),
-    };
+    let body = &src[content_start..];
 
     // The singular `<tool_call>` tag collides with the legacy `name({...})`
     // heredoc markup. Only claim it for the JSON dialect when its body is a JSON
     // object; otherwise leave it to the legacy-markup path (which emits its own
     // actionable protocol violation), so the existing legacy behavior is kept.
-    if matches!(kind, EnvelopeKind::ToolCall) && !inner.trim_start().starts_with('{') {
+    if matches!(kind, EnvelopeKind::ToolCall) && !body.trim_start().starts_with('{') {
         return None;
     }
 
-    let result = match kind {
-        EnvelopeKind::ToolCalls => parse_tool_calls_body(inner),
-        EnvelopeKind::ToolCode | EnvelopeKind::ToolCall => parse_json_object_list(inner),
+    let close = kind.close();
+    let parsed = match kind {
+        EnvelopeKind::ToolCalls => parse_tool_calls_body(body, close),
+        EnvelopeKind::ToolCode | EnvelopeKind::ToolCall => parse_json_object_list(body, close),
     };
-    Some(LocatedEnvelope {
-        prose: collapse_prose_around(&src[..opener_start], after),
-        result,
+    let before = &src[..opener_start];
+    Some(match parsed {
+        Ok((calls, after)) => LocatedEnvelope {
+            prose: collapse_prose_around(before, after),
+            result: Ok(calls),
+        },
+        Err(error) => LocatedEnvelope {
+            prose: collapse_prose_around(before, ""),
+            result: Err(error),
+        },
     })
 }
 
@@ -575,15 +589,17 @@ fn collapse_prose_around(before: &str, after: &str) -> String {
 /// first structural token: a JSON object or a `<tool>` marker routes to the
 /// `<tool>`-marker JSON dialect (preserving its marker-required rejection); any
 /// other opening tag (a tag named after the tool) routes to the XML dialect.
-fn parse_tool_calls_body(inner: &str) -> Result<Vec<(String, serde_json::Value)>, BlockError> {
-    let trimmed = inner.trim();
+/// Returns the parsed calls plus the slice past the structurally-recognized
+/// `</tool_calls>` close (empty at end-of-input).
+fn parse_tool_calls_body<'a>(body: &'a str, close: &str) -> EnvelopeBody<'a> {
+    let trimmed = body.trim_start();
     if trimmed.starts_with('{') {
-        return parse_tool_marker_json_body(inner);
+        return parse_tool_marker_json_body(body, close);
     }
     match first_tag_name(trimmed) {
-        Some(name) if is_known_marker(&name) => parse_tool_marker_json_body(inner),
-        Some(_) => parse_xml_tool_calls(inner),
-        None => parse_tool_marker_json_body(inner),
+        Some(name) if is_known_marker(&name) => parse_tool_marker_json_body(body, close),
+        Some(_) => parse_xml_tool_calls(body, close),
+        None => parse_tool_marker_json_body(body, close),
     }
 }
 
@@ -618,17 +634,26 @@ fn is_known_marker(name: &str) -> bool {
 ///
 /// Every `<tool>` marker must be followed by a complete JSON object before
 /// another marker, a `</tool>` close, or the end of the body. Partial markup is
-/// fail-loud rather than dispatching a guessed action.
-fn parse_tool_marker_json_body(body: &str) -> Result<Vec<(String, serde_json::Value)>, BlockError> {
+/// fail-loud rather than dispatching a guessed action. The `</tool_calls>`
+/// `close` is matched only at a boundary (never inside a JSON object), so a
+/// literal `</tool_calls>` inside a JSON string is preserved; the slice past the
+/// close is returned as trailing prose.
+fn parse_tool_marker_json_body<'a>(body: &'a str, close: &str) -> EnvelopeBody<'a> {
     const TOOL_OPEN: &str = "<tool>";
     const TOOL_CLOSE: &str = "</tool>";
 
-    let mut body = body.trim();
+    let mut body = body.trim_start();
     let mut saw_tool_marker = false;
     let mut tool_marker_active = false;
     let mut pending_tool_object = false;
     let mut calls = Vec::new();
-    while !body.is_empty() {
+    let after = loop {
+        if let Some(after) = body.strip_prefix(close) {
+            break after;
+        }
+        if body.is_empty() {
+            break "";
+        }
         if let Some(rest) = body.strip_prefix(TOOL_OPEN) {
             if pending_tool_object {
                 return Err(env_err(
@@ -706,7 +731,7 @@ fn parse_tool_marker_json_body(body: &str) -> Result<Vec<(String, serde_json::Va
         }
         pending_tool_object = false;
         body = body[consumed..].trim_start();
-    }
+    };
 
     if pending_tool_object {
         return Err(env_err(
@@ -723,16 +748,25 @@ fn parse_tool_marker_json_body(body: &str) -> Result<Vec<(String, serde_json::Va
             "the envelope contained no JSON tool object".to_string(),
         ));
     }
-    Ok(calls)
+    Ok((calls, after))
 }
 
 /// Parse a body that is a bare list of consecutive JSON tool objects (the
 /// `<tool_code>` / `<tool_call>` tag-wrapping-JSON dialect). Inline arguments
-/// beside `name` are accepted, matching the chat-template policy.
-fn parse_json_object_list(body: &str) -> Result<Vec<(String, serde_json::Value)>, BlockError> {
-    let mut body = body.trim();
+/// beside `name` are accepted, matching the chat-template policy. The `close`
+/// tag is matched only at a boundary between complete objects (never inside
+/// one), so a literal `</tool_code>` / `</tool_call>` inside a JSON string value
+/// survives as content; the slice past the close is returned as trailing prose.
+fn parse_json_object_list<'a>(body: &'a str, close: &str) -> EnvelopeBody<'a> {
+    let mut body = body.trim_start();
     let mut calls = Vec::new();
-    while !body.is_empty() {
+    let after = loop {
+        if let Some(after) = body.strip_prefix(close) {
+            break after;
+        }
+        if body.is_empty() {
+            break "";
+        }
         if !body.starts_with('{') {
             return Err(env_err(format!(
                 "expected a JSON tool object, found `{}`",
@@ -750,7 +784,7 @@ fn parse_json_object_list(body: &str) -> Result<Vec<(String, serde_json::Value)>
             Some(Err(error)) => {
                 return Err(env_err(format!("invalid JSON tool object: {error}")));
             }
-            None => break,
+            None => break "",
         };
         let consumed = values.byte_offset();
         let obj = match value {
@@ -766,13 +800,13 @@ fn parse_json_object_list(body: &str) -> Result<Vec<(String, serde_json::Value)>
             Err(error) => return Err(env_err(error.into_message())),
         }
         body = body[consumed..].trim_start();
-    }
+    };
     if calls.is_empty() {
         return Err(env_err(
             "the envelope contained no JSON tool object".to_string(),
         ));
     }
-    Ok(calls)
+    Ok((calls, after))
 }
 
 /// Parse the tag-per-call XML dialect inside `<tool_calls>`:
@@ -789,10 +823,19 @@ fn parse_json_object_list(body: &str) -> Result<Vec<(String, serde_json::Value)>
 /// string argument (trimmed, multi-line values kept verbatim). Any tag whose
 /// name is a known structural marker is rejected, and an inner tag left unclosed
 /// at end of input is a violation — a truncated/guessed call never dispatches.
-fn parse_xml_tool_calls(inner: &str) -> Result<Vec<(String, serde_json::Value)>, BlockError> {
-    let mut rest = inner.trim();
+/// The `</tool_calls>` `close` is matched only at a boundary between complete
+/// call blocks (never inside an argument value), so a literal `</tool_calls>`
+/// inside an argument survives; the slice past the close is returned as prose.
+fn parse_xml_tool_calls<'a>(body: &'a str, close: &str) -> EnvelopeBody<'a> {
+    let mut rest = body.trim_start();
     let mut calls = Vec::new();
-    while !rest.is_empty() {
+    let after = loop {
+        if let Some(after) = rest.strip_prefix(close) {
+            break after;
+        }
+        if rest.is_empty() {
+            break "";
+        }
         if !rest.starts_with('<') {
             return Err(env_err(format!(
                 "expected a tool-call tag inside `<tool_calls>`, found `{}`",
@@ -805,20 +848,20 @@ fn parse_xml_tool_calls(inner: &str) -> Result<Vec<(String, serde_json::Value)>,
                 "`<{tag_name}>` is a structural marker, not a tool-call tag"
             )));
         }
-        let close = format!("</{tag_name}>");
-        let (args, after_close) = parse_xml_call_args(after_open, &close, &tag_name)?;
+        let call_close = format!("</{tag_name}>");
+        let (args, after_close) = parse_xml_call_args(after_open, &call_close, &tag_name)?;
         calls.push(super::super::normalize_tool_call_shape(
             &tag_name,
             serde_json::Value::Object(args),
         ));
         rest = after_close.trim_start();
-    }
+    };
     if calls.is_empty() {
         return Err(env_err(
             "the `<tool_calls>` envelope contained no tool-call tags".to_string(),
         ));
     }
-    Ok(calls)
+    Ok((calls, after))
 }
 
 /// Parse one `<NAME ...>` opening tag. Returns the tag name and the slice just
@@ -872,6 +915,14 @@ fn parse_xml_call_args<'a>(
             )));
         }
         let (arg_name, after_open) = parse_open_tag(t)?;
+        // A repeated argument tag makes the call's value for that argument
+        // ambiguous. Fail loud rather than silently taking the last write, so a
+        // guessed/ambiguous call is never dispatched.
+        if args.contains_key(&arg_name) {
+            return Err(env_err(format!(
+                "the `<{tag_name}>` call repeated the `<{arg_name}>` argument; a call with an ambiguous duplicate argument is not executed"
+            )));
+        }
         let arg_close = format!("</{arg_name}>");
         let end = after_open.find(&arg_close).ok_or_else(|| {
             env_err(format!(
@@ -1496,5 +1547,62 @@ mod tests {
             "prose: {:?}",
             out.prose
         );
+    }
+
+    // A repeated XML argument tag makes the call ambiguous -> loud violation,
+    // zero calls (never take the last write and dispatch a guessed value).
+    #[test]
+    fn xml_envelope_duplicate_arg_is_violation_zero_calls() {
+        let out = parse(
+            "<tool_calls>\n<look>\n<file>\na.rs\n</file>\n<file>\nb.rs\n</file>\n</look>\n</tool_calls>",
+        );
+        assert!(out.calls.is_empty(), "calls: {:?}", out.calls);
+        assert_eq!(out.errors.len(), 1, "errors: {:?}", out.errors);
+        assert!(
+            out.errors[0].contains("<file>") && out.errors[0].contains("not executed"),
+            "error: {}",
+            out.errors[0]
+        );
+    }
+
+    // A JSON string argument that contains a literal `</tool_code>` is content,
+    // not the envelope close: structural close recognition keeps the whole
+    // object intact (the raw-`find` scan truncated it before the JSON parser).
+    #[test]
+    fn tool_code_json_string_with_literal_close_tag_survives() {
+        let out = parse(
+            "<tool_code>\n{ \"name\": \"write\", \"args\": { \"content\": \"</tool_code>\" } }\n</tool_code>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "write");
+        assert_eq!(arg(&out.calls[0], "content").unwrap(), "</tool_code>");
+    }
+
+    // Same for the `<tool>`-marker JSON dialect: a literal `</tool_calls>` inside
+    // a JSON string value survives instead of truncating the envelope.
+    #[test]
+    fn tool_marker_json_string_with_literal_envelope_close_survives() {
+        let out = parse(
+            "<tool_calls>\n<tool>\n{ \"name\": \"write\", \"content\": \"</tool_calls>\" }\n</tool_calls>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "write");
+        assert_eq!(arg(&out.calls[0], "content").unwrap(), "</tool_calls>");
+    }
+
+    // An XML argument VALUE containing a literal `</tool_calls>` is content: the
+    // envelope close is recognized only at a call-block boundary, so the value
+    // (closed by its own `</content>`) is preserved verbatim.
+    #[test]
+    fn xml_arg_value_with_literal_envelope_close_survives() {
+        let out = parse(
+            "<tool_calls>\n<write>\n<content>\n</tool_calls>\n</content>\n</write>\n</tool_calls>",
+        );
+        assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+        assert_eq!(out.calls.len(), 1);
+        assert_eq!(out.calls[0]["name"], "write");
+        assert_eq!(arg(&out.calls[0], "content").unwrap(), "</tool_calls>");
     }
 }
