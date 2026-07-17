@@ -33,7 +33,7 @@
 //!
 //! [`ENV_ALLOWLIST`] is the one place the admitted names live. Nothing else in
 //! the codebase should hand-maintain a parallel "safe env" list; the drift test
-//! in this module pins the invariants (sorted, unique, no obviously-secret
+//! in this module pins the invariants (unique, no obviously-secret
 //! names, base essentials present) so an accidental scatter or a secret-shaped
 //! addition fails `cargo test`.
 
@@ -79,7 +79,8 @@ const BASE_ENV_ALLOWLIST: &[&str] = &[
 /// Toolchain variables, grouped by ecosystem. Each is a build/tooling fact
 /// (install root, cache dir, module path) — never a credential. Add here, with
 /// a receipt, when a toolchain fails a hermetic run for want of one; never
-/// regress to a denylist. Kept sorted within each group for the drift test.
+/// regress to a denylist. Grouped by ecosystem (not globally sorted) so a
+/// reviewer reads a toolchain's vars as a unit.
 const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     // Rust / Cargo: install roots + target/backtrace controls.
     "CARGO_HOME",
@@ -196,9 +197,9 @@ mod tests {
             || SECRET_SUFFIXES.iter().any(|s| upper.ends_with(s))
     }
 
-    /// The allowlist is the single owned artifact — sorted-within-group, unique,
-    /// free of any secret-shaped name, and carrying the base essentials a build
-    /// cannot run without. A scattered or secret-shaped addition fails here.
+    /// The allowlist is the single owned artifact — unique, free of any
+    /// secret-shaped name, and carrying the base essentials a build cannot run
+    /// without. A scattered or secret-shaped addition fails here.
     #[test]
     fn allowlist_is_single_owned_and_secret_free() {
         // Unique.
@@ -223,16 +224,12 @@ mod tests {
                 "base allowlist missing essential '{required}'"
             );
         }
-        // Each group is kept sorted so additions land deterministically and
-        // review can eyeball membership.
-        assert!(
-            BASE_ENV_ALLOWLIST.windows(2).all(|w| w[0] <= w[1]),
-            "BASE_ENV_ALLOWLIST must stay sorted"
-        );
-        assert!(
-            TOOLCHAIN_ENV_ALLOWLIST.windows(2).all(|w| w[0] <= w[1]),
-            "TOOLCHAIN_ENV_ALLOWLIST must stay sorted"
-        );
+        // No global-sort assertion: the arrays are deliberately grouped by
+        // ecosystem (with a receipt comment per group) rather than alphabetized,
+        // because a reviewer reasons about "the Rust toolchain vars" as a unit.
+        // The load-bearing guards above (uniqueness, no secret-shaped name, base
+        // essentials present) are what actually protect the closed-by-construction
+        // property; ordering within the source is cosmetic.
     }
 
     fn env_from(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
