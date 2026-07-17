@@ -2817,6 +2817,7 @@ async fn execute_with_skill_dirs_and_optional_harness(
                     branch: None,
                     base_ref: None,
                     cleanup: None,
+                    grants: Vec::new(),
                 },
             ));
             if let Some(ref root) = project_root {

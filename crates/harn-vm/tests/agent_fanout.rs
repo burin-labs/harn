@@ -109,6 +109,7 @@ fn run_with_bridge_in_parent_workspace(
                         branch: None,
                         base_ref: None,
                         cleanup: None,
+                        grants: Vec::new(),
                     },
                 ));
                 harn_vm::orchestration::push_execution_policy(

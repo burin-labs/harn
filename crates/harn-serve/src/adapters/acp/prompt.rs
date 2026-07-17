@@ -54,8 +54,12 @@ impl AcpServer {
             self.send_prompt_error(&session_id, id, &message);
             return;
         }
-        let (cwd, project_root) = match self.sessions.get(&session_id) {
-            Some(session) => (session.cwd.clone(), session.project_root.clone()),
+        let (cwd, project_root, capability_profile) = match self.sessions.get(&session_id) {
+            Some(session) => (
+                session.cwd.clone(),
+                session.project_root.clone(),
+                session.capability_profile.clone(),
+            ),
             None => {
                 self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
                 return;
@@ -271,6 +275,7 @@ impl AcpServer {
                 cwd: &cwd,
                 project_root: Some(&project_root),
                 runtime_configurator: self.runtime_configurator.clone(),
+                session_profile: capability_profile.clone(),
             },
         )
         .await;

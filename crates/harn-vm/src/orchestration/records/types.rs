@@ -1164,6 +1164,13 @@ pub struct RunExecutionRecord {
     pub branch: Option<String>,
     pub base_ref: Option<String>,
     pub cleanup: Option<String>,
+    /// Non-secret receipts for the session-scoped capability grants this run
+    /// launched under (empty for a hermetic run, which is the default). Each
+    /// receipt records the grant name, its source kind, and whether it was
+    /// exposed to the process environment — never the credential value. See
+    /// [`crate::security::GrantReceipt`]. `#[serde(default)]` on the struct
+    /// loads pre-grants records with an empty vec.
+    pub grants: Vec<crate::security::GrantReceipt>,
 }
 
 #[cfg(test)]

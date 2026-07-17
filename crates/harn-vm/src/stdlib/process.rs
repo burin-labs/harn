@@ -16,6 +16,16 @@ const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
 thread_local! {
     pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static VM_EXECUTION_CONTEXT: RefCell<Option<RunExecutionRecord>> = const { RefCell::new(None) };
+    /// The capability profile the current session launched under (hermetic or a
+    /// grant-carrying lane). `None` is the legacy, no-profile path: a plain CLI
+    /// or test invocation that never opted into the profile model, whose child
+    /// processes inherit the parent environment unchanged. `Some(profile)`
+    /// switches subprocess env construction to the closed-by-construction
+    /// resolver (`security::resolve_env`). Held across a worker's `.await`s and
+    /// so swapped per-task by the ambient scope; its `_CONTEXT` suffix enrolls it
+    /// in the ambient-thread-local drift guard.
+    static SESSION_PROFILE_CONTEXT: RefCell<Option<crate::security::SessionProfile>> =
+        const { RefCell::new(None) };
 }
 
 /// Set the source directory for the current thread (called by VM on file execution).
@@ -44,6 +54,30 @@ pub fn set_thread_execution_context(context: Option<RunExecutionRecord>) {
 
 pub(crate) fn current_execution_context() -> Option<RunExecutionRecord> {
     VM_EXECUTION_CONTEXT.with(|current| current.borrow().clone())
+}
+
+/// Install (or clear) the capability profile the current session runs under.
+/// Called at the session launch boundary once the ACP config's declared profile
+/// and grants have been resolved into a [`crate::security::SessionProfile`].
+pub fn set_session_profile(profile: Option<crate::security::SessionProfile>) {
+    SESSION_PROFILE_CONTEXT.with(|current| *current.borrow_mut() = profile);
+}
+
+/// The capability profile governing subprocess env construction for the current
+/// task, or `None` on the legacy no-profile path.
+pub(crate) fn current_session_profile() -> Option<crate::security::SessionProfile> {
+    SESSION_PROFILE_CONTEXT.with(|current| current.borrow().clone())
+}
+
+/// Per-task ambient-scope swap of the session profile. Same rationale as
+/// [`swap_thread_execution_context`]: a fan-out worker holds its session's
+/// profile across `.await`s, so it must keep its own copy rather than read a
+/// cooperatively-scheduled sibling's. `pub(crate)` — only the ambient combinator
+/// moves whole profiles; launch code uses [`set_session_profile`].
+pub(crate) fn swap_session_profile(
+    next: Option<crate::security::SessionProfile>,
+) -> Option<crate::security::SessionProfile> {
+    SESSION_PROFILE_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
 }
 
 /// Per-task ambient-scope swap of the thread execution context. See
@@ -1030,7 +1064,45 @@ fn process_command_config(
     if let Some(value) = env_override(HARN_REPLAY_ENV) {
         config.env.push((HARN_REPLAY_ENV.to_string(), value));
     }
+    // When the session launched under a capability profile, switch to the
+    // closed-by-construction environment: `resolve_env` composes the allowlisted
+    // subset of the parent env plus the profile's granted exposure. The
+    // host-set/execution-context overlays already collected in `config.env`
+    // (worktree paths, HARN_REPLAY, ...) win over the resolver base, then the
+    // whole set is handed to the child with the parent env cleared. A hermetic
+    // profile contributes no grants, so its child sees the allowlist alone.
+    if let Some(profile) = current_session_profile() {
+        let resolved = crate::security::resolve_env(
+            &profile,
+            &|name| std::env::var(name).ok(),
+            &resolve_grant_secret,
+        )
+        .map_err(|error| {
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                "session grant env resolution failed: {error}"
+            ))))
+        })?;
+        let mut env: BTreeMap<String, String> = resolved;
+        for (key, value) in config.env.drain(..) {
+            env.insert(key, value);
+        }
+        config.env = env.into_iter().collect();
+        config.closed_env = true;
+    }
     Ok(config)
+}
+
+/// Resolve a `secret_store` grant pointer to its value through the crate's
+/// configured secret chain. Env-snapshot grants never reach this — their value
+/// was captured at launch — so this only runs for a lane that exposes a
+/// `secret_store` grant to the process env. Any resolution failure yields `None`,
+/// which surfaces as a loud `MissingSecret` at the spawn boundary rather than a
+/// silently-empty credential.
+fn resolve_grant_secret(account: &str, key: &str) -> Option<String> {
+    let reference = format!("{}{}/{}", crate::secrets::SECRET_REF_SCHEME, account, key);
+    crate::secrets::resolve_secret_ref_to_string(&reference)
+        .ok()
+        .flatten()
 }
 
 fn prefix_process_error(error: VmError, prefix: &str) -> VmError {
@@ -1134,6 +1206,7 @@ mod tests {
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         }));
         // A long string of `..` should escape the temp-root and trip
         // the rejection sentinel, so the file read fails NotFound
@@ -1180,6 +1253,7 @@ mod tests {
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         }));
         let resolved = resolve_source_relative_path("templates/prompt.txt");
         assert_eq!(resolved, cwd.join("templates/prompt.txt"));
@@ -1207,6 +1281,7 @@ mod tests {
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         }));
         let resolved = resolve_source_asset_path("templates/prompt.txt");
         assert_eq!(resolved, source_dir.join("templates/prompt.txt"));

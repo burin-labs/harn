@@ -1861,6 +1861,7 @@ mod tests {
                 branch: None,
                 base_ref: None,
                 cleanup: None,
+                grants: Vec::new(),
             },
         ));
 
@@ -1889,6 +1890,7 @@ mod tests {
                     branch: None,
                     base_ref: None,
                     cleanup: None,
+                    grants: Vec::new(),
                 },
             ));
 

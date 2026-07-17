@@ -82,6 +82,13 @@ pub struct ProcessCommandConfig {
     pub cwd: Option<PathBuf>,
     pub env: Vec<(String, String)>,
     pub stdin_null: bool,
+    /// When `true`, the child starts from an EMPTY environment and receives only
+    /// the pairs in [`ProcessCommandConfig::env`] — the closed-by-construction
+    /// path a session profile takes (`security::resolve_env` has already composed
+    /// the allowlist + grants into `env`). When `false` (the default, legacy
+    /// no-profile path), the child inherits the parent environment and `env` is
+    /// overlaid on top.
+    pub closed_env: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1778,6 +1785,14 @@ pub(crate) fn active_sandbox_policy() -> Option<(CapabilityPolicy, SandboxProfil
 fn apply_process_config(command: &mut Command, config: &ProcessCommandConfig) {
     if let Some(cwd) = config.cwd.as_ref() {
         command.current_dir(cwd);
+    }
+    // A profile-governed session builds a closed environment: clear the
+    // inherited parent env first so the child sees ONLY what the resolver
+    // admitted (allowlist + grants), already materialized in `config.env`.
+    // The default no-profile path leaves the inherited env in place and overlays
+    // `config.env` on top, preserving legacy behavior.
+    if config.closed_env {
+        command.env_clear();
     }
     command.envs(config.env.iter().map(|(key, value)| (key, value)));
     if config.stdin_null {
