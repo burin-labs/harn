@@ -1033,12 +1033,12 @@ pub(crate) fn toml_string_literal(value: &str) -> Result<String, PackageError> {
     encoded.push('"');
     Ok(encoded)
 }
-
 #[derive(Debug, Default, Clone)]
 pub struct RuntimeExtensions {
     pub root_manifest: Option<Manifest>,
     pub root_manifest_path: Option<PathBuf>,
     pub root_manifest_dir: Option<PathBuf>,
+    pub(crate) runtime_personas: Vec<ResolvedRuntimePersona>,
     pub llm: Option<harn_vm::llm_config::ProvidersConfig>,
     pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub hooks: Vec<ResolvedHookConfig>,

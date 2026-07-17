@@ -328,14 +328,9 @@ pub fn tool_capability_policy_from_spec(value: &serde_json::Value) -> Capability
     CapabilityPolicy {
         tools,
         capabilities,
-        workspace_roots: Vec::new(),
-        read_only_roots: Vec::new(),
         side_effect_level,
-        recursion_limit: None,
-        tool_arg_constraints: Vec::new(),
         tool_annotations,
-        sandbox_profile: crate::orchestration::SandboxProfile::default(),
-        process_sandbox: Default::default(),
+        ..CapabilityPolicy::default()
     }
 }
 
@@ -672,15 +667,9 @@ fn effective_active_names(
     entries: &[ToolEntry],
     policy: Option<&CapabilityPolicy>,
 ) -> BTreeSet<String> {
-    let policy_tools = policy.map(|policy| policy.tools.as_slice()).unwrap_or(&[]);
     entries
         .iter()
-        .filter(|entry| {
-            policy_tools.is_empty()
-                || policy_tools
-                    .iter()
-                    .any(|pattern| crate::orchestration::glob_match(pattern, &entry.name))
-        })
+        .filter(|entry| policy.is_none_or(|policy| policy.tool_pattern_allows(&entry.name)))
         .map(|entry| entry.name.clone())
         .collect()
 }

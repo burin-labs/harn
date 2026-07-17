@@ -335,11 +335,11 @@ pub fn bundle_capability_ceiling(bundle: &WorkflowBundle) -> CapabilityPolicy {
     let mut max_side_effect: Option<&'static str> = None;
 
     for node in bundle.workflow.nodes.values() {
-        for tool in &node.capability_policy.tools {
-            tools.insert(tool.clone());
+        for tool in node.capability_policy.allowed_tool_patterns() {
+            tools.insert(tool.to_string());
         }
-        for (capability, ops) in &node.capability_policy.capabilities {
-            let entry = capabilities.entry(capability.clone()).or_default();
+        for (capability, ops) in node.capability_policy.allowed_capabilities() {
+            let entry = capabilities.entry(capability.to_string()).or_default();
             for op in ops {
                 entry.insert(op.clone());
             }
@@ -891,9 +891,9 @@ fn collect_ceiling_violations(
     raised_autonomy_tier: Option<&RaisedAutonomyTier>,
 ) -> Vec<CapabilityCeilingViolation> {
     let mut violations = Vec::new();
-    if !parent.tools.is_empty() {
-        for tool in &requested.tools {
-            if !parent.tools.contains(tool) {
+    if parent.tools_are_restricted() {
+        for tool in requested.allowed_tool_patterns() {
+            if !parent.tool_pattern_allows(tool) {
                 violations.push(CapabilityCeilingViolation {
                     kind: "tool".to_string(),
                     detail: format!("tool '{tool}' is not in parent tool ceiling"),
@@ -901,11 +901,20 @@ fn collect_ceiling_violations(
             }
         }
     }
-    for (capability, ops) in &requested.capabilities {
-        match parent.capabilities.get(capability) {
+    for (capability, ops) in requested.allowed_capabilities() {
+        match parent.capability_operations(capability) {
             Some(parent_ops) => {
+                if ops.is_empty() && !parent_ops.is_empty() {
+                    violations.push(CapabilityCeilingViolation {
+                        kind: "capability".to_string(),
+                        detail: format!(
+                            "capability '{capability}' requests every operation beyond parent ceiling"
+                        ),
+                    });
+                    continue;
+                }
                 for op in ops {
-                    if !parent_ops.contains(op) {
+                    if !parent_ops.is_empty() && !parent_ops.contains(op) {
                         violations.push(CapabilityCeilingViolation {
                             kind: "capability".to_string(),
                             detail: format!(
@@ -915,7 +924,7 @@ fn collect_ceiling_violations(
                     }
                 }
             }
-            None if !parent.capabilities.is_empty() => {
+            None if parent.capabilities_are_restricted() => {
                 violations.push(CapabilityCeilingViolation {
                     kind: "capability".to_string(),
                     detail: format!("capability '{capability}' is not in parent ceiling"),
@@ -964,7 +973,7 @@ fn collect_ceiling_violations(
             .capabilities
             .get("connector")
             .is_some_and(|ops| ops.iter().any(|op| op == "call"));
-        if !parent_allows_connector_calls && !parent.capabilities.is_empty() {
+        if !parent_allows_connector_calls && parent.capabilities_are_restricted() {
             for (connector_id, scopes) in added_connector_scopes {
                 violations.push(CapabilityCeilingViolation {
                     kind: "connector_scope".to_string(),
@@ -980,7 +989,7 @@ fn collect_ceiling_violations(
             .capabilities
             .get("process")
             .is_some_and(|ops| ops.iter().any(|op| op == "exec"));
-        if !parent_allows_exec && !parent.capabilities.is_empty() {
+        if !parent_allows_exec && parent.capabilities_are_restricted() {
             violations.push(CapabilityCeilingViolation {
                 kind: "command_gate".to_string(),
                 detail: format!(

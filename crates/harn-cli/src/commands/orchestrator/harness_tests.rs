@@ -153,7 +153,9 @@ name = "persona-cron-fixture"
 name = "digest"
 description = "Runs the digest workflow."
 entry_workflow = "digest.harn#run"
-autonomy = "suggest"
+tools = ["filesystem"]
+capabilities = ["workspace.write_text"]
+autonomy = "act_auto"
 receipts = "required"
 
 [[triggers]]

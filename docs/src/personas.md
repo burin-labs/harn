@@ -157,6 +157,58 @@ consume. It includes name, version, tools, capabilities, autonomy tier, model
 policy, budget, triggers, handoffs, context packs, evals, receipt policy, and
 manifest source.
 
+### Installed persona activation
+
+Personas exported by installed packages use qualified IDs such as
+`agents/reviewer`. Installation only makes them discoverable; it does not bind
+their schedules, triggers, or workflows. Activation is a separate,
+project-scoped authority decision:
+
+```bash
+harn persona activate agents/reviewer --json
+harn persona activate agents/reviewer --autonomy-tier suggest \
+  --tool filesystem --no-capabilities --json
+harn persona activations --json
+harn persona deactivate agents/reviewer --json
+```
+
+Activation writes `.harn/personas/activations.json` beside the resolved root
+manifest using an exclusive lock and atomic replacement. Each record pins the
+installed package content hash, package-generation lock digest, full exported
+persona-contract digest, enforceable effective-policy digest, and a typed
+receipt. Repeating the same activation is idempotent.
+
+Local path packages intentionally float in `harn.lock`; activation observes and
+pins their current package content. A later local edit makes that activation
+stale until it is explicitly refreshed.
+
+An activation may inherit or reduce authority that the runtime enforces.
+Autonomy can only move down, and repeated `--tool` or `--capability` flags
+select subsets of the exported grants. The matching `--no-*` flag selects an
+empty set. Budgets, model policy, receipt policy, package permissions, and host
+requirements remain inherited contracts rather than activation attenuation
+axes; they are covered by the exported-contract drift pin. Deactivation does not
+need the package to remain installed, so stale records are removable.
+A configured model implies the exported `llm.call` capability; selecting an
+empty capability set disables provider calls while retaining that model policy.
+The runtime lifecycle `--state-dir` flag does not relocate this project ledger.
+
+Schema-v1 activation records are validated and retained for audit, but they
+cannot execute until explicitly reactivated. This fail-closed migration avoids
+treating formerly recorded budget or model fields as runtime grants that the
+activation layer does not itself enforce.
+
+Runtime extension loading includes root personas plus dependency personas whose
+activation still matches the installed package content and exported policy.
+Package or policy drift fails closed with a reactivation diagnostic; installing
+or inspecting a package alone never registers its triggers. Activated personas
+keep their qualified identity in trigger bindings and lifecycle state, and an
+explicit handler may address one as `persona://agents/reviewer`.
+The runtime compiles the entry and imports from the exact bytes captured by a
+successful content-hash check. Imports may cross into content-hashed
+dependencies pinned by the activated generation lock; paths outside that
+content-pinned package graph are rejected.
+
 ## Trigger handlers
 
 Persona trigger names are first-class trigger registrations. A persona with
@@ -173,7 +225,7 @@ id = "merge-captain-pr-opened"
 kind = "webhook"
 provider = "github"
 match = { events = ["pr_opened"] }
-handler = "persona://merge_captain"
+handler = "persona://merge_captain" # or persona://agents/reviewer after activation
 ```
 
 ## Continuous runtime
@@ -206,9 +258,13 @@ incoming events are queued with a `queue_then_drain_on_resume` policy. `resume`
 sets the state back to idle and drains queued events once under normal lease and
 budget checks. Disabled personas record later events as dead-lettered.
 
-Budget checks run before schedule and trigger work records. Per-persona
-`daily_usd`, `hourly_usd`, `run_usd`, and `max_tokens` caps block expensive
-work and append a structured budget-exhaustion event with a receipt id.
+Budget checks run before schedule and trigger work records, and actual usage is
+recorded after execution. The admission check compares recorded usage plus any
+estimate supplied by the caller; current trigger dispatch starts with zero
+estimated cost and tokens. Exceeding a known `daily_usd`, `hourly_usd`,
+`run_usd`, or `max_tokens` limit appends a structured budget-exhaustion event
+with a receipt id. These are runtime accounting and admission controls, not hard
+live spend or token caps inside a provider call.
 
 `harn persona supervision tail` projects `persona.runtime.events` into the
 hosted supervision feed shape as newline-delimited JSON. It accepts
