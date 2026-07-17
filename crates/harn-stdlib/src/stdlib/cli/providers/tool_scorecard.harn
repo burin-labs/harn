@@ -272,6 +272,14 @@ fn __render_plan_human(report: dict) -> string {
     + to_string(__safe_int(report["case_count"], 0))
     + " required="
     + to_string(__safe_int(report["required_case_count"], 0))
+    + " executable="
+    + to_string(__safe_int(report["executable_case_count"], 0))
+    + " live_tool_probes="
+    + to_string(__safe_int(report["live_tool_probe_case_count"], 0))
+    + " offline_request_checks="
+    + to_string(__safe_int(report["offline_request_case_count"], 0))
+    + " not_applicable="
+    + to_string(__safe_int(report["not_applicable_case_count"], 0))
     + " batch_manifest_requests="
     + to_string(__safe_int(report["batch_manifest_request_count"], 0))
     + " readiness_commands="
@@ -320,6 +328,33 @@ fn __render_plan_human(report: dict) -> string {
       + __join_case_ids(cases, "-")
       + "\n"
   }
+  const provider_summaries = __safe_list(report["provider_summaries"])
+  for provider in provider_summaries {
+    if type_of(provider) != "dict" {
+      continue
+    }
+    out = out + "  provider-summary "
+      + __safe_string(provider["provider"], "")
+      + " routes="
+      + to_string(__safe_int(provider["route_count"], 0))
+      + " cases="
+      + to_string(__safe_int(provider["case_count"], 0))
+      + " required="
+      + to_string(__safe_int(provider["required_case_count"], 0))
+      + " executable="
+      + to_string(__safe_int(provider["executable_case_count"], 0))
+      + " live_tool_probes="
+      + to_string(__safe_int(provider["live_tool_probe_case_count"], 0))
+      + " offline_request_checks="
+      + to_string(__safe_int(provider["offline_request_case_count"], 0))
+      + " readiness_commands="
+      + to_string(__safe_int(provider["readiness_command_count"], 0))
+      + " batch_manifest_requests="
+      + to_string(__safe_int(provider["batch_manifest_request_count"], 0))
+      + " not_applicable="
+      + to_string(__safe_int(provider["not_applicable_case_count"], 0))
+      + "\n"
+  }
   const unscorecardable = __safe_list(report["unscorecardable_providers"])
   for provider in unscorecardable {
     if type_of(provider) != "dict" {
@@ -354,6 +389,18 @@ fn __render_plan_markdown(report: dict) -> string {
   out = out + "- Cases: " + to_string(__safe_int(report["case_count"], 0)) + "\n"
   out = out + "- Required cases: "
     + to_string(__safe_int(report["required_case_count"], 0))
+    + "\n"
+  out = out + "- Executable cases: "
+    + to_string(__safe_int(report["executable_case_count"], 0))
+    + "\n"
+  out = out + "- Live tool probes: "
+    + to_string(__safe_int(report["live_tool_probe_case_count"], 0))
+    + "\n"
+  out = out + "- Offline request checks: "
+    + to_string(__safe_int(report["offline_request_case_count"], 0))
+    + "\n"
+  out = out + "- Not applicable cases: "
+    + to_string(__safe_int(report["not_applicable_case_count"], 0))
     + "\n"
   out = out + "- Batch manifest requests: "
     + to_string(__safe_int(report["batch_manifest_request_count"], 0))
@@ -407,6 +454,39 @@ fn __render_plan_markdown(report: dict) -> string {
       + " | "
       + __join_case_ids(cases, "-")
       + " |\n"
+  }
+  const provider_summaries = __safe_list(report["provider_summaries"])
+  if len(provider_summaries) > 0 {
+    out = out
+      + "\n## Provider Scheduling Summary\n\n"
+      + "| Provider | Routes | Cases | Required | Executable | Live tool probes | Offline request checks | Readiness commands | Batch manifest requests | Not applicable |\n"
+    out = out + "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n"
+    for provider in provider_summaries {
+      if type_of(provider) != "dict" {
+        continue
+      }
+      out = out + "| "
+        + __safe_string(provider["provider"], "")
+        + " | "
+        + to_string(__safe_int(provider["route_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["required_case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["executable_case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["live_tool_probe_case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["offline_request_case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["readiness_command_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["batch_manifest_request_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["not_applicable_case_count"], 0))
+        + " |\n"
+    }
   }
   const unscorecardable = __safe_list(report["unscorecardable_providers"])
   if len(unscorecardable) > 0 {

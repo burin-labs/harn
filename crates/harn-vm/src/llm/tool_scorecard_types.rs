@@ -133,6 +133,11 @@ pub struct ToolScorecardPlan {
     pub unscorecardable_provider_count: usize,
     pub case_count: usize,
     pub required_case_count: usize,
+    pub executable_case_count: usize,
+    pub live_tool_probe_case_count: usize,
+    pub offline_request_case_count: usize,
+    pub not_applicable_case_count: usize,
+    pub provider_summaries: Vec<ToolScorecardPlanProviderSummary>,
     pub batch_manifest_request_count: usize,
     pub routes: Vec<ToolScorecardPlanRoute>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -146,6 +151,20 @@ pub struct ToolScorecardCatalogProvenance {
     pub schema_version: u32,
     pub generated_by: String,
     pub hash_blake3: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardPlanProviderSummary {
+    pub provider: String,
+    pub route_count: usize,
+    pub case_count: usize,
+    pub required_case_count: usize,
+    pub executable_case_count: usize,
+    pub live_tool_probe_case_count: usize,
+    pub offline_request_case_count: usize,
+    pub readiness_command_count: usize,
+    pub batch_manifest_request_count: usize,
+    pub not_applicable_case_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -782,6 +782,30 @@ fn provider_tool_scorecard_plan_json_includes_fixed_micro_case_matrix() {
     assert_eq!(harn_value["kind"], "plan");
     assert_eq!(harn_value["route_count"], 1);
     assert_eq!(harn_value["readiness_command_count"], 1);
+    assert_eq!(harn_value["case_count"], 9);
+    assert_eq!(harn_value["required_case_count"], 8);
+    assert_eq!(harn_value["executable_case_count"], 9);
+    assert_eq!(harn_value["live_tool_probe_case_count"], 7);
+    assert_eq!(harn_value["offline_request_case_count"], 2);
+    assert_eq!(harn_value["not_applicable_case_count"], 0);
+    assert_eq!(harn_value["batch_manifest_request_count"], 7);
+    assert_eq!(
+        harn_value["provider_summaries"],
+        serde_json::json!([
+            {
+                "provider": "anthropic",
+                "route_count": 1,
+                "case_count": 9,
+                "required_case_count": 8,
+                "executable_case_count": 9,
+                "live_tool_probe_case_count": 7,
+                "offline_request_case_count": 2,
+                "readiness_command_count": 1,
+                "batch_manifest_request_count": 7,
+                "not_applicable_case_count": 0
+            }
+        ])
+    );
     assert_eq!(harn_value["routes"][0]["provider"], "anthropic");
     assert_eq!(harn_value["routes"][0]["model"], "claude-sonnet-5");
     assert_eq!(harn_value["routes"][0]["trust_status"], "needs_review");
@@ -990,7 +1014,9 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
     );
     assert!(
         harn.stdout
-            .contains("required=8 batch_manifest_requests=0 readiness_commands=1")
+            .contains(
+                "required=8 executable=9 live_tool_probes=7 offline_request_checks=2 not_applicable=0 batch_manifest_requests=0 readiness_commands=1"
+            )
             && harn.stdout.contains("executable=9 missing_runner=0"),
         "execution summary missing from human output: {}",
         harn.stdout
@@ -1000,6 +1026,13 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
             "trust=needs_review trust_reasons=missing_live_evidence readiness=executable"
         ),
         "trust/readiness summary missing from human output: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains(
+            "provider-summary anthropic routes=1 cases=9 required=8 executable=9 live_tool_probes=7 offline_request_checks=2 readiness_commands=1 batch_manifest_requests=0 not_applicable=0"
+        ),
+        "provider scheduling summary missing from human output: {}",
         harn.stdout
     );
 }
@@ -1042,6 +1075,14 @@ fn provider_tool_scorecard_plan_markdown_is_byte_identical_across_runs() {
     assert!(
         harn.stdout.contains("| Executable | Missing runner |"),
         "execution columns missing from markdown output: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("## Provider Scheduling Summary")
+            && harn
+                .stdout
+                .contains("| anthropic | 1 | 9 | 8 | 9 | 7 | 2 | 1 | 0 | 0 |"),
+        "provider scheduling summary missing from markdown output: {}",
         harn.stdout
     );
     assert!(

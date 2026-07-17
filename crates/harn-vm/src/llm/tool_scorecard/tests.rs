@@ -347,7 +347,23 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert!(case_ids.contains(&"signed_thinking_tool_result_followup"));
     assert!(case_ids.contains(&"done_sentinel"));
     assert_eq!(plan.case_count, plan.routes[0].cases.len());
-    assert!(plan.required_case_count >= 7);
+    assert_eq!(plan.required_case_count, 8);
+    assert_eq!(plan.executable_case_count, 9);
+    assert_eq!(plan.live_tool_probe_case_count, 7);
+    assert_eq!(plan.offline_request_case_count, 2);
+    assert_eq!(plan.not_applicable_case_count, 0);
+    assert_eq!(plan.provider_summaries.len(), 1);
+    let provider_summary = &plan.provider_summaries[0];
+    assert_eq!(provider_summary.provider, "anthropic");
+    assert_eq!(provider_summary.route_count, 1);
+    assert_eq!(provider_summary.case_count, 9);
+    assert_eq!(provider_summary.required_case_count, 8);
+    assert_eq!(provider_summary.executable_case_count, 9);
+    assert_eq!(provider_summary.live_tool_probe_case_count, 7);
+    assert_eq!(provider_summary.offline_request_case_count, 2);
+    assert_eq!(provider_summary.readiness_command_count, 1);
+    assert_eq!(provider_summary.batch_manifest_request_count, 7);
+    assert_eq!(provider_summary.not_applicable_case_count, 0);
     let unscorecardable_by_provider = plan
         .unscorecardable_providers
         .iter()
@@ -567,6 +583,16 @@ fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
     let plan = tool_scorecard_plan_from_catalog(&[String::from("groq:groq/compound")], false)
         .expect("plan from catalog");
     let cases = &plan.routes[0].cases;
+    assert_eq!(plan.case_count, 9);
+    assert_eq!(plan.required_case_count, 4);
+    assert_eq!(plan.executable_case_count, 4);
+    assert_eq!(plan.live_tool_probe_case_count, 3);
+    assert_eq!(plan.offline_request_case_count, 1);
+    assert_eq!(plan.not_applicable_case_count, 5);
+    assert_eq!(plan.provider_summaries.len(), 1);
+    assert_eq!(plan.provider_summaries[0].provider, "groq");
+    assert_eq!(plan.provider_summaries[0].case_count, 9);
+    assert_eq!(plan.provider_summaries[0].not_applicable_case_count, 5);
 
     for case_id in [
         "single_tool_call",

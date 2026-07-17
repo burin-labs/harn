@@ -18,7 +18,7 @@ use super::tool_conformance::{
 pub use super::tool_scorecard_types::*;
 
 pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 7;
-pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 4;
+pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Default)]
 struct RouteAccumulator {
@@ -32,6 +32,58 @@ struct RouteAccumulator {
 struct ToolScorecardObservedCase {
     probe_case: ToolProbeCase,
     case: ToolConformanceCase,
+}
+
+#[derive(Debug, Default)]
+struct PlanProviderAccumulator {
+    route_count: usize,
+    case_count: usize,
+    required_case_count: usize,
+    executable_case_count: usize,
+    live_tool_probe_case_count: usize,
+    offline_request_case_count: usize,
+    readiness_command_count: usize,
+    batch_manifest_request_count: usize,
+    not_applicable_case_count: usize,
+}
+
+impl PlanProviderAccumulator {
+    fn record_route(&mut self, cases: &[ToolScorecardPlanCase]) {
+        self.route_count += 1;
+        self.case_count += cases.len();
+        for case in cases {
+            if case.requirement == "required" {
+                self.required_case_count += 1;
+            }
+            match case.execution.status {
+                "executable" => {
+                    self.executable_case_count += 1;
+                    match case.execution.runner {
+                        "provider_tool_probe" => self.live_tool_probe_case_count += 1,
+                        "provider_tool_probe_request" => self.offline_request_case_count += 1,
+                        _ => {}
+                    }
+                }
+                "not_applicable" => self.not_applicable_case_count += 1,
+                _ => {}
+            }
+        }
+    }
+
+    fn into_summary(self, provider: String) -> ToolScorecardPlanProviderSummary {
+        ToolScorecardPlanProviderSummary {
+            provider,
+            route_count: self.route_count,
+            case_count: self.case_count,
+            required_case_count: self.required_case_count,
+            executable_case_count: self.executable_case_count,
+            live_tool_probe_case_count: self.live_tool_probe_case_count,
+            offline_request_case_count: self.offline_request_case_count,
+            readiness_command_count: self.readiness_command_count,
+            batch_manifest_request_count: self.batch_manifest_request_count,
+            not_applicable_case_count: self.not_applicable_case_count,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -217,6 +269,7 @@ pub fn tool_scorecard_plan_from_catalog(
     let mut seen_routes = BTreeSet::new();
     let mut plan_routes = Vec::new();
     let mut batch_manifest_requests = Vec::new();
+    let mut provider_summaries = BTreeMap::<String, PlanProviderAccumulator>::new();
 
     let catalog_claims = catalog_claims_by_route();
 
@@ -233,6 +286,10 @@ pub fn tool_scorecard_plan_from_catalog(
                 "routing routes are generated from catalog models indexed by id and wire_model",
             );
         let cases = fixed_micro_cases_for_route(&route.provider, &route.model, &claim);
+        provider_summaries
+            .entry(route.provider.clone())
+            .or_default()
+            .record_route(&cases);
         if include_batch_manifest && claim.batch_api {
             for case in &cases {
                 if !case.batch_eligible {
@@ -249,9 +306,19 @@ pub fn tool_scorecard_plan_from_catalog(
                     batch_wire_format: claim.batch_wire_format.clone(),
                     batch_input_mode: claim.batch_input_mode.clone(),
                 });
+                provider_summaries
+                    .entry(route.provider.clone())
+                    .or_default()
+                    .batch_manifest_request_count += 1;
             }
         }
         let readiness = readiness_plan_for_route(&route.provider, &route.model);
+        if readiness.command.is_some() {
+            provider_summaries
+                .entry(route.provider.clone())
+                .or_default()
+                .readiness_command_count += 1;
+        }
         plan_routes.push(ToolScorecardPlanRoute {
             provider: route.provider.clone(),
             model: route.model.clone(),
@@ -286,6 +353,35 @@ pub fn tool_scorecard_plan_from_catalog(
         .flat_map(|route| &route.cases)
         .filter(|case| case.requirement == "required")
         .count();
+    let executable_case_count = plan_routes
+        .iter()
+        .flat_map(|route| &route.cases)
+        .filter(|case| case.execution.status == "executable")
+        .count();
+    let live_tool_probe_case_count = plan_routes
+        .iter()
+        .flat_map(|route| &route.cases)
+        .filter(|case| {
+            case.execution.status == "executable" && case.execution.runner == "provider_tool_probe"
+        })
+        .count();
+    let offline_request_case_count = plan_routes
+        .iter()
+        .flat_map(|route| &route.cases)
+        .filter(|case| {
+            case.execution.status == "executable"
+                && case.execution.runner == "provider_tool_probe_request"
+        })
+        .count();
+    let not_applicable_case_count = plan_routes
+        .iter()
+        .flat_map(|route| &route.cases)
+        .filter(|case| case.execution.status == "not_applicable")
+        .count();
+    let provider_summaries = provider_summaries
+        .into_iter()
+        .map(|(provider, acc)| acc.into_summary(provider))
+        .collect();
     let unscorecardable_providers = unscorecardable_providers(&artifact);
 
     Ok(ToolScorecardPlan {
@@ -301,6 +397,11 @@ pub fn tool_scorecard_plan_from_catalog(
         unscorecardable_provider_count: unscorecardable_providers.len(),
         case_count,
         required_case_count,
+        executable_case_count,
+        live_tool_probe_case_count,
+        offline_request_case_count,
+        not_applicable_case_count,
+        provider_summaries,
         batch_manifest_request_count: batch_manifest_requests.len(),
         routes: plan_routes,
         unscorecardable_providers,
