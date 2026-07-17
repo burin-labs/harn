@@ -12,10 +12,15 @@ use super::{
 };
 
 mod denial_results;
+mod dispatch_policy;
 mod host_permission;
 mod side_effect_ceiling;
 use denial_results::agent_primitive_denied_tool;
-use host_permission::{request_host_permission, HostPermissionOutcome, HostPermissionRequest};
+use dispatch_policy::{enforce_dispatch_policies, tool_denial_from_policy};
+use host_permission::{
+    emit_permission_event, emit_permission_event_with_policy, request_host_permission,
+    HostPermissionOutcome, HostPermissionRequest,
+};
 use side_effect_ceiling::{request_side_effect_permission, SideEffectPermissionOutcome};
 
 #[derive(Clone)]
@@ -164,50 +169,6 @@ fn agent_primitive_option_int(options: &crate::value::DictMap, key: &str) -> Opt
     options.get(key)?.as_int()
 }
 
-/// Append a `PermissionGrant` / `PermissionDeny` / `PermissionEscalation`
-/// event to the live transcript for the named session, when one exists.
-/// Silent no-op for sessions that haven't been opened (e.g. raw
-/// dispatcher calls outside an agent loop).
-fn emit_permission_event(
-    session_id: &str,
-    kind: &str,
-    tool_name: &str,
-    tool_args: &serde_json::Value,
-    reason: &str,
-    escalated: bool,
-) {
-    emit_permission_event_with_policy(
-        session_id, kind, tool_name, tool_args, reason, escalated, None,
-    );
-}
-
-fn emit_permission_event_with_policy(
-    session_id: &str,
-    kind: &str,
-    tool_name: &str,
-    tool_args: &serde_json::Value,
-    reason: &str,
-    escalated: bool,
-    policy_decision: Option<serde_json::Value>,
-) {
-    if !crate::agent_sessions::exists(session_id) {
-        return;
-    }
-    let event = if let Some(policy_decision) = policy_decision {
-        permissions::permission_transcript_event_with_policy(
-            kind,
-            tool_name,
-            tool_args,
-            reason,
-            escalated,
-            Some(policy_decision),
-        )
-    } else {
-        permissions::permission_transcript_event(kind, tool_name, tool_args, reason, escalated)
-    };
-    let _ = crate::agent_sessions::append_event(session_id, event);
-}
-
 /// Cause-named feedback for a tool call whose arguments failed validation
 /// because of an argument-DELIVERY fault — the model authored a real call, but
 /// what reached dispatch is not what it wrote. Two classes, both of which the
@@ -333,66 +294,6 @@ fn parse_error_carrier_feedback(tool_name: &str, parse_error: &str) -> (String, 
 /// input"), so a truncation is recognized regardless of which parser ran last.
 fn parse_error_is_truncation(parse_error: &str) -> bool {
     parse_error.contains("EOF while parsing") || parse_error.contains("unexpected end of input")
-}
-
-/// Execution-policy gate for one tool dispatch: the tool/capability/
-/// side-effect ceilings plus the per-tool argument allow-lists.
-///
-/// `policy_machinery_active` is the dispatch fast-path gate (see
-/// `host_agent_dispatch_tool_call`): when false, no execution-policy scope is
-/// installed, so `enforce_current_policy_for_tool` would return `Ok(())`
-/// unconditionally and `enforce_tool_arg_constraints` would iterate the empty
-/// constraint list of `CapabilityPolicy::default()` — skipping both is
-/// behavior-preserving and avoids building that default policy per call.
-fn enforce_dispatch_policies(
-    policy_machinery_active: bool,
-    tool_name: &str,
-    tool_args: &serde_json::Value,
-    side_effect_grant: Option<&crate::orchestration::SideEffectCeilingGrant>,
-) -> Result<(), crate::orchestration::PolicyDenial> {
-    if !policy_machinery_active {
-        return Ok(());
-    }
-    crate::orchestration::enforce_current_policy_for_tool_with_side_effect_grant(
-        tool_name,
-        side_effect_grant,
-    )?;
-    crate::orchestration::enforce_tool_arg_constraints(
-        &crate::orchestration::current_execution_policy().unwrap_or_default(),
-        tool_name,
-        tool_args,
-    )
-}
-
-fn tool_denial_from_policy(
-    policy_denial: crate::orchestration::PolicyDenial,
-    tool_name: &str,
-) -> crate::agent_events::ToolDenial {
-    let side_effect_ceiling = policy_denial.side_effect_ceiling.map(|violation| {
-        crate::agent_events::SideEffectCeilingDetails {
-            ceiling: violation.ceiling,
-            required_level: violation.required_level,
-            tool: tool_name.to_string(),
-            remedy: crate::agent_events::SideEffectCeilingRemedy::RaiseSideEffectCeiling,
-        }
-    });
-    let denial = if policy_denial.gate == crate::agent_events::DenialGate::ArgConstraint {
-        crate::agent_events::ToolDenial::retryable(
-            policy_denial.gate,
-            policy_denial.capability,
-            policy_denial.reason,
-        )
-    } else {
-        crate::agent_events::ToolDenial::terminal(
-            policy_denial.gate,
-            policy_denial.capability,
-            policy_denial.reason,
-        )
-    };
-    match side_effect_ceiling {
-        Some(details) => denial.with_side_effect_ceiling(details),
-        None => denial,
-    }
 }
 
 /// Append a `PermissionDeny` transcript event that carries the structured
