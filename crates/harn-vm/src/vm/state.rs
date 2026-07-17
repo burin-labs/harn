@@ -352,6 +352,10 @@ pub struct Vm {
     pub(crate) inline_cache_set_by_chunk: HashMap<u64, usize>,
     /// VM-scoped pool registry inherited by child VMs and scoped into Tokio tasks.
     pub(crate) pool_registry: Arc<crate::stdlib::pool::PoolRegistry>,
+    /// Reader leases opened by package_snapshot_open in this execution tree.
+    /// Child VMs share the registry; the final VM drop releases abandoned
+    /// leases without touching concurrent executions.
+    pub(crate) package_snapshot_registry: Arc<crate::stdlib::PackageSnapshotRegistry>,
     /// Shared task/channel wait graph for this VM execution tree.
     pub(crate) wait_for_graph: Arc<crate::wait_for_graph::VmWaitForGraph>,
     /// Permits acquired by lexical synchronization blocks in this VM.
@@ -538,6 +542,7 @@ impl VmBaseline {
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
+            package_snapshot_registry: Arc::new(Default::default()),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
@@ -788,6 +793,7 @@ impl Vm {
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
+            package_snapshot_registry: Arc::new(Default::default()),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
@@ -962,6 +968,7 @@ impl Vm {
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: self.pool_registry.clone(),
+            package_snapshot_registry: self.package_snapshot_registry.clone(),
             wait_for_graph: self.wait_for_graph.clone(),
             held_sync_guards: Vec::new(),
             inherited_held_keys: Arc::new(Vec::new()),
