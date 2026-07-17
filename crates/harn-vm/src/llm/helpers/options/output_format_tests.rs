@@ -37,7 +37,8 @@ fn normalizes_harn_schema_types_for_provider_output() {
         "properties": {
             "items": {
                 "type": "list",
-                "items": {"type": "int"}
+                "items": {"type": "int"},
+                "x-provider-extension": {"mode": "strict"}
             }
         }
     }));
@@ -49,6 +50,10 @@ fn normalizes_harn_schema_types_for_provider_output() {
     assert_eq!(parsed["type"], "object");
     assert_eq!(parsed["properties"]["items"]["type"], "array");
     assert_eq!(parsed["properties"]["items"]["items"]["type"], "integer");
+    assert_eq!(
+        parsed["properties"]["items"]["x-provider-extension"]["mode"],
+        "strict"
+    );
 }
 
 #[test]

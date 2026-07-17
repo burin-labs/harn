@@ -130,8 +130,9 @@ pub(super) fn parse_schema_value(
     match raw {
         None | Some(VmValue::Nil) => Ok(None),
         Some(value @ VmValue::Dict(_)) => {
-            crate::schema::schema_to_json_schema_value(value)
-                .map(|schema| Some(vm_value_to_json(&schema)))
+            let mut schema = vm_value_to_json(value);
+            crate::schema::normalize_json_schema_type_names(&mut schema);
+            Ok(Some(schema))
         }
         Some(_) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{field}: expected a JSON Schema object"),
