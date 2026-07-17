@@ -13,7 +13,7 @@ use crate::value::{
 use crate::BuiltinId;
 
 use super::debug::DebugHook;
-use super::modules::LoadedModule;
+use super::modules::ModuleCache;
 use super::VmBuiltinMetadata;
 
 /// A lazy callable's resolved export set together with the module graph that
@@ -36,7 +36,7 @@ pub(crate) struct ResolvedLazyCallable {
     /// same liveness role [`crate::value::RetainedModuleScope`] plays for a
     /// single retained closure, generalized across the whole import graph).
     #[allow(dead_code)]
-    pub(crate) retained_module_graph: Arc<BTreeMap<PathBuf, LoadedModule>>,
+    pub(crate) retained_module_graph: ModuleCache,
 }
 
 pub(crate) type LazyCallableResolution = Arc<ResolvedLazyCallable>;
@@ -420,7 +420,7 @@ pub struct Vm {
     /// involved modules finish loading.
     pub(crate) deferred_cyclic_imports: Vec<super::modules::DeferredCyclicImport>,
     /// Loaded module cache keyed by canonical or synthetic module path.
-    pub(crate) module_cache: Arc<BTreeMap<std::path::PathBuf, LoadedModule>>,
+    pub(crate) module_cache: ModuleCache,
     /// Immutable hydrated module bytecode shared across fresh VM isolates.
     /// Runtime closures, registries, state, and init execution are not cached.
     pub(crate) prepared_module_cache: crate::PreparedModuleCache,
