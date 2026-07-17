@@ -47,7 +47,7 @@ fn build_review_receipt_step(review) {
   }
 }
 
-pipeline run(task) {
+pub pipeline run(task) -> dict {
   const result = build_review_receipt_step(sample_review())
   __io_println(json_stringify(result))
   return result
