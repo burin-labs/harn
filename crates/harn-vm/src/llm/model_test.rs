@@ -56,11 +56,7 @@ pub async fn run_model_smoke_test(
                 },
             )
             .await;
-            if matches!(
-                readiness.status,
-                super::readiness::ReadinessStatus::ModelMissing
-                    | super::readiness::ReadinessStatus::InvalidUrl
-            ) {
+            if readiness_status_blocks_smoke_test(readiness.status) {
                 return Err(readiness.message);
             }
         }
@@ -157,6 +153,15 @@ pub async fn run_model_smoke_test(
     })
 }
 
+fn readiness_status_blocks_smoke_test(status: super::readiness::ReadinessStatus) -> bool {
+    matches!(
+        status,
+        super::readiness::ReadinessStatus::ModelMissing
+            | super::readiness::ReadinessStatus::InvalidUrl
+            | super::readiness::ReadinessStatus::ProviderMismatch
+    )
+}
+
 fn duration_ms(duration: std::time::Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -175,7 +180,19 @@ fn vm_error_message(error: VmError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_model_smoke_test, ModelSmokeTestOptions};
+    use super::{readiness_status_blocks_smoke_test, run_model_smoke_test, ModelSmokeTestOptions};
+    use crate::llm::readiness::ReadinessStatus;
+
+    #[test]
+    fn smoke_test_blocks_provider_mismatch_before_generation() {
+        assert!(readiness_status_blocks_smoke_test(
+            ReadinessStatus::ProviderMismatch
+        ));
+        assert!(readiness_status_blocks_smoke_test(
+            ReadinessStatus::ModelMissing
+        ));
+        assert!(!readiness_status_blocks_smoke_test(ReadinessStatus::Ok));
+    }
 
     #[tokio::test]
     async fn mock_provider_smoke_test_reports_timing_tokens_and_cost() {

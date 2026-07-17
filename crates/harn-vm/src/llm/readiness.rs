@@ -15,6 +15,7 @@ pub enum ReadinessStatus {
     BadStatus,
     BadResponse,
     ModelMissing,
+    ProviderMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -29,6 +30,8 @@ pub struct ProviderReadiness {
     pub requested_model: Option<String>,
     pub served_models: Vec<String>,
     pub http_status: Option<u16>,
+    pub runtime_provider: Option<String>,
+    pub server_header: Option<String>,
 }
 
 impl ProviderReadiness {
@@ -53,6 +56,8 @@ impl ProviderReadiness {
             requested_model,
             served_models: Vec::new(),
             http_status,
+            runtime_provider: None,
+            server_header: None,
         }
     }
 }
@@ -197,6 +202,11 @@ pub async fn probe_provider_readiness_with_options(
     };
 
     let http_status = response.status().as_u16();
+    let server_header = response
+        .headers()
+        .get(reqwest::header::SERVER)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
     if !response.status().is_success() {
         return ProviderReadiness::fail(
             provider,
@@ -226,20 +236,8 @@ pub async fn probe_provider_readiness_with_options(
             );
         }
     };
-    let served_models = match parse_model_ids(&body) {
-        Ok(models) if !models.is_empty() => models,
-        Ok(_) => {
-            return ProviderReadiness::fail(
-                provider,
-                ReadinessStatus::BadResponse,
-                format!("{provider} /models response did not include any model ids"),
-                Some(diagnostic_base_url),
-                Some(diagnostic_url),
-                resolved_model,
-                raw_model,
-                Some(http_status),
-            );
-        }
+    let payload = match serde_json::from_str::<serde_json::Value>(&body) {
+        Ok(payload) => payload,
         Err(error) => {
             return ProviderReadiness::fail(
                 provider,
@@ -253,6 +251,40 @@ pub async fn probe_provider_readiness_with_options(
             );
         }
     };
+    let served_models = parse_model_ids_from_value(&payload);
+    if served_models.is_empty() {
+        return ProviderReadiness::fail(
+            provider,
+            ReadinessStatus::BadResponse,
+            format!("{provider} /models response did not include any model ids"),
+            Some(diagnostic_base_url),
+            Some(diagnostic_url),
+            resolved_model,
+            raw_model,
+            Some(http_status),
+        );
+    }
+    let runtime_provider = runtime_provider_fingerprint(&payload, server_header.as_deref());
+    if let Some(actual_provider) = runtime_provider.as_deref() {
+        if provider_runtime_mismatch(provider, actual_provider) {
+            return ProviderReadiness {
+                provider: provider.to_string(),
+                ok: false,
+                status: ReadinessStatus::ProviderMismatch,
+                message: format!(
+                    "{provider} readiness endpoint at {diagnostic_base_url} is serving `{actual_provider}` runtime metadata; use provider `{actual_provider}` for this endpoint or move the endpoint to the real {provider} server"
+                ),
+                base_url: Some(diagnostic_base_url),
+                url: Some(diagnostic_url),
+                model: resolved_model,
+                requested_model: raw_model,
+                served_models,
+                http_status: Some(http_status),
+                runtime_provider,
+                server_header,
+            };
+        }
+    }
 
     let readiness_model = resolved_model.as_deref().map(llm_config::wire_model_id);
 
@@ -278,6 +310,8 @@ pub async fn probe_provider_readiness_with_options(
                 requested_model: raw_model,
                 served_models,
                 http_status: Some(http_status),
+                runtime_provider,
+                server_header,
             };
         }
     }
@@ -306,6 +340,8 @@ pub async fn probe_provider_readiness_with_options(
         requested_model: raw_model,
         served_models,
         http_status: Some(http_status),
+        runtime_provider,
+        server_header,
     }
 }
 
@@ -341,6 +377,69 @@ fn collect_model_ids(entries: &[serde_json::Value], models: &mut Vec<String>) {
             models.push(id.to_string());
         }
     }
+}
+
+fn runtime_provider_fingerprint(
+    payload: &serde_json::Value,
+    server_header: Option<&str>,
+) -> Option<String> {
+    let from_server = server_header.and_then(runtime_provider_from_server_token);
+    let from_payload = payload
+        .get("data")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("owned_by").and_then(|value| value.as_str()))
+        .find_map(runtime_provider_from_owner);
+    from_server.or(from_payload)
+}
+
+fn normalize_provider_token(token: &str) -> String {
+    token
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['_', '-', ' ', '.'], "")
+}
+
+fn runtime_provider_from_server_token(token: &str) -> Option<String> {
+    let normalized = normalize_provider_token(token);
+    if normalized.contains("llamacpp") {
+        return Some("llamacpp".to_string());
+    }
+    if normalized.contains("vllm") {
+        return Some("vllm".to_string());
+    }
+    if normalized.contains("ollama") {
+        return Some("ollama".to_string());
+    }
+    if normalized.contains("mlx") {
+        return Some("mlx".to_string());
+    }
+    if normalized.contains("tgi") || normalized.contains("textgenerationinference") {
+        return Some("tgi".to_string());
+    }
+    None
+}
+
+fn runtime_provider_from_owner(token: &str) -> Option<String> {
+    let normalized = normalize_provider_token(token);
+    match normalized.as_str() {
+        "llamacpp" => Some("llamacpp".to_string()),
+        "vllm" => Some("vllm".to_string()),
+        "ollama" => Some("ollama".to_string()),
+        "mlx" => Some("mlx".to_string()),
+        "tgi" | "textgenerationinference" => Some("tgi".to_string()),
+        _ => None,
+    }
+}
+
+fn provider_runtime_mismatch(requested_provider: &str, actual_provider: &str) -> bool {
+    fn specific_local_provider(provider: &str) -> bool {
+        matches!(provider, "llamacpp" | "vllm" | "ollama" | "mlx" | "tgi")
+    }
+    specific_local_provider(requested_provider)
+        && specific_local_provider(actual_provider)
+        && requested_provider != actual_provider
 }
 
 pub fn model_is_served(model: &str, served_models: &[String]) -> bool {
@@ -556,6 +655,64 @@ mod tests {
         assert!(!model_is_served("gpt-4", &models));
     }
 
+    #[test]
+    fn runtime_provider_fingerprint_reads_llamacpp_models_payload() {
+        let payload = serde_json::json!({
+            "data": [{
+                "id": "llama-3.1-8b-instruct",
+                "owned_by": "llamacpp",
+                "meta": {"n_ctx": 16384}
+            }]
+        });
+        assert_eq!(
+            runtime_provider_fingerprint(&payload, Some("llama.cpp")).as_deref(),
+            Some("llamacpp")
+        );
+    }
+
+    #[test]
+    fn runtime_provider_fingerprint_does_not_treat_model_owner_as_runtime() {
+        let payload = serde_json::json!({
+            "data": [{
+                "id": "mlx-community/Qwen3.6-4bit",
+                "owned_by": "mlx-community"
+            }]
+        });
+        assert_eq!(runtime_provider_fingerprint(&payload, None), None);
+    }
+
+    #[tokio::test]
+    async fn probe_provider_readiness_rejects_mislabeled_local_runtime() {
+        let (base_url, handle) = spawn_models_stub_with_response_header(
+            200,
+            r#"{"data":[{"id":"llama-3.1-8b-instruct","owned_by":"llamacpp","meta":{"n_ctx":16384}}]}"#,
+            "server: llama.cpp",
+        );
+        let result =
+            probe_provider_readiness("vllm", Some("llama-3.1-8b-instruct"), Some(&base_url)).await;
+        handle.join().expect("stub joins");
+        assert!(!result.ok);
+        assert_eq!(result.status, ReadinessStatus::ProviderMismatch);
+        assert_eq!(result.runtime_provider.as_deref(), Some("llamacpp"));
+        assert_eq!(result.server_header.as_deref(), Some("llama.cpp"));
+        assert!(result.message.contains("use provider `llamacpp`"));
+    }
+
+    #[tokio::test]
+    async fn probe_provider_readiness_allows_generic_local_runtime_fingerprint() {
+        let (base_url, handle) = spawn_models_stub_with_response_header(
+            200,
+            r#"{"data":[{"id":"llama-3.1-8b-instruct","owned_by":"llamacpp"}]}"#,
+            "server: llama.cpp",
+        );
+        let result =
+            probe_provider_readiness("local", Some("llama-3.1-8b-instruct"), Some(&base_url)).await;
+        handle.join().expect("stub joins");
+        assert!(result.ok, "{}", result.message);
+        assert_eq!(result.status, ReadinessStatus::Ok);
+        assert_eq!(result.runtime_provider.as_deref(), Some("llamacpp"));
+    }
+
     #[tokio::test]
     async fn probe_provider_readiness_verifies_served_model() {
         let (base_url, handle) = spawn_models_stub(
@@ -622,10 +779,27 @@ mod tests {
         spawn_models_stub_with_expected_header(status, body, None)
     }
 
+    fn spawn_models_stub_with_response_header(
+        status: u16,
+        body: &'static str,
+        response_header: &'static str,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        spawn_models_stub_with_headers(status, body, None, Some(response_header))
+    }
+
     fn spawn_models_stub_with_expected_header(
         status: u16,
         body: &'static str,
         expected_header: Option<&'static str>,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        spawn_models_stub_with_headers(status, body, expected_header, None)
+    }
+
+    fn spawn_models_stub_with_headers(
+        status: u16,
+        body: &'static str,
+        expected_header: Option<&'static str>,
+        response_header: Option<&'static str>,
     ) -> (String, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind models stub");
         let addr = listener.local_addr().expect("stub addr");
@@ -657,8 +831,11 @@ mod tests {
                     "expected request header {header:?}, got:\n{request}"
                 );
             }
+            let extra = response_header
+                .map(|header| format!("{header}\r\n"))
+                .unwrap_or_default();
             let response = format!(
-                "HTTP/1.1 {status} OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                "HTTP/1.1 {status} OK\r\n{extra}content-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );
