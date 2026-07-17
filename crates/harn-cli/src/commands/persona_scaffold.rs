@@ -212,10 +212,17 @@ struct PromptCompiledPersonaLowering {
     // Closed enum decoding is the boundary validation for this fixed profile.
     // The materializer projects its one supported policy; consumers do not
     // reinterpret it.
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Serde decodes the closed lowering contract at this boundary."
+    )]
     profile: PromptCompiledProfile,
     template: String,
     persona: PromptCompiledPersona,
+    #[expect(
+        dead_code,
+        reason = "Serde decodes the closed lowering contract at this boundary."
+    )]
     policy: PromptCompiledPolicy,
     triggers: Vec<PromptCompiledTrigger>,
 }
@@ -237,9 +244,15 @@ struct PromptCompiledPersona {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PromptCompiledPolicy {
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Serde decodes the closed lowering contract at this boundary."
+    )]
     autonomy_tier: SuggestAutonomyTier,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "Serde decodes the closed lowering contract at this boundary."
+    )]
     receipt_policy: RequiredReceiptPolicy,
 }
 
