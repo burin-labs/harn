@@ -5,6 +5,7 @@ hook_dir=$(dirname "$0")
 . "$hook_dir/lib.sh"
 
 hook_timing_start pre-push
+hook_timing_phase setup-and-guards
 
 changed=$(mktemp)
 harn_format_files=$(mktemp)
@@ -142,6 +143,8 @@ fi
 # `cargo check --tests` / generated-mirror rebuilds below.
 # ---------------------------------------------------------------------------
 
+hook_timing_phase fast-validation
+
 if hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN" && command -v npx >/dev/null 2>&1; then
   # Every user-visible change carries a changelog fragment. Linting the entire
   # repository here made even fast-mode pushes pay markdownlint's full glob
@@ -219,6 +222,8 @@ fi
 # Phase 2 — Rust/Harn compilation and generated-mirror rebuilds (the
 # expensive steps). Reached only once the fast validators above pass.
 # ---------------------------------------------------------------------------
+
+hook_timing_phase full-local
 
 if hook_fast_default_mode; then
   echo "=== Pre-push: skipping expensive local checks (fast default; set HARN_HOOKS_FULL_LOCAL=1 to opt in) ==="

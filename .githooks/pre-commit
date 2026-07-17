@@ -5,6 +5,7 @@ hook_dir=$(dirname "$0")
 . "$hook_dir/lib.sh"
 
 hook_timing_start pre-commit
+hook_timing_phase setup-and-guards
 
 changed=$(mktemp)
 harn_format_files=$(mktemp)
@@ -67,6 +68,8 @@ fi
 # source is markdown-linted here too, so linting the mirror before the
 # Phase-2 sync step yields the same result the sync would produce.
 # ---------------------------------------------------------------------------
+
+hook_timing_phase fast-validation
 
 # rustfmt does not compile the workspace. Keep this read-only formatting guard
 # in the default hook while leaving build-backed Harn formatting, linting, and
@@ -165,6 +168,8 @@ fi
 # Reached only once the fast validators above pass; Rust compilation and
 # linting run once at pre-push.
 # ---------------------------------------------------------------------------
+
+hook_timing_phase full-local
 
 if hook_skip_no_local_build "pre-commit local build/format/lint phases"; then
   exit 0

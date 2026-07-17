@@ -7,13 +7,28 @@ type HookTimingEvent = {
   hook: string,
   profile: string,
   duration_ms: int,
+  phases: dict<string, int>,
   exit_code: int?,
   commit_sha: string?,
   host: string?,
 }
 
+type HookTimingPhaseGroup = {
+  repository: string,
+  hook: string,
+  profile: string,
+  phase: string,
+  count: int,
+  total_ms: int,
+  max_ms: int,
+  avg_ms: int,
+  p50_ms: int,
+  p95_ms: int,
+}
+
 type HookTimingGroup = {
   repository: string,
+  repo: string?,
   hook: string,
   profile: string,
   count: int,
@@ -24,6 +39,8 @@ type HookTimingGroup = {
   p50_ms: int,
   p95_ms: int,
 }
+
+type DurationStats = {count: int, total_ms: int, max_ms: int, avg_ms: int, p50_ms: int, p95_ms: int}
 
 type HookTimingObserved = {p50: int, p95: int, max: int, n: int, window: string}
 
@@ -46,13 +63,15 @@ type HookTimingReport = {
   filters: HookTimingFilters,
   events: list<HookTimingEvent>,
   groups: list<HookTimingGroup>,
+  phase_groups: list<HookTimingPhaseGroup>,
+  worktree_groups: list<HookTimingGroup>,
   invalid_lines: int,
 }
 
 fn usage() -> string {
   return join(
     [
-      "usage: harn run scripts/hook_timing_summary.harn -- [--input PATH] [--limit N] [--repo TEXT] [--hook NAME] [--min-ms N] [--json|--budgets]",
+      "usage: harn run scripts/hook_timing_summary.harn -- [--input PATH] [--limit N] [--repo TEXT] [--hook NAME] [--min-ms N] [--worktrees] [--json|--budgets]",
       "",
       "Summarizes ~/.burin/hook-timings.ndjson so slow local hook/build paths are visible.",
       "Use harn run --no-sandbox when reading the default ~/.burin log from outside the repo sandbox.",
@@ -68,17 +87,43 @@ pub fn default_hook_timing_path(home: string) -> string {
   return path_join(home, ".burin/hook-timings.ndjson")
 }
 
+fn normalize_hook_phases(value) -> dict<string, int>? {
+  if value == nil {
+    return {}
+  }
+  if type_of(value) != "dict" {
+    return nil
+  }
+  let phases: dict<string, int> = {}
+  for entry in value {
+    const name = to_string(entry.key)
+    const duration_ms = to_int(entry.value)
+    if name == "" || duration_ms == nil || duration_ms < 0 {
+      return nil
+    }
+    phases = phases + {[name]: duration_ms}
+  }
+  return phases
+}
+
+fn hook_phase_total(phases: dict<string, int>) -> int {
+  return phases.values().to_list().sum()
+}
+
 pub fn hook_timing_event_from_json(value) -> HookTimingEvent? {
   const repo = to_string(value?.repo ?? "")
   const repository = to_string(value?.repository ?? repo)
   const hook = to_string(value?.hook ?? "")
   const profile = to_string(value?.profile ?? "legacy")
   const duration_ms = to_int(value?.duration_ms)
+  const phases = normalize_hook_phases(value?.phases)
   if repository == ""
     || hook == ""
     || !["fast", "full", "legacy"].contains(profile)
     || duration_ms == nil
-    || duration_ms < 0 {
+    || duration_ms < 0
+    || phases == nil
+    || hook_phase_total(phases ?? {}) > duration_ms {
     return nil
   }
   const ts = if value?.ts == nil {
@@ -102,6 +147,7 @@ pub fn hook_timing_event_from_json(value) -> HookTimingEvent? {
     hook: hook,
     profile: profile,
     duration_ms: duration_ms,
+    phases: phases,
     ts: ts,
     exit_code: to_int(value?.exit_code),
     commit_sha: commit_sha,
@@ -153,16 +199,34 @@ fn nearest_rank(values: list<int>, percentile: int) -> int {
   return sorted[rank - 1] ?? 0
 }
 
-pub fn summarize_hook_timings(events: list<HookTimingEvent>) -> list<HookTimingGroup> {
+fn duration_stats(durations: list<int>) -> DurationStats {
+  const total_ms = durations.sum()
+  return {
+    count: durations.count,
+    total_ms: total_ms,
+    max_ms: durations.max() ?? 0,
+    avg_ms: rounded_average(total_ms, durations.count),
+    p50_ms: nearest_rank(durations, 50),
+    p95_ms: nearest_rank(durations, 95),
+  }
+}
+
+fn summarize_hook_timing_groups(events: list<HookTimingEvent>, by_worktree: bool) -> list<HookTimingGroup> {
   let by_key = {}
   for event in events {
-    const key = json_stringify([event.repository, event.profile, event.hook])
+    const repo = if by_worktree {
+      event.repo
+    } else {
+      nil
+    }
+    const key = json_stringify([event.repository, repo, event.profile, event.hook])
     const previous = by_key[key]
     if previous == nil {
       by_key = by_key
         + {
         [key]: {
           repository: event.repository,
+          repo: repo,
           hook: event.hook,
           profile: event.profile,
           count: 1,
@@ -181,6 +245,7 @@ pub fn summarize_hook_timings(events: list<HookTimingEvent>) -> list<HookTimingG
         + {
         [key]: {
           repository: previous.repository,
+          repo: previous.repo,
           hook: previous.hook,
           profile: previous.profile,
           count: previous.count + 1,
@@ -204,23 +269,99 @@ pub fn summarize_hook_timings(events: list<HookTimingEvent>) -> list<HookTimingG
   let groups: list<HookTimingGroup> = []
   for entry in by_key {
     const value = entry.value
+    const stats = duration_stats(value.durations)
+    groups = groups
+      + [
+      {
+        repository: value.repository,
+        repo: value.repo,
+        hook: value.hook,
+        profile: value.profile,
+        count: stats.count,
+        failures: value.failures,
+        total_ms: stats.total_ms,
+        max_ms: stats.max_ms,
+        avg_ms: stats.avg_ms,
+        p50_ms: stats.p50_ms,
+        p95_ms: stats.p95_ms,
+      },
+    ]
+  }
+  return groups.sort_by({ group -> 0 - group.total_ms })
+}
+
+pub fn summarize_hook_timings(events: list<HookTimingEvent>) -> list<HookTimingGroup> {
+  return summarize_hook_timing_groups(events, false)
+}
+
+pub fn summarize_hook_timing_phases(events: list<HookTimingEvent>) -> list<HookTimingPhaseGroup> {
+  let by_key = {}
+  for event in events {
+    for phase in event.phases {
+      const key = json_stringify([event.repository, event.profile, event.hook, phase.key])
+      const previous = by_key[key]
+      if previous == nil {
+        by_key = by_key
+          + {
+          [key]: {
+            repository: event.repository,
+            hook: event.hook,
+            profile: event.profile,
+            phase: phase.key,
+            durations: [phase.value],
+          },
+        }
+      } else {
+        by_key = by_key + {[key]: previous + {durations: previous.durations + [phase.value]}}
+      }
+    }
+    if event.phases.keys().to_list().count > 0 {
+      const unattributed_ms = event.duration_ms - hook_phase_total(event.phases)
+      if unattributed_ms > 0 {
+        const key = json_stringify([event.repository, event.profile, event.hook, "unattributed"])
+        const previous = by_key[key]
+        if previous == nil {
+          by_key = by_key
+            + {
+            [key]: {
+              repository: event.repository,
+              hook: event.hook,
+              profile: event.profile,
+              phase: "unattributed",
+              durations: [unattributed_ms],
+            },
+          }
+        } else {
+          by_key = by_key + {[key]: previous + {durations: previous.durations + [unattributed_ms]}}
+        }
+      }
+    }
+  }
+  let groups: list<HookTimingPhaseGroup> = []
+  for entry in by_key {
+    const value = entry.value
+    const stats = duration_stats(value.durations)
     groups = groups
       + [
       {
         repository: value.repository,
         hook: value.hook,
         profile: value.profile,
-        count: value.count,
-        failures: value.failures,
-        total_ms: value.total_ms,
-        max_ms: value.max_ms,
-        avg_ms: rounded_average(value.total_ms, value.count),
-        p50_ms: nearest_rank(value.durations, 50),
-        p95_ms: nearest_rank(value.durations, 95),
+        phase: value.phase,
+        count: stats.count,
+        total_ms: stats.total_ms,
+        max_ms: stats.max_ms,
+        avg_ms: stats.avg_ms,
+        p50_ms: stats.p50_ms,
+        p95_ms: stats.p95_ms,
       },
     ]
   }
   return groups.sort_by({ group -> 0 - group.total_ms })
+}
+
+pub fn summarize_hook_timing_worktrees(events: list<HookTimingEvent>) -> list<HookTimingGroup> {
+  return summarize_hook_timing_groups(events, true)
 }
 
 fn observation_window(events: list<HookTimingEvent>) -> string {
@@ -315,6 +456,34 @@ fn render_group(group: HookTimingGroup) -> string {
     + to_string(group.failures)
 }
 
+fn render_phase_group(group: HookTimingPhaseGroup) -> string {
+  return "- " + group.repository + " " + group.profile + " " + group.hook + "/" + group.phase + ": total="
+    + to_string(group.total_ms)
+    + "ms count="
+    + to_string(group.count)
+    + " p50="
+    + to_string(group.p50_ms)
+    + "ms p95="
+    + to_string(group.p95_ms)
+    + "ms max="
+    + to_string(group.max_ms)
+    + "ms"
+}
+
+fn render_worktree_group(group: HookTimingGroup) -> string {
+  return "- " + group.repository + " " + (group.repo ?? "unknown") + " " + group.profile + " " + group.hook
+    + ": total="
+    + to_string(group.total_ms)
+    + "ms count="
+    + to_string(group.count)
+    + " p50="
+    + to_string(group.p50_ms)
+    + "ms p95="
+    + to_string(group.p95_ms)
+    + "ms failures="
+    + to_string(group.failures)
+}
+
 fn render_event(event: HookTimingEvent) -> string {
   let line = "- " + event.repository + " " + event.profile + " " + event.hook + ": "
     + to_string(event.duration_ms)
@@ -373,6 +542,30 @@ pub fn render_hook_timing_report(report: HookTimingReport, limit: int) -> string
       lines = lines + [render_group(group)]
     }
   }
+  lines = lines + ["", "aggregate phases by repository/profile/hook:"]
+  const phase_groups = if limit <= 0 || report.phase_groups.count <= limit {
+    report.phase_groups
+  } else {
+    report.phase_groups.slice(0, limit)
+  }
+  if phase_groups.count == 0 {
+    lines = lines + ["- none"]
+  } else {
+    for group in phase_groups {
+      lines = lines + [render_phase_group(group)]
+    }
+  }
+  if report.worktree_groups.count > 0 {
+    lines = lines + ["", "worktree drilldown:"]
+    const worktree_groups = if limit <= 0 || report.worktree_groups.count <= limit {
+      report.worktree_groups
+    } else {
+      report.worktree_groups.slice(0, limit)
+    }
+    for group in worktree_groups {
+      lines = lines + [render_worktree_group(group)]
+    }
+  }
   return join(lines, "\n")
 }
 
@@ -385,6 +578,7 @@ fn arg_spec() -> list {
     {kind: "option", name: "min_ms", flags: ["--min-ms"], parse: "int", default: 0},
     {kind: "flag", name: "json", flags: ["--json"], default: false},
     {kind: "flag", name: "budgets", flags: ["--budgets"], default: false},
+    {kind: "flag", name: "worktrees", flags: ["--worktrees"], default: false},
   ]
 }
 
@@ -423,6 +617,12 @@ fn main(harness: Harness) {
     filters: filters,
     events: events,
     groups: summarize_hook_timings(events),
+    phase_groups: summarize_hook_timing_phases(events),
+    worktree_groups: if parsed?.worktrees ?? false {
+      summarize_hook_timing_worktrees(events)
+    } else {
+      []
+    },
     invalid_lines: parsed_log.invalid_lines,
   }
   if (parsed?.json ?? false) && (parsed?.budgets ?? false) {
