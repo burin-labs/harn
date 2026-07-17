@@ -744,6 +744,8 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
+          # Restore the latest full-suite nightly cache. PR refs stay
+          # restore-only; windows-nightly.yml owns the default-branch writer.
           shared-key: workspace-windows
           cache-on-failure: true
           cache-bin: false
