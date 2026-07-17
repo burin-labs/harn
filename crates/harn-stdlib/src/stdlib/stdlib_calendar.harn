@@ -118,6 +118,16 @@ pub fn parts(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarPa
 }
 
 /**
+ * Return true when `expression` is accepted by the runtime cron parser.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_valid_cron(expression: string) -> bool {
+  return __cron_is_valid(expression)
+}
+
+/**
  * Return `{year, week}` for the timestamp's ISO week in `timezone`.
  *
  * @effects: []

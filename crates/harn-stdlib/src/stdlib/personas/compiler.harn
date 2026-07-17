@@ -129,12 +129,12 @@ fn __persona_blueprint_cron_fields(cron) -> list<string> {
 fn __persona_blueprint_validate_cron(blueprint, providers, report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
   let out = report
   const source = blueprint.cron
-  if len(__persona_blueprint_cron_fields(source.cron)) != 5 {
+  if len(__persona_blueprint_cron_fields(source.cron)) != 5 || !is_valid_cron(source.cron) {
     out = __persona_blueprint_error(
       out,
       "invalid_cron",
       "cron.cron",
-      "cron source must use a five-field cron expression",
+      "cron source must be a valid five-field cron expression",
     )
   }
   try {

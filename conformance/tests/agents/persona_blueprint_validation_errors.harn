@@ -58,4 +58,17 @@ pipeline main() {
   __io_println(has_code(invalid_cron, "invalid_cron"))
   __io_println(has_code(invalid_cron, "invalid_timezone"))
   __io_println(has_code(invalid_cron, "cron_unavailable"))
+  const malformed_five_field_cron = persona_blueprint_validate(
+    {
+      schema_version: "1",
+      name: "invalid_minute",
+      description: "Has a syntactically malformed five-field schedule.",
+      goal: "Must fail before materialization.",
+      template: "deterministic-sweeper",
+      cron: {cron: "60 0 * * *", timezone: "UTC"},
+    },
+    [],
+  )
+  __io_println(malformed_five_field_cron.valid)
+  __io_println(has_code(malformed_five_field_cron, "invalid_cron"))
 }
