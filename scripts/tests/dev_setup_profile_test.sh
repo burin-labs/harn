@@ -20,8 +20,10 @@ make_fixture_repo() {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '%s\n' 'printf "%s\\n" "$*" >> "$DEV_SETUP_TEST_CARGO_RECORD"'
   } > "$repo/bin/cargo"
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$repo/bin/git"
-  chmod +x "$repo/bin/cargo" "$repo/bin/git"
+  for tool in git go; do
+    printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$repo/bin/$tool"
+  done
+  chmod +x "$repo/bin/cargo" "$repo/bin/git" "$repo/bin/go"
   printf '%s\n' "$repo"
 }
 
@@ -82,10 +84,14 @@ fi
 prune_output="$(
   HARN_DEV_SETUP_STORAGE_ROOT="$rust_storage_root" \
     HARN_TARGET_GC_ROOTS="$tmp_root/no-repos" \
-    "$repo_root/scripts/prune_stale_targets.sh" --dry-run
+    "$repo_root/scripts/prune_stale_targets.sh"
 )"
 if ! grep -Fq "roots=$rust_storage_root/harn-target" <<< "$prune_output"; then
   echo "stale-target pruning did not use the setup storage root" >&2
+  exit 1
+fi
+if [[ ! -d "$rust_target_dir" ]]; then
+  echo "stale-target pruning removed a recently active target" >&2
   exit 1
 fi
 default_prune_output="$(
@@ -93,10 +99,14 @@ default_prune_output="$(
     XDG_CACHE_HOME="$tmp_root/cache-rust" \
     TMPDIR="$tmp_root/tmp-rust" \
     HARN_TARGET_GC_ROOTS="$tmp_root/no-repos" \
-    "$repo_root/scripts/prune_stale_targets.sh" --dry-run
+    "$repo_root/scripts/prune_stale_targets.sh"
 )"
 if ! grep -Fq "roots=$rust_storage_root/harn-target" <<< "$default_prune_output"; then
   echo "default stale-target pruning did not discover the Rust setup cache root" >&2
+  exit 1
+fi
+if [[ ! -d "$rust_target_dir" ]]; then
+  echo "default stale-target pruning removed a recently active target" >&2
   exit 1
 fi
 

@@ -98,7 +98,19 @@ discover_repo_roots() {
 }
 
 mtime_epoch() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0
+  local value
+
+  # GNU `stat -f` means "filesystem status" and can succeed with a multiline
+  # report, so probe GNU's epoch form first and only then fall back to macOS.
+  if value="$(stat -c %Y "$1" 2>/dev/null)" && [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+    return
+  fi
+  if value="$(stat -f %m "$1" 2>/dev/null)" && [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+    return
+  fi
+  printf '0\n'
 }
 
 removed=0; kept=0; summary_printed=0
