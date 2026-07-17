@@ -292,6 +292,7 @@ tool boundary; `queue` defers until the agent yields control.
 
 ```bash
 ./scripts/dev_setup.sh   # git hooks, cargo-nextest, sccache, portal frontend, workspace check
+make setup-rust          # focused Rust-only setup using a durable user-cache build root
 make all                 # fmt + lint + test
 make test                # Rust tests (uses cargo-nextest when available)
 make conformance         # .harn conformance suite

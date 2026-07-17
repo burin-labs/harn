@@ -2,8 +2,9 @@
 # Prune orphaned per-worktree Cargo target dirs.
 #
 # dev_setup.sh redirects each worktree's CARGO_TARGET_DIR to
-# "$TMPDIR/harn-target/<parent>-<leaf>" so parallel worktree builds don't
-# clobber each other. Nothing reclaimed those dirs when the worktree was
+# "$HARN_DEV_SETUP_STORAGE_ROOT/harn-target/<parent>-<leaf>" so parallel
+# worktree builds do not clobber each other. Nothing reclaimed those dirs when
+# the worktree was
 # removed, so they accumulated (observed: ~1 TB across dozens of deleted
 # agent/codex worktrees). This script deletes any harn-target/* dir that no
 # live git worktree still maps to.
@@ -13,7 +14,8 @@
 # dir has not been modified within HARN_TARGET_GC_MIN_AGE_SECS (default 3h),
 # so an in-flight `make setup`/build is never touched.
 #
-# The machine-shared Cargo build-dir ("$TMPDIR/cargo-build-shared", emitted by
+# The machine-shared Cargo build-dir
+# ("$HARN_DEV_SETUP_STORAGE_ROOT/cargo-build-shared", emitted by
 # dev_setup.sh) is intentionally OUTSIDE the harn-target root and must never
 # be pruned here: it is shared by every worktree, so no per-worktree liveness
 # check applies. An assertion below pins the rm loop to a root whose basename
@@ -26,13 +28,15 @@
 #                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
 #   HARN_TARGET_GC_FIND_DEPTH   max depth for nested worktree discovery (default 3)
 #   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before deletion (default 10800)
-#   TMPDIR                      base for harn-target (default /tmp)
+#   HARN_DEV_SETUP_STORAGE_ROOT base for harn-target (default: $TMPDIR or the
+#                               Rust-only setup cache root)
 set -euo pipefail
 
 dry_run=0
 [[ "${1:-}" == "--dry-run" ]] && dry_run=1
 
-target_root="${TMPDIR:-/tmp}/harn-target"
+storage_root="${HARN_DEV_SETUP_STORAGE_ROOT:-${TMPDIR:-/tmp}}"
+target_root="${storage_root}/harn-target"
 target_root="${target_root//\/\///}"   # collapse accidental double slash
 [[ -d "$target_root" ]] || { echo "no harn-target dir at $target_root; nothing to prune"; exit 0; }
 
@@ -76,8 +80,9 @@ mtime_epoch() {
 }
 
 # Refuse to sweep anything but a harn-target root. This keeps the rm loop
-# away from siblings under $TMPDIR — most importantly the machine-shared
-# "cargo-build-shared" build-dir — even if target_root derivation changes.
+# away from siblings under the storage root — most importantly the
+# machine-shared "cargo-build-shared" build-dir — even if target-root
+# derivation changes.
 if [ "$(basename "$target_root")" != "harn-target" ]; then
   echo "refusing to prune: root '$target_root' basename is not 'harn-target'" >&2
   exit 1
