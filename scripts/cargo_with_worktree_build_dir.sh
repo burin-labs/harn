@@ -19,8 +19,12 @@ cargo_metadata_target_dir() {
 if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
   CARGO_TARGET_DIR="$(cargo_metadata_target_dir)"
   export CARGO_TARGET_DIR
+else
+  # A caller-supplied target is an explicit isolation boundary, so keep its
+  # intermediates self-contained. A metadata-discovered target may come from
+  # repo config alongside a machine-shared build-dir; leave that config in
+  # charge instead of silently overriding it.
+  harn_export_cargo_build_dir_for_target "$CARGO_TARGET_DIR" || true
 fi
-
-harn_export_cargo_build_dir_for_target "$CARGO_TARGET_DIR" || true
 
 exec cargo "$@"
