@@ -106,7 +106,7 @@ pub fn render_trainer_identity_check(harness: Harness, value: unknown) {
  * @effects: [stdio.write]
  * @errors: []
  */
-pub fn render_trainer_environment_check(harness: Harness, value: unknown) {
+pub fn render_trainer_environment_check(harness: Harness, value: unknown) -> nil {
   const check = safe_dict(value)
   const status = safe_string(check["status"], "")
   if status == "" {
