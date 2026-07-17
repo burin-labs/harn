@@ -36,6 +36,8 @@ const STICKY_DISK_PIN = "useblacksmith/stickydisk@5b350170ae4ef55b536b548ef5f589
 
 const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
 
+const PERSISTENT_SCCACHE_SIZE = "15G"
+
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
 const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
@@ -326,6 +328,13 @@ fn persistent_sccache_job_errors(
     errors = errors
       + ["ci.yml:${job_name} must use ${expected_runner} behind ${BLACKSMITH_DISABLE_VAR}"]
   }
+  if trim(job?.env?.SCCACHE_CACHE_SIZE ?? "") != PERSISTENT_SCCACHE_SIZE {
+    errors = errors
+      + ["ci.yml:${job_name} must cap persistent sccache at ${PERSISTENT_SCCACHE_SIZE}"]
+  }
+  if !contains(trim(job?.env?.SCCACHE_BASEDIRS ?? ""), "github.workspace") {
+    errors = errors + ["ci.yml:${job_name} must normalize sccache paths to github.workspace"]
+  }
   const caches = matching_steps(job, SCCACHE_ACTION)
   if len(caches) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure ${SCCACHE_ACTION} exactly once"]
@@ -365,13 +374,12 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
       errors = errors + ["${SCCACHE_ACTION_PATH} must persist the lane-keyed local sccache directory"]
     }
   }
-  if len(
-    matching_steps(
-      action?.runs,
-      "mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696",
-    ),
+  const upstream = matching_steps(
+    action?.runs,
+    "mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696",
   )
-    != 1
+  if len(upstream) != 1
+    || !(upstream[0]?.["continue-on-error"] ?? false)
     || len(matching_steps(action?.runs, "./.github/actions/configure-cargo-sccache")) != 1 {
     errors = errors + ["${SCCACHE_ACTION_PATH} must own pinned sccache setup and wrapper configuration"]
   }

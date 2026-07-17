@@ -17,7 +17,10 @@ fn sccache_action() {
             path: "~/.cache/sccache",
           },
         },
-        {uses: "mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696"},
+        {
+          uses: "mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696",
+          "continue-on-error": true,
+        },
         {uses: "./.github/actions/configure-cargo-sccache"},
       ],
     },
@@ -27,6 +30,7 @@ fn sccache_action() {
 fn persistent_job(runner: string, cache_key: string, sticky_if: string, fallback_if: string) {
   return {
     "runs-on": runner,
+    env: {SCCACHE_BASEDIRS: gha_expression("github.workspace"), SCCACHE_CACHE_SIZE: "15G"},
     steps: [
       {
         uses: "./.github/actions/sccache",
@@ -107,5 +111,6 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
   assert(
     errors.contains("ci.yml:package-audit must retain rust-cache only on the GitHub-hosted fallback"),
   )
+  assert(errors.contains("ci.yml:package-audit must cap persistent sccache at 15G"))
   assert(errors.contains("ci.yml:surprise uses persistent sccache without a lane policy"))
 }
