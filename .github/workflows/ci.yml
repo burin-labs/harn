@@ -582,7 +582,8 @@ jobs:
       # scripts/check_agent_path_normalization.sh). Kept with the other
       # fast Python/shell gates so it fails before the harn CLI compile.
       - run: make lint-agent-path-normalization
-      - run: make test-pr-gate-scripts
+      - name: Run pre-warm shell gates without Cargo
+        run: ./scripts/tests/pr_gate_pre_warm_boundary_test.sh
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/sccache
         with:
@@ -599,6 +600,7 @@ jobs:
         run: ./scripts/ci_warm_harn_bin.sh
       # These targets invoke Harn, so keep them after cache restore and the
       # warm HARN_BIN export.
+      - run: make test-pr-gate-post-warm-integrations
       - name: Check OpenAPI contract
         run: make spec-lint
       - run: make lint-test-patterns
