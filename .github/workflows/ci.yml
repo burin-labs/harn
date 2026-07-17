@@ -559,6 +559,15 @@ jobs:
           # Full history + tags so the changelog retroactive-edit check can
           # traverse BASE..HEAD and inspect commit trailers.
           fetch-depth: 0
+      # `make spec-lint` must run the repository's declared Redocly CLI, not
+      # let npx fall back to an unrelated registry package. Keep this install
+      # in the already-required audit lane, where the snapshot check can reuse
+      # the warmed Harn binary below rather than creating another Rust job.
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: package-lock.json
+      - run: npm ci
       # Install mold early so the later `cargo run --bin harn` link steps use
       # it. apt's `mold` does not replace /usr/bin/ld; rustc opts in via the
       # `-fuse-ld=mold` RUSTFLAGS link-arg above.
@@ -590,6 +599,8 @@ jobs:
         run: ./scripts/ci_warm_harn_bin.sh
       # These targets invoke Harn, so keep them after cache restore and the
       # warm HARN_BIN export.
+      - name: Check OpenAPI contract
+        run: make spec-lint
       - run: make lint-test-patterns
       # check-bindings also runs the published Python and Go protocol bindings
       # against the committed JSON fixture.

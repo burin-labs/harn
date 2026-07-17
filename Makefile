@@ -223,7 +223,7 @@ lint-md:
 
 # Validate the Harn Agents Protocol OpenAPI artifact and its public path/schema snapshot.
 spec-lint:
-	npx redocly lint spec/openapi.yaml
+	./node_modules/.bin/redocly lint spec/openapi.yaml
 	$(HARN_CMD) run scripts/check_openapi_snapshot.harn
 
 # Lint GitHub Actions workflows.
