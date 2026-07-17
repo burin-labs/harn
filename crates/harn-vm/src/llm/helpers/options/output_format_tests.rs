@@ -31,6 +31,32 @@ fn parses_explicit_json_schema_output_format() {
 }
 
 #[test]
+fn normalizes_harn_schema_types_for_provider_output() {
+    let schema = crate::schema::json_to_vm_value(&serde_json::json!({
+        "type": "dict",
+        "properties": {
+            "items": {
+                "type": "list",
+                "items": {"type": "int"},
+                "x-provider-extension": {"mode": "strict"}
+            }
+        }
+    }));
+
+    let parsed = parse_schema_value(Some(&schema), "output_schema")
+        .expect("valid Harn schema")
+        .expect("present schema");
+
+    assert_eq!(parsed["type"], "object");
+    assert_eq!(parsed["properties"]["items"]["type"], "array");
+    assert_eq!(parsed["properties"]["items"]["items"]["type"], "integer");
+    assert_eq!(
+        parsed["properties"]["items"]["x-provider-extension"]["mode"],
+        "strict"
+    );
+}
+
+#[test]
 fn legacy_response_format_and_json_schema_map_to_typed_output_format() {
     let schema = serde_json::json!({"type": "object"});
 
