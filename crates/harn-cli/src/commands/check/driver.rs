@@ -48,6 +48,19 @@ pub(crate) struct CheckCliOverrides {
     pub invariants: bool,
 }
 
+impl From<&crate::cli::CheckArgs> for CheckCliOverrides {
+    fn from(args: &crate::cli::CheckArgs) -> Self {
+        Self {
+            host_capabilities: args.host_capabilities.clone(),
+            bundle_root: args.bundle_root.clone(),
+            strict: args.strict,
+            strict_types: args.strict_types,
+            preflight: args.preflight.clone(),
+            invariants: args.invariants,
+        }
+    }
+}
+
 /// One file's finished check: the structured report, the strictness the
 /// file's own config resolved to (drives `should_fail`), and the buffered
 /// text output (empty when the caller asked for JSON).
