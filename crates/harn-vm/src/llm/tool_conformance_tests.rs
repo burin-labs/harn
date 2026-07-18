@@ -363,6 +363,25 @@ fn probe_request_body_accepts_openai_compat_allowed_scalar_tool_choice() {
 }
 
 #[test]
+fn probe_request_body_uses_llamacpp_scalar_required_tool_choice() {
+    let body = probe_request_body(
+        "llamacpp",
+        "qwen3.6-35b-a3b-ud-q4-k-xl",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
+        DEFAULT_TOOL_PROBE_MARKER,
+    )
+    .expect("llama.cpp probe body");
+
+    assert_eq!(body["tools"][0]["function"]["name"], TOOL_PROBE_TOOL_NAME);
+    assert_eq!(
+        body["tool_choice"], "required",
+        "llama.cpp rejects OpenAI named-tool objects but the probe exposes exactly one tool"
+    );
+}
+
+#[test]
 fn probe_request_body_accepts_unrestricted_parameter_edge_tool_choice() {
     let body = probe_request_body(
         "fireworks",
@@ -772,6 +791,84 @@ fn classify_parallel_text_tool_calls_as_fallback_pass() {
 }
 
 #[test]
+fn classify_single_native_tool_call_rejects_duplicate_calls() {
+    let raw = serde_json::json!({
+        "choices": [{
+            "message": {
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "echo_marker",
+                            "arguments": serde_json::json!({
+                                "value": DEFAULT_TOOL_PROBE_MARKER
+                            }).to_string(),
+                        },
+                    },
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "echo_marker",
+                            "arguments": serde_json::json!({
+                                "value": DEFAULT_TOOL_PROBE_MARKER
+                            }).to_string(),
+                        },
+                    },
+                ],
+            },
+        }],
+    })
+    .to_string();
+    let report = classify_tool_conformance_fixture_for_case(
+        "local",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::SingleToolCall,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &raw,
+    );
+
+    assert!(!report.cases[0].ok, "{:#?}", report.cases[0]);
+    assert_eq!(report.cases[0].native_tool_call_count, 2);
+    assert_eq!(
+        report.cases[0].failure_reason.as_deref(),
+        Some("expected_1_native_tool_calls_got_2")
+    );
+}
+
+#[test]
+fn classify_single_text_tool_call_rejects_duplicate_calls() {
+    let call = serde_json::json!({
+        "name": "echo_marker",
+        "arguments": {"value": DEFAULT_TOOL_PROBE_MARKER},
+    });
+    let content = [
+        "<tool_call>",
+        &call.to_string(),
+        "</tool_call>\n<tool_call>",
+        &call.to_string(),
+        "</tool_call>",
+    ]
+    .concat();
+    let raw = serde_json::json!({"content": content}).to_string();
+    let report = classify_tool_conformance_fixture_for_case(
+        "local",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::SingleToolCall,
+        DEFAULT_TOOL_PROBE_MARKER,
+        &raw,
+    );
+
+    assert!(!report.cases[0].ok, "{:#?}", report.cases[0]);
+    assert_eq!(report.cases[0].text_tool_call_count, 2);
+    assert_eq!(
+        report.cases[0].failure_reason.as_deref(),
+        Some("expected_1_text_tool_calls_got_2")
+    );
+}
+
+#[test]
 fn classify_parallel_tool_calls_requires_both_values() {
     let report = classify_tool_conformance_fixture_for_case(
         "local",
@@ -1062,6 +1159,7 @@ fn aggregates_openai_streaming_tool_call_deltas() {
         case.classification,
         ToolProbeClassification::StructuredNativeToolCall
     );
+    assert_eq!(case.native_tool_call_count, 1);
 }
 
 #[test]
@@ -1093,6 +1191,7 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
         case.classification,
         ToolProbeClassification::StructuredNativeToolCall
     );
+    assert_eq!(case.native_tool_call_count, 1);
 }
 
 #[test]

@@ -985,12 +985,16 @@ fn classify_tool_probe_response(
             }
         }
     }
+    let expected_call_count = expected_tool_values.len();
+    let native_values_match = expected_tool_values
+        .iter()
+        .all(|expected| native_probe_calls.contains(expected));
+    let native_cardinality_matches =
+        native_probe_calls.len() == expected_call_count && native_count == expected_call_count;
     let native_pass = probe_case.requires_probe_tool()
-        && expected_tool_values
-            .iter()
-            .all(|expected| native_probe_calls.contains(expected))
-        && (probe_case != ToolProbeCase::ParallelToolCalls
-            || (native_probe_calls.len() == expected_tool_values.len() && !malformed_native));
+        && native_values_match
+        && native_cardinality_matches
+        && !malformed_native;
     if native_pass {
         return ToolConformanceCase {
             mode,
@@ -1008,6 +1012,8 @@ fn classify_tool_probe_response(
             content_sample: content_sample(response),
         };
     }
+    let native_cardinality_mismatch =
+        probe_case.requires_probe_tool() && native_values_match && !native_cardinality_matches;
 
     let content = extract_content(response);
     let tools = probe_tool_registry();
@@ -1035,12 +1041,9 @@ fn classify_tool_probe_response(
             usage,
         );
     }
-    let text_pass = if probe_case == ToolProbeCase::ParallelToolCalls {
-        probe_values_present(&parsed.calls, &expected_tool_values)
-            && parsed.calls.len() == expected_tool_values.len()
-    } else {
-        probe_marker_present(&parsed.calls, expected_value)
-    };
+    let text_values_match = probe_values_present(&parsed.calls, &expected_tool_values);
+    let text_cardinality_matches = parsed.calls.len() == expected_call_count;
+    let text_pass = text_values_match && text_cardinality_matches;
     if text_pass {
         return ToolConformanceCase {
             mode,
@@ -1058,8 +1061,23 @@ fn classify_tool_probe_response(
             content_sample: sample_content(&content),
         };
     }
+    let text_cardinality_mismatch = text_values_match && !text_cardinality_matches;
 
-    let (classification, failure_reason) = if malformed_native || !parsed.errors.is_empty() {
+    let (classification, failure_reason) = if native_cardinality_mismatch {
+        (
+            ToolProbeClassification::StructuredNativeToolCall,
+            Some(format!(
+                "expected_{expected_call_count}_native_tool_calls_got_{native_count}"
+            )),
+        )
+    } else if text_cardinality_mismatch {
+        (
+            ToolProbeClassification::ParseableHarnTextToolCall,
+            Some(format!(
+                "expected_{expected_call_count}_text_tool_calls_got_{text_count}"
+            )),
+        )
+    } else if malformed_native || !parsed.errors.is_empty() {
         (
             ToolProbeClassification::MalformedJsonArguments,
             Some(first_non_empty(
@@ -1183,6 +1201,12 @@ struct NativeToolCall {
 }
 
 fn extract_native_tool_calls(response: &Value) -> Vec<NativeToolCall> {
+    if let Some(tool_calls) = response.get("tool_calls").and_then(Value::as_array) {
+        return tool_calls
+            .iter()
+            .filter_map(parse_native_tool_call)
+            .collect();
+    }
     let mut calls = Vec::new();
     visit_native_tool_call_arrays(response, &mut calls);
     calls
