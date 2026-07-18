@@ -18,6 +18,17 @@ fn test_parses_public_api_type_lint_override() {
 }
 
 #[test]
+fn check_parses_independent_fixture_mode() {
+    let cli = Cli::parse_from(["harn", "check", "--json", "--independent", "fixtures"]);
+    let Command::Check(args) = cli.command.unwrap() else {
+        panic!("expected check command");
+    };
+    assert!(args.json);
+    assert!(args.independent);
+    assert_eq!(args.targets, ["fixtures"]);
+}
+
+#[test]
 fn test_parses_conformance_target_selection() {
     let cli = Cli::parse_from([
         "harn",
