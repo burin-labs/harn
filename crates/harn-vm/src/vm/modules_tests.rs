@@ -238,13 +238,14 @@ pub fn decide() -> Decision {
             .expect("imported constructor executes");
 
         assert_eq!(result.struct_name(), Some("Decision"));
-        assert!(matches!(
-            result
-                .struct_fields_map()
-                .expect("struct fields")
-                .get("allowed"),
-            Some(VmValue::Bool(true))
-        ));
+        let fields = result.struct_fields_map().expect("struct fields");
+        let Some(VmValue::Bool(allowed)) = fields.get("allowed") else {
+            panic!(
+                "expected bool field `allowed`, got {:?}",
+                fields.get("allowed")
+            );
+        };
+        assert!(*allowed, "expected `allowed` to be true");
     });
 }
 

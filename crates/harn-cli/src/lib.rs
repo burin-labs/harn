@@ -575,6 +575,22 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     "no .harn, .harn.txt, or .harn.prompt files found under the given target(s)",
                 );
             }
+            if args.json {
+                let outcome = commands::check::run_lint_json(
+                    &files,
+                    commands::check::LintJsonOptions {
+                        strict: args.strict,
+                        require_file_header: args.require_file_header,
+                        require_public_api_types: args.require_public_api_types,
+                    },
+                )
+                .await;
+                println!("{}", json_envelope::to_string_pretty(&outcome.envelope));
+                if outcome.exit_code != 0 {
+                    process::exit(outcome.exit_code);
+                }
+                return;
+            }
             let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
             let module_graph =
                 commands::check::build_module_graph_and_seed_analysis(&files, &mut analysis);
@@ -590,53 +606,6 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     .map(Vec::as_slice)
                     .unwrap_or(&[])
             };
-            if args.json {
-                // `--json` always reports without modifying source — `--fix`
-                // is intentionally orthogonal to structured output so agents
-                // can plan repairs from the report and apply them in a
-                // follow-up `harn lint --fix` (or `harn fix apply`).
-                let mut should_fail = false;
-                let mut json_files: Vec<commands::check::LintFileReport> = Vec::new();
-                for file in &files {
-                    let mut config = package::load_check_config(Some(file));
-                    let mut lint_config = commands::check::load_harn_lint_config(file);
-                    lint_config.require_file_header |= args.require_file_header;
-                    lint_config.require_public_api_types |= args.require_public_api_types;
-                    commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
-                    let report = commands::check::lint_file_report(
-                        &mut analysis,
-                        file,
-                        &config,
-                        &cross_file_imports,
-                        &module_graph,
-                        &lint_config,
-                        script_diags_for(file.as_path()),
-                    );
-                    should_fail |= report.outcome().should_fail(config.strict || args.strict);
-                    json_files.push(report);
-                }
-                let report = commands::check::LintReport::from_files(json_files);
-                let envelope = if should_fail {
-                    json_envelope::JsonEnvelope {
-                        schema_version: commands::check::LINT_SCHEMA_VERSION,
-                        ok: false,
-                        data: Some(report),
-                        error: Some(json_envelope::JsonError {
-                            code: "lint_failed".to_string(),
-                            message: "one or more files failed `harn lint`".to_string(),
-                            details: serde_json::Value::Null,
-                        }),
-                        warnings: Vec::new(),
-                    }
-                } else {
-                    json_envelope::JsonEnvelope::ok(commands::check::LINT_SCHEMA_VERSION, report)
-                };
-                println!("{}", json_envelope::to_string_pretty(&envelope));
-                if should_fail {
-                    process::exit(1);
-                }
-                return;
-            }
             if args.fix {
                 let mut should_fail = false;
                 for file in &files {

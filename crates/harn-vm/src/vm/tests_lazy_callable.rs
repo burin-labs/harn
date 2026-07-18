@@ -121,7 +121,13 @@ pub pipeline run(value) {
     let VmValue::Dict(repeated) = repeated else {
         panic!("expected repeated pipeline result dict, got {repeated:?}");
     };
-    assert!(matches!(repeated.get("received"), Some(VmValue::Int(43))));
+    let Some(VmValue::Int(received)) = repeated.get("received") else {
+        panic!(
+            "expected int field `received`, got {:?}",
+            repeated.get("received")
+        );
+    };
+    assert_eq!(*received, 43);
     assert_eq!(vm.source_dir.as_deref(), Some(caller_dir.path()));
 }
 
@@ -203,5 +209,8 @@ pub pipeline run(options: Options) -> bool {
         .await
         .expect("optional shape field accepts explicit nil");
 
-    assert_eq!(crate::stdlib::json::vm_value_to_json(&result), "true");
+    let VmValue::Bool(field_is_nil) = result else {
+        panic!("expected bool pipeline result, got {result:?}");
+    };
+    assert!(field_is_nil, "expected explicit nil to remain nil");
 }
