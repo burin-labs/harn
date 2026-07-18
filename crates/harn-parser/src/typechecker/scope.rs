@@ -490,22 +490,30 @@ impl TypeScope {
             .or_else(|| self.parent.as_ref()?.get_enum(name))
     }
 
-    /// Names of every visible enum that declares a variant named `variant`,
-    /// walking the scope chain (child declarations shadow same-named parent
-    /// enums). Powers bare call-shaped match patterns (`Ok(v)`): the
-    /// compiler resolves them when exactly one enum owns the variant name.
-    pub(super) fn enum_owners_of_variant(&self, variant: &str) -> Vec<String> {
-        let mut owners: Vec<String> = Vec::new();
-        let mut cur = Some(self);
-        while let Some(scope) = cur {
+    /// Project the visible enum declarations into the one shared classifier
+    /// used by compiler capture and type-flow reassignment analysis. Child
+    /// declarations shadow same-named parent enums as ordinary scope lookup
+    /// does; each visible enum contributes its variants exactly once.
+    pub(super) fn lexical_match_pattern_catalog(&self) -> crate::lexical::MatchPatternCatalog {
+        let mut enum_names = std::collections::HashSet::new();
+        let mut variant_owners: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        let mut current = Some(self);
+        while let Some(scope) = current {
             for (name, info) in &scope.enums {
-                if info.variants.iter().any(|v| v.name == variant) && !owners.contains(name) {
-                    owners.push(name.clone());
+                if !enum_names.insert(name.clone()) {
+                    continue;
+                }
+                for variant in &info.variants {
+                    variant_owners
+                        .entry(variant.name.clone())
+                        .or_default()
+                        .push(name.clone());
                 }
             }
-            cur = scope.parent.as_deref();
+            current = scope.parent.as_deref();
         }
-        owners
+        crate::lexical::MatchPatternCatalog::from_parts(enum_names, variant_owners)
     }
 
     pub(super) fn get_interface(&self, name: &str) -> Option<&InterfaceDeclInfo> {

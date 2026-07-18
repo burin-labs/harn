@@ -5,48 +5,13 @@ use std::sync::Arc;
 
 use crate::chunk::{DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget};
 use crate::orchestration::HookEvent;
-use crate::value::{
-    string_char_count, values_equal, DeadlockError, VmClosure, VmError, VmJoinHandle, VmTaskHandle,
-    VmValue,
-};
+use crate::value::{string_char_count, values_equal, DeadlockError, VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
 use super::super::{CallArgs, CallFrame};
+use super::call_support::{AwaitingTask, StepPreHookAction};
 
 const DIRECT_CALL_QUICKEN_THRESHOLD: u8 = 3;
-
-struct AwaitingTask {
-    task: Option<VmTaskHandle>,
-}
-
-impl AwaitingTask {
-    fn new(task: VmTaskHandle) -> Self {
-        Self { task: Some(task) }
-    }
-
-    fn handle_mut(&mut self) -> &mut VmJoinHandle {
-        &mut self.task.as_mut().expect("awaiting task present").handle
-    }
-
-    fn disarm(mut self) {
-        self.task = None;
-    }
-}
-
-impl Drop for AwaitingTask {
-    fn drop(&mut self) {
-        if let Some(task) = self.task.take() {
-            task.cancel_token
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            task.handle.abort();
-        }
-    }
-}
-
-enum StepPreHookAction {
-    Allow(Vec<VmValue>),
-    Deny(String),
-}
 
 impl super::super::Vm {
     fn step_hook_payload(
@@ -940,12 +905,20 @@ impl super::super::Vm {
                     .await?;
             }
             VmValue::BuiltinRef(name) => {
-                self.call_named_value_from_stack_args(&name, args_start, callee_idx, None)
-                    .await?;
+                self.call_exact_value_from_stack_args(
+                    VmValue::BuiltinRef(name),
+                    args_start,
+                    callee_idx,
+                )
+                .await?;
             }
             VmValue::BuiltinRefId(r) => {
-                self.call_named_value_from_stack_args(&r.name, args_start, callee_idx, Some(r.id))
-                    .await?;
+                self.call_exact_value_from_stack_args(
+                    VmValue::BuiltinRefId(r),
+                    args_start,
+                    callee_idx,
+                )
+                .await?;
             }
             _ => {
                 let message = format!("Cannot call {}", callee.display());
@@ -982,10 +955,12 @@ impl super::super::Vm {
                 self.call_user_closure(closure, args).await?;
             }
             VmValue::BuiltinRef(name) => {
-                self.call_named_value(&name, args, None).await?;
+                self.call_exact_value(VmValue::BuiltinRef(name), args)
+                    .await?;
             }
             VmValue::BuiltinRefId(r) => {
-                self.call_named_value(&r.name, args, Some(r.id)).await?;
+                self.call_exact_value(VmValue::BuiltinRefId(r), args)
+                    .await?;
             }
             _ => {
                 return Err(VmError::TypeError(format!(
@@ -1033,9 +1008,9 @@ impl super::super::Vm {
         let name = Self::const_str(&chunk.constants[name_idx]).ok()?;
 
         // Names handled by `try_call_special_name` are runtime constructs
-        // (`await`, `cancel`, ...) that must run on the async path even if
-        // the user happens to define a function with the same name —
-        // matching the async dispatcher's first-check semantics.
+        // (`await`, `cancel`, ...) that require the async path. The async
+        // dispatcher still resolves a lexical binding first, so user values
+        // retain ordinary shadowing semantics.
         if Self::is_special_name(name) {
             return None;
         }
@@ -1044,19 +1019,27 @@ impl super::super::Vm {
             Some(closure) => closure,
             None => match self.resolve_named_closure(name) {
                 Some(closure) => closure,
-                None => match crate::vm::tool_callable::resolve_named_single_harn_tool_handler(
-                    self, name,
-                ) {
-                    Ok(Some(closure)) => closure,
-                    // Not a user closure or single-tool registry, so this
-                    // bare call targets a builtin. Most builtins are
-                    // synchronous; dispatch them right here on the sync path
-                    // instead of bailing to `execute_call_builtin_async`.
-                    Ok(None) => {
-                        return self.try_dispatch_sync_builtin_inline(name, argc);
+                None => {
+                    // A present lexical value owns the name regardless of its
+                    // runtime shape. Let the async path dispatch that exact
+                    // value instead of falling through to a same-named builtin.
+                    if self.resolve_lexical_named_value(name).is_some() {
+                        return None;
                     }
-                    Err(_) => return None,
-                },
+                    match crate::vm::tool_callable::resolve_named_single_harn_tool_handler(
+                        self, name,
+                    ) {
+                        Ok(Some(closure)) => closure,
+                        // Not a user closure or single-tool registry, so this
+                        // bare call targets a builtin. Most builtins are
+                        // synchronous; dispatch them right here on the sync path
+                        // instead of bailing to `execute_call_builtin_async`.
+                        Ok(None) => {
+                            return self.try_dispatch_sync_builtin_inline(name, argc);
+                        }
+                        Err(_) => return None,
+                    }
+                }
             },
         };
         if !Self::direct_call_cacheable(&closure) {
@@ -1369,15 +1352,18 @@ impl super::super::Vm {
             VmValue::Closure(cl) => Some(Arc::clone(cl)),
             VmValue::String(name) => match self.resolve_named_closure(name) {
                 Some(closure) => Some(closure),
-                None => match crate::vm::tool_callable::resolve_named_single_harn_tool_handler(
-                    self, name,
-                ) {
-                    Ok(closure) => closure,
-                    Err(error) => {
-                        self.stack.truncate(callee_idx);
-                        return Err(error);
+                None if self.resolve_lexical_named_value(name).is_some() => None,
+                None => {
+                    match crate::vm::tool_callable::resolve_named_single_harn_tool_handler(
+                        self, name,
+                    ) {
+                        Ok(closure) => closure,
+                        Err(error) => {
+                            self.stack.truncate(callee_idx);
+                            return Err(error);
+                        }
                     }
-                },
+                }
             },
             VmValue::Dict(registry) => {
                 match crate::vm::tool_callable::single_harn_tool_handler(registry) {
@@ -1419,10 +1405,9 @@ impl super::super::Vm {
                     self.call_named_value_from_stack_args(&name, args_start, callee_idx, None)
                         .await?;
                 }
-                _ => {
-                    let message = format!("Cannot call {}", callee.display());
-                    self.stack.truncate(callee_idx);
-                    return Err(VmError::TypeError(message));
+                callable => {
+                    self.call_exact_value_from_stack_args(callable, args_start, callee_idx)
+                        .await?;
                 }
             }
         }
@@ -1821,12 +1806,20 @@ impl super::super::Vm {
                     .await?;
             }
             VmValue::BuiltinRef(name) => {
-                self.call_named_value_from_stack_args(&name, args_start, args_start, None)
-                    .await?;
+                self.call_exact_value_from_stack_args(
+                    VmValue::BuiltinRef(name),
+                    args_start,
+                    args_start,
+                )
+                .await?;
             }
             VmValue::BuiltinRefId(r) => {
-                self.call_named_value_from_stack_args(&r.name, args_start, args_start, Some(r.id))
-                    .await?;
+                self.call_exact_value_from_stack_args(
+                    VmValue::BuiltinRefId(r),
+                    args_start,
+                    args_start,
+                )
+                .await?;
             }
             _ => {
                 self.stack.truncate(args_start);

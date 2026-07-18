@@ -54,6 +54,28 @@ pub(super) fn apply_fixes(source: &str, diagnostics: &[LintDiagnostic]) -> Strin
     result
 }
 
+/// Run a source fixture through Harn's strict parse/typecheck/compile boundary
+/// and then the real VM. Autofix tests use this to prove they preserve runtime
+/// behavior instead of merely producing replacement text.
+pub(super) fn execute_strict_source(source: &str) -> String {
+    let chunk = harn_vm::compile_source(source).expect("fixture should strictly compile");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let mut vm = harn_vm::Vm::new();
+                harn_vm::register_vm_stdlib(&mut vm);
+                vm.execute(&chunk).await.expect("fixture should execute");
+                vm.output().trim_end().to_string()
+            })
+            .await
+    })
+}
+
 pub(super) fn lint_with_require_header(
     source: &str,
     path: Option<&std::path::Path>,

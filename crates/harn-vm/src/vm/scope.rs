@@ -64,11 +64,11 @@ impl Vm {
     }
 
     pub(crate) fn resolve_named_closure(&self, name: &str) -> Option<Arc<VmClosure>> {
-        if let Some(VmValue::Closure(closure)) = self.active_local_slot_value(name) {
-            return Some(closure);
-        }
-        if let Some(VmValue::Closure(closure)) = self.env.get(name) {
-            return Some(closure);
+        if let Some(value) = self.resolve_lexical_named_value(name) {
+            return match value {
+                VmValue::Closure(closure) => Some(closure),
+                _ => None,
+            };
         }
         if let Some(closure) = self
             .frames
@@ -78,27 +78,20 @@ impl Vm {
         {
             return Some(closure);
         }
-        // Module-level bindings (top-level `var`/`let` closures and imports
-        // bound late by `flush_deferred_cyclic_imports`) live in the shared
-        // `module_state`. `execute_get_var` already consults it for bare
-        // references; consulting it here keeps name *calls* consistent with
-        // name *reads* and lets cyclically-imported functions resolve.
-        if let Some(VmValue::Closure(closure)) = self
-            .frames
-            .last()
-            .and_then(|frame| frame.module_state.as_ref())
-            .and_then(|state| state.lock().get(name))
-        {
-            return Some(closure);
-        }
         None
     }
 
-    pub(crate) fn resolve_named_value(&self, name: &str) -> Option<VmValue> {
-        if let Some(value) = self.active_local_slot_value(name) {
+    /// Resolve an exact lexical value without falling through to VM globals.
+    ///
+    /// Call sites use this before by-name builtin/tool dispatch so shadowing is
+    /// determined by binding presence, not by whether the bound value happens
+    /// to be a closure. A captured `BuiltinRef` or non-callable must therefore
+    /// win over a same-named builtin just as a captured closure does.
+    pub(crate) fn resolve_lexical_named_value(&self, name: &str) -> Option<VmValue> {
+        if let Some(value) = self.env.get(name) {
             return Some(value);
         }
-        if let Some(value) = self.env.get(name) {
+        if let Some(value) = self.active_local_slot_value(name) {
             return Some(value);
         }
         if let Some(value) = self
@@ -107,6 +100,13 @@ impl Vm {
             .and_then(|frame| frame.module_state.as_ref())
             .and_then(|state| state.lock().get(name))
         {
+            return Some(value);
+        }
+        None
+    }
+
+    pub(crate) fn resolve_named_value(&self, name: &str) -> Option<VmValue> {
+        if let Some(value) = self.resolve_lexical_named_value(name) {
             return Some(value);
         }
         if let Some(value) = self.globals.get(name) {

@@ -15,7 +15,67 @@ use super::super::scope::{FnSignature, InferredType, TypeScope};
 use super::super::union::simplify_union;
 use super::super::TypeChecker;
 
+#[derive(Clone, Copy)]
+pub(in crate::typechecker) struct CallableDeclarationContext<'a> {
+    pub span: Span,
+    pub scope: &'a TypeScope,
+}
+
 impl TypeChecker {
+    /// Check a parameter default before introducing the parameter itself.
+    /// Earlier parameters are already in `scope`; the current parameter and
+    /// every later one still resolve in the enclosing scope, matching runtime
+    /// default evaluation for functions, tools, and closure literals.
+    pub(super) fn check_and_define_parameter(
+        &mut self,
+        param: &TypedParam,
+        param_type: InferredType,
+        annotated: bool,
+        scope: &mut TypeScope,
+    ) {
+        if let Some(default) = &param.default_value {
+            let context_checked =
+                self.check_node_with_expected(default, param_type.as_ref(), scope);
+            if !context_checked {
+                match (param_type.as_ref(), self.infer_type(default, scope)) {
+                    (Some(expected), Some(actual))
+                        if !self.types_compatible(expected, &actual, scope) =>
+                    {
+                        self.type_mismatch_at(
+                            Code::VariableTypeMismatch,
+                            format!("parameter default `{}`", param.name),
+                            expected,
+                            &actual,
+                            default.span,
+                            (None, Some(default.span)),
+                            scope,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        scope.define_var(&param.name, param_type);
+        if annotated {
+            scope.mark_annotated(&param.name);
+        }
+        scope.clear_nil_widenable(&param.name);
+    }
+
+    pub(super) fn check_and_define_declared_parameters(
+        &mut self,
+        params: &[TypedParam],
+        scope: &mut TypeScope,
+    ) {
+        for param in params {
+            let annotated = param
+                .type_expr
+                .as_ref()
+                .is_some_and(|ty| !Self::contains_wildcard_type(ty));
+            self.check_and_define_parameter(param, param.type_expr.clone(), annotated, scope);
+        }
+    }
+
     pub(in crate::typechecker) fn fn_signature_from_parts(
         params: &[TypedParam],
         return_type: InferredType,
@@ -137,8 +197,9 @@ impl TypeChecker {
         &self,
         params: &[TypedParam],
         body: &[SNode],
+        enclosing_scope: &TypeScope,
     ) -> InferredType {
-        let mut scope = TypeScope::child_of(&self.scope);
+        let mut scope = enclosing_scope.child();
         for param in params {
             let param_type = if param.rest {
                 param
@@ -408,7 +469,7 @@ impl TypeChecker {
         body: &[SNode],
         where_clauses: &[WhereClause],
         is_stream: bool,
-        expected_span: Span,
+        declaration: CallableDeclarationContext<'_>,
     ) {
         self.fn_depth += 1;
         let saved_stream_depth = self.stream_fn_depth;
@@ -428,7 +489,7 @@ impl TypeChecker {
             body,
             where_clauses,
             is_stream,
-            expected_span,
+            declaration,
         );
         if is_stream {
             self.stream_emit_types.pop();
@@ -453,8 +514,9 @@ impl TypeChecker {
         expected_span: Span,
         result_label: &str,
         declaration_label: &str,
+        enclosing_scope: &TypeScope,
     ) {
-        let mut body_scope = TypeScope::child_of(&self.scope);
+        let mut body_scope = enclosing_scope.child();
         self.fn_depth += 1;
         for param in params {
             let param_type = if param.rest {
@@ -465,15 +527,12 @@ impl TypeChecker {
             } else {
                 param.type_expr.clone()
             };
-            let has_annotation = param.type_expr.is_some();
-            body_scope.define_var(&param.name, param_type.clone());
-            if has_annotation {
-                body_scope.mark_annotated(&param.name);
-            }
-            body_scope.clear_nil_widenable(&param.name);
-            if let Some(default) = &param.default_value {
-                self.check_node_with_expected(default, param_type.as_ref(), &mut body_scope);
-            }
+            self.check_and_define_parameter(
+                param,
+                param_type,
+                param.type_expr.is_some(),
+                &mut body_scope,
+            );
         }
         Self::mark_closure_mutated_captures(&mut body_scope, body);
         self.expected_return_types.push(return_type.clone());
@@ -518,9 +577,9 @@ impl TypeChecker {
         body: &[SNode],
         where_clauses: &[WhereClause],
         is_stream: bool,
-        expected_span: Span,
+        declaration: CallableDeclarationContext<'_>,
     ) {
-        let mut fn_scope = TypeScope::child_of(&self.scope);
+        let mut fn_scope = declaration.scope.child();
         // Register generic type parameters so they are treated as compatible
         // with any concrete type during type checking.
         for tp in type_params {
@@ -548,15 +607,12 @@ impl TypeChecker {
             } else {
                 param.type_expr.clone()
             };
-            let has_annotation = param.type_expr.is_some();
-            fn_scope.define_var(&param.name, param_type.clone());
-            if has_annotation {
-                fn_scope.mark_annotated(&param.name);
-            }
-            fn_scope.clear_nil_widenable(&param.name);
-            if let Some(default) = &param.default_value {
-                self.check_node_with_expected(default, param_type.as_ref(), &mut fn_scope);
-            }
+            self.check_and_define_parameter(
+                param,
+                param_type,
+                param.type_expr.is_some(),
+                &mut fn_scope,
+            );
         }
         Self::mark_closure_mutated_captures(&mut fn_scope, body);
         self.expected_return_types.push(return_type.clone());
@@ -585,7 +641,7 @@ impl TypeChecker {
             let mut ret_scope = fn_scope.clone();
             ret_scope.restore_narrowed_vars();
             for stmt in body {
-                self.check_return_type(stmt, ret_type, expected_span, &mut ret_scope);
+                self.check_return_type(stmt, ret_type, declaration.span, &mut ret_scope);
             }
             if !is_stream
                 && !Self::body_contains_yield(body)
@@ -598,7 +654,7 @@ impl TypeChecker {
                         "function can fall through without returning {}",
                         format_type(ret_type)
                     ),
-                    expected_span,
+                    declaration.span,
                 );
             }
         }

@@ -145,6 +145,15 @@ impl Compiler {
         name: &str,
         args: &[SNode],
     ) -> Result<(), CompileError> {
+        // A lexically resolved callable is already addressed by its slot or
+        // captured environment cell. Load that exact value before compiling
+        // arguments; by-name dispatch is reserved for unresolved globals and
+        // builtins so a same-named slot cannot steal an environment capture.
+        if self.has_local_binding(name) {
+            self.emit_get_binding(name);
+            return self.compile_value_call(args);
+        }
+
         // Compile-time lowering: `schema_of(TypeAlias)` emits the
         // alias's JSON-Schema dict as a constant. Falls through to
         // the runtime `schema_of(...)` builtin when the argument is
@@ -178,33 +187,7 @@ impl Compiler {
             }
         }
 
-        let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
-        if has_spread {
-            // Flush-and-concat pattern: build args into one list
-            // (same as ListLiteral with spreads).
-            self.chunk.emit_u16(Op::BuildList, 0, self.line);
-            let mut pending = 0u16;
-            for arg in args {
-                if let Node::Spread(inner) = &arg.node {
-                    if pending > 0 {
-                        self.chunk.emit_u16(Op::BuildList, pending, self.line);
-                        self.chunk.emit(Op::Add, self.line);
-                        pending = 0;
-                    }
-                    self.compile_node(inner)?;
-                    self.chunk.emit(Op::Dup, self.line);
-                    self.emit_named_call("__assert_list", 1);
-                    self.chunk.emit(Op::Pop, self.line);
-                    self.chunk.emit(Op::Add, self.line);
-                } else {
-                    self.compile_node(arg)?;
-                    pending += 1;
-                }
-            }
-            if pending > 0 {
-                self.chunk.emit_u16(Op::BuildList, pending, self.line);
-                self.chunk.emit(Op::Add, self.line);
-            }
+        if self.compile_spread_call_args(args)? {
             self.emit_named_call_spread(name);
         } else {
             for arg in args {
@@ -213,6 +196,51 @@ impl Compiler {
             self.emit_named_call(name, args.len());
         }
         Ok(())
+    }
+
+    fn compile_value_call(&mut self, args: &[SNode]) -> Result<(), CompileError> {
+        if self.compile_spread_call_args(args)? {
+            self.chunk.emit(Op::CallSpread, self.line);
+        } else {
+            for arg in args {
+                self.compile_node(arg)?;
+            }
+            self.chunk.emit_u8(Op::Call, args.len() as u8, self.line);
+        }
+        Ok(())
+    }
+
+    /// Build a spread argument list while preserving ordinary argument order.
+    /// Returns false without emitting anything when no spread is present.
+    fn compile_spread_call_args(&mut self, args: &[SNode]) -> Result<bool, CompileError> {
+        if !args.iter().any(|arg| matches!(&arg.node, Node::Spread(_))) {
+            return Ok(false);
+        }
+
+        self.chunk.emit_u16(Op::BuildList, 0, self.line);
+        let mut pending = 0u16;
+        for arg in args {
+            if let Node::Spread(inner) = &arg.node {
+                if pending > 0 {
+                    self.chunk.emit_u16(Op::BuildList, pending, self.line);
+                    self.chunk.emit(Op::Add, self.line);
+                    pending = 0;
+                }
+                self.compile_node(inner)?;
+                self.chunk.emit(Op::Dup, self.line);
+                self.emit_named_call("__assert_list", 1);
+                self.chunk.emit(Op::Pop, self.line);
+                self.chunk.emit(Op::Add, self.line);
+            } else {
+                self.compile_node(arg)?;
+                pending += 1;
+            }
+        }
+        if pending > 0 {
+            self.chunk.emit_u16(Op::BuildList, pending, self.line);
+            self.chunk.emit(Op::Add, self.line);
+        }
+        Ok(true)
     }
 
     pub(super) fn compile_method_call(

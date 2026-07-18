@@ -29,11 +29,10 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::secret_patterns::DEFAULT_SECRET_PATTERN_SPECS;
+use crate::secret_patterns::compiled_default_secret_patterns;
 
 /// Stable identifier emitted in audit logs for every token-redaction
 /// event. Part of the OA-06 epic's compliance contract.
@@ -78,21 +77,6 @@ impl std::fmt::Debug for NamedPattern {
             .finish()
     }
 }
-
-/// Default token patterns shipped with Harn. Order matters only for
-/// audit attribution when multiple patterns would match the same
-/// substring — earlier patterns win.
-pub static DEFAULT_PATTERNS: LazyLock<Vec<NamedPattern>> = LazyLock::new(|| {
-    DEFAULT_SECRET_PATTERN_SPECS
-        .iter()
-        .map(|spec| NamedPattern {
-            name: spec.redaction_name,
-            regex: Regex::new(spec.regex).unwrap_or_else(|error| {
-                panic!("invalid {} secret regex: {error}", spec.redaction_name)
-            }),
-        })
-        .collect()
-});
 
 thread_local! {
     /// Custom token patterns installed by stdlib callers. Stored on a
@@ -159,7 +143,10 @@ pub fn clear_custom_patterns() {
 
 /// Return the names of every default pattern, in catalog order.
 pub fn default_pattern_names() -> Vec<&'static str> {
-    DEFAULT_PATTERNS.iter().map(|p| p.name).collect()
+    compiled_default_secret_patterns()
+        .iter()
+        .map(|pattern| pattern.spec.redaction_name)
+        .collect()
 }
 
 /// Return the names of every custom pattern currently installed on the
@@ -257,12 +244,14 @@ pub fn scan_secret_patterns<'a>(input: &'a str, placeholder: &str) -> Cow<'a, st
     // patterns into a Vec so the closure does not borrow the
     // thread-local across the regex calls.
     let custom: Vec<NamedPattern> = CUSTOM_PATTERNS.with(|cell| cell.borrow().clone());
-    let all_patterns = DEFAULT_PATTERNS.iter().chain(custom.iter());
+    let all_patterns = compiled_default_secret_patterns()
+        .iter()
+        .map(|pattern| (pattern.spec.redaction_name, &pattern.regex))
+        .chain(custom.iter().map(|pattern| (pattern.name, &pattern.regex)));
 
-    for pattern in all_patterns {
+    for (pattern_name, regex) in all_patterns {
         let target: &str = owned.as_deref().unwrap_or(input);
-        let matches: Vec<(usize, usize)> = pattern
-            .regex
+        let matches: Vec<(usize, usize)> = regex
             .find_iter(target)
             .map(|m| (m.start(), m.end()))
             .collect();
@@ -271,9 +260,9 @@ pub fn scan_secret_patterns<'a>(input: &'a str, placeholder: &str) -> Cow<'a, st
         }
         let total_bytes: usize = matches.iter().map(|(s, e)| e - s).sum();
         audit_events.insert(
-            pattern.name,
+            pattern_name,
             RedactionEvent {
-                pattern_name: pattern.name.to_string(),
+                pattern_name: pattern_name.to_string(),
                 match_count: matches.len(),
                 bytes_redacted: total_bytes,
             },
@@ -285,7 +274,7 @@ pub fn scan_secret_patterns<'a>(input: &'a str, placeholder: &str) -> Cow<'a, st
         for (start, end) in matches.into_iter().rev() {
             let matched_slice = &buffer[start..end];
             let replacement = if use_named_placeholder {
-                replacement_for(pattern.name, matched_slice)
+                replacement_for(pattern_name, matched_slice)
             } else {
                 placeholder.to_string()
             };
@@ -360,7 +349,11 @@ fn scan_secret_patterns_windowed<'a>(
     }
     let mut claims: Vec<Claim> = Vec::new();
 
-    for pattern in DEFAULT_PATTERNS.iter().chain(custom.iter()) {
+    let all_patterns = compiled_default_secret_patterns()
+        .iter()
+        .map(|pattern| (pattern.spec.redaction_name, &pattern.regex))
+        .chain(custom.iter().map(|pattern| (pattern.name, &pattern.regex)));
+    for (pattern_name, regex) in all_patterns {
         let mut window_start = 0usize;
         loop {
             let ws = floor_char_boundary(input, window_start);
@@ -368,7 +361,7 @@ fn scan_secret_patterns_windowed<'a>(
                 input,
                 (window_start + MAX_SCAN_INPUT_BYTES).min(input.len()),
             );
-            for m in pattern.regex.find_iter(&input[ws..we]) {
+            for m in regex.find_iter(&input[ws..we]) {
                 let gs = ws + m.start();
                 let ge = ws + m.end();
                 // Drop matches touching an artificial window edge; the same
@@ -382,7 +375,7 @@ fn scan_secret_patterns_windowed<'a>(
                     continue;
                 }
                 let replacement = if use_named_placeholder {
-                    replacement_for(pattern.name, &input[gs..ge])
+                    replacement_for(pattern_name, &input[gs..ge])
                 } else {
                     placeholder.to_string()
                 };
@@ -390,7 +383,7 @@ fn scan_secret_patterns_windowed<'a>(
                     start: gs,
                     end: ge,
                     replacement,
-                    pattern: pattern.name,
+                    pattern: pattern_name,
                 });
             }
             if we >= input.len() {

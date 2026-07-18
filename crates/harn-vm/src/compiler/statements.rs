@@ -113,9 +113,9 @@ impl Compiler {
                 } else {
                     self.compile_node(value)?;
                 }
-                if let Some(binding) = self.resolve_local_slot(var_name) {
+                if let Some(slot) = self.resolve_local_slot(var_name) {
                     self.chunk
-                        .emit_set_local_slot_property(prop_idx, binding.slot, self.line);
+                        .emit_set_local_slot_property(prop_idx, slot, self.line);
                 } else {
                     // The variable name index is encoded as a second u16.
                     let var_idx = self.string_constant(var_name);
@@ -149,9 +149,9 @@ impl Compiler {
                         self.compile_node(value)?;
                     }
                     self.compile_node(index)?;
-                    if let Some(binding) = self.resolve_local_slot(var_name) {
+                    if let Some(slot) = self.resolve_local_slot(var_name) {
                         self.chunk
-                            .emit_u16(Op::SetLocalSlotSubscript, binding.slot, self.line);
+                            .emit_u16(Op::SetLocalSlotSubscript, slot, self.line);
                     } else {
                         let var_idx = self.string_constant(var_name);
                         self.chunk.emit_u16(Op::SetSubscript, var_idx, self.line);
@@ -385,13 +385,12 @@ impl Compiler {
         // ones — while a throwing add on a scalar leaves the binding intact.
         // Skip only when both operands are known scalars so the specialized
         // numeric opcode keeps its fast lane.
-        if let Some(binding) = self.resolve_local_slot(name) {
+        if let Some(slot) = self.resolve_local_slot(name) {
             if is_known_scalar(left_type) && is_known_scalar(rhs_type.as_ref()) {
                 return Ok(false);
             }
             self.compile_node(rhs)?; // [e]  (slot live: aliasing rhs sees real x)
-            self.chunk
-                .emit_u16(Op::ConcatAssignLocal, binding.slot, self.line); // x = x + e
+            self.chunk.emit_u16(Op::ConcatAssignLocal, slot, self.line); // x = x + e
             return Ok(true);
         }
 
@@ -435,13 +434,12 @@ impl Compiler {
         if matches!(item.node, Node::Spread(_)) {
             return Ok(false);
         }
-        let Some(binding) = self.resolve_local_slot(name) else {
+        let Some(slot) = self.resolve_local_slot(name) else {
             return Ok(false);
         };
         self.compile_node(item)?;
         self.chunk.emit_u16(Op::BuildList, 1, self.line);
-        self.chunk
-            .emit_u16(Op::ConcatAssignLocal, binding.slot, self.line);
+        self.chunk.emit_u16(Op::ConcatAssignLocal, slot, self.line);
         Ok(true)
     }
 
@@ -514,6 +512,7 @@ impl Compiler {
         pattern: &harn_parser::BindingPattern,
         iterable: &SNode,
         body: &[SNode],
+        declaration: harn_lexer::Span,
     ) -> Result<(), CompileError> {
         let item_type = self.infer_for_item_type(iterable);
         self.compile_node(iterable)?;
@@ -531,7 +530,7 @@ impl Compiler {
         let exit_jump_pos = self.chunk.emit_jump(Op::IterNext, self.line);
         self.begin_scope();
         let finally_floor = self.finally_bodies.len();
-        self.compile_destructuring(pattern, true)?;
+        self.compile_destructuring(pattern, true, declaration)?;
         // A `for`-item binding is reassignable per iteration, so — like a `var`
         // — its inferred primitive type may only feed typed-opcode
         // specialization when no reassignment in the loop body can change its
@@ -587,8 +586,17 @@ impl Compiler {
                 let allow_tail_call = self.handler_depth == 0;
                 if allow_tail_call {
                     if let Node::FunctionCall { name, args, .. } = &val.node {
-                        let name_idx = self.string_constant(name);
-                        self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+                        if args.iter().any(|arg| matches!(&arg.node, Node::Spread(_))) {
+                            self.compile_node(val)?;
+                            self.chunk.emit(Op::Return, self.line);
+                            return Ok(());
+                        }
+                        if self.has_local_binding(name) {
+                            self.emit_get_binding(name);
+                        } else {
+                            let name_idx = self.string_constant(name);
+                            self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+                        }
                         for arg in args {
                             self.compile_node(arg)?;
                         }

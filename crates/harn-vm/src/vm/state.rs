@@ -559,6 +559,7 @@ impl VmBaseline {
     }
 
     pub fn instantiate(&self) -> Vm {
+        crate::initialize_runtime_assets();
         let mut source_cache = BTreeMap::new();
         if let (Some(file), Some(text)) = (&self.source_file, &self.source_text) {
             source_cache.insert(std::path::PathBuf::from(file), text.clone());
@@ -820,6 +821,7 @@ impl Vm {
     }
 
     pub fn new() -> Self {
+        crate::initialize_runtime_assets();
         Self {
             stack: Vec::with_capacity(256),
             env: VmEnv::new(),
@@ -1340,6 +1342,12 @@ impl Default for Vm {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn vm_construction_initializes_shared_secret_patterns() {
+        let _vm = Vm::new();
+        assert!(crate::secret_patterns::default_secret_patterns_initialized());
+    }
 
     fn baseline_with_stdlib(source: &str) -> VmBaseline {
         let mut vm = Vm::new();
