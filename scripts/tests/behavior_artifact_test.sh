@@ -10,6 +10,14 @@ mkdir -p "$tmpdir/bin" "$tmpdir/target/debug" "$tmpdir/out" "$tmpdir/receipts"
 cat > "$tmpdir/bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$1" == "--config" ]]; then
+  if [[ "$2" != "profile.dev.package.harn-vm.opt-level=1" ]]; then
+    printf 'unexpected cargo profile config: <%s>\n' "$2" >&2
+    exit 2
+  fi
+  shift 2
+  : > "${CARGO_RECEIPTS:?}/runtime-profile"
+fi
 case "$1" in
   build)
     if [[ "$#" -ne 4 || "$2" != "--locked" || "$3" != "--bin" || "$4" != "harn" ]]; then
@@ -78,11 +86,13 @@ PATH="$tmpdir/bin:$PATH" CARGO_RECEIPTS="$tmpdir/receipts" FAKE_TARGET="$tmpdir/
   "$script" build "$bundle" "$commit"
 test -f "$tmpdir/receipts/build"
 test -f "$tmpdir/receipts/nextest-archive"
+test -f "$tmpdir/receipts/runtime-profile"
 
 github_env="$tmpdir/github-env"
 PATH="$tmpdir/bin:$PATH" CARGO_RECEIPTS="$tmpdir/receipts" FAKE_TARGET="$tmpdir/target" FAKE_COMMIT="$commit" \
   "$script" restore "$bundle" "$tmpdir/restored" "$commit" "$github_env"
 "$tmpdir/restored/harn" | grep -Fxq harn
+grep -Fxq 'runtime-profile=profile.dev.package.harn-vm.opt-level=1' "$tmpdir/restored/manifest"
 restored="$(cd "$tmpdir/restored" && pwd -P)"
 grep -Fxq "HARN_BIN=$restored/harn" "$github_env"
 

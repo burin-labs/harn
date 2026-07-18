@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly NEXTEST_VERSION="0.9.132"
 readonly SECURITY_FILTER='package(harn-vm) and binary(harn_vm)'
+readonly RUNTIME_PROFILE_CONFIG='profile.dev.package.harn-vm.opt-level=1'
 cleanup_dir=""
 trap '[[ -z "$cleanup_dir" ]] || rm -rf "$cleanup_dir"' EXIT
 
@@ -57,10 +58,11 @@ build_bundle() {
   staging="$(mktemp -d "${output_dir}/behavior-artifact.XXXXXX")"
   cleanup_dir="$staging"
 
-  # Build the product executable explicitly. The filtered nextest archive is
-  # allowed to omit unrelated binary targets, and a persistent target directory
-  # must never let an older target/debug/harn leak into this commit's payload.
-  cargo build --locked --bin harn
+  # Optimize only the VM in the existing dev graph so third-party dependencies
+  # remain reusable instead of creating a separate release graph. The filtered
+  # nextest archive is allowed to omit unrelated binary targets, so build the
+  # product executable explicitly and never trust an older target/debug/harn.
+  cargo --config "$RUNTIME_PROFILE_CONFIG" build --locked --bin harn
   cargo nextest archive --locked --workspace --profile ci \
     -E "$SECURITY_FILTER" \
     --archive-file "$staging/harn-security.tar.zst"
@@ -70,8 +72,8 @@ build_bundle() {
     exit 1
   fi
   install -m 0755 "$target_dir/debug/harn" "$staging/harn"
-  printf 'schema=1\ncommit=%s\nnextest=%s\n' \
-    "$commit" "$NEXTEST_VERSION" > "$staging/manifest"
+  printf 'schema=2\ncommit=%s\nnextest=%s\nruntime-profile=%s\n' \
+    "$commit" "$NEXTEST_VERSION" "$RUNTIME_PROFILE_CONFIG" > "$staging/manifest"
   (
     cd "$staging"
     sha256sum harn-security.tar.zst harn manifest > SHA256SUMS
@@ -107,7 +109,8 @@ restore_bundle() {
     cd "$destination"
     sha256sum -c SHA256SUMS
   )
-  expected_manifest="$(printf 'schema=1\ncommit=%s\nnextest=%s' "$commit" "$NEXTEST_VERSION")"
+  expected_manifest="$(printf 'schema=2\ncommit=%s\nnextest=%s\nruntime-profile=%s' \
+    "$commit" "$NEXTEST_VERSION" "$RUNTIME_PROFILE_CONFIG")"
   if [[ "$(cat "$destination/manifest")" != "$expected_manifest" ]]; then
     echo "error: behavior artifact manifest does not match this CI execution" >&2
     exit 1
