@@ -77,8 +77,19 @@ if ! grep -Fxq "target-dir = \"$rust_target_dir\" # harn-dev-setup-managed" "$ru
   echo "rust setup did not use the durable per-worktree target directory" >&2
   exit 1
 fi
-if ! grep -Fxq "build-dir = \"$rust_storage_root/cargo-build-shared\" # harn-dev-setup-managed" "$rust_repo/.cargo/config.toml"; then
-  echo "rust setup did not use the durable shared build directory" >&2
+if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
+  echo "rust setup shared Cargo build scratch across worktrees" >&2
+  exit 1
+fi
+printf 'build-dir = "%s/cargo-build-shared" # harn-dev-setup-managed\n' \
+  "$rust_storage_root" >> "$rust_repo/.cargo/config.toml"
+run_setup "$rust_repo" rust "$tmp_root/rust-migration-output.txt" "$rust_cargo"
+if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
+  echo "rust setup did not remove the legacy shared build directory" >&2
+  exit 1
+fi
+if ! grep -Fxq "target-dir = \"$rust_target_dir\" # harn-dev-setup-managed" "$rust_repo/.cargo/config.toml"; then
+  echo "shared-build migration did not preserve the per-worktree target directory" >&2
   exit 1
 fi
 prune_output="$(
@@ -126,7 +137,26 @@ if grep -Eq '^[[:space:]]*target-dir[[:space:]]*=' "$rust_repo/.cargo/config.tom
   exit 1
 fi
 if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
-  echo "profile switch left a generated shared build directory in Cargo config" >&2
+  echo "profile switch left a generated build directory in Cargo config" >&2
+  exit 1
+fi
+
+override_repo=$(make_fixture_repo build-dir-override)
+add_available_cargo_tools "$override_repo"
+mkdir -p "$tmp_root/tmp-build-dir-override"
+PATH="$override_repo/bin:/usr/bin:/bin" \
+  HOME="$tmp_root/home-build-dir-override" \
+  TMPDIR="$tmp_root/tmp-build-dir-override" \
+  HARN_DEV_SETUP_PROFILE=full \
+  HARN_DEV_SETUP_FORCE=1 \
+  HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-build-dir-override" \
+  HARN_DEV_BUILD_DIR="$tmp_root/operator-build-dir" \
+  DEV_SETUP_TEST_CARGO_RECORD="$tmp_root/build-dir-override-cargo.txt" \
+  "$override_repo/scripts/dev_setup.sh" > "$tmp_root/build-dir-override-output.txt" 2>&1
+if ! grep -Fxq \
+  "build-dir = \"$tmp_root/operator-build-dir\" # harn-dev-setup-managed" \
+  "$override_repo/.cargo/config.toml"; then
+  echo "setup did not preserve the explicit Cargo build-dir override" >&2
   exit 1
 fi
 

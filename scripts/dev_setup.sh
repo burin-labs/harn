@@ -24,16 +24,6 @@ derive_target_dir() {
   printf '%s/harn-target/%s-%s\n' "${HARN_DEV_SETUP_STORAGE_ROOT}" "${worktree_parent}" "${worktree_leaf}"
 }
 
-derive_build_dir() {
-  # One shared build-dir per storage root (per-user by default), NOT
-  # per-worktree: Cargo's own fingerprinting dedupes
-  # intermediate artifacts (registry deps, build scripts) across every
-  # worktree that shares the path, while the per-worktree target-dir above
-  # keeps final binaries isolated. sccache cannot provide this cross-worktree
-  # dedup because its Rust hash is target-dir-path-dependent.
-  printf '%s/cargo-build-shared\n' "${HARN_DEV_SETUP_STORAGE_ROOT}"
-}
-
 derive_storage_root() {
   if [[ -n "${HARN_DEV_SETUP_STORAGE_ROOT:-}" ]]; then
     printf '%s\n' "${HARN_DEV_SETUP_STORAGE_ROOT}"
@@ -296,9 +286,6 @@ if [[ -z "${target_dir}" ]]; then
 fi
 
 build_dir="${HARN_DEV_BUILD_DIR:-}"
-if [[ -z "${build_dir}" && -n "${target_dir}" ]]; then
-  build_dir="$(derive_build_dir)"
-fi
 
 rustc_wrapper=""
 if command -v sccache >/dev/null 2>&1; then
@@ -315,7 +302,7 @@ if [[ -n "${target_dir}" ]]; then
 fi
 if [[ -n "${build_dir}" ]]; then
   mkdir -p "${build_dir}"
-  echo "Configured shared Cargo build dir -> ${build_dir}"
+  echo "Configured custom Cargo build dir -> ${build_dir}"
 fi
 
 if [[ "${SETUP_PROFILE}" == "full" ]]; then

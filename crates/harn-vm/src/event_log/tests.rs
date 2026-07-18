@@ -307,6 +307,35 @@ fn sqlite_open_skips_wal_promotion_when_existing_wal_database_is_busy() {
     writer.execute_batch("ROLLBACK").unwrap();
 }
 
+#[test]
+fn sqlite_read_only_open_requires_initialized_event_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.sqlite");
+    drop(Connection::open(&path).unwrap());
+
+    let error = match SqliteEventLog::open_read_only(path, 8) {
+        Ok(_) => panic!("read-only open must reject a database without the event schema"),
+        Err(error) => error,
+    };
+    match error {
+        LogError::Sqlite(message) => assert_eq!(
+            message,
+            "event log read-only setup error: SQLite schema event_log version 1 is not initialized"
+        ),
+        other => panic!("expected SQLite setup error, got {other:?}"),
+    }
+}
+
+#[test]
+fn sqlite_read_only_open_returns_an_initialized_handle() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.sqlite");
+    drop(SqliteEventLog::open(path.clone(), 8).unwrap());
+
+    let reader = SqliteEventLog::open_read_only(path, 8).expect("open initialized event log");
+    assert_eq!(reader.topics().unwrap(), Vec::<Topic>::new());
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn sqlite_backend_idempotent_append_returns_original_event() {
     let dir = tempfile::tempdir().unwrap();

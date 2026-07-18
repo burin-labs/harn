@@ -104,7 +104,6 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
   "conformance/tests/concurrency/rwlock_channel_select.harn",
   "conformance/tests/concurrency/select_basic.harn",
   "conformance/tests/concurrency/supervisor_circuit_open.harn",
-  "conformance/tests/concurrency/supervisor_graceful_stop.harn",
   "conformance/tests/concurrency/supervisor_one_for_one.harn",
   "conformance/tests/concurrency/supervisor_restart_cap.harn",
   "conformance/tests/concurrency/supervisor_restart_window.harn",
@@ -130,6 +129,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/acp_server_cli.rs",
   "crates/harn-cli/tests/burin_mini_playground.rs",
   "crates/harn-cli/tests/check_result_cache.rs",
+  // Strictness is an exit-status contract whose text and JSON renderings must
+  // stay identical to advisory checks; only the real CLI process proves all three.
+  "crates/harn-cli/tests/check_strict_cli.rs",
   "crates/harn-cli/tests/demo_cli_e2e.rs",
   "crates/harn-cli/tests/doctor_dispatch.rs",
   "crates/harn-cli/tests/models_dispatch.rs",

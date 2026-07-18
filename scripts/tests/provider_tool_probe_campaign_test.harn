@@ -1,4 +1,212 @@
+import { assert_contains, assert_false, assert_true } from "std/testing"
 import "../provider_tool_probe_campaign.harn"
+
+fn verified_runtime() -> ProviderToolProbeRuntimeReceipt {
+  return {
+    schema_version: "harn.provider_tool_probe_runtime.v1",
+    command: ["harn", "version", "--json"],
+    status: "verified",
+    exit_code: 0,
+    version: "0.10.24",
+    reason: "target Harn runtime identified",
+  }
+}
+
+fn verified_catalog() -> ProviderToolProbeCatalogReceipt {
+  return {
+    schema_version: "harn.provider_tool_probe_catalog.v1",
+    command: ["harn", "provider", "catalog", "show"],
+    command_env: {},
+    status: "verified",
+    exit_code: 0,
+    providers_config: "",
+    catalog_sha256: "sha256:fixture",
+    provider_count: 1,
+    model_count: 1,
+    route_count: 1,
+    reason: "target Harn provider catalog identified",
+  }
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_selects_explicit_provider_config(task) {
+  assert_eq(
+    provider_tool_probe_campaign_providers_config(
+      " /explicit/providers.toml ",
+      "/configured",
+      "/inherited",
+    ),
+    "/explicit/providers.toml",
+  )
+  assert_eq(
+    provider_tool_probe_campaign_providers_config("", " /configured/providers.toml ", "/inherited"),
+    "/configured/providers.toml",
+  )
+  assert_eq(
+    provider_tool_probe_campaign_providers_config("", "", " /inherited/providers.toml "),
+    "/inherited/providers.toml",
+  )
+  assert_eq(provider_tool_probe_campaign_command_env(""), {})
+  assert_eq(
+    provider_tool_probe_campaign_command_env(" /catalog/providers.toml "),
+    {HARN_PROVIDERS_CONFIG: "/catalog/providers.toml"},
+  )
+  assert_eq(provider_tool_probe_campaign_providers_config_text_error("[aliases]\n"), nil)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_normalizes_verified_catalog_snapshot(task) {
+  const catalog = {
+    providers: [{id: "openrouter"}],
+    models: [{id: "anthropic/claude-sonnet-4.6"}],
+    routing_routes: [{provider: "openrouter", model: "anthropic/claude-sonnet-4.6"}],
+  }
+  const snapshot = provider_tool_probe_campaign_catalog_snapshot(
+    "/opt/harn",
+    "/workspace/providers.toml",
+    {exit_code: 0, stdout: json_stringify(catalog), stderr: ""},
+  )
+  assert_eq(snapshot.catalog, catalog)
+  assert_eq(
+    snapshot.receipt,
+    {
+      schema_version: "harn.provider_tool_probe_catalog.v1",
+      command: ["/opt/harn", "provider", "catalog", "show"],
+      command_env: {HARN_PROVIDERS_CONFIG: "/workspace/providers.toml"},
+      status: "verified",
+      exit_code: 0,
+      providers_config: "/workspace/providers.toml",
+      catalog_sha256: "sha256:" + sha256(json_stringify(catalog)),
+      provider_count: 1,
+      model_count: 1,
+      route_count: 1,
+      reason: "target Harn provider catalog identified",
+    },
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_rejects_unavailable_and_invalid_catalog_snapshots(task) {
+  const unavailable = provider_tool_probe_campaign_catalog_snapshot(
+    "missing-harn",
+    "",
+    {exit_code: 127, stdout: "", stderr: "command not found"},
+  )
+  assert_eq(
+    unavailable,
+    {
+      receipt: {
+        schema_version: "harn.provider_tool_probe_catalog.v1",
+        command: ["missing-harn", "provider", "catalog", "show"],
+        command_env: {},
+        status: "unavailable",
+        exit_code: 127,
+        providers_config: "",
+        catalog_sha256: "",
+        provider_count: 0,
+        model_count: 0,
+        route_count: 0,
+        reason: "command not found",
+      },
+      catalog: {},
+    },
+  )
+  const invalid = provider_tool_probe_campaign_catalog_snapshot(
+    "harn",
+    "",
+    {exit_code: 0, stdout: json_stringify({providers: [], models: []}), stderr: ""},
+  )
+  assert_eq(invalid.receipt.status, "invalid")
+  assert_eq(invalid.receipt.reason, "target Harn runtime produced invalid provider catalog JSON")
+  assert_eq(invalid.catalog, {})
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_normalizes_verified_runtime_receipt(task) {
+  const receipt = provider_tool_probe_campaign_runtime_receipt(
+    "/opt/harn",
+    {
+      exit_code: 0,
+      stdout: json_stringify({schemaVersion: 1, ok: true, data: {name: "harn-cli", version: "0.10.24"}}),
+      stderr: "",
+    },
+  )
+  assert_eq(
+    receipt,
+    {
+      schema_version: "harn.provider_tool_probe_runtime.v1",
+      command: ["/opt/harn", "version", "--json"],
+      status: "verified",
+      exit_code: 0,
+      version: "0.10.24",
+      reason: "target Harn runtime identified",
+    },
+  )
+  assert_eq(provider_tool_probe_campaign_runtime_allows_live(receipt), true)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_normalizes_unavailable_runtime_receipt(task) {
+  const receipt = provider_tool_probe_campaign_runtime_receipt(
+    "missing-harn",
+    {exit_code: 127, stdout: "", stderr: "command not found"},
+  )
+  assert_eq(
+    receipt,
+    {
+      schema_version: "harn.provider_tool_probe_runtime.v1",
+      command: ["missing-harn", "version", "--json"],
+      status: "unavailable",
+      exit_code: 127,
+      version: "",
+      reason: "command not found",
+    },
+  )
+  assert_eq(provider_tool_probe_campaign_runtime_allows_live(receipt), false)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(task) {
+  const malformed = provider_tool_probe_campaign_runtime_receipt("harn", {exit_code: 0, stdout: "not-json", stderr: ""})
+  assert_eq(
+    malformed,
+    {
+      schema_version: "harn.provider_tool_probe_runtime.v1",
+      command: ["harn", "version", "--json"],
+      status: "invalid",
+      exit_code: 0,
+      version: "",
+      reason: "target Harn runtime produced invalid version JSON",
+    },
+  )
+  const wrong_contract = provider_tool_probe_campaign_runtime_receipt(
+    "harn",
+    {exit_code: 0, stdout: json_stringify({ok: true, data: {name: "harn-cli", version: "1.0.0"}})},
+  )
+  assert_eq(
+    wrong_contract,
+    {
+      schema_version: "harn.provider_tool_probe_runtime.v1",
+      command: ["harn", "version", "--json"],
+      status: "invalid",
+      exit_code: 0,
+      version: "",
+      reason: "target Harn runtime version JSON did not match the harn-cli contract",
+    },
+  )
+  assert_eq(provider_tool_probe_campaign_runtime_allows_live(malformed), false)
+  assert_eq(provider_tool_probe_campaign_runtime_allows_live(wrong_contract), false)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_env_file_is_explicit_and_portable(task) {
+  assert_eq(
+    provider_tool_probe_campaign_env_file(" /explicit/.env ", "/configured/.env"),
+    "/explicit/.env",
+  )
+  assert_eq(provider_tool_probe_campaign_env_file("", " /configured/.env "), "/configured/.env")
+  assert_eq(provider_tool_probe_campaign_env_file("", ""), "")
+}
 
 @test
 pipeline test_provider_tool_probe_campaign_parses_explicit_routes(task) {
@@ -49,20 +257,20 @@ pipeline test_provider_tool_probe_campaign_rejects_malformed_routes(task) {
 pipeline test_provider_tool_probe_campaign_default_routes_are_cheap_by_default(task) {
   const routes = provider_tool_probe_campaign_default_routes(false)
   const ids = routes.map({ route -> route.id }).to_list()
-  assert(ids.contains("fireworks-gpt-oss-120b"), "fireworks route present")
-  assert(ids.contains("cerebras-gpt-oss-120b"), "cerebras route present")
-  assert(ids.contains("openrouter-gpt-oss-120b"), "openrouter route present")
-  assert(ids.contains("moonshot-kimi"), "moonshot route present")
-  assert(ids.contains("local-vllm"), "local vLLM route present")
-  assert(ids.contains("ollama"), "ollama route present")
-  assert(!ids.contains("xai-grok"), "xAI is excluded unless expensive defaults are requested")
+  assert_contains(ids, "fireworks-gpt-oss-120b")
+  assert_contains(ids, "cerebras-gpt-oss-120b")
+  assert_contains(ids, "openrouter-gpt-oss-120b")
+  assert_contains(ids, "moonshot-kimi")
+  assert_contains(ids, "local-vllm")
+  assert_contains(ids, "ollama")
+  assert_false(ids.contains("xai-grok"), "xAI is excluded unless expensive defaults are requested")
 }
 
 @test
 pipeline test_provider_tool_probe_campaign_include_expensive_adds_xai(task) {
   const routes = provider_tool_probe_campaign_default_routes(true)
   const ids = routes.map({ route -> route.id }).to_list()
-  assert(ids.contains("xai-grok"), "xAI expensive default route present")
+  assert_contains(ids, "xai-grok")
 }
 
 @test
@@ -217,7 +425,7 @@ pipeline test_provider_tool_probe_campaign_behavior_filter_matches_category_and_
   const parser = provider_tool_probe_campaign_select_behaviors(["parser"])
   assert_eq(len(tool_calls), 2)
   assert_eq(len(executable), 5)
-  assert(len(parser) >= 2, "parser behaviors are selected by category")
+  assert_true(len(parser) >= 2, "parser behaviors are selected by category")
 }
 
 @test
@@ -306,8 +514,12 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(task) {
     1,
     {},
     {checked: false},
+    verified_runtime(),
+    verified_catalog(),
   )
-  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v6")
+  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v8")
+  assert_eq(report.runtime, verified_runtime())
+  assert_eq(report.catalog, verified_catalog())
   assert_eq(report.summary.planned, 3)
   assert_eq(report.summary.pass, 0)
   assert_eq(report.cell_count, 3)
@@ -380,6 +592,8 @@ pipeline test_provider_tool_probe_campaign_max_probes_caps_executable_units(task
     3,
     {},
     {checked: true},
+    verified_runtime(),
+    verified_catalog(),
     plan.slice,
   )
   assert_eq(report.campaign_slice.max_probes, 2)
@@ -406,6 +620,8 @@ pipeline test_provider_tool_probe_campaign_live_spend_is_unknown_until_aggregate
     2,
     {},
     {checked: true},
+    verified_runtime(),
+    verified_catalog(),
   )
   assert_eq(report.spend.actual_usd_known, false)
   assert_eq(report.spend.estimated_usd_known, false)
@@ -428,6 +644,8 @@ pipeline test_provider_tool_probe_campaign_report_counts_missing_runners(task) {
     1,
     {},
     {checked: false},
+    verified_runtime(),
+    verified_catalog(),
   )
   assert_eq(report.runner_summary.planned_llm_call.total, 1)
   assert_eq(report.executable_gap.executable_cells, 0)
@@ -451,6 +669,8 @@ pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(task) {
     1,
     {},
     {checked: false},
+    verified_runtime(),
+    verified_catalog(),
   )
   assert_eq(report.runner_summary.provider_tool_probe.total, 3)
   assert_eq(report.executable_gap.executable_cells, 3)
@@ -521,6 +741,8 @@ pipeline test_provider_tool_probe_campaign_auth_readiness_summarizes_env_without
     1,
     {KIMI_API_KEY: "present"},
     {checked: true, loaded: true, parsed_key_count: 1, reason: "loaded"},
+    verified_runtime(),
+    verified_catalog(),
   )
   assert_eq(report.auth_readiness.env_checked, true)
   assert_eq(report.auth_readiness.env_source.loaded, true)
@@ -554,13 +776,13 @@ pipeline test_provider_tool_probe_campaign_artifact_paths_are_unique_per_behavio
   let paths: list<string> = []
   for behavior in behaviors {
     const path = provider_tool_probe_campaign_artifact_path(route, behavior, "non-streaming", ".out")
-    assert(!paths.contains(path), "artifact path must be unique: " + path)
+    assert_false(paths.contains(path), "artifact path must be unique: " + path)
     paths = paths + [path]
   }
   assert_eq(len(paths), 4)
-  assert(contains(paths[0] ?? "", "tool-calling-non-streaming"), "behavior id participates in path")
-  assert(contains(paths[0] ?? "", "single-tool-call"), "probe case participates in path")
-  assert(contains(paths[1] ?? "", "parallel-tool-calls"), "case-distinct path is visible")
+  assert_contains(paths[0] ?? "", "tool-calling-non-streaming")
+  assert_contains(paths[0] ?? "", "single-tool-call")
+  assert_contains(paths[1] ?? "", "parallel-tool-calls")
 }
 
 @test
@@ -586,6 +808,8 @@ pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(task) {
       "2",
       "--max-probes",
       "10",
+      "--providers-config",
+      "/workspace/providers.toml",
     ],
   )
   assert_eq(parsed.catalog_routes, true)
@@ -593,6 +817,7 @@ pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(task) {
   assert_eq(parsed.shard_count, 4)
   assert_eq(parsed.shard_index, 2)
   assert_eq(parsed.max_probes, 10)
+  assert_eq(parsed.providers_config, "/workspace/providers.toml")
 }
 
 @test
@@ -640,7 +865,11 @@ pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(task) {
     1,
     {},
     {checked: false},
+    verified_runtime(),
+    verified_catalog(),
   )
   const markdown = provider_tool_probe_campaign_markdown(report)
-  assert(contains(markdown, "left \\| right"), "pipe escaped")
+  assert_contains(markdown, "- Target runtime: `" + json_stringify(verified_runtime()) + "`")
+  assert_contains(markdown, "- Target catalog: `" + json_stringify(verified_catalog()) + "`")
+  assert_contains(markdown, "left \\| right")
 }

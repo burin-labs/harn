@@ -1,0 +1,82 @@
+import { agent_capture_events } from "std/agent/events"
+import { typed_output_checkpoint } from "std/checkpoint"
+import { assert_approx, assert_eq, with_llm_script } from "std/testing"
+
+pipeline test_typed_output_checkpoint_usage_cost() {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["decision", "confidence", "evidence"],
+    properties: {
+      decision: {type: "string", enum: ["merge", "wait"]},
+      confidence: {type: "number"},
+      evidence: {type: "array", items: {type: "string"}},
+    },
+  }
+  with_llm_script(
+    [
+      {
+        text: "{\"decision\":\"merge\",\"confidence\":0.9,\"evidence\":[\"green\"]}",
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        input_tokens: 1000,
+        output_tokens: 1000,
+      },
+      {
+        text: "{\"decision\":\"wait\",\"confidence\":\"low\",\"evidence\":[\"pending\"]}",
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        input_tokens: 2000,
+        output_tokens: 500,
+      },
+      {
+        text: "{\"decision\":\"wait\",\"confidence\":0.5,\"evidence\":[\"pending\"]}",
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        input_tokens: 500,
+        output_tokens: 2000,
+      },
+    ],
+    { ->
+      const captured = agent_capture_events(
+        "usage-cost-success",
+        fn() { typed_output_checkpoint(
+          "usage.success",
+          "Choose an action.",
+          schema,
+          {provider: "mock", session_id: "usage-cost-success", validator_retries: 0},
+        ) },
+      )
+      const success = captured.result
+      assert_eq(success.ok, true)
+      assert_eq(success.usage.input_tokens, 1000)
+      assert_eq(success.usage.output_tokens, 1000)
+      assert_approx(success.usage.cost_usd, 0.018)
+      assert_eq(captured.events[0].checkpoint.usage, success.usage)
+      const schema_failure = typed_output_checkpoint(
+        "usage.schema_failure",
+        "Choose an action.",
+        schema,
+        {provider: "mock", schema_retries: 0, validator_retries: 0, repair: {enabled: false}},
+      )
+      assert_eq(schema_failure.ok, false)
+      assert_eq(schema_failure.error_category, "schema_validation")
+      assert_eq(schema_failure.usage.input_tokens, 2000)
+      assert_eq(schema_failure.usage.output_tokens, 500)
+      assert_approx(schema_failure.usage.cost_usd, 0.0135)
+      const validator_failure = typed_output_checkpoint(
+        "usage.validator_failure",
+        "Choose an action.",
+        schema,
+        {provider: "mock", validator_retries: 0, repair: {enabled: false}},
+        fn(_data) { return {ok: false, errors: ["review is still pending"]} },
+      )
+      assert_eq(validator_failure.ok, false)
+      assert_eq(validator_failure.error_category, "validator_failure")
+      assert_eq(validator_failure.usage.input_tokens, 500)
+      assert_eq(validator_failure.usage.output_tokens, 2000)
+      assert_approx(validator_failure.usage.cost_usd, 0.0315)
+      __io_println("ok")
+    },
+  )
+}

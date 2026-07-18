@@ -137,7 +137,7 @@
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_run_artifacts.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_runtime.harn
 # count   34  crates/harn-stdlib/src/stdlib/stdlib_schema.harn
-# count    1  crates/harn-stdlib/src/stdlib/stdlib_semver.harn
+# count    0  crates/harn-stdlib/src/stdlib/stdlib_semver.harn
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_signal.harn
 # count    9  crates/harn-stdlib/src/stdlib/stdlib_slug.harn
 # count   25  crates/harn-stdlib/src/stdlib/stdlib_testing.harn
@@ -861,9 +861,6 @@ crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_extract_variable
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_inline
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_move_decl
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_reorder_parameters
-crates/harn-stdlib/src/stdlib/stdlib_eval_stats.harn::cost_per_solved
-crates/harn-stdlib/src/stdlib/stdlib_eval_stats.harn::estimate_cost_usd
-crates/harn-stdlib/src/stdlib/stdlib_eval_stats.harn::realized_trial_cost_usd
 crates/harn-stdlib/src/stdlib/stdlib_experiments.harn::append_message
 crates/harn-stdlib/src/stdlib/stdlib_experiments.harn::chain_of_draft
 crates/harn-stdlib/src/stdlib/stdlib_experiments.harn::custom
@@ -1055,7 +1052,6 @@ crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_strict_object
 crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_string
 crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_union
 crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_validator
-crates/harn-stdlib/src/stdlib/stdlib_semver.harn::bump_type
 crates/harn-stdlib/src/stdlib/stdlib_signal.harn::off_interrupt
 crates/harn-stdlib/src/stdlib/stdlib_signal.harn::on_interrupt
 crates/harn-stdlib/src/stdlib/stdlib_signal.harn::with_interrupt

@@ -51,6 +51,7 @@ harn-clock = { path = "../harn-clock", version = "=0.10.23" }
 harn-glob = { path = "../harn-glob", version = "=0.10.23" }
 harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.23" }
 harn-session-store = { path = "../harn-session-store", version = "=0.10.23" }
+harn-sqlite = { path = "../harn-sqlite", version = "=0.10.23" }
 harn-ir = { path = "../harn-ir", version = "=0.10.23" }
 harn-lexer = { path = "../harn-lexer", version = "=0.10.23" }
 harn-modules = { path = "../harn-modules", version = "=0.10.23" }
@@ -73,7 +74,7 @@ rand = "0.10"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "test-util", "process", "io-util", "io-std", "macros"] }
 reqwest = { version = "0.12", default-features = false, features = ["brotli", "deflate", "gzip", "json", "multipart", "rustls-tls", "zstd"] }
 reqwest-eventsource = "0.6"
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 rcgen = "0.14"
 libc = "0.2"
@@ -95,7 +96,7 @@ sha3 = "0.12"
 stacker = "0.1"
 blake3 = "1"
 md-5 = "0.11"
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 hkdf = "0.13"
 csv = "1"
 url = "2"
@@ -179,6 +180,10 @@ harness = false
 
 [[bench]]
 name = "vm_adaptive_inline_cache"
+harness = false
+
+[[bench]]
+name = "vm_async_dispatch"
 harness = false
 
 [[bench]]

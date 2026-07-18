@@ -1,0 +1,39 @@
+import {
+  agent_tool_lifecycle_error_category,
+  agent_tool_mutation_status,
+} from "std/agent/tool_lifecycle"
+
+pipeline test() {
+  for category in [
+    "schema_validation",
+    "tool_error",
+    "mcp_server_error",
+    "host_bridge_error",
+    "permission_denied",
+    "rejected_loop",
+    "parse_aborted",
+    "timeout",
+    "network",
+    "resource_busy",
+    "cancelled",
+    "abandoned_at_loop_exit",
+    "unknown",
+  ] {
+    assert_eq(agent_tool_lifecycle_error_category(category), category)
+  }
+  assert_eq(agent_tool_lifecycle_error_category("intra_turn_resource_fail_fast"), "rejected_loop")
+  assert_eq(agent_tool_lifecycle_error_category("scope_violation"), "permission_denied")
+  assert_eq(agent_tool_lifecycle_error_category("validator_failure"), "schema_validation")
+  assert_eq(agent_tool_lifecycle_error_category("overloaded"), "network")
+  assert_eq(agent_tool_lifecycle_error_category("tool_middleware_exception"), "tool_error")
+  assert_eq(agent_tool_lifecycle_error_category("circuit_open"), "host_bridge_error")
+  assert_eq(agent_tool_lifecycle_error_category(nil), nil)
+  assert_eq(agent_tool_lifecycle_error_category(""), nil)
+  assert_eq(agent_tool_lifecycle_error_category("future_category"), "unknown")
+  assert_eq(agent_tool_mutation_status("applied"), "applied")
+  assert_eq(agent_tool_mutation_status("not_applied"), "not_applied")
+  assert_eq(agent_tool_mutation_status("unknown"), "unknown")
+  assert_eq(agent_tool_mutation_status(nil), "unknown")
+  assert_eq(agent_tool_mutation_status("future_status"), "unknown")
+  log("agent tool lifecycle taxonomy ok")
+}

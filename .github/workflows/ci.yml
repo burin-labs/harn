@@ -1023,6 +1023,9 @@ jobs:
         # `-D warnings` (from the job env) promotes every warning to a hard
         # failure so it fails the PR instead of the release.
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Typecheck generated Swift protocol bindings
+        shell: bash
+        run: xcrun swiftc -typecheck spec/protocol-artifacts/HarnProtocol.swift
       # Gracefully stop the sccache daemon so the post-job orphan-cleanup phase
       # has nothing to terminate (see the Stop-sccache note in rust-builds).
       - name: Stop sccache server

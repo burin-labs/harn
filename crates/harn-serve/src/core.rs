@@ -669,18 +669,8 @@ impl DispatchCore {
                     self.config.script_path.display()
                 ))
             })?;
-        let program = harn_parser::parse_source(&source).map_err(|error| {
-            DispatchError::Validation(format!(
-                "failed to parse {}: {error}",
-                self.config.script_path.display()
-            ))
-        })?;
-        let chunk = Arc::new(
-            harn_vm::Compiler::new()
-                .compile_named(&program, &function.name)
-                .map_err(|error| DispatchError::Validation(format!("compile error: {error}")))?,
-        );
-        let globals = build_pipeline_globals(&request.arguments, function)?;
+        let arguments = request.arguments.clone();
+        let function = function.clone();
         let script_path = self.config.script_path.clone();
         let cancel_token = request
             .cancel_token
@@ -717,11 +707,15 @@ impl DispatchCore {
                     let mut vm = Vm::new();
                     install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
                     self.config.vm_configurator.configure(&mut vm)?;
-                    for (name, value) in globals {
-                        vm.set_global(&name, value);
-                    }
-
-                    let result = vm.execute_arc(Arc::clone(&chunk)).await;
+                    let exports = vm
+                        .load_module_exports_from_source(script_path.clone(), &source)
+                        .await
+                        .map_err(classify_vm_error)?;
+                    let closure = exports
+                        .get(&function.name)
+                        .ok_or_else(|| DispatchError::MissingExport(function.name.clone()))?;
+                    let args = build_vm_args(&arguments, &function, &vm)?;
+                    let result = vm.call_closure_pub(closure, &args).await;
 
                     match result {
                         Ok(_) => {
@@ -906,54 +900,6 @@ fn first_param_is_harness(function: &crate::ExportedFunction) -> bool {
         .first()
         .map(|param| param.name == "harness")
         .unwrap_or(false)
-}
-
-fn build_pipeline_globals(
-    arguments: &CallArguments,
-    function: &crate::ExportedFunction,
-) -> Result<harn_vm::value::DictMap, DispatchError> {
-    let mut globals = harn_vm::value::DictMap::new();
-    match arguments {
-        CallArguments::Positional(values) => {
-            for (index, param) in function.params.iter().enumerate() {
-                match values.get(index) {
-                    Some(value) => {
-                        globals.insert(
-                            harn_vm::value::intern_key(&param.name),
-                            json_to_vm_value(value),
-                        );
-                    }
-                    None if param.has_default => {}
-                    None => {
-                        return Err(DispatchError::Validation(format!(
-                            "missing required argument '{}' for '{}'",
-                            param.name, function.name
-                        )));
-                    }
-                }
-            }
-        }
-        CallArguments::Named(values) => {
-            for param in &function.params {
-                match values.get(&param.name) {
-                    Some(value) => {
-                        globals.insert(
-                            harn_vm::value::intern_key(&param.name),
-                            json_to_vm_value(value),
-                        );
-                    }
-                    None if param.has_default => {}
-                    None => {
-                        return Err(DispatchError::Validation(format!(
-                            "missing required argument '{}' for '{}'",
-                            param.name, function.name
-                        )));
-                    }
-                }
-            }
-        }
-    }
-    Ok(globals)
 }
 
 fn trim_trailing_defaults(mut args: Vec<VmValue>) -> Vec<VmValue> {
@@ -1765,49 +1711,8 @@ pub fn whoami(harness: Harness) -> string {
         assert_eq!(response.value, serde_json::json!("override-tenant"));
     }
 
-    #[test]
-    fn budget_category_recovers_every_dimension() {
-        // Structured guards (mcp/pg call counts, LLM preflight) carry the
-        // dimension on the `limit` field.
-        let structured = |limit: &str| {
-            harn_vm::VmError::Thrown(harn_vm::VmValue::dict(std::collections::BTreeMap::from([
-                (
-                    "category".to_string(),
-                    harn_vm::VmValue::String(arcstr::ArcStr::from("budget_exceeded")),
-                ),
-                (
-                    "limit".to_string(),
-                    harn_vm::VmValue::String(arcstr::ArcStr::from(limit)),
-                ),
-            ])))
-        };
-        assert_eq!(
-            budget_category_from_error(&structured("mcp_calls")).as_deref(),
-            Some("mcp_calls"),
-        );
-        assert_eq!(
-            budget_category_from_error(&structured("pg_queries")).as_deref(),
-            Some("pg_queries"),
-        );
-
-        // LLM cost/token mid-call exhaustion raises the categorised
-        // variant; the message disambiguates cost from tokens so the
-        // per-class telemetry is accurate.
-        let categorized = |message: &str| harn_vm::VmError::CategorizedError {
-            message: message.to_string(),
-            category: harn_vm::ErrorCategory::BudgetExceeded,
-        };
-        assert_eq!(
-            budget_category_from_error(&categorized("LLM budget exceeded: spent $0.01 of $0.00"))
-                .as_deref(),
-            Some("llm_cost_usd"),
-        );
-        assert_eq!(
-            budget_category_from_error(&categorized(
-                "LLM token budget exceeded: spent 11 of 10 tokens"
-            ))
-            .as_deref(),
-            Some("llm_tokens"),
-        );
-    }
+    #[path = "dispatch_error_tests.rs"]
+    mod dispatch_error_tests;
+    #[path = "typed_pipeline_tests.rs"]
+    mod typed_pipeline_tests;
 }

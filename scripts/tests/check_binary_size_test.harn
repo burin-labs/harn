@@ -152,11 +152,14 @@ pipeline test_workflow_budget_matches_helper_default(task) {
 }
 
 @test
-pipeline test_workflow_runs_bloat_only_for_warm_builds(task) {
+pipeline test_workflow_preserves_bloat_after_failed_warm_budget_gate(task) {
   const warm_only = "matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.build_mode == 'warm'"
+  const warm_diagnostics = "always() && " + warm_only
   const steps = release_workflow().jobs.build.steps
+  const bloat = release_workflow_step(steps, "Generate cargo-bloat report (warm only)")
   assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, warm_only)
-  assert_eq(release_workflow_step(steps, "Generate cargo-bloat report (warm only)").if, warm_only)
+  assert_eq(bloat.if, warm_diagnostics)
+  assert_eq(bloat["continue-on-error"], true)
   assert_eq(
     release_workflow_step(steps, "Check binary size budget").if,
     "matrix.target == 'x86_64-unknown-linux-gnu'",

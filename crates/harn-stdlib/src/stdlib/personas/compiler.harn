@@ -7,7 +7,6 @@
 // The CLI materializer owns those package bytes and atomically publishes only a
 // successfully validated lowering.
 import "std/calendar"
-import { typed_output_checkpoint } from "std/checkpoint"
 import "std/schema"
 import { list_providers } from "std/triggers"
 
@@ -64,58 +63,21 @@ pub type PersonaBlueprintLowering = {
 
 pub type PersonaBlueprintCompileResult = Result<PersonaBlueprintLowering, PersonaBlueprintValidationReport>
 
-pub type PersonaPromptCompileOptions = {
-  provider?: string,
-  model?: string,
-  max_tokens?: int,
-  name_override?: string,
-}
-
-pub type PersonaPromptCatalogEntry = {
-  provider: string,
-  transports: list<string>,
-  required_secrets: list<string>,
-}
-
-pub type PersonaPromptCompileUsage = {
-  input_tokens: int,
-  output_tokens: int,
-  total_tokens: int,
-  realized_cost_usd: float?,
-}
-
-pub type PersonaPromptCheckpointStatus = "not_attempted" | "accepted" | "schema_rejected" | "validator_rejected"
-
-pub type PersonaPromptCheckpointReceipt = {
-  status: PersonaPromptCheckpointStatus,
-  attempts: int,
-  checkpoint_attempts: int,
-  repaired: bool,
-  extracted_json: bool,
-  provider: string,
-  model: string,
-  error_category?: string,
-}
-
-pub type PersonaPromptCompileReceipt = {
-  schema_version: "harn.persona.prompt_compile.v1",
-  ok: bool,
-  prompt_digest: string,
-  catalog_digest: string,
-  catalog: list<PersonaPromptCatalogEntry>,
-  checkpoint: PersonaPromptCheckpointReceipt,
-  usage: PersonaPromptCompileUsage,
-  blueprint?: PersonaBlueprint,
-  validation?: PersonaBlueprintValidationReport,
-  lowering?: PersonaBlueprintLowering,
-  error?: PersonaBlueprintDiagnostic,
+fn __persona_blueprint_common_schema_fields() -> dict {
+  return {
+    schema_version: schema_literal(PERSONA_BLUEPRINT_SCHEMA_VERSION),
+    name: schema_string(),
+    description: schema_string(),
+    goal: schema_string(),
+    template: schema_enum(__PERSONA_TEMPLATE_IDS),
+  }
 }
 
 /**
  * persona_blueprint_schema.
  *
- * Returns the closed model-output schema. A blueprint has exactly one source
- * after semantic validation: either `cron` or `external`, never both.
+ * Returns the closed canonical blueprint schema. A blueprint has exactly one
+ * source after semantic validation: either `cron` or `external`, never both.
  *
  * @effects: []
  * @errors: []
@@ -123,12 +85,8 @@ pub type PersonaPromptCompileReceipt = {
  */
 pub fn persona_blueprint_schema() -> dict {
   return schema_closed_object(
-    {
-      schema_version: schema_literal(PERSONA_BLUEPRINT_SCHEMA_VERSION),
-      name: schema_string(),
-      description: schema_string(),
-      goal: schema_string(),
-      template: schema_enum(__PERSONA_TEMPLATE_IDS),
+    __persona_blueprint_common_schema_fields()
+      + {
       cron: schema_field(schema_closed_object({cron: schema_string(), timezone: schema_string()}), false),
       external: schema_field(schema_closed_object({provider: schema_string(), event: schema_string()}), false),
     },
@@ -391,260 +349,4 @@ pub fn persona_blueprint_compile(blueprint, providers = nil) -> PersonaBlueprint
       triggers: [trigger],
     },
   )
-}
-
-fn __persona_prompt_catalog(providers) -> list<PersonaPromptCatalogEntry> {
-  let catalog: list<PersonaPromptCatalogEntry> = []
-  for provider in providers {
-    const transports = provider.kinds.map({ kind -> to_string(kind) }).sort_by({ kind -> kind })
-    const required_secrets = provider.secret_requirements
-      .filter({ requirement -> requirement.required })
-      .map({ requirement -> to_string(requirement.name) })
-      .sort_by({ name -> name })
-    catalog = catalog
-      .push(
-      {provider: provider.provider, transports: transports, required_secrets: required_secrets},
-    )
-  }
-  return catalog.sort_by({ entry -> entry.provider })
-}
-
-fn __persona_prompt_digest(value) -> string {
-  return "sha256:" + sha256(json_stringify(value))
-}
-
-fn __persona_prompt_grounding(user_prompt: string, catalog: list<PersonaPromptCatalogEntry>) -> string {
-  return "Compile the user's request into exactly one closed PersonaBlueprint JSON object.\n"
-    + "Do not emit TOML, Harn source, paths, tools, capabilities, budgets, model policy, filters, destinations, or authority.\n"
-    + "Choose one template: deterministic-sweeper for periodic watches/digests; hybrid-classify-then-act for event triage; frontier-judgment-loop only for bounded judgment work.\n"
-    + "Choose exactly one source: cron {cron, timezone} or external {provider, event}. External events must begin with '<provider>.'.\n"
-    + "Live provider transports: "
-    + json_stringify(catalog)
-    + "\nExamples:\n"
-    + "SDK watch -> {\"schema_version\":\"1\",\"name\":\"sdk_watch\",\"description\":\"Narrates meaningful SDK changes.\",\"goal\":\"Watch the SDK and explain meaningful changes every morning.\",\"template\":\"deterministic-sweeper\",\"cron\":{\"cron\":\"0 9 * * *\",\"timezone\":\"UTC\"}}\n"
-    + "Slack triage -> {\"schema_version\":\"1\",\"name\":\"alerts_triage\",\"description\":\"Classifies incoming alerts.\",\"goal\":\"Page, investigate, or ignore each alert.\",\"template\":\"hybrid-classify-then-act\",\"external\":{\"provider\":\"slack\",\"event\":\"slack.message\"}}\n"
-    + "Four-hour digest -> {\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up work.\",\"goal\":\"Surface replies and follow-ups every four hours.\",\"template\":\"deterministic-sweeper\",\"cron\":{\"cron\":\"0 */4 * * *\",\"timezone\":\"UTC\"}}\n"
-    + "User request:\n"
-    + user_prompt
-}
-
-fn __persona_prompt_with_name_override(blueprint, options: PersonaPromptCompileOptions) {
-  if options.name_override != nil {
-    return blueprint + {name: options.name_override}
-  }
-  return blueprint
-}
-
-fn __persona_prompt_usage(checkpoint) -> PersonaPromptCompileUsage {
-  const raw = checkpoint.usage ?? {}
-  const input_tokens = to_int(raw?.input_tokens ?? raw?.prompt_tokens) ?? 0
-  const output_tokens = to_int(raw?.output_tokens ?? raw?.completion_tokens) ?? 0
-  const total_tokens = to_int(raw?.total_tokens) ?? (input_tokens + output_tokens)
-  return {
-    input_tokens: input_tokens,
-    output_tokens: output_tokens,
-    total_tokens: total_tokens,
-    realized_cost_usd: to_float(raw?.cost_usd),
-  }
-}
-
-fn __persona_prompt_checkpoint_receipt(checkpoint) -> PersonaPromptCheckpointReceipt {
-  const status = if checkpoint.status == "accepted" {
-    "accepted"
-  } else if checkpoint.status == "validator_rejected" {
-    "validator_rejected"
-  } else {
-    "schema_rejected"
-  }
-  return {
-    status: status,
-    attempts: checkpoint.attempts,
-    checkpoint_attempts: checkpoint.checkpoint_attempts,
-    repaired: checkpoint.repaired,
-    extracted_json: checkpoint.extracted_json,
-    provider: checkpoint.provider,
-    model: checkpoint.model,
-    error_category: checkpoint.error_category,
-  }
-}
-
-fn __persona_prompt_not_attempted() -> PersonaPromptCheckpointReceipt {
-  return {
-    status: "not_attempted",
-    attempts: 0,
-    checkpoint_attempts: 0,
-    repaired: false,
-    extracted_json: false,
-    provider: "",
-    model: "",
-    error_category: nil,
-  }
-}
-
-fn __persona_prompt_zero_usage() -> PersonaPromptCompileUsage {
-  return {input_tokens: 0, output_tokens: 0, total_tokens: 0, realized_cost_usd: nil}
-}
-
-fn __persona_prompt_preflight_failure(
-  prompt_digest: string,
-  catalog_digest: string,
-  catalog: list<PersonaPromptCatalogEntry>,
-  code: string,
-  path: string,
-  message: string,
-) -> PersonaPromptCompileReceipt {
-  return {
-    schema_version: "harn.persona.prompt_compile.v1",
-    ok: false,
-    prompt_digest: prompt_digest,
-    catalog_digest: catalog_digest,
-    catalog: catalog,
-    checkpoint: __persona_prompt_not_attempted(),
-    usage: __persona_prompt_zero_usage(),
-    blueprint: nil,
-    validation: nil,
-    lowering: nil,
-    error: {code: code, path: path, message: message},
-  }
-}
-
-fn __persona_prompt_validation_error(report: PersonaBlueprintValidationReport) -> PersonaBlueprintDiagnostic {
-  if len(report.errors) > 0 {
-    return report.errors[0]
-      ?? {code: "blueprint_invalid", path: "", message: "persona blueprint failed validation"}
-  }
-  return {code: "blueprint_invalid", path: "", message: "persona blueprint failed validation"}
-}
-
-/**
- * persona_compile_prompt.
- *
- * Compiles one natural-language request into the closed persona blueprint and
- * deterministic prompt_compiled_v1 lowering. The checkpoint is deliberately
- * single-shot: schema and validator retries are zero and repair is disabled.
- * The returned receipt contains only prompt/catalog digests, compact catalog
- * facts, normalized usage/cost, the validated blueprint, and its lowering.
- *
- * @effects: [llm]
- * @errors: []
- * @api_stability: experimental
- */
-pub fn persona_compile_prompt(
-  prompt: string,
-  options: PersonaPromptCompileOptions? = nil,
-  providers = nil,
-) -> PersonaPromptCompileReceipt {
-  const opts: PersonaPromptCompileOptions = options ?? {}
-  const live_providers = providers ?? list_providers()
-  const catalog = __persona_prompt_catalog(live_providers)
-  const prompt_digest = __persona_prompt_digest(trim(prompt))
-  const catalog_digest = __persona_prompt_digest(catalog)
-  const max_tokens = opts.max_tokens ?? 512
-  if trim(prompt) == "" {
-    return __persona_prompt_preflight_failure(
-      prompt_digest,
-      catalog_digest,
-      catalog,
-      "blank_prompt",
-      "prompt",
-      "persona prompt must not be blank",
-    )
-  }
-  if max_tokens < 1 || max_tokens > 1200 {
-    return __persona_prompt_preflight_failure(
-      prompt_digest,
-      catalog_digest,
-      catalog,
-      "max_tokens_out_of_range",
-      "options.max_tokens",
-      "persona prompt max_tokens must be between 1 and 1200",
-    )
-  }
-  const checkpoint = typed_output_checkpoint(
-    "personas.compile_prompt",
-    __persona_prompt_grounding(trim(prompt), catalog),
-    persona_blueprint_schema(),
-    {
-      provider: opts.provider,
-      model: opts.model,
-      max_tokens: max_tokens,
-      schema_retries: 0,
-      validator_retries: 0,
-      repair: {enabled: false},
-    },
-    fn(candidate) {
-      const normalized = __persona_prompt_with_name_override(candidate, opts)
-      const validation = persona_blueprint_validate(normalized, live_providers)
-      return {
-        ok: validation.valid,
-        errors: validation.errors.map({ diagnostic -> diagnostic.path + ": " + diagnostic.message }),
-      }
-    },
-  )
-  const checkpoint_receipt = __persona_prompt_checkpoint_receipt(checkpoint)
-  const usage = __persona_prompt_usage(checkpoint)
-  if !checkpoint.ok {
-    if checkpoint.status == "validator_rejected" {
-      const blueprint = __persona_blueprint_record(__persona_prompt_with_name_override(checkpoint.data, opts))
-      const validation = persona_blueprint_validate(blueprint, live_providers)
-      return {
-        schema_version: "harn.persona.prompt_compile.v1",
-        ok: false,
-        prompt_digest: prompt_digest,
-        catalog_digest: catalog_digest,
-        catalog: catalog,
-        checkpoint: checkpoint_receipt,
-        usage: usage,
-        blueprint: blueprint,
-        validation: validation,
-        lowering: nil,
-        error: __persona_prompt_validation_error(validation),
-      }
-    }
-    return {
-      schema_version: "harn.persona.prompt_compile.v1",
-      ok: false,
-      prompt_digest: prompt_digest,
-      catalog_digest: catalog_digest,
-      catalog: catalog,
-      checkpoint: checkpoint_receipt,
-      usage: usage,
-      blueprint: nil,
-      validation: nil,
-      lowering: nil,
-      error: {code: checkpoint.error_category ?? "schema_rejected", path: "", message: checkpoint.error},
-    }
-  }
-  const blueprint = __persona_blueprint_record(__persona_prompt_with_name_override(checkpoint.data, opts))
-  const validation = persona_blueprint_validate(blueprint, live_providers)
-  const compiled = persona_blueprint_compile(blueprint, live_providers)
-  if is_err(compiled) {
-    const failed = unwrap_err(compiled)
-    return {
-      schema_version: "harn.persona.prompt_compile.v1",
-      ok: false,
-      prompt_digest: prompt_digest,
-      catalog_digest: catalog_digest,
-      catalog: catalog,
-      checkpoint: checkpoint_receipt,
-      usage: usage,
-      blueprint: blueprint,
-      validation: failed,
-      lowering: nil,
-      error: __persona_prompt_validation_error(failed),
-    }
-  }
-  return {
-    schema_version: "harn.persona.prompt_compile.v1",
-    ok: true,
-    prompt_digest: prompt_digest,
-    catalog_digest: catalog_digest,
-    catalog: catalog,
-    checkpoint: checkpoint_receipt,
-    usage: usage,
-    blueprint: blueprint,
-    validation: validation,
-    lowering: unwrap(compiled),
-    error: nil,
-  }
 }

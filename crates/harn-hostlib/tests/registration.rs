@@ -7,21 +7,69 @@
 //! that a routed `Unimplemented` becomes a real return value — never a
 //! removed builtin.
 
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs;
+use std::path::Path;
+use std::sync::{Mutex, MutexGuard};
 
 #[cfg(feature = "terminal-session")]
 use harn_hostlib::terminal_session::TerminalSessionCapability;
 use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, embed::EmbedCapability, fs::FsCapability,
-    fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability, scanner::ScannerCapability,
-    schemas, secret_store::SecretStoreCapability, tools::permissions, tools::ToolsCapability,
-    BuiltinRegistry, HostlibCapability, HostlibError, HostlibRegistry,
+    fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability,
+    host_lease_capability::HostLeaseCapability, scanner::ScannerCapability, schemas,
+    secret_store::SecretStoreCapability, tools::permissions, tools::ToolsCapability,
+    BuiltinRegistry, HostLeasePriorityClass, HostLeaseRequest, HostLeaseResourceClass,
+    HostLeaseStore, HostlibCapability, HostlibError, HostlibRegistry, HOST_LEASE_ROOT_ENV,
 };
 use harn_lexer::Lexer;
 use harn_parser::Parser;
 use harn_vm::{register_vm_stdlib, Compiler, Vm, VmError, VmValue};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
+
+static HOST_LEASE_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// Restores the process-global lease-root override after one hermetic VM test.
+///
+/// The host capability resolves its store per invocation, so the test needs to
+/// exercise the real environment-owned boundary rather than a test-only
+/// injected store. The lock makes that mutation safe under libtest's parallel
+/// runner.
+struct HostLeaseRootGuard {
+    prior: Option<OsString>,
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl HostLeaseRootGuard {
+    fn set(root: &Path) -> Self {
+        let lock = HOST_LEASE_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let prior = std::env::var_os(HOST_LEASE_ROOT_ENV);
+        // SAFETY: the process-global mutex above serializes every mutation in
+        // this test target and the previous value is restored in Drop.
+        unsafe {
+            std::env::set_var(HOST_LEASE_ROOT_ENV, root);
+        }
+        Self { prior, _lock: lock }
+    }
+}
+
+impl Drop for HostLeaseRootGuard {
+    fn drop(&mut self) {
+        // SAFETY: `self._lock` is held for the guard's full lifetime, including
+        // this restoration, so no sibling test in this target can observe a
+        // torn environment value.
+        unsafe {
+            match &self.prior {
+                Some(value) => std::env::set_var(HOST_LEASE_ROOT_ENV, value),
+                None => std::env::remove_var(HOST_LEASE_ROOT_ENV),
+            }
+        }
+    }
+}
 
 fn collect_into_registry<C: HostlibCapability>(cap: C) -> BuiltinRegistry {
     let mut registry = BuiltinRegistry::new();
@@ -532,6 +580,7 @@ fn install_default_wires_every_module_into_a_vm() {
         "fs_watch",
         "tools",
         "secret_store",
+        "host_lease",
     ];
     // The computer-use module is registered only when the `computer` feature is
     // compiled in (it is out of default/full so headless/Linux CI is unaffected).
@@ -543,8 +592,112 @@ fn install_default_wires_every_module_into_a_vm() {
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
-    // + 1 hostlib_enable + 4 secret_store = 79.
-    assert!(registry.builtins().len() >= 79);
+    // + 1 hostlib_enable + 4 secret_store + 1 host_lease = 80.
+    assert!(registry.builtins().len() >= 80);
+}
+
+#[test]
+fn host_lease_capability_registers_read_only_status() {
+    let registry = collect_into_registry(HostLeaseCapability);
+    let names: Vec<_> = registry.iter().map(|builtin| builtin.name).collect();
+    assert_eq!(names, vec!["hostlib_host_lease_status"]);
+
+    let entry = registry
+        .find("hostlib_host_lease_status")
+        .expect("registered");
+    let error = (entry.handler)(&[]).expect_err("host is required");
+    match error {
+        HostlibError::MissingParameter { builtin, param } => {
+            assert_eq!(builtin, "hostlib_host_lease_status");
+            assert_eq!(param, "host");
+        }
+        other => panic!("expected missing host error, got {other:?}"),
+    }
+
+    let whitespace_host = VmValue::dict([("host", VmValue::string("  "))]);
+    let error = (entry.handler)(&[whitespace_host]).expect_err("blank host is invalid");
+    match error {
+        HostlibError::InvalidParameter { builtin, param, .. } => {
+            assert_eq!(builtin, "hostlib_host_lease_status");
+            assert_eq!(param, "host");
+        }
+        other => panic!("expected invalid host error, got {other:?}"),
+    }
+}
+
+#[test]
+fn stdlib_host_lease_status_reads_empty_active_and_recovered_state() {
+    let root = TempDir::new().expect("lease root");
+    let _env = HostLeaseRootGuard::set(root.path());
+    let store = HostLeaseStore::for_root(root.path()).expect("store");
+
+    let source = r#"
+import { host_lease_status } from "std/host_lease"
+
+pipeline default(task) {
+  return host_lease_status("mac-local")
+}
+"#;
+
+    let empty = expect_dict(execute_harn(source).expect("empty state"));
+    assert!(matches!(empty.get("active"), Some(VmValue::Nil)));
+    assert!(matches!(
+        empty.get("recovered_stale_lease"),
+        Some(VmValue::Bool(false))
+    ));
+
+    let acquired = store
+        .try_acquire(HostLeaseRequest {
+            host: "mac-local".to_string(),
+            resource_class: HostLeaseResourceClass::WholeMachine,
+            execution_context: None,
+            owner: "registration-test".to_string(),
+            priority_class: HostLeasePriorityClass::Measurement,
+            ttl_ms: Some(60_000),
+            owner_pid: None,
+            reason: Some("pipeline contract test".to_string()),
+            metadata: BTreeMap::from([("lane".to_string(), "p7".to_string())]),
+        })
+        .expect("acquire");
+    assert!(acquired.handle.is_some(), "fixture lease acquires");
+
+    let active = expect_dict(execute_harn(source).expect("active state"));
+    let Some(VmValue::Dict(handle)) = active.get("active") else {
+        panic!("active fixture lease must reach the Harn wrapper");
+    };
+    assert_eq!(
+        handle.get("owner").map(VmValue::display),
+        Some("registration-test".to_string())
+    );
+    assert_eq!(
+        handle.get("priority_class").map(VmValue::display),
+        Some("measurement".to_string())
+    );
+
+    // Make expiry deterministic rather than sleeping. The registry's public
+    // status operation remains the only code under test that performs recovery.
+    let database = store.root().join("host-leases.sqlite");
+    let connection = rusqlite::Connection::open(database).expect("lease database");
+    connection
+        .execute(
+            "UPDATE host_leases SET expires_at_ms = 0 WHERE host = ?1",
+            ["mac-local"],
+        )
+        .expect("expire fixture lease");
+
+    let recovered = expect_dict(execute_harn(source).expect("recovered state"));
+    assert!(matches!(recovered.get("active"), Some(VmValue::Nil)));
+    assert!(matches!(
+        recovered.get("recovered_stale_lease"),
+        Some(VmValue::Bool(true))
+    ));
+}
+
+fn expect_dict(value: VmValue) -> harn_vm::value::DictMap {
+    match value {
+        VmValue::Dict(dict) => (*dict).clone(),
+        other => panic!("expected dict response, got {other:?}"),
+    }
 }
 
 #[test]
@@ -769,7 +922,8 @@ fn every_registered_builtin_has_request_and_response_schemas() {
         .with(FsSnapshotCapability)
         .with(FsWatchCapability)
         .with(ToolsCapability)
-        .with(SecretStoreCapability);
+        .with(SecretStoreCapability)
+        .with(HostLeaseCapability);
     #[cfg(feature = "terminal-session")]
     let registry = registry.with(TerminalSessionCapability::new());
 

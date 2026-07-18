@@ -212,6 +212,29 @@ pub fn count_lines(text: string) -> int {
 }
 
 #[test]
+fn graph_json_preserves_typed_pipeline_signatures() {
+    let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("deploy.harn"),
+        "pub pipeline deploy(config: {region: string}, dry_run: bool) -> string {\n  return config.region\n}\n",
+    )
+    .unwrap();
+
+    let output = run_harn(&["graph", temp.path().to_str().unwrap(), "--json"]);
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed = stdout_json(&output);
+    assert_eq!(
+        parsed["data"]["modules"][0]["public_symbols"][0]["signature"],
+        "pipeline deploy(config: {region: string}, dry_run: bool) -> string"
+    );
+}
+
+#[test]
 fn graph_json_attributes_harness_sub_handle_calls_to_capabilities() {
     let temp = TempDir::new().unwrap();
     fs::write(

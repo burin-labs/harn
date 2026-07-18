@@ -1,19 +1,50 @@
 use super::*;
 use crate::package::test_support::*;
 
+const PREDICATE_WORKFLOW: &str = r#"import "std/triggers"
+
+pub fn should_handle(_event: TriggerEvent) -> bool {
+  return true
+}
+
+pub pipeline run(task) -> dict {
+  return {ok: true, task: task}
+}
+"#;
+
 fn installed_persona_project(root: &Path, root_manifest: &str, with_trigger: bool) -> PathBuf {
+    installed_persona_project_fixture(root, root_manifest, &["reviewer"], with_trigger, "")
+}
+
+fn installed_persona_project_fixture(
+    root: &Path,
+    root_manifest: &str,
+    persona_names: &[&str],
+    with_persona_trigger: bool,
+    root_triggers: &str,
+) -> PathBuf {
     let root_manifest =
         format!("{root_manifest}\n[dependencies]\nagents = {{ path = \"vendor/agents\" }}\n");
     let anchor = write_trigger_project(root, &root_manifest, None);
-    let mut lock =
-        install_test_persona_package(root, "agents", vec!["reviewer".to_string()], &["reviewer"]);
+    let mut lock = install_test_persona_package(
+        root,
+        "agents",
+        persona_names
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect(),
+        persona_names,
+    );
     let dependency_source = root.join("vendor/agents");
     fs::create_dir_all(&dependency_source).unwrap();
     lock.packages[0].source = path_source_uri(&dependency_source.canonicalize().unwrap()).unwrap();
-    if with_trigger {
+    if with_persona_trigger || !root_triggers.is_empty() {
         let package_manifest = current_packages_dir(root).join("agents").join(MANIFEST);
         let mut body = fs::read_to_string(&package_manifest).unwrap();
-        body.push_str("triggers = [\"github.pr_opened\"]\n");
+        if with_persona_trigger {
+            body.push_str("triggers = [\"github.pr_opened\"]\n");
+        }
+        body.push_str(root_triggers);
         fs::write(&package_manifest, body).unwrap();
         lock.packages[0].content_hash = Some(
             compute_content_hash(package_manifest.parent().unwrap()).expect("package content hash"),
@@ -33,6 +64,45 @@ fn installed_persona_project(root: &Path, root_manifest: &str, with_trigger: boo
     write_runtime_test_lock(root, &lock);
     try_load_runtime_extensions(&anchor).expect("persona fixture dependencies should materialize");
     anchor
+}
+
+fn update_installed_persona_workflow(root: &Path, anchor: &Path, source: &str) {
+    let package_dir = current_packages_dir(root).join("agents");
+    fs::write(package_dir.join("workflow.harn"), source).unwrap();
+    fs::write(root.join("vendor/agents/workflow.harn"), source).unwrap();
+    let mut lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+    lock.packages[0].content_hash = Some(compute_content_hash(&package_dir).unwrap());
+    write_runtime_test_lock(root, &lock);
+    try_load_runtime_extensions(anchor).expect("updated fixture should materialize");
+}
+
+fn activated_persona_predicate_extensions(root: &Path) -> (PathBuf, RuntimeExtensions) {
+    let anchor = installed_persona_project_fixture(
+        root,
+        "[package]\nname = \"consumer\"\n",
+        &["reviewer"],
+        false,
+        r#"
+[[triggers]]
+id = "review-events"
+kind = "webhook"
+provider = "github"
+match = { events = ["pull_request.opened"] }
+when = "workflow::should_handle"
+handler = "persona://reviewer"
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+    );
+    update_installed_persona_workflow(root, &anchor, PREDICATE_WORKFLOW);
+    activate_persona(
+        Some(&root.join(MANIFEST)),
+        "agents/reviewer",
+        &PersonaAttenuation::default(),
+        100,
+    )
+    .unwrap();
+    let extensions = try_load_runtime_extensions(&anchor).unwrap();
+    (anchor, extensions)
 }
 
 fn write_runtime_test_lock(root: &Path, lock: &LockFile) {
@@ -223,6 +293,264 @@ fn installed_persona_is_inert_until_activation_and_deactivation_is_reversible() 
     assert!(deactivated.runtime_personas.is_empty());
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn activated_installed_persona_projects_its_canonical_root_trigger() {
+    let tmp = tempfile::tempdir().unwrap();
+    let anchor = installed_persona_project_fixture(
+        tmp.path(),
+        "[package]\nname = \"consumer\"\n",
+        &["reviewer", "observer"],
+        false,
+        r#"
+[[triggers]]
+id = "review-digest"
+kind = "cron"
+provider = "cron"
+match = { events = ["tick"] }
+handler = "persona://reviewer"
+schedule = "0 */4 * * *"
+timezone = "UTC"
+secrets = { signing_secret = "cron/signing-secret" }
+when = "workflow::should_handle"
+when_budget = { max_cost_usd = 0.02, tokens_max = 256, timeout = "2s" }
+retry = { max = 7, backoff = "svix", retention_days = 7 }
+budget = { max_cost_usd = 0.5, max_tokens = 4096, daily_cost_usd = 3.0, hourly_cost_usd = 1.0, max_autonomous_decisions_per_hour = 4, max_autonomous_decisions_per_day = 12 }
+concurrency = { key = "repository", max = 2 }
+filter = "payload.draft == false"
+
+[[triggers]]
+id = "observer-events"
+kind = "webhook"
+provider = "github"
+match = { events = ["issue_opened"] }
+handler = "persona://observer"
+
+[[triggers]]
+id = "unrelated-worker"
+kind = "webhook"
+provider = "github"
+match = { events = ["pr_opened"] }
+handler = "worker://review-queue"
+"#,
+    );
+    update_installed_persona_workflow(tmp.path(), &anchor, PREDICATE_WORKFLOW);
+
+    let installed = try_load_runtime_extensions(&anchor).unwrap();
+    assert!(installed.triggers.is_empty());
+
+    activate_persona(
+        Some(&tmp.path().join(MANIFEST)),
+        "agents/reviewer",
+        &PersonaAttenuation::default(),
+        100,
+    )
+    .unwrap();
+    let activated = try_load_runtime_extensions(&anchor).unwrap();
+    assert_eq!(activated.triggers.len(), 1);
+    let trigger = &activated.triggers[0];
+    assert_eq!(trigger.id, "agents/review-digest");
+    assert_eq!(trigger.handler, "persona://agents/reviewer");
+    assert_eq!(trigger.kind, TriggerKind::Cron);
+    assert_eq!(trigger.provider.as_str(), "cron");
+    assert_eq!(trigger.match_.events, vec!["tick"]);
+    assert_eq!(trigger.retry.max, 7);
+    assert_eq!(trigger.retry.backoff, TriggerRetryBackoff::Svix);
+    assert_eq!(trigger.retry.retention_days, 7);
+    assert_eq!(
+        trigger.when_budget,
+        Some(TriggerWhenBudgetSpec {
+            max_cost_usd: Some(0.02),
+            tokens_max: Some(256),
+            timeout: Some("2s".to_string()),
+        })
+    );
+    assert_eq!(trigger.budget.max_cost_usd, Some(0.5));
+    assert_eq!(trigger.budget.max_tokens, Some(4096));
+    assert_eq!(trigger.budget.daily_cost_usd, Some(3.0));
+    assert_eq!(trigger.budget.hourly_cost_usd, Some(1.0));
+    assert_eq!(trigger.budget.max_autonomous_decisions_per_hour, Some(4));
+    assert_eq!(trigger.budget.max_autonomous_decisions_per_day, Some(12));
+    assert_eq!(
+        trigger.concurrency,
+        Some(TriggerConcurrencyManifestSpec {
+            key: Some("repository".to_string()),
+            max: 2,
+        })
+    );
+    assert_eq!(trigger.filter.as_deref(), Some("payload.draft == false"));
+    assert_eq!(trigger.when.as_deref(), Some("workflow::should_handle"));
+    assert_eq!(
+        trigger.execution_guard,
+        activated.runtime_personas[0].execution_guard
+    );
+    assert_eq!(
+        trigger.kind_specific.get("schedule"),
+        Some(&toml::Value::String("0 */4 * * *".to_string()))
+    );
+    assert_eq!(
+        trigger.kind_specific.get("timezone"),
+        Some(&toml::Value::String("UTC".to_string()))
+    );
+    assert_eq!(
+        trigger.secrets.get("signing_secret").map(String::as_str),
+        Some("cron/signing-secret")
+    );
+    let collected = collect_manifest_triggers(&mut test_vm(), &activated)
+        .await
+        .expect("qualified activated package trigger should collect");
+    assert_eq!(collected.len(), 1);
+    assert!(matches!(
+        &collected[0].handler,
+        CollectedTriggerHandler::Persona { binding, .. }
+            if binding.name == "agents/reviewer"
+    ));
+    assert!(matches!(
+        collected[0]
+            .when
+            .as_ref()
+            .map(|predicate| &predicate.callable),
+        Some(harn_vm::VmCallable::Eager(_))
+    ));
+    assert_eq!(
+        collected[0].flow_control.concurrency.as_ref().unwrap().max,
+        2
+    );
+
+    deactivate_persona(Some(&tmp.path().join(MANIFEST)), "agents/reviewer", 200).unwrap();
+    let deactivated = try_load_runtime_extensions(&anchor).unwrap();
+    assert!(deactivated.triggers.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn activated_trigger_eager_collection_rejects_mutated_predicate_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_anchor, extensions) = activated_persona_predicate_extensions(tmp.path());
+    fs::write(
+        current_packages_dir(tmp.path()).join("agents/workflow.harn"),
+        PREDICATE_WORKFLOW.replace("return true", "return false"),
+    )
+    .unwrap();
+
+    let error = collect_manifest_triggers(&mut test_vm(), &extensions)
+        .await
+        .expect_err("eager collection must reject post-activation mutation");
+    assert!(error.to_string().contains("content changed"), "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn activated_trigger_lazy_predicate_rechecks_content_at_invocation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_anchor, extensions) = activated_persona_predicate_extensions(tmp.path());
+    let mut vm = test_vm();
+    let collected = collect_manifest_triggers_with_mode(&mut vm, &extensions, true)
+        .await
+        .expect("pristine activated predicate should collect lazily");
+    let predicate = collected[0].when.as_ref().expect("predicate collected");
+    assert!(matches!(predicate.callable, harn_vm::VmCallable::Lazy(_)));
+    let initial = vm
+        .execute_callable(&predicate.callable, &[harn_vm::VmValue::Nil])
+        .await
+        .expect("pristine predicate should resolve and execute");
+    assert!(
+        matches!(initial, harn_vm::VmValue::Bool(true)),
+        "{initial:?}"
+    );
+
+    fs::write(
+        current_packages_dir(tmp.path()).join("agents/workflow.harn"),
+        PREDICATE_WORKFLOW.replace("return true", "return false"),
+    )
+    .unwrap();
+    let error = vm
+        .execute_callable(&predicate.callable, &[harn_vm::VmValue::Nil])
+        .await
+        .expect_err("lazy invocation must reject post-collection mutation");
+    assert!(
+        error
+            .to_string()
+            .contains("installed package execution rejected"),
+        "{error}"
+    );
+}
+
+#[test]
+fn activated_installed_trigger_ids_are_namespaced_by_dependency_alias() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let anchor = write_trigger_project(
+        root,
+        r#"
+[package]
+name = "consumer"
+
+[dependencies]
+agents = { path = "vendor/agents" }
+auditors = { path = "vendor/auditors" }
+"#,
+        None,
+    );
+    let mut lock =
+        install_test_persona_package(root, "agents", vec!["reviewer".to_string()], &["reviewer"]);
+    add_test_persona_package(
+        root,
+        &mut lock,
+        "auditors",
+        vec!["reviewer".to_string()],
+        &["reviewer"],
+    );
+
+    for alias in ["agents", "auditors"] {
+        let package_dir = current_packages_dir(root).join(alias);
+        let mut manifest = fs::read_to_string(package_dir.join(MANIFEST)).unwrap();
+        manifest.push_str(
+            r#"
+[[triggers]]
+id = "shared-event"
+kind = "webhook"
+provider = "github"
+match = { events = ["pr_opened"] }
+handler = "persona://reviewer"
+"#,
+        );
+        fs::write(package_dir.join(MANIFEST), manifest).unwrap();
+        let source = root.join("vendor").join(alias);
+        fs::create_dir_all(&source).unwrap();
+        fs::copy(package_dir.join(MANIFEST), source.join(MANIFEST)).unwrap();
+        fs::copy(
+            package_dir.join("workflow.harn"),
+            source.join("workflow.harn"),
+        )
+        .unwrap();
+        let entry = lock
+            .packages
+            .iter_mut()
+            .find(|entry| entry.name == alias)
+            .unwrap();
+        entry.source = path_source_uri(&source.canonicalize().unwrap()).unwrap();
+        entry.content_hash = Some(compute_content_hash(&package_dir).unwrap());
+    }
+    write_runtime_test_lock(root, &lock);
+    try_load_runtime_extensions(&anchor).expect("fixture dependencies should materialize");
+
+    for id in ["agents/reviewer", "auditors/reviewer"] {
+        activate_persona(
+            Some(&root.join(MANIFEST)),
+            id,
+            &PersonaAttenuation::default(),
+            100,
+        )
+        .unwrap();
+    }
+    let extensions = try_load_runtime_extensions(&anchor).unwrap();
+    let mut ids = extensions
+        .triggers
+        .iter()
+        .map(|trigger| trigger.id.as_str())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["agents/shared-event", "auditors/shared-event"]);
+}
+
 #[test]
 fn activated_persona_fails_closed_when_installed_content_changes() {
     let tmp = tempfile::tempdir().unwrap();
@@ -282,11 +610,12 @@ async fn activated_persona_guard_rechecks_content_at_invocation() {
         .execute_callable(callable, &[harn_vm::VmValue::Nil])
         .await
         .expect_err("guard must reject mutation after trigger registration");
+    let harn_vm::VmError::Runtime(message) = error else {
+        panic!("expected runtime package rejection, got {error:?}");
+    };
     assert!(
-        error
-            .to_string()
-            .contains("installed package execution rejected"),
-        "{error}"
+        message.starts_with("installed package execution rejected: "),
+        "{message}"
     );
 }
 
@@ -496,7 +825,20 @@ async fn activated_persona_rejects_module_cached_from_unverified_bytes() {
         .execute_callable(callable, &[harn_vm::VmValue::Nil])
         .await
         .expect_err("guard must reject a module cached from different bytes");
-    assert!(error.to_string().contains("cached module"), "{error}");
+    let harn_vm::VmError::Runtime(message) = error else {
+        panic!("expected runtime package rejection, got {error:?}");
+    };
+    let workflow = packages
+        .join("agents/workflow.harn")
+        .canonicalize()
+        .expect("canonical workflow path");
+    assert_eq!(
+        message,
+        format!(
+            "installed package execution rejected: cached module {} was not instantiated under the active package execution guard",
+            workflow.display()
+        )
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

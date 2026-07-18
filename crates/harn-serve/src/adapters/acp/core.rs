@@ -293,8 +293,42 @@ impl AcpServer {
         id: &serde_json::Value,
         message: &str,
     ) {
+        self.send_prompt_error_with_class(
+            session_id,
+            id,
+            message,
+            harn_vm::llm::AgentTerminalClass::GenericThrow,
+        );
+    }
+
+    pub(super) fn send_prompt_error_with_class(
+        &self,
+        session_id: &str,
+        id: &serde_json::Value,
+        message: &str,
+        terminal_class: harn_vm::llm::AgentTerminalClass,
+    ) {
         self.send_update(session_id, &format!("Error: {message}\n"));
-        self.send_error(id, -32000, message);
+        let data = super::types::AcpPromptErrorData::new(terminal_class);
+        self.send_error_with_data(
+            id,
+            -32000,
+            message,
+            serde_json::to_value(data).expect("ACP prompt error data must serialize"),
+        );
+        eprintln!("{message}");
+    }
+
+    pub(super) fn send_prompt_protocol_error(&self, id: &serde_json::Value, message: &str) {
+        let data = super::types::AcpPromptErrorData::new(
+            harn_vm::llm::AgentTerminalClass::AgentLoopProtocolFailure,
+        );
+        self.send_error_with_data(
+            id,
+            -32602,
+            message,
+            serde_json::to_value(data).expect("ACP prompt error data must serialize"),
+        );
         eprintln!("{message}");
     }
 

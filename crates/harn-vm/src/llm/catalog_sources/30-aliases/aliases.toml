@@ -663,3 +663,18 @@ provider = "dashscope"
 [aliases."dashscope-qwen3.7-max"]
 id = "dashscope/qwen3.7-max"
 provider = "dashscope"
+
+# Vercel AI Gateway routes. These aliases intentionally resolve to
+# collision-free catalog ids while the catalog's `wire_model` carries the
+# creator/model slug used by the Gateway API.
+[aliases."vercel-gpt-5.4-nano"]
+id = "vercel/openai/gpt-5.4-nano"
+provider = "vercel_ai_gateway"
+
+[aliases."vercel-claude-haiku-4.5"]
+id = "vercel/anthropic/claude-haiku-4.5"
+provider = "vercel_ai_gateway"
+
+[aliases."vercel-gemini-3.1-flash-lite"]
+id = "vercel/google/gemini-3.1-flash-lite-preview"
+provider = "vercel_ai_gateway"

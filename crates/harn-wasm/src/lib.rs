@@ -247,7 +247,7 @@ impl SyncInterpreter {
             return Ok(());
         };
 
-        if params.iter().any(|p| p == "task") {
+        if params.iter().any(|p| p.name == "task") {
             self.env.define("task", Val::String(String::new()), false);
         }
 
