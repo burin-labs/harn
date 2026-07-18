@@ -663,15 +663,13 @@ mod cache_supported_serde_tests {
         let Some(VmValue::Dict(priced_usage)) = priced_dict.get("usage") else {
             panic!("missing usage dict: {priced_dict:?}");
         };
+        let priced_usage_json = crate::llm::vm_value_to_json(&VmValue::Dict(priced_usage.clone()));
         assert_eq!(
-            priced_usage.get("cost_usd"),
-            Some(&VmValue::Float(expected_cost))
+            priced_usage_json["cost_usd"],
+            serde_json::json!(expected_cost)
         );
-        assert_eq!(priced_usage.get("input_tokens"), Some(&VmValue::Int(1_000)));
-        assert_eq!(
-            priced_usage.get("output_tokens"),
-            Some(&VmValue::Int(1_000))
-        );
+        assert_eq!(priced_usage_json["input_tokens"], serde_json::json!(1_000));
+        assert_eq!(priced_usage_json["output_tokens"], serde_json::json!(1_000));
 
         let mut unpriced = priced;
         unpriced.provider = "nonexistent_provider".to_string();
@@ -682,10 +680,17 @@ mod cache_supported_serde_tests {
         let Some(VmValue::Dict(unpriced_usage)) = unpriced_dict.get("usage") else {
             panic!("missing usage dict: {unpriced_dict:?}");
         };
-        assert_eq!(unpriced_usage.get("cost_usd"), Some(&VmValue::Nil));
+        let unpriced_usage_json =
+            crate::llm::vm_value_to_json(&VmValue::Dict(unpriced_usage.clone()));
         assert_eq!(
-            unpriced_usage.get("cache_savings_usd"),
-            Some(&VmValue::Float(0.0))
+            unpriced_usage_json
+                .as_object()
+                .and_then(|usage| usage.get("cost_usd")),
+            Some(&serde_json::Value::Null)
+        );
+        assert_eq!(
+            unpriced_usage_json["cache_savings_usd"],
+            serde_json::json!(0.0)
         );
 
         let mut zero_priced = unpriced;
@@ -697,10 +702,9 @@ mod cache_supported_serde_tests {
         let Some(VmValue::Dict(zero_priced_usage)) = zero_priced_dict.get("usage") else {
             panic!("missing usage dict: {zero_priced_dict:?}");
         };
-        assert_eq!(
-            zero_priced_usage.get("cost_usd"),
-            Some(&VmValue::Float(0.0))
-        );
+        let zero_priced_usage_json =
+            crate::llm::vm_value_to_json(&VmValue::Dict(zero_priced_usage.clone()));
+        assert_eq!(zero_priced_usage_json["cost_usd"], serde_json::json!(0.0));
     }
 
     #[test]

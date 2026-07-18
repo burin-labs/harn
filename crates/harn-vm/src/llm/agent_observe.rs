@@ -3254,13 +3254,18 @@ mod retry_tests {
             let Some(VmValue::Dict(usage)) = result_dict.get("usage") else {
                 panic!("missing usage dict: {result_dict:?}");
             };
-            usage.get("cost_usd").cloned().expect("cost_usd")
+            let usage = crate::llm::vm_value_to_json(&VmValue::Dict(usage.clone()));
+            usage
+                .as_object()
+                .and_then(|usage| usage.get("cost_usd"))
+                .cloned()
+                .expect("cost_usd")
         };
         let expected_cost = priced.priced_cost_usd().expect("catalog-priced result");
         assert_eq!(events[0]["cost_usd"].as_f64(), Some(expected_cost));
-        assert_eq!(vm_usage_cost(&priced), VmValue::Float(expected_cost));
+        assert_eq!(vm_usage_cost(&priced), serde_json::json!(expected_cost));
         assert_eq!(events[1]["cost_usd"], serde_json::Value::Null);
-        assert_eq!(vm_usage_cost(&unpriced), VmValue::Nil);
+        assert_eq!(vm_usage_cost(&unpriced), serde_json::Value::Null);
     }
 
     #[test]

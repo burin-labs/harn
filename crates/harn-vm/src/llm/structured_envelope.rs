@@ -704,22 +704,15 @@ mod tests {
         let success = envelope_success(&outcome, false);
         let failure = envelope_failure(&outcome, EnvelopeFailureKind::SchemaValidation, false);
 
-        assert_eq!(
-            success.as_dict().and_then(|dict| dict.get("usage")),
-            Some(canonical_usage)
-        );
-        assert_eq!(
-            failure.as_dict().and_then(|dict| dict.get("usage")),
-            Some(canonical_usage)
-        );
-        assert_eq!(
-            envelope_usage(&success).get("cost_usd"),
-            Some(&VmValue::Float(expected_cost))
-        );
-        assert_eq!(
-            envelope_usage(&failure).get("cost_usd"),
-            Some(&VmValue::Float(expected_cost))
-        );
+        let canonical_usage = crate::llm::vm_value_to_json(canonical_usage);
+        let success_usage =
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&success).clone()));
+        let failure_usage =
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&failure).clone()));
+        assert_eq!(success_usage, canonical_usage);
+        assert_eq!(failure_usage, canonical_usage);
+        assert_eq!(success_usage["cost_usd"], serde_json::json!(expected_cost));
+        assert_eq!(failure_usage["cost_usd"], serde_json::json!(expected_cost));
     }
 
     #[test]
@@ -729,9 +722,11 @@ mod tests {
             "nonexistent_provider",
             "ghost-model",
         );
+        let usage =
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&transport).clone()));
         assert_eq!(
-            envelope_usage(&transport).get("cost_usd"),
-            Some(&VmValue::Nil)
+            usage.as_object().and_then(|usage| usage.get("cost_usd")),
+            Some(&serde_json::Value::Null)
         );
     }
 
