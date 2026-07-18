@@ -150,6 +150,7 @@ pub(crate) fn resolved_single_trigger_entry(
         manifest_path: manifest_path.to_path_buf(),
         package_name,
         exports,
+        execution_guard: None,
         table_index,
         shape_error,
     }
@@ -221,6 +222,7 @@ pub(crate) fn resolved_trigger_source_entry(
         manifest_path: manifest_path.to_path_buf(),
         package_name,
         exports,
+        execution_guard: None,
         table_index,
         shape_error: source
             .match_
@@ -1150,7 +1152,30 @@ pub(crate) fn load_module_callable_signatures(
 ) -> Result<BTreeMap<String, ModuleCallableSignature>, PackageError> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let program = harn_parser::parse_source(&source)
+    parse_module_callable_signatures(path, &source)
+}
+
+pub(crate) fn load_guarded_module_callable_signatures(
+    path: &Path,
+    guard: &harn_modules::package_execution::PackageExecutionGuard,
+) -> Result<BTreeMap<String, ModuleCallableSignature>, PackageError> {
+    let bytes = guard
+        .verify_entry_source(path)
+        .map_err(|error| PackageError::Validation(error.to_string()))?;
+    let source = std::str::from_utf8(&bytes).map_err(|error| {
+        PackageError::Validation(format!(
+            "installed package module {} is not valid UTF-8: {error}",
+            path.display()
+        ))
+    })?;
+    parse_module_callable_signatures(path, source)
+}
+
+fn parse_module_callable_signatures(
+    path: &Path,
+    source: &str,
+) -> Result<BTreeMap<String, ModuleCallableSignature>, PackageError> {
+    let program = harn_parser::parse_source(source)
         .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
     let mut signatures = BTreeMap::new();
     for node in &program {

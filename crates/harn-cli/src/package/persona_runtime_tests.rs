@@ -1,6 +1,17 @@
 use super::*;
 use crate::package::test_support::*;
 
+const PREDICATE_WORKFLOW: &str = r#"import "std/triggers"
+
+pub fn should_handle(_event: TriggerEvent) -> bool {
+  return true
+}
+
+pub pipeline run(task) -> dict {
+  return {ok: true, task: task}
+}
+"#;
+
 fn installed_persona_project(root: &Path, root_manifest: &str, with_trigger: bool) -> PathBuf {
     installed_persona_project_fixture(root, root_manifest, &["reviewer"], with_trigger, "")
 }
@@ -53,6 +64,45 @@ fn installed_persona_project_fixture(
     write_runtime_test_lock(root, &lock);
     try_load_runtime_extensions(&anchor).expect("persona fixture dependencies should materialize");
     anchor
+}
+
+fn update_installed_persona_workflow(root: &Path, anchor: &Path, source: &str) {
+    let package_dir = current_packages_dir(root).join("agents");
+    fs::write(package_dir.join("workflow.harn"), source).unwrap();
+    fs::write(root.join("vendor/agents/workflow.harn"), source).unwrap();
+    let mut lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+    lock.packages[0].content_hash = Some(compute_content_hash(&package_dir).unwrap());
+    write_runtime_test_lock(root, &lock);
+    try_load_runtime_extensions(anchor).expect("updated fixture should materialize");
+}
+
+fn activated_persona_predicate_extensions(root: &Path) -> (PathBuf, RuntimeExtensions) {
+    let anchor = installed_persona_project_fixture(
+        root,
+        "[package]\nname = \"consumer\"\n",
+        &["reviewer"],
+        false,
+        r#"
+[[triggers]]
+id = "review-events"
+kind = "webhook"
+provider = "github"
+match = { events = ["pull_request.opened"] }
+when = "workflow::should_handle"
+handler = "persona://reviewer"
+secrets = { signing_secret = "github/webhook-secret" }
+"#,
+    );
+    update_installed_persona_workflow(root, &anchor, PREDICATE_WORKFLOW);
+    activate_persona(
+        Some(&root.join(MANIFEST)),
+        "agents/reviewer",
+        &PersonaAttenuation::default(),
+        100,
+    )
+    .unwrap();
+    let extensions = try_load_runtime_extensions(&anchor).unwrap();
+    (anchor, extensions)
 }
 
 fn write_runtime_test_lock(root: &Path, lock: &LockFile) {
@@ -261,6 +311,12 @@ handler = "persona://reviewer"
 schedule = "0 */4 * * *"
 timezone = "UTC"
 secrets = { signing_secret = "cron/signing-secret" }
+when = "workflow::should_handle"
+when_budget = { max_cost_usd = 0.02, tokens_max = 256, timeout = "2s" }
+retry = { max = 7, backoff = "svix", retention_days = 7 }
+budget = { max_cost_usd = 0.5, max_tokens = 4096, daily_cost_usd = 3.0, hourly_cost_usd = 1.0, max_autonomous_decisions_per_hour = 4, max_autonomous_decisions_per_day = 12 }
+concurrency = { key = "repository", max = 2 }
+filter = "payload.draft == false"
 
 [[triggers]]
 id = "observer-events"
@@ -277,6 +333,7 @@ match = { events = ["pr_opened"] }
 handler = "worker://review-queue"
 "#,
     );
+    update_installed_persona_workflow(tmp.path(), &anchor, PREDICATE_WORKFLOW);
 
     let installed = try_load_runtime_extensions(&anchor).unwrap();
     assert!(installed.triggers.is_empty());
@@ -296,6 +353,36 @@ handler = "worker://review-queue"
     assert_eq!(trigger.kind, TriggerKind::Cron);
     assert_eq!(trigger.provider.as_str(), "cron");
     assert_eq!(trigger.match_.events, vec!["tick"]);
+    assert_eq!(trigger.retry.max, 7);
+    assert_eq!(trigger.retry.backoff, TriggerRetryBackoff::Svix);
+    assert_eq!(trigger.retry.retention_days, 7);
+    assert_eq!(
+        trigger.when_budget,
+        Some(TriggerWhenBudgetSpec {
+            max_cost_usd: Some(0.02),
+            tokens_max: Some(256),
+            timeout: Some("2s".to_string()),
+        })
+    );
+    assert_eq!(trigger.budget.max_cost_usd, Some(0.5));
+    assert_eq!(trigger.budget.max_tokens, Some(4096));
+    assert_eq!(trigger.budget.daily_cost_usd, Some(3.0));
+    assert_eq!(trigger.budget.hourly_cost_usd, Some(1.0));
+    assert_eq!(trigger.budget.max_autonomous_decisions_per_hour, Some(4));
+    assert_eq!(trigger.budget.max_autonomous_decisions_per_day, Some(12));
+    assert_eq!(
+        trigger.concurrency,
+        Some(TriggerConcurrencyManifestSpec {
+            key: Some("repository".to_string()),
+            max: 2,
+        })
+    );
+    assert_eq!(trigger.filter.as_deref(), Some("payload.draft == false"));
+    assert_eq!(trigger.when.as_deref(), Some("workflow::should_handle"));
+    assert_eq!(
+        trigger.execution_guard,
+        activated.runtime_personas[0].execution_guard
+    );
     assert_eq!(
         trigger.kind_specific.get("schedule"),
         Some(&toml::Value::String("0 */4 * * *".to_string()))
@@ -317,10 +404,73 @@ handler = "worker://review-queue"
         CollectedTriggerHandler::Persona { binding, .. }
             if binding.name == "agents/reviewer"
     ));
+    assert!(matches!(
+        collected[0]
+            .when
+            .as_ref()
+            .map(|predicate| &predicate.callable),
+        Some(harn_vm::VmCallable::Eager(_))
+    ));
+    assert_eq!(
+        collected[0].flow_control.concurrency.as_ref().unwrap().max,
+        2
+    );
 
     deactivate_persona(Some(&tmp.path().join(MANIFEST)), "agents/reviewer", 200).unwrap();
     let deactivated = try_load_runtime_extensions(&anchor).unwrap();
     assert!(deactivated.triggers.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn activated_trigger_eager_collection_rejects_mutated_predicate_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_anchor, extensions) = activated_persona_predicate_extensions(tmp.path());
+    fs::write(
+        current_packages_dir(tmp.path()).join("agents/workflow.harn"),
+        PREDICATE_WORKFLOW.replace("return true", "return false"),
+    )
+    .unwrap();
+
+    let error = collect_manifest_triggers(&mut test_vm(), &extensions)
+        .await
+        .expect_err("eager collection must reject post-activation mutation");
+    assert!(error.to_string().contains("content changed"), "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn activated_trigger_lazy_predicate_rechecks_content_at_invocation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_anchor, extensions) = activated_persona_predicate_extensions(tmp.path());
+    let mut vm = test_vm();
+    let collected = collect_manifest_triggers_with_mode(&mut vm, &extensions, true)
+        .await
+        .expect("pristine activated predicate should collect lazily");
+    let predicate = collected[0].when.as_ref().expect("predicate collected");
+    assert!(matches!(predicate.callable, harn_vm::VmCallable::Lazy(_)));
+    let initial = vm
+        .execute_callable(&predicate.callable, &[harn_vm::VmValue::Nil])
+        .await
+        .expect("pristine predicate should resolve and execute");
+    assert!(
+        matches!(initial, harn_vm::VmValue::Bool(true)),
+        "{initial:?}"
+    );
+
+    fs::write(
+        current_packages_dir(tmp.path()).join("agents/workflow.harn"),
+        PREDICATE_WORKFLOW.replace("return true", "return false"),
+    )
+    .unwrap();
+    let error = vm
+        .execute_callable(&predicate.callable, &[harn_vm::VmValue::Nil])
+        .await
+        .expect_err("lazy invocation must reject post-collection mutation");
+    assert!(
+        error
+            .to_string()
+            .contains("installed package execution rejected"),
+        "{error}"
+    );
 }
 
 #[test]

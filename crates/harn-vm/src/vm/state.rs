@@ -40,8 +40,12 @@ pub(crate) struct ResolvedLazyCallable {
 }
 
 pub(crate) type LazyCallableResolution = Arc<ResolvedLazyCallable>;
+pub(crate) struct LazyCallableCacheSlot {
+    pub(crate) execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+    pub(crate) resolution: Arc<tokio::sync::OnceCell<LazyCallableResolution>>,
+}
 pub(crate) type LazyCallableModuleCache =
-    Arc<VmMutex<BTreeMap<PathBuf, Arc<tokio::sync::OnceCell<LazyCallableResolution>>>>>;
+    Arc<VmMutex<BTreeMap<PathBuf, Vec<LazyCallableCacheSlot>>>>;
 
 /// RAII guard that starts a tracing span on creation and ends it on drop.
 pub(crate) struct ScopeSpan(u64);

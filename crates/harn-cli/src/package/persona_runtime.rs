@@ -123,6 +123,7 @@ pub(crate) fn installed_persona_trigger_configs(
             }
             trigger.id = format!("{package_alias}/{}", trigger.id);
             trigger.handler.clone_from(&qualified_handler);
+            trigger.execution_guard = Some(Arc::clone(guard));
             triggers.push(trigger);
         }
     }
