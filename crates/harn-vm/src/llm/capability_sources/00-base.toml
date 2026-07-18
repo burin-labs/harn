@@ -119,9 +119,9 @@
 #                     operator directive placed mid-conversation, not the
 #                     leading system prompt) is carried on the wire. Known
 #                     values: `inline` (OpenAI Chat/Responses, Ollama — verbatim
-#                     at any position), `native_directive` (Anthropic Fable 5,
-#                     Mythos 5, and Opus 4.8 — a validly-placed `system` section
-#                     rides natively, else folds), and `fold` (Gemini, Bedrock,
+#                     at any position), `native_directive` (Anthropic Opus 4.8
+#                     — a validly-placed `system` message rides natively, else
+#                     folds), and `fold` (Gemini, Bedrock,
 #                     older/other Claude —
 #                     no positional system channel, so the directive folds into
 #                     the adjacent user turn as a `<system-reminder>` block).

@@ -30,7 +30,7 @@ fn native_directive_gated_to_opus_4_8_and_layers_via_extends() {
     ] {
         assert_eq!(
             resolve_system_message_placement(&lookup("anthropic", model)),
-            SystemMessagePlacement::NativeDirective,
+            SystemMessagePlacement::Fold,
             "{model}"
         );
     }
@@ -50,6 +50,11 @@ fn native_directive_gated_to_opus_4_8_and_layers_via_extends() {
     assert_eq!(
         resolve_system_message_placement(&lookup("anthropic", "claude-sonnet-5")),
         SystemMessagePlacement::Fold
+    );
+    assert_eq!(
+        resolve_system_message_placement(&lookup("anthropic", "anthropic/claude-opus-4-8")),
+        SystemMessagePlacement::Fold,
+        "third-party-prefixed ids must not inherit the direct Claude API grant"
     );
 }
 

@@ -3,8 +3,8 @@
   operator instruction delivered mid-conversation (a mode switch, a
   runtime-fetched constraint, injected state) — and Harn rewrites it at the wire
   boundary to the exact form the target route accepts, driven by the new
-  `system_message_placement` provider capability. Claude Fable 5, Mythos 5, and
-  Opus 4.8 carry a validly-placed section natively as `role: "system"`; OpenAI
+  `system_message_placement` provider capability. Claude Opus 4.8 carries a
+  validly-placed message natively as `role: "system"`; OpenAI
   and Ollama carry it inline; Gemini, Bedrock, and older/other Claude fold it
   into the adjacent user turn as a `<system-reminder>` block so its position and
   operator intent survive. The same script now runs on every provider without
