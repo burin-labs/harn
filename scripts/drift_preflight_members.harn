@@ -16,12 +16,14 @@
 // `make check-generated-registry` audits that EVERY check-* Makefile target is
 // classified in that table, so the tiers this script derives can never silently
 // omit a guard. Pure selection lives in `members_for_tier`; main does the read.
-import { parse_args } from "std/cli"
+import { parse, parser } from "std/cli/argparse"
 
 const REGISTRY = "scripts/generated_artifacts.toml"
 
-fn arg_spec() -> list {
-  return [{kind: "option", name: "tier", flags: ["--tier"], default: ""}]
+fn arg_spec() {
+  return parser(
+    {name: "drift_preflight_members", args: [{kind: "flag", name: "tier", long: "--tier", default: ""}]},
+  )
 }
 
 /**
@@ -39,7 +41,12 @@ pub fn members_for_tier(dispatch: dict, tier: string) -> list {
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
   const tier = trim(parsed?.tier ?? "")
   if tier != "source" && tier != "binary" {
     harness.stdio
