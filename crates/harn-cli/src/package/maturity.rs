@@ -504,6 +504,16 @@ pub fn artifacts_check(manifest: &Path, json: bool) {
 pub(crate) fn check_artifact_manifest(
     manifest_path: &Path,
 ) -> Result<ArtifactDriftReport, PackageError> {
+    let cwd = std::env::current_dir().map_err(|error| {
+        PackageError::Ops(format!("failed to inspect current directory: {error}"))
+    })?;
+    check_artifact_manifest_from(manifest_path, &cwd)
+}
+
+fn check_artifact_manifest_from(
+    manifest_path: &Path,
+    source_anchor: &Path,
+) -> Result<ArtifactDriftReport, PackageError> {
     let body = fs::read_to_string(manifest_path).map_err(|error| {
         PackageError::Ops(format!(
             "failed to read {}: {error}",
@@ -512,8 +522,8 @@ pub(crate) fn check_artifact_manifest(
     })?;
     let vendored: serde_json::Value = serde_json::from_str(&body)
         .map_err(|error| format!("failed to parse {}: {error}", manifest_path.display()))?;
-    let current_text =
-        crate::commands::dump_protocol_artifacts::manifest_json().map_err(|error| {
+    let current_text = crate::commands::dump_protocol_artifacts::manifest_json_from(source_anchor)
+        .map_err(|error| {
             PackageError::Ops(format!("failed to render protocol manifest: {error}"))
         })?;
     let current: serde_json::Value = serde_json::from_str(&current_text).map_err(|error| {
@@ -1026,7 +1036,8 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
             "generatedBy": "harn dump-protocol-artifacts",
         });
         fs::write(&path, serde_json::to_string_pretty(&stale).unwrap() + "\n").unwrap();
-        let report = check_artifact_manifest(&path).unwrap();
+        let report =
+            check_artifact_manifest_from(&path, Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
         assert!(!report.ok);
         assert_eq!(report.vendored_artifact_version.as_deref(), Some("0.0.0"));
         assert!(!report.differences.is_empty());
@@ -1036,9 +1047,11 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
     fn artifacts_check_passes_for_current_manifest() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("manifest.json");
-        let current = crate::commands::dump_protocol_artifacts::manifest_json().unwrap();
+        let source_anchor = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let current =
+            crate::commands::dump_protocol_artifacts::manifest_json_from(source_anchor).unwrap();
         fs::write(&path, current).unwrap();
-        let report = check_artifact_manifest(&path).unwrap();
+        let report = check_artifact_manifest_from(&path, source_anchor).unwrap();
         assert!(report.ok, "expected no drift, got {:?}", report.differences);
     }
 

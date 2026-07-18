@@ -1,6 +1,52 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug)]
+pub(super) struct ProtocolArtifactSource {
+    repo_root: PathBuf,
+}
+
+impl ProtocolArtifactSource {
+    pub(super) fn discover() -> Result<Self, String> {
+        let cwd = std::env::current_dir()
+            .map_err(|error| format!("failed to inspect the current directory: {error}"))?;
+        Self::from_anchor(&cwd)
+    }
+
+    pub(super) fn from_anchor(anchor: &Path) -> Result<Self, String> {
+        let repo_root = repo_root_from(anchor).ok_or_else(|| {
+            format!(
+                "could not find the Harn workspace above {}; run this command from a Harn checkout",
+                anchor.display()
+            )
+        })?;
+        Ok(Self { repo_root })
+    }
+
+    #[cfg(test)]
+    pub(super) fn repo_root(&self) -> &Path {
+        &self.repo_root
+    }
+
+    pub(super) fn read_text(&self, relative_path: &str) -> Result<String, String> {
+        let path = self.repo_root.join(relative_path);
+        fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))
+    }
+
+    pub(super) fn schema_provenance(
+        &self,
+        relative_path: &str,
+    ) -> Result<serde_json::Value, String> {
+        let source: serde_json::Value = serde_json::from_str(&self.read_text(relative_path)?)
+            .map_err(|error| format!("failed to parse {relative_path}: {error}"))?;
+        Ok(source
+            .get("x-harn-provenance")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null))
+    }
+}
+
 pub(super) fn collapse_repeated_underscores(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut last_underscore = false;
@@ -30,31 +76,6 @@ pub(super) fn generated_header(command: &str, language: &str) -> String {
         ),
         _ => String::new(),
     }
-}
-
-pub(super) fn schema_provenance(relative_path: &str) -> Result<serde_json::Value, String> {
-    let source: serde_json::Value = serde_json::from_str(&read_repo_text(relative_path)?)
-        .map_err(|error| format!("failed to parse {relative_path}: {error}"))?;
-    Ok(source
-        .get("x-harn-provenance")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null))
-}
-
-pub(super) fn read_repo_text(relative_path: &str) -> Result<String, String> {
-    let path = repo_root()?.join(relative_path);
-    fs::read_to_string(&path).map_err(|error| format!("failed to read {}: {error}", path.display()))
-}
-
-pub(super) fn repo_root() -> Result<PathBuf, String> {
-    let cwd = std::env::current_dir()
-        .map_err(|error| format!("failed to inspect the current directory: {error}"))?;
-    repo_root_from(&cwd).ok_or_else(|| {
-        format!(
-            "could not find the Harn workspace above {}; run this command from a Harn checkout",
-            cwd.display()
-        )
-    })
 }
 
 pub(super) fn repo_root_from(start: &Path) -> Option<PathBuf> {

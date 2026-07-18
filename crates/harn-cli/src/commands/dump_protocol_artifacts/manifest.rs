@@ -9,6 +9,7 @@ use harn_vm::llm::receipts::{
     TOOL_CALL_RECEIPT_SCHEMA_VERSION, TOOL_CALL_RECEIPT_STATUSES,
 };
 use serde_json::json;
+use std::path::Path;
 
 use super::constants::*;
 use super::support::*;
@@ -25,14 +26,24 @@ pub(super) fn generate_tool_call_receipt_schema() -> Result<String, String> {
 /// (downstream hosts, cloud platforms) can compare against vendored copies without
 /// shelling out to `dump-protocol-artifacts`.
 pub(crate) fn manifest_json() -> Result<String, String> {
-    generate_manifest()
+    let cwd = std::env::current_dir()
+        .map_err(|error| format!("failed to inspect the current directory: {error}"))?;
+    manifest_json_from(&cwd)
 }
 
-pub(super) fn generate_manifest() -> Result<String, String> {
-    generate_manifest_for_version(env!("CARGO_PKG_VERSION"))
+pub(crate) fn manifest_json_from(anchor: &Path) -> Result<String, String> {
+    let source = ProtocolArtifactSource::from_anchor(anchor)?;
+    generate_manifest(&source)
 }
 
-pub(super) fn generate_manifest_for_version(artifact_version: &str) -> Result<String, String> {
+pub(super) fn generate_manifest(source: &ProtocolArtifactSource) -> Result<String, String> {
+    generate_manifest_for_version(source, env!("CARGO_PKG_VERSION"))
+}
+
+pub(super) fn generate_manifest_for_version(
+    source: &ProtocolArtifactSource,
+    artifact_version: &str,
+) -> Result<String, String> {
     let mut schemas = SCHEMA_COPIES
         .iter()
         .map(|schema| {
@@ -40,7 +51,7 @@ pub(super) fn generate_manifest_for_version(artifact_version: &str) -> Result<St
                 "protocol": schema.protocol,
                 "source": schema.source,
                 "artifact": schema.artifact,
-                "provenance": schema_provenance(schema.source)?,
+                "provenance": source.schema_provenance(schema.source)?,
             }))
         })
         .collect::<Result<Vec<_>, String>>()?;
