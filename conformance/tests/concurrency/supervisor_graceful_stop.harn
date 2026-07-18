@@ -1,5 +1,6 @@
 pipeline default() {
   const drained = atomic(0)
+  const ready = channel("supervisor-graceful-stop-ready", 1)
   const sup = supervisor_start(
     {
       name: "persona",
@@ -10,12 +11,9 @@ pipeline default() {
           kind: "persona_loop",
           restart: "never",
           task: { _ctx ->
+            send(ready, "started")
             while !is_cancelled() {
-              try {
-                sleep(1ms)
-              } catch (_e) {
-                nil
-              }
+              yield_now()
             }
             atomic_set(drained, 1)
             "drained"
@@ -24,9 +22,16 @@ pipeline default() {
       ],
     },
   )
-  sleep(1ms)
-  const stopped = supervisor_stop(sup, 50ms)
+  const started = deadline 2s {
+    receive(ready)
+  }
+  const stopped = supervisor_stop(sup, 2s)
+  const events = supervisor_events(sup)
+  const final_event = events[len(events) - 1]
+  __io_println(started)
   __io_println(stopped.status)
   __io_println(stopped.children[0].status)
   __io_println(atomic_get(drained))
+  __io_println(final_event.kind)
+  __io_println(final_event.message)
 }

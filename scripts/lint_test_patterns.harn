@@ -104,7 +104,6 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
   "conformance/tests/concurrency/rwlock_channel_select.harn",
   "conformance/tests/concurrency/select_basic.harn",
   "conformance/tests/concurrency/supervisor_circuit_open.harn",
-  "conformance/tests/concurrency/supervisor_graceful_stop.harn",
   "conformance/tests/concurrency/supervisor_one_for_one.harn",
   "conformance/tests/concurrency/supervisor_restart_cap.harn",
   "conformance/tests/concurrency/supervisor_restart_window.harn",
