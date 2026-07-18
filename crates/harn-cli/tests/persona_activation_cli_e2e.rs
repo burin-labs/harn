@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod test_util;
@@ -77,6 +78,23 @@ fn json(output: std::process::Output) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+fn reviewed_apply_project() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let temp = tempfile::tempdir().unwrap();
+    let manifest = temp.path().join("harn.toml");
+    fs::write(
+        &manifest,
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let receipt = temp.path().join("reviewed-compile-receipt.json");
+    fs::write(
+        &receipt,
+        include_str!("fixtures/persona/reviewed-compile-receipt.json"),
+    )
+    .unwrap();
+    (temp, manifest, receipt)
+}
+
 #[test]
 fn installed_persona_activation_is_explicit_attenuated_and_reversible() {
     let temp = installed_persona_project();
@@ -151,4 +169,128 @@ fn installed_persona_activation_is_explicit_attenuated_and_reversible() {
         .as_array()
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn reviewed_receipt_apply_is_discoverable_activated_and_triggerable_through_cli() {
+    let (temp, manifest, receipt) = reviewed_apply_project();
+    let root = temp.path();
+    let manifest = manifest.to_string_lossy();
+    let receipt = receipt.to_string_lossy();
+    let persona_id = "harn-accepted-prompt-watch-persona/accepted_prompt_watch";
+
+    let applied = json(run(
+        root,
+        &[
+            "persona",
+            "--manifest",
+            &manifest,
+            "materialize",
+            "--compile-receipt",
+            &receipt,
+            "--activate",
+            "--json",
+        ],
+    ));
+    assert_eq!(applied["ok"], true);
+    assert_eq!(applied["stage"], "complete");
+    assert_eq!(applied["verification"]["persona_id"], persona_id);
+
+    let listed = json(run(
+        root,
+        &["persona", "--manifest", &manifest, "list", "--json"],
+    ));
+    assert!(listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|persona| persona["id"] == persona_id));
+
+    let inspected = json(run(
+        root,
+        &[
+            "persona",
+            "--manifest",
+            &manifest,
+            "inspect",
+            persona_id,
+            "--json",
+        ],
+    ));
+    assert_eq!(inspected["id"], persona_id);
+    assert_eq!(inspected["source"]["kind"], "installed_package");
+    assert_eq!(inspected["source"]["integrity"], "observed");
+
+    let activations = json(run(
+        root,
+        &["persona", "--manifest", &manifest, "activations", "--json"],
+    ));
+    assert_eq!(activations.as_array().unwrap().len(), 1);
+    assert_eq!(activations[0]["persona_id"], persona_id);
+
+    let tick = json(run(
+        root,
+        &[
+            "persona",
+            "--manifest",
+            &manifest,
+            "tick",
+            persona_id,
+            "--at",
+            "2099-07-18T12:00:00Z",
+            "--json",
+        ],
+    ));
+    assert_eq!(tick["persona"], persona_id);
+    assert_eq!(tick["status"], "completed");
+}
+
+#[test]
+fn activation_failure_rolls_back_install_without_ledger_mutation() {
+    let (temp, manifest, receipt) = reviewed_apply_project();
+    let root = temp.path();
+    let ledger = root.join(".harn/personas/activations.json");
+    fs::create_dir_all(ledger.parent().unwrap()).unwrap();
+    let invalid_ledger = b"{\"schema_version\":99,\"activations\":{}}\n";
+    fs::write(&ledger, invalid_ledger).unwrap();
+    let manifest = manifest.to_string_lossy();
+    let receipt = receipt.to_string_lossy();
+    let persona_id = "harn-accepted-prompt-watch-persona/accepted_prompt_watch";
+
+    let output = run(
+        root,
+        &[
+            "persona",
+            "--manifest",
+            &manifest,
+            "materialize",
+            "--compile-receipt",
+            &receipt,
+            "--activate",
+            "--json",
+        ],
+    );
+    assert!(!output.status.success());
+    let failure: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(failure["stage"], "activate");
+    assert_eq!(failure["error"]["code"], "activation_failed");
+    assert_eq!(failure["error"]["installed_inert"], false);
+    assert_eq!(failure["error"]["activation_present"], false);
+    assert_eq!(fs::read(&ledger).unwrap(), invalid_ledger);
+
+    let listed = json(run(
+        root,
+        &["persona", "--manifest", &manifest, "list", "--json"],
+    ));
+    assert!(!listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|persona| persona["id"] == persona_id));
+    assert_eq!(
+        fs::read_to_string(root.join("harn.toml")).unwrap(),
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n"
+    );
+    assert!(!root.join("harn.lock").exists());
+    assert!(!root.join(".harn/package-current.toml").exists());
 }

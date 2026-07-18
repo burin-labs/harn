@@ -1,12 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use harn_modules::personas::PersonaAutonomyTier;
 use serde::Serialize;
 
 use crate::cli::PersonaMaterializeArgs;
 use crate::package::{
-    self, LocalDependencyInstallReceipt, PackageWorkspace, PersonaActivationReceipt,
-    PersonaAttenuation,
+    self, LocalDependencyInstall, LocalDependencyInstallReceipt, PackageWorkspace,
+    PersonaActivationReceipt, PersonaAttenuation,
 };
 
 use super::persona_scaffold::PersonaScaffoldResult;
@@ -143,7 +143,18 @@ pub(crate) async fn apply_reviewed_persona(
             );
         }
     };
-    let output_root = resolve_output_root(&project.dir, &args.output_root);
+    let output_root = match resolve_output_root(&project.dir, &args.output_root) {
+        Ok(output_root) => output_root,
+        Err(error) => {
+            return failed(
+                receipt,
+                PersonaApplyStage::Preflight,
+                "output_root_invalid",
+                error,
+                false,
+            );
+        }
+    };
     let materialized = match Box::pin(super::persona_scaffold::materialize_persona_for_apply(
         args,
         &output_root,
@@ -177,7 +188,7 @@ pub(crate) async fn apply_reviewed_persona(
         }
     };
     let workspace = PackageWorkspace::from_manifest_dir(&project.dir);
-    let install = match package::install_local_package(&workspace, &materialized.root) {
+    let install_transaction = match package::install_local_package(&workspace, &materialized.root) {
         Ok(install) => install,
         Err(error) => {
             return failed(
@@ -189,9 +200,9 @@ pub(crate) async fn apply_reviewed_persona(
             );
         }
     };
-    let persona_id = format!("{}/{}", install.alias, persona_name);
+    let persona_id = format!("{}/{}", install_transaction.receipt().alias, persona_name);
     receipt.stage = PersonaApplyStage::Install;
-    receipt.install = Some(install);
+    receipt.install = Some(install_transaction.receipt().clone());
 
     match package::doctor_packages_in(&workspace) {
         Ok(report) if report.ok => receipt.stage = PersonaApplyStage::Doctor,
@@ -203,8 +214,9 @@ pub(crate) async fn apply_reviewed_persona(
                 .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message))
                 .collect::<Vec<_>>()
                 .join("; ");
-            return failed(
+            return failed_with_install_rollback(
                 receipt,
+                install_transaction,
                 PersonaApplyStage::Doctor,
                 "package_doctor_failed",
                 message,
@@ -212,8 +224,9 @@ pub(crate) async fn apply_reviewed_persona(
             );
         }
         Err(error) => {
-            return failed(
+            return failed_with_install_rollback(
                 receipt,
+                install_transaction,
                 PersonaApplyStage::Doctor,
                 "package_doctor_failed",
                 error.to_string(),
@@ -233,8 +246,9 @@ pub(crate) async fn apply_reviewed_persona(
     ) {
         Ok(activation) => activation,
         Err(error) => {
-            return failed(
+            return failed_with_install_rollback(
                 receipt,
+                install_transaction,
                 PersonaApplyStage::Activate,
                 "activation_failed",
                 error.to_string(),
@@ -247,18 +261,45 @@ pub(crate) async fn apply_reviewed_persona(
 
     match verify_apply(&project.manifest_path(), &persona_id, &receipt) {
         Ok(verification) => {
+            let committed = install_transaction.commit();
+            receipt.install = Some(committed);
             receipt.ok = true;
             receipt.stage = PersonaApplyStage::Complete;
             receipt.verification = Some(verification);
             receipt
         }
-        Err(error) => failed(
-            receipt,
-            PersonaApplyStage::Verify,
-            "verification_failed",
-            error,
-            false,
-        ),
+        Err(error) => {
+            if receipt
+                .activation
+                .as_ref()
+                .is_some_and(|activation| activation.changed)
+            {
+                if let Err(deactivation_error) = package::deactivate_persona(
+                    Some(&project.manifest_path()),
+                    &persona_id,
+                    harn_vm::persona_now_ms(),
+                ) {
+                    return failed(
+                        receipt,
+                        PersonaApplyStage::Verify,
+                        "verification_rollback_failed",
+                        format!(
+                            "persona verification failed: {error}; activation rollback failed: {deactivation_error}"
+                        ),
+                        false,
+                    );
+                }
+                receipt.activation = None;
+            }
+            failed_with_install_rollback(
+                receipt,
+                install_transaction,
+                PersonaApplyStage::Verify,
+                "verification_failed",
+                error,
+                false,
+            )
+        }
     }
 }
 
@@ -332,12 +373,77 @@ fn failed(
     receipt
 }
 
-fn resolve_output_root(project_root: &Path, output_root: &Path) -> PathBuf {
-    if output_root.is_absolute() {
-        output_root.to_path_buf()
-    } else {
-        project_root.join(output_root)
+fn failed_with_install_rollback(
+    receipt: PersonaApplyReceipt,
+    install: LocalDependencyInstall,
+    stage: PersonaApplyStage,
+    code: &'static str,
+    message: String,
+    retryable: bool,
+) -> PersonaApplyReceipt {
+    match install.rollback() {
+        Ok(_) => {
+            let mut receipt = failed(receipt, stage, code, message, retryable);
+            if let Some(error) = receipt.error.as_mut() {
+                error.installed_inert = false;
+            }
+            receipt
+        }
+        Err(rollback_error) => failed(
+            receipt,
+            stage,
+            "install_rollback_failed",
+            format!("{message}; local package rollback failed: {rollback_error}"),
+            false,
+        ),
     }
+}
+
+fn resolve_output_root(project_root: &Path, output_root: &Path) -> Result<PathBuf, String> {
+    if output_root.is_absolute() {
+        return Ok(output_root.to_path_buf());
+    }
+    if output_root.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(format!(
+            "relative persona output root {} escapes the selected project",
+            output_root.display()
+        ));
+    }
+
+    let canonical_project = project_root.canonicalize().map_err(|error| {
+        format!(
+            "failed to canonicalize selected project {}: {error}",
+            project_root.display()
+        )
+    })?;
+    let target = canonical_project.join(output_root);
+    let mut ancestor = target.as_path();
+    while !ancestor.exists() {
+        ancestor = ancestor.parent().ok_or_else(|| {
+            format!(
+                "persona output root {} has no existing ancestor",
+                target.display()
+            )
+        })?;
+    }
+    let canonical_ancestor = ancestor.canonicalize().map_err(|error| {
+        format!(
+            "failed to canonicalize persona output ancestor {}: {error}",
+            ancestor.display()
+        )
+    })?;
+    if !canonical_ancestor.starts_with(&canonical_project) {
+        return Err(format!(
+            "relative persona output root {} resolves outside the selected project",
+            output_root.display()
+        ));
+    }
+    Ok(target)
 }
 
 fn materialization_receipt(result: &PersonaScaffoldResult) -> PersonaApplyMaterialization {
@@ -474,9 +580,45 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn activation_failure_reports_the_installed_package_as_inert() {
+    async fn apply_rejects_relative_output_root_traversal_before_materialization() {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, mut args) = apply_fixture(temp.path());
+        args.output_root = PathBuf::from("../outside");
+
+        let receipt = apply_reviewed_persona(Some(&manifest), &args).await;
+
+        assert!(!receipt.ok);
+        assert_eq!(receipt.stage, PersonaApplyStage::Preflight);
+        assert!(receipt.materialization.is_none());
+        assert!(receipt.install.is_none());
+        assert_eq!(receipt.error.unwrap().code, "output_root_invalid");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn apply_rejects_relative_output_root_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let (manifest, mut args) = apply_fixture(temp.path());
+        symlink(outside.path(), temp.path().join("linked-personas")).unwrap();
+        args.output_root = PathBuf::from("linked-personas");
+
+        let receipt = apply_reviewed_persona(Some(&manifest), &args).await;
+
+        assert!(!receipt.ok);
+        assert_eq!(receipt.stage, PersonaApplyStage::Preflight);
+        assert!(receipt.materialization.is_none());
+        assert_eq!(receipt.error.unwrap().code, "output_root_invalid");
+        assert!(!outside.path().join("accepted_prompt_watch").exists());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn activation_failure_rolls_back_the_local_package_install() {
         let temp = tempfile::tempdir().unwrap();
         let (manifest, args) = apply_fixture(temp.path());
+        let manifest_before = fs::read(&manifest).unwrap();
         let ledger = temp.path().join(".harn/personas/activations.json");
         fs::create_dir_all(ledger.parent().unwrap()).unwrap();
         fs::write(&ledger, "{\"schema_version\":99,\"activations\":{}}\n").unwrap();
@@ -490,8 +632,11 @@ mod tests {
         let error = receipt.error.unwrap();
         assert_eq!(error.code, "activation_failed");
         assert!(error.retryable);
-        assert!(error.installed_inert);
+        assert!(!error.installed_inert);
         assert!(!error.activation_present);
+        assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
+        assert!(!temp.path().join("harn.lock").exists());
+        assert!(!temp.path().join(".harn/package-current.toml").exists());
         let ledger_value: serde_json::Value =
             serde_json::from_slice(&fs::read(&ledger).unwrap()).unwrap();
         assert_eq!(ledger_value["activations"], serde_json::json!({}));
@@ -522,8 +667,12 @@ mod tests {
         .unwrap();
         let workspace = PackageWorkspace::from_manifest_dir(root);
 
-        let first = package::install_local_package(&workspace, &package).unwrap();
-        let second = package::install_local_package(&workspace, &package).unwrap();
+        let first = package::install_local_package(&workspace, &package)
+            .unwrap()
+            .commit();
+        let second = package::install_local_package(&workspace, &package)
+            .unwrap()
+            .commit();
 
         assert!(first.alias.starts_with("generated-persona-"));
         assert_eq!(second.alias, first.alias);
