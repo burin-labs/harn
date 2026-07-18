@@ -28,7 +28,7 @@ pub use error::{
 };
 pub use handles::{
     VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange,
-    VmRngHandle, VmStream, VmStreamCancel, VmSyncPermitHandle, VmTaskHandle,
+    VmRngHandle, VmStream, VmStreamCancel, VmSyncPermitHandle, VmTaskHandle, VmVerdictReceipt,
 };
 pub use set::VmSet;
 pub(crate) use storage_json::vm_to_storage_json;

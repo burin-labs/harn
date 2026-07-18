@@ -60,6 +60,16 @@ pub fn harn_syntax_sensitive_files(root: string = "") -> list<string> {
 }
 
 fn git_candidate_files(root: string) -> list<string>? {
+  // `git -C` walks parent directories when `root` is not itself a repository.
+  // Test/temp trees nested inside a checkout must use the filesystem fallback;
+  // otherwise git reports candidates relative to the parent repository and the
+  // requested subtree is silently skipped.
+  const top_level = harness.process
+    .spawn_captured({cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]})
+  if top_level.exit_code != 0
+    || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
+    return nil
+  }
   const args = [
     "-C",
     root,

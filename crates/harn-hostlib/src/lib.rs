@@ -50,6 +50,7 @@ pub mod secret_store;
 #[cfg(feature = "terminal-session")]
 pub mod terminal_session;
 pub mod tools;
+pub mod verdict;
 
 mod json;
 mod registry;
@@ -96,6 +97,7 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(fs_watch::FsWatchCapability)
         .with(tools::ToolsCapability)
         .with(secret_store::SecretStoreCapability)
+        .with(verdict::VerdictCapability)
         .with(host_lease_capability::HostLeaseCapability);
     #[cfg(feature = "terminal-session")]
     {

@@ -1,0 +1,83 @@
+// Run: harn test tests/agent/verdict_host_test.harn
+//
+// Host-backed executed guarantees for `std/agent/verdict`: a positive verdict is
+// mintable ONLY from the host's own record of a real `run_test` execution
+// (resolved by its opaque `result_handle`). This suite proves the PROVENANCE
+// floor — caller-authored evidence, fabricated handles, and handle-less run
+// results can NEVER earn a pass; they degrade to `indeterminate`. The
+// green-execution POSITIVE is exercised at the Rust issuance boundary in
+// `crates/harn-hostlib/src/verdict.rs`, where a host execution record can be
+// produced deterministically; a real `run_test` subprocess is reachable in
+// `.harn` only through the agent tool loop, not as a direct call, so it does not
+// belong in this unit suite.
+import {
+  verdict_all,
+  verdict_disposition,
+  verdict_evidence_ref,
+  verdict_fail,
+  verdict_from_run,
+  verdict_indeterminate,
+  verdict_is_pass,
+} from "std/agent/verdict"
+
+const PASSING = "running 2 tests\ntest a ... ok\ntest b ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
+
+// Verdict issuance reads the host execution store, so it rides the deterministic
+// host-tools gate; a real consumer (an eval / agent loop) has it enabled. Enable
+// it for the test session.
+fn enable_verdict() -> nil {
+  hostlib_enable("tools:deterministic")
+  return nil
+}
+
+// THE FORGERY, CLOSED. A caller writes passing-looking test output to a real
+// file and cites it as the result handle. Because the host never RECORDED an
+// execution under that reference, it can never be a pass — it is honestly
+// indeterminate. Authoring evidence is not executing tests: this is the
+// provenance-forgery negative the earlier path-based design missed.
+pipeline test_caller_authored_evidence_is_never_a_pass(_task) {
+  enable_verdict()
+  const dir = harness.fs.mkdtemp_in_workspace("verdict-neg")
+  const path = harness.fs.path_join(dir, "green.txt")
+  harness.fs.write_text(path, PASSING)
+  const v = verdict_from_run(harness, {result_handle: path})
+  assert_eq(verdict_disposition(v), "indeterminate")
+  assert_eq(verdict_is_pass(v), false)
+}
+
+// A fabricated handle string — one no `run_test` ever issued — is indeterminate,
+// never a pass. A caller cannot guess a handle into the host execution store.
+pipeline test_fabricated_handle_is_indeterminate(_task) {
+  enable_verdict()
+  const v = verdict_from_run(harness, {result_handle: "htr-deadbeef-999999"})
+  assert_eq(verdict_disposition(v), "indeterminate")
+  assert_eq(verdict_is_pass(v), false)
+}
+
+// A run result carrying no handle at all cannot be a pass — there is no host
+// execution to attest, so the reference is empty and the verdict is undecided.
+pipeline test_run_result_without_handle_is_indeterminate(_task) {
+  enable_verdict()
+  const v = verdict_from_run(harness, {exit_code: 0, stdout: PASSING})
+  assert_eq(verdict_disposition(v), "indeterminate")
+  assert_eq(verdict_evidence_ref(v), "")
+}
+
+// verdict_all: any fail dominates the aggregate (disposition == fail).
+pipeline test_verdict_all_with_a_fail_is_fail(_task) {
+  const v = verdict_all(harness, [verdict_fail("evidence_red", ""), verdict_indeterminate("x", "")])
+  assert_eq(verdict_disposition(v), "fail")
+}
+
+// verdict_all: absent a fail, any indeterminate dominates — never a vacuous pass.
+pipeline test_verdict_all_with_an_indeterminate_is_indeterminate(_task) {
+  const v = verdict_all(harness, [verdict_indeterminate("judge_unavailable", "")])
+  assert_eq(verdict_disposition(v), "indeterminate")
+}
+
+// verdict_all: an empty aggregate is indeterminate, never a vacuously combined
+// pass over zero host-issued receipts.
+pipeline test_verdict_all_empty_is_indeterminate(_task) {
+  const v = verdict_all(harness, [])
+  assert_eq(verdict_disposition(v), "indeterminate")
+}
