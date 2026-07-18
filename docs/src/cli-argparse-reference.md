@@ -38,6 +38,8 @@ pub fn parse_typed<T>(
   apply_defaults: bool = false,
 ) -> Result<CliInvocation<T>, CliParseFailure>
 
+pub fn help_requested(argv: list<string>) -> bool
+
 pub fn render_help(spec: ParserSpec) -> string
 ```
 
@@ -52,15 +54,20 @@ bare `--` stops argument parsing; later tokens are placed under `.rest` and
 are never mixed into the option bag or passed to the schema. Required
 argument checks still run.
 
-Use the native `Result` helpers rather than inspecting an object envelope:
+Handle canonical help before parsing, then use native `Result` helpers rather
+than inspecting an object envelope:
 
 ```harn
-import { parse, parser, render_help } from "std/cli/argparse"
+import { help_requested, parse, parser, render_help } from "std/cli/argparse"
 
 const spec = parser({
   name: "render",
   args: [{name: "input", kind: "positional"}],
 })
+if help_requested(argv) {
+  __io_println(render_help(spec))
+  exit(0)
+}
 const result = parse(spec, argv)
 if is_err(result) {
   const failure = unwrap_err(result)
@@ -109,10 +116,16 @@ declared.
 
 Defaults are not strings waiting to be decoded. For example, an integer
 flag uses `default: 4`, not `default: "4"`, and a list flag uses a list
-value. Required presence is checked first: a required flag or switch must
+value. `parser()` rejects defaults that cannot satisfy the declared decoder,
+kind, and multiplicity, so an invalid static declaration fails before argv is
+read. Required presence is checked first: a required flag or switch must
 appear in argv even if its spec declares a default. Explicit defaults, the
 switch `false` default, and the `multi` `[]` default are then applied to
 omitted optional arguments.
+
+Positionals bind from left to right. A required positional cannot follow an
+optional positional because that declaration has no unambiguous binding rule;
+`parser()` rejects it. A variadic positional must remain last.
 
 ## Primitive decoding
 
@@ -130,6 +143,11 @@ Invalid `int`, `float`, or `bool` text returns an argv-stage
 `invalid_value` failure. Switches may omit `parse`, declare
 `parse: "string"`, or declare `parse: "bool"`; because they do not consume
 values, all three forms still produce a boolean.
+
+A signed numeric token such as `-7` or `-0.25` binds to the next `int` or
+`float` positional when that decoder accepts it. Registered short aliases are
+still resolved as flags, and other dash-prefixed tokens remain
+`unknown_flag` failures.
 
 With both `multi: true` and `parse: "list"`, each occurrence is split and
 the results are flattened into one list. For example:

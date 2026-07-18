@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 import { decode_normal_literal } from "./check_rust_prompt_prose.harn"
 
 type IncludePath = {line: int, path: string}
@@ -87,27 +87,32 @@ pub fn packaged_include_errors(root: string, crate: string) -> list<string> {
   return errors
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "package_dir", flags: ["--package-dir"], parse: "string", default: ""},
-    {kind: "option", name: "crate", flags: ["--crate"], parse: "string", default: ""},
-  ]
+fn arg_spec() {
+  return parser(
+    {
+      name: "verify_crate_package_includes",
+      args: [
+        {kind: "flag", name: "package_dir", long: "--package-dir", parse: "string", default: ""},
+        {kind: "flag", name: "crate", long: "--crate", parse: "string", default: ""},
+      ],
+    },
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio
       .println(
       "usage: harn run scripts/verify_crate_package_includes.harn -- --package-dir DIR --crate CRATE",
     )
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const package_dir = to_string(parsed?.package_dir ?? "")
   const crate = to_string(parsed?.crate ?? "")
   if package_dir == "" || crate == "" {

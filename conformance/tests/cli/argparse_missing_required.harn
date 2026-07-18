@@ -1,8 +1,29 @@
 import { parse, parser } from "std/cli/argparse"
+import { assert_eq } from "std/testing"
 
-fn main(harness: Harness) {
+pipeline test(task) {
   const spec = parser({name: "demo", args: [{name: "input", kind: "positional"}]})
-  const err = unwrap_err(parse(spec, []))
+  const result = parse(spec, [])
+  assert_eq(
+    result,
+    Err(
+      {
+        kind: "cli_parse_failure",
+        stage: "argv",
+        code: "missing_required",
+        message: "required argument 'input' was not provided",
+        issues: [
+          {
+            stage: "argv",
+            code: "missing_required",
+            message: "required argument 'input' was not provided",
+            arg: "input",
+          },
+        ],
+      },
+    ),
+  )
+  const err = unwrap_err(result)
   harness.stdio.println(err.code)
   harness.stdio.println(err.issues[0].arg)
 }

@@ -17,18 +17,20 @@ pipeline test_provider_tool_probe_campaign_parses_explicit_routes(task) {
 
 @test
 pipeline test_provider_tool_probe_campaign_cli_collects_repeated_routes_and_behaviors(task) {
-  const parsed = provider_tool_probe_campaign_parse_args(
-    [
-      "--route",
-      "fireworks:accounts/fireworks/models/gpt-oss-120b",
-      "--route",
-      "groq:openai/gpt-oss-120b",
-      "--behavior",
-      "tool_calling_non_streaming",
-      "--behavior",
-      "tool_calling_streaming",
-    ],
-  )
+  const parsed = unwrap(
+    provider_tool_probe_campaign_parse_args(
+      [
+        "--route",
+        "fireworks:accounts/fireworks/models/gpt-oss-120b",
+        "--route",
+        "groq:openai/gpt-oss-120b",
+        "--behavior",
+        "tool_calling_non_streaming",
+        "--behavior",
+        "tool_calling_streaming",
+      ],
+    ),
+  ).options
   assert_eq(
     parsed.route,
     ["fireworks:accounts/fireworks/models/gpt-oss-120b", "groq:openai/gpt-oss-120b"],
@@ -576,18 +578,20 @@ pipeline test_provider_tool_probe_campaign_dotenv_parser_does_not_require_shell(
 
 @test
 pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(task) {
-  const parsed = provider_tool_probe_campaign_parse_args(
-    [
-      "--catalog-routes",
-      "--include-expensive",
-      "--shard-count",
-      "4",
-      "--shard-index",
-      "2",
-      "--max-probes",
-      "10",
-    ],
-  )
+  const parsed = unwrap(
+    provider_tool_probe_campaign_parse_args(
+      [
+        "--catalog-routes",
+        "--include-expensive",
+        "--shard-count",
+        "4",
+        "--shard-index",
+        "2",
+        "--max-probes",
+        "10",
+      ],
+    ),
+  ).options
   assert_eq(parsed.catalog_routes, true)
   assert_eq(parsed.include_expensive, true)
   assert_eq(parsed.shard_count, 4)

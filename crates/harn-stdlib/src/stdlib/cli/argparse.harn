@@ -135,6 +135,80 @@ fn __validate_arg_decoder(arg: ArgSpec) {
   }
 }
 
+fn __value_matches_decoder(value, decoder: CliValueParser) -> bool {
+  const value_type = type_of(value)
+  if decoder == "string" {
+    return value_type == "string"
+  }
+  if decoder == "int" {
+    return value_type == "int"
+  }
+  if decoder == "float" {
+    return value_type == "float"
+  }
+  if decoder == "bool" {
+    return value_type == "bool"
+  }
+  if value_type != "list" {
+    return false
+  }
+  for item in value {
+    if type_of(item) != "string" {
+      return false
+    }
+  }
+  return true
+}
+
+fn __repeated_default_matches(value, decoder: CliValueParser) -> bool {
+  if type_of(value) != "list" {
+    return false
+  }
+  for item in value {
+    if decoder == "list" && type_of(item) != "string" {
+      return false
+    }
+    if decoder != "list" && !__value_matches_decoder(item, decoder) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __validate_arg_default(arg: ArgSpec) {
+  if arg.default == nil {
+    return nil
+  }
+  const decoder = arg.parse ?? "string"
+  const repeated = (arg.kind == "flag" && (arg.multi ?? false))
+    || (arg.kind == "positional" && (arg.variadic ?? false))
+  const valid = if arg.kind == "switch" {
+    type_of(arg.default) == "bool"
+  } else if repeated {
+    __repeated_default_matches(arg.default, decoder)
+  } else {
+    __value_matches_decoder(arg.default, decoder)
+  }
+  if !valid {
+    const expected = if arg.kind == "switch" {
+      "bool"
+    } else if repeated {
+      "list<" + if decoder == "list" {
+        "string"
+      } else {
+        decoder
+      }
+        + ">"
+    } else if decoder == "list" {
+      "list<string>"
+    } else {
+      decoder
+    }
+    throw "std/cli/argparse: default for arg '" + arg.name + "' must be " + expected
+  }
+  return nil
+}
+
 fn __append_arg_aliases(arg: ArgSpec, aliases: list<string>) -> list<string> {
   let out = aliases
   for alias in [arg.short, arg.long] {
@@ -164,6 +238,7 @@ pub fn parser(spec: ParserSpec) -> ParserSpec {
   let names = []
   let aliases = []
   let saw_variadic = false
+  let saw_optional_positional = false
   for arg in spec.args {
     const name = arg.name
     if name == nil || name == "" {
@@ -178,8 +253,19 @@ pub fn parser(spec: ParserSpec) -> ParserSpec {
       throw "std/cli/argparse: duplicate arg name '" + name + "'"
     }
     names = names.push(name)
+    if kind == "positional" {
+      const required = arg.required ?? true
+      if required && saw_optional_positional {
+        throw "std/cli/argparse: required positional arg '" + name
+          + "' cannot follow an optional positional"
+      }
+      if !required {
+        saw_optional_positional = true
+      }
+    }
     saw_variadic = __validate_arg_shape(arg, saw_variadic)
     __validate_arg_decoder(arg)
+    __validate_arg_default(arg)
     aliases = __append_arg_aliases(arg, aliases)
   }
   return spec
@@ -384,6 +470,50 @@ fn __long_split(body: string) -> {key: string, value?: string} {
   return {key: "--" + key, value: value}
 }
 
+fn __consume_positional(
+  collected: dict,
+  positionals: list<ArgSpec>,
+  positional_idx: int,
+  raw: string,
+) -> Result<dict, CliParseFailure> {
+  if positional_idx >= len(positionals) {
+    return Err(__argv_failure("unknown_arg", raw, "unexpected positional"))
+  }
+  const positional = positionals[positional_idx]
+  if positional == nil {
+    return Err(__argv_failure("unknown_arg", raw, "unexpected positional"))
+  }
+  const recorded = __record_value(collected, positional, raw, positional.variadic ?? false)
+  if is_err(recorded) {
+    return Err(unwrap_err(recorded))
+  }
+  const next_idx = if positional.variadic ?? false {
+    positional_idx
+  } else {
+    positional_idx + 1
+  }
+  return Ok({collected: unwrap(recorded), positional_idx: next_idx})
+}
+
+fn __accepts_signed_numeric_positional(
+  args: list<ArgSpec>,
+  positionals: list<ArgSpec>,
+  positional_idx: int,
+  raw: string,
+) -> bool {
+  if !starts_with(raw, "-") || positional_idx >= len(positionals) {
+    return false
+  }
+  if len(raw) > 1 && __find_short(args, substring(raw, 0, 2)) != nil {
+    return false
+  }
+  const positional = positionals[positional_idx]
+  if positional == nil || !contains(["int", "float"], positional.parse ?? "string") {
+    return false
+  }
+  return is_ok(__decode_value(positional, raw))
+}
+
 fn __finish_parse(collected: dict, rest: list<string>, args: list<ArgSpec>, pending: ArgSpec?) -> CliParseResult<dict> {
   if pending != nil {
     const label = pending.long ?? pending.short ?? pending.name
@@ -427,6 +557,16 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
     }
     if arg_str == "--" {
       seen_dash_dash = true
+      continue
+    }
+    if __accepts_signed_numeric_positional(spec.args, positionals, positional_idx, arg_str) {
+      const consumed = __consume_positional(collected, positionals, positional_idx, arg_str)
+      if is_err(consumed) {
+        return Err(unwrap_err(consumed))
+      }
+      const next = unwrap(consumed)
+      collected = next.collected
+      positional_idx = next.positional_idx
       continue
     }
     // Long flag: --key, --key=value
@@ -482,24 +622,35 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
       }
       continue
     }
-    // Positional
-    if positional_idx >= len(positionals) {
-      return Err(__argv_failure("unknown_arg", arg_str, "unexpected positional"))
+    const consumed = __consume_positional(collected, positionals, positional_idx, arg_str)
+    if is_err(consumed) {
+      return Err(unwrap_err(consumed))
     }
-    const pos = positionals[positional_idx]
-    if pos == nil {
-      return Err(__argv_failure("unknown_arg", arg_str, "unexpected positional"))
-    }
-    const recorded = __record_value(collected, pos, arg_str, pos.variadic ?? false)
-    if is_err(recorded) {
-      return Err(unwrap_err(recorded))
-    }
-    collected = unwrap(recorded)
-    if !(pos.variadic ?? false) {
-      positional_idx = positional_idx + 1
-    }
+    const next = unwrap(consumed)
+    collected = next.collected
+    positional_idx = next.positional_idx
   }
   return __finish_parse(collected, rest, spec.args, pending)
+}
+
+/**
+ * Return whether argv requests canonical CLI help before the `--` boundary.
+ * Help is a preflight outcome rather than a partial `CliInvocation<T>`, so a
+ * typed parse never has to fabricate values for required options.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn help_requested(argv: list<string>) -> bool {
+  for arg in argv {
+    if arg == "--" {
+      return false
+    }
+    if arg == "-h" || arg == "--help" {
+      return true
+    }
+  }
+  return false
 }
 
 /**
