@@ -133,8 +133,21 @@ pub(crate) struct PersonaCompilePromptArgs {
 #[derive(Debug, Args)]
 pub(crate) struct PersonaMaterializeArgs {
     /// Path to a JSON persona blueprint compiled by Harn at the materialization boundary.
-    #[arg(long, value_name = "JSON")]
-    pub blueprint: PathBuf,
+    #[arg(
+        long,
+        value_name = "JSON",
+        required_unless_present = "compile_receipt",
+        conflicts_with = "compile_receipt"
+    )]
+    pub blueprint: Option<PathBuf>,
+    /// Path to an accepted compile-prompt receipt reviewed before materialization.
+    #[arg(
+        long,
+        value_name = "JSON",
+        required_unless_present = "blueprint",
+        conflicts_with = "blueprint"
+    )]
+    pub compile_receipt: Option<PathBuf>,
     /// Directory under which the persona package is created.
     #[arg(long, value_name = "DIR", default_value = "personas")]
     pub output_root: PathBuf,

@@ -61,7 +61,12 @@ pub async fn scaffold_persona_package(
 async fn materialize_persona(
     args: &PersonaMaterializeArgs,
 ) -> Result<PersonaScaffoldResult, String> {
-    materialize_persona_package(&args.blueprint, &args.output_root, args.force).await
+    let lowering = match (&args.blueprint, &args.compile_receipt) {
+        (Some(blueprint), None) => persona_prompt::compile_blueprint_path(blueprint).await?,
+        (None, Some(receipt)) => persona_prompt::compile_reviewed_receipt_path(receipt).await?,
+        _ => return Err("exactly one persona materialization input is required".to_string()),
+    };
+    materialize_prompt_compiled_lowering(lowering, &args.output_root, args.force).await
 }
 
 pub async fn materialize_persona_package(
@@ -792,7 +797,69 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
-    use crate::commands::persona_prompt::PersonaPromptCompileReceipt;
+
+    fn reviewed_compile_receipt() -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": "harn.persona.prompt_compile.v1",
+            "ok": true,
+            "prompt_digest": "sha256:prompt",
+            "catalog_digest": "sha256:catalog",
+            "checkpoint": {
+                "status": "accepted",
+                "attempts": 1,
+                "repaired": false,
+                "provider": "mock",
+                "model": "mock",
+            },
+            "usage": {
+                "input_tokens": 11,
+                "output_tokens": 7,
+                "total_tokens": 18,
+                "realized_cost_usd": 0.0,
+            },
+            "blueprint": {
+                "schema_version": "1",
+                "name": "accepted_prompt_watch",
+                "description": "Watches accepted prompt receipts.",
+                "goal": "Prove the accepted receipt enters the canonical transaction.",
+                "template": "deterministic-sweeper",
+                "cron": {"cron": "0 9 * * *", "timezone": "UTC"},
+            },
+            "lowering": {
+                "profile": "prompt_compiled_v1",
+                "template": "deterministic-sweeper",
+                "persona": {
+                    "name": "accepted_prompt_watch",
+                    "description": "Watches accepted prompt receipts.",
+                    "goal": "Prove the accepted receipt enters the canonical transaction.",
+                },
+                "policy": {
+                    "autonomy_tier": "suggest",
+                    "receipt_policy": "required",
+                },
+                "triggers": [{
+                    "id": "accepted_prompt_watch-cron",
+                    "kind": "cron",
+                    "provider": "cron",
+                    "events": ["cron.tick"],
+                    "secrets": {},
+                    "schedule": "0 9 * * *",
+                    "timezone": "UTC",
+                    "handler": "persona://accepted_prompt_watch",
+                }],
+            },
+            "error": null,
+        })
+    }
+
+    fn materialize_args(receipt: PathBuf, output_root: PathBuf) -> PersonaMaterializeArgs {
+        PersonaMaterializeArgs {
+            blueprint: None,
+            compile_receipt: Some(receipt),
+            output_root,
+            force: false,
+        }
+    }
 
     #[test]
     fn prompt_rendering_templates_declare_their_read_capability() {
@@ -887,58 +954,15 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn accepted_prompt_receipt_enters_the_strict_scaffold_transaction() {
-        let receipt = serde_json::from_value::<PersonaPromptCompileReceipt>(serde_json::json!({
-            "schema_version": "harn.persona.prompt_compile.v1",
-            "ok": true,
-            "prompt_digest": "sha256:prompt",
-            "catalog_digest": "sha256:catalog",
-            "checkpoint": {
-                "status": "accepted",
-                "attempts": 1,
-                "repaired": false,
-                "provider": "mock",
-                "model": "mock",
-            },
-            "usage": {
-                "input_tokens": 11,
-                "output_tokens": 7,
-                "total_tokens": 18,
-                "realized_cost_usd": 0.0,
-            },
-            "lowering": {
-                "profile": "prompt_compiled_v1",
-                "template": "deterministic-sweeper",
-                "persona": {
-                    "name": "accepted_prompt_watch",
-                    "description": "Watches accepted prompt receipts.",
-                    "goal": "Prove the accepted receipt enters the canonical transaction.",
-                },
-                "policy": {
-                    "autonomy_tier": "suggest",
-                    "receipt_policy": "required",
-                },
-                "triggers": [{
-                    "id": "accepted_prompt_watch-cron",
-                    "kind": "cron",
-                    "provider": "cron",
-                    "events": ["cron.tick"],
-                    "secrets": {},
-                    "schedule": "0 9 * * *",
-                    "timezone": "UTC",
-                    "handler": "persona://accepted_prompt_watch",
-                }],
-            },
-            "error": null,
-        }))
-        .expect("accepted Harn compiler receipt");
-        let lowering = receipt.into_lowering().expect("accepted lowering");
+    async fn accepted_reviewed_receipt_revalidates_then_enters_the_strict_transaction() {
         let temp = tempfile::tempdir().unwrap();
+        let receipt_path = temp.path().join("reviewed-receipt.json");
+        fs::write(&receipt_path, reviewed_compile_receipt().to_string()).unwrap();
+        let output_root = temp.path().join("personas");
 
-        let result =
-            materialize_prompt_compiled_lowering(lowering, &temp.path().join("personas"), false)
-                .await
-                .expect("materialize accepted prompt receipt");
+        let result = materialize_persona(&materialize_args(receipt_path, output_root))
+            .await
+            .expect("materialize accepted reviewed prompt receipt");
 
         let manifest = toml::from_str::<toml::Value>(
             &fs::read_to_string(result.root.join("harn.toml")).unwrap(),
@@ -949,10 +973,98 @@ mod tests {
             Some("suggest")
         );
         assert_eq!(
+            manifest["personas"][0]["receipt_policy"].as_str(),
+            Some("required")
+        );
+        assert_eq!(manifest["triggers"].as_array().unwrap().len(), 1);
+        assert_eq!(manifest["triggers"][0]["kind"].as_str(), Some("cron"));
+        assert_eq!(
             manifest["triggers"][0]["handler"].as_str(),
             Some("persona://accepted_prompt_watch")
         );
         assert!(result.root.join("src/accepted_prompt_watch.harn").is_file());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rejected_reviewed_receipts_publish_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        let cases_root = temp.path().join("cases");
+        fs::create_dir_all(&cases_root).unwrap();
+
+        let mut wrong_version = reviewed_compile_receipt();
+        wrong_version["schema_version"] = serde_json::json!("harn.persona.prompt_compile.v2");
+        let mut failed = reviewed_compile_receipt();
+        failed["ok"] = serde_json::json!(false);
+        failed["checkpoint"]["status"] = serde_json::json!("validator_rejected");
+        failed["error"] = serde_json::json!({"code": "rejected", "message": "not accepted"});
+        let mut missing_blueprint = reviewed_compile_receipt();
+        missing_blueprint
+            .as_object_mut()
+            .unwrap()
+            .remove("blueprint");
+        let mut missing_lowering = reviewed_compile_receipt();
+        missing_lowering.as_object_mut().unwrap().remove("lowering");
+        let mut drifted_lowering = reviewed_compile_receipt();
+        drifted_lowering["lowering"]["triggers"][0]["schedule"] = serde_json::json!("0 10 * * *");
+        let mut invalid_catalog = reviewed_compile_receipt();
+        invalid_catalog["blueprint"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cron");
+        invalid_catalog["blueprint"]["external"] =
+            serde_json::json!({"provider": "missing", "event": "missing.event"});
+
+        let serde_cases = [
+            ("malformed", None, "invalid"),
+            ("wrong-version", Some(wrong_version), "unknown variant"),
+        ];
+        let stable_cases = [
+            ("failed", failed, "rejected: not accepted"),
+            (
+                "missing-blueprint",
+                missing_blueprint,
+                "persona compile receipt has no blueprint",
+            ),
+            (
+                "missing-lowering",
+                missing_lowering,
+                "persona compile receipt has no reviewed lowering",
+            ),
+            (
+                "drifted-lowering",
+                drifted_lowering,
+                "persona compile receipt lowering no longer matches current Harn lowering; compile and review a fresh receipt",
+            ),
+            (
+                "invalid-catalog",
+                invalid_catalog,
+                "unknown_provider: provider `missing` is not in the live trigger catalog",
+            ),
+        ];
+
+        for (name, receipt, expected) in serde_cases {
+            let receipt_path = cases_root.join(format!("{name}.json"));
+            let contents =
+                receipt.map_or_else(|| "not-json".to_string(), |value| value.to_string());
+            fs::write(&receipt_path, contents).unwrap();
+            let output_root = cases_root.join(format!("{name}-output"));
+            let error = materialize_persona(&materialize_args(receipt_path, output_root.clone()))
+                .await
+                .expect_err(name);
+            assert!(error.contains(expected), "{name}: {error}");
+            assert!(!output_root.exists(), "{name} published output");
+        }
+
+        for (name, receipt, expected) in stable_cases {
+            let receipt_path = cases_root.join(format!("{name}.json"));
+            fs::write(&receipt_path, receipt.to_string()).unwrap();
+            let output_root = cases_root.join(format!("{name}-output"));
+            let error = materialize_persona(&materialize_args(receipt_path, output_root.clone()))
+                .await
+                .expect_err(name);
+            assert_eq!(error, expected, "{name}");
+            assert!(!output_root.exists(), "{name} published output");
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
