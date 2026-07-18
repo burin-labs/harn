@@ -427,7 +427,7 @@ jobs:
         if: matrix.kind == 'test'
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
-          tool: nextest@0.9.133
+          tool: nextest@0.9.132
       # `make lint` also runs `lint-no-xfail-regression`, which compiles
       # `harn-cli` via `cargo run` just to walk conformance/ and count
       # `@xfail:` markers. That ~1-2 min cost is paid by the harn-audit lane
@@ -494,7 +494,7 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
-          tool: nextest@0.9.133
+          tool: nextest@0.9.132
       - name: Download portable behavior payload
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -772,7 +772,7 @@ jobs:
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         continue-on-error: true
         with:
-          tool: nextest@0.9.133
+          tool: nextest@0.9.132
       # Don't gate the whole pipeline on the full Windows test surface yet —
       # this job exists to catch hard regressions (compile breaks, missing
       # cfg-gates, hardcoded `/bin/sh`, etc.). PRs compile the changed crates
@@ -1133,7 +1133,7 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
-          tool: nextest@0.9.133
+          tool: nextest@0.9.132
       - run: make test-e2e
         env:
           NEXTEST_PROFILE: e2e

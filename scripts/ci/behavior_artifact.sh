@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly NEXTEST_VERSION="0.9.133"
+readonly NEXTEST_VERSION="0.9.132"
 readonly SECURITY_FILTER='package(harn-vm) and binary(harn_vm)'
 cleanup_dir=""
 trap '[[ -z "$cleanup_dir" ]] || rm -rf "$cleanup_dir"' EXIT

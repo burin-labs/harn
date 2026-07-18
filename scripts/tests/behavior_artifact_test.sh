@@ -21,8 +21,8 @@ case "$1" in
   nextest)
     if [[ "$2" == "--version" ]]; then
       cat <<'VERSION'
-cargo-nextest 0.9.133 (65e806bd5 2026-04-14)
-release: 0.9.133
+cargo-nextest 0.9.132 (6e4a9d6f2 2026-03-20)
+release: 0.9.132
 commit-hash: 65e806bd589d12c4341d3696a02a9788bd437c3c
 VERSION
       exit 0
