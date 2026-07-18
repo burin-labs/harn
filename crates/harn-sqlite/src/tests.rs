@@ -294,7 +294,10 @@ fn transient_initializer_rejects_file_backed_connection() {
     .expect_err("transient initialization must reject a file-backed database");
 
     match error {
-        InitializationError::FileBackedTransient { path } => assert_eq!(path, database),
+        InitializationError::FileBackedTransient { path } => assert_eq!(
+            path,
+            std::fs::canonicalize(database).expect("canonical database")
+        ),
         other => panic!("expected file-backed transient error, got {other:?}"),
     }
 }
@@ -401,7 +404,7 @@ fn shared_memory_initialization_serializes_the_schema_callback() {
     assert_eq!(state, (1, 1));
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn file_initializer_preserves_non_utf8_lock_identity() {
     use std::os::unix::ffi::OsStringExt;
@@ -416,7 +419,9 @@ fn file_initializer_preserves_non_utf8_lock_identity() {
 
     let lock_path = super::initialization_lock_path::<rusqlite::Error>(&connection)
         .expect("derive non-UTF-8 lock path");
-    let mut expected = database.into_os_string();
+    let mut expected = std::fs::canonicalize(database)
+        .expect("canonical non-UTF-8 database")
+        .into_os_string();
     expected.push(".harn-init.lock");
     assert_eq!(lock_path.into_os_string(), expected);
 }

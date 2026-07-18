@@ -9,6 +9,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use fs2::FileExt;
@@ -22,6 +23,7 @@ const CREATE_SCHEMA_MARKER_TABLE: &str =
     name TEXT PRIMARY KEY,
     version INTEGER NOT NULL CHECK(version > 0)
 );";
+static TRANSIENT_INITIALIZATION_LOCK: Mutex<()> = Mutex::new(());
 
 /// Stable identity for one schema stored in a Harn-owned SQLite database.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,8 +81,8 @@ pub enum InitializationError<E> {
     WalBusyNotWal { mode: String },
     /// WAL promotion and the diagnostic journal-mode query both failed.
     WalBusyQuery {
-        wal_error: rusqlite::Error,
-        query_error: rusqlite::Error,
+        wal_error: Box<rusqlite::Error>,
+        query_error: Box<rusqlite::Error>,
     },
     /// The connection rejected the runtime synchronous setting.
     Synchronous(rusqlite::Error),
@@ -281,8 +283,10 @@ fn initialization_stage_is_busy_or_locked<E>(error: &InitializationError<E>) -> 
 /// Initialize a transient database with the same atomic schema-marker contract.
 ///
 /// No filesystem lock or WAL promotion is performed because the connection is
-/// not shared across processes. The callback follows the same transaction-local
-/// effects and at-most-once invocation contract as [`initialize_file`].
+/// not shared across processes. A process-local lock serializes first use of
+/// named shared-memory databases; ready connections avoid it. The callback
+/// follows the same transaction-local effects and at-most-once invocation
+/// contract as [`initialize_file`].
 pub fn initialize_transient<E, F>(
     connection: &Connection,
     busy_timeout: Duration,
@@ -297,6 +301,15 @@ where
         return Err(InitializationError::FileBackedTransient { path });
     }
     configure_connection(connection)?;
+    match schema_is_ready(connection, schema) {
+        Ok(true) => return Ok(()),
+        Ok(false) => {}
+        Err(error) if initialization_stage_is_busy_or_locked(&error) => {}
+        Err(error) => return Err(error),
+    }
+    let _initialization_lock = TRANSIENT_INITIALIZATION_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if schema_is_ready(connection, schema)? {
         return Ok(());
     }
@@ -481,8 +494,8 @@ fn ensure_wal_journal_mode<E>(connection: &Connection) -> Result<(), Initializat
             Ok(mode) if mode.eq_ignore_ascii_case("wal") => Ok(()),
             Ok(mode) => Err(InitializationError::WalBusyNotWal { mode }),
             Err(query_error) => Err(InitializationError::WalBusyQuery {
-                wal_error: error,
-                query_error,
+                wal_error: Box::new(error),
+                query_error: Box::new(query_error),
             }),
         },
         Err(error) => Err(InitializationError::WalPragma(error)),

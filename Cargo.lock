@@ -3457,6 +3457,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "ed25519-dalek",
+ "harn-sqlite",
  "hex",
  "rusqlite",
  "serde",
@@ -3467,6 +3468,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -3474,6 +3476,16 @@ name = "harn-skills"
 version = "0.10.23"
 dependencies = [
  "tempfile",
+]
+
+[[package]]
+name = "harn-sqlite"
+version = "0.10.23"
+dependencies = [
+ "fs2",
+ "rusqlite",
+ "tempfile",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -3528,6 +3540,7 @@ dependencies = [
  "harn-parser",
  "harn-secret-catalog",
  "harn-session-store",
+ "harn-sqlite",
  "harn-stdlib",
  "hex",
  "hkdf",
