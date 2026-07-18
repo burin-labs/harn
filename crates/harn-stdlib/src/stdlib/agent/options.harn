@@ -145,10 +145,9 @@ pub type JudgeConfig = {
  * `docs/src/llm/agent_loop.md`, plus the caller-facing keys consumed by the
  * `agent_loop_options` normalizer below.
  *
- * The `llm_call` keys are inlined (rather than composed as
- * `LlmCallOptions & {...}`) so consumers can import this alias alone and
- * still get structural checking; the parity test pins this copy as a
- * superset of `LlmCallOptions`.
+ * The `llm_call` keys are inlined so consumers can import this alias alone and
+ * retain structural checking. The parity test pins it as a superset of
+ * `LlmCallOptions`.
  *
  * NOTE ON `output_schema`: unlike on `llm_call`, this is a TERMINAL-answer
  * contract, not a per-turn one. The loop deliberately does NOT force each
@@ -238,6 +237,7 @@ pub type AgentLoopOptions = {
   history?: list,
   transcript?: dict,
   session_id?: string,
+  mock_scope?: string,
   system?: string,
   system_preamble?: string,
   system_prefix?: string,
