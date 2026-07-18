@@ -10,6 +10,7 @@ mod hitl;
 mod optimizer;
 mod patterns;
 mod pipe;
+mod pipelines;
 mod state;
 mod statements;
 #[cfg(test)]
@@ -195,16 +196,10 @@ pub struct Compiler {
     /// Pipeline bodies and nested `Compiler::new()` instances (fn,
     /// closure, tool, etc.) flip this to false before compiling.
     module_level: bool,
-    /// Names referenced inside a nested closure of the body this compiler is
-    /// emitting. A mutable (`let`) local whose name is in this set is captured
-    /// by a closure, so it is boxed into a shared cell (`Op::DefCell`) rather
-    /// than a by-value local slot — this is what makes closure capture
-    /// **by reference** (harn#4479). Recomputed per function-like body via
-    /// [`Compiler::seed_captured_idents`]; an over-approximation (a shadowed or
-    /// read-only capture may be boxed) is safe — it only forgoes the slot fast
-    /// path for that one local. `const` locals and params are immutable and
-    /// never boxed.
-    captured_idents: std::collections::HashSet<String>,
+    /// Source bindings captured by a nested callable in the body this compiler
+    /// emits. Identity includes the declaration span, so a shadowing parameter
+    /// or block-local never boxes an unrelated same-named `let`.
+    captured_bindings: std::collections::HashSet<harn_parser::lexical::BindingId>,
 }
 
 impl Compiler {
@@ -262,7 +257,7 @@ impl Compiler {
                     _ => self.infer_expr_type(value),
                 };
                 self.compile_node(value)?;
-                self.compile_destructuring(pattern, true)?;
+                self.compile_destructuring(pattern, true, snode.span)?;
                 // A `let` is reassignable, so its initializer-inferred primitive
                 // type is only safe for typed-opcode specialization when the
                 // binding is provably monomorphic (proven by
@@ -288,7 +283,7 @@ impl Compiler {
                     _ => self.infer_expr_type(value),
                 };
                 self.compile_node(value)?;
-                self.compile_destructuring(pattern, false)?;
+                self.compile_destructuring(pattern, false, snode.span)?;
                 self.record_binding_type(pattern, binding_type.clone());
                 self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
             }
@@ -412,7 +407,7 @@ impl Compiler {
                 iterable,
                 body,
             } => {
-                self.compile_for_in(pattern, iterable, body)?;
+                self.compile_for_in(pattern, iterable, body, snode.span)?;
             }
             Node::ReturnStmt { value } => {
                 self.compile_return_stmt(value)?;
