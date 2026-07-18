@@ -429,7 +429,11 @@ pub fn known_model_names() -> Vec<String> {
 }
 
 pub fn alias_entries() -> Vec<(String, AliasDef)> {
-    effective_config().aliases.into_iter().collect()
+    effective_config()
+        .aliases
+        .iter()
+        .map(|(name, alias)| (name.clone(), alias.clone()))
+        .collect()
 }
 
 pub fn alias_tool_calling_entry(alias: &str) -> Option<AliasToolCallingDef> {
@@ -780,7 +784,7 @@ pub fn default_model_for_provider(provider: &str) -> String {
 }
 
 pub fn qc_defaults() -> BTreeMap<String, String> {
-    effective_config().qc_defaults
+    effective_config().qc_defaults.clone()
 }
 
 pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
