@@ -111,6 +111,29 @@ slow-timeout = { period = "30s", terminate-after = 3, grace-period = "5s" }
 filter = 'package(harn-vm) and test(/llm::api::tests/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 
+# request_catalog_audit_validates_every_catalog_route_in_process validates every
+# LLM provider route in-process (route_count x probe_cases x request_profiles x
+# modes). It is a heavy CPU-bound test whose wall-time is dominated by runner
+# contention, not its own work: observed 15s-80s on Linux workers under full
+# workspace fan-out. On the slower Windows runner it sits right on the default
+# 120s hard-kill cliff, so a loaded run tips it over and terminates a correct
+# test. Give it more room than the default slow ceiling, same rationale as the
+# llm::api transport override above.
+#
+# Scope is anchored to this single test on purpose: its fast fixture siblings in
+# the same module keep the default ceiling so a real slow-test regression in one
+# of them still trips immediately. The durable root fix is the O(1) immutable
+# provider-catalog snapshot (harn#5105), which takes this exact test from ~40s
+# to <1s; this override is the immediate Windows belt-and-suspenders until that
+# lands.
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
+
+[[profile.ci.overrides]]
+filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
+
 # Bound parallelism for any harn-cli integration test that spawns the
 # `harn` debug binary as a subprocess. See the `[test-groups]` block
 # above for rationale.
@@ -176,6 +199,10 @@ success-output = "never"
 [[profile.flake-detection.overrides]]
 filter = 'package(harn-vm) and test(/llm::api::tests/)'
 slow-timeout = { period = "30s", terminate-after = 3, grace-period = "5s" }
+
+[[profile.flake-detection.overrides]]
+filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 
 [[profile.flake-detection.overrides]]
 filter = "package(harn-cli) and kind(test)"
