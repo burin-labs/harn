@@ -924,7 +924,15 @@ impl Compiler {
     /// parameters, patterns, blocks, loops, catches, selects, and nested
     /// callable boundaries before the VM decides whether to use `DefCell`.
     pub(super) fn seed_captured_idents(&mut self, body: &[SNode]) {
-        self.captured_bindings = harn_parser::lexical::captured_bindings_in_nested_callables(body);
+        let match_patterns = self.lexical_match_pattern_catalog();
+        self.captured_bindings =
+            harn_parser::lexical::captured_bindings_in_nested_callables(body, &match_patterns);
+    }
+
+    pub(super) fn lexical_match_pattern_catalog(
+        &self,
+    ) -> harn_parser::lexical::MatchPatternCatalog {
+        harn_parser::lexical::MatchPatternCatalog::new(&self.enum_names, &self.enum_variant_owners)
     }
 
     /// Whether this mutable source binding must be boxed into a shared cell

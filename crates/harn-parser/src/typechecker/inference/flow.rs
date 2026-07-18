@@ -322,8 +322,11 @@ fn collect_assigned_var_names(node: &SNode, names: &mut Vec<String>) {
 /// pre-marks this set on its body scope so `apply_refinements` never narrows
 /// them — the conservative, TypeScript/Flow-aligned "assigned in a nested
 /// function ⇒ not narrowed" rule. See harn#4523.
-pub(in crate::typechecker) fn vars_reassigned_in_nested_closures(body: &[SNode]) -> Vec<String> {
-    crate::lexical::nested_callable_reassigned_names(body)
+pub(in crate::typechecker) fn vars_reassigned_in_nested_closures(
+    body: &[SNode],
+    match_patterns: &crate::lexical::MatchPatternCatalog,
+) -> Vec<String> {
+    crate::lexical::nested_callable_reassigned_names(body, match_patterns)
 }
 
 impl TypeChecker {
@@ -338,7 +341,8 @@ impl TypeChecker {
         scope: &mut TypeScope,
         body: &[SNode],
     ) {
-        for name in vars_reassigned_in_nested_closures(body) {
+        let match_patterns = scope.lexical_match_pattern_catalog();
+        for name in vars_reassigned_in_nested_closures(body, &match_patterns) {
             scope.mark_closure_mutated(&name);
         }
     }

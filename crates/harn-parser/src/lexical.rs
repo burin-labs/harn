@@ -21,6 +21,63 @@ pub struct BindingId {
     pub declaration_end: usize,
 }
 
+/// Compiler-resolved enum metadata needed to distinguish call-shaped enum
+/// patterns from ordinary expression-equality patterns.
+#[derive(Debug, Clone, Default)]
+pub struct MatchPatternCatalog {
+    enum_names: HashSet<String>,
+    variant_owners: HashMap<String, Vec<String>>,
+}
+
+/// Resolution of a bare call-shaped match pattern such as `Ok(value)`.
+/// Compiler lowering and lexical analysis share this decision so a pattern
+/// cannot bind payload names in one subsystem and act as an expression in the
+/// other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BareVariantResolution<'a> {
+    NotVariant,
+    Unique(&'a str),
+    Ambiguous(&'a [String]),
+}
+
+pub fn resolve_bare_variant_owners(owners: Option<&[String]>) -> BareVariantResolution<'_> {
+    match owners {
+        None | Some([]) => BareVariantResolution::NotVariant,
+        Some([owner]) => BareVariantResolution::Unique(owner),
+        Some(owners) => BareVariantResolution::Ambiguous(owners),
+    }
+}
+
+impl MatchPatternCatalog {
+    pub fn new(
+        enum_names: &HashSet<String>,
+        variant_owners: &HashMap<String, Vec<String>>,
+    ) -> Self {
+        Self {
+            enum_names: enum_names.clone(),
+            variant_owners: variant_owners.clone(),
+        }
+    }
+
+    pub fn from_parts(
+        enum_names: HashSet<String>,
+        variant_owners: HashMap<String, Vec<String>>,
+    ) -> Self {
+        Self {
+            enum_names,
+            variant_owners,
+        }
+    }
+
+    pub fn resolve_bare_variant(&self, name: &str) -> BareVariantResolution<'_> {
+        resolve_bare_variant_owners(self.variant_owners.get(name).map(Vec::as_slice))
+    }
+
+    pub fn is_enum_name(&self, name: &str) -> bool {
+        self.enum_names.contains(name)
+    }
+}
+
 impl BindingId {
     pub fn from_declaration(name: impl Into<String>, span: Span) -> Self {
         Self {
@@ -62,8 +119,11 @@ pub fn binding_pattern_ids(pattern: &BindingPattern, declaration: Span) -> Vec<B
 /// A result is declaration-identity based rather than name based. That keeps
 /// `let pin` distinct from a later `{ pin -> ... }` parameter or an inner
 /// block-local `let pin`, which is essential when selecting VM storage.
-pub fn captured_bindings_in_nested_callables(body: &[SNode]) -> HashSet<BindingId> {
-    let mut analysis = LexicalAnalysis::default();
+pub fn captured_bindings_in_nested_callables(
+    body: &[SNode],
+    match_patterns: &MatchPatternCatalog,
+) -> HashSet<BindingId> {
+    let mut analysis = LexicalAnalysis::new(match_patterns);
     analysis.walk_body(body, Vec::new(), false, BindingOwner::Current);
     analysis.captured
 }
@@ -72,8 +132,11 @@ pub fn captured_bindings_in_nested_callables(body: &[SNode]) -> HashSet<BindingI
 /// callable body. Type-flow narrowing uses this conservative summary: unknown
 /// names remain included so parameter captures continue to invalidate their
 /// narrowing at the caller-owned scope.
-pub fn nested_callable_reassigned_names(body: &[SNode]) -> Vec<String> {
-    let mut analysis = LexicalAnalysis::default();
+pub fn nested_callable_reassigned_names(
+    body: &[SNode],
+    match_patterns: &MatchPatternCatalog,
+) -> Vec<String> {
+    let mut analysis = LexicalAnalysis::new(match_patterns);
     analysis.walk_body(body, Vec::new(), false, BindingOwner::Current);
     analysis.reassigned.into_iter().collect()
 }
@@ -92,13 +155,21 @@ enum ScopeBinding {
 
 type Scope = HashMap<String, ScopeBinding>;
 
-#[derive(Default)]
-struct LexicalAnalysis {
+struct LexicalAnalysis<'a> {
     captured: HashSet<BindingId>,
     reassigned: BTreeSet<String>,
+    match_patterns: &'a MatchPatternCatalog,
 }
 
-impl LexicalAnalysis {
+impl<'a> LexicalAnalysis<'a> {
+    fn new(match_patterns: &'a MatchPatternCatalog) -> Self {
+        Self {
+            captured: HashSet::new(),
+            reassigned: BTreeSet::new(),
+            match_patterns,
+        }
+    }
+
     fn walk_body(
         &mut self,
         body: &[SNode],
@@ -141,6 +212,13 @@ impl LexicalAnalysis {
     ) {
         match &node.node {
             Node::Identifier(name) => self.record_reference(name, scopes, inside_nested_callable),
+            Node::FunctionCall { name, .. } => {
+                // Bare calls resolve a user binding before falling back to a
+                // builtin. Keep the complete name intact so dotted builtin
+                // names do not become references to their first component.
+                self.record_reference(name, scopes, inside_nested_callable);
+                self.walk_children(node, scopes, inside_nested_callable, owner);
+            }
             Node::Assignment { target, .. } => {
                 if inside_nested_callable {
                     if let Node::Identifier(name) = &target.node {
@@ -152,12 +230,19 @@ impl LexicalAnalysis {
             Node::Closure { params, body, .. }
             | Node::FnDecl { params, body, .. }
             | Node::ToolDecl { params, body, .. } => {
-                // Defaults resolve before their parameter is bound. They still
-                // belong to the nested callable and can capture an outer local.
+                // Defaults run left to right: earlier parameters are visible,
+                // while the current and later parameters still resolve outside
+                // the callable.
+                let mut default_scopes = scopes.to_vec();
+                default_scopes.push(Scope::new());
                 for param in params {
                     if let Some(default) = &param.default_value {
-                        self.walk_node(default, scopes, true, owner);
+                        self.walk_node(default, &default_scopes, true, owner);
                     }
+                    default_scopes
+                        .last_mut()
+                        .expect("parameter default scope")
+                        .extend(names_scope([param.name.clone()]));
                 }
                 self.walk_callable_body(body, params, scopes);
             }
@@ -233,16 +318,18 @@ impl LexicalAnalysis {
             Node::MatchExpr { value, arms } => {
                 self.walk_node(value, scopes, inside_nested_callable, owner);
                 for arm in arms {
-                    self.walk_node(&arm.pattern, scopes, inside_nested_callable, owner);
-                    if let Some(guard) = &arm.guard {
-                        self.walk_node(guard, scopes, inside_nested_callable, owner);
-                    }
-                    self.walk_body(
-                        &arm.body,
-                        scopes.to_vec(),
+                    let bindings = self.analyze_match_pattern(
+                        &arm.pattern,
+                        scopes,
                         inside_nested_callable,
-                        owner.clone(),
+                        owner,
                     );
+                    let mut arm_scopes = scopes.to_vec();
+                    arm_scopes.push(bindings);
+                    if let Some(guard) = &arm.guard {
+                        self.walk_node(guard, &arm_scopes, inside_nested_callable, owner);
+                    }
+                    self.walk_body(&arm.body, arm_scopes, inside_nested_callable, owner.clone());
                 }
             }
             Node::WhileLoop { condition, body } => {
@@ -366,6 +453,83 @@ impl LexicalAnalysis {
             BindingOwner::Nested,
             names_scope(params.iter().map(|param| param.name.clone())),
         );
+    }
+
+    /// Analyze the expression parts of a match pattern and return the names
+    /// that compiler lowering binds before the arm guard and body execute.
+    fn analyze_match_pattern(
+        &mut self,
+        pattern: &SNode,
+        scopes: &[Scope],
+        inside_nested_callable: bool,
+        owner: &BindingOwner,
+    ) -> Scope {
+        let mut bindings = Vec::new();
+        match &pattern.node {
+            Node::Identifier(name) if name != "_" => bindings.push(name.clone()),
+            Node::Identifier(_) => {}
+            Node::EnumConstruct { args, .. } => {
+                for arg in args {
+                    if let Node::Identifier(name) = &arg.node {
+                        bindings.push(name.clone());
+                    }
+                }
+            }
+            Node::FunctionCall { name, args, .. }
+                if matches!(
+                    self.match_patterns.resolve_bare_variant(name),
+                    BareVariantResolution::Unique(_)
+                ) =>
+            {
+                for arg in args {
+                    if let Node::Identifier(name) = &arg.node {
+                        bindings.push(name.clone());
+                    }
+                }
+            }
+            Node::PropertyAccess { object, .. } if matches!(&object.node, Node::Identifier(name) if self.match_patterns.is_enum_name(name)) =>
+                {}
+            Node::MethodCall { object, args, .. } if matches!(&object.node, Node::Identifier(name) if self.match_patterns.is_enum_name(name)) => {
+                for arg in args {
+                    if let Node::Identifier(name) = &arg.node {
+                        bindings.push(name.clone());
+                    }
+                }
+            }
+            Node::DictLiteral(entries)
+                if entries
+                    .iter()
+                    .all(|entry| matches!(&entry.key.node, Node::StringLiteral(_))) =>
+            {
+                for entry in entries {
+                    if let Node::Identifier(name) = &entry.value.node {
+                        bindings.push(name.clone());
+                    } else {
+                        self.walk_node(&entry.value, scopes, inside_nested_callable, owner);
+                    }
+                }
+            }
+            Node::ListLiteral(elements) => {
+                for element in elements {
+                    match &element.node {
+                        Node::Identifier(name) if name != "_" => bindings.push(name.clone()),
+                        Node::Identifier(_) => {}
+                        Node::Spread(inner) => {
+                            if let Node::Identifier(name) = &inner.node {
+                                bindings.push(name.clone());
+                            } else {
+                                self.walk_node(inner, scopes, inside_nested_callable, owner);
+                            }
+                        }
+                        _ => {
+                            self.walk_node(element, scopes, inside_nested_callable, owner);
+                        }
+                    }
+                }
+            }
+            _ => self.walk_node(pattern, scopes, inside_nested_callable, owner),
+        }
+        names_scope(bindings)
     }
 
     fn walk_pattern_defaults(
@@ -496,7 +660,7 @@ fn resolve<'a>(scopes: &'a [Scope], name: &str) -> Option<&'a ScopeBinding> {
 mod tests {
     use harn_lexer::Span;
 
-    use crate::ast::SelectCase;
+    use crate::ast::{DictEntry, MatchArm, SelectCase};
 
     use super::*;
 
@@ -506,6 +670,17 @@ mod tests {
 
     fn identifier(offset: usize, name: &str) -> SNode {
         node(offset, Node::Identifier(name.to_string()))
+    }
+
+    fn function_call(offset: usize, name: &str) -> SNode {
+        node(
+            offset,
+            Node::FunctionCall {
+                name: name.to_string(),
+                type_args: Vec::new(),
+                args: Vec::new(),
+            },
+        )
     }
 
     fn let_binding(offset: usize, name: &str) -> SNode {
@@ -533,6 +708,258 @@ mod tests {
         )
     }
 
+    fn fn_decl(offset: usize, name: &str, body: Vec<SNode>) -> SNode {
+        node(
+            offset,
+            Node::FnDecl {
+                name: name.to_string(),
+                type_params: Vec::new(),
+                params: Vec::new(),
+                return_type: None,
+                throws: None,
+                where_clauses: Vec::new(),
+                body,
+                is_pub: false,
+                is_stream: false,
+            },
+        )
+    }
+
+    fn defaulted_param(name: &str, default: SNode) -> TypedParam {
+        TypedParam {
+            name: name.to_string(),
+            type_expr: None,
+            default_value: Some(Box::new(default)),
+            rest: false,
+        }
+    }
+
+    fn captured(body: &[SNode]) -> HashSet<BindingId> {
+        captured_bindings_in_nested_callables(body, &MatchPatternCatalog::default())
+    }
+
+    fn enum_pattern_catalog() -> MatchPatternCatalog {
+        MatchPatternCatalog::new(
+            &HashSet::from(["Option".to_string(), "Result".to_string()]),
+            &HashMap::from([
+                ("Some".to_string(), vec!["Option".to_string()]),
+                ("Ok".to_string(), vec!["Result".to_string()]),
+            ]),
+        )
+    }
+
+    #[test]
+    fn function_call_callee_is_a_lexical_reference() {
+        let callable = let_binding(10, "callable");
+        let nested = closure(
+            30,
+            Vec::new(),
+            vec![function_call(31, "callable"), function_call(33, "log")],
+        );
+
+        let captured = captured(&[callable.clone(), nested]);
+        assert!(captured.contains(&BindingId::from_declaration("callable", callable.span)));
+    }
+
+    #[test]
+    fn earlier_value_binding_shadows_later_hoisted_callable_for_capture() {
+        let callable = let_binding(10, "callable");
+        let invoke = node(
+            20,
+            Node::ConstBinding {
+                pattern: BindingPattern::Identifier("invoke".to_string()),
+                type_ann: None,
+                value: Box::new(closure(21, Vec::new(), vec![function_call(22, "callable")])),
+                is_pub: false,
+            },
+        );
+        let later_callable = fn_decl(30, "callable", Vec::new());
+
+        let captured = captured(&[callable.clone(), invoke, later_callable]);
+        assert_eq!(
+            captured,
+            HashSet::from([BindingId::from_declaration("callable", callable.span)])
+        );
+    }
+
+    #[test]
+    fn match_bindings_shadow_same_named_outer_mutables() {
+        let pin = let_binding(10, "pin");
+        let alias = let_binding(20, "alias");
+        let rest = let_binding(30, "rest");
+        let match_expr = node(
+            40,
+            Node::MatchExpr {
+                value: Box::new(identifier(41, "value")),
+                arms: vec![
+                    MatchArm {
+                        pattern: identifier(42, "pin"),
+                        guard: Some(Box::new(identifier(43, "pin"))),
+                        body: vec![identifier(44, "pin")],
+                        span: Span::with_offsets(42, 47, 1, 43),
+                    },
+                    MatchArm {
+                        pattern: node(
+                            50,
+                            Node::DictLiteral(vec![DictEntry {
+                                key: node(51, Node::StringLiteral("key".to_string())),
+                                value: identifier(52, "alias"),
+                            }]),
+                        ),
+                        guard: None,
+                        body: vec![identifier(53, "alias")],
+                        span: Span::with_offsets(50, 55, 1, 51),
+                    },
+                    MatchArm {
+                        pattern: node(
+                            60,
+                            Node::ListLiteral(vec![
+                                identifier(61, "pin"),
+                                node(62, Node::Spread(Box::new(identifier(63, "rest")))),
+                            ]),
+                        ),
+                        guard: None,
+                        body: vec![identifier(64, "pin"), identifier(65, "rest")],
+                        span: Span::with_offsets(60, 67, 1, 61),
+                    },
+                    MatchArm {
+                        pattern: node(
+                            70,
+                            Node::FunctionCall {
+                                name: "Some".to_string(),
+                                type_args: Vec::new(),
+                                args: vec![identifier(71, "alias")],
+                            },
+                        ),
+                        guard: None,
+                        body: vec![identifier(72, "alias")],
+                        span: Span::with_offsets(70, 74, 1, 71),
+                    },
+                    MatchArm {
+                        pattern: node(
+                            80,
+                            Node::MethodCall {
+                                object: Box::new(identifier(81, "Result")),
+                                method: "Ok".to_string(),
+                                args: vec![identifier(82, "rest")],
+                            },
+                        ),
+                        guard: None,
+                        body: vec![identifier(83, "rest")],
+                        span: Span::with_offsets(80, 85, 1, 81),
+                    },
+                ],
+            },
+        );
+
+        let nested = closure(39, Vec::new(), vec![match_expr]);
+        let captured = captured_bindings_in_nested_callables(
+            &[pin.clone(), alias.clone(), rest.clone(), nested],
+            &enum_pattern_catalog(),
+        );
+        assert!(!captured.contains(&BindingId::from_declaration("pin", pin.span)));
+        assert!(!captured.contains(&BindingId::from_declaration("alias", alias.span)));
+        assert!(!captured.contains(&BindingId::from_declaration("rest", rest.span)));
+    }
+
+    #[test]
+    fn unresolved_call_patterns_capture_expression_references() {
+        let callable = let_binding(10, "callable");
+        let object = let_binding(20, "object");
+        let argument = let_binding(30, "argument");
+        let match_expr = node(
+            40,
+            Node::MatchExpr {
+                value: Box::new(identifier(41, "value")),
+                arms: vec![
+                    MatchArm {
+                        pattern: node(
+                            42,
+                            Node::FunctionCall {
+                                name: "callable".to_string(),
+                                type_args: Vec::new(),
+                                args: vec![identifier(43, "argument")],
+                            },
+                        ),
+                        guard: None,
+                        body: Vec::new(),
+                        span: Span::with_offsets(42, 44, 1, 43),
+                    },
+                    MatchArm {
+                        pattern: node(
+                            45,
+                            Node::MethodCall {
+                                object: Box::new(identifier(46, "object")),
+                                method: "compute".to_string(),
+                                args: vec![identifier(47, "argument")],
+                            },
+                        ),
+                        guard: None,
+                        body: Vec::new(),
+                        span: Span::with_offsets(45, 48, 1, 46),
+                    },
+                ],
+            },
+        );
+        let nested = closure(39, Vec::new(), vec![match_expr]);
+
+        let captured = captured(&[callable.clone(), object.clone(), argument.clone(), nested]);
+        assert!(captured.contains(&BindingId::from_declaration("callable", callable.span)));
+        assert!(captured.contains(&BindingId::from_declaration("object", object.span)));
+        assert!(captured.contains(&BindingId::from_declaration("argument", argument.span)));
+    }
+
+    #[test]
+    fn qualified_enum_constant_pattern_does_not_capture_enum_name() {
+        let result = let_binding(10, "Result");
+        let match_expr = node(
+            20,
+            Node::MatchExpr {
+                value: Box::new(identifier(21, "value")),
+                arms: vec![MatchArm {
+                    pattern: node(
+                        22,
+                        Node::PropertyAccess {
+                            object: Box::new(identifier(23, "Result")),
+                            property: "Ok".to_string(),
+                        },
+                    ),
+                    guard: None,
+                    body: Vec::new(),
+                    span: Span::with_offsets(22, 25, 1, 23),
+                }],
+            },
+        );
+        let nested = closure(19, Vec::new(), vec![match_expr]);
+
+        let captured = captured_bindings_in_nested_callables(
+            &[result.clone(), nested],
+            &enum_pattern_catalog(),
+        );
+        assert!(!captured.contains(&BindingId::from_declaration("Result", result.span)));
+    }
+
+    #[test]
+    fn parameter_defaults_see_only_earlier_parameters() {
+        let first = let_binding(10, "first");
+        let current = let_binding(20, "current");
+        let later = let_binding(30, "later");
+        let nested = closure(
+            40,
+            vec![
+                defaulted_param("first", identifier(41, "later")),
+                defaulted_param("current", identifier(42, "current")),
+                defaulted_param("later", identifier(43, "first")),
+            ],
+            Vec::new(),
+        );
+
+        let captured = captured(&[first.clone(), current.clone(), later.clone(), nested]);
+        assert!(!captured.contains(&BindingId::from_declaration("first", first.span)));
+        assert!(captured.contains(&BindingId::from_declaration("current", current.span)));
+        assert!(captured.contains(&BindingId::from_declaration("later", later.span)));
+    }
+
     #[test]
     fn parameter_shadow_does_not_capture_outer_binding() {
         let outer = let_binding(10, "pin");
@@ -545,8 +972,7 @@ mod tests {
             ),
         ];
 
-        assert!(!captured_bindings_in_nested_callables(&body)
-            .contains(&BindingId::from_declaration("pin", outer.span)));
+        assert!(!captured(&body).contains(&BindingId::from_declaration("pin", outer.span)));
     }
 
     #[test]
@@ -564,7 +990,7 @@ mod tests {
             ),
         ];
 
-        let captured = captured_bindings_in_nested_callables(&body);
+        let captured = captured(&body);
         assert!(captured.contains(&BindingId::from_declaration("pin", inner.span)));
         assert!(!captured.contains(&BindingId::from_declaration("pin", outer.span)));
     }
@@ -584,7 +1010,7 @@ mod tests {
             ),
         ];
 
-        let captured = captured_bindings_in_nested_callables(&body);
+        let captured = captured(&body);
         assert!(captured.contains(&BindingId::from_declaration("pin", outer.span)));
         assert!(!captured.contains(&BindingId::from_declaration("pin", inner.span)));
     }
@@ -600,7 +1026,7 @@ mod tests {
                 body: vec![closure(22, Vec::new(), vec![identifier(23, "pin")])],
             },
         );
-        let captured = captured_bindings_in_nested_callables(&[outer.clone(), loop_node.clone()]);
+        let captured = captured(&[outer.clone(), loop_node.clone()]);
 
         assert!(captured.contains(&BindingId::from_declaration("pin", loop_node.span)));
         assert!(!captured.contains(&BindingId::from_declaration("pin", outer.span)));
@@ -633,7 +1059,7 @@ mod tests {
             },
         );
 
-        let captured = captured_bindings_in_nested_callables(&[outer.clone(), try_catch, select]);
+        let captured = captured(&[outer.clone(), try_catch, select]);
         assert!(!captured.contains(&BindingId::from_declaration("pin", outer.span)));
     }
 
@@ -645,7 +1071,7 @@ mod tests {
             Vec::new(),
             vec![closure(30, Vec::new(), vec![identifier(31, "pin")])],
         );
-        let captured = captured_bindings_in_nested_callables(&[outer.clone(), nested]);
+        let captured = captured(&[outer.clone(), nested]);
 
         assert!(captured.contains(&BindingId::from_declaration("pin", outer.span)));
     }
@@ -665,6 +1091,44 @@ mod tests {
             )],
         )];
 
-        assert!(nested_callable_reassigned_names(&body).is_empty());
+        assert!(
+            nested_callable_reassigned_names(&body, &MatchPatternCatalog::default()).is_empty()
+        );
+    }
+
+    #[test]
+    fn nested_reassignment_ignores_enum_payload_binding() {
+        let assignment = node(
+            14,
+            Node::Assignment {
+                target: Box::new(identifier(15, "pin")),
+                value: Box::new(identifier(16, "next")),
+                op: None,
+            },
+        );
+        let body = vec![node(
+            10,
+            Node::MatchExpr {
+                value: Box::new(identifier(11, "value")),
+                arms: vec![MatchArm {
+                    pattern: node(
+                        12,
+                        Node::FunctionCall {
+                            name: "Some".to_string(),
+                            type_args: Vec::new(),
+                            args: vec![identifier(13, "pin")],
+                        },
+                    ),
+                    guard: None,
+                    body: vec![closure(14, Vec::new(), vec![assignment])],
+                    span: Span::with_offsets(12, 18, 1, 13),
+                }],
+            },
+        )];
+
+        assert_eq!(
+            nested_callable_reassigned_names(&body, &enum_pattern_catalog()),
+            Vec::<String>::new()
+        );
     }
 }

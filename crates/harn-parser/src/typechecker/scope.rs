@@ -490,6 +490,32 @@ impl TypeScope {
             .or_else(|| self.parent.as_ref()?.get_enum(name))
     }
 
+    /// Project the visible enum declarations into the one shared classifier
+    /// used by compiler capture and type-flow reassignment analysis. Child
+    /// declarations shadow same-named parent enums as ordinary scope lookup
+    /// does; each visible enum contributes its variants exactly once.
+    pub(super) fn lexical_match_pattern_catalog(&self) -> crate::lexical::MatchPatternCatalog {
+        let mut enum_names = std::collections::HashSet::new();
+        let mut variant_owners: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        let mut current = Some(self);
+        while let Some(scope) = current {
+            for (name, info) in &scope.enums {
+                if !enum_names.insert(name.clone()) {
+                    continue;
+                }
+                for variant in &info.variants {
+                    variant_owners
+                        .entry(variant.name.clone())
+                        .or_default()
+                        .push(name.clone());
+                }
+            }
+            current = scope.parent.as_deref();
+        }
+        crate::lexical::MatchPatternCatalog::from_parts(enum_names, variant_owners)
+    }
+
     /// Names of every visible enum that declares a variant named `variant`,
     /// walking the scope chain (child declarations shadow same-named parent
     /// enums). Powers bare call-shaped match patterns (`Ok(v)`): the

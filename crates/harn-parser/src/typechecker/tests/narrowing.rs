@@ -1617,3 +1617,34 @@ fn take() -> bool { return true }"#,
         "a closure's own reassigned local must still narrow: {errs:?}"
     );
 }
+
+#[test]
+fn test_enum_payload_closure_reassignment_does_not_poison_outer_narrowing() {
+    // `pin` in `Some(pin)` is an arm-local enum payload binding. Reassigning it
+    // from a nested closure must not be attributed to the same-named outer
+    // nullable value; the outer guard remains soundly narrowable.
+    let errs = errors(
+        r#"enum Option<T> {
+  Some(value: T),
+  None
+}
+
+fn f(value: Option<string>) {
+  let pin: string | nil = "outer"
+  match value {
+    Some(pin) -> {
+      const replace = { -> pin = "inner" }
+      replace()
+    }
+    None -> {}
+  }
+  if pin != nil {
+    let narrowed: string = pin
+  }
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "enum payload reassignment poisoned outer narrowing: {errs:?}"
+    );
+}

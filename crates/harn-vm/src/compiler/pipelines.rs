@@ -26,7 +26,9 @@ impl Compiler {
         let mut lineage = Vec::new();
         Self::append_parent_pipeline_nodes(program, extends, &mut lineage);
         lineage.extend(body.iter().cloned());
-        let captured = harn_parser::lexical::captured_bindings_in_nested_callables(&lineage);
+        let match_patterns = self.lexical_match_pattern_catalog();
+        let captured =
+            harn_parser::lexical::captured_bindings_in_nested_callables(&lineage, &match_patterns);
         let saved = std::mem::replace(&mut self.captured_bindings, captured);
         let result = compile(self);
         self.captured_bindings = saved;
