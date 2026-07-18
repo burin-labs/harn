@@ -46,6 +46,17 @@ pub type TurnPolicy = {
 }
 
 /**
+ * Explicit transport guarantees for a custom `llm_caller`.
+ *
+ * Harn cannot inspect an arbitrary caller closure, so recovery mechanisms stay
+ * fail-closed unless the caller declares that it forwards the supplied
+ * assistant prefill unchanged to the provider transport. This says nothing
+ * about provider support; the resolved provider capability remains a separate
+ * required gate.
+ */
+pub type LlmCallerTransport = {forwards_assistant_prefill?: bool}
+
+/**
  * Nested repair-diagnostics config accepted under `stall_diagnostics`.
  * Callers may also pass these fields flat on `stall_diagnostics`; flat fields
  * win when both forms are present.
@@ -263,6 +274,7 @@ pub type AgentLoopOptions = {
   retry?: bool | AgentLoopRetryOptions,
   llm_retry?: AgentLoopRetryOptions,
   llm_caller?: any,
+  llm_caller_transport?: LlmCallerTransport,
   tool_caller?: any,
   structural_validator?: any,
   input_guardrail?: any,
@@ -1119,6 +1131,21 @@ fn __validate_llm_caller(value) {
   }
 }
 
+fn __normalize_llm_caller_transport(value) -> LlmCallerTransport {
+  if value == nil {
+    return {forwards_assistant_prefill: false}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `llm_caller_transport` must be a dict or nil; got " + type_of(value)
+  }
+  const forwards_assistant_prefill = value?.forwards_assistant_prefill ?? false
+  if type_of(forwards_assistant_prefill) != "bool" {
+    throw "agent_loop: `llm_caller_transport.forwards_assistant_prefill` must be a bool; got "
+      + type_of(forwards_assistant_prefill)
+  }
+  return {forwards_assistant_prefill: forwards_assistant_prefill}
+}
+
 fn __validate_on_delta(value) {
   if value == nil {
     return
@@ -1758,6 +1785,7 @@ pub fn agent_loop_options(options = nil) {
   opts = defaults + opts
   opts = agent_apply_default_retry(opts)
   const llm_caller = opts?.llm_caller
+  const llm_caller_transport = __normalize_llm_caller_transport(opts?.llm_caller_transport)
   const llm_retry = opts?._llm_retry
   const on_delta = opts?.on_delta
   const tool_caller = opts?.tool_caller
@@ -1814,6 +1842,7 @@ pub fn agent_loop_options(options = nil) {
   opts = opts
     + {
     _llm_caller: llm_caller,
+    _llm_caller_transport: llm_caller_transport,
     _llm_retry: llm_retry,
     _on_delta: on_delta,
     _tool_caller: tool_caller,

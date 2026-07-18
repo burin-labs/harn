@@ -110,6 +110,10 @@ fn run_case(script, session, actuation = nil, tool_format = "text", extra = nil)
   )
 }
 
+fn prefill_capable_caller_options() {
+  return {llm_caller: default_llm_caller(), llm_caller_transport: {forwards_assistant_prefill: true}}
+}
+
 pipeline default() {
   const off = run_case(
     [
@@ -268,6 +272,36 @@ pipeline default() {
   __io_println(parse_error.result.status)
   __io_println(parse_error.calls[2].prefill == nil)
   __io_println(len(actuation_receipts(parse_error.events)))
+  const compatible_text = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call(),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-compatible-text-" + uuid(),
+    {enabled: true},
+    "text",
+    prefill_capable_caller_options(),
+  )
+  __io_println(compatible_text.result.status)
+  __io_println(compatible_text.calls[2].prefill == "<tool_call>")
+  __io_println(actuation_receipts(compatible_text.events)[0].checkpoint.outcome)
+  const compatible_json = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call("json"),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-compatible-json-" + uuid(),
+    {enabled: true},
+    "json",
+    prefill_capable_caller_options(),
+  )
+  __io_println(compatible_json.result.status)
+  __io_println(compatible_json.calls[2].prefill == "```tool\\n")
+  __io_println(actuation_receipts(compatible_json.events)[0].checkpoint.outcome)
   const external_caller = run_case(
     [
       llm_text("I should inspect app.txt before editing."),

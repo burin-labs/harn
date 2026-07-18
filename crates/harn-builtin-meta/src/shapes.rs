@@ -151,6 +151,7 @@ pub const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("max_nudges", TY_INT),
     ShapeFieldDescriptor::optional("nudge", TY_STRING),
     ShapeFieldDescriptor::optional("llm_caller", TY_ANY),
+    ShapeFieldDescriptor::optional("llm_caller_transport", TY_DICT),
     ShapeFieldDescriptor::optional("tool_caller", TY_ANY),
     ShapeFieldDescriptor::optional("reasoning_policy", TY_ANY),
     ShapeFieldDescriptor::optional("thinking_policy", TY_ANY),
