@@ -129,9 +129,11 @@ terminate_children() {
   local status="$1"
   local pid
   for pid in "${child_pids[@]}"; do
+    [ -z "$pid" ] && continue
     kill "$pid" 2>/dev/null || true
   done
   for pid in "${child_pids[@]}"; do
+    [ -z "$pid" ] && continue
     wait "$pid" 2>/dev/null || true
   done
   exit "$status"
@@ -183,6 +185,7 @@ for offset in "${!conformance_pids[@]}"; do
     conformance_status="$shard_status"
     conformance_failures+=("$shard_index:$shard_status")
   fi
+  child_pids[$((offset + 1))]=""
   echo "=== conformance shard $shard_index/$conformance_shards ==="
   cat "$conformance_log_dir/shard-$shard_index.log"
 done
@@ -198,6 +201,7 @@ if wait "$audit_pid"; then
 else
   audit_status=$?
 fi
+child_pids[0]=""
 
 # Say at the TAIL what failed, because the tail is where a reader looks.
 #
