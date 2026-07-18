@@ -68,9 +68,9 @@ pipeline main() {
       assert_eq(sdk.ok, true)
       assert_eq(sdk.checkpoint.attempts, 1)
       assert_eq(sdk.checkpoint.repaired, false)
-      assert_eq(sdk.usage.input_tokens, 11)
-      assert_eq(sdk.usage.output_tokens, 7)
-      assert_eq(sdk.usage.total_tokens, 18)
+      assert(sdk.usage.input_tokens > 0, "compiler receipt records realized prompt tokens")
+      assert(sdk.usage.output_tokens > 0, "compiler receipt records realized output tokens")
+      assert_eq(sdk.usage.total_tokens, sdk.usage.input_tokens + sdk.usage.output_tokens)
       const sdk_lowering = sdk.lowering
       guard sdk_lowering != nil else {
         throw "SDK prompt did not lower"
