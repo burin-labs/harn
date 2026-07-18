@@ -22,6 +22,7 @@
 //! (`HARN_CHECK_JOBS=1` restores the fully serial driver for bisection).
 
 use std::collections::{HashMap, HashSet};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -30,7 +31,9 @@ use harn_parser::analysis::{AnalysisDatabase, SourceId, SourceVersion};
 
 use crate::{package, CLI_RUNTIME_STACK_SIZE};
 
-use super::check_cmd::{check_file_report_inner, CheckFileReport, CheckTextOutput};
+use super::check_cmd::{
+    check_file_report_inner, CheckDiagnostic, CheckFileReport, CheckFileStatus, CheckTextOutput,
+};
 use super::host_capabilities::{resolve_host_capabilities, ResolvedHostCapabilities};
 
 /// Environment override for the check worker-pool size. `1` forces the
@@ -104,18 +107,24 @@ pub(crate) fn check_files(
     // particular, an external host-capability manifest is read and parsed once
     // per source directory instead of once per checked file.
     let config_by_dir = build_check_contexts(files, overrides);
-    run_ordered_checks(files, workers, AnalysisDatabase::new, |analysis, file| {
-        check_one(
-            analysis,
-            file,
-            module_graph,
-            &parsed_sources,
-            &config_by_dir,
-            cross_file_imports,
-            overrides,
-            want_text,
-        )
-    })
+    run_ordered_checks(
+        files,
+        workers,
+        want_text,
+        AnalysisDatabase::new,
+        |analysis, file| {
+            check_one(
+                analysis,
+                file,
+                module_graph,
+                &parsed_sources,
+                &config_by_dir,
+                cross_file_imports,
+                overrides,
+                want_text,
+            )
+        },
+    )
 }
 
 /// Check a source corpus with one-file module-resolution semantics while
@@ -138,6 +147,7 @@ pub(crate) fn check_files_independently(
     run_ordered_checks(
         files,
         workers,
+        want_text,
         || (),
         |(), file| {
             let (module_graph, parsed_sources) =
@@ -162,6 +172,7 @@ pub(crate) fn check_files_independently(
 fn run_ordered_checks<State>(
     files: &[PathBuf],
     workers: usize,
+    want_text: bool,
     init: impl Fn() -> State + Sync,
     check: impl Fn(&mut State, &PathBuf) -> CheckedFile + Sync,
 ) -> Vec<CheckedFile> {
@@ -174,7 +185,18 @@ fn run_ordered_checks<State>(
             let Some(file) = files.get(index) else {
                 break;
             };
-            produced.push((index, check(&mut state, file)));
+            let checked = match catch_unwind(AssertUnwindSafe(|| check(&mut state, file))) {
+                Ok(checked) => checked,
+                Err(_) => {
+                    // A checker panic is an internal failure of this file, not
+                    // permission to drop the rest of a corpus. The unwind may
+                    // have left per-worker analysis state partially mutated,
+                    // so replace it before claiming another file.
+                    state = init();
+                    internal_failure(file, want_text)
+                }
+            };
+            produced.push((index, checked));
         }
         produced
     };
@@ -211,6 +233,37 @@ fn run_ordered_checks<State>(
         .into_iter()
         .map(|slot| slot.expect("every input file produces exactly one check result"))
         .collect()
+}
+
+fn internal_failure(file: &Path, want_text: bool) -> CheckedFile {
+    let path = file.to_string_lossy().into_owned();
+    let message = "internal `harn check` failure while analyzing this file";
+    let text = if want_text {
+        CheckTextOutput {
+            stdout: String::new(),
+            stderr: format!("{path}: error: {message}\n"),
+        }
+    } else {
+        CheckTextOutput::default()
+    };
+    CheckedFile {
+        report: CheckFileReport {
+            path,
+            status: CheckFileStatus::Error,
+            diagnostics: vec![CheckDiagnostic {
+                source: "check",
+                severity: "error",
+                code: None,
+                message: message.to_string(),
+                span: None,
+                help: Some(
+                    "report this reproducible checker failure to the Harn maintainers".to_string(),
+                ),
+            }],
+        },
+        strict: false,
+        text,
+    }
 }
 
 fn check_one(
@@ -466,6 +519,95 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    fn successful_file(file: &Path) -> CheckedFile {
+        CheckedFile {
+            report: CheckFileReport {
+                path: file.to_string_lossy().into_owned(),
+                status: CheckFileStatus::Ok,
+                diagnostics: Vec::new(),
+            },
+            strict: false,
+            text: CheckTextOutput::default(),
+        }
+    }
+
+    #[test]
+    fn checker_panic_is_a_file_diagnostic_and_serial_checks_continue() {
+        let files = ["before.harn", "panic.harn", "after.harn"]
+            .map(PathBuf::from)
+            .to_vec();
+        let initializations = AtomicUsize::new(0);
+        let checked = run_ordered_checks(
+            &files,
+            1,
+            true,
+            || initializations.fetch_add(1, Ordering::Relaxed) + 1,
+            |generation, file| {
+                assert_ne!(
+                    file,
+                    Path::new("panic.harn"),
+                    "payload and location must not enter the diagnostic"
+                );
+                if file == Path::new("after.harn") {
+                    assert_eq!(*generation, 2, "worker state must reset after unwind");
+                }
+                successful_file(file)
+            },
+        );
+
+        assert_eq!(initializations.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            checked
+                .iter()
+                .map(|file| file.report.path.as_str())
+                .collect::<Vec<_>>(),
+            ["before.harn", "panic.harn", "after.harn"]
+        );
+        assert_eq!(
+            diagnostic_facts(&checked[1]),
+            [(
+                "error",
+                None,
+                "internal `harn check` failure while analyzing this file"
+            )]
+        );
+        assert_eq!(
+            checked[1].text.stderr,
+            "panic.harn: error: internal `harn check` failure while analyzing this file\n"
+        );
+        assert!(matches!(checked[1].report.status, CheckFileStatus::Error));
+    }
+
+    #[test]
+    fn parallel_checker_panic_preserves_every_ordered_result() {
+        let files = ["zero.harn", "panic.harn", "two.harn", "three.harn"]
+            .map(PathBuf::from)
+            .to_vec();
+        let visits = AtomicUsize::new(0);
+        let checked = run_ordered_checks(
+            &files,
+            3,
+            false,
+            || (),
+            |(), file| {
+                visits.fetch_add(1, Ordering::Relaxed);
+                assert_ne!(file, Path::new("panic.harn"), "adversarial worker panic");
+                successful_file(file)
+            },
+        );
+
+        assert_eq!(visits.load(Ordering::Relaxed), files.len());
+        assert_eq!(
+            checked
+                .iter()
+                .map(|file| file.report.path.as_str())
+                .collect::<Vec<_>>(),
+            ["zero.harn", "panic.harn", "two.harn", "three.harn"]
+        );
+        assert_eq!(diagnostic_facts(&checked[1]).len(), 1);
+        assert!(checked[1].text.stderr.is_empty());
     }
 
     #[test]
