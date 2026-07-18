@@ -1,0 +1,227 @@
+/**
+ * std/agent/verdict — a typed three-valued disposition for judges and gates.
+ *
+ * Import with: import { Verdict, verdict_from_run, verdict_from_checkpoint,
+ *   verdict_fail, verdict_indeterminate, verdict_all, verdict_disposition }
+ *   from "std/agent/verdict"
+ *
+ * WHY THIS TYPE EXISTS. A judge or gate has three honest outcomes, not two: the
+ * thing PASSED, the thing FAILED, or the judge could not tell. For years the
+ * third case was papered over with a `fail_open_on_error` knob that fabricated a
+ * PASS on error — a verdict reporting success without the deciding check ever
+ * running. `Verdict` makes the third outcome a first-class, uncoercible value.
+ *
+ * ISSUANCE AUTHORITY LIVES AT THE HOST BOUNDARY. A positive verdict is ISSUED by
+ * the party that observed execution, never ASSERTED by the caller. The `pass`
+ * variant carries a `proof: verdict_receipt` — an OPAQUE host value minted only
+ * by `harness.verdict.issue`, and only from the host-owned record of a REAL
+ * `run_test` execution whose plan the host discovered in the active workspace
+ * (resolved by its opaque `result_handle`). Caller-authored argv may execute for
+ * diagnostics but has no positive verdict authority. Issuance reads
+ * no caller-supplied filesystem bytes: a file written by the caller has no
+ * handle, so it can never earn a pass — the proof is bound to execution the host
+ * itself ran and observed, not to evidence the caller authored. No `.harn` code
+ * can construct a `verdict_receipt` (there is no literal and no builtin hands one
+ * back bare), so a hand-authored `{kind: "pass", ...}` is a type error and cannot
+ * be minted by lying to a constructor — the constructor takes no disposition
+ * scalar at all. `indeterminate` is the honest replacement for fail-open; an
+ * exhaustive `match v.kind` forces every consumer to handle it separately from
+ * `pass`.
+ */
+/**
+ * The proof-backed positive variant. `proof` is the opaque host receipt; a
+ *  non-receipt value fails this annotation, so a pass is unforgeable.
+ */
+type VerdictPass = {kind: "pass", proof: verdict_receipt, evidence_ref: string}
+
+/** The negative variant. */
+type VerdictFailShape = {kind: "fail", reason: string, detail: string}
+
+/** The undecided variant — the honest fail-open replacement. */
+type VerdictIndeterminateShape = {kind: "indeterminate", cause: string, detail: string}
+
+/**
+ * A judge/gate disposition. Positive only with a host-issued proof receipt the
+ * caller cannot forge; the undecided case is a first-class variant every
+ * consumer must handle (an exhaustive `match v.kind` — `HARN-MAT-001`).
+ */
+pub type Verdict = VerdictPass | VerdictFailShape | VerdictIndeterminateShape
+
+/**
+ * verdict_from_run — the sole positive path. Takes the result of a REAL host
+ * `run_test` execution (the dict it returned, carrying an opaque `result_handle`)
+ * and asks the host issuance authority (`harness.verdict.issue`) to mint the
+ * opaque receipt — but only when the host's OWN frozen disposition for that
+ * execution is green. Maps the host outcome onto a Verdict: a red execution is
+ * `fail`; a run with no handle, an unrecorded handle, or a zero-pass / unparsed
+ * execution, caller-selected argv, or a plan outside the active workspace is
+ * `indeterminate` (never a pass — the caller can neither assert a pass nor
+ * fabricate the evidence, because issuance reads no caller bytes).
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: verdict_from_run(harness, run_result)
+ */
+pub fn verdict_from_run(harness: Harness, run_result, subject = "") -> Verdict {
+  const handle = to_string(run_result?.result_handle ?? "")
+  if handle == "" {
+    return verdict_indeterminate(
+      "no_execution_handle",
+      "run result carries no result_handle; not a host execution",
+    )
+  }
+  const r = harness.verdict.issue({result_handle: handle, subject: to_string(subject)})
+  if r?.outcome == "pass" {
+    return {kind: "pass", proof: r.receipt, evidence_ref: to_string(r?.artifact_id ?? handle)}
+  }
+  if r?.outcome == "fail" {
+    return verdict_fail("evidence_red", to_string(r?.detail ?? ""))
+  }
+  return verdict_indeterminate("evidence_unavailable", to_string(r?.detail ?? ""))
+}
+
+/**
+ * verdict_from_checkpoint — combine an advisory judge decision with authoritative
+ * host execution. The LLM checkpoint can VETO (`fail`) or ABSTAIN (`indeterminate`
+ * on error) but can NEVER mint a pass — entailment is not execution. Only when
+ * the judge did not veto does the host execution decide, via verdict_from_run.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: verdict_from_checkpoint(harness, cp, decided_pass, run_result)
+ */
+pub fn verdict_from_checkpoint(
+  harness: Harness,
+  checkpoint,
+  decided_pass: bool,
+  run_result,
+  subject = "",
+) -> Verdict {
+  if !(checkpoint?.ok ?? false) {
+    return verdict_indeterminate("judge_unavailable", to_string(checkpoint?.error ?? ""))
+  }
+  if !decided_pass {
+    return verdict_fail("judge_vetoed", "")
+  }
+  return verdict_from_run(harness, run_result, subject)
+}
+
+/**
+ * verdict_fail — negative disposition.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verdict_fail(reason: string, detail = "") -> Verdict {
+  return {kind: "fail", reason: to_string(reason), detail: to_string(detail)}
+}
+
+/**
+ * verdict_indeterminate — the judge could not decide (its model errored, its
+ * facts were unavailable, it timed out). Never a pass, never a fail.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verdict_indeterminate(cause: string, detail = "") -> Verdict {
+  return {kind: "indeterminate", cause: to_string(cause), detail: to_string(detail)}
+}
+
+/**
+ * verdict_all — AND-of-host-issued-passes aggregator. The combined verdict is a
+ * pass ONLY when every input is a pass AND all their receipts share one run
+ * identity (host-checked via `harness.verdict.same_run`); any fail yields fail,
+ * any indeterminate yields indeterminate, and receipts spanning multiple runs
+ * degrade to indeterminate — closing the cross-run replay class (a pass minted
+ * for run A cannot bless an aggregate over run B).
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: verdict_all(harness, [v1, v2, v3])
+ */
+pub fn verdict_all(harness: Harness, verdicts: list) -> Verdict {
+  for v in verdicts {
+    if v.kind == "fail" {
+      return v
+    }
+  }
+  for v in verdicts {
+    if v.kind == "indeterminate" {
+      return v
+    }
+  }
+  if len(verdicts) == 0 {
+    return verdict_indeterminate("empty_aggregate", "no verdicts to combine")
+  }
+  let proofs = []
+  for v in verdicts {
+    proofs = proofs.push(v.proof)
+  }
+  if !harness.verdict.same_run(proofs) {
+    return verdict_indeterminate("cross_run", "receipts span multiple runs; cannot combine into one pass")
+  }
+  return verdicts[0]
+}
+
+/**
+ * verdict_disposition — the stable low-cardinality label ("pass" | "fail" |
+ * "indeterminate") for events and telemetry.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verdict_disposition(v: Verdict) -> string {
+  return v.kind
+}
+
+/**
+ * verdict_is_pass — true only for a proof-backed pass.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verdict_is_pass(v: Verdict) -> bool {
+  match v.kind {
+    "pass" -> { return true }
+    "fail" -> { return false }
+    "indeterminate" -> { return false }
+  }
+}
+
+/**
+ * verdict_is_indeterminate — true when the judge could not decide.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verdict_is_indeterminate(v: Verdict) -> bool {
+  match v.kind {
+    "pass" -> { return false }
+    "fail" -> { return false }
+    "indeterminate" -> { return true }
+  }
+}
+
+/**
+ * verdict_evidence_ref — the durable evidence reference of a pass, or "" for a
+ * fail / indeterminate. A plain telemetry label alongside the opaque proof.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verdict_evidence_ref(v: Verdict) -> string {
+  match v.kind {
+    "pass" -> { return v.evidence_ref }
+    "fail" -> { return "" }
+    "indeterminate" -> { return "" }
+  }
+}

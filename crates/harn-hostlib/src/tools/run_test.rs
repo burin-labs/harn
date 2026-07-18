@@ -27,7 +27,9 @@ use std::path::PathBuf;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
-use crate::tools::inspect_test_results::{store_run, RawArtifacts, TestSummaryData};
+use crate::tools::inspect_test_results::{
+    store_run, AuthorizedTestPlanIdentity, RawArtifacts, TestSummaryData,
+};
 use crate::tools::lang::{detect, Ecosystem};
 use crate::tools::payload::{
     optional_bool, optional_string, optional_string_list, optional_timeout, parse_argv_program,
@@ -62,6 +64,13 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     };
 
     let (argv, junit_tmp) = plan.build_argv(filter.as_deref(), &cwd_for_detect)?;
+    // A caller-selected filter is useful for diagnostics, but is not the full
+    // host-discovered workspace plan and therefore carries no positive proof
+    // authority.
+    let authorized_test_plan = filter
+        .is_none()
+        .then(|| plan.authorized_identity(&cwd_for_detect, &argv))
+        .flatten();
     let (program, args_tail) = parse_argv_program(NAME, argv.clone())?;
 
     if long_running {
@@ -105,9 +114,10 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         junit_path: junit_tmp,
         ecosystem: plan.ecosystem_name(),
         argv,
+        authorized_test_plan,
     };
     let summary = artifacts.compute_summary();
-    let handle = store_run(artifacts);
+    let handle = store_run(artifacts, summary);
 
     let mut builder = ResponseBuilder::new()
         .int("exit_code", outcome.exit_code as i64)
@@ -145,6 +155,33 @@ enum TestPlan {
 }
 
 impl TestPlan {
+    fn authorized_identity(
+        &self,
+        detected_cwd: &Path,
+        argv: &[String],
+    ) -> Option<AuthorizedTestPlanIdentity> {
+        let TestPlan::Detected(ecosystem) = self else {
+            return None;
+        };
+        let workspace = harn_vm::stdlib::process::runtime_root_base();
+        let workspace = workspace.canonicalize().unwrap_or(workspace);
+        let detected_cwd = detected_cwd
+            .canonicalize()
+            .unwrap_or_else(|_| detected_cwd.to_path_buf());
+        // Positive authority is deliberately narrower than process permission:
+        // discovery must run at the host-bound project root itself. A caller may
+        // execute diagnostics in a nested cwd, but cannot create a passing
+        // throwaway subproject and promote it to proof for the parent task.
+        if detected_cwd != workspace {
+            return None;
+        }
+        Some(AuthorizedTestPlanIdentity::discovered(
+            &workspace,
+            ecosystem.name(),
+            argv,
+        ))
+    }
+
     fn ecosystem_name(&self) -> Option<String> {
         match self {
             TestPlan::Explicit(_) => None,

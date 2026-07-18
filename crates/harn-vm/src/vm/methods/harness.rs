@@ -99,6 +99,7 @@ impl crate::vm::Vm {
             HarnessKind::Tenant => self.call_harness_tenant_method(handle, method, args),
             HarnessKind::Auth => self.call_harness_auth_method(handle, method, args),
             HarnessKind::Obs => self.call_harness_obs_method(handle, method, args).await,
+            HarnessKind::Verdict => self.call_harness_verdict_method(handle, method, args).await,
         }
     }
 
@@ -137,7 +138,8 @@ impl crate::vm::Vm {
             | HarnessKind::System
             | HarnessKind::Secrets
             | HarnessKind::Llm
-            | HarnessKind::Obs => None,
+            | HarnessKind::Obs
+            | HarnessKind::Verdict => None,
         }
     }
 
@@ -508,7 +510,8 @@ impl crate::vm::Vm {
             | HarnessKind::Process
             | HarnessKind::Secrets
             | HarnessKind::Llm
-            | HarnessKind::Obs => None,
+            | HarnessKind::Obs
+            | HarnessKind::Verdict => None,
         };
         if result.is_some() {
             state.record_call(handle.kind(), method, args);
@@ -1404,6 +1407,7 @@ impl crate::vm::Vm {
                 // surface through `harness.obs.*` calls.
                 self.call_harness_obs_method(handle, method, args).await
             }
+            HarnessKind::Verdict => self.call_harness_verdict_method(handle, method, args).await,
         }
     }
 }
@@ -2006,7 +2010,7 @@ fn record_handoff_envelope(args: &[VmValue]) -> VmValue {
 /// surface keeps the original diagnostic. Already-tagged errors are
 /// idempotent — the check avoids double prefixing under nested
 /// dispatch.
-fn tag_sandbox_denied(error: VmError) -> VmError {
+pub(crate) fn tag_sandbox_denied(error: VmError) -> VmError {
     match error {
         VmError::CategorizedError { message, category }
             if matches!(category, ErrorCategory::ToolRejected)
@@ -2048,7 +2052,7 @@ fn tag_egress_dict(
     std::sync::Arc::new(next)
 }
 
-fn method_unsupported(handle: &VmHarness, method: &str) -> VmError {
+pub(crate) fn method_unsupported(handle: &VmHarness, method: &str) -> VmError {
     VmError::TypeError(format!(
         "value of type {} has no method `{method}`",
         handle.type_name()

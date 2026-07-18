@@ -103,10 +103,13 @@ impl Vm {
     pub async fn execute_arc(&mut self, chunk: ChunkRef) -> Result<VmValue, VmError> {
         self.ensure_execution_available()?;
         let registry = self.pool_registry.clone();
-        crate::stdlib::pool::with_pool_registry_scope(registry, async {
+        let owner = crate::observability::execution_scope::mint_execution_scope();
+        let ambient =
+            crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(owner);
+        let execution = crate::stdlib::pool::with_pool_registry_scope(registry, async {
             self.execute_scoped(chunk).await
-        })
-        .await
+        });
+        crate::orchestration::scope_ambient(ambient, execution).await
     }
 
     async fn execute_scoped(&mut self, chunk: ChunkRef) -> Result<VmValue, VmError> {

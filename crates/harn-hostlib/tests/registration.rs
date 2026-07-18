@@ -580,6 +580,7 @@ fn install_default_wires_every_module_into_a_vm() {
         "fs_watch",
         "tools",
         "secret_store",
+        "verdict",
         "host_lease",
     ];
     // The computer-use module is registered only when the `computer` feature is
@@ -592,8 +593,8 @@ fn install_default_wires_every_module_into_a_vm() {
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
-    // + 1 hostlib_enable + 4 secret_store + 1 host_lease = 80.
-    assert!(registry.builtins().len() >= 80);
+    // + 1 hostlib_enable + 4 secret_store + 1 verdict + 1 host_lease = 81.
+    assert!(registry.builtins().len() >= 81);
 }
 
 #[test]
