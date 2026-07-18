@@ -23,16 +23,8 @@ pub pipeline deploy(config: {region: string, replicas: int}) -> bool {
     assert_eq!(
         deploy.params[0].type_expr,
         Some(TypeExpr::Shape(vec![
-            ShapeField {
-                name: "region".to_string(),
-                type_expr: TypeExpr::Named("string".to_string()),
-                optional: false,
-            },
-            ShapeField {
-                name: "replicas".to_string(),
-                type_expr: TypeExpr::Named("int".to_string()),
-                optional: false,
-            },
+            ShapeField::synthetic("region", TypeExpr::Named("string".to_string()), false),
+            ShapeField::synthetic("replicas", TypeExpr::Named("int".to_string()), false),
         ]))
     );
     assert_eq!(deploy.input_schema["type"], "object");
