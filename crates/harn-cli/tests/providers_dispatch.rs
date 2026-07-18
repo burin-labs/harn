@@ -609,8 +609,7 @@ fn provider_probe_mock_human_with_model_is_byte_identical_across_runs() {
     );
 }
 
-/// JSON-mode coverage with `--model` set — exercises the `runtime_profile`
-/// branch even though mock isn't in `LOCAL_PROVIDERS`.
+/// JSON-mode coverage with `--model` set for a non-local provider.
 #[test]
 fn provider_probe_mock_json_with_model_is_structurally_identical_across_runs() {
     let harn = run(&["provider", "probe", "mock", "--model", "mock"], &[]);
@@ -630,6 +629,24 @@ fn provider_probe_mock_json_with_model_is_structurally_identical_across_runs() {
         repeat_value["readiness"]["ok"], harn_value["readiness"]["ok"],
         "readiness.ok diverged"
     );
+}
+
+#[test]
+fn provider_probe_profiles_catalog_declared_local_runtime() {
+    let harn = run(
+        &[
+            "provider",
+            "probe",
+            "tgi",
+            "--model",
+            "zephyr-7b-beta",
+            "--base-url",
+            "http://127.0.0.1:1",
+        ],
+        &[],
+    );
+    let value = parse_json(&harn.stdout, "harn");
+    assert_eq!(value["runtime_profile"]["provider"], "tgi");
 }
 
 /// Tool-probe fixture with `--mode streaming` — exercises a different
