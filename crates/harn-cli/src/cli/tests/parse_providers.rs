@@ -734,8 +734,8 @@ fn test_parses_models_lora_promote_args() {
         "models",
         "lora",
         "promote",
-        "--manifest",
-        "./adapters/burin-tools.manifest.json",
+        "--train-receipt",
+        "./adapters/burin-tools.train.receipt.json",
         "--probe-root",
         "./promotions/probes",
         "--base-probe-root",
@@ -756,8 +756,8 @@ fn test_parses_models_lora_promote_args() {
         panic!("expected models lora promote command");
     };
     assert_eq!(
-        args.manifest.display().to_string(),
-        "./adapters/burin-tools.manifest.json"
+        args.train_receipt.display().to_string(),
+        "./adapters/burin-tools.train.receipt.json"
     );
     assert_eq!(args.probe_root.display().to_string(), "./promotions/probes");
     assert_eq!(

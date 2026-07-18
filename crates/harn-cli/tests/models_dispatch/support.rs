@@ -1,6 +1,6 @@
-pub(super) use crate::test_util::process::run_harn_e2e as run;
+pub(super) use crate::test_util::process::{harn_e2e_binary, run_harn_e2e as run, HarnCliOutput};
 
-pub(super) const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 4;
+pub(super) const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 5;
 
 pub(super) fn parse_json(s: &str, label: &str) -> serde_json::Value {
     serde_json::from_str(s).unwrap_or_else(|err| {
