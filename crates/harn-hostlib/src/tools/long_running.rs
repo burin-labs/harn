@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 use harn_vm::VmValue;
@@ -54,16 +54,91 @@ use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Shared cancellation state between the store entry and its waiter thread.
+///
+/// The waiter must never observe a terminal cancellation before its cleanup
+/// receipt is available. A single mutex makes that publication atomic even
+/// though `ProcessKiller::kill` wakes the process waiter before it returns its
+/// cleanup report.
+#[derive(Default)]
 struct CancelState {
-    /// Set to `true` when `cancel_handle` / `cancel_session_handles` runs.
-    /// The waiter checks this before pushing feedback.
-    cancelled: AtomicBool,
-    /// Set by cancellation paths that represent a timeout rather than a
-    /// user-requested kill. The waiter uses this for the returned result
-    /// status while still suppressing inbox feedback.
-    timed_out: AtomicBool,
+    state: Mutex<CancellationState>,
+}
+
+#[derive(Default)]
+struct CancellationState {
+    /// A canceller owns the terminal result publication while this is set.
+    cancellation_requested: bool,
+    /// A cancellation result has been published for the waiter.
+    cancelled: bool,
+    /// Whether the published cancellation represents a timeout.
+    timed_out: bool,
     /// Structural process-tree cleanup evidence returned by the killer.
-    process_cleanup: Mutex<Option<process_handle::ProcessCleanupReport>>,
+    process_cleanup: Option<process_handle::ProcessCleanupReport>,
+    /// The waiter has committed a terminal result, so later cancellation is a
+    /// no-op rather than retroactively rewriting a completed outcome.
+    completed: bool,
+}
+
+#[derive(Clone, Debug)]
+struct CancellationSnapshot {
+    cancelled: bool,
+    timed_out: bool,
+    process_cleanup: Option<process_handle::ProcessCleanupReport>,
+}
+
+impl CancelState {
+    fn begin_cancellation(&self, timed_out: bool) -> Option<MutexGuard<'_, CancellationState>> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if state.cancellation_requested || state.completed {
+            return None;
+        }
+        state.cancellation_requested = true;
+        state.timed_out = timed_out;
+        Some(state)
+    }
+
+    fn complete_wait(&self) -> CancellationSnapshot {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        state.completed = true;
+        CancellationSnapshot {
+            cancelled: state.cancelled,
+            timed_out: state.timed_out,
+            process_cleanup: state.process_cleanup.clone(),
+        }
+    }
+
+    fn cancellation_published(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .cancelled
+    }
+}
+
+impl CancellationState {
+    fn record_cleanup(&mut self, report: process_handle::ProcessCleanupReport) {
+        match self.process_cleanup.as_mut() {
+            Some(existing) => existing.merge(report),
+            None => self.process_cleanup = Some(report),
+        }
+    }
+
+    fn publish_cancellation(&mut self) {
+        debug_assert!(self.cancellation_requested);
+        self.cancelled = true;
+    }
+}
+
+fn kill_and_publish(killer: &dyn ProcessKiller, cancellation: &mut CancellationState) {
+    let report = killer.kill();
+    cancellation.record_cleanup(report);
+    cancellation.publish_cancellation();
 }
 
 #[derive(Default)]
@@ -276,9 +351,7 @@ pub(crate) fn spawn_long_running_with_options(
     let command_display = all_argv.join(" ");
 
     let cancel_state = Arc::new(CancelState {
-        cancelled: AtomicBool::new(false),
-        timed_out: AtomicBool::new(false),
-        process_cleanup: Mutex::new(None),
+        state: Mutex::new(CancellationState::default()),
     });
 
     {
@@ -424,13 +497,10 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         (state.stdout.clone(), state.stderr.clone())
     };
 
-    let cancelled = cancel_state.cancelled.load(Ordering::Acquire);
-    let timed_out = cancelled && cancel_state.timed_out.load(Ordering::Acquire);
-    let process_cleanup = cancel_state
-        .process_cleanup
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .clone();
+    let cancellation = cancel_state.complete_wait();
+    let cancelled = cancellation.cancelled;
+    let timed_out = cancelled && cancellation.timed_out;
+    let process_cleanup = cancellation.process_cleanup;
 
     let (exit_code, signal_name) = match status {
         Some(s) => decode_exit_status(s),
@@ -607,11 +677,10 @@ fn spawn_output_drain(
 fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         while !context.done.load(Ordering::Acquire)
-            && !context.cancel_state.cancelled.load(Ordering::Acquire)
+            && !context.cancel_state.cancellation_published()
         {
             std::thread::sleep(context.interval);
-            if context.done.load(Ordering::Acquire)
-                || context.cancel_state.cancelled.load(Ordering::Acquire)
+            if context.done.load(Ordering::Acquire) || context.cancel_state.cancellation_published()
             {
                 break;
             }
@@ -700,34 +769,50 @@ pub(crate) fn snapshot_binding_for_handle(handle_id: &str) -> Option<harn_vm::va
 }
 
 pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions) -> CancelOutcome {
-    let (killer, cancel_state, result_rx) = {
-        let mut store = HANDLE_STORE
+    let (killer, cancel_state) = {
+        let store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
-        let Some(entry) = store.entries.get_mut(handle_id) else {
+        let Some(entry) = store.entries.get(handle_id) else {
             return CancelOutcome {
                 cancelled: false,
                 result: None,
             };
         };
-        if entry.cancel_state.cancelled.swap(true, Ordering::AcqRel) {
+        (entry.killer.clone(), entry.cancel_state.clone())
+    };
+    let mut cancellation = match cancel_state.begin_cancellation(options.timed_out) {
+        Some(cancellation) => cancellation,
+        None => {
             return CancelOutcome {
                 cancelled: false,
                 result: None,
             };
         }
-        entry
-            .cancel_state
-            .timed_out
-            .store(options.timed_out, Ordering::Release);
-        let result_rx = options.wait_result.map(|_| {
-            let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
-            entry.result_txs.push(tx);
-            rx
-        });
-        (entry.killer.clone(), entry.cancel_state.clone(), result_rx)
     };
-    do_kill(killer, cancel_state);
+    let result_rx = if options.wait_result.is_some() {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
+        let registered = {
+            let mut store = HANDLE_STORE
+                .lock()
+                .expect("long-running handle store poisoned");
+            store
+                .entries
+                .get_mut(handle_id)
+                .filter(|entry| Arc::ptr_eq(&entry.cancel_state, &cancel_state))
+                .map(|entry| entry.result_txs.push(tx))
+                .is_some()
+        };
+        if registered {
+            Some(rx)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    kill_and_publish(killer.as_ref(), &mut cancellation);
+    drop(cancellation);
     let result = match (options.wait_result, result_rx) {
         (Some(timeout), Some(rx)) => rx.recv_timeout(timeout).ok(),
         _ => None,
@@ -782,36 +867,15 @@ pub fn cancel_session_handles(session_id: &str) {
             .into_iter()
             .filter_map(|id| {
                 let entry = store.entries.get(&id)?;
-                if entry.cancel_state.cancelled.swap(true, Ordering::AcqRel) {
-                    return None;
-                }
-                entry.cancel_state.timed_out.store(false, Ordering::Release);
                 Some((entry.killer.clone(), entry.cancel_state.clone()))
             })
             .collect()
     };
     for (killer, cancel_state) in to_kill {
-        do_kill(killer, cancel_state);
-    }
-}
-
-/// Set the cancellation flag and kill the process. Used by both `cancel_handle`
-/// and `cancel_session_handles`.
-fn do_kill(killer: Arc<dyn ProcessKiller>, cancel_state: Arc<CancelState>) {
-    // Kill via the handle's killer (works whether or not we still own
-    // the handle). The waiter owns process reaping and artifact finalization.
-    let report = killer.kill();
-    {
-        let mut stored = cancel_state
-            .process_cleanup
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        match stored.as_mut() {
-            Some(existing) => existing.merge(report),
-            None => *stored = Some(report),
+        if let Some(mut cancellation) = cancel_state.begin_cancellation(false) {
+            kill_and_publish(killer.as_ref(), &mut cancellation);
         }
     }
-    cancel_state.cancelled.store(true, Ordering::Release);
 }
 
 /// Register the session-cleanup hook with harn-vm. Uses a `OnceLock` so the
@@ -865,4 +929,55 @@ pub fn register_result_notifier(handle_id: &str) -> Option<std::sync::mpsc::Rece
     let entry = store.entries.get_mut(handle_id)?;
     entry.result_txs.push(tx);
     Some(rx)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{mpsc, Arc};
+
+    use super::CancelState;
+    use crate::process::ProcessCleanupReport;
+
+    #[test]
+    fn terminal_snapshot_waits_for_cleanup_publication() {
+        let state = Arc::new(CancelState::default());
+        let mut publication = state
+            .begin_cancellation(true)
+            .expect("fresh handle should accept cancellation");
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (snapshot_tx, snapshot_rx) = mpsc::sync_channel(1);
+        let waiter_state = state.clone();
+        let waiter = std::thread::spawn(move || {
+            started_tx.send(()).expect("test waiter start receiver");
+            snapshot_tx
+                .send(waiter_state.complete_wait())
+                .expect("test snapshot receiver");
+        });
+
+        started_rx.recv().expect("test waiter did not start");
+        assert!(matches!(
+            snapshot_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+
+        publication.record_cleanup(ProcessCleanupReport::for_signal(Some(42), 9));
+        publication.publish_cancellation();
+        drop(publication);
+
+        let snapshot = snapshot_rx.recv().expect("waiter did not publish snapshot");
+        waiter.join().expect("test waiter panicked");
+        assert!(snapshot.cancelled);
+        assert!(snapshot.timed_out);
+        assert_eq!(
+            snapshot
+                .process_cleanup
+                .expect("cleanup must publish with cancellation")
+                .root_pid,
+            Some(42)
+        );
+        assert!(
+            state.begin_cancellation(false).is_none(),
+            "a completed terminal result must not be retroactively cancelled"
+        );
+    }
 }

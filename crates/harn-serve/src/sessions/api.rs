@@ -93,6 +93,7 @@ fn map_error(error: StoreError) -> (StatusCode, Json<ErrorBody>) {
         StoreError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
         StoreError::InvalidInput(_) => (StatusCode::BAD_REQUEST, "invalid_input"),
         StoreError::Tenant(_) => (StatusCode::FORBIDDEN, "tenant"),
+        StoreError::Contention { .. } => (StatusCode::SERVICE_UNAVAILABLE, "resource_busy"),
         StoreError::Backend(_) => (StatusCode::INTERNAL_SERVER_ERROR, "backend_error"),
     };
     (
@@ -434,5 +435,28 @@ fn record_signature_fields(
         None => {
             span.record(signed_field, false);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use harn_session_store::{StoreContention, StoreError};
+
+    use super::map_error;
+
+    #[test]
+    fn contention_is_a_retryable_http_failure() {
+        let (status, body) = map_error(StoreError::Contention {
+            kind: StoreContention::DatabaseLocked,
+            message: "database table is locked".to_string(),
+        });
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body.error.code, "resource_busy");
+        assert_eq!(
+            body.error.message,
+            "retryable backend contention (database_locked): database table is locked"
+        );
     }
 }

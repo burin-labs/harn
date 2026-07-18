@@ -24,6 +24,7 @@ pub(crate) use super::{
 
 mod parse_cmds;
 mod parse_core;
+mod parse_models;
 mod parse_orchestration;
 mod parse_packaging;
 mod parse_provider_dispatch_audit;

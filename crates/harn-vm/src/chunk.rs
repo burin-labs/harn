@@ -499,13 +499,18 @@ impl ParamSlot {
     /// Build a [`ParamSlot`] from a parser-side [`harn_parser::TypedParam`].
     /// Centralizes the conversion so every compile path stays in lockstep.
     pub fn from_typed_param(param: &harn_parser::TypedParam) -> Self {
+        Self::from_typed_param_with_type(param, param.type_expr.clone())
+    }
+
+    pub(crate) fn from_typed_param_with_type(
+        param: &harn_parser::TypedParam,
+        type_expr: Option<TypeExpr>,
+    ) -> Self {
+        let runtime_guard = type_expr.as_ref().map(RuntimeParamGuard::from_type_expr);
         Self {
             name: param.name.clone(),
-            type_expr: param.type_expr.clone(),
-            runtime_guard: param
-                .type_expr
-                .as_ref()
-                .map(RuntimeParamGuard::from_type_expr),
+            type_expr,
+            runtime_guard,
             has_default: param.default_value.is_some(),
         }
     }

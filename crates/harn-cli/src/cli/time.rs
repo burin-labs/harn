@@ -36,6 +36,14 @@ pub(crate) struct TimeRunArgs {
     /// network egress fail-closed guard for this run.
     #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
     pub no_sandbox: bool,
+    /// Permit commands spawned by this run to open network sockets while
+    /// retaining the worktree filesystem and process sandbox.
+    #[arg(
+        long = "allow-process-network",
+        action = clap::ArgAction::SetTrue,
+        conflicts_with = "no_sandbox"
+    )]
+    pub allow_process_network: bool,
     /// Extra writable filesystem roots. Repeatable; each path becomes
     /// part of the run's write jail while sandboxing stays enabled.
     #[arg(

@@ -16,7 +16,11 @@
 //     scripts/audit_gates.sh (drift would not fail any PR);
 //   - a registry entry flagged make_all = true whose check is missing from
 //     the all: recipe (so `make all` would not catch it);
-//   - a source-owned declared output file that does not exist on disk.
+//   - a source-owned declared output file that does not exist on disk;
+//   - a check-* Makefile target missing from the [preflight.dispatch] table,
+//     or a dispatch entry naming a nonexistent target / an invalid tier (so
+//     `make check-drift` / `check-drift-binary`, derived from that table,
+//     cannot silently omit a guard).
 //
 // Most artifacts use the default `lifecycle = "source"`: their generated
 // outputs are tracked and must be present in every checkout. A
@@ -247,6 +251,46 @@ pub fn exempt_hygiene_errors(exempt: list, registered_checks: list) -> list {
 }
 
 /**
+ * Preflight-dispatch completeness + hygiene. Every `^check-*:` Makefile target
+ * (except the umbrella `check`, which has no hyphen) must be classified in the
+ * `[preflight.dispatch]` table, and every classified name must be a real
+ * Makefile target with a known tier. This keeps `make check-drift` /
+ * `check-drift-binary` — whose member lists are DERIVED from the table — from
+ * silently omitting a guard or naming a dead target. `dispatch` maps a target
+ * name to its tier string ("source" | "binary" | "excluded").
+ */
+pub fn preflight_dispatch_errors(targets: list, dispatch: dict) -> list {
+  const valid_tiers = ["source", "binary", "excluded"]
+  const classified = dispatch.keys()
+  let errors = []
+  // Completeness: every check-* target must be classified.
+  for target in targets {
+    if target.starts_with("check-") && !classified.contains(target) {
+      errors = errors
+        + [
+        "Makefile target `${target}` is not classified in [preflight.dispatch] in scripts/generated_artifacts.toml (add it with tier source|binary|excluded).",
+      ]
+    }
+  }
+  // Hygiene: every classified name must be a real target with a valid tier.
+  for name in classified.sort() {
+    if !targets.contains(name) {
+      errors = errors
+        + [
+        "[preflight.dispatch] classifies `${name}` but no such Makefile target exists — remove it or fix the name.",
+      ]
+    }
+    if !valid_tiers.contains(dispatch[name]) {
+      errors = errors
+        + [
+        "[preflight.dispatch] `${name}` has invalid tier `${dispatch[name]}` (expected source|binary|excluded).",
+      ]
+    }
+  }
+  return errors
+}
+
+/**
  * Pure validation. Given the parsed registry pieces and the scanned
  * Makefile / workflow facts, return the ordered list of error strings
  * (empty = OK). `missing_outputs` is the subset of declared output paths
@@ -338,6 +382,7 @@ pipeline main(task) {
   }
   const artifacts = registry?.artifact ?? []
   const exempt = registry?.meta?.exempt_checks ?? []
+  const dispatch = registry?.preflight?.dispatch ?? {}
   const make_text = harness.fs.read_text(MAKEFILE)
   const targets = makefile_targets(make_text)
   const all_recipe = make_all_recipe(make_text)
@@ -353,6 +398,7 @@ pipeline main(task) {
     }
   }
   const errors = validate(artifacts, exempt, targets, all_recipe, workflow_text, missing_outputs)
+    + preflight_dispatch_errors(targets, dispatch)
   if errors.count > 0 {
     __io_eprintln("error: generated-artifact registry is out of sync:\n")
     for e in errors {
@@ -364,7 +410,7 @@ pipeline main(task) {
     return 1
   }
   __io_println(
-    "    Generated-artifact registry OK (${artifacts.count} artifacts, ${exempt.count} exempt checks).",
+    "    Generated-artifact registry OK (${artifacts.count} artifacts, ${exempt.count} exempt checks, ${dispatch.keys().count} preflight-classified targets).",
   )
   return 0
 }

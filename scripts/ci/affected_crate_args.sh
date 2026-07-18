@@ -98,7 +98,21 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-workspace_root="$(git rev-parse --show-toplevel)"
+normalize_native_path() {
+  # Cargo metadata is rendered through jq @tsv below, which escapes Windows
+  # backslashes. Normalize both separator spellings before comparing roots.
+  local path="${1//\\//}"
+  while [[ "$path" == *"//"* ]]; do
+    path="${path//\/\//\/}"
+  done
+  if [[ "$path" =~ ^([A-Za-z]):/(.*)$ ]]; then
+    local drive="${BASH_REMATCH[1],,}"
+    path="${drive}:/${BASH_REMATCH[2]}"
+  fi
+  printf '%s\n' "$path"
+}
+
+workspace_root="$(normalize_native_path "$(git rev-parse --show-toplevel)")"
 metadata="$(cargo metadata --no-deps --format-version 1)"
 
 sort_unique() {
@@ -123,6 +137,7 @@ package_dirs=()
 package_deps=()
 while IFS=$'\t' read -r name manifest_path deps; do
   [[ -z "$name" || -z "$manifest_path" ]] && continue
+  manifest_path="$(normalize_native_path "$manifest_path")"
   dir="${manifest_path%/Cargo.toml}"
   if [[ "$dir" == "$workspace_root" ]]; then
     rel_dir="."

@@ -32,6 +32,28 @@ pub struct SchemaVersion {
     version: i64,
 }
 
+/// Lock-contention reason reported by SQLite.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SqliteContention {
+    /// Another connection currently owns the database write lock.
+    Busy,
+    /// A shared-cache table lock prevents the operation from proceeding.
+    Locked,
+}
+
+/// Classify a SQLite error without relying on rendered error text.
+#[must_use]
+pub fn sqlite_contention(error: &rusqlite::Error) -> Option<SqliteContention> {
+    match error {
+        rusqlite::Error::SqliteFailure(failure, _) => match failure.code {
+            ErrorCode::DatabaseBusy => Some(SqliteContention::Busy),
+            ErrorCode::DatabaseLocked => Some(SqliteContention::Locked),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 impl SchemaVersion {
     /// Define a non-empty schema name and positive version.
     ///
@@ -583,11 +605,7 @@ fn current_journal_mode(connection: &Connection) -> Result<String, rusqlite::Err
 }
 
 fn is_sqlite_busy_or_locked(error: &rusqlite::Error) -> bool {
-    matches!(
-        error,
-        rusqlite::Error::SqliteFailure(failure, _)
-            if matches!(failure.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
-    )
+    sqlite_contention(error).is_some()
 }
 
 #[cfg(test)]

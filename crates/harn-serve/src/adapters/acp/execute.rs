@@ -77,6 +77,21 @@ mod prompt_execution_error_tests {
             harn_vm::llm::AgentTerminalClass::GenericThrow
         );
     }
+
+    #[test]
+    fn resource_contention_preserves_its_typed_terminal_class() {
+        let vm = harn_vm::Vm::new();
+        let error = harn_vm::VmError::CategorizedError {
+            category: harn_vm::ErrorCategory::ResourceBusy,
+            message: "session_store: database is locked".to_string(),
+        };
+
+        let prompt_error = PromptExecutionError::from_vm_error(&vm, &error);
+        assert_eq!(
+            prompt_error.terminal_class,
+            harn_vm::llm::AgentTerminalClass::ResourceBusy
+        );
+    }
 }
 
 pub(super) struct PromptGlobals<'a> {

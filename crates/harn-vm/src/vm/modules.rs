@@ -59,6 +59,11 @@ pub(crate) struct LoadedModule {
     /// schema. Importers bind the alias name to this value so
     /// expression-position uses (`output_schema: ImportedAlias`) work.
     pub(crate) public_type_schemas: BTreeMap<String, VmValue>,
+    /// Guard under which this filesystem module and its transitive closure were
+    /// instantiated. A guarded execution cannot reuse an unguarded module even
+    /// when the entry bytes currently match: its closures may retain imports
+    /// compiled from earlier, unverified bytes.
+    package_execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
     pub(crate) _module_functions: crate::value::ModuleFunctionRegistry,
     pub(crate) _module_state: crate::value::ModuleState,
 }
@@ -85,6 +90,21 @@ pub(crate) struct DeferredCyclicImport {
     pub(crate) target: PathBuf,
     /// Selectively-imported names, or `None` for a wildcard/side-effect import.
     pub(crate) selected_names: Option<Vec<String>>,
+}
+
+#[derive(Clone, Copy)]
+enum ImportProjection<'a> {
+    BindCaller(Option<&'a [String]>),
+    MaterializeOnly,
+}
+
+impl ImportProjection<'_> {
+    fn package_rejection_kind(self) -> &'static str {
+        match self {
+            Self::BindCaller(_) => "import",
+            Self::MaterializeOnly => "execution",
+        }
+    }
 }
 
 pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
@@ -193,14 +213,31 @@ impl Vm {
             crate::value::VmCallable::Eager(closure) => Ok(Arc::clone(closure)),
             crate::value::VmCallable::Lazy(lazy) => {
                 let (cache_key, module_path) = self.lazy_callable_module_path(lazy);
+                let next_guard = lazy
+                    .package_execution_guard_handle()
+                    .or_else(|| self.package_execution_guard.clone());
+                if let Some(guard) = &next_guard {
+                    guard.verify_entry_source(&module_path).map_err(|error| {
+                        VmError::Runtime(format!("installed package execution rejected: {error}"))
+                    })?;
+                }
                 let resolution = {
                     let mut modules = self.lazy_callable_modules.lock();
-                    Arc::clone(
-                        modules
-                            .entry(cache_key)
-                            .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new())),
-                    )
+                    let slots = modules.entry(cache_key).or_default();
+                    if let Some(slot) = slots.iter().find(|slot| slot.execution_guard == next_guard)
+                    {
+                        Arc::clone(&slot.resolution)
+                    } else {
+                        let resolution = Arc::new(tokio::sync::OnceCell::new());
+                        slots.push(crate::vm::state::LazyCallableCacheSlot {
+                            execution_guard: next_guard.clone(),
+                            resolution: Arc::clone(&resolution),
+                        });
+                        resolution
+                    }
                 };
+                let previous_package_execution_guard =
+                    std::mem::replace(&mut self.package_execution_guard, next_guard);
                 let resolved = resolution
                     .get_or_try_init(|| async {
                         let exports = self.load_module_exports(&module_path).await?;
@@ -217,7 +254,9 @@ impl Vm {
                             retained_module_graph: Arc::clone(&self.module_cache),
                         }))
                     })
-                    .await?;
+                    .await;
+                self.package_execution_guard = previous_package_execution_guard;
+                let resolved = resolved?;
                 resolved
                     .exports
                     .get(&lazy.function_name)
@@ -250,63 +289,16 @@ impl Vm {
         let next_guard = pipeline
             .package_execution_guard_handle()
             .or_else(|| self.package_execution_guard.clone());
-        let source = if let Some(guard) = &next_guard {
-            let bytes = guard.verify_entry_source(&module_path).map_err(|error| {
-                VmError::Runtime(format!("installed package execution rejected: {error}"))
-            })?;
-            verified_package_source(bytes, &module_path)?
-        } else {
-            std::fs::read_to_string(&module_path).map_err(|error| {
-                VmError::Runtime(format!("failed to read {}: {error}", module_path.display()))
-            })?
-        };
-        let program = harn_parser::check_source_strict(&source)
-            .map_err(|error| VmError::Runtime(error.to_string()))?;
-        let params = program
-            .iter()
-            .find_map(|node| {
-                let (_, inner) = harn_parser::peel_attributes(node);
-                match &inner.node {
-                    harn_parser::Node::Pipeline {
-                        name,
-                        params,
-                        is_pub: true,
-                        ..
-                    } if name == &pipeline.pipeline_name => Some(params.clone()),
-                    _ => None,
-                }
-            })
-            .ok_or_else(|| {
-                VmError::Runtime(format!(
-                    "pipeline '{}' is not exported by module '{}'",
-                    pipeline.pipeline_name,
-                    module_path.display()
-                ))
-            })?;
-        if params.len() != args.len() {
-            return Err(VmError::Runtime(format!(
-                "pipeline '{}' expects {} argument(s), got {}",
-                pipeline.pipeline_name,
-                params.len(),
-                args.len()
-            )));
-        }
-        let chunk = crate::Compiler::new()
-            .compile_named_with_param_globals(&program, &pipeline.pipeline_name)
-            .map_err(|error| VmError::Runtime(error.to_string()))?;
-        let previous_source_dir = self.source_dir.clone();
-        if let Some(parent) = module_path.parent() {
-            self.set_source_dir(parent);
-        }
-        for (param, value) in params.iter().zip(args) {
-            self.set_global(param, value.clone());
-        }
         let previous_package_execution_guard =
             std::mem::replace(&mut self.package_execution_guard, next_guard);
-        let result = self.execute(&chunk).await;
+        let result = async {
+            let closure = self
+                .load_public_module_callable(&module_path, &pipeline.pipeline_name)
+                .await?;
+            self.call_closure_pub(&closure, args).await
+        }
+        .await;
         self.package_execution_guard = previous_package_execution_guard;
-        self.source_dir = previous_source_dir;
-        crate::stdlib::set_thread_source_dir_option(self.source_dir.as_deref());
         result
     }
 
@@ -612,6 +604,9 @@ impl Vm {
             public_values,
             public_type_names,
             public_type_schemas,
+            package_execution_guard: module_source_dir
+                .as_ref()
+                .and(self.package_execution_guard.clone()),
             _module_functions: registry,
             _module_state: module_state,
         })
@@ -701,6 +696,21 @@ impl Vm {
         path: &'a str,
         selected_names: Option<&'a [String]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
+        self.execute_import_with_projection(path, ImportProjection::BindCaller(selected_names))
+    }
+
+    fn materialize_import<'a>(
+        &'a mut self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
+        self.execute_import_with_projection(path, ImportProjection::MaterializeOnly)
+    }
+
+    fn execute_import_with_projection<'a>(
+        &'a mut self,
+        path: &'a str,
+        projection: ImportProjection<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
         Box::pin(async move {
             let _import_span = ScopeSpan::new(crate::tracing::SpanKind::Import, path.to_string());
 
@@ -714,12 +724,17 @@ impl Vm {
                         return Ok(());
                     }
                     if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
-                        return self.export_loaded_module(&synthetic, &loaded, selected_names);
+                        return match projection {
+                            ImportProjection::BindCaller(selected_names) => {
+                                self.export_loaded_module(&synthetic, &loaded, selected_names)
+                            }
+                            ImportProjection::MaterializeOnly => Ok(()),
+                        };
                     }
                     let loaded = self
                         .load_stdlib_module_from_source(module, synthetic.clone(), source)
                         .await?;
-                    {
+                    if let ImportProjection::BindCaller(selected_names) = projection {
                         let _load_span = self.module_load_span();
                         self.export_loaded_module(&synthetic, &loaded, selected_names)?;
                     }
@@ -737,7 +752,10 @@ impl Vm {
             let file_path = self.resolve_module_import_path(&base, path)?;
             let verified_source = if let Some(guard) = &self.package_execution_guard {
                 let bytes = guard.verify_entry_source(&file_path).map_err(|error| {
-                    VmError::Runtime(format!("installed package import rejected: {error}"))
+                    VmError::Runtime(format!(
+                        "installed package {} rejected: {error}",
+                        projection.package_rejection_kind()
+                    ))
                 })?;
                 Some(verified_package_source(bytes, &file_path)?)
             } else {
@@ -755,13 +773,15 @@ impl Vm {
                 // whichever module happens to close the cycle silently loses
                 // these bindings and fails with `Undefined builtin` at call
                 // time, in a load-order-dependent way.
-                if let Some(importer) = self.imported_paths.last().cloned() {
-                    if importer != canonical {
-                        self.deferred_cyclic_imports.push(DeferredCyclicImport {
-                            importer,
-                            target: canonical.clone(),
-                            selected_names: selected_names.map(<[String]>::to_vec),
-                        });
+                if let ImportProjection::BindCaller(selected_names) = projection {
+                    if let Some(importer) = self.imported_paths.last().cloned() {
+                        if importer != canonical {
+                            self.deferred_cyclic_imports.push(DeferredCyclicImport {
+                                importer,
+                                target: canonical.clone(),
+                                selected_names: selected_names.map(<[String]>::to_vec),
+                            });
+                        }
                     }
                 }
                 return Ok(());
@@ -771,12 +791,29 @@ impl Vm {
                     let cached_source = self.source_cache.get(&canonical);
                     if cached_source != Some(source) {
                         return Err(VmError::Runtime(format!(
-                            "installed package import rejected: cached module {} was not compiled from the verified package bytes",
+                            "installed package {} rejected: cached module {} was not compiled from the verified package bytes",
+                            projection.package_rejection_kind(),
+                            canonical.display()
+                        )));
+                    }
+                    let active_guard = self
+                        .package_execution_guard
+                        .as_deref()
+                        .expect("verified package source requires an active guard");
+                    if loaded.package_execution_guard.as_deref() != Some(active_guard) {
+                        return Err(VmError::Runtime(format!(
+                            "installed package {} rejected: cached module {} was not instantiated under the active package execution guard",
+                            projection.package_rejection_kind(),
                             canonical.display()
                         )));
                     }
                 }
-                return self.export_loaded_module(&canonical, &loaded, selected_names);
+                return match projection {
+                    ImportProjection::BindCaller(selected_names) => {
+                        self.export_loaded_module(&canonical, &loaded, selected_names)
+                    }
+                    ImportProjection::MaterializeOnly => Ok(()),
+                };
             }
             self.imported_paths.push(canonical.clone());
 
@@ -861,7 +898,7 @@ impl Vm {
                     .insert(canonical.clone(), Arc::clone(&loaded));
             }
             self.record_module_loaded();
-            {
+            if let ImportProjection::BindCaller(selected_names) = projection {
                 let _load_span = self.module_load_span();
                 self.export_loaded_module(&canonical, &loaded, selected_names)?;
             }
@@ -955,15 +992,13 @@ impl Vm {
         Ok(file_path.canonicalize().unwrap_or(file_path))
     }
 
-    /// Load a module file and return the exported function closures that
-    /// would be visible to a wildcard import.
-    pub async fn load_module_exports(
+    async fn loaded_module_for_path(
         &mut self,
         path: &Path,
-    ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
+    ) -> Result<(PathBuf, Arc<LoadedModule>), VmError> {
         self.ensure_execution_available()?;
         let path_str = path.to_string_lossy().into_owned();
-        self.execute_import(&path_str, None).await?;
+        self.materialize_import(&path_str).await?;
 
         let mut file_path = if path.is_absolute() {
             path.to_path_buf()
@@ -986,6 +1021,42 @@ impl Vm {
                 canonical.display()
             ))
         })?;
+        Ok((canonical, loaded))
+    }
+
+    /// Load one explicitly public callable from a module.
+    pub async fn load_public_module_callable(
+        &mut self,
+        path: &Path,
+        name: &str,
+    ) -> Result<Arc<VmClosure>, VmError> {
+        let (canonical, loaded) = self.loaded_module_for_path(path).await?;
+        if !loaded.public_names.contains(name) {
+            let hint = if loaded.functions.contains_key(name) {
+                "; it is defined there but not `pub`"
+            } else {
+                ""
+            };
+            return Err(VmError::Runtime(format!(
+                "callable '{name}' is not exported by module '{}'{hint}",
+                canonical.display()
+            )));
+        }
+        loaded.functions.get(name).cloned().ok_or_else(|| {
+            VmError::Runtime(format!(
+                "Import error: exported callable '{name}' is missing from {}",
+                canonical.display()
+            ))
+        })
+    }
+
+    /// Load a module file and return the exported function closures that
+    /// would be visible to a wildcard import.
+    pub async fn load_module_exports(
+        &mut self,
+        path: &Path,
+    ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
+        let (canonical, loaded) = self.loaded_module_for_path(path).await?;
 
         let export_names: Vec<String> = if loaded.public_names.is_empty() {
             loaded.functions.keys().cloned().collect()
@@ -1047,7 +1118,7 @@ impl Vm {
         import_path: &str,
     ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
         self.ensure_execution_available()?;
-        self.execute_import(import_path, None).await?;
+        self.materialize_import(import_path).await?;
 
         if let Some(module) = import_path
             .strip_prefix("std/")

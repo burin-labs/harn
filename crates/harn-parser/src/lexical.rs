@@ -380,7 +380,10 @@ impl LexicalAnalysis {
                 }
                 self.walk_callable_body(body, params, scopes);
             }
-            Node::Pipeline { params, body, .. } | Node::OverrideDecl { params, body, .. } => {
+            Node::Pipeline { params, body, .. } => {
+                self.walk_callable_body(body, params, scopes);
+            }
+            Node::OverrideDecl { params, body, .. } => {
                 let bindings = names_scope(params.iter().cloned());
                 self.walk_body_with_bindings(
                     body,

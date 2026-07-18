@@ -5,7 +5,7 @@
 use harn_lexer::{FixEdit, Span};
 use harn_parser::{Node, SNode};
 
-/// Replace a simple `let`/`var` binding's identifier with the discard binding
+/// Replace a simple `let`/`const` binding's identifier with the discard binding
 /// `_`. Returns `None` for destructuring patterns, unusual formatting, or
 /// anything else where the rewrite is not unambiguously safe.
 pub(crate) fn simple_ident_discard_fix(

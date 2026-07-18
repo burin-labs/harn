@@ -52,3 +52,7 @@ updates:
       timezone: "America/Los_Angeles"
     cooldown:
       default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"

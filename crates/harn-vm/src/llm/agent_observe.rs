@@ -1705,12 +1705,7 @@ pub(super) fn dump_llm_response(
         "parsed_tool_calls": parsed_tool_calls,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
-        "cost_usd": crate::llm::cost::calculate_cost_for_provider(
-            &result.provider,
-            &result.model,
-            result.input_tokens,
-            result.output_tokens,
-        ),
+        "cost_usd": result.priced_cost_usd(),
         "cache_read_tokens": result.cache_read_tokens,
         "cache_write_tokens": result.cache_write_tokens,
         "cache_creation_input_tokens": result.cache_write_tokens,
@@ -2407,12 +2402,7 @@ pub(crate) async fn observed_llm_call(
                     output_tokens: result.output_tokens,
                     cache_read_tokens: result.cache_read_tokens,
                     cache_write_tokens: result.cache_write_tokens,
-                    cost_usd: crate::llm::cost::pricing_aware_call_cost(
-                        &result.provider,
-                        &result.model,
-                        result.input_tokens,
-                        result.output_tokens,
-                    ),
+                    cost_usd: result.priced_cost_usd(),
                 };
                 annotate_current_span(&[("status", serde_json::json!("ok"))]);
                 annotate_current_span(&usage.metadata_pairs());
@@ -2799,6 +2789,10 @@ pub(crate) async fn observed_llm_call(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "agent_observe_cost_tests.rs"]
+mod cost_tests;
 
 #[cfg(test)]
 mod retry_tests {

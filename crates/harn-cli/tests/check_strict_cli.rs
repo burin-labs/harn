@@ -101,6 +101,52 @@ fn strict_and_strict_types_compose_monotonically() {
 }
 
 #[test]
+fn strict_types_rejects_absent_selective_type_import_before_runtime() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        temp.path().join("compiler.harn"),
+        "pub type PersonaBlueprintLowering = {ok: bool}\n",
+    )
+    .expect("write target module");
+    std::fs::write(
+        temp.path().join("main.harn"),
+        "import { PersonaPromptCompileReceipt } from \"./compiler\"\n\npub fn grade(value: PersonaPromptCompileReceipt) -> bool {\n  return true\n}\n",
+    )
+    .expect("write consumer");
+
+    let output = run_check(
+        temp.path(),
+        &["--strict-types", "--json", "main.harn"],
+        None,
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = stdout_json(&output);
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["error"]["code"], "check_failed");
+    let diagnostics = envelope["data"]["files"][0]["diagnostics"]
+        .as_array()
+        .expect("diagnostics");
+    let import_diagnostics = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == "HARN-IMP-002")
+        .collect::<Vec<_>>();
+    assert_eq!(import_diagnostics.len(), 1);
+    let diagnostic = import_diagnostics[0];
+    assert_eq!(diagnostic["source"], "preflight");
+    assert_eq!(diagnostic["severity"], "error");
+    assert_eq!(
+        diagnostic["message"],
+        "imported symbol `PersonaPromptCompileReceipt` does not exist in `./compiler`"
+    );
+    assert_eq!(
+        diagnostic["help"],
+        "update the import to a symbol exported by `./compiler`"
+    );
+    assert_eq!(diagnostic["span"]["start"], 0);
+    assert_eq!(diagnostic["span"]["end"], 56);
+}
+
+#[test]
 fn manifest_strictness_cannot_be_disabled_by_cli_defaults() {
     let temp = tempfile::tempdir().expect("tempdir");
     std::fs::write(temp.path().join("main.harn"), warning_source("manifest"))

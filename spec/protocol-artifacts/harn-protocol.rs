@@ -556,6 +556,7 @@ pub const AGENT_TERMINAL_CLASS_PROVIDER_MISCONFIGURED: &str = "provider_misconfi
 pub const AGENT_TERMINAL_CLASS_PROVIDER_UNAVAILABLE: &str = "provider_unavailable";
 pub const AGENT_TERMINAL_CLASS_RATE_LIMITED: &str = "rate_limited";
 pub const AGENT_TERMINAL_CLASS_TIMEOUT: &str = "timeout";
+pub const AGENT_TERMINAL_CLASS_RESOURCE_BUSY: &str = "resource_busy";
 pub const AGENT_TERMINAL_CLASS_TOOL_POLICY_REJECTED: &str = "tool_policy_rejected";
 pub const AGENT_TERMINAL_CLASS_HOST_BRIDGE_UNIMPLEMENTED: &str = "host_bridge_unimplemented";
 pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_protocol_failure";
@@ -568,6 +569,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "provider_unavailable",
     "rate_limited",
     "timeout",
+    "resource_busy",
     "tool_policy_rejected",
     "host_bridge_unimplemented",
     "agent_loop_protocol_failure",

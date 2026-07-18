@@ -13,7 +13,7 @@ use crate::test_timing::DurationSummary;
 use crate::CLI_RUNTIME_STACK_SIZE;
 use harn_lexer::Lexer;
 use harn_parser::const_eval::{const_eval, ConstEnv, ConstValue};
-use harn_parser::{Attribute, Node, Parser, SNode};
+use harn_parser::{Attribute, Node, Parser, SNode, TypedParam};
 use harn_vm::VmValue;
 
 mod execution;
@@ -775,7 +775,7 @@ fn inspect_test_pipeline(snode: &SNode) -> Result<Option<PipelineMeta>, String> 
         _ => (&[][..], snode),
     };
     let (name, params) = match &inner.node {
-        Node::Pipeline { name, params, .. } => (name.clone(), params.clone()),
+        Node::Pipeline { name, params, .. } => (name.clone(), TypedParam::names(params)),
         _ => return Ok(None),
     };
     let has_test_attr = attributes.iter().any(|a| a.name == "test");

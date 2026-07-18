@@ -1,7 +1,7 @@
 // CLI bridge for the Harn-owned prompt persona compiler. Rust supplies only a
 // closed payload and renders the returned receipt; compilation policy remains
-// in std/personas/compiler.
-import { persona_compile_prompt } from "std/personas/compiler"
+// in std/personas/prompt_compiler.
+import { persona_compile_prompt } from "std/personas/prompt_compiler"
 
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PERSONA_COMPILE_PROMPT_JSON", "")
