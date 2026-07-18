@@ -50,16 +50,15 @@ if ! git diff --quiet --ignore-submodules HEAD --; then
   echo "=== Dirty tree detected; publishing with --allow-dirty ==="
 fi
 
-# harn-cli's package `include` list pulls in portal-dist/ — a gitignored
-# build artifact produced by `npm run build` during the release gate. Cargo
-# treats its contents as "uncommitted changes" relative to git and refuses
-# to package without --allow-dirty. Force the flag on when portal-dist/
-# has content so release_ship.sh's publish step doesn't blow up on the
-# predictable gitignored-but-included case.
-if [[ -z "$ALLOW_DIRTY" && -d "crates/harn-cli/portal-dist" ]] \
-  && [[ -n "$(ls -A crates/harn-cli/portal-dist 2>/dev/null)" ]]; then
+# harn-cli's package `include` list pulls in portal-dist/ plus the optional
+# release/package CLI AOT payload. Both are gitignored build products, so
+# Cargo sees them as dirty even though the release gate generated them
+# intentionally. Force the flag on when either payload is present.
+if [[ -z "$ALLOW_DIRTY" ]] \
+  && { { [[ -d "crates/harn-cli/portal-dist" ]] && [[ -n "$(ls -A crates/harn-cli/portal-dist 2>/dev/null)" ]]; } \
+    || [[ -f "crates/harn-cli/generated/cli-bytecode-manifest.json" ]]; }; then
   ALLOW_DIRTY="--allow-dirty"
-  echo "=== portal-dist/ present (gitignored, included by Cargo); publishing with --allow-dirty ==="
+  echo "=== gitignored harn-cli package payload present; publishing with --allow-dirty ==="
 fi
 
 RETRY_DELAY=120  # seconds to wait on rate limit
