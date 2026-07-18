@@ -87,6 +87,8 @@ fn abrupt_supervisor_loss_preserves_worker_lease_until_cargo_exits() {
             "abrupt-supervisor-test",
             "--host",
             "lease-cli-crash-fixture",
+            "--priority-class",
+            "interactive",
             "--workspace",
         ])
         .arg(&workspace)
@@ -135,7 +137,7 @@ fn abrupt_supervisor_loss_preserves_worker_lease_until_cargo_exits() {
     let active: serde_json::Value =
         serde_json::from_str(&active.stdout).expect("parse active lease status");
     assert_eq!(active["data"]["active"]["owner_pid"], cargo_pid);
-    assert_eq!(active["data"]["active"]["priority_class"], "ci-verify");
+    assert_eq!(active["data"]["active"]["priority_class"], "interactive");
 
     let deferred = run_harn_e2e(
         &[
