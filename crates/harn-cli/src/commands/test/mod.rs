@@ -85,7 +85,7 @@ pub(crate) async fn run_command(args: TestArgs) {
     } else if args.determinism {
         run_determinism_command(args, shard_requested).await;
     } else {
-        run_standard_command(args, shard_requested).await;
+        run_standard_command(args).await;
     }
 }
 
@@ -189,7 +189,7 @@ async fn run_determinism_command(args: TestArgs, shard_requested: bool) {
     }
 }
 
-async fn run_standard_command(args: TestArgs, shard_requested: bool) {
+async fn run_standard_command(args: TestArgs) {
     let cli_skill_dirs: Vec<PathBuf> = args.skill_dir.iter().map(PathBuf::from).collect();
     if args.record {
         harn_vm::llm::set_replay_mode(harn_vm::llm::LlmReplayMode::Record, ".harn-fixtures");
@@ -199,9 +199,6 @@ async fn run_standard_command(args: TestArgs, shard_requested: bool) {
 
     if let Some(t) = args.target.as_deref() {
         if t == "conformance" {
-            if shard_requested {
-                command_error("test sharding is only supported for user test suites");
-            }
             run_conformance_tests(
                 t,
                 args.selection.as_deref(),
@@ -213,6 +210,7 @@ async fn run_standard_command(args: TestArgs, shard_requested: bool) {
                     timing: args.timing,
                     differential_optimizations: args.differential_optimizations,
                     json: args.json,
+                    shard: resolve_test_shard(args.shard_index, args.shard_total),
                     cli_skill_dirs: &cli_skill_dirs,
                 },
             )
@@ -240,7 +238,7 @@ async fn run_user_test_target(path: &str, args: &TestArgs, cli_skill_dirs: &[Pat
         parallel: args.parallel,
         fail_fast: args.fail_fast,
         jobs: args.jobs,
-        shard: resolve_user_test_shard(args.shard_index, args.shard_total),
+        shard: resolve_test_shard(args.shard_index, args.shard_total),
         verbose: args.verbose,
         timing: args.timing,
         diagnose: args.diagnose,
@@ -281,7 +279,7 @@ fn default_test_dir_or_exit() -> String {
     }
 }
 
-fn resolve_user_test_shard(
+fn resolve_test_shard(
     shard_index: Option<usize>,
     shard_total: Option<usize>,
 ) -> Option<test_runner::TestShard> {

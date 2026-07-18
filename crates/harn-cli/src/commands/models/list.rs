@@ -1,4 +1,4 @@
-//! `harn models list` — list configured models grouped by provider.
+//! `harn models list` — query the authoritative configured-model catalog.
 //!
 //! ## Harn renderer
 //!
@@ -7,34 +7,38 @@
 //! itself comes from the read-only `harness.llm.catalog()` handle, so the
 //! script owns the entire data-shape transformation end-to-end. The Rust
 //! shim's only contribution is detecting installed Ollama models
-//! out-of-process (sandboxed scripts can't run `ollama list`) and threading
-//! the parsed `--provider` /
-//! `--installed-only` flags through env vars.
+//! out-of-process (sandboxed scripts can't run `ollama list`) and collecting
+//! parsed command input into one typed JSON payload.
 //!
 
 use std::collections::BTreeSet;
 use std::io::Write as _;
 
-use crate::cli::ModelsListArgs;
+use serde::Serialize;
+
+use crate::cli::{ModelsListArgs, ModelsListSort};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
-/// Env var the embedded `cli/models/list` script reads to pick up the
-/// `--provider` filter. Empty when no filter was passed.
-const LIST_PROVIDER_ENV: &str = "HARN_MODELS_LIST_PROVIDER";
-
-/// Env var for `--installed-only`. `"1"` iff the flag was set.
-const LIST_INSTALLED_ONLY_ENV: &str = "HARN_MODELS_LIST_INSTALLED_ONLY";
-
-/// Env var carrying the JSON list of installed Ollama model ids. The
-/// Rust shim resolves these via `ollama list` (which scripts can't run
-/// because the sandbox would block the subprocess) and hands them
-/// across as a single payload so the script doesn't have to.
-const LIST_INSTALLED_OLLAMA_ENV: &str = "HARN_MODELS_INSTALLED_OLLAMA";
+/// Env var carrying the complete parsed list query. Keeping this as one JSON
+/// object prevents independent mutable env knobs from drifting as the Harn
+/// query surface grows.
+const LIST_QUERY_ENV: &str = "HARN_MODELS_LIST_QUERY_JSON";
 
 /// Serialises the dispatch path so concurrent in-process callers don't
 /// race on the global env vars the shim sets.
 static DISPATCH_LIST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[derive(Debug, Serialize)]
+struct ListDispatchPayload<'a> {
+    provider: Option<&'a str>,
+    #[serde(rename = "where")]
+    where_filters: &'a [String],
+    sort: Option<&'static str>,
+    columns: Option<&'a str>,
+    installed_only: bool,
+    installed_ollama: &'a [String],
+}
 
 pub(crate) async fn run(args: ModelsListArgs) {
     let exit_code = run_dispatch(args).await;
@@ -46,21 +50,24 @@ pub(crate) async fn run(args: ModelsListArgs) {
 async fn run_dispatch(args: ModelsListArgs) -> i32 {
     let installed = detect_installed_ollama_models().await;
     let installed_vec: Vec<String> = installed.iter().cloned().collect();
-    let installed_json = match serde_json::to_string(&installed_vec) {
+    let payload = ListDispatchPayload {
+        provider: args.provider.as_deref(),
+        where_filters: &args.where_filters,
+        sort: args.sort.map(ModelsListSort::catalog_field),
+        columns: args.columns.as_deref(),
+        installed_only: args.installed_only,
+        installed_ollama: &installed_vec,
+    };
+    let payload_json = match serde_json::to_string(&payload) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise installed ollama set: {error}");
+            eprintln!("error: failed to serialise models list query: {error}");
             return 1;
         }
     };
 
     let _guard = DISPATCH_LIST_LOCK.lock().await;
-    let _installed = ScopedEnvVar::set(LIST_INSTALLED_OLLAMA_ENV, &installed_json);
-    let _installed_only = ScopedEnvVar::set(
-        LIST_INSTALLED_ONLY_ENV,
-        if args.installed_only { "1" } else { "0" },
-    );
-    let _provider = ScopedEnvVar::set(LIST_PROVIDER_ENV, args.provider.as_deref().unwrap_or(""));
+    let _payload = ScopedEnvVar::set(LIST_QUERY_ENV, &payload_json);
 
     let outcome = dispatch::run_embedded_script("models/list", Vec::new(), args.json).await;
     if !outcome.stderr.is_empty() {

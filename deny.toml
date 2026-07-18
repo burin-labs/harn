@@ -28,6 +28,14 @@ ignore = [
     # resolved without an upstream xcap release. The parsed XML is local
     # X11/Wayland protocol data (not attacker-controlled network input), so the
     # memory-exhaustion / quadratic-parse vectors are not reachable in practice.
+    #
+    # Two further reachability facts, so this does not get re-derived: xcap is
+    # optional behind harn-hostlib's `computer-local` feature, and `default` =
+    # `full` = ["ast", "terminal-session"] — no workspace crate enables
+    # `computer-local`, so quick-xml is not compiled in a default build at all
+    # (`cargo tree -i quick-xml` matches nothing). xcb's copy is additionally a
+    # BUILD-dependency used to generate X11 bindings, so it never ships in the
+    # binary. Both parents are Linux-only.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml quadratic attribute-check; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0194" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml unbounded namespace alloc; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0195" },
 ]

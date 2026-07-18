@@ -201,7 +201,9 @@ impl ProcessSpawner for MockSpawner {
             pgid: config.pgid,
             killer,
             state,
-            file_output: matches!(spec.output_capture, OutputCapture::File { .. }),
+            stdin_is_piped: spec.use_stdin
+                && !matches!(&spec.output_capture, OutputCapture::Inherit),
+            output_is_piped: matches!(&spec.output_capture, OutputCapture::Pipe),
             stdin_taken: false,
             stdout_taken: false,
             stderr_taken: false,
@@ -391,7 +393,8 @@ pub struct MockProcess {
     pgid: Option<u32>,
     killer: Arc<dyn ProcessKiller>,
     state: Arc<MockState>,
-    file_output: bool,
+    stdin_is_piped: bool,
+    output_is_piped: bool,
     stdin_taken: bool,
     stdout_taken: bool,
     stderr_taken: bool,
@@ -411,7 +414,7 @@ impl ProcessHandle for MockProcess {
     }
 
     fn take_stdin(&mut self) -> Option<Box<dyn Write + Send>> {
-        if self.stdin_taken {
+        if !self.stdin_is_piped || self.stdin_taken {
             return None;
         }
         self.stdin_taken = true;
@@ -421,7 +424,7 @@ impl ProcessHandle for MockProcess {
     }
 
     fn take_stdout(&mut self) -> Option<Box<dyn Read + Send>> {
-        if self.file_output {
+        if !self.output_is_piped {
             return None;
         }
         if self.stdout_taken {
@@ -435,7 +438,7 @@ impl ProcessHandle for MockProcess {
     }
 
     fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>> {
-        if self.file_output {
+        if !self.output_is_piped {
             return None;
         }
         if self.stderr_taken {

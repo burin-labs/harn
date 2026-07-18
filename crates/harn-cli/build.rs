@@ -6,6 +6,7 @@
 // succeeds without requiring npm. The placeholder is only created when a real
 // build has not already populated the directory; real `npm run build` output
 // uses `emptyOutDir: true`, so it transparently overwrites the placeholder.
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -13,12 +14,11 @@ use std::process::Command;
 #[path = "build_support/cli_aot_manifest.rs"]
 #[allow(dead_code)]
 mod cli_aot_manifest;
-#[path = "../harn-vm/build_support/codegen_fingerprint.rs"]
-#[allow(dead_code)]
-mod codegen_fingerprint;
 
 const CLI_AOT_MANIFEST: &str = "generated/cli-bytecode-manifest.json";
 const CLI_BYTECODE_MAGIC: &[u8; 8] = b"HARNBC\0\0";
+const EMBEDDED_ASSET_DIRS: &[&str] = &["assets/persona-templates", "portal-dist"];
+const CLI_AOT_REQUIRED_ENV: &str = "HARN_REQUIRE_CLI_AOT";
 
 fn main() {
     ensure_git_hooks_installed();
@@ -60,7 +60,7 @@ fn main() {
         }
     }
 
-    println!("cargo:rerun-if-changed=portal-dist");
+    emit_embedded_asset_watches(&manifest_dir);
 }
 
 /// Fingerprint the check pipeline's own sources — `harn-lint`, this crate's
@@ -204,77 +204,163 @@ fn ensure_git_hooks_installed() {
         .status();
 }
 
-/// Validate and embed the committed CLI bytecode artifacts. Compilation is a
-/// repository generation step, never build-script work: keeping harn-vm out of
-/// `[build-dependencies]` prevents Cargo resolver v2 from compiling the VM once
-/// for the host graph and again for the runtime graph on every cold build.
+/// Embed an optional release/package CLI AOT payload.
+///
+/// The generator validates source and compiler freshness while it has the full
+/// workspace. This consumer deliberately validates only package-local facts:
+/// an extracted or published `harn-cli` crate has neither sibling workspace
+/// sources nor a reason to reject a payload merely because a developer edited
+/// them after generating it. Development builds safely use source fallback;
+/// release/package verification sets `HARN_REQUIRE_CLI_AOT=1` to fail closed.
 fn emit_cli_script_bytecode() {
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let manifest_path = manifest_dir.join(CLI_AOT_MANIFEST);
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     println!("cargo:rerun-if-changed={}", manifest_path.display());
-    let manifest = cli_aot_manifest::read_manifest(&manifest_path).unwrap_or_else(|error| {
-        panic!("invalid CLI AOT manifest: {error}; run `make gen-cli-aot`");
-    });
-    let package_version = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
-    assert_eq!(
-        manifest.harn_version, package_version,
-        "CLI AOT artifacts target Harn {}; expected {package_version}; run `make gen-cli-aot`",
-        manifest.harn_version
-    );
+    println!("cargo:rerun-if-env-changed={CLI_AOT_REQUIRED_ENV}");
+    let required = cli_aot_required();
+    let table = cli_aot_manifest::read_manifest(&manifest_path)
+        .and_then(|manifest| render_cli_aot_table(&manifest_dir, &manifest));
 
-    let vm_manifest_dir = manifest_dir
-        .parent()
-        .expect("harn-cli manifest dir has a parent")
-        .join("harn-vm");
-    let compiler_inputs = codegen_fingerprint::compiler_inputs(&vm_manifest_dir);
-    for input in &compiler_inputs {
-        println!("cargo:rerun-if-changed={}", input.disk_path.display());
-    }
-    for root in codegen_fingerprint::watch_roots(&vm_manifest_dir) {
-        println!("cargo:rerun-if-changed={}", root.display());
-    }
-    let compiler_fingerprint = codegen_fingerprint::fingerprint_inputs(&compiler_inputs);
-    assert_eq!(
-        manifest.compiler_fingerprint, compiler_fingerprint,
-        "CLI AOT compiler fingerprint is stale; run `make gen-cli-aot`"
-    );
-
-    for script in &manifest.scripts {
-        let source_path = resolve_manifest_path(&manifest_dir, &script.source_path, true);
-        println!("cargo:rerun-if-changed={}", source_path.display());
-        let source_sha256 = cli_aot_manifest::sha256_source_file(&source_path)
-            .unwrap_or_else(|error| panic!("validate CLI AOT source: {error}"));
-        assert_eq!(
-            script.source_sha256, source_sha256,
-            "CLI AOT source `{}` is stale; run `make gen-cli-aot`",
-            script.name
-        );
-
-        if let Some(artifact) = &script.artifact {
-            assert!(
-                artifact.path.starts_with("generated/cli-bytecode/"),
-                "CLI AOT artifact `{}` must live under generated/cli-bytecode/",
-                artifact.path
-            );
-            let artifact_path = resolve_manifest_path(&manifest_dir, &artifact.path, false);
-            println!("cargo:rerun-if-changed={}", artifact_path.display());
-            let bytes = fs::read(&artifact_path).unwrap_or_else(|error| {
-                panic!("read CLI AOT artifact {}: {error}", artifact_path.display());
-            });
-            assert!(
-                bytes.starts_with(CLI_BYTECODE_MAGIC),
-                "CLI AOT artifact `{}` has an invalid bytecode header",
-                script.name
-            );
-            assert_eq!(
-                artifact.sha256,
-                cli_aot_manifest::sha256_bytes(&bytes),
-                "CLI AOT artifact `{}` is stale; run `make gen-cli-aot`",
-                script.name
+    let table = match table {
+        Ok(table) => table,
+        Err(error) if required => {
+            panic!(
+                "CLI AOT payload is required ({CLI_AOT_REQUIRED_ENV}=1) but unavailable: {error}; run `make gen-cli-aot` before packaging or releasing"
             );
         }
+        // A source checkout normally has no release/package payload. Keep that
+        // expected development path quiet; required release/package builds use
+        // the branch above and fail with the full validation error instead.
+        Err(_) => empty_cli_aot_table(),
+    };
+    fs::write(out_dir.join("cli_bytecode_table.rs"), table)
+        .expect("write CLI AOT table into OUT_DIR");
+}
+
+fn cli_aot_required() -> bool {
+    let Some(value) = std::env::var_os(CLI_AOT_REQUIRED_ENV) else {
+        return false;
+    };
+    !matches!(
+        value.to_string_lossy().trim().to_ascii_lowercase().as_str(),
+        "" | "0" | "false" | "no" | "off"
+    )
+}
+
+fn render_cli_aot_table(
+    manifest_dir: &Path,
+    manifest: &cli_aot_manifest::CliAotManifest,
+) -> Result<String, String> {
+    let package_version = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    if manifest.harn_version != package_version {
+        return Err(format!(
+            "CLI AOT payload targets Harn {}; package version is {package_version}",
+            manifest.harn_version
+        ));
     }
+
+    let mut table = String::new();
+    writeln!(table, "// @generated by harn-cli/build.rs. Do not edit.").expect("write String");
+    writeln!(table, "#[allow(dead_code)]").expect("write String");
+    writeln!(
+        table,
+        "pub(crate) const CLI_AOT_PAYLOAD_PRESENT: bool = true;"
+    )
+    .expect("write String");
+    writeln!(
+        table,
+        "pub(crate) const STDLIB_CLI_SCRIPT_BYTECODE: &[(&str, &[u8])] = &["
+    )
+    .expect("write String");
+
+    let mut artifact_count = 0;
+    for script in &manifest.scripts {
+        if let Some(artifact) = &script.artifact {
+            if !artifact.path.starts_with("generated/cli-bytecode/") {
+                return Err(format!(
+                    "CLI AOT artifact `{}` must live under generated/cli-bytecode/",
+                    script.name
+                ));
+            }
+            let artifact_path = resolve_cli_aot_payload_path(manifest_dir, &artifact.path)?;
+            println!("cargo:rerun-if-changed={}", artifact_path.display());
+            let bytes = fs::read(&artifact_path)
+                .map_err(|error| format!("read {}: {error}", artifact_path.display()))?;
+            if !bytes.starts_with(CLI_BYTECODE_MAGIC) {
+                return Err(format!(
+                    "CLI AOT artifact `{}` has an invalid bytecode header",
+                    script.name
+                ));
+            }
+            if artifact.sha256 != cli_aot_manifest::sha256_bytes(&bytes) {
+                return Err(format!(
+                    "CLI AOT artifact `{}` has a mismatched SHA-256",
+                    script.name
+                ));
+            }
+            writeln!(
+                table,
+                "    (\"{}\", include_bytes!(\"{}\")),",
+                escape_str(&script.name),
+                escape_str(&artifact_path.to_string_lossy())
+            )
+            .expect("write String");
+            artifact_count += 1;
+        }
+    }
+    if artifact_count == 0 {
+        return Err("CLI AOT payload contains no bytecode artifacts".to_string());
+    }
+    writeln!(table, "];").expect("write String");
+    writeln!(table, "#[allow(dead_code)]").expect("write String");
+    writeln!(
+        table,
+        "pub(crate) const STDLIB_CLI_SCRIPT_BYTECODE_SKIPPED: &[(&str, &str)] = &["
+    )
+    .expect("write String");
+    for script in &manifest.scripts {
+        if let Some(reason) = &script.skip_reason {
+            writeln!(
+                table,
+                "    (\"{}\", \"{}\"),",
+                escape_str(&script.name),
+                escape_str(reason)
+            )
+            .expect("write String");
+        }
+    }
+    writeln!(table, "];").expect("write String");
+    Ok(table)
+}
+
+fn empty_cli_aot_table() -> String {
+    String::from(
+        "// No release/package CLI AOT payload was supplied.\n\
+     #[allow(dead_code)]\n\
+     pub(crate) const CLI_AOT_PAYLOAD_PRESENT: bool = false;\n\
+     pub(crate) const STDLIB_CLI_SCRIPT_BYTECODE: &[(&str, &[u8])] = &[];\n\
+     #[allow(dead_code)]\n\
+     pub(crate) const STDLIB_CLI_SCRIPT_BYTECODE_SKIPPED: &[(&str, &str)] = &[];\n",
+    )
+}
+
+fn resolve_cli_aot_payload_path(manifest_dir: &Path, relative: &str) -> Result<PathBuf, String> {
+    let candidate = Path::new(relative);
+    if candidate.is_absolute() {
+        return Err(format!("CLI AOT payload path must be relative: {relative}"));
+    }
+    let root = fs::canonicalize(manifest_dir)
+        .map_err(|error| format!("canonicalize {}: {error}", manifest_dir.display()))?;
+    let resolved = fs::canonicalize(manifest_dir.join(candidate))
+        .map_err(|error| format!("canonicalize CLI AOT payload {relative}: {error}"))?;
+    if !resolved.starts_with(&root) {
+        return Err(format!(
+            "CLI AOT payload path escapes the package: {relative}"
+        ));
+    }
+    Ok(resolved)
 }
 
 /// Embed every demo *sibling* file (anything under `assets/demo/<id>/` other
@@ -300,6 +386,18 @@ fn emit_demo_sibling_assets() {
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     write_demo_assets_table(&out_dir.join("demo_assets_table.rs"), &entries);
+}
+
+/// Keep every directory embedded by `include_dir!` under one Cargo-owned watch
+/// contract. This runs after the portal fallback exists so Cargo can observe
+/// nested portal assets on fresh checkouts as well as real frontend builds.
+fn emit_embedded_asset_watches(manifest_dir: &Path) {
+    for relative_dir in EMBEDDED_ASSET_DIRS {
+        println!(
+            "cargo:rerun-if-changed={}",
+            manifest_dir.join(relative_dir).display()
+        );
+    }
 }
 
 /// Recurse `dir`, recording each embeddable sibling file as
@@ -349,34 +447,6 @@ fn write_demo_assets_table(path: &Path, entries: &[(String, String)]) {
     }
     body.push_str("];\n");
     fs::write(path, body).expect("write demo_assets_table.rs");
-}
-
-fn resolve_manifest_path(manifest_dir: &Path, relative: &str, allow_crates_root: bool) -> PathBuf {
-    let relative = Path::new(relative);
-    assert!(
-        !relative.is_absolute(),
-        "CLI AOT manifest path must be relative: {}",
-        relative.display()
-    );
-    let path = manifest_dir.join(relative);
-    let canonical = path.canonicalize().unwrap_or_else(|error| {
-        panic!("resolve CLI AOT path {}: {error}", path.display());
-    });
-    let allowed_root = if allow_crates_root {
-        manifest_dir.parent().expect("harn-cli is under crates/")
-    } else {
-        manifest_dir
-    };
-    let allowed_root = allowed_root
-        .canonicalize()
-        .expect("resolve CLI AOT allowed root");
-    assert!(
-        canonical.starts_with(&allowed_root),
-        "CLI AOT manifest path escapes {}: {}",
-        allowed_root.display(),
-        canonical.display()
-    );
-    canonical
 }
 
 fn escape_str(s: &str) -> String {

@@ -206,8 +206,9 @@ The next port to land in this file shrinks the budget to its new
 ## Argparse cookbook
 
 Common patterns using [`std/cli/argparse`](./cli-argparse-reference.md).
-Every example assumes `let result = parse(spec, argv)` and a follow-up
-error check.
+`parse` returns a native
+`Result<CliInvocation<dict>, CliParseFailure>`; successful values keep
+declared arguments in `.options` and tokens after `--` in `.rest`.
 
 ### Positional + required
 
@@ -222,6 +223,12 @@ const spec = parser({
   ],
 })
 const result = parse(spec, argv)
+if is_err(result) {
+  __io_eprintln(unwrap_err(result).message)
+  exit(2)
+}
+const invocation = unwrap(result)
+const template = invocation.options.template
 ```
 
 Positionals are required by default — flip to `required: false` to opt
@@ -239,40 +246,101 @@ With `multi: true`, the parsed value is a `list<string>` (defaulting to
 `[]` when unspecified), so `-m claude-opus-4-7 -m gpt-5` yields
 `["claude-opus-4-7", "gpt-5"]`.
 
+### Primitive values and defaults
+
+Set `parse` on a value-taking flag or positional to decode at the parser
+boundary:
+
+```harn
+{name: "jobs", kind: "flag", long: "--jobs",
+ parse: "int", default: 1}
+{name: "threshold", kind: "flag", long: "--threshold",
+ parse: "float"}
+{name: "enabled", kind: "flag", long: "--enabled",
+ parse: "bool"}
+{name: "labels", kind: "flag", long: "--labels",
+ parse: "list", separator: ":", multi: true}
+```
+
+The supported decoders are `string` (the default), `int`, `float`,
+`bool`, and `list`. Defaults are already typed and are inserted unchanged:
+use `default: 1`, not `default: "1"`. Repeated list flags flatten all
+split values, so `--labels core:cli --labels docs:tests` produces
+`["core", "cli", "docs", "tests"]`.
+
+### Typed option bag
+
+Use `parse_typed<T>` to make the parser and schema one boundary. It parses
+argv primitives, validates `.options` against `Schema<T>`, and returns a
+typed invocation directly.
+
+```harn
+import { parse_typed, parser } from "std/cli/argparse"
+
+type RenderOptions = {template: string, jobs: int, json: bool}
+
+const spec = parser({
+  name: "render",
+  args: [
+    {name: "template", kind: "positional"},
+    {name: "jobs", kind: "flag", long: "--jobs", parse: "int", default: 1},
+    {name: "json", kind: "switch", long: "--json"},
+  ],
+})
+
+const result = parse_typed(spec, argv, schema_of(RenderOptions))
+if is_err(result) {
+  __io_eprintln(unwrap_err(result).message)
+  exit(2)
+}
+const options: RenderOptions = unwrap(result).options
+```
+
+The optional fourth argument, `apply_defaults`, defaults to `false`. Pass
+`true` only when defaults declared in the schema should be applied.
+`ArgSpec.default`, switch `false`, and `multi` `[]` defaults are applied by
+argv parsing regardless of that setting.
+
 ### `--` separator → `rest`
 
-`argparse` always routes everything after a bare `--` into
-`parsed.rest`, no matter what flags or positionals are still pending:
+When no flag value is pending, a bare `--` stops argument parsing and
+routes every later token into the successful invocation's `.rest`:
 
 ```bash
 harn greet -- --not-a-flag "hello world"
 ```
 
-`parsed.rest` is `["--not-a-flag", "hello world"]`. Use this to forward
-verbatim argv to a child process or to a downstream script.
+`unwrap(result).rest` is `["--not-a-flag", "hello world"]`. Use this to forward
+verbatim argv to a child process or to a downstream script. Required
+argument checks still run after the terminator.
 
-### Error envelope handling
+### Failure handling
 
-`parse` returns `{ok: dict}` or `{err: ParseError}`. Narrow with the
-standard `r.err != nil` pattern and let `render_help` produce the
-usage block:
+Both parse functions use the same native `Result` and JSON-safe
+`CliParseFailure`. Let `render_help` produce the usage block and report the
+failure message:
 
 ```harn
 import { parser, parse, render_help } from "std/cli/argparse"
 
 const result = parse(spec, argv)
-const err = result.err
-if err != nil {
+if is_err(result) {
+  const failure = unwrap_err(result)
   __io_eprintln(render_help(spec))
-  __io_eprintln("error: " + (err.hint ?? ""))
+  __io_eprintln("error: " + failure.message)
   exit(2)
 }
-const parsed = result.ok
+const invocation = unwrap(result)
 ```
 
-The error `kind` is one of `missing_required`, `unknown_flag`,
-`unknown_arg`, `value_required`, or `bad_value`. Each carries the
-offending argv string in `arg` and a one-line `hint`.
+`failure.stage` is `argv` for token syntax and primitive decoding, or
+`schema` for `parse_typed` mismatches. Argv failures use codes such as
+`unknown_flag`, `missing_required`, and `invalid_value`; schema failures
+use top-level code `schema_mismatch`, with field paths on their issues.
+Static declaration mistakes are different: `parser(spec)` throws while
+building the parser, including for invalid kinds or decoders, conflicting
+names or aliases, invalid positional/variadic combinations, and invalid
+list separators.
 
 See the [`std/cli/argparse` reference](./cli-argparse-reference.md) for
 the full surface, error catalog, and `--help` layout contract.

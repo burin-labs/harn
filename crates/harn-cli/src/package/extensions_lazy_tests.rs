@@ -123,6 +123,7 @@ pub fn on_new_issue(event: TriggerEvent) -> string {
 "#,
     );
     let extensions = load_runtime_extensions(&harn_file);
+    assert!(extensions.triggers[0].execution_guard.is_none());
     let mut vm = test_vm();
 
     let collected = collect_manifest_triggers_with_mode(&mut vm, &extensions, true)

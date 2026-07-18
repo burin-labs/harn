@@ -87,17 +87,17 @@ pipeline test() {
     {
       persona: "deploy_captain",
       events: [
-        {step: "wait_for_pr_merged", payload: {wait_source: "github.pull_request_merged", polls: 2}},
-        {step: "deploy_to_staging", payload: {environment: "staging"}},
-        {step: "promote_production", payload: {environment: "production", promoted: true}},
+        {step: "wait_for_pr_merged", payload: result.merged.result, observed_at_ms: 1},
+        {step: "deploy_to_staging", payload: result.staging.result},
+        {step: "promote_production", payload: result.promoted.result},
       ],
     },
     {
       persona: "deploy_captain",
       events: [
-        {step: "wait_for_pr_merged", payload: result.merged.result, observed_at_ms: 1},
-        {step: "deploy_to_staging", payload: result.staging.result},
-        {step: "promote_production", payload: result.promoted.result},
+        {step: "wait_for_pr_merged", payload: {wait_source: "github.pull_request_merged", polls: 2}},
+        {step: "deploy_to_staging", payload: {environment: "staging"}},
+        {step: "promote_production", payload: {environment: "production", promoted: true}},
       ],
     },
   )

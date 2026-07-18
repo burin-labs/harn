@@ -58,7 +58,13 @@ impl Parser {
         let name = self.consume_identifier("pipeline name")?;
 
         self.consume(&TokenKind::LParen, "(")?;
-        let params = self.parse_param_list()?;
+        let params = self.parse_typed_param_list()?;
+        if params.iter().any(|param| param.default_value.is_some()) {
+            return Err(self.error("Pipeline parameters do not support default values"));
+        }
+        if params.iter().any(|param| param.rest) {
+            return Err(self.error("Pipeline parameters do not support rest parameters"));
+        }
         self.consume(&TokenKind::RParen, ")")?;
 
         let return_type = if self.check(&TokenKind::Arrow) {

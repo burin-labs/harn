@@ -1,6 +1,6 @@
 use harn_serve::adapters::acp::{
-    HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD, HARN_PROVIDER_CATALOG_METHOD,
-    HARN_SESSION_UPDATE_EXTENSIONS,
+    ACP_PROMPT_ERROR_DATA_SCHEMA, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
+    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
 };
 use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
@@ -85,6 +85,14 @@ pub(super) fn generate_typescript_for_version(artifact_version: &str) -> String 
     out.push_str("export const HARN_PROVIDER_CATALOG_METHOD = ");
     out.push_str(&json_string_literal(HARN_PROVIDER_CATALOG_METHOD));
     out.push('\n');
+    out.push_str("export const ACP_PROMPT_ERROR_DATA_SCHEMA = ");
+    out.push_str(&json_string_literal(ACP_PROMPT_ERROR_DATA_SCHEMA));
+    out.push_str(" as const\n");
+    out.push_str(&ts_array_owned(
+        "AGENT_TERMINAL_CLASSES",
+        &agent_terminal_class_values(),
+        "AgentTerminalClass",
+    ));
     out.push_str(&ts_array(
         "HARN_AGENT_EVENT_KINDS",
         HARN_AGENT_EVENT_KINDS,
@@ -226,6 +234,11 @@ export interface ACPError {
   code: number
   message: string
   data?: ACPValue
+}
+
+export interface HarnACPPromptErrorData {
+  schema: typeof ACP_PROMPT_ERROR_DATA_SCHEMA
+  terminalClass: AgentTerminalClass
 }
 
 export interface ACPNotification {

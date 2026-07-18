@@ -541,6 +541,28 @@ mod tests {
         assert!(!bool_field(&result, "cascade"));
     }
 
+    // Swift optional-chained subscripts are ordinary production syntax. The
+    // 0.7.3 grammar release regressed this expression when it is followed by
+    // a conditional cast and nil-coalescing fallback, which made valid Burin
+    // sources look like model-authored syntax errors to AST consumers.
+    #[test]
+    fn swift_optional_chained_subscript_with_fallback_parses_clean() {
+        let source = r#"
+import Foundation
+
+func message(from notification: Notification) -> String {
+    notification.userInfo?["message"] as? String ?? "Collaboration error"
+}
+"#;
+        let result = run_with(source, "swift");
+        let errors = list_field(&result, "errors");
+        assert!(
+            errors.is_empty(),
+            "valid Swift optional chaining must parse clean, got {errors:?}"
+        );
+        assert!(!bool_field(&result, "cascade"));
+    }
+
     // Guard against over-unescaping: a JSON-arg body with `\\n` (an intended
     // literal backslash-n in authored code, e.g. a Go/Kotlin string literal)
     // must survive as the two characters `\` + `n` in the source we validate,

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, ErrorCode, TransactionBehavior};
 
-use crate::runtime_sqlite::{configure_runtime_sqlite, RuntimeSqliteError};
+use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteError, RuntimeSqliteSchema};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
 use crate::stdlib::sandbox::{self, FsAccess};
@@ -18,6 +18,17 @@ const DEFAULT_BUSY_TIMEOUT_MS: u64 = 5_000;
 const SQLITE_BUSY_RETRY_INITIAL_MS: u64 = 2;
 const SQLITE_BUSY_RETRY_MAX_MS: u64 = 50;
 const MAX_SLEEP_MS: u64 = 60_000;
+const SQLITE_SCHEMA: RuntimeSqliteSchema = RuntimeSqliteSchema::new(
+    "durable_rate_limit",
+    1,
+    "CREATE TABLE IF NOT EXISTS durable_rate_limit_entries (
+        bucket_key TEXT NOT NULL,
+        ts_ms INTEGER NOT NULL,
+        units INTEGER NOT NULL CHECK(units >= 0)
+    );
+    CREATE INDEX IF NOT EXISTS durable_rate_limit_entries_key_ts_idx
+        ON durable_rate_limit_entries(bucket_key, ts_ms);",
+);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RateBucket {
@@ -347,18 +358,12 @@ fn try_reserve_once_inner(
     }
 
     let mut conn = Connection::open(path)?;
-    configure_runtime_sqlite(&conn, Duration::from_millis(sqlite_busy_timeout_ms))
-        .map_err(ReserveOnceError::RuntimeSqlite)?;
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS durable_rate_limit_entries (
-            bucket_key TEXT NOT NULL,
-            ts_ms INTEGER NOT NULL,
-            units INTEGER NOT NULL CHECK(units >= 0)
-         );
-         CREATE INDEX IF NOT EXISTS durable_rate_limit_entries_key_ts_idx
-            ON durable_rate_limit_entries(bucket_key, ts_ms);",
+    initialize_runtime_sqlite(
+        &conn,
+        Duration::from_millis(sqlite_busy_timeout_ms),
+        &SQLITE_SCHEMA,
     )
-    .map_err(ReserveOnceError::Sqlite)?;
+    .map_err(ReserveOnceError::RuntimeSqlite)?;
 
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut retry_after_ms = 0_u64;

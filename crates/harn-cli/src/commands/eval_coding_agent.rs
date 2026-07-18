@@ -542,9 +542,9 @@ fn normalize_tool_formats(raw_formats: &[String]) -> Result<Vec<String>, String>
         if format.is_empty() {
             continue;
         }
-        if format != "native" && format != "text" {
+        if !matches!(format.as_str(), "native" | "text" | "json") {
             return Err(format!(
-                "unsupported --tool-format `{format}`; expected `native` or `text`"
+                "unsupported --tool-format `{format}`; expected `native`, `text`, or `json`"
             ));
         }
         if seen.insert(format.clone()) {

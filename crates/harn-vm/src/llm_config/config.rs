@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use super::*;
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
 pub struct ProvidersConfig {
     #[serde(default)]
     pub default_provider: Option<String>,
@@ -311,7 +311,7 @@ fn patched_model_row(base: &ModelDef, patch: &toml::Value) -> Result<ModelDef, S
     ModelDef::deserialize(value).map_err(|error| error.to_string())
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct InferenceRule {
     #[serde(default)]
     pub pattern: Option<String>,
@@ -322,7 +322,7 @@ pub struct InferenceRule {
     pub provider: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct TierRule {
     #[serde(default)]
     pub pattern: Option<String>,
@@ -333,7 +333,7 @@ pub struct TierRule {
     pub tier: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct TierDefaults {
     #[serde(default = "default_mid")]
     pub default: String,

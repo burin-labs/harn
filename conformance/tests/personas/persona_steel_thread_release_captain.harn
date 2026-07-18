@@ -158,17 +158,17 @@ pipeline test() {
     {
       persona: "release_captain",
       steps: [
-        {name: "setup_branch", elapsed_ms: "<ms>"},
-        {name: "rewrite_release_notes", payload: {prompt: {provenance: "release-harness-fixture"}}},
-        {name: "enable_auto_merge", payload: {live_github_side_effects: false}},
+        {name: "setup_branch", elapsed_ms: 12, extra: "ignored"},
+        {name: "rewrite_release_notes", payload: result.notes.result},
+        {name: "enable_auto_merge", payload: result.auto_merge.result},
       ],
     },
     {
       persona: "release_captain",
       steps: [
-        {name: "setup_branch", elapsed_ms: 12, extra: "ignored"},
-        {name: "rewrite_release_notes", payload: result.notes.result},
-        {name: "enable_auto_merge", payload: result.auto_merge.result},
+        {name: "setup_branch", elapsed_ms: "<ms>"},
+        {name: "rewrite_release_notes", payload: {prompt: {provenance: "release-harness-fixture"}}},
+        {name: "enable_auto_merge", payload: {live_github_side_effects: false}},
       ],
     },
   )

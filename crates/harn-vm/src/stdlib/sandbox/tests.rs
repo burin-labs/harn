@@ -34,6 +34,7 @@ fn empty_workspace_roots_default_to_execution_root_for_fs_paths() {
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         },
     ));
     push_execution_policy(CapabilityPolicy {
@@ -78,6 +79,7 @@ fn empty_workspace_roots_prefer_execution_project_root_over_env_and_execution_ro
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         },
     ));
     push_execution_policy(CapabilityPolicy {
@@ -147,6 +149,7 @@ fn empty_workspace_roots_prefer_project_root_env_over_execution_root() {
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         },
     ));
     push_execution_policy(CapabilityPolicy {
@@ -198,6 +201,7 @@ fn empty_workspace_roots_default_to_execution_root_for_process_cwd() {
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         },
     ));
     push_execution_policy(CapabilityPolicy {
@@ -233,6 +237,7 @@ fn scoped_process_sandbox_roots_concretize_empty_policy_for_command_cwd() {
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         },
     ));
     push_execution_policy(CapabilityPolicy {

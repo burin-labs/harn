@@ -81,12 +81,22 @@ write_paths windows_source crates/harn-hostlib/src/lib.rs
 assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_source"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_source"
 
+write_paths windows_selector scripts/ci/affected_crate_args.sh
+assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_selector"
+assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_selector"
+
 write_paths package_paths \
   crates/harn-modules/src/package_execution.rs \
   crates/harn-modules/src/package_imports.rs \
   crates/harn-modules/src/package_snapshot.rs
 assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/package_paths"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/package_paths"
+
+write_paths swift_protocol_paths \
+  crates/harn-cli/src/commands/dump_protocol_artifacts/swift.rs \
+  spec/protocol-artifacts/HarnProtocol.swift
+assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/swift_protocol_paths"
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/swift_protocol_paths"
 
 write_paths release_meta Cargo.lock changelog.d/123.fixed.md
 assert_plan false --platform windows --event push --changed-files "$tmp_dir/release_meta"

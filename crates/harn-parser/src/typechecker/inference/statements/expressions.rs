@@ -203,11 +203,7 @@ impl TypeChecker {
             let is_typed = param_ty
                 .as_ref()
                 .is_some_and(|ty| !Self::contains_wildcard_type(ty));
-            closure_scope.define_var(&param.name, param_ty);
-            if is_typed {
-                closure_scope.mark_annotated(&param.name);
-            }
-            closure_scope.clear_nil_widenable(&param.name);
+            self.check_and_define_parameter(param, param_ty, is_typed, &mut closure_scope);
         }
 
         self.fn_depth += 1;

@@ -1,6 +1,8 @@
 //! Selector resolution: turn an alias or provider/model selector into the
 //! complete `ResolvedModel` identity (provider, normalized id, tool format,
 //! tier, family, lineage).
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 use super::*;
@@ -14,6 +16,19 @@ pub struct ResolvedModel {
     pub tier: String,
     pub family: String,
     pub lineage: String,
+}
+
+/// Stable, secret-free model-route facts suitable for durable receipts.
+///
+/// The execution path may carry arbitrary route-overlay parameters. This
+/// contract exposes only Harn's validated generation-default schema so
+/// replay, eval, and audit consumers do not serialize private operator fields.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelExecutionContract {
+    pub selector: String,
+    pub resolved: ResolvedModel,
+    pub wire_model: String,
+    pub generation_defaults: BTreeMap<String, toml::Value>,
 }
 
 /// Resolve a model alias to (model_id, provider_name).
@@ -83,6 +98,20 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
         tier,
         family,
         lineage,
+    }
+}
+
+/// Resolve a model selector into the stable, secret-free execution facts that
+/// hosts may persist and fingerprint.
+pub fn model_execution_contract(selector: &str) -> ModelExecutionContract {
+    let resolved = resolve_model_info(selector);
+    let wire_model = wire_model_id(&resolved.id);
+    let generation_defaults = generation_defaults_for_route(&resolved.provider, &resolved.id);
+    ModelExecutionContract {
+        selector: selector.to_string(),
+        resolved,
+        wire_model,
+        generation_defaults,
     }
 }
 

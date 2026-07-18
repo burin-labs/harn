@@ -1,4 +1,5 @@
 true
+prompt_compiled_v1
 deterministic-sweeper
 suggest
 required
@@ -11,5 +12,9 @@ webhook
 slack
 slack.message
 persona://alerts_triage
+slack/signing_secret
 false
 true
+false
+true
+{"errors":[{"code":"invalid_name","message":"persona name must be an identifier-like token","path":"name"},{"code":"empty_description","message":"description must not be blank","path":"description"},{"code":"empty_goal","message":"goal must not be blank","path":"goal"},{"code":"source_count","message":"persona blueprint must select exactly one source: cron or external","path":""}],"schema_version":"1","source_kind":null,"valid":false,"warnings":[]}

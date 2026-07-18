@@ -26,7 +26,9 @@ siliconflow = "openai"
 parasail = "openai"
 atlas = "openai"
 github_models = "openai"
-vercel_ai_gateway = "openai"
+# Creator/model slugs need the same routed-model capability rows as OpenRouter
+# before falling through to the shared OpenAI-compatible transport defaults.
+vercel_ai_gateway = "openrouter"
 cloudflare_ai_gateway = "openai"
 inception = "openai"
 friendli = "openai"

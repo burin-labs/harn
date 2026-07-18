@@ -16,6 +16,7 @@ mod agent_runtime;
 pub(crate) mod agent_session_host;
 mod agent_session_transcript;
 mod agent_terminal_class;
+pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
 mod agent_tools;
 pub mod api;
 #[cfg(test)]
@@ -37,6 +38,8 @@ pub(crate) mod cost;
 #[cfg(test)]
 mod cost_context_tests;
 pub(crate) mod cost_route;
+#[cfg(test)]
+mod cost_route_pricing_tests;
 pub(crate) mod daemon;
 pub mod eval;
 pub(crate) mod fake;
@@ -65,6 +68,7 @@ pub(crate) mod skill_score;
 mod stream_builtins;
 pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
+pub(crate) mod system_placement;
 mod token_count;
 pub mod tool_conformance;
 pub mod tool_scorecard;
@@ -353,10 +357,13 @@ pub use self::healthcheck::{
 };
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::{vm_value_to_json, vm_value_to_json_strict};
-pub use self::jsonl::{load_llm_mocks_jsonl, parse_llm_mock_value, serialize_llm_mock};
+pub use self::jsonl::{
+    load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned, serialize_llm_mock,
+};
 pub use self::mock::{
-    clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mocks, set_replay_mode,
-    take_cli_llm_recordings, LlmMock, LlmReplayMode, MockError,
+    clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mock_fixture,
+    install_cli_llm_mocks, set_replay_mode, take_cli_llm_recordings, LlmMock, LlmMockFixture,
+    LlmReplayMode, MockError,
 };
 pub use self::model_test::{run_model_smoke_test, ModelSmokeTestOptions, ModelSmokeTestResult};
 pub(crate) use self::provider_auth::provider_auth_status_with_definition;
@@ -405,6 +412,7 @@ pub fn reset_llm_state() {
     mock::reset_llm_mock_state();
     autonomy_budget::reset_autonomy_budget_state();
     agent_session_host::reset_agent_session_host_state();
+    agent_runtime::reset_session_state();
     reminder_providers::clear_reminder_providers();
     permissions::clear_dynamic_permission_state();
     crate::orchestration::clear_all_approval_policy_repeat_counts();
@@ -839,35 +847,9 @@ mod tests {
         LlmCallOptions {
             provider: "mock".to_string(),
             model: "mock".to_string(),
-            api_key: String::new(),
-            api_mode: super::api::LlmApiMode::ChatCompletions,
-            route_policy: super::api::LlmRoutePolicy::Manual,
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::new(),
-            routing_decision: None,
-            routing_policy: None,
-            region: None,
-            session_id: None,
-            dispatch_provenance: None,
-            reminders: None,
-            reminder_lifecycle: Vec::new(),
-            messages: Vec::new(),
-            system: None,
-            transcript_summary: None,
             max_tokens: 128,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            logprobs: false,
-            top_logprobs: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            fast: false,
             output_format: super::api::OutputFormat::JsonObject,
             response_format: Some("json".to_string()),
-            json_schema: None,
             output_schema: Some(serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -876,31 +858,7 @@ mod tests {
             })),
             output_validation: Some("error".to_string()),
             schema_stream_abort: true,
-            thinking: crate::llm::api::ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: false,
-            tools: None,
-            native_tools: None,
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            tool_search: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            stream: true,
-            timeout: None,
-            idle_timeout: None,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            budget: None,
-            prefill: None,
-            structural_experiment: None,
-            applied_structural_experiment: None,
+            ..LlmCallOptions::default()
         }
     }
 
@@ -1020,7 +978,9 @@ mod tests {
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),
             match_pattern: None,
-            consume_on_match: false,
+            scope: mock::DEFAULT_MOCK_SCOPE.to_string(),
+            entry_id: String::new(),
+            sticky: false,
             input_tokens: None,
             output_tokens: None,
             cache_read_tokens: None,
@@ -1040,7 +1000,9 @@ mod tests {
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),
             match_pattern: None,
-            consume_on_match: false,
+            scope: mock::DEFAULT_MOCK_SCOPE.to_string(),
+            entry_id: String::new(),
+            sticky: false,
             input_tokens: None,
             output_tokens: None,
             cache_read_tokens: None,

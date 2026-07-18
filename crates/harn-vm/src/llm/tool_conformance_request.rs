@@ -64,10 +64,17 @@ pub(super) fn probe_request_payload(
     let mut tool_choice = if probe_case.requires_probe_tool()
         && !crate::llm::provider::provider_uses_ollama_messages(provider, model)
     {
-        Some(json!({
-            "type": "function",
-            "function": {"name": TOOL_PROBE_TOOL_NAME}
-        }))
+        if provider == "llamacpp" {
+            // llama.cpp accepts only scalar tool-choice modes. The probe
+            // exposes exactly one tool, so required preserves exact selection
+            // without sending an object the server ignores.
+            Some(json!("required"))
+        } else {
+            Some(json!({
+                "type": "function",
+                "function": {"name": TOOL_PROBE_TOOL_NAME}
+            }))
+        }
     } else {
         None
     };
@@ -129,6 +136,7 @@ pub(super) fn probe_request_payload(
         session_id: None,
         reminder_lifecycle: Vec::new(),
         cli_llm_mock_scope: None,
+        mock_scope: None,
     };
     payload.messages = probe_messages(provider, probe_case, marker);
     apply_request_profile(&mut payload, request_profile);

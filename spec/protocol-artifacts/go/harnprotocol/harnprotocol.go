@@ -10,7 +10,7 @@ package harnprotocol
 import "encoding/json"
 
 // ArtifactVersion pins the Harn release that generated this binding.
-const ArtifactVersion = "0.10.21"
+const ArtifactVersion = "0.10.23"
 
 // HarnAgentEventMethod is the JSON-RPC method for `_harn/agentEvent` notifications.
 const HarnAgentEventMethod = "_harn/agentEvent"
@@ -20,6 +20,9 @@ const HarnProviderCatalogMethod = "_harn/providerCatalog"
 
 // ACPSchemaCompatibility is the upstream ACP schema version Harn tracks.
 const ACPSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
+
+// ACPPromptErrorDataSchema identifies typed session/prompt JSON-RPC error data.
+const ACPPromptErrorDataSchema = "harn.acp.prompt_error.v1"
 
 // A2AProtocolVersion is the A2A protocol version Harn implements.
 const A2AProtocolVersion = "0.3.0"
@@ -254,6 +257,7 @@ var HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
 	"parse_aborted",
 	"timeout",
 	"network",
+	"resource_busy",
 	"cancelled",
 	"abandoned_at_loop_exit",
 	"unknown",
@@ -295,6 +299,23 @@ var HarnWorkerStatuses = []HarnWorkerStatus{
 	"failed",
 	"stopped",
 	"cancelled",
+}
+
+// AgentTerminalClass is the typed alias for the AgentTerminalClasses wire vocabulary.
+type AgentTerminalClass = string
+
+// AgentTerminalClasses enumerates every wire value Harn currently emits for AgentTerminalClass.
+var AgentTerminalClasses = []AgentTerminalClass{
+	"context_overflow",
+	"provider_misconfigured",
+	"provider_unavailable",
+	"rate_limited",
+	"timeout",
+	"resource_busy",
+	"tool_policy_rejected",
+	"host_bridge_unimplemented",
+	"agent_loop_protocol_failure",
+	"generic_throw",
 }
 
 // ToolCallReceiptStatus is the typed alias for the ToolCallReceiptStatuses wire vocabulary.
@@ -544,6 +565,12 @@ type ACPError struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+// HarnACPPromptErrorData is the typed data payload for failed session/prompt calls.
+type HarnACPPromptErrorData struct {
+	Schema        string             `json:"schema"`
+	TerminalClass AgentTerminalClass `json:"terminalClass"`
 }
 
 // ACPResponse is a JSON-RPC response envelope.

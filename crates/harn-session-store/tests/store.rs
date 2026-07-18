@@ -2,30 +2,104 @@
 //!
 //! The runners exercise the memory and SQLite backends against the same scenarios.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use harn_vm::redact::RedactionPolicy;
 use serde_json::json;
 use tempfile::TempDir;
 
 use harn_session_store::*;
 
+#[derive(Clone)]
+struct TestRedactor;
+
+impl EventRedactor for TestRedactor {
+    fn redact_json_in_place(&self, value: &mut serde_json::Value) {
+        if let Some(object) = value.as_object_mut() {
+            if object.contains_key("api_key") {
+                object.insert("api_key".to_string(), json!("[redacted]"));
+            }
+        }
+    }
+
+    fn redact_headers(
+        &self,
+        headers: &std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        headers
+            .iter()
+            .map(|(name, value)| {
+                let value = if name == "authorization" {
+                    "[redacted]".to_string()
+                } else {
+                    value.clone()
+                };
+                (name.clone(), value)
+            })
+            .collect()
+    }
+}
+
+#[derive(Clone)]
+struct IdentityClobberingRedactor;
+
+impl EventRedactor for IdentityClobberingRedactor {
+    fn redact_json_in_place(&self, _value: &mut serde_json::Value) {}
+
+    fn redact_headers(
+        &self,
+        headers: &std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        let mut headers = headers.clone();
+        headers.insert("run_id".to_string(), "[redacted]".to_string());
+        headers
+    }
+}
+
+#[derive(Clone)]
+struct SwitchableRedactor {
+    enabled: Arc<AtomicBool>,
+    clobber_identity: bool,
+}
+
+impl EventRedactor for SwitchableRedactor {
+    fn redact_json_in_place(&self, value: &mut serde_json::Value) {
+        if self.enabled.load(Ordering::SeqCst) {
+            TestRedactor.redact_json_in_place(value);
+        }
+    }
+
+    fn redact_headers(
+        &self,
+        headers: &std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        if !self.enabled.load(Ordering::SeqCst) {
+            return headers.clone();
+        }
+        let mut headers = TestRedactor.redact_headers(headers);
+        if self.clobber_identity {
+            headers.insert("run_id".to_string(), "[redacted]".to_string());
+        }
+        headers
+    }
+}
+
 fn dummy_signer(seed: u8) -> SessionSigner {
     SessionSigner::from_seed([seed; 32])
 }
 
-fn fresh_memory(hooks: StoreHooks) -> Arc<dyn SessionStore> {
+fn fresh_memory(hooks: StoreHooks) -> Arc<dyn SessionImporter> {
     Arc::new(MemorySessionStore::with_hooks(hooks))
 }
 
-fn fresh_sqlite(hooks: StoreHooks, dir: &TempDir) -> Arc<dyn SessionStore> {
+fn fresh_sqlite(hooks: StoreHooks, dir: &TempDir) -> Arc<dyn SessionImporter> {
     let path = dir.path().join("sessions.sqlite");
     Arc::new(SqliteSessionStore::open_with_hooks(path, hooks).expect("open sqlite"))
 }
 
 async fn run_with_hooks<F, Fut>(hooks: StoreHooks, body: F)
 where
-    F: Fn(Arc<dyn SessionStore>) -> Fut,
+    F: Fn(Arc<dyn SessionImporter>) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     body(fresh_memory(hooks.clone())).await;
@@ -56,6 +130,309 @@ async fn create_assigns_meta_and_open_status() {
         assert_eq!(described, meta);
     })
     .await;
+}
+
+#[tokio::test]
+async fn import_is_atomic_idempotent_and_survives_session_deletion() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let request = ImportSession {
+            source_id: "legacy:session-a".to_string(),
+            source_digest: "sha256:source-a".to_string(),
+            session: CreateSession {
+                id: Some("session-a".to_string()),
+                ..CreateSession::default()
+            },
+            events: vec![AppendEvent::new(
+                SessionEventKind::Message,
+                json!({"text": "imported"}),
+            )],
+        };
+        let first = store.import(request.clone()).await.expect("first import");
+        assert!(first.imported);
+        assert_eq!(first.event_count, 1);
+
+        let second = store.import(request.clone()).await.expect("repeat import");
+        assert!(!second.imported);
+        assert_eq!(second.event_count, 1);
+        assert_eq!(store.describe("session-a").await.unwrap().event_count, 1);
+
+        let mut changed = request.clone();
+        changed.source_digest = "sha256:changed".to_string();
+        assert!(matches!(
+            store.import(changed).await,
+            Err(StoreError::Conflict(_))
+        ));
+
+        store.hard_delete("session-a").await.expect("hard delete");
+        let after_delete = store.import(request).await.expect("receipt survives");
+        assert!(!after_delete.imported);
+        assert!(matches!(
+            store.describe("session-a").await,
+            Err(StoreError::NotFound(_))
+        ));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn failed_import_rolls_back_before_retry() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let mut invalid = ImportSession {
+            source_id: "legacy:rollback".to_string(),
+            source_digest: "sha256:rollback".to_string(),
+            session: CreateSession {
+                id: Some("rollback".to_string()),
+                ..CreateSession::default()
+            },
+            events: vec![AppendEvent::new(SessionEventKind::Message, json!({})).with_parent(99)],
+        };
+        assert!(matches!(
+            store.import(invalid.clone()).await,
+            Err(StoreError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            store.describe("rollback").await,
+            Err(StoreError::NotFound(_))
+        ));
+
+        invalid.events = vec![AppendEvent::new(SessionEventKind::Message, json!({}))];
+        assert!(store.import(invalid).await.expect("retry import").imported);
+    })
+    .await;
+}
+
+#[test]
+fn sqlite_import_serializes_independent_connections() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("concurrent.sqlite");
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let request = ImportSession {
+        source_id: "legacy:concurrent".to_string(),
+        source_digest: "sha256:concurrent".to_string(),
+        session: CreateSession {
+            id: Some("concurrent".to_string()),
+            ..CreateSession::default()
+        },
+        events: vec![AppendEvent::new(SessionEventKind::Message, json!({}))],
+    };
+    let stores = [
+        SqliteSessionStore::open(&path).expect("open first sqlite"),
+        SqliteSessionStore::open(&path).expect("open second sqlite"),
+    ];
+    let workers = stores
+        .into_iter()
+        .map(|store| {
+            let barrier = barrier.clone();
+            let request = request.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(store.import(request))
+                    .expect("concurrent import")
+            })
+        })
+        .collect::<Vec<_>>();
+    let results = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("worker"))
+        .collect::<Vec<_>>();
+    assert_eq!(results.iter().filter(|result| result.imported).count(), 1);
+    assert_eq!(results.iter().filter(|result| !result.imported).count(), 1);
+}
+
+#[test]
+fn sqlite_create_maps_an_independent_connection_race_to_already_exists() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("concurrent-create.sqlite");
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let stores = [
+        SqliteSessionStore::open(&path).expect("open first sqlite"),
+        SqliteSessionStore::open(&path).expect("open second sqlite"),
+    ];
+    let workers = stores
+        .into_iter()
+        .map(|store| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(store.create(CreateSession {
+                        id: Some("concurrent-create".to_string()),
+                        ..CreateSession::default()
+                    }))
+            })
+        })
+        .collect::<Vec<_>>();
+    let results = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("worker"))
+        .collect::<Vec<_>>();
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Err(StoreError::AlreadyExists(_))))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn sqlite_upgrade_cleans_pre_foreign_key_orphans_and_records_v2() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("upgrade.sqlite");
+    let store = SqliteSessionStore::open(&path).expect("open sqlite");
+    store
+        .create(CreateSession {
+            id: Some("reused".to_string()),
+            tags: vec!["old".to_string()],
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create old session");
+    store
+        .append(
+            "reused",
+            AppendEvent::new(SessionEventKind::Message, json!({"generation": 1})),
+        )
+        .await
+        .expect("append old event");
+    store
+        .snapshot("reused")
+        .await
+        .expect("snapshot old session");
+    drop(store);
+
+    let conn = rusqlite::Connection::open(&path).expect("open legacy connection");
+    conn.execute_batch(
+        "DROP TABLE _harn_sqlite_schema_versions;
+         DROP TABLE session_imports;
+         CREATE TABLE schema_version (version INTEGER NOT NULL PRIMARY KEY);
+         INSERT INTO schema_version(version) VALUES (1);
+         DELETE FROM sessions WHERE id = 'reused';",
+    )
+    .expect("simulate v1 hard delete");
+    drop(conn);
+
+    let store = SqliteSessionStore::open(&path).expect("upgrade sqlite");
+    store
+        .create(CreateSession {
+            id: Some("reused".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("recreate cleaned session");
+    let event = store
+        .append(
+            "reused",
+            AppendEvent::new(SessionEventKind::Message, json!({"generation": 2})),
+        )
+        .await
+        .expect("append after cleanup");
+    assert_eq!(event.event_id, 1);
+    drop(store);
+
+    let conn = rusqlite::Connection::open(path).expect("inspect upgraded sqlite");
+    let schema_state = (
+        conn.query_row(
+            "SELECT version FROM _harn_sqlite_schema_versions WHERE name = 'session_store'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("shared schema version"),
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'schema_version'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .expect("legacy schema table state"),
+    );
+    assert_eq!(schema_state, (2, false));
+    let stale_children: i64 = conn
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM session_tags WHERE tag = 'old') +
+                (SELECT COUNT(*) FROM session_snapshots WHERE session_id = 'reused')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("orphan count");
+    assert_eq!(stale_children, 0);
+}
+
+#[test]
+fn sqlite_rejects_a_newer_schema_version() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("future.sqlite");
+    let conn = rusqlite::Connection::open(&path).expect("open raw sqlite");
+    conn.execute_batch(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL PRIMARY KEY);
+         INSERT INTO schema_version(version) VALUES (99);",
+    )
+    .expect("mark future legacy schema");
+    drop(conn);
+
+    let error = SqliteSessionStore::open(path)
+        .err()
+        .expect("reject future schema");
+    assert_eq!(
+        error,
+        StoreError::Backend(
+            "schema initialization failed: backend error: session store schema version 99 is newer than supported version 2"
+                .to_string()
+        )
+    );
+}
+
+#[tokio::test]
+async fn sqlite_verify_detects_a_deleted_middle_event() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("tamper.sqlite");
+    let store = SqliteSessionStore::open(&path).expect("open sqlite");
+    store
+        .create(CreateSession {
+            id: Some("tamper".to_string()),
+            ..CreateSession::default()
+        })
+        .await
+        .expect("create");
+    for index in 0..3 {
+        store
+            .append(
+                "tamper",
+                AppendEvent::new(SessionEventKind::Message, json!({"index": index})),
+            )
+            .await
+            .expect("append");
+    }
+    drop(store);
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "DELETE FROM session_events WHERE session_id = 'tamper' AND event_id = 2",
+            [],
+        )
+        .unwrap();
+
+    let store = SqliteSessionStore::open(path).expect("reopen sqlite");
+    let report = store.verify("tamper").await.expect("verify");
+    assert!(!report.failures.is_empty());
+    assert!(report
+        .failures
+        .iter()
+        .any(|failure| failure.reason.contains("sequence gap")));
+    assert!(report
+        .failures
+        .iter()
+        .any(|failure| failure.reason.contains("event_count mismatch")));
 }
 
 #[tokio::test]
@@ -93,6 +470,98 @@ async fn append_assigns_monotonic_ids_and_chain_hashes() {
         assert_eq!(described.event_count, 2);
         assert_eq!(described.last_event_id, Some(2));
         assert!(described.chain_root_hash.is_some());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn typed_identity_is_normalized_and_preserved_by_every_backend() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create");
+        let identity = EventIdentity::new()
+            .with(EventIdentityField::RunId, " run-1 ")
+            .expect("run id")
+            .with(EventIdentityField::TurnId, "turn-1")
+            .expect("turn id")
+            .with(EventIdentityField::SourceEventId, "event-7")
+            .expect("source event id")
+            .with(EventIdentityField::MessageId, "message-3")
+            .expect("message id")
+            .with(EventIdentityField::ToolCallId, "tool-2")
+            .expect("tool call id");
+        let event = AppendEvent::new(SessionEventKind::ToolCall, json!({"name": "shell"}))
+            .with_identity(&identity)
+            .expect("stamp identity");
+
+        let stored = store.append(&meta.id, event).await.expect("append");
+
+        assert_eq!(stored.identity().expect("stored identity"), identity);
+        assert_eq!(stored.headers["run_id"], "run-1");
+        let mut tampered = stored.clone();
+        tampered
+            .headers
+            .insert("run_id".to_string(), "run-2".to_string());
+        assert_ne!(compute_record_hash(&tampered), stored.record_hash);
+        let replayed = store
+            .replay(&store.snapshot(&meta.id).await.expect("snapshot").id)
+            .await
+            .expect("replay");
+        assert_eq!(replayed.events[0].identity().unwrap(), identity);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn redaction_cannot_silently_replace_producer_identity() {
+    let hooks = StoreHooks {
+        redaction: Some(Arc::new(IdentityClobberingRedactor)),
+        ..Default::default()
+    };
+    run_with_hooks(hooks, |store| async move {
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create");
+        let identity = EventIdentity::new()
+            .with(EventIdentityField::RunId, "run-1")
+            .expect("run id");
+        let event = AppendEvent::new(SessionEventKind::Message, json!({"text": "hello"}))
+            .with_identity(&identity)
+            .expect("stamp identity");
+
+        let error = store
+            .append(&meta.id, event)
+            .await
+            .expect_err("identity clobber must fail");
+
+        assert!(matches!(error, StoreError::InvalidInput(_)));
+        assert_eq!(store.describe(&meta.id).await.unwrap().event_count, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn raw_reserved_identity_headers_are_validated_before_persistence() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create");
+        let mut event = AppendEvent::new(SessionEventKind::Message, json!({"text": "hello"}));
+        event
+            .headers
+            .insert("run_id".to_string(), " \n ".to_string());
+
+        let error = store
+            .append(&meta.id, event)
+            .await
+            .expect_err("blank run id must fail");
+
+        assert!(matches!(error, StoreError::InvalidInput(_)));
+        assert_eq!(store.describe(&meta.id).await.unwrap().event_count, 0);
     })
     .await;
 }
@@ -440,10 +909,8 @@ async fn verify_reports_chain_hash_mismatch() {
 
 #[tokio::test]
 async fn redaction_hook_scrubs_payload_on_append() {
-    let mut policy = RedactionPolicy::default();
-    policy = policy.with_extra_field("api_key");
     let hooks = StoreHooks {
-        redaction: Some(policy),
+        redaction: Some(Arc::new(TestRedactor)),
         ..Default::default()
     };
     run_with_hooks(hooks, |store| async move {
@@ -451,23 +918,164 @@ async fn redaction_hook_scrubs_payload_on_append() {
             .create(CreateSession::default())
             .await
             .expect("create");
-        store
-            .append(
-                &meta.id,
-                AppendEvent::new(
-                    SessionEventKind::Message,
-                    json!({"api_key": "ghp_1234567890abcdef", "text": "ok"}),
-                ),
-            )
-            .await
-            .expect("append");
+        let mut event = AppendEvent::new(
+            SessionEventKind::Message,
+            json!({"api_key": "sensitive", "text": "ok"}),
+        );
+        event
+            .headers
+            .insert("authorization".to_string(), "Bearer sensitive".to_string());
+        store.append(&meta.id, event).await.expect("append");
         let page = store
             .read(&meta.id, ReadRange::default())
             .await
             .expect("read");
         let payload = &page.events[0].payload;
         let api_key = payload["api_key"].as_str().expect("string");
-        assert_ne!(api_key, "ghp_1234567890abcdef");
+        assert_eq!(api_key, "[redacted]");
+        assert_eq!(page.events[0].headers["authorization"], "[redacted]");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn retrieval_reapplies_redaction_to_stored_data_and_marks_projection() {
+    let enabled = Arc::new(AtomicBool::new(false));
+    let hooks = StoreHooks {
+        redaction: Some(Arc::new(SwitchableRedactor {
+            enabled: Arc::clone(&enabled),
+            clobber_identity: false,
+        })),
+        event_signer: Some(dummy_signer(9)),
+        ..Default::default()
+    };
+    run_with_hooks(hooks, |store| {
+        let enabled = Arc::clone(&enabled);
+        async move {
+            enabled.store(false, Ordering::SeqCst);
+            let meta = store
+                .create(CreateSession::default())
+                .await
+                .expect("create");
+            let identity = EventIdentity::new()
+                .with(EventIdentityField::RunId, "run-1")
+                .expect("run id");
+            let mut event = AppendEvent::new(
+                SessionEventKind::Message,
+                json!({"api_key": "sensitive", "text": "ok"}),
+            )
+            .with_identity(&identity)
+            .expect("stamp identity");
+            event
+                .headers
+                .insert("authorization".to_string(), "Bearer sensitive".to_string());
+            let stored = store.append(&meta.id, event).await.expect("append");
+            assert_eq!(stored.payload["api_key"], "sensitive");
+            assert_eq!(stored.headers["authorization"], "Bearer sensitive");
+            assert!(stored.signed_by.is_some());
+            let raw_snapshot = store.snapshot(&meta.id).await.expect("raw snapshot");
+            store.close(&meta.id).await.expect("close");
+
+            enabled.store(true, Ordering::SeqCst);
+            let page = store
+                .read(&meta.id, ReadRange::default())
+                .await
+                .expect("read");
+
+            assert_eq!(page.events[0].payload["api_key"], "[redacted]");
+            assert_eq!(page.events[0].headers["authorization"], "[redacted]");
+            assert_eq!(page.events[0].headers["run_id"], "run-1");
+            assert!(page.events[0].is_redacted_projection());
+            assert_eq!(page.events[0].source_record_hash(), stored.record_hash);
+            assert!(page.events[0].signed_by.is_none());
+            let verify_error = verify_event(&page.events[0], &dummy_signer(9).verifying_key())
+                .expect_err("projection must not authenticate as canonical bytes");
+            assert!(matches!(verify_error, VerifyError::InvalidShape(_)));
+
+            let forked = store
+                .fork(&meta.id, 1, Some("redacted-child".to_string()))
+                .await
+                .expect("fork");
+            let child_page = store
+                .read(&forked.child_session_id, ReadRange::default())
+                .await
+                .expect("read child");
+            assert_eq!(child_page.events[0].payload["api_key"], "[redacted]");
+            assert_eq!(child_page.events[0].headers["authorization"], "[redacted]");
+            assert!(!child_page.events[0].is_redacted_projection());
+            assert!(store
+                .verify(&forked.child_session_id)
+                .await
+                .expect("verify child")
+                .failures
+                .is_empty());
+
+            let replayed_raw = store.replay(&raw_snapshot.id).await.expect("replay raw");
+            assert_eq!(replayed_raw.events[0], page.events[0]);
+
+            let protected_snapshot = store.snapshot(&meta.id).await.expect("protected snapshot");
+            assert_eq!(protected_snapshot.events[0], page.events[0]);
+            let projected_root = chain_root_hash(&protected_snapshot.events);
+            assert_eq!(
+                Some(projected_root.as_str()),
+                protected_snapshot.session.chain_root_hash.as_deref()
+            );
+            let verifying_key = dummy_signer(9).verifying_key();
+            let (signed, failures) = verify_event_chain(
+                &protected_snapshot.events,
+                Some(&verifying_key),
+                Some(&verifying_key),
+            );
+            assert_eq!(signed, 1, "the unchanged receipt remains valid");
+            assert_eq!(failures.len(), 1);
+            assert!(failures[0].1.contains("redacted projection"));
+            let replayed_protected = store
+                .replay(&protected_snapshot.id)
+                .await
+                .expect("replay protected");
+            assert_eq!(replayed_protected.events[0], page.events[0]);
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn read_rejects_a_policy_that_clobbers_stored_identity() {
+    let enabled = Arc::new(AtomicBool::new(false));
+    let hooks = StoreHooks {
+        redaction: Some(Arc::new(SwitchableRedactor {
+            enabled: Arc::clone(&enabled),
+            clobber_identity: true,
+        })),
+        ..Default::default()
+    };
+    run_with_hooks(hooks, |store| {
+        let enabled = Arc::clone(&enabled);
+        async move {
+            enabled.store(false, Ordering::SeqCst);
+            let meta = store
+                .create(CreateSession::default())
+                .await
+                .expect("create");
+            let identity = EventIdentity::new()
+                .with(EventIdentityField::RunId, "run-1")
+                .expect("run id");
+            let event = AppendEvent::new(SessionEventKind::Message, json!({"text": "ok"}))
+                .with_identity(&identity)
+                .expect("stamp identity");
+            store.append(&meta.id, event).await.expect("append");
+
+            enabled.store(true, Ordering::SeqCst);
+            let error = store
+                .read(&meta.id, ReadRange::default())
+                .await
+                .expect_err("identity clobber must fail");
+
+            assert!(matches!(error, StoreError::Backend(_)));
+            assert!(error
+                .to_string()
+                .contains("redaction policy changed producer identity"));
+        }
     })
     .await;
 }
@@ -527,6 +1135,13 @@ async fn soft_delete_marks_session_and_hard_delete_removes_it() {
             .create(CreateSession::default())
             .await
             .expect("create");
+        store
+            .append(
+                &meta.id,
+                AppendEvent::new(SessionEventKind::Message, json!({"generation": 1})),
+            )
+            .await
+            .expect("append before delete");
         let soft = store.soft_delete(&meta.id).await.expect("soft delete");
         assert_eq!(soft.status, SessionStatus::SoftDeleted);
         assert!(soft.soft_deleted_at_ms.is_some());
@@ -541,6 +1156,22 @@ async fn soft_delete_marks_session_and_hard_delete_removes_it() {
         store.hard_delete(&meta.id).await.expect("hard delete");
         let missing = store.describe(&meta.id).await.expect_err("describe gone");
         assert!(matches!(missing, StoreError::NotFound(_)));
+
+        store
+            .create(CreateSession {
+                id: Some(meta.id.clone()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("recreate same id");
+        let event = store
+            .append(
+                &meta.id,
+                AppendEvent::new(SessionEventKind::Message, json!({"generation": 2})),
+            )
+            .await
+            .expect("append after recreate");
+        assert_eq!(event.event_id, 1);
     })
     .await;
 }

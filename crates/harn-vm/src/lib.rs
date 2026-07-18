@@ -31,6 +31,7 @@ pub mod autonomy;
 pub(crate) mod aws_sigv4;
 pub mod bridge;
 mod builtin_id;
+pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
 pub mod channel_guardrails;
@@ -128,6 +129,16 @@ pub mod triggers;
 pub mod trust_graph;
 pub(crate) mod url_encoding;
 pub mod user_dirs;
+
+/// Initialize process-wide assets whose construction should happen before an
+/// embedding host enters an async request or VM execution stack.
+///
+/// Hosts should call this once at startup. The operation is idempotent, and VM
+/// construction retains a fallback for embedders that do not have an explicit
+/// bootstrap phase.
+pub fn initialize_runtime_assets() {
+    secret_patterns::initialize_default_secret_patterns();
+}
 
 /// Crate-wide deterministic clock mock used by stdlib time builtins, the
 /// trigger dispatcher, the cron scheduler, and Rust-side tests. Re-exports
@@ -647,6 +658,7 @@ pub fn reset_thread_local_state() {
     stdlib::reset_stdlib_state();
     connectors::clear_active_connector_clients();
     orchestration::clear_runtime_hooks();
+    orchestration::clear_file_edit_queue();
     orchestration::clear_execution_policy_stacks();
     orchestration::clear_command_policies();
     orchestration::clear_pipeline_on_finish();
@@ -660,6 +672,7 @@ pub fn reset_thread_local_state() {
     events::reset_event_sinks();
     tracing::set_tracing_enabled(false);
     tracing::reset_tracing();
+    builtin_profile::reset();
     agent_events::reset_all_sinks();
     agent_sessions::reset_session_store();
     mcp_registry::reset();
@@ -677,6 +690,60 @@ mod reset_leak_tests {
     //! the registry is empty again.
     use super::*;
     use crate::value::VmValue;
+
+    #[test]
+    fn reset_drains_pending_file_edit_notifications() {
+        orchestration::queue_file_edited("stale.harn", serde_json::json!({"operation": "write"}));
+
+        reset_thread_local_state();
+
+        assert!(
+            orchestration::drain_file_edits().is_empty(),
+            "a later VM run must not receive file edits queued by the previous run"
+        );
+    }
+
+    /// The recorder is enabled per RUN but lives for the PROCESS, so an
+    /// embedder that runs one script with `--profile` and the next without it
+    /// would keep paying for bookkeeping nobody reads and fold the second run's
+    /// builtins into the first run's totals. Enablement therefore ends where
+    /// every other process-global ends: here.
+    #[test]
+    fn reset_disables_and_drains_builtin_profile() {
+        let _guard = builtin_profile::test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        builtin_profile::enable();
+        builtin_profile::record("run_shell", std::time::Duration::from_millis(5));
+        assert!(builtin_profile::is_enabled());
+        assert!(!builtin_profile::snapshot().is_empty());
+
+        reset_thread_local_state();
+
+        assert!(
+            !builtin_profile::is_enabled(),
+            "a profiled run must not leave the recorder on for the next one"
+        );
+        assert!(
+            builtin_profile::snapshot().is_empty(),
+            "builtin totals must be empty after reset"
+        );
+    }
+
+    /// The changed-path map is the authoritative source for a sub-agent's
+    /// `files_written` receipt, is process-global, and is drained only at
+    /// teardown — which a session that errors never reaches. A later session
+    /// reusing the id would report writes it never made.
+    #[test]
+    fn reset_drains_session_changed_paths() {
+        agent_sessions::record_session_changed_path("sess-leak", "/tmp/written-by-a-dead-run.txt");
+        assert!(!agent_sessions::session_changed_paths("sess-leak").is_empty());
+        reset_thread_local_state();
+        assert!(
+            agent_sessions::session_changed_paths("sess-leak").is_empty(),
+            "a receipt must not inherit an abandoned session's writes"
+        );
+    }
 
     #[test]
     fn reset_drains_agent_inbox() {

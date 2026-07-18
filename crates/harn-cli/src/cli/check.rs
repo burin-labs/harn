@@ -29,6 +29,10 @@ pub(crate) struct CheckArgs {
     /// Alternate root for render/template path checks.
     #[arg(long = "bundle-root")]
     pub bundle_root: Option<String>,
+    /// Treat warnings as failures. Monotonically enables `[check] strict` for
+    /// this invocation; it never disables workspace strictness.
+    #[arg(long)]
+    pub strict: bool,
     /// Flag unvalidated boundary-API values used in field access.
     #[arg(long = "strict-types")]
     pub strict_types: bool,

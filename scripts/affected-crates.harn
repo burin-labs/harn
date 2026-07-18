@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 
 // Compute the affected-crate set for PR fast-feedback test selection.
 //
@@ -239,34 +239,32 @@ fn preview(items: list, limit: int) -> string {
   }
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "base", flags: ["--base"], parse: "string", default: "origin/main"},
+fn arg_spec() {
+  return parser(
     {
-      kind: "option",
-      name: "output",
-      flags: ["--output"],
-      parse: "string",
-      default: "filter",
-      choices: ["filter", "packages", "args"],
+      name: "affected-crates",
+      args: [
+        {kind: "flag", name: "base", long: "--base", parse: "string", default: "origin/main"},
+        {kind: "flag", name: "output", long: "--output", parse: "string", default: "filter"},
+      ],
     },
-  ]
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio
       .println(
       "usage: harn run scripts/affected-crates.harn -- [--base REF] [--output filter|packages|args]",
     )
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const base = to_string(parsed?.base ?? "origin/main")
   const output = to_string(parsed?.output ?? "filter")
   const root = repo_root()

@@ -2,7 +2,7 @@
 
 ## Built-in providers
 
-Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter, Baseten,
+Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter, Vercel AI Gateway, Baseten,
 HuggingFace, Together, DeepInfra, NVIDIA NIM, Bedrock, Azure OpenAI, Vertex AI,
 and local OpenAI-compatible servers. Set the appropriate environment variable
 to authenticate or point Harn at an endpoint:
@@ -36,6 +36,7 @@ family-level guidance, endpoint notes, and downstream JSON support data.
 | Anthropic (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
 | OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
 | OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.6` |
+| Vercel AI Gateway | `AI_GATEWAY_API_KEY` or `VERCEL_AI_GATEWAY_API_KEY` | `vercel-gpt-5.4-nano` |
 | Baseten Model APIs | `BASETEN_API_KEY` | `baseten-glm-5.2` or explicit `baseten/<wire-id>` |
 | Together AI | `TOGETHER_AI_API_KEY` | explicit Together model ID |
 | DeepInfra | `DEEPINFRA_API_KEY` or `DEEPINFRA_TOKEN` | explicit `deepinfra/<wire-id>` |
@@ -319,6 +320,13 @@ connector. In that case OpenAI owns per-tool execution and approval according
 to the tool config; Harn records provider-native IDs, normalized
 `provider_tool_call` blocks, and `provider_response_id`, but it does not
 locally mediate each remote call.
+
+Providers whose catalog entry declares `responses_api`, including Vercel AI
+Gateway, use the same request and response normalization with their own base
+URL and credentials. For example, select the Gateway Responses endpoint with
+`provider: "vercel_ai_gateway"` and `api_mode: "responses"`. Harn does not
+inherit OpenAI-only hosted tools or remote-MCP claims through a gateway unless
+that provider declares them itself.
 
 ### Capability matrix + `harn.toml` overrides
 
@@ -680,6 +688,38 @@ permissions.
 - Auth: `Authorization: Bearer <key>`
 - Same message format as OpenAI
 
+### Vercel AI Gateway
+
+- Endpoint: `https://ai-gateway.vercel.sh/v1/chat/completions` or `/v1/responses`
+- Auth: `Authorization: Bearer <AI_GATEWAY_API_KEY>`; the longer
+  `VERCEL_AI_GATEWAY_API_KEY` spelling is also accepted
+- Models use creator/model wire ids. Collision-free Harn catalog ids and
+  aliases such as `vercel-gpt-5.4-nano` resolve to those ids automatically.
+- Model capabilities follow the routed creator/model family, so Claude,
+  Gemini, OpenAI, and open-weight routes keep their distinct tool, reasoning,
+  caching, multimodal, and structured-output behavior.
+- Pass Gateway routing controls through the provider override rather than
+  coupling scripts to a second routing abstraction:
+
+```harn
+llm_call("Summarize the change.", nil, {
+  provider: "vercel_ai_gateway",
+  model: "vercel-gpt-5.4-nano",
+  vercel_ai_gateway: {
+    providerOptions: {
+      gateway: {
+        sort: "cost",
+        models: ["google/gemini-3.1-flash-lite-preview"],
+      },
+    },
+  },
+})
+```
+
+The returned `telemetry.provider_metadata` preserves Gateway routing attempts,
+the resolved upstream, and exact billed cost without baking Vercel's metadata
+schema into Harn.
+
 ### HuggingFace
 
 - Endpoint: `https://router.huggingface.co/v1/chat/completions`
@@ -799,6 +839,7 @@ Each provider defines an `auth_style` and one or more environment variables:
 | Anthropic | `ANTHROPIC_API_KEY` | header |
 | OpenAI | `OPENAI_API_KEY` | bearer |
 | OpenRouter | `OPENROUTER_API_KEY` | bearer |
+| Vercel AI Gateway | `AI_GATEWAY_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY` | bearer |
 | HuggingFace | `HF_TOKEN`, `HUGGINGFACE_API_KEY` | bearer |
 | Bedrock | AWS credential chain | SigV4 |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_AD_TOKEN` | api-key or bearer |

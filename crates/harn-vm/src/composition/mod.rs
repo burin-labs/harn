@@ -686,6 +686,7 @@ fn is_retryable_child_error(output: &CompositionToolOutput) -> bool {
             ToolCallErrorCategory::Network
                 | ToolCallErrorCategory::Timeout
                 | ToolCallErrorCategory::McpServerError
+                | ToolCallErrorCategory::ResourceBusy
         )
     ) {
         return true;

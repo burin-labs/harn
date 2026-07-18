@@ -26,11 +26,7 @@
 // Ships default-OFF and experimental.
 import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/postturn"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
-import { agent_tool_annotations } from "std/agent/tool_annotations"
-
-const __STANCE_READ_ONLY_KINDS = ["read", "search", "think", "fetch"]
-
-const __STANCE_READ_ONLY_LEVELS = ["none", "read_only"]
+import { agent_tool_is_read_only } from "std/agent/tool_annotations"
 
 fn __stance_config(opts) {
   return opts?.read_only_stance ?? {}
@@ -53,25 +49,6 @@ fn __stance_entry_name(entry) {
   return entry?.function?.name ?? entry?.name ?? ""
 }
 
-/**
- * Fail-safe read-only classification, mirroring the VM's
- * `ToolKind::is_read_only`: a tool counts as read-only ONLY when its
- * annotations explicitly say so — by kind, or by a none/read_only side
- * effect level. Unannotated tools are mutating by default.
- */
-fn __stance_entry_read_only(entry, policy) {
-  const annotations = agent_tool_annotations(entry, policy, __stance_entry_name(entry))
-  const kind = annotations?.kind
-  if kind != nil {
-    return contains(__STANCE_READ_ONLY_KINDS, to_string(kind))
-  }
-  const level = annotations?.side_effect_level
-  if level != nil {
-    return contains(__STANCE_READ_ONLY_LEVELS, to_string(level))
-  }
-  return false
-}
-
 fn __stance_read_only_names(registry, policy, hard_keep, escape_tool) {
   let names = [escape_tool]
   for name in hard_keep ?? [] {
@@ -80,8 +57,8 @@ fn __stance_read_only_names(registry, policy, hard_keep, escape_tool) {
     }
   }
   for entry in __stance_registry_entries(registry) {
-    if __stance_entry_read_only(entry, policy) {
-      const name = __stance_entry_name(entry)
+    const name = __stance_entry_name(entry)
+    if agent_tool_is_read_only(entry, policy, name) {
       if name != "" && !contains(names, name) {
         names = names.push(name)
       }
@@ -181,13 +158,13 @@ fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
   const escape_tool = cfg?.escape_tool ?? "request_write_access"
   const consent = cfg?.consent_check
   const handler = { args ->
-    let justification = to_string(args?.justification ?? "")
-    let verdict = if consent != nil {
+    const justification = to_string(args?.justification ?? "")
+    const verdict = if consent != nil {
       consent(justification, session_id)
     } else {
       agent_stance_default_consent_check(justification, session_id)
     }
-    let granted = (verdict?.verdict ?? "deny") == "grant"
+    const granted = (verdict?.verdict ?? "deny") == "grant"
     agent_emit_event(
       session_id,
       if granted {

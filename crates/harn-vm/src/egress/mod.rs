@@ -17,6 +17,8 @@ use crate::vm::Vm;
 
 mod provider_allow;
 pub mod ssrf;
+#[cfg(test)]
+mod test_support;
 
 pub use provider_allow::{
     configured_provider_private_allow_host, install_ssrf_guard_with_private_host_allowlist,
@@ -304,11 +306,11 @@ pub fn reset_egress_policy_for_tests() {
     reset_egress_policy_for_host();
 }
 
-/// Serializes egress tests that mutate `HARN_EGRESS_*` process-global env or
-/// the global egress policy state. `std::env::set_var` is unsound under
-/// concurrent access, so every env-mutating egress test holds this lock for its
-/// whole body. Recovers from a poisoned mutex so a panicking test cannot wedge
-/// the rest of the suite.
+/// Serializes egress tests that read or mutate `HARN_EGRESS_*` process-global
+/// environment and the global egress policy state. An environment reader must
+/// hold the same lock as a writer: otherwise it can snapshot a sibling test's
+/// temporary configuration. Recovers from a poisoned mutex so a panicking test
+/// cannot wedge the rest of the suite.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
     use std::sync::{Mutex, OnceLock};
@@ -316,6 +318,30 @@ pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.get_or_init(|| Mutex::new(()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A clean, serialized egress configuration snapshot for constructing a test
+/// client. Drop this before awaiting the client request: its resulting resolver
+/// is immutable, while holding a synchronous mutex across async I/O is wrong.
+#[cfg(test)]
+pub(crate) struct EgressTestConfigGuard {
+    _env: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl EgressTestConfigGuard {
+    pub(crate) fn new() -> Self {
+        let env = test_env_lock();
+        reset_egress_policy_for_tests();
+        Self { _env: env }
+    }
+}
+
+#[cfg(test)]
+impl Drop for EgressTestConfigGuard {
+    fn drop(&mut self) {
+        reset_egress_policy_for_tests();
+    }
 }
 
 /// Install a thread-local egress policy from `(key, value)` config pairs for
@@ -1951,26 +1977,6 @@ mod tests {
         assert_eq!(current_ssrf_client_settings(), (false, false));
     }
 
-    /// Accept exactly one TCP connection and answer a minimal HTTP/1.1 200 so a
-    /// non-blocked client gets a real response. Returns the bound loopback port.
-    fn spawn_one_shot_ok_server() -> (u16, std::thread::JoinHandle<()>) {
-        use std::io::{Read, Write};
-        let listener =
-            std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback probe server");
-        let port = listener.local_addr().expect("probe server addr").port();
-        let handle = std::thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0u8; 1024];
-                let _ = stream.read(&mut buf);
-                let _ = stream.write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-                );
-                let _ = stream.flush();
-            }
-        });
-        (port, handle)
-    }
-
     /// Finding A: a client built through `install_ssrf_guard` under the run's
     /// SSRF scope must NOT be able to reach a hostname that resolves to a
     /// loopback/private address (the connect-time backstop drops it), while the
@@ -1978,53 +1984,44 @@ mod tests {
     /// guard is actually installed and not over-blocking when disabled.
     #[tokio::test]
     async fn install_ssrf_guard_blocks_loopback_hostname_and_passes_when_off() {
-        // No process-env mutation here: the guard scope and the block_private
-        // override both go through thread-local test state, so no env lock is
-        // needed (and holding a std mutex across `.await` would trip clippy).
-
         // Under the guard scope, `localhost` resolves only to loopback, which the
         // backstop resolver drops → the send fails before any server bytes flow.
-        let (port, server) = spawn_one_shot_ok_server();
-        reset_egress_policy_for_tests();
-        {
+        let server = test_support::OneShotHttpServer::start();
+        let client = {
+            let _config = EgressTestConfigGuard::new();
             let _scope = require_ssrf_guard_for_host();
-            let client = install_ssrf_guard(reqwest::Client::builder())
+            install_ssrf_guard(reqwest::Client::builder())
                 .build()
-                .expect("guarded client builds");
-            let result = client
-                .get(format!("http://localhost:{port}/probe"))
-                .send()
-                .await;
-            assert!(
-                result.is_err(),
-                "guarded client must not reach a loopback hostname, got {result:?}"
-            );
-        }
-        // The listener never served anyone; release its accept thread.
-        drop(server);
+                .expect("guarded client builds")
+        };
+        let result = client.get(server.url()).send().await;
+        assert!(
+            result.is_err(),
+            "guarded client must not reach a loopback hostname, got {result:?}"
+        );
+        server.unblock_and_join();
 
         // With the private block explicitly off, the guard installs no resolver
         // and the very same hostname is reachable (no over-blocking).
-        let (port, server) = spawn_one_shot_ok_server();
-        reset_egress_policy_for_tests();
-        install_test_policy(&[(
-            "block_private",
-            VmValue::String(arcstr::ArcStr::from("off")),
-        )]);
-        {
+        let server = test_support::OneShotHttpServer::start();
+        let client = {
+            let _config = EgressTestConfigGuard::new();
+            install_test_policy(&[(
+                "block_private",
+                VmValue::String(arcstr::ArcStr::from("off")),
+            )]);
             let _scope = require_ssrf_guard_for_host();
-            let client = install_ssrf_guard(reqwest::Client::builder())
+            install_ssrf_guard(reqwest::Client::builder())
                 .build()
-                .expect("unguarded client builds");
-            let response = client
-                .get(format!("http://localhost:{port}/probe"))
-                .send()
-                .await
-                .expect("block_private:off permits loopback hostname");
-            assert_eq!(response.status().as_u16(), 200);
-        }
-        server.join().expect("probe server thread");
-        reset_egress_policy_for_tests();
+                .expect("unguarded client builds")
+        };
+        let response = client
+            .get(server.url())
+            .send()
+            .await
+            .expect("block_private:off permits loopback hostname");
+        assert_eq!(response.status().as_u16(), 200);
+        server.join();
     }
 
     // --- NetPolicy CIDR/IP rules applied to RESOLVED host IPs (#3174). ---

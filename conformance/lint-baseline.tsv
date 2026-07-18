@@ -6,7 +6,9 @@
 9	agents/agent_loop_escalation_provider_error.harn	HARN-LNT-018
 2	agents/agent_loop_intra_turn_failure_fanout_cap.harn	HARN-LNT-049
 36	agents/agent_loop_intra_turn_resource_fail_fast.harn	HARN-LNT-025
+17	agents/agent_loop_monologue_actuation.harn	HARN-LNT-025
 1	agents/agent_loop_native_missing_tool_call_recovery.harn	HARN-LNT-018
+6	agents/agent_loop_options.harn	HARN-LNT-025
 2	agents/agent_loop_step_judge_unavailable.harn	HARN-LNT-032
 4	agents/agent_path_scope_guard.harn	HARN-LNT-025
 16	agents/agent_path_scope_permissions.harn	HARN-LNT-025

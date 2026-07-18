@@ -605,6 +605,9 @@ impl<'a> TsValueParser<'a> {
             Err(HeredocError::MissingNewline { tag }) => {
                 Err(format!("expected newline after heredoc tag <<{tag}"))
             }
+            Err(HeredocError::InvalidCount { tag }) => Err(format!(
+                "heredoc <<{tag}:N line count is too large; emit a valid non-negative integer"
+            )),
             Err(HeredocError::Unterminated { tag }) => Err(format!(
                 "unterminated heredoc: expected closing {tag} at the start of a line"
             )),

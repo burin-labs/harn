@@ -25,9 +25,13 @@ mod tests_lazy_callable;
 #[cfg(test)]
 mod tests_lexical_block;
 #[cfg(test)]
+mod tests_lexical_capture;
+#[cfg(test)]
 mod tests_package_runtime;
 #[cfg(test)]
 mod tests_runtime;
+#[cfg(test)]
+mod tests_runtime_process_exit;
 #[cfg(test)]
 mod tests_typed_op_fallback;
 

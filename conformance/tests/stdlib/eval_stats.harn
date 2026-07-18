@@ -101,6 +101,35 @@ pipeline test(task) {
     {harnessConfigFingerprint: "cfg-1"},
   )
   assert_eq(aggregate_with_harness.harness_config_fingerprint, "cfg-1")
+  const fingerprint_rows = [
+    {case_name: "case-a", case_fingerprint: "a", harness_config_fingerprint: "cfg-1"},
+    {case_name: "case-a", case_fingerprint: "a", harness_config_fingerprint: "cfg-1"},
+    {case_name: "case-b", case_fingerprint: "b", harness_config_fingerprint: "cfg-1"},
+  ]
+  assert_eq(
+    eval_fingerprint_integrity(fingerprint_rows),
+    {
+      complete: true,
+      consistent: true,
+      case_fingerprints: {"case-a": "a", "case-b": "b"},
+      harness_fingerprints: ["cfg-1"],
+      inconsistent_cases: [],
+    },
+  )
+  const mixed_fingerprints = eval_fingerprint_integrity(
+    fingerprint_rows
+      + [{case_name: "case-a", case_fingerprint: "a-v2", harness_config_fingerprint: "cfg-2"}],
+  )
+  assert_eq(mixed_fingerprints.complete, true)
+  assert_eq(mixed_fingerprints.consistent, false)
+  assert_eq(mixed_fingerprints.harness_fingerprints, ["cfg-1", "cfg-2"])
+  assert_eq(mixed_fingerprints.inconsistent_cases, ["case-a"])
+  assert_eq(
+    eval_fingerprint_integrity(
+      [{case_name: "case-a", case_fingerprint: "", harness_config_fingerprint: "cfg-1"}],
+    ).complete,
+    false,
+  )
   const power_two_values = [0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0]
   const ci = bootstrap_mean_ci(power_two_values, 200, 0.05, 12345)
   assert_eq(ci, bootstrap_mean_ci(power_two_values, 200, 0.05, 12345))

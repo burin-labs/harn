@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
-use crate::llm::capabilities::WireDialect;
+use crate::llm::capabilities::{should_use_responses_transport, WireDialect};
 use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{
     append_paragraph, debug_log_message_shapes, extract_openai_delta_field_str,
 };
-use super::options::{DeltaSender, LlmRequestPayload};
+use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{
     billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
@@ -184,20 +184,14 @@ pub(super) async fn vm_call_llm_api(
         )?;
     }
 
-    // OpenAI `*-codex` routes are served ONLY by the Responses API and return
-    // HTTP 404 ("Use the v1/responses endpoint instead") on
-    // `/v1/chat/completions`. Route them through the Responses provider even
-    // when the caller did not explicitly request `api_mode: "responses"`, so a
-    // codex model can never be a silent 404. This lives in the shared
-    // `vm_call_llm_api` funnel (not `chat_impl`) because `openai` is a built-in
-    // dialect, not a `provider_register`-ed provider, so it takes the
-    // unregistered fallback below and never reaches `chat_impl`. Pure
-    // capability lookup — the `*-codex` match lives in the OpenAI capability
-    // rows, no model-name branch here.
-    if provider == "openai"
-        && (opts.api_mode == crate::llm::api::LlmApiMode::Responses
-            || crate::llm::capabilities::lookup(provider, &opts.model).chat_completions_unsupported)
-    {
+    // Route explicit Responses requests through providers that advertise the
+    // transport. OpenAI models that reject Chat Completions (such as Codex)
+    // also select Responses implicitly through the model capability matrix.
+    if should_use_responses_transport(
+        provider,
+        &opts.model,
+        opts.api_mode == LlmApiMode::Responses,
+    ) {
         return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
     }
 
@@ -1577,6 +1571,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                     .filter(|value| !value.is_empty());
                 telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
             }
+            telemetry.capture_provider_metadata(&json);
         }
     }
 

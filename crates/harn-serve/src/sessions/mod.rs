@@ -14,10 +14,11 @@ pub use api::sessions_router;
 pub use harn_session_store::{
     canonical_event_bytes, canonical_json_bytes, chain_root_fold, chain_root_hash, chain_root_init,
     compute_record_hash, re_anchor_events, verify_event, verify_receipt_root, AppendEvent,
-    ArchiveSink, CreateSession, EventId, EventPage, EventSignature, ForkResult, ListFilter,
-    MemorySessionStore, ReadRange, RetentionPolicy, SessionEventKind, SessionId, SessionMeta,
-    SessionSigner, SessionStatus, SessionStore, SharedArchiveSink, SharedSessionStore, Snapshot,
-    SnapshotId, SqliteSessionStore, StoreError, StoreHooks, StoreResult, StoredEvent, SweepReport,
-    Tombstone, TruncateResult, VerifyError, VerifyFailure, VerifyReport, MAX_READ_BATCH,
-    SIGNATURE_ALGORITHM,
+    ArchiveSink, CreateSession, EventId, EventIdentity, EventIdentityError, EventIdentityField,
+    EventPage, EventRedactor, EventSignature, ForkResult, ListFilter, MemorySessionStore,
+    ReadRange, RetentionPolicy, SessionEventKind, SessionId, SessionMeta, SessionSigner,
+    SessionStatus, SessionStore, SharedArchiveSink, SharedEventRedactor, SharedSessionStore,
+    Snapshot, SnapshotId, SqliteSessionStore, StoreContention, StoreError, StoreHooks, StoreResult,
+    StoredEvent, SweepReport, Tombstone, TruncateResult, VerifyError, VerifyFailure, VerifyReport,
+    MAX_READ_BATCH, SIGNATURE_ALGORITHM,
 };

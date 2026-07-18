@@ -2,10 +2,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-use super::api::{
-    vm_call_llm_full_streaming, LlmApiMode, LlmCallOptions, LlmRoutePolicy, OutputFormat,
-    ThinkingConfig,
-};
+use super::api::{vm_call_llm_full_streaming, LlmCallOptions};
 use crate::value::{VmError, VmValue};
 
 const SMOKE_TEST_MAX_TOKENS: i64 = 32;
@@ -66,65 +63,15 @@ pub async fn run_model_smoke_test(
         provider: provider.clone(),
         model: model_id.clone(),
         api_key,
-        api_mode: LlmApiMode::ChatCompletions,
-        route_policy: LlmRoutePolicy::Manual,
-        fallback_chain: Vec::new(),
-        route_fallbacks: Vec::new(),
-        routing_decision: None,
-        routing_policy: None,
-        region: None,
-        session_id: None,
-        dispatch_provenance: None,
-        reminders: None,
-        reminder_lifecycle: Vec::new(),
         messages: vec![serde_json::json!({
             "role": "user",
             "content": options.prompt,
         })],
-        system: None,
-        transcript_summary: None,
         max_tokens: SMOKE_TEST_MAX_TOKENS,
-        temperature: None,
-        top_p: None,
-        top_k: None,
-        logprobs: false,
-        top_logprobs: None,
-        stop: None,
-        seed: None,
-        frequency_penalty: None,
-        presence_penalty: None,
-        fast: false,
-        output_format: OutputFormat::Text,
-        response_format: None,
-        json_schema: None,
-        output_schema: None,
-        output_validation: None,
-        schema_stream_abort: false,
-        thinking: ThinkingConfig::Disabled,
-        anthropic_beta_features: Vec::new(),
-        vision: false,
-        tools: None,
-        native_tools: None,
-        provider_tools: Vec::new(),
-        tool_choice: None,
-        tool_search: None,
-        cache: false,
-        prompt_cache_ttl: None,
-        timeout: None,
-        idle_timeout: None,
-        stream: true,
-        provider_overrides: None,
-        previous_response_id: None,
-        store: None,
-        background: None,
-        truncation: None,
-        compact: None,
-        include: None,
-        max_tool_calls: None,
-        budget: None,
-        prefill: None,
-        structural_experiment: None,
-        applied_structural_experiment: None,
+        // A smoke test wants a bare, deterministic completion: no schema, no
+        // thinking, plain text. Those all match `LlmCallOptions::default()`,
+        // so only the routing + prompt + token cap need spelling out here.
+        ..LlmCallOptions::default()
     };
 
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();

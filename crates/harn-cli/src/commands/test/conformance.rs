@@ -838,7 +838,22 @@ pub(crate) struct ConformanceRunOptions<'a> {
     pub(crate) timing: bool,
     pub(crate) differential_optimizations: bool,
     pub(crate) json: bool,
+    pub(crate) shard: Option<crate::test_runner::TestShard>,
     pub(crate) cli_skill_dirs: &'a [PathBuf],
+}
+
+fn select_conformance_shard<T>(
+    items: Vec<T>,
+    shard: Option<crate::test_runner::TestShard>,
+) -> Vec<T> {
+    let Some(shard) = shard else {
+        return items;
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(offset, item)| (offset % shard.total() == shard.index() - 1).then_some(item))
+        .collect()
 }
 
 async fn evaluate_conformance_case(
@@ -1174,6 +1189,7 @@ pub(crate) async fn run_conformance_tests(
             conformance_filter_matches(&rel_path, filter).then_some((harn_file, rel_path))
         })
         .collect();
+    let selected_harn_files = select_conformance_shard(selected_harn_files, options.shard);
 
     for (harn_file, rel_path) in &selected_harn_files {
         let expected_file = harn_file.with_extension("expected");

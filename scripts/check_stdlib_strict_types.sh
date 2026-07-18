@@ -30,15 +30,14 @@ EXCLUDE=(
   "crates/harn-stdlib/src/stdlib/stdlib_agents.harn"
 )
 
-# Resolve the checker through the shared fresh-binary wrapper. It reuses a
-# current worktree binary without walking Cargo's graph for stdlib-only edits,
-# and rebuilds or fails loudly when executable inputs are stale.
-harn=(./scripts/harn_bin.sh --)
+# Resolve the checker before suppressing diagnostic exit status below. This
+# gate must fail rather than compile or mistake resolver failure for no findings.
+harn_bin="$(./scripts/harn_bin.sh --no-build --print)"
 
 # The check exits non-zero on pre-existing HARN-TYP errors in the tree; those
 # are not this gate's concern, so capture output and drive the verdict off the
 # HARN-OWN-004 findings alone.
-out="$("${harn[@]}" check --strict-types "$STDLIB_DIR" 2>&1 || true)"
+out="$("$harn_bin" check --strict-types "$STDLIB_DIR" 2>&1 || true)"
 
 # Each finding is a `warning[HARN-OWN-004]: ...` line followed by a
 # `    --> <file>:<line>:<col>` locator. Pull the locators for our code.

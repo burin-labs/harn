@@ -109,7 +109,20 @@ impl TypeChecker {
             Node::Spread(inner) if matches!(inner.node, Node::Identifier(_)) => {}
             Node::Spread(inner) => self.check_match_pattern(inner, scope),
             Node::EnumConstruct { .. } | Node::MethodCall { .. } => {}
-            Node::FunctionCall { name, .. } if !scope.enum_owners_of_variant(name).is_empty() => {}
+            Node::FunctionCall { name, .. } => {
+                let catalog = scope.lexical_match_pattern_catalog();
+                match catalog.resolve_bare_variant(name) {
+                    crate::lexical::BareVariantResolution::Unique(_) => {}
+                    crate::lexical::BareVariantResolution::Ambiguous(owners) => self.error_at(
+                        Code::InvalidMatchPattern,
+                        crate::lexical::ambiguous_bare_variant_message(name, owners),
+                        pattern.span,
+                    ),
+                    crate::lexical::BareVariantResolution::NotVariant => {
+                        self.check_node(pattern, scope);
+                    }
+                }
+            }
             Node::OrPattern(alternatives) => self.check_or_pattern_alternatives(alternatives),
             _ => self.check_node(pattern, scope),
         }

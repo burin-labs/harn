@@ -37,6 +37,8 @@ mod worker;
 mod from_host_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tool_taxonomy_tests;
 
 pub use agent::AgentEvent;
 pub use host_injection::{
@@ -51,8 +53,12 @@ pub use registry::{
     session_has_external_sink, unregister_wildcard_sink, WildcardSinkHandle,
 };
 pub use sinks::{AgentEventSink, EventLogSink, JsonlEventSink, MultiSink, PersistedAgentEvent};
-pub use terminal::{classify_agent_terminal, AgentTerminalKind, AgentTerminalOutcome};
+pub use terminal::{
+    classify_agent_terminal, classify_agent_terminal_with_class, AgentTerminalKind,
+    AgentTerminalOutcome,
+};
 pub use tool::{
-    DenialGate, ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
+    DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, ToolCallErrorCategory,
+    ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
 };
 pub use worker::{FsWatchEvent, WorkerEvent};

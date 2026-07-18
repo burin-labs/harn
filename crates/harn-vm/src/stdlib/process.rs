@@ -16,6 +16,16 @@ const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
 thread_local! {
     pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static VM_EXECUTION_CONTEXT: RefCell<Option<RunExecutionRecord>> = const { RefCell::new(None) };
+    /// The capability profile the current session launched under (hermetic or a
+    /// grant-carrying lane). `None` is the legacy, no-profile path: a plain CLI
+    /// or test invocation that never opted into the profile model, whose child
+    /// processes inherit the parent environment unchanged. `Some(profile)`
+    /// switches subprocess env construction to the closed-by-construction
+    /// resolver (`security::resolve_env`). Held across a worker's `.await`s and
+    /// so swapped per-task by the ambient scope; its `_CONTEXT` suffix enrolls it
+    /// in the ambient-thread-local drift guard.
+    static SESSION_PROFILE_CONTEXT: RefCell<Option<crate::security::SessionProfile>> =
+        const { RefCell::new(None) };
 }
 
 /// Set the source directory for the current thread (called by VM on file execution).
@@ -44,6 +54,30 @@ pub fn set_thread_execution_context(context: Option<RunExecutionRecord>) {
 
 pub(crate) fn current_execution_context() -> Option<RunExecutionRecord> {
     VM_EXECUTION_CONTEXT.with(|current| current.borrow().clone())
+}
+
+/// Install (or clear) the capability profile the current session runs under.
+/// Called at the session launch boundary once the ACP config's declared profile
+/// and grants have been resolved into a [`crate::security::SessionProfile`].
+pub fn set_session_profile(profile: Option<crate::security::SessionProfile>) {
+    SESSION_PROFILE_CONTEXT.with(|current| *current.borrow_mut() = profile);
+}
+
+/// The capability profile governing subprocess env construction for the current
+/// task, or `None` on the legacy no-profile path.
+pub(crate) fn current_session_profile() -> Option<crate::security::SessionProfile> {
+    SESSION_PROFILE_CONTEXT.with(|current| current.borrow().clone())
+}
+
+/// Per-task ambient-scope swap of the session profile. Same rationale as
+/// [`swap_thread_execution_context`]: a fan-out worker holds its session's
+/// profile across `.await`s, so it must keep its own copy rather than read a
+/// cooperatively-scheduled sibling's. `pub(crate)` — only the ambient combinator
+/// moves whole profiles; launch code uses [`set_session_profile`].
+pub(crate) fn swap_session_profile(
+    next: Option<crate::security::SessionProfile>,
+) -> Option<crate::security::SessionProfile> {
+    SESSION_PROFILE_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
 }
 
 /// Per-task ambient-scope swap of the thread execution context. See
@@ -263,7 +297,7 @@ fn env_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 #[harn_builtin(sig = "exit(code?: int) -> never", category = "process")]
 fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let code = args.first().and_then(|a| a.as_int()).unwrap_or(0);
-    std::process::exit(code as i32);
+    Err(VmError::ProcessExit(code as i32))
 }
 
 #[harn_builtin(sig = "exec(...command: string) -> dict", category = "process")]
@@ -574,8 +608,9 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         args: &cmd_args,
         cwd: cwd.as_deref(),
         env: &env_overrides,
-        // `spawn_captured` has always layered `env` over the inherited
-        // parent environment, so keep that merge behavior.
+        // `spawn_captured` layers `env` over the ambient environment rather
+        // than replacing it. Under a session profile that ambient base is the
+        // resolver's allowlist + grants, not the raw parent env.
         env_clear: false,
         stdin: stdin_bytes,
         timeout,
@@ -632,8 +667,9 @@ struct CapturedRun {
 
 /// Shared synchronous spawn-and-capture core used by `spawn_captured` and the
 /// `exec_opts`/`exec_at_opts` convenience builtins. Honors cwd, an env
-/// overlay (merge or replace via `env_clear`), optional stdin, and an optional
-/// wall-clock timeout (after which the child is killed and `timed_out` is set).
+/// overlay (merge or replace via `env_clear`), the live session profile's
+/// closed environment, optional stdin, and an optional wall-clock timeout
+/// (after which the child is killed and `timed_out` is set).
 ///
 /// The child runs in its own process group and the wait polls
 /// [`crate::op_interrupt::requested`], so scope cancellation, `deadline`
@@ -647,10 +683,20 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     if let Some(cwd) = spec.cwd {
         command.current_dir(cwd);
     }
-    if spec.env_clear {
+    // A `replace` request (`env_clear`) is already closed — only the caller's
+    // keys survive — so it needs no further narrowing. A `merge` request would
+    // otherwise inherit the parent environment wholesale, which under a session
+    // profile means credentials crossing into the child. Route it through the
+    // same resolver `process_command_config` uses so both seams close together.
+    let profile_env = if spec.env_clear {
+        None
+    } else {
+        session_closed_env(spec.env.iter().cloned())?
+    };
+    if spec.env_clear || profile_env.is_some() {
         command.env_clear();
     }
-    for (key, value) in spec.env {
+    for (key, value) in profile_env.as_deref().unwrap_or(spec.env) {
         command.env(key, value);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -747,9 +793,11 @@ struct ExecOptions {
 /// Extract `exec_opts` / `exec_at_opts` options into an [`ExecOptions`].
 ///
 /// `env_mode` mirrors the `process.exec` host op (and the env-clear footgun
-/// fix): the default is `"merge"` (overlay `env` keys on the inherited parent
-/// environment, keeping PATH/HOME/etc.); `"replace"` clears the parent
-/// environment first so only the provided keys remain.
+/// fix): the default is `"merge"` (overlay `env` keys on the ambient
+/// environment, keeping PATH/HOME/etc.); `"replace"` clears that environment
+/// first so only the provided keys remain. Under a session profile the ambient
+/// base a `"merge"` sees is the resolver's allowlist + grants, not the raw
+/// parent env — see [`session_closed_env`].
 fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, VmError> {
     let opts = match options {
         None | Some(VmValue::Nil) => return Ok(ExecOptions::default()),
@@ -1030,7 +1078,63 @@ fn process_command_config(
     if let Some(value) = env_override(HARN_REPLAY_ENV) {
         config.env.push((HARN_REPLAY_ENV.to_string(), value));
     }
+    // `iter().cloned()`, not `drain(..)`: `Drain`'s destructor removes the
+    // range even when the iterator is never consumed, so draining here would
+    // silently empty `config.env` on the no-profile path.
+    if let Some(env) = session_closed_env(config.env.iter().cloned())? {
+        config.env = env;
+        config.closed_env = true;
+    }
     Ok(config)
+}
+
+/// The single place a live session profile becomes a child environment.
+///
+/// Returns `None` when no profile governs this session — the legacy path, where
+/// children inherit the parent environment and `overlay` is layered on top.
+/// Returns `Some(env)` when a profile is active: `resolve_env` composes the
+/// allowlisted subset of the parent env plus the profile's granted exposure,
+/// and `overlay` (worktree paths, `HARN_REPLAY`, caller-supplied `env`, ...)
+/// wins over that base. The caller must hand the result to the child with the
+/// inherited environment CLEARED — a closed env is only closed if nothing
+/// leaks in behind it. A hermetic profile contributes no grants, so its child
+/// sees the allowlist alone.
+///
+/// Every spawn seam must route through here. `resolve_env` is documented as the
+/// single environment builder, and a seam that skips it silently reopens the
+/// credential boundary the profile exists to close (harn#5011).
+pub(crate) fn session_closed_env(
+    overlay: impl Iterator<Item = (String, String)>,
+) -> Result<Option<Vec<(String, String)>>, VmError> {
+    let Some(profile) = current_session_profile() else {
+        return Ok(None);
+    };
+    let resolved = crate::security::resolve_env(
+        &profile,
+        &|name| std::env::var(name).ok(),
+        &resolve_grant_secret,
+    )
+    .map_err(|error| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "session grant env resolution failed: {error}"
+        ))))
+    })?;
+    let mut env: BTreeMap<String, String> = resolved;
+    env.extend(overlay);
+    Ok(Some(env.into_iter().collect()))
+}
+
+/// Resolve a `secret_store` grant pointer to its value through the crate's
+/// configured secret chain. Env-snapshot grants never reach this — their value
+/// was captured at launch — so this only runs for a lane that exposes a
+/// `secret_store` grant to the process env. Any resolution failure yields `None`,
+/// which surfaces as a loud `MissingSecret` at the spawn boundary rather than a
+/// silently-empty credential.
+fn resolve_grant_secret(account: &str, key: &str) -> Option<String> {
+    let reference = format!("{}{}/{}", crate::secrets::SECRET_REF_SCHEME, account, key);
+    crate::secrets::resolve_secret_ref_to_string(&reference)
+        .ok()
+        .flatten()
 }
 
 fn prefix_process_error(error: VmError, prefix: &str) -> VmError {
@@ -1057,431 +1161,5 @@ fn resolve_command_dir(dir: &str) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct RuntimePathsEnvGuard {
-        state: Option<String>,
-        run: Option<String>,
-        worktree: Option<String>,
-    }
-
-    impl RuntimePathsEnvGuard {
-        fn capture() -> Self {
-            Self {
-                state: std::env::var(crate::runtime_paths::HARN_STATE_DIR_ENV).ok(),
-                run: std::env::var(crate::runtime_paths::HARN_RUN_DIR_ENV).ok(),
-                worktree: std::env::var(crate::runtime_paths::HARN_WORKTREE_DIR_ENV).ok(),
-            }
-        }
-    }
-
-    impl Drop for RuntimePathsEnvGuard {
-        fn drop(&mut self) {
-            match self.state.as_deref() {
-                Some(value) => std::env::set_var(crate::runtime_paths::HARN_STATE_DIR_ENV, value),
-                None => std::env::remove_var(crate::runtime_paths::HARN_STATE_DIR_ENV),
-            }
-            match self.run.as_deref() {
-                Some(value) => std::env::set_var(crate::runtime_paths::HARN_RUN_DIR_ENV, value),
-                None => std::env::remove_var(crate::runtime_paths::HARN_RUN_DIR_ENV),
-            }
-            match self.worktree.as_deref() {
-                Some(value) => {
-                    std::env::set_var(crate::runtime_paths::HARN_WORKTREE_DIR_ENV, value);
-                }
-                None => std::env::remove_var(crate::runtime_paths::HARN_WORKTREE_DIR_ENV),
-            }
-        }
-    }
-
-    #[test]
-    fn lexically_collapse_resolves_sibling_walk() {
-        let path = PathBuf::from("/tmp/project/tests/../fixtures/x.json");
-        let collapsed = lexically_collapse(&path).expect("sibling walk");
-        assert_eq!(collapsed, PathBuf::from("/tmp/project/fixtures/x.json"));
-    }
-
-    #[test]
-    fn lexically_collapse_blocks_escape_past_root() {
-        // `/app/../etc/passwd` would lexically resolve to `/etc/passwd`,
-        // but the pop hits a RootDir which is not Normal — refuse.
-        let path = PathBuf::from("/app/../../etc/passwd");
-        assert!(lexically_collapse(&path).is_none());
-    }
-
-    #[test]
-    fn lexically_collapse_strips_curdir() {
-        let path = PathBuf::from("/app/./logs/today.txt");
-        let collapsed = lexically_collapse(&path).expect("curdir is benign");
-        assert_eq!(collapsed, PathBuf::from("/app/logs/today.txt"));
-    }
-
-    #[test]
-    fn resolve_source_relative_path_blocks_obvious_escape() {
-        let dir =
-            std::env::temp_dir().join(format!("harn-process-escape-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&dir).unwrap();
-        set_thread_source_dir(&dir);
-        set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
-            cwd: Some(dir.to_string_lossy().into_owned()),
-            project_root: None,
-            source_dir: Some(dir.to_string_lossy().into_owned()),
-            env: BTreeMap::new(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-        }));
-        // A long string of `..` should escape the temp-root and trip
-        // the rejection sentinel, so the file read fails NotFound
-        // instead of escaping to a different filesystem location.
-        let resolved = resolve_source_relative_path("../../../../../../../../etc/passwd");
-        assert!(
-            resolved
-                .to_string_lossy()
-                .contains("__harn_rejected_parent_dir_traversal__"),
-            "expected rejection sentinel, got {resolved:?}"
-        );
-        reset_process_state();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn resolve_source_relative_path_ignores_thread_source_dir_without_execution_context() {
-        let dir = std::env::temp_dir().join(format!("harn-process-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let current_dir = std::env::current_dir().unwrap();
-        set_thread_source_dir(&dir);
-        let resolved = resolve_source_relative_path("templates/prompt.txt");
-        assert_eq!(resolved, current_dir.join("templates/prompt.txt"));
-        reset_process_state();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn resolve_source_relative_path_prefers_execution_cwd_over_source_dir() {
-        let cwd = std::env::temp_dir().join(format!("harn-process-cwd-{}", uuid::Uuid::now_v7()));
-        let source_dir =
-            std::env::temp_dir().join(format!("harn-process-source-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&cwd).unwrap();
-        std::fs::create_dir_all(&source_dir).unwrap();
-        set_thread_source_dir(&source_dir);
-        set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
-            cwd: Some(cwd.to_string_lossy().into_owned()),
-            project_root: None,
-            source_dir: Some(source_dir.to_string_lossy().into_owned()),
-            env: BTreeMap::new(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-        }));
-        let resolved = resolve_source_relative_path("templates/prompt.txt");
-        assert_eq!(resolved, cwd.join("templates/prompt.txt"));
-        reset_process_state();
-        let _ = std::fs::remove_dir_all(&cwd);
-        let _ = std::fs::remove_dir_all(&source_dir);
-    }
-
-    #[test]
-    fn resolve_source_asset_path_prefers_execution_source_dir_over_cwd() {
-        let cwd = std::env::temp_dir().join(format!("harn-asset-cwd-{}", uuid::Uuid::now_v7()));
-        let source_dir =
-            std::env::temp_dir().join(format!("harn-asset-source-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&cwd).unwrap();
-        std::fs::create_dir_all(&source_dir).unwrap();
-        set_thread_source_dir(&source_dir);
-        set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
-            cwd: Some(cwd.to_string_lossy().into_owned()),
-            project_root: None,
-            source_dir: Some(source_dir.to_string_lossy().into_owned()),
-            env: BTreeMap::new(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-        }));
-        let resolved = resolve_source_asset_path("templates/prompt.txt");
-        assert_eq!(resolved, source_dir.join("templates/prompt.txt"));
-        reset_process_state();
-        let _ = std::fs::remove_dir_all(&cwd);
-        let _ = std::fs::remove_dir_all(&source_dir);
-    }
-
-    #[test]
-    fn set_thread_source_dir_absolutizes_relative_paths() {
-        reset_process_state();
-        let current_dir = std::env::current_dir().unwrap();
-        set_thread_source_dir(std::path::Path::new("scripts"));
-        assert_eq!(source_root_path(), current_dir.join("scripts"));
-        reset_process_state();
-    }
-
-    #[test]
-    fn project_root_builtin_prefers_explicit_execution_project_root() {
-        let cwd = std::env::temp_dir().join(format!("harn-process-cwd-{}", uuid::Uuid::now_v7()));
-        let project_root =
-            std::env::temp_dir().join(format!("harn-process-root-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&cwd).unwrap();
-        std::fs::create_dir_all(&project_root).unwrap();
-        set_thread_execution_context(Some(RunExecutionRecord {
-            cwd: Some(cwd.to_string_lossy().into_owned()),
-            project_root: Some(project_root.to_string_lossy().into_owned()),
-            ..Default::default()
-        }));
-
-        let mut out = String::new();
-        let value = project_root_impl(&[], &mut out).unwrap();
-        assert_eq!(value.display(), project_root.display().to_string());
-
-        reset_process_state();
-        let _ = std::fs::remove_dir_all(&cwd);
-        let _ = std::fs::remove_dir_all(&project_root);
-    }
-
-    #[test]
-    fn exec_context_sets_default_cwd_and_env() {
-        let dir = std::env::temp_dir().join(format!("harn-process-ctx-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("marker.txt"), "ok").unwrap();
-        set_thread_execution_context(Some(RunExecutionRecord {
-            cwd: Some(dir.to_string_lossy().into_owned()),
-            env: BTreeMap::from([("HARN_PROCESS_TEST".to_string(), "present".to_string())]),
-            ..Default::default()
-        }));
-        let output = exec_shell(
-            None,
-            "sh",
-            "-c",
-            "printf '%s:' \"$HARN_PROCESS_TEST\" && test -f marker.txt",
-        )
-        .unwrap();
-        assert!(output.status.success());
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "present:");
-        reset_process_state();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn exec_at_resolves_relative_to_execution_cwd() {
-        let dir = std::env::temp_dir().join(format!("harn-process-rel-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(dir.join("nested")).unwrap();
-        std::fs::write(dir.join("nested").join("marker.txt"), "ok").unwrap();
-        set_thread_execution_context(Some(RunExecutionRecord {
-            cwd: Some(dir.to_string_lossy().into_owned()),
-            ..Default::default()
-        }));
-        let output = exec_shell(Some("nested"), "sh", "-c", "test -f marker.txt").unwrap();
-        assert!(output.status.success());
-        reset_process_state();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn runtime_paths_uses_configurable_state_roots() {
-        let _runtime_paths_env_lock = crate::runtime_paths::test_env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _env_guard = RuntimePathsEnvGuard::capture();
-        let base =
-            std::env::temp_dir().join(format!("harn-process-runtime-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&base).unwrap();
-        std::env::set_var(crate::runtime_paths::HARN_STATE_DIR_ENV, ".custom-harn");
-        std::env::set_var(crate::runtime_paths::HARN_RUN_DIR_ENV, ".custom-runs");
-        std::env::set_var(
-            crate::runtime_paths::HARN_WORKTREE_DIR_ENV,
-            ".custom-worktrees",
-        );
-        set_thread_execution_context(Some(RunExecutionRecord {
-            cwd: Some(base.to_string_lossy().into_owned()),
-            ..Default::default()
-        }));
-
-        let mut vm = crate::vm::Vm::new();
-        register_process_builtins(&mut vm);
-        let mut out = String::new();
-        let builtin = vm
-            .builtins
-            .get("runtime_paths")
-            .expect("runtime_paths builtin");
-        let paths = match builtin(&[], &mut out).unwrap() {
-            VmValue::Dict(map) => map,
-            other => panic!("expected dict, got {other:?}"),
-        };
-        assert_eq!(
-            paths.get("state_root").unwrap().display(),
-            base.join(".custom-harn").display().to_string()
-        );
-        assert_eq!(
-            paths.get("run_root").unwrap().display(),
-            base.join(".custom-runs").display().to_string()
-        );
-        assert_eq!(
-            paths.get("worktree_root").unwrap().display(),
-            base.join(".custom-worktrees").display().to_string()
-        );
-
-        reset_process_state();
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[cfg(unix)]
-    fn exec_opts_list(items: &[&str]) -> VmValue {
-        VmValue::List(std::sync::Arc::new(
-            items
-                .iter()
-                .map(|s| VmValue::String(arcstr::ArcStr::from(*s)))
-                .collect(),
-        ))
-    }
-
-    #[cfg(unix)]
-    fn exec_opts_dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        VmValue::dict(
-            pairs
-                .iter()
-                .map(|(k, v)| (crate::value::intern_key(k), v.clone()))
-                .collect::<crate::value::DictMap>(),
-        )
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn exec_opts_merges_env_with_parent_by_default() {
-        std::env::set_var("HARN_EXEC_OPTS_PARENT", "from-parent");
-        let env = exec_opts_dict(&[("CHILD", VmValue::String(arcstr::ArcStr::from("from-child")))]);
-        let args = vec![
-            exec_opts_list(&[
-                "/bin/sh",
-                "-c",
-                "printf '%s|%s' \"$HARN_EXEC_OPTS_PARENT\" \"$CHILD\"",
-            ]),
-            exec_opts_dict(&[("env", env)]),
-        ];
-        let mut out = String::new();
-        let result = exec_opts_impl(&args, &mut out).expect("exec_opts result");
-        let dict = result.as_dict().expect("dict");
-        assert_eq!(
-            dict.get("stdout").unwrap().display(),
-            "from-parent|from-child"
-        );
-        assert!(matches!(dict.get("success"), Some(VmValue::Bool(true))));
-        std::env::remove_var("HARN_EXEC_OPTS_PARENT");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn exec_opts_replace_env_clears_parent() {
-        std::env::set_var("HARN_EXEC_OPTS_PARENT2", "from-parent");
-        let env = exec_opts_dict(&[("CHILD", VmValue::String(arcstr::ArcStr::from("from-child")))]);
-        let args = vec![
-            exec_opts_list(&[
-                "/bin/sh",
-                "-c",
-                "printf '%s|%s' \"$HARN_EXEC_OPTS_PARENT2\" \"$CHILD\"",
-            ]),
-            exec_opts_dict(&[
-                ("env", env),
-                ("env_mode", VmValue::String(arcstr::ArcStr::from("replace"))),
-            ]),
-        ];
-        let mut out = String::new();
-        let result = exec_opts_impl(&args, &mut out).expect("exec_opts result");
-        let dict = result.as_dict().expect("dict");
-        assert_eq!(dict.get("stdout").unwrap().display(), "|from-child");
-        std::env::remove_var("HARN_EXEC_OPTS_PARENT2");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn exec_at_opts_honors_directory() {
-        let dir = std::env::temp_dir().join(format!("harn-exec-opts-cwd-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let args = vec![
-            VmValue::String(arcstr::ArcStr::from(dir.to_string_lossy().into_owned())),
-            exec_opts_list(&["/bin/sh", "-c", "pwd -P"]),
-        ];
-        let mut out = String::new();
-        let result = exec_at_opts_impl(&args, &mut out).expect("exec_at_opts result");
-        let dict = result.as_dict().expect("dict");
-        // macOS /tmp is a symlink to /private/tmp; canonicalize for comparison.
-        let want = std::fs::canonicalize(&dir).unwrap();
-        let got = dict.get("stdout").unwrap().display();
-        assert_eq!(got.trim(), want.to_string_lossy());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn exec_opts_enforces_timeout() {
-        let args = vec![
-            exec_opts_list(&["/bin/sh", "-c", "sleep 5"]),
-            exec_opts_dict(&[("timeout", VmValue::Int(50))]),
-        ];
-        let mut out = String::new();
-        let result = exec_opts_impl(&args, &mut out).expect("exec_opts result");
-        let dict = result.as_dict().expect("dict");
-        assert!(
-            matches!(dict.get("timed_out"), Some(VmValue::Bool(true))),
-            "command exceeding timeout must report timed_out"
-        );
-        assert!(matches!(dict.get("success"), Some(VmValue::Bool(false))));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn exec_opts_rejects_empty_command() {
-        let args = vec![exec_opts_list(&[])];
-        let mut out = String::new();
-        assert!(exec_opts_impl(&args, &mut out).is_err());
-        let bad = vec![VmValue::String(arcstr::ArcStr::from("not-a-list"))];
-        assert!(exec_opts_impl(&bad, &mut out).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn exec_opts_interrupt_kills_child_process_group() {
-        use std::sync::atomic::AtomicBool;
-        use std::sync::Arc;
-
-        // An armed cancel token (the shape scope cancellation / deadline
-        // expiry takes by the time the wait loop polls) must terminate the
-        // child *and its grandchild* long before the command finishes.
-        let cancel = Arc::new(AtomicBool::new(false));
-        let _guard = crate::op_interrupt::install(Some(Arc::clone(&cancel)), None);
-        let flipper = {
-            let cancel = Arc::clone(&cancel);
-            std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(200));
-                cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-            })
-        };
-
-        let started = Instant::now();
-        let args = vec![exec_opts_list(&[
-            "/bin/sh",
-            "-c",
-            // Write the group id, spawn a grandchild, then block.
-            "echo started; sleep 30 & wait",
-        ])];
-        let mut out = String::new();
-        let result = exec_opts_impl(&args, &mut out).expect("exec_opts result");
-        flipper.join().unwrap();
-
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "interrupt must preempt the 30s child, took {:?}",
-            started.elapsed()
-        );
-        let dict = result.as_dict().expect("dict");
-        assert!(matches!(dict.get("success"), Some(VmValue::Bool(false))));
-        assert!(matches!(dict.get("timed_out"), Some(VmValue::Bool(false))));
-    }
-}
+#[path = "process_tests.rs"]
+mod tests;

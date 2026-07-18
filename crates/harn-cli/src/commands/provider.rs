@@ -173,7 +173,17 @@ pub(crate) async fn run_tool_probe(args: ProviderToolProbeArgs) {
     }
 }
 
-async fn dispatch_provider_tool_probe(args: ProviderToolProbeArgs) -> i32 {
+async fn dispatch_provider_tool_probe(mut args: ProviderToolProbeArgs) -> i32 {
+    args.model = match crate::commands::providers::resolve_tool_probe_wire_model(
+        &args.provider,
+        &args.model,
+    ) {
+        Ok(model) => model,
+        Err(error) => {
+            eprintln!("{error}");
+            return 1;
+        }
+    };
     if args.dry_run_request {
         return crate::commands::providers::render_tool_probe_request(&args);
     }

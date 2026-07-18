@@ -1,0 +1,155 @@
+import { agent_loop_default_retry_predicate } from "std/agent/retry"
+import { agent_emit_event } from "std/agent/state"
+import { with_retry } from "std/llm/handlers"
+import { llm_call_options } from "std/llm/options"
+
+fn __dispatch_messages_include_tool_result(messages) {
+  if type_of(messages) != "list" {
+    return false
+  }
+  for msg in messages {
+    const role = to_string(msg?.role ?? "")
+    if role == "tool" || role == "tool_result" {
+      return true
+    }
+  }
+  return false
+}
+
+fn __dispatch_error_field(err, key, fallback) {
+  if type_of(err) == "dict" {
+    const value = err[key]
+    if value != nil {
+      return to_string(value)
+    }
+  }
+  return fallback
+}
+
+fn __dispatch_provider_error(err, llm_opts) {
+  const message = __dispatch_error_field(err, "message", to_string(err))
+  const category = __dispatch_error_field(err, "category", error_category(err))
+  const reason = __dispatch_error_field(err, "reason", "")
+  const kind = __dispatch_error_field(err, "kind", "")
+  const provider = __dispatch_error_field(err, "provider", to_string(llm_opts?.provider ?? ""))
+  const model = __dispatch_error_field(err, "model", to_string(llm_opts?.model ?? ""))
+  return {
+    category: category,
+    reason: reason,
+    kind: kind,
+    provider: provider,
+    model: model,
+    message: message,
+    phase: "llm_call",
+    tool_format: to_string(llm_opts?.tool_format ?? ""),
+    after_tool_result: __dispatch_messages_include_tool_result(llm_opts?.messages),
+  }
+}
+
+fn __dispatch_emit_call_start(llm_opts) {
+  const session_id = to_string(llm_opts?.session_id ?? "")
+  if session_id == "" {
+    return nil
+  }
+  const checkpoint = {
+    kind: "llm_call_start",
+    phase: "llm_call",
+    iteration: to_int(llm_opts?._iteration ?? 0),
+    attempt: to_int(llm_opts?._truncation_auto_continue_attempt ?? 0) + 1,
+    context_overflow_recovery_attempt: to_int(llm_opts?._context_overflow_recovery_attempt ?? 0),
+    provider: to_string(llm_opts?.provider ?? ""),
+    model: to_string(llm_opts?.model ?? ""),
+    tool_format: to_string(llm_opts?.tool_format ?? ""),
+    final_wrapup: llm_opts?._final_wrapup ?? false,
+  }
+  agent_emit_event(session_id, "typed_checkpoint", checkpoint)
+  return nil
+}
+
+fn __dispatch_validate_caller_result(result) {
+  if type_of(result) != "dict" {
+    throw "agent_loop: llm_caller must return a dict; got " + type_of(result)
+  }
+  if result?.ok == nil {
+    throw "agent_loop: llm_caller result missing `ok`"
+  }
+  if result.ok && type_of(result?.value) != "dict" {
+    throw "agent_loop: llm_caller returned ok=true but `value` is not a dict"
+  }
+  if !result.ok && type_of(result?.status) != "string" {
+    throw "agent_loop: llm_caller returned ok=false but `status` is not a string"
+  }
+}
+
+fn __dispatch_default(message, turn_system, llm_opts) {
+  // Streaming and non-streaming paths intentionally return the same normalized
+  // result so downstream tool dispatch does not depend on rendering mode.
+  const on_delta = llm_opts?._on_delta
+  const result = try {
+    if type_of(on_delta) == "closure" {
+      __host_llm_stream_collect(message, turn_system, llm_call_options(llm_opts), on_delta)
+    } else {
+      llm_call(message, turn_system, llm_call_options(llm_opts))
+    }
+  }
+  if !is_err(result) {
+    return {ok: true, value: unwrap(result)}
+  }
+  const err = unwrap_err(result)
+  const normalized = __dispatch_provider_error(err, llm_opts)
+  const reason = if type_of(err) == "dict" {
+    err?.reason ?? ""
+  } else {
+    ""
+  }
+  if reason == "budget_exceeded" {
+    return {ok: false, status: "budget_exhausted", stop_reason: "budget_exhausted", error: normalized}
+  }
+  return {ok: false, status: "provider_error", stop_reason: "provider_error", error: normalized}
+}
+
+/**
+ * Invoke one agent LLM request through the configured caller middleware or the
+ * default provider transport, emitting the canonical call-start checkpoint.
+ *
+ * @effects: [agent, llm.call]
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_invoke_llm(message, turn_system, llm_opts) -> dict {
+  __dispatch_emit_call_start(llm_opts)
+  const caller = llm_opts?._llm_caller
+  if caller == nil {
+    const retry_cfg = llm_opts?._llm_retry
+    if retry_cfg != nil {
+      const retrying_default = with_retry(
+        { call -> __dispatch_default(call.prompt, call.system, call.opts) },
+        retry_cfg + {predicate: retry_cfg?.predicate ?? agent_loop_default_retry_predicate},
+      )
+      return retrying_default(
+        {
+          prompt: message,
+          system: turn_system,
+          opts: llm_opts,
+          turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
+        },
+      )
+    }
+    return __dispatch_default(message, turn_system, llm_opts)
+  }
+  const call = {
+    prompt: message,
+    system: turn_system,
+    opts: llm_opts,
+    turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
+  }
+  const invoked = try {
+    caller(call)
+  }
+  if is_err(invoked) {
+    throw unwrap_err(invoked)
+  }
+  const result = unwrap(invoked)
+  __dispatch_validate_caller_result(result)
+  return result
+}

@@ -160,9 +160,10 @@ fn __join(items: list, sep: string) -> string {
 }
 
 /**
- * Render the human-readable table. Mirrors `print_text_report` in
- * `crates/harn-cli/src/commands/routes.rs` byte-for-byte (column
- * widths and ordering).
+ * Render the human-readable routes table. This script owns rendering: the
+ * Rust `harn routes` command (`crates/harn-cli/src/commands/routes.rs`)
+ * extracts the route inventory and delegates the text/JSON view to this
+ * script, so the column widths and ordering below are authoritative.
  */
 fn __render_text(report: dict) -> string {
   let out = __pad_right("id", 28)

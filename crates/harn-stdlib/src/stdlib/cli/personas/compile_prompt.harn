@@ -1,0 +1,33 @@
+// CLI bridge for the Harn-owned prompt persona compiler. Rust supplies only a
+// closed payload and renders the returned receipt; compilation policy remains
+// in std/personas/prompt_compiler.
+import { persona_compile_prompt } from "std/personas/prompt_compiler"
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_PERSONA_COMPILE_PROMPT_JSON", "")
+  if raw == "" {
+    __io_eprintln("HARN_PERSONA_COMPILE_PROMPT_JSON is required")
+    return 2
+  }
+  const payload = try {
+    json_parse(raw)
+  } catch (e) {
+    __io_eprintln("persona prompt compiler payload must be valid JSON: " + to_string(e))
+    return 2
+  }
+  if type_of(payload?.prompt) != "string" {
+    __io_eprintln("persona prompt compiler payload requires a string prompt")
+    return 2
+  }
+  const receipt = persona_compile_prompt(
+    payload.prompt,
+    {
+      provider: payload?.provider,
+      model: payload?.model,
+      max_tokens: payload?.max_tokens,
+      name_override: payload?.name,
+    },
+  )
+  __io_println(json_stringify(receipt))
+  return 0
+}

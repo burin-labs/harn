@@ -2,7 +2,9 @@ use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{error_to_category, values_equal, ErrorCategory, VmError, VmValue};
+use crate::value::{
+    error_to_category, render_diff, repr, values_equal, ErrorCategory, VmError, VmValue,
+};
 use crate::vm::Vm;
 
 pub(crate) fn register_testing_builtins(vm: &mut Vm) {
@@ -16,6 +18,9 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &ASSERT_IMPL_DEF,
     &ASSERT_EQ_IMPL_DEF,
     &ASSERT_NE_IMPL_DEF,
+    &ASSERT_APPROX_IMPL_DEF,
+    &ASSERT_MATCHES_IMPL_DEF,
+    &VALUE_DIFF_IMPL_DEF,
     &ERROR_CATEGORY_IMPL_DEF,
     &THROW_ERROR_IMPL_DEF,
     &IS_TIMEOUT_IMPL_DEF,
@@ -103,51 +108,192 @@ fn assert_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     Ok(VmValue::Nil)
 }
 
-#[harn_builtin(
-    sig = "assert_eq(left: any, right: any, message?: string) -> nil",
-    category = "testing"
-)]
-fn assert_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() >= 2 {
-        if !values_equal(&args[0], &args[1]) {
-            let msg = assert_message(args, 2, || {
-                format!(
-                    "Assertion failed: expected {}, got {}",
-                    args[1].display(),
-                    args[0].display()
-                )
-            });
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
-        }
-        Ok(VmValue::Nil)
-    } else {
-        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "assert_eq requires at least 2 arguments",
-        ))))
+/// Throws a Harn-level error carrying `text` — the shape every assertion
+/// failure takes, so `try`/`catch` sees a plain string it can match on.
+fn fail(text: String) -> VmError {
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(text)))
+}
+
+/// The two values under comparison, in the surface's fixed `(actual,
+/// expected)` order, plus the caller's optional override message.
+///
+/// Every equality-shaped builtin funnels through this so the argument order is
+/// stated once. Getting it wrong silently inverts every diff, so it is not a
+/// thing to re-derive at four call sites.
+struct Comparison<'a> {
+    actual: &'a VmValue,
+    expected: &'a VmValue,
+    message: Option<String>,
+}
+
+impl<'a> Comparison<'a> {
+    fn parse(name: &str, args: &'a [VmValue]) -> Result<Self, VmError> {
+        let (Some(actual), Some(expected)) = (args.first(), args.get(1)) else {
+            return Err(fail(format!(
+                "{name} needs two values to compare: {name}(actual, expected)"
+            )));
+        };
+        Ok(Self {
+            actual,
+            expected,
+            // An uninformative override (nil, blank, or the bare string
+            // `"null"` that `json_stringify(nil)` produces) carries no signal,
+            // so it falls back to the diff the same way an omitted message
+            // does — see `is_uninformative_message`.
+            message: args
+                .get(2)
+                .filter(|m| !is_uninformative_message(m))
+                .map(|m| m.display()),
+        })
+    }
+
+    /// The caller's message when they gave one, else `default`. An explicit
+    /// message is a deliberate choice to say something the diff cannot, so it
+    /// replaces the diff rather than decorating it.
+    fn or_default(&self, default: impl FnOnce() -> String) -> VmError {
+        fail(self.message.clone().unwrap_or_else(default))
     }
 }
 
 #[harn_builtin(
-    sig = "assert_ne(left: any, right: any, message?: string) -> nil",
+    sig = "assert_eq(actual: any, expected: any, message?: string) -> nil",
+    category = "testing"
+)]
+fn assert_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let cmp = Comparison::parse("assert_eq", args)?;
+    match render_diff(Some("assert_eq failed"), cmp.actual, cmp.expected) {
+        None => Ok(VmValue::Nil),
+        Some(diff) => Err(cmp.or_default(|| diff)),
+    }
+}
+
+#[harn_builtin(
+    sig = "assert_ne(actual: any, expected: any, message?: string) -> nil",
     category = "testing"
 )]
 fn assert_ne_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() >= 2 {
-        if values_equal(&args[0], &args[1]) {
-            let msg = assert_message(args, 2, || {
-                format!(
-                    "Assertion failed: values should not be equal: {}",
-                    args[0].display()
-                )
-            });
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
-        }
-        Ok(VmValue::Nil)
-    } else {
-        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "assert_ne requires at least 2 arguments",
-        ))))
+    let cmp = Comparison::parse("assert_ne", args)?;
+    if !values_equal(cmp.actual, cmp.expected) {
+        return Ok(VmValue::Nil);
     }
+    Err(cmp.or_default(|| format!("assert_ne failed: both values are {}.", repr(cmp.actual))))
+}
+
+/// Default tolerance for `assert_approx`: tight enough to catch a real error,
+/// loose enough to absorb the rounding of a few chained float operations.
+const DEFAULT_APPROX_TOLERANCE: f64 = 1e-9;
+
+#[harn_builtin(
+    sig = "assert_approx(actual: any, expected: any, tolerance?: float, message?: string) -> nil",
+    category = "testing"
+)]
+fn assert_approx_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let (Some(actual), Some(expected)) = (args.first(), args.get(1)) else {
+        return Err(fail(
+            "assert_approx needs two values to compare: assert_approx(actual, expected, tolerance?)"
+                .to_string(),
+        ));
+    };
+    let numeric = |v: &VmValue| -> Option<f64> {
+        match v {
+            VmValue::Int(n) => Some(*n as f64),
+            VmValue::Float(n) => Some(*n),
+            _ => None,
+        }
+    };
+    let (Some(a), Some(e)) = (numeric(actual), numeric(expected)) else {
+        return Err(fail(format!(
+            "assert_approx compares numbers, but was given {} and {}.",
+            actual.type_name(),
+            expected.type_name()
+        )));
+    };
+    let tolerance = match args.get(2) {
+        None | Some(VmValue::Nil) => DEFAULT_APPROX_TOLERANCE,
+        Some(v) => numeric(v).ok_or_else(|| {
+            fail(format!(
+                "assert_approx: tolerance must be a number, got {}.",
+                v.type_name()
+            ))
+        })?,
+    };
+    if tolerance < 0.0 {
+        return Err(fail(format!(
+            "assert_approx: tolerance must not be negative, got {tolerance}."
+        )));
+    }
+    // NaN is never within tolerance of anything, including itself — the one
+    // case where `<=` would quietly report success by returning false.
+    let gap = (a - e).abs();
+    if gap <= tolerance {
+        return Ok(VmValue::Nil);
+    }
+    let message = args
+        .get(3)
+        .filter(|m| !matches!(m, VmValue::Nil))
+        .map(|m| m.display());
+    Err(fail(message.unwrap_or_else(|| {
+        format!(
+            "assert_approx failed.\n    expected  {e} ± {tolerance}\n    actual    {a}\n    \
+             These differ by {gap:e}, which is outside the tolerance."
+        )
+    })))
+}
+
+#[harn_builtin(
+    sig = "assert_matches(actual: any, pattern: string, message?: string) -> string",
+    category = "testing"
+)]
+fn assert_matches_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let (Some(actual), Some(pattern)) = (args.first(), args.get(1)) else {
+        return Err(fail(
+            "assert_matches needs a value and a pattern: assert_matches(actual, pattern)"
+                .to_string(),
+        ));
+    };
+    // Only text can match a pattern. Coercing here would let `assert_matches(42,
+    // "4")` pass, which is exactly the kind of quiet success an assertion must
+    // never grant.
+    let VmValue::String(text) = actual else {
+        return Err(fail(format!(
+            "assert_matches expects text to match against, but was given {} ({}).",
+            repr(actual),
+            actual.type_name()
+        )));
+    };
+    let VmValue::String(pattern) = pattern else {
+        return Err(fail(format!(
+            "assert_matches: the pattern must be a string, got {}.",
+            pattern.type_name()
+        )));
+    };
+    let regex = crate::stdlib::regex::get_cached_regex(pattern, "")?;
+    if regex.is_match(text) {
+        return Ok(actual.clone());
+    }
+    let message = args
+        .get(2)
+        .filter(|m| !matches!(m, VmValue::Nil))
+        .map(|m| m.display());
+    Err(fail(message.unwrap_or_else(|| {
+        format!(
+            "assert_matches failed.\n    pattern   /{pattern}/\n    actual    {}\n    \
+             The pattern did not match anywhere in the text.",
+            repr(actual)
+        )
+    })))
+}
+
+#[harn_builtin(
+    sig = "value_diff(actual: any, expected: any) -> string | nil",
+    category = "testing"
+)]
+fn value_diff_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let cmp = Comparison::parse("value_diff", args)?;
+    Ok(match render_diff(None, cmp.actual, cmp.expected) {
+        None => VmValue::Nil,
+        Some(diff) => VmValue::String(arcstr::ArcStr::from(diff)),
+    })
 }
 
 #[harn_builtin(sig = "error_category(error: any) -> string", category = "testing")]
@@ -354,28 +500,42 @@ mod tests {
         );
     }
 
+    /// The uninformative-message guard ported into `Comparison::parse`: a
+    /// message that stringifies to the bare `"null"` that `json_stringify(nil)`
+    /// produces carries no signal, so `assert_eq` shows the structural diff
+    /// instead of surfacing the literal word `null` as if it were diagnostic.
     #[test]
-    fn assert_eq_with_nil_message_falls_back_to_synthesized_default() {
-        let mut out = String::new();
-        let args = [VmValue::Int(1), VmValue::Int(2), VmValue::Nil];
+    fn assert_eq_with_json_null_message_falls_back_to_the_diff() {
         assert_eq!(
-            thrown_message(assert_eq_impl(&args, &mut out)),
-            "Assertion failed: expected 2, got 1"
+            failure_text(
+                assert_eq_impl,
+                &[VmValue::Int(1), VmValue::Int(2), s("null")]
+            ),
+            "assert_eq failed.\n    expected  2\n    actual    1"
         );
     }
 
+    /// An empty (or whitespace-only) override is likewise uninformative and
+    /// falls back to the diff rather than throwing a blank message.
     #[test]
-    fn assert_ne_with_json_null_message_falls_back_to_synthesized_default() {
-        let mut out = String::new();
-        let args = [
-            VmValue::Int(5),
-            VmValue::Int(5),
-            VmValue::String(arcstr::ArcStr::from("null")),
-        ];
+    fn assert_eq_with_empty_message_falls_back_to_the_diff() {
         assert_eq!(
-            thrown_message(assert_ne_impl(&args, &mut out)),
-            "Assertion failed: values should not be equal: 5"
+            failure_text(assert_eq_impl, &[VmValue::Int(1), VmValue::Int(2), s("")]),
+            "assert_eq failed.\n    expected  2\n    actual    1"
         );
+    }
+
+    /// The same ported guard governs `assert_ne`: nil, blank, and the bare
+    /// `"null"` string all fall back to the synthesized default rather than
+    /// replacing it with an empty or misleading message.
+    #[test]
+    fn assert_ne_with_uninformative_message_falls_back_to_the_default() {
+        for message in [VmValue::Nil, s(""), s("null")] {
+            assert_eq!(
+                failure_text(assert_ne_impl, &[VmValue::Int(5), VmValue::Int(5), message]),
+                "assert_ne failed: both values are 5."
+            );
+        }
     }
 
     #[test]
@@ -406,5 +566,212 @@ mod tests {
             &[dict_err("auth")],
             &mut out
         )));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Assertion builtins
+    // ---------------------------------------------------------------------------------------------
+
+    fn s(text: &str) -> VmValue {
+        VmValue::String(arcstr::ArcStr::from(text))
+    }
+
+    /// The text an assertion throws, or a panic if it unexpectedly passed.
+    fn failure_text(
+        builtin: fn(&[VmValue], &mut String) -> Result<VmValue, VmError>,
+        args: &[VmValue],
+    ) -> String {
+        let mut out = String::new();
+        match builtin(args, &mut out) {
+            Err(VmError::Thrown(VmValue::String(text))) => text.to_string(),
+            other => panic!("expected a thrown failure, got {other:?}"),
+        }
+    }
+
+    fn passes(
+        builtin: fn(&[VmValue], &mut String) -> Result<VmValue, VmError>,
+        args: &[VmValue],
+    ) -> bool {
+        let mut out = String::new();
+        builtin(args, &mut out).is_ok()
+    }
+
+    /// The load-bearing convention: argument one is the value under test.
+    /// If this ever flips, every diff in the language silently inverts, so it
+    /// is pinned by the rendered text rather than by a comment.
+    #[test]
+    fn assert_eq_reads_argument_one_as_actual_and_two_as_expected() {
+        assert_eq!(
+            failure_text(assert_eq_impl, &[VmValue::Int(1), VmValue::Int(2)]),
+            "assert_eq failed.\n    expected  2\n    actual    1"
+        );
+    }
+
+    #[test]
+    fn assert_eq_passes_on_equal_values() {
+        assert!(passes(assert_eq_impl, &[VmValue::Int(1), VmValue::Int(1)]));
+        // Cross-type numeric equality follows the language's `==`, not a
+        // stricter rule invented here.
+        assert!(passes(
+            assert_eq_impl,
+            &[VmValue::Int(1), VmValue::Float(1.0)]
+        ));
+    }
+
+    #[test]
+    fn a_caller_message_replaces_the_diff() {
+        assert_eq!(
+            failure_text(
+                assert_eq_impl,
+                &[VmValue::Int(1), VmValue::Int(2), s("ids must line up")]
+            ),
+            "ids must line up"
+        );
+    }
+
+    /// `message = nil` is what a Harn wrapper forwards when its own optional
+    /// message was omitted. Treating that as "the message is the text `nil`"
+    /// would replace every diff with the word `nil`.
+    #[test]
+    fn an_explicitly_nil_message_still_yields_the_diff() {
+        assert!(failure_text(
+            assert_eq_impl,
+            &[VmValue::Int(1), VmValue::Int(2), VmValue::Nil]
+        )
+        .starts_with("assert_eq failed."));
+    }
+
+    #[test]
+    fn assert_eq_needs_two_values() {
+        assert_eq!(
+            failure_text(assert_eq_impl, &[VmValue::Int(1)]),
+            "assert_eq needs two values to compare: assert_eq(actual, expected)"
+        );
+    }
+
+    #[test]
+    fn assert_ne_fails_only_when_the_values_match() {
+        assert!(passes(assert_ne_impl, &[VmValue::Int(1), VmValue::Int(2)]));
+        assert_eq!(
+            failure_text(assert_ne_impl, &[s("x"), s("x")]),
+            "assert_ne failed: both values are \"x\"."
+        );
+    }
+
+    #[test]
+    fn assert_approx_absorbs_float_rounding_but_not_real_error() {
+        assert!(passes(
+            assert_approx_impl,
+            &[VmValue::Float(0.1 + 0.2), VmValue::Float(0.3)]
+        ));
+        assert_eq!(
+            failure_text(
+                assert_approx_impl,
+                &[VmValue::Float(1.0), VmValue::Float(2.0)]
+            ),
+            "assert_approx failed.\n    expected  2 ± 0.000000001\n    actual    1\n    \
+             These differ by 1e0, which is outside the tolerance."
+        );
+    }
+
+    #[test]
+    fn assert_approx_honours_an_explicit_tolerance() {
+        assert!(passes(
+            assert_approx_impl,
+            &[
+                VmValue::Float(1.0),
+                VmValue::Float(1.4),
+                VmValue::Float(0.5)
+            ]
+        ));
+        assert!(!passes(
+            assert_approx_impl,
+            &[
+                VmValue::Float(1.0),
+                VmValue::Float(1.6),
+                VmValue::Float(0.5)
+            ]
+        ));
+    }
+
+    /// NaN compares false against everything, so a tolerance check written as
+    /// `gap <= tolerance` correctly rejects it — but only by accident of IEEE
+    /// semantics, which is exactly the kind of thing that gets "simplified"
+    /// into a bug later.
+    #[test]
+    fn assert_approx_never_passes_on_nan() {
+        assert!(!passes(
+            assert_approx_impl,
+            &[VmValue::Float(f64::NAN), VmValue::Float(f64::NAN)]
+        ));
+        assert!(!passes(
+            assert_approx_impl,
+            &[VmValue::Float(f64::NAN), VmValue::Float(1.0)]
+        ));
+    }
+
+    #[test]
+    fn assert_approx_rejects_values_it_cannot_compare_numerically() {
+        assert_eq!(
+            failure_text(assert_approx_impl, &[s("1.0"), VmValue::Float(1.0)]),
+            "assert_approx compares numbers, but was given string and float."
+        );
+        assert_eq!(
+            failure_text(
+                assert_approx_impl,
+                &[VmValue::Float(1.0), VmValue::Float(1.0), s("loose")]
+            ),
+            "assert_approx: tolerance must be a number, got string."
+        );
+        assert_eq!(
+            failure_text(
+                assert_approx_impl,
+                &[
+                    VmValue::Float(1.0),
+                    VmValue::Float(9.0),
+                    VmValue::Float(-1.0)
+                ]
+            ),
+            "assert_approx: tolerance must not be negative, got -1."
+        );
+    }
+
+    #[test]
+    fn assert_matches_tests_a_pattern_against_text() {
+        assert!(passes(
+            assert_matches_impl,
+            &[s("order-1234"), s("^order-\\d+$")]
+        ));
+        assert_eq!(
+            failure_text(assert_matches_impl, &[s("order-abc"), s("^order-\\d+$")]),
+            "assert_matches failed.\n    pattern   /^order-\\d+$/\n    actual    \"order-abc\"\n    \
+             The pattern did not match anywhere in the text."
+        );
+    }
+
+    /// A pattern is a claim about text. Stringifying the subject first would
+    /// let `assert_matches(1234, "\\d+")` pass, which tests the renderer
+    /// rather than the code.
+    #[test]
+    fn assert_matches_refuses_a_non_string_subject() {
+        assert_eq!(
+            failure_text(assert_matches_impl, &[VmValue::Int(1234), s("\\d+")]),
+            "assert_matches expects text to match against, but was given 1234 (int)."
+        );
+    }
+
+    #[test]
+    fn value_diff_is_nil_when_equal_and_headline_free_when_not() {
+        let mut out = String::new();
+        assert!(matches!(
+            value_diff_impl(&[VmValue::Int(1), VmValue::Int(1)], &mut out),
+            Ok(VmValue::Nil)
+        ));
+        let VmValue::String(rendered) =
+            value_diff_impl(&[VmValue::Int(1), VmValue::Int(2)], &mut out).unwrap()
+        else {
+            panic!("expected the rendered diff");
+        };
+        assert_eq!(rendered.as_str(), "    expected  2\n    actual    1");
     }
 }

@@ -489,6 +489,7 @@ fn real_run_command_sandbox_scope_allows_temp_cwd_outside_empty_policy_fallback(
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         },
     ));
     push_execution_policy(CapabilityPolicy {

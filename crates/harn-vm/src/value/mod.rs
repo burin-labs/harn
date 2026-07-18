@@ -1,5 +1,6 @@
 mod build;
 mod core;
+mod diff;
 mod env;
 mod error;
 mod handles;
@@ -15,6 +16,7 @@ pub use core::{
     intern_key, string_char_count, struct_fields_to_map, DictMap, HarnStr, StructInstanceData,
     StructLayout, VmAsyncBuiltinFn, VmBuiltinFn, VmBuiltinRefId, VmEnumVariant, VmValue,
 };
+pub use diff::{diff_values, render_diff, repr, DifferenceKind, ValueDifference};
 pub(crate) use env::Binding;
 pub use env::{
     closest_match, LazyPipelineCallable, LazyVmCallable, ModuleFunctionRegistry, ModuleState,

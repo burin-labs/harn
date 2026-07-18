@@ -1,0 +1,111 @@
+// The failure TEXT is the feature of `assert_eq`, so this fixture asserts on
+// the rendered bytes. A test that only checked "it failed" would pass against
+// an `assert_eq` that says nothing but "assertion failed" — which is precisely
+// the state this surface exists to leave behind.
+import { assert_approx, assert_eq, assert_matches, assert_ne, value_diff } from "std/testing"
+
+fn failure_of(body) -> string {
+  const caught = try {
+    body()
+    "UNREACHABLE: the assertion passed when it should have failed"
+  } catch (e) {
+    e
+  }
+  return to_string(caught)
+}
+
+pipeline test_assert_eq(task) {
+  // === importable from std/testing, not just as a bare global ===
+  // The import at the top of this file is itself the assertion: before these
+  // builtins were re-exported it resolved at `harn check` and died at runtime.
+  assert_eq(assert_eq(1, 1), nil)
+  // === passing cases ===
+  assert_eq("a", "a")
+  assert_eq([1, {k: [2, 3]}], [1, {k: [2, 3]}])
+  assert_eq(nil, nil)
+  assert_ne(1, 2)
+  assert_ne({a: 1}, {a: 2})
+  // === a scalar mismatch names both sides, in a fixed order ===
+  assert_eq(failure_of({ -> assert_eq(3, 4) }), "assert_eq failed.\n    expected  4\n    actual    3")
+  // === a nested mismatch is addressed by path, and shows only what differs ===
+  assert_eq(
+    failure_of({ -> assert_eq({id: 7, user: {name: "Ada"}}, {id: 7, user: {name: "Grace"}}) }),
+    "assert_eq failed: the two values differ in 1 place.\n"
+      + "\n"
+      + "  at .user.name\n"
+      + "    expected  \"Grace\"\n"
+      + "    actual    \"Ada\"\n"
+      + "    The strings first differ at character 0.",
+  )
+  // === a list index appears in the path; a surplus item is not a mismatch ===
+  assert_eq(
+    failure_of({ -> assert_eq([1, 2, 3], [1, 9]) }),
+    "assert_eq failed: the two values differ in 2 places.\n"
+      + "\n"
+      + "  at [1]\n"
+      + "    expected  9\n"
+      + "    actual    2\n"
+      + "\n"
+      + "  at [2]\n"
+      + "    expected  nothing here\n"
+      + "    actual    3",
+  )
+  // === a type mismatch names the types: `1` and `"1"` must not look alike ===
+  assert_eq(
+    failure_of({ -> assert_eq(1, "1") }),
+    "assert_eq failed.\n"
+      + "    expected  \"1\" (string)\n"
+      + "    actual    1 (int)\n"
+      + "    One side is a number and the other is text. "
+      + "If this came from parsed input, the conversion may be missing.",
+  )
+  // === nil is not the same finding as an absent key ===
+  assert_eq(
+    failure_of({ -> assert_eq({a: nil}, {}) }),
+    "assert_eq failed: the two values differ in 1 place.\n"
+      + "\n"
+      + "  at .a\n"
+      + "    expected  nothing here\n"
+      + "    actual    nil",
+  )
+  // === a float mismatch points at the tolerance escape hatch ===
+  const float_failure = failure_of({ -> assert_eq(0.1 + 0.2, 0.3) })
+  assert(contains(float_failure, "expected  0.3"))
+  assert(contains(float_failure, "actual    0.30000000000000004"))
+  assert(contains(float_failure, "assert_approx"))
+  // === assert_ne says what the colliding value was ===
+  assert_eq(failure_of({ -> assert_ne("x", "x") }), "assert_ne failed: both values are \"x\".")
+  // === a caller message replaces the diff outright ===
+  assert_eq(failure_of({ -> assert_eq(1, 2, "ids must line up") }), "ids must line up")
+  // === assert_approx: the answer to the float footgun above ===
+  assert_approx(0.1 + 0.2, 0.3)
+  assert_approx(1.0, 1.4, 0.5)
+  assert_eq(
+    failure_of({ -> assert_approx(1.0, 2.0) }),
+    "assert_approx failed.\n"
+      + "    expected  2 ± 0.000000001\n"
+      + "    actual    1\n"
+      + "    These differ by 1e0, which is outside the tolerance.",
+  )
+  // === assert_matches: regex over text, and only text ===
+  assert_eq(assert_matches("order-1234", "^order-\\d+$"), "order-1234")
+  assert_eq(
+    failure_of({ -> assert_matches("order-abc", "^order-\\d+$") }),
+    "assert_matches failed.\n"
+      + "    pattern   /^order-\\d+$/\n"
+      + "    actual    \"order-abc\"\n"
+      + "    The pattern did not match anywhere in the text.",
+  )
+  assert_eq(
+    failure_of({ -> assert_matches(1234, "\\d+") }),
+    "assert_matches expects text to match against, but was given 1234 (int).",
+  )
+  // === value_diff: the differ on its own, for callers with their own framing ===
+  assert_eq(value_diff({a: 1}, {a: 1}), nil)
+  assert_eq(value_diff(1, 2), "    expected  2\n    actual    1")
+  // === a flood of differences stays readable ===
+  const flood = failure_of({ -> assert_eq(range(0, 30).to_list(), range(100, 130).to_list()) })
+  assert(contains(flood, "differ in 30 places"))
+  assert(contains(flood, "… and 20 more differences."))
+  __io_println("ok")
+}

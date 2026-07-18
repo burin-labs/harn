@@ -12,7 +12,16 @@ use super::{
 };
 
 mod denial_results;
+mod dispatch_policy;
+mod host_permission;
+mod side_effect_ceiling;
 use denial_results::agent_primitive_denied_tool;
+use dispatch_policy::{enforce_dispatch_policies, tool_denial_from_policy};
+use host_permission::{
+    emit_permission_event, emit_permission_event_with_policy, request_host_permission,
+    HostPermissionOutcome, HostPermissionRequest,
+};
+use side_effect_ceiling::{request_side_effect_permission, SideEffectPermissionOutcome};
 
 #[derive(Clone)]
 struct CapturingAgentEventSink {
@@ -160,50 +169,6 @@ fn agent_primitive_option_int(options: &crate::value::DictMap, key: &str) -> Opt
     options.get(key)?.as_int()
 }
 
-/// Append a `PermissionGrant` / `PermissionDeny` / `PermissionEscalation`
-/// event to the live transcript for the named session, when one exists.
-/// Silent no-op for sessions that haven't been opened (e.g. raw
-/// dispatcher calls outside an agent loop).
-fn emit_permission_event(
-    session_id: &str,
-    kind: &str,
-    tool_name: &str,
-    tool_args: &serde_json::Value,
-    reason: &str,
-    escalated: bool,
-) {
-    emit_permission_event_with_policy(
-        session_id, kind, tool_name, tool_args, reason, escalated, None,
-    );
-}
-
-fn emit_permission_event_with_policy(
-    session_id: &str,
-    kind: &str,
-    tool_name: &str,
-    tool_args: &serde_json::Value,
-    reason: &str,
-    escalated: bool,
-    policy_decision: Option<serde_json::Value>,
-) {
-    if !crate::agent_sessions::exists(session_id) {
-        return;
-    }
-    let event = if let Some(policy_decision) = policy_decision {
-        permissions::permission_transcript_event_with_policy(
-            kind,
-            tool_name,
-            tool_args,
-            reason,
-            escalated,
-            Some(policy_decision),
-        )
-    } else {
-        permissions::permission_transcript_event(kind, tool_name, tool_args, reason, escalated)
-    };
-    let _ = crate::agent_sessions::append_event(session_id, event);
-}
-
 /// Cause-named feedback for a tool call whose arguments failed validation
 /// because of an argument-DELIVERY fault — the model authored a real call, but
 /// what reached dispatch is not what it wrote. Two classes, both of which the
@@ -329,31 +294,6 @@ fn parse_error_carrier_feedback(tool_name: &str, parse_error: &str) -> (String, 
 /// input"), so a truncation is recognized regardless of which parser ran last.
 fn parse_error_is_truncation(parse_error: &str) -> bool {
     parse_error.contains("EOF while parsing") || parse_error.contains("unexpected end of input")
-}
-
-/// Execution-policy gate for one tool dispatch: the tool/capability/
-/// side-effect ceilings plus the per-tool argument allow-lists.
-///
-/// `policy_machinery_active` is the dispatch fast-path gate (see
-/// `host_agent_dispatch_tool_call`): when false, no execution-policy scope is
-/// installed, so `enforce_current_policy_for_tool` would return `Ok(())`
-/// unconditionally and `enforce_tool_arg_constraints` would iterate the empty
-/// constraint list of `CapabilityPolicy::default()` — skipping both is
-/// behavior-preserving and avoids building that default policy per call.
-fn enforce_dispatch_policies(
-    policy_machinery_active: bool,
-    tool_name: &str,
-    tool_args: &serde_json::Value,
-) -> Result<(), crate::orchestration::PolicyDenial> {
-    if !policy_machinery_active {
-        return Ok(());
-    }
-    crate::orchestration::enforce_current_policy_for_tool(tool_name)?;
-    crate::orchestration::enforce_tool_arg_constraints(
-        &crate::orchestration::current_execution_policy().unwrap_or_default(),
-        tool_name,
-        tool_args,
-    )
 }
 
 /// Append a `PermissionDeny` transcript event that carries the structured
@@ -1206,42 +1146,101 @@ pub(super) async fn host_agent_dispatch_tool_call(
         None
     };
 
+    let mut approval_status = None;
     if let Err(policy_denial) =
-        enforce_dispatch_policies(policy_machinery_active, &tool_name, &tool_args)
+        enforce_dispatch_policies(policy_machinery_active, &tool_name, &tool_args, None)
     {
-        // Argument constraints are correctable; hard policy ceilings remain terminal.
-        let denial = if policy_denial.gate == crate::agent_events::DenialGate::ArgConstraint {
-            crate::agent_events::ToolDenial::retryable(
-                policy_denial.gate,
-                policy_denial.capability,
-                policy_denial.reason,
+        if let Some(violation) = policy_denial.side_effect_ceiling {
+            // A side-effect ceiling is the one static policy refusal that can
+            // offer an explicit, dispatch-local ACP approval. The grant below
+            // is exact (tool + active ceiling + required effect), non-stored,
+            // and immediately rechecked before the call can proceed.
+            match request_side_effect_permission(
+                bridge.as_ref(),
+                &session_id,
+                &tool_id,
+                &tool_name,
+                &tool_args,
+                violation,
+                policy_denial.reason.clone(),
+                tool_descriptor_for(tools, &tool_name),
             )
+            .await
+            {
+                SideEffectPermissionOutcome::Allowed { policy_decision } => {
+                    let Some(grant) = policy_denial.side_effect_grant_for(&tool_name) else {
+                        return Err(VmError::Runtime(
+                            "side-effect approval missing its policy violation".to_string(),
+                        ));
+                    };
+                    if let Err(recheck_denial) = enforce_dispatch_policies(
+                        policy_machinery_active,
+                        &tool_name,
+                        &tool_args,
+                        Some(&grant),
+                    ) {
+                        let denial = tool_denial_from_policy(recheck_denial, &tool_name);
+                        return Ok(deny_tool_call_value(
+                            &session_id,
+                            &tool_name,
+                            &tool_id,
+                            &tool_args,
+                            denial,
+                            false,
+                            Some(policy_decision),
+                            None,
+                        ));
+                    }
+                    approval_status = Some("host_granted");
+                    emit_permission_event_with_policy(
+                        &session_id,
+                        "PermissionGrant",
+                        &tool_name,
+                        &tool_args,
+                        "host approved one-time side-effect ceiling exception",
+                        true,
+                        Some(policy_decision),
+                    );
+                }
+                SideEffectPermissionOutcome::Denied {
+                    denial,
+                    escalated,
+                    policy_decision,
+                } => {
+                    return Ok(deny_tool_call_value(
+                        &session_id,
+                        &tool_name,
+                        &tool_id,
+                        &tool_args,
+                        denial,
+                        escalated,
+                        Some(policy_decision),
+                        None,
+                    ));
+                }
+            }
         } else {
-            crate::agent_events::ToolDenial::terminal(
-                policy_denial.gate,
-                policy_denial.capability,
-                policy_denial.reason,
-            )
-        };
-        let schema_repair = if denial.gate == crate::agent_events::DenialGate::ToolCeiling {
-            let schemas = tools::collect_tool_schemas(tools, None);
-            let allowed = crate::orchestration::current_allowed_tool_names();
-            crate::llm::tools::schema_match_repair_result(
-                &tool_name, &tool_args, &schemas, &allowed,
-            )
-        } else {
-            None
-        };
-        return Ok(deny_tool_call_value(
-            &session_id,
-            &tool_name,
-            &tool_id,
-            &tool_args,
-            denial,
-            false,
-            None,
-            schema_repair,
-        ));
+            let denial = tool_denial_from_policy(policy_denial, &tool_name);
+            let schema_repair = if denial.gate == crate::agent_events::DenialGate::ToolCeiling {
+                let schemas = tools::collect_tool_schemas(tools, None);
+                let allowed = crate::orchestration::current_allowed_tool_names();
+                crate::llm::tools::schema_match_repair_result(
+                    &tool_name, &tool_args, &schemas, &allowed,
+                )
+            } else {
+                None
+            };
+            return Ok(deny_tool_call_value(
+                &session_id,
+                &tool_name,
+                &tool_id,
+                &tool_args,
+                denial,
+                false,
+                None,
+                schema_repair,
+            ));
+        }
     }
 
     // Fast path: with no dynamic-permission scope installed (and none
@@ -1380,7 +1379,6 @@ pub(super) async fn host_agent_dispatch_tool_call(
             }
         }
     }
-    let mut approval_status = None;
     match approval {
         None => {}
         Some(decision) if decision.is_allow() && decision.has_audit_signal() => {
@@ -1412,95 +1410,60 @@ pub(super) async fn host_agent_dispatch_tool_call(
             ));
         }
         Some(decision) if decision.is_ask() => {
-            let Some(bridge) = bridge.as_ref() else {
-                let (denial_class, repeat_count) =
-                    crate::orchestration::next_approval_unavailable_class_repeat_count(
-                        &session_id,
-                        &decision.risk_labels,
-                    );
-                let denial = crate::agent_events::ToolDenial::terminal(
-                    crate::agent_events::DenialGate::ApprovalUnavailable,
-                    None,
-                    "approval required but no host bridge is available",
-                )
-                .with_denial_class(denial_class, repeat_count);
-                return Ok(deny_tool_call_value(
-                    &session_id,
-                    &tool_name,
-                    &tool_id,
-                    &tool_args,
-                    denial,
-                    false,
-                    Some(decision.receipt.clone()),
-                    None,
-                ));
-            };
             let approval_id = if tool_id.is_empty() {
                 format!("tool_call_{}", uuid::Uuid::now_v7())
             } else {
                 tool_id.clone()
             };
-            let approval_request = crate::stdlib::hitl::approval_request_for_host_permission(
-                approval_id.clone(),
-                tool_name.clone(),
-                tool_args.clone(),
-                session_id.clone(),
-                Vec::new(),
-                serde_json::json!({"policy_decision": decision.receipt.clone()}),
-                vec![format!("tool.{tool_name}")],
-            );
-            let approval_request_json =
-                serde_json::to_value(&approval_request).unwrap_or(serde_json::Value::Null);
-            let response = bridge
-                .call(
-                    crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
-                    crate::llm::acp_permission::request_params(
-                        Some(&session_id),
-                        &approval_id,
+            let no_host_bridge = bridge.is_none();
+            let request = HostPermissionRequest {
+                session_id: session_id.clone(),
+                tool_call_id: approval_id,
+                tool_name: tool_name.clone(),
+                tool_args: tool_args.clone(),
+                policy_decision: decision.receipt.clone(),
+                request_context: serde_json::json!({"policy_decision": decision.receipt.clone()}),
+                requested_capabilities: vec![format!("tool.{tool_name}")],
+                tool_descriptor: tool_descriptor_for(tools, &tool_name),
+            };
+            match request_host_permission(bridge.as_ref(), request).await {
+                HostPermissionOutcome::Allowed { response } => {
+                    // Preserve the established static-approval extension.
+                    // Side-effect grants intentionally never accept rewritten
+                    // arguments: their exact exception was approved for the
+                    // original dispatch and is rechecked before execution.
+                    if let Some(new_args) = response.get("args") {
+                        tool_args = new_args.clone();
+                    }
+                    approval_status = Some("host_granted");
+                    emit_permission_event_with_policy(
+                        &session_id,
+                        "PermissionGrant",
                         &tool_name,
                         &tool_args,
-                        approval_request_json,
-                        &decision.receipt,
-                        tool_descriptor_for(tools, &tool_name),
-                    ),
-                )
-                .await;
-            match response {
-                Ok(response) => match crate::llm::acp_permission::parse_response(&response) {
-                    crate::llm::acp_permission::WireOutcome::Allowed => {
-                        if let Some(new_args) = response.get("args") {
-                            tool_args = new_args.clone();
-                        }
-                        approval_status = Some("host_granted");
-                        emit_permission_event_with_policy(
-                            &session_id,
-                            "PermissionGrant",
-                            &tool_name,
-                            &tool_args,
-                            "host approved tool call",
-                            true,
-                            Some(decision.receipt.clone()),
-                        );
-                    }
-                    crate::llm::acp_permission::WireOutcome::Rejected { reason } => {
-                        let denial = crate::agent_events::ToolDenial::terminal(
-                            crate::agent_events::DenialGate::HostRejected,
-                            None,
-                            reason,
-                        );
-                        return Ok(deny_tool_call_value(
-                            &session_id,
-                            &tool_name,
-                            &tool_id,
-                            &tool_args,
-                            denial,
-                            true,
-                            Some(decision.receipt.clone()),
-                            None,
-                        ));
-                    }
-                },
-                Err(_) => {
+                        "host approved tool call",
+                        true,
+                        Some(decision.receipt.clone()),
+                    );
+                }
+                HostPermissionOutcome::Rejected { reason } => {
+                    let denial = crate::agent_events::ToolDenial::terminal(
+                        crate::agent_events::DenialGate::HostRejected,
+                        None,
+                        reason,
+                    );
+                    return Ok(deny_tool_call_value(
+                        &session_id,
+                        &tool_name,
+                        &tool_id,
+                        &tool_args,
+                        denial,
+                        true,
+                        Some(decision.receipt.clone()),
+                        None,
+                    ));
+                }
+                HostPermissionOutcome::Unavailable => {
                     let (denial_class, repeat_count) =
                         crate::orchestration::next_approval_unavailable_class_repeat_count(
                             &session_id,
@@ -1509,7 +1472,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     let denial = crate::agent_events::ToolDenial::terminal(
                         crate::agent_events::DenialGate::ApprovalUnavailable,
                         None,
-                        "approval request failed or host does not implement session/request_permission",
+                        if no_host_bridge {
+                            "approval required but no host bridge is available"
+                        } else {
+                            "approval request failed or host does not implement session/request_permission"
+                        },
                     )
                     .with_denial_class(denial_class, repeat_count);
                     return Ok(deny_tool_call_value(
@@ -3238,6 +3205,9 @@ mod parse_tool_call_id_tests {
 
 #[cfg(test)]
 mod approval_unavailable_tests;
+
+#[cfg(test)]
+mod side_effect_ceiling_tests;
 
 #[cfg(test)]
 mod schema_argument_dispatch_tests {

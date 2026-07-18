@@ -15,6 +15,7 @@ members = [
     "crates/harn-codegen",
     "crates/harn-cli",
     "crates/harn-cli-aot-gen",
+    "crates/harn-sqlite",
     "crates/harn-session-store",
     "crates/harn-serve",
     "crates/harn-skills",
@@ -41,7 +42,7 @@ exclude = ["crates/harn-wasm"]
 resolver = "2"
 
 [workspace.package]
-version = "0.10.21"
+version = "0.10.23"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"

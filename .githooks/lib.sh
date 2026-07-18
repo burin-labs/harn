@@ -1,13 +1,22 @@
 #!/bin/sh
 
 HOOK_RUST_PATTERN='(^Cargo\.toml$|^Cargo\.lock$|\.rs$|^crates/[^/]+/Cargo\.toml$)'
+# Paths that can change what a built binary emits. Broader than
+# HOOK_RUST_PATTERN, which answers "is there Rust source to format/lint" —
+# this answers "could the binary be stale". Crates compile non-Rust assets in
+# via include_str!/include_bytes! (capability tables, diagnostic explanations,
+# stdlib sources, bytecode, and tree-sitter queries), and editing one changes
+# generated output without touching a single .rs file. Matching the production
+# package roots leaves the which-files-matter question to cargo, which already
+# tracks those includes as build dependencies; a path it does not consider an
+# input rebuilds nothing.
+HOOK_BINARY_INPUT_PATTERN='(^Cargo\.toml$|^Cargo\.lock$|\.rs$|^crates/|^tree-sitter-harn/)'
 HOOK_TEST_PATTERN='(^Cargo\.toml$|^Cargo\.lock$|\.rs$|\.harn$|^crates/|^conformance/|^experiments/|^scripts/)'
 HOOK_HARN_PATTERN='(\.harn$|^conformance/tests/|^experiments/)'
 HOOK_MARKDOWN_PATTERN='\.md$'
 HOOK_ACTIONS_PATTERN='(^\.github/workflows/|^\.githooks/|^Makefile$)'
 HOOK_PORTAL_PATTERN='(^crates/harn-cli/portal/|^package(-lock)?\.json$)'
 HOOK_HIGHLIGHT_CORE_PATTERN='(^crates/harn-lexer/|^crates/harn-stdlib/src/lib\.rs$|^crates/harn-vm/src/(stdlib|lib\.rs)|^crates/harn-modules/|^crates/harn-cli/src/commands/dump_highlight_keywords\.rs$|^crates/harn-cli/src/commands/portal/highlight\.rs$|^docs/theme/harn-keywords\.js$)'
-HOOK_CLI_AOT_PATTERN='(^Cargo\.toml$|^crates/harn-cli-aot-gen/|^crates/harn-cli/build_support/cli_aot_manifest\.rs$|^crates/harn-cli/generated/(cli-bytecode|cli_bytecode_table\.rs$)|^crates/harn-stdlib/src/lib\.rs$|^crates/harn-stdlib/src/stdlib/cli/|^crates/harn-(lexer|parser|ir)/src/|^crates/harn-vm/(build_support/codegen_fingerprint\.rs$|src/(compiler/|bytecode_cache\.rs$|chunk\.rs$|module_artifact\.rs$)))'
 HOOK_HIGHLIGHT_ENTRYPOINT_MARKER='@harn-entrypoint-category'
 HOOK_LANGSPEC_PATTERN='(^spec/chapters/.*\.md$|^spec/HARN_SPEC\.md$|^docs/src/language-spec\.md$|^docs/src/spec/language/.*\.md$|^docs/src/SUMMARY\.md$)'
 HOOK_DIAGCATALOG_PATTERN='(^crates/harn-parser/src/diagnostic_codes(\.rs|/)|^docs/src/diagnostics\.md$|^docs/diagnostics-catalog\.json$)'
@@ -310,11 +319,12 @@ hook_export_fresh_worktree_harn_bin() {
 }
 
 # Registry checks execute repository Harn source but only require a freshly
-# built runtime when the pushed/staged delta changes compiled Rust inputs.
-# Non-Rust changes reuse the binary selected during hook initialization.
+# built runtime when the pushed/staged delta changes an input to the binary.
+# Changes that cannot affect it reuse the binary selected during hook
+# initialization.
 hook_export_registry_harn_bin() {
   changed_file_list=$1
-  if hook_paths_match "$changed_file_list" "$HOOK_RUST_PATTERN"; then
+  if hook_paths_match "$changed_file_list" "$HOOK_BINARY_INPUT_PATTERN"; then
     hook_export_fresh_worktree_harn_bin
   else
     hook_export_harn_bin
@@ -329,7 +339,7 @@ hook_check_generated_registry() {
 
 hook_export_existing_harn_bin_for_non_rust_changes() {
   changed_file_list=$1
-  if hook_paths_match "$changed_file_list" "$HOOK_RUST_PATTERN"; then
+  if hook_paths_match "$changed_file_list" "$HOOK_BINARY_INPUT_PATTERN"; then
     return 0
   fi
   if [ -n "${HARN_BIN:-}" ]; then
@@ -342,7 +352,7 @@ hook_export_existing_harn_bin_for_non_rust_changes() {
   fi
   HARN_BIN=$path_harn
   export HARN_BIN
-  printf '=== Hook: reusing HARN_BIN %s (no Rust/Cargo changes) ===\n' "$HARN_BIN" >&2
+  printf '=== Hook: reusing HARN_BIN %s (no changes to binary inputs) ===\n' "$HARN_BIN" >&2
 }
 
 hook_write_staged_files() {
@@ -490,6 +500,30 @@ hook_write_harn_lint_files() {
   done < "$input"
 }
 
+hook_cargo_package_for_path() {
+  path=$1
+  case "$path" in
+    crates/*/*)
+      crate=${path#crates/}
+      crate=${crate%%/*}
+      manifest="crates/$crate/Cargo.toml"
+      [ -f "$manifest" ] || return 1
+      # `cargo -p` cannot target excluded crates. Match the workspace's
+      # single-line exclude list without pulling a TOML parser into hooks.
+      if [ -f "Cargo.toml" ] && \
+         grep -E '^exclude *= *\[' Cargo.toml \
+           | grep -Fq "\"crates/$crate\""; then
+        return 1
+      fi
+      package=$(awk -F '"' '/^name = / { print $2; exit }' "$manifest")
+      [ -n "$package" ] || return 1
+      printf '%s\n' "$package"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 hook_write_changed_cargo_packages() {
   input=$1
   output=$2
@@ -498,30 +532,62 @@ hook_write_changed_cargo_packages() {
     if hook_is_provider_catalog_data_path "$path"; then
       continue
     fi
+    package=$(hook_cargo_package_for_path "$path" || true)
+    [ -n "$package" ] && printf '%s\n' "$package" >> "$output"
+  done < "$input"
+  sort -u -o "$output" "$output"
+}
+
+# Format only the Cargo packages that own staged Rust files. Harn deliberately
+# tracks malformed parser fixtures and generated/seed `.rs` files outside
+# Cargo's format ownership, so invoking rustfmt directly on changed paths is
+# not equivalent to `cargo fmt`. Return false for any unmapped Rust path so the
+# caller preserves the workspace-wide Cargo fallback.
+hook_write_rust_format_packages() {
+  input=$1
+  output=$2
+  : > "$output"
+  while IFS= read -r path; do
     case "$path" in
-      crates/*/*)
-        crate=${path#crates/}
-        crate=${crate%%/*}
-        manifest="crates/$crate/Cargo.toml"
-        if [ -f "$manifest" ]; then
-          # Skip crates listed in the workspace `exclude = [...]` line.
-          # `cargo check -p <name>` cannot target them, so gating the
-          # push on those crates produces a "did not match any packages"
-          # error. Match against the workspace's exclude line directly
-          # rather than parsing all the way to a `]` (the harn workspace
-          # writes it inline on a single line).
-          if [ -f "Cargo.toml" ] && \
-             grep -E '^exclude *= *\[' Cargo.toml \
-               | grep -Fq "\"crates/$crate\""; then
-            continue
-          fi
-          package=$(awk -F '"' '/^name = / { print $2; exit }' "$manifest")
-          [ -n "$package" ] && printf '%s\n' "$package" >> "$output"
+      *.rs|crates/*/Cargo.toml)
+        package=$(hook_cargo_package_for_path "$path" || true)
+        if [ -z "$package" ]; then
+          : > "$output"
+          return 1
         fi
+        printf '%s\n' "$package" >> "$output"
+        ;;
+      Cargo.toml|Cargo.lock)
+        : > "$output"
+        return 1
         ;;
     esac
   done < "$input"
   sort -u -o "$output" "$output"
+  [ -s "$output" ]
+}
+
+hook_run_rust_format_gate() {
+  changed_file_list=$1
+  changed_packages=$2
+
+  if ! hook_paths_match "$changed_file_list" "$HOOK_RUST_PATTERN"; then
+    echo "=== Pre-commit: skipping Rust formatting (no Rust/Cargo changes) ==="
+    return
+  fi
+
+  if hook_write_rust_format_packages "$changed_file_list" "$changed_packages"; then
+    set --
+    while IFS= read -r package; do
+      set -- "$@" -p "$package"
+    done < "$changed_packages"
+    echo "=== Pre-commit: checking Rust formatting for changed packages ($(tr '\n' ' ' < "$changed_packages")) ==="
+    cargo fmt "$@" -- --check
+  else
+    echo "=== Pre-commit: checking workspace Rust formatting (unmapped Rust source) ==="
+    cargo fmt --all -- --check
+  fi
+  echo "    Rust formatting OK."
 }
 
 # Run the one local Rust compilation gate for a commit lifecycle. Pre-commit

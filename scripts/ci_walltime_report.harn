@@ -1,0 +1,239 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { percentile } from "std/math"
+import { render_table } from "std/table"
+
+type DurationStats = {count: int, mean_ms: int, p50_ms: int, p90_ms: int, max_ms: int}
+
+type CiRunSample = {id: int, duration_ms: int, url: string}
+
+type CiJobSample = {run_id: int, name: string, duration_ms: int}
+
+type CiJobGroup = {name: string, stats: DurationStats}
+
+type CiWalltimeReport = {
+  schema_version: int,
+  repository: string,
+  workflow: string,
+  event: string,
+  runs: list<CiRunSample>,
+  wall: DurationStats,
+  jobs: list<CiJobGroup>,
+}
+
+const DEFAULT_REPOSITORY = "burin-labs/harn"
+
+const DEFAULT_WORKFLOW = "ci.yml"
+
+const DEFAULT_EVENT = "merge_group"
+
+const DEFAULT_LIMIT = 50
+
+fn usage() -> string {
+  return [
+    "usage: harn run scripts/ci_walltime_report.harn -- [--repo OWNER/NAME] [--workflow FILE] [--event NAME] [--limit N] [--json]",
+    "",
+    "Summarize successful GitHub Actions workflow wall time and critical jobs.",
+  ].join("\n")
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "ci_walltime_report",
+      args: [
+        {kind: "flag", name: "repo", long: "--repo", parse: "string", default: DEFAULT_REPOSITORY},
+        {kind: "flag", name: "workflow", long: "--workflow", parse: "string", default: DEFAULT_WORKFLOW},
+        {kind: "flag", name: "event", long: "--event", parse: "string", default: DEFAULT_EVENT},
+        {kind: "flag", name: "limit", long: "--limit", parse: "int", default: DEFAULT_LIMIT},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
+    },
+  )
+}
+
+fn timestamp_ms(raw) -> int? {
+  if type_of(raw) != "string" || raw == "" {
+    return nil
+  }
+  const parsed = try {
+    date_parse(raw)
+  }
+  if is_err(parsed) {
+    return nil
+  }
+  const seconds = to_float(unwrap(parsed))
+  if seconds == nil {
+    return nil
+  }
+  return to_int(round(seconds * 1000.0))
+}
+
+fn elapsed_ms(started_at, completed_at) -> int? {
+  const started_ms = timestamp_ms(started_at)
+  const completed_ms = timestamp_ms(completed_at)
+  if started_ms == nil || completed_ms == nil || completed_ms < started_ms {
+    return nil
+  }
+  return completed_ms - started_ms
+}
+
+fn percentile_ms(values: list<int>, rank: int) -> int {
+  if values.count == 0 {
+    return 0
+  }
+  return to_int(round(percentile(values, rank))) ?? 0
+}
+
+pub fn duration_stats(values: list<int>) -> DurationStats {
+  if values.count == 0 {
+    return {count: 0, mean_ms: 0, p50_ms: 0, p90_ms: 0, max_ms: 0}
+  }
+  const total_ms = values.sum()
+  return {
+    count: values.count,
+    mean_ms: to_int(round((to_float(total_ms) ?? 0.0) / values.count)) ?? 0,
+    p50_ms: percentile_ms(values, 50),
+    p90_ms: percentile_ms(values, 90),
+    max_ms: values.max() ?? 0,
+  }
+}
+
+pub fn run_samples_from_api(data) -> list<CiRunSample> {
+  let samples: list<CiRunSample> = []
+  for raw in data?.workflow_runs ?? [] {
+    const id = to_int(raw?.id)
+    const duration_ms = elapsed_ms(raw?.created_at, raw?.updated_at)
+    if id == nil || duration_ms == nil {
+      continue
+    }
+    samples = samples
+      + [{id: id, duration_ms: duration_ms, url: to_string(raw?.html_url ?? "")}]
+  }
+  return samples
+}
+
+pub fn job_samples_from_api(run_id: int, data) -> list<CiJobSample> {
+  let samples: list<CiJobSample> = []
+  for raw in data?.jobs ?? [] {
+    const name = to_string(raw?.name ?? "")
+    const duration_ms = elapsed_ms(raw?.started_at, raw?.completed_at)
+    if name == "" || duration_ms == nil {
+      continue
+    }
+    samples = samples + [{run_id: run_id, name: name, duration_ms: duration_ms}]
+  }
+  return samples
+}
+
+pub fn group_job_samples(samples: list<CiJobSample>) -> list<CiJobGroup> {
+  let durations_by_name: dict<string, list<int>> = {}
+  for sample in samples {
+    const previous = durations_by_name[sample.name] ?? []
+    durations_by_name = durations_by_name + {[sample.name]: previous + [sample.duration_ms]}
+  }
+  let groups: list<CiJobGroup> = []
+  for entry in durations_by_name {
+    groups = groups + [{name: entry.key, stats: duration_stats(entry.value)}]
+  }
+  return groups.sort_by({ group -> 0 - group.stats.p90_ms })
+}
+
+pub fn build_report(
+  repository: string,
+  workflow: string,
+  event: string,
+  runs: list<CiRunSample>,
+  jobs: list<CiJobSample>,
+) -> CiWalltimeReport {
+  return {
+    schema_version: 1,
+    repository: repository,
+    workflow: workflow,
+    event: event,
+    runs: runs,
+    wall: duration_stats(runs.map({ run -> run.duration_ms }).to_list()),
+    jobs: group_job_samples(jobs),
+  }
+}
+
+fn gh_api_json(path: string) {
+  const result = harness.process.spawn_captured({cmd: "gh", args: ["api", path]})
+  if !result.success {
+    throw "gh api ${path} failed: ${result.stderr.trim()}"
+  }
+  return json_parse(result.stdout)
+}
+
+fn format_seconds(duration_ms: int) -> string {
+  const tenths = to_int(round(duration_ms / 100.0)) ?? 0
+  return "${tenths / 10}.${tenths % 10}s"
+}
+
+fn render_report(report: CiWalltimeReport) -> string {
+  const wall = report.wall
+  const summary = "${report.repository} ${report.workflow} ${report.event}: n=${wall.count} mean=${format_seconds(wall.mean_ms)} p50=${format_seconds(wall.p50_ms)} p90=${format_seconds(wall.p90_ms)} max=${format_seconds(wall.max_ms)}"
+  const rows = report.jobs
+    .map(
+    { group -> {
+      job: group.name,
+      n: group.stats.count,
+      mean: format_seconds(group.stats.mean_ms),
+      p50: format_seconds(group.stats.p50_ms),
+      p90: format_seconds(group.stats.p90_ms),
+      max: format_seconds(group.stats.max_ms),
+    } },
+  ).to_list()
+  return summary
+    + "\n\n"
+    + render_table(
+    rows,
+    {
+      columns: [
+        {key: "job", header: "job"},
+        {key: "n", header: "n", align: "right"},
+        {key: "mean", header: "mean", align: "right"},
+        {key: "p50", header: "p50", align: "right"},
+        {key: "p90", header: "p90", align: "right"},
+        {key: "max", header: "max", align: "right"},
+      ],
+      empty: "No completed jobs found.",
+    },
+  )
+}
+
+pipeline main(task) {
+  if help_requested(argv) {
+    harness.stdio.println(usage())
+    return 0
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.stdio.eprintln("\n" + usage())
+    return 2
+  }
+  const parsed = unwrap(parsed_result).options
+  const repository = to_string(parsed.repo)
+  const workflow = to_string(parsed.workflow)
+  const event = to_string(parsed.event)
+  const limit = min(100, max(1, to_int(parsed.limit) ?? DEFAULT_LIMIT))
+  const runs_data = gh_api_json(
+    "/repos/${repository}/actions/workflows/${workflow}/runs?event=${event}&status=success&per_page=${limit}",
+  )
+  const runs = run_samples_from_api(runs_data)
+  let jobs: list<CiJobSample> = []
+  for run in runs {
+    jobs = jobs
+      + job_samples_from_api(
+      run.id,
+      gh_api_json("/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100"),
+    )
+  }
+  const report = build_report(repository, workflow, event, runs, jobs)
+  if parsed.json {
+    harness.stdio.println(json_stringify_pretty(report))
+  } else {
+    harness.stdio.println(render_report(report))
+  }
+  return 0
+}

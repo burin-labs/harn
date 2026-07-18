@@ -237,3 +237,32 @@ fn config_change_invalidates() {
         "config change must not replay the old diagnostics"
     );
 }
+
+#[test]
+fn strictness_changes_cache_identity_and_preserves_warm_exit_semantics() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let cache = tempfile::TempDir::new().expect("cache dir");
+    let root = temp.path();
+    std::fs::write(
+        root.join("main.harn"),
+        "fn unused_helper() {\n  return 1\n}\npipeline main(task) {\n  return 1\n}\n",
+    )
+    .expect("write source");
+
+    let advisory_cold = run_check(cache.path(), root, &["main.harn"], &[]);
+    assert!(advisory_cold.status.success());
+    let advisory_artifacts = cache_artifacts(cache.path());
+    assert!(advisory_artifacts >= 1);
+
+    let strict_cold = run_check(cache.path(), root, &["--strict", "main.harn"], &[]);
+    assert!(!strict_cold.status.success(), "strict warning must fail");
+    assert!(
+        cache_artifacts(cache.path()) > advisory_artifacts,
+        "effective strictness must select a distinct cache artifact"
+    );
+
+    let strict_warm = run_check(cache.path(), root, &["--strict", "main.harn"], &[]);
+    assert_same_output(&strict_cold, &strict_warm, "strict warm replay");
+    let advisory_warm = run_check(cache.path(), root, &["main.harn"], &[]);
+    assert_same_output(&advisory_cold, &advisory_warm, "advisory warm replay");
+}

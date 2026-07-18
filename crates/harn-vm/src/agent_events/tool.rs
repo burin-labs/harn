@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::tool_annotations::SideEffectLevel;
+
 /// Status of a tool call. Mirrors ACP's `toolCallStatus`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -96,6 +98,9 @@ pub enum ToolCallErrorCategory {
     Timeout,
     /// Transient network / rate-limited / 5xx provider failure.
     Network,
+    /// A shared local resource is temporarily unavailable, such as a
+    /// contended database write lock.
+    ResourceBusy,
     /// The tool was cancelled (e.g. session aborted).
     Cancelled,
     /// The agent loop reached a terminal condition (completion judge `done`,
@@ -112,7 +117,7 @@ pub enum ToolCallErrorCategory {
 }
 
 impl ToolCallErrorCategory {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::SchemaValidation,
         Self::ToolError,
         Self::McpServerError,
@@ -122,6 +127,7 @@ impl ToolCallErrorCategory {
         Self::ParseAborted,
         Self::Timeout,
         Self::Network,
+        Self::ResourceBusy,
         Self::Cancelled,
         Self::AbandonedAtLoopExit,
         Self::Unknown,
@@ -149,6 +155,7 @@ impl ToolCallErrorCategory {
             Self::ParseAborted => "parse_aborted",
             Self::Timeout => "timeout",
             Self::Network => "network",
+            Self::ResourceBusy => "resource_busy",
             Self::Cancelled => "cancelled",
             Self::AbandonedAtLoopExit => "abandoned_at_loop_exit",
             Self::Unknown => "unknown",
@@ -169,6 +176,7 @@ impl ToolCallErrorCategory {
             | Internal::Overloaded
             | Internal::ServerError
             | Internal::TransientNetwork => Self::Network,
+            Internal::ResourceBusy => Self::ResourceBusy,
             Internal::SchemaValidation | Internal::SchemaStreamAborted => Self::SchemaValidation,
             Internal::ToolError => Self::ToolError,
             Internal::ToolRejected => Self::PermissionDenied,
@@ -261,6 +269,35 @@ impl DenialGate {
     }
 }
 
+/// The next action a host or operator can take after a side-effect ceiling
+/// blocked a tool call. This is deliberately one-shot: durable policy or
+/// credential grants have their own session-grant contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SideEffectCeilingRemedy {
+    /// An interactive host can ask the user to allow this exact call once.
+    RequestPermission,
+    /// No interactive approver is available; an operator must raise the
+    /// session's declared ceiling before the call can run.
+    RaiseSideEffectCeiling,
+}
+
+/// Typed facts for a [`DenialGate::SideEffectCeiling`] refusal. Keeping this
+/// beside the denied tool result makes the cause actionable without parsing
+/// the human-readable error string.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SideEffectCeilingDetails {
+    /// The active policy ceiling that blocked the call.
+    pub ceiling: SideEffectLevel,
+    /// The side-effect level declared by the requested tool.
+    pub required_level: SideEffectLevel,
+    /// The tool whose declared effect exceeded the ceiling.
+    pub tool: String,
+    /// The only supported path forward for this denial.
+    pub remedy: SideEffectCeilingRemedy,
+}
+
 /// Structured record of a tool call refused at the dispatch boundary —
 /// by a capability/policy ceiling, an argument allow-list, a permission
 /// rule, an approval decision, or a pre-tool hook. Carried on the denied
@@ -296,6 +333,10 @@ pub struct ToolDenial {
     /// One-based count for this terminal-denial class within the session.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub class_repeat_count: Option<u64>,
+    /// Typed side-effect facts when the denied call exceeded the active
+    /// ceiling. Other denial gates omit this field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub side_effect_ceiling: Option<SideEffectCeilingDetails>,
 }
 
 impl ToolDenial {
@@ -318,6 +359,7 @@ impl ToolDenial {
             reason: reason.into(),
             denial_class: None,
             class_repeat_count: None,
+            side_effect_ceiling: None,
         }
     }
 
@@ -341,12 +383,21 @@ impl ToolDenial {
             reason: reason.into(),
             denial_class: None,
             class_repeat_count: None,
+            side_effect_ceiling: None,
         }
     }
 
     pub fn with_denial_class(mut self, denial_class: impl Into<String>, repeat_count: u64) -> Self {
         self.denial_class = Some(denial_class.into());
         self.class_repeat_count = Some(repeat_count);
+        self
+    }
+
+    /// Attach the typed cause of a side-effect ceiling denial. The dispatch
+    /// boundary chooses the remedy because only it knows whether an
+    /// interactive ACP host is available.
+    pub fn with_side_effect_ceiling(mut self, details: SideEffectCeilingDetails) -> Self {
+        self.side_effect_ceiling = Some(details);
         self
     }
 

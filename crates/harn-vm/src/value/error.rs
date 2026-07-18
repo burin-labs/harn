@@ -110,6 +110,11 @@ pub enum VmError {
     /// A host-imposed deadline expired while executing the VM. Unlike a Harn
     /// `deadline` block, this control-plane stop cannot be caught by user code.
     ExecutionDeadlineExceeded,
+    /// A Harn program requested that its embedding process terminate with this
+    /// status code. Like a host deadline, this is control flow rather than a
+    /// catchable Harn error; the embedding boundary owns the final cleanup and
+    /// process exit.
+    ProcessExit(i32),
     /// A host dropped a polled top-level execution future. Interpreter state is
     /// intentionally not resumed after arbitrary async cancellation. Discard
     /// this VM; see [`crate::Vm::execute_with_timeout`] for ambient-state
@@ -147,6 +152,21 @@ pub enum VmError {
 }
 
 impl VmError {
+    /// Whether this error is VM control flow that user `catch` blocks and
+    /// error-as-data combinators must propagate unchanged.
+    pub fn is_uncatchable_control_flow(&self) -> bool {
+        matches!(self, Self::ExecutionDeadlineExceeded | Self::ProcessExit(_))
+    }
+
+    /// The requested host-process exit status, when this is an explicit Harn
+    /// `exit(code)` control signal.
+    pub fn process_exit_code(&self) -> Option<i32> {
+        match self {
+            Self::ProcessExit(code) => Some(*code),
+            _ => None,
+        }
+    }
+
     /// The `VmValue` a `catch` binding (or a `parallel settle` result) observes
     /// for this error: the raw thrown value for [`VmError::Thrown`] (so a
     /// structured error — e.g. a `{category, message}` dict from `throw_error` —
@@ -199,6 +219,9 @@ pub enum ErrorCategory {
     /// Network-level transient failure (connection reset, DNS hiccup,
     /// partial stream) — retryable but not provider-status-coded.
     TransientNetwork,
+    /// A shared local resource is temporarily unavailable, such as a
+    /// contended database write lock.
+    ResourceBusy,
     /// LLM output failed schema validation. Retryable via `schema_retries`.
     SchemaValidation,
     /// LLM streaming response was aborted mid-stream because the partial
@@ -245,6 +268,7 @@ impl ErrorCategory {
             ErrorCategory::Overloaded => "overloaded",
             ErrorCategory::ServerError => "server_error",
             ErrorCategory::TransientNetwork => "transient_network",
+            ErrorCategory::ResourceBusy => "resource_busy",
             ErrorCategory::SchemaValidation => "schema_validation",
             ErrorCategory::SchemaStreamAborted => "schema_stream_aborted",
             ErrorCategory::ToolError => "tool_error",
@@ -268,6 +292,7 @@ impl ErrorCategory {
             "overloaded" => ErrorCategory::Overloaded,
             "server_error" => ErrorCategory::ServerError,
             "transient_network" => ErrorCategory::TransientNetwork,
+            "resource_busy" => ErrorCategory::ResourceBusy,
             "schema_validation" => ErrorCategory::SchemaValidation,
             "schema_stream_aborted" => ErrorCategory::SchemaStreamAborted,
             "tool_error" => ErrorCategory::ToolError,
@@ -289,9 +314,9 @@ impl ErrorCategory {
         matches!(self, ErrorCategory::Internal)
     }
 
-    /// Whether an error of this category is worth retrying for a transient
-    /// provider-side reason. Agent loops consult this to decide whether to
-    /// back off and retry vs surface the error to the user.
+    /// Whether an error of this category is worth retrying because the
+    /// underlying condition is transient. Agent loops consult this to decide
+    /// whether to back off and retry vs surface the error to the user.
     pub fn is_transient(&self) -> bool {
         matches!(
             self,
@@ -300,6 +325,7 @@ impl ErrorCategory {
                 | ErrorCategory::Overloaded
                 | ErrorCategory::ServerError
                 | ErrorCategory::TransientNetwork
+                | ErrorCategory::ResourceBusy
         )
     }
 }
@@ -323,6 +349,10 @@ pub fn categorized_error(message: impl Into<String>, category: ErrorCategory) ->
 pub fn error_to_category(err: &VmError) -> ErrorCategory {
     match err {
         VmError::ExecutionDeadlineExceeded => ErrorCategory::Timeout,
+        // ProcessExit is uncatchable control flow rather than an agent-facing
+        // failure. Keep this fallback total for callers that classify an
+        // arbitrary VmError without treating the request as retryable.
+        VmError::ProcessExit(_) => ErrorCategory::Generic,
         VmError::AbandonedExecution => ErrorCategory::Cancelled,
         VmError::CategorizedError { category, .. } => category.clone(),
         VmError::Thrown(VmValue::Dict(d)) => d
@@ -471,6 +501,7 @@ impl std::fmt::Display for VmError {
             VmError::Runtime(msg) => write!(f, "Runtime error: {msg}"),
             VmError::DivisionByZero => write!(f, "Division by zero"),
             VmError::ExecutionDeadlineExceeded => write!(f, "Execution deadline exceeded"),
+            VmError::ProcessExit(code) => write!(f, "Process exit requested: {code}"),
             VmError::AbandonedExecution => write!(
                 f,
                 "Execution future was abandoned; discard this VM and reset its exclusively owned execution context"
@@ -559,6 +590,7 @@ mod tests {
         ErrorCategory::Overloaded,
         ErrorCategory::ServerError,
         ErrorCategory::TransientNetwork,
+        ErrorCategory::ResourceBusy,
         ErrorCategory::SchemaValidation,
         ErrorCategory::SchemaStreamAborted,
         ErrorCategory::ToolError,
@@ -586,6 +618,7 @@ mod tests {
                 | ErrorCategory::Overloaded
                 | ErrorCategory::ServerError
                 | ErrorCategory::TransientNetwork
+                | ErrorCategory::ResourceBusy
                 | ErrorCategory::SchemaValidation
                 | ErrorCategory::SchemaStreamAborted
                 | ErrorCategory::ToolError
@@ -602,7 +635,7 @@ mod tests {
         }
         assert_eq!(
             ALL_CATEGORIES.len(),
-            18,
+            19,
             "a category was added or removed — update ALL_CATEGORIES and the \
              `Error categories` table in docs/src/builtins.md"
         );
@@ -624,7 +657,7 @@ mod tests {
 
     /// Scripts branch on these strings, so an undocumented category is a
     /// caller writing a match that cannot handle a value the runtime emits.
-    /// `error_category()` used to advertise 10 of the 18 — a dead-port probe
+    /// `error_category()` used to advertise 10 of the full category set — a dead-port probe
     /// returning `transient_network` fell outside its own documented list.
     #[test]
     fn every_category_is_documented_in_builtins_md() {

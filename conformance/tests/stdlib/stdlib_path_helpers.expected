@@ -27,6 +27,8 @@
 [harn] packages/demo/file.txt
 [harn] true
 [harn] packages/demo/file.txt
+[harn] packages/demo/file.txt
+[harn] true
 [harn] host_absolute
 [harn] packages/demo/file.txt
 [harn] invalid

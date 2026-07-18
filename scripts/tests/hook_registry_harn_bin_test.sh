@@ -42,6 +42,35 @@ if [[ "$(cat "$record")" != $'fresh\nrun:run scripts/check_generated_registry.ha
   exit 1
 fi
 
+# Crates compile non-Rust assets in via include_str!, so editing one changes
+# what the binary emits even though no .rs file moved. Reusing a stale binary
+# here makes a drift gate compare generated output against the old inputs and
+# pass — the exact way an un-regenerated capability table or diagnostic
+# explanation ships unnoticed.
+for asset in \
+  'crates/harn-parser/src/diagnostic_codes/explanations/HARN-OWN-003.md' \
+  'crates/harn-vm/src/llm/capabilities.toml' \
+  'crates/harn-stdlib/src/stdlib/cli/scaffold/init.harn' \
+  'tree-sitter-harn/src/node-types.json'; do
+  : > "$record"
+  printf '%s\n' "$asset" > "$tmp/asset"
+  hook_check_generated_registry "$tmp/asset"
+  if [[ "$(cat "$record")" != $'fresh\nrun:run scripts/check_generated_registry.harn' ]]; then
+    echo "compiled-in asset $asset did not select a fresh worktree Harn binary" >&2
+    exit 1
+  fi
+done
+
+# A path outside the crates that cannot reach the binary still reuses it, so
+# the broadened pattern does not turn every docs edit into a rebuild.
+: > "$record"
+printf '%s\n' 'docs/src/introduction.md' 'README.md' > "$tmp/docs-only"
+hook_check_generated_registry "$tmp/docs-only"
+if [[ "$(cat "$record")" != $'reuse\nrun:run scripts/check_generated_registry.harn' ]]; then
+  echo "docs-only change should reuse the authorized Harn binary" >&2
+  exit 1
+fi
+
 for hook in .githooks/pre-commit .githooks/pre-push; do
   helper_count="$(grep -c "hook_check_generated_registry \"\$changed\"" "$root/$hook")"
   direct_count="$(grep -c 'hook_export_fresh_worktree_harn_bin' "$root/$hook")"

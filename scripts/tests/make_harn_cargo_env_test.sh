@@ -38,6 +38,20 @@ esac
 SH
 chmod +x "$fake_bin/cargo"
 
+cat > "$fake_bin/harn-lease" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+for name in HARN_CARGO_LEASE_RUNNER HARN_CARGO_LEASE_OWNER HARN_CARGO_LEASE_HOST \
+  HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_PRIORITY_CLASS; do
+  if [[ -v "$name" ]]; then
+    echo "wrapper leaked $name into the lease runner" >&2
+    exit 91
+  fi
+done
+printf '%s\n' "$@" > "$FAKE_HARN_LEASE_RECORD"
+SH
+chmod +x "$fake_bin/harn-lease"
+
 cat > "$fake_bin/python3" <<'SH'
 #!/usr/bin/env bash
 echo "python3 must not run" >&2
@@ -80,6 +94,47 @@ PATH="$fake_bin:$PATH" \
 if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$custom_build_dir" "$record"; then
   echo "wrapper did not preserve explicit CARGO_BUILD_BUILD_DIR" >&2
   cat "$record" >&2
+  exit 1
+fi
+
+lease_record="$tmp_root/harn-lease-record.txt"
+PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  CARGO_BUILD_BUILD_DIR="$custom_build_dir" \
+  HARN_CARGO_LEASE_RUNNER=harn-lease \
+  HARN_CARGO_LEASE_OWNER=lease-test \
+  HARN_CARGO_LEASE_HOST=mac-local \
+  HARN_CARGO_LEASE_WAIT_MS=123 \
+  HARN_CARGO_LEASE_PRIORITY_CLASS=interactive \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+
+cat > "$tmp_root/expected-harn-lease-record.txt" <<EOF
+host
+lease
+run
+cargo
+--owner
+lease-test
+--workspace
+$repo_root
+--target-dir
+$target_dir
+--build-dir
+$custom_build_dir
+--host
+mac-local
+--wait-ms
+123
+--priority-class
+interactive
+--
+test
+-p
+harn-vm
+EOF
+if ! diff -u "$tmp_root/expected-harn-lease-record.txt" "$lease_record"; then
+  echo "wrapper did not route the isolated Cargo invocation through Harn" >&2
   exit 1
 fi
 
@@ -282,4 +337,56 @@ if grep -Eq 'make.*gen-provider-(config|capabilities)' "$make_provider_targets";
   cat "$make_provider_targets" >&2
   exit 1
 fi
+
+source_only_targets="$tmp_root/source-only-targets.txt"
+make -C "$repo_root" -n \
+  sync-language-spec check-language-spec \
+  check-source-file-lengths update-source-file-length-baseline \
+  > "$source_only_targets"
+for expected in \
+  './scripts/harn_bin.sh --no-build -- run scripts/sync_language_spec.harn' \
+  './scripts/harn_bin.sh --no-build -- run scripts/sync_language_spec.harn -- --check' \
+  './scripts/harn_bin.sh --no-build -- run scripts/check_source_file_lengths.harn' \
+  './scripts/harn_bin.sh --no-build -- run scripts/check_source_file_lengths.harn -- --update'
+do
+  if ! grep -Fq "$expected" "$source_only_targets"; then
+    echo "source-only Make target can still trigger an implicit build: $expected" >&2
+    cat "$source_only_targets" >&2
+    exit 1
+  fi
+done
+
+unset HARN_BIN HARN_BIN_NO_BUILD
+missing_harn_target="$tmp_root/missing harn target"
+run_no_build_gate() {
+  name="$1"
+  shift
+  : > "$record"
+  if PATH="$fake_bin:$PATH" \
+    CARGO_TARGET_DIR="$missing_harn_target" \
+    FAKE_CARGO_RECORD="$record" \
+    FAKE_METADATA_TARGET_DIR="$metadata_target_dir" \
+    "$@" > "$tmp_root/$name.out" 2> "$tmp_root/$name.err"; then
+    echo "$name unexpectedly passed without a Harn binary" >&2
+    exit 1
+  fi
+  if ! grep -Fq "no fresh worktree harn binary found" "$tmp_root/$name.err"; then
+    echo "$name did not report its missing no-build Harn binary" >&2
+    cat "$tmp_root/$name.err" >&2
+    exit 1
+  fi
+  if [[ -s "$record" ]]; then
+    echo "$name invoked Cargo despite its no-build contract" >&2
+    cat "$record" >&2
+    exit 1
+  fi
+}
+
+run_no_build_gate sync-language-spec make -C "$repo_root" sync-language-spec
+run_no_build_gate check-source-file-lengths make -C "$repo_root" check-source-file-lengths
+run_no_build_gate check-stdlib-strict-types \
+  "$repo_root/scripts/check_stdlib_strict_types.sh"
+run_no_build_gate check-stdlib-public-return-types \
+  "$repo_root/scripts/check_stdlib_public_return_types.sh"
+
 echo "make_harn_cargo_env_test: ok"

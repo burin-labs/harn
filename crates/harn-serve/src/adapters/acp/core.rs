@@ -57,11 +57,17 @@ impl AcpServer {
         let provider_overrides = self.llm_config_overrides.clone();
         let runtime_provider_endpoint_overrides = self.runtime_provider_endpoint_overrides.clone();
         let capability_overrides = self.llm_capability_overrides.clone();
+        // Erase the large method-router state machine before it enters the
+        // generic ambient wrapper. This intentionally pays one heap allocation
+        // per message and virtual dispatch per poll so the wrapper's generated
+        // code stays independent of the router state and drop glue.
+        let dispatch: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>> =
+            Box::pin(self.handle_incoming_message_scoped(msg));
         harn_vm::orchestration::scope_llm_runtime_overrides_with_provider_endpoints(
             provider_overrides,
             capability_overrides,
             runtime_provider_endpoint_overrides,
-            self.handle_incoming_message_scoped(msg),
+            dispatch,
         )
         .await;
     }
@@ -287,8 +293,42 @@ impl AcpServer {
         id: &serde_json::Value,
         message: &str,
     ) {
+        self.send_prompt_error_with_class(
+            session_id,
+            id,
+            message,
+            harn_vm::llm::AgentTerminalClass::GenericThrow,
+        );
+    }
+
+    pub(super) fn send_prompt_error_with_class(
+        &self,
+        session_id: &str,
+        id: &serde_json::Value,
+        message: &str,
+        terminal_class: harn_vm::llm::AgentTerminalClass,
+    ) {
         self.send_update(session_id, &format!("Error: {message}\n"));
-        self.send_error(id, -32000, message);
+        let data = super::types::AcpPromptErrorData::new(terminal_class);
+        self.send_error_with_data(
+            id,
+            -32000,
+            message,
+            serde_json::to_value(data).expect("ACP prompt error data must serialize"),
+        );
+        eprintln!("{message}");
+    }
+
+    pub(super) fn send_prompt_protocol_error(&self, id: &serde_json::Value, message: &str) {
+        let data = super::types::AcpPromptErrorData::new(
+            harn_vm::llm::AgentTerminalClass::AgentLoopProtocolFailure,
+        );
+        self.send_error_with_data(
+            id,
+            -32602,
+            message,
+            serde_json::to_value(data).expect("ACP prompt error data must serialize"),
+        );
         eprintln!("{message}");
     }
 

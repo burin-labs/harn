@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::chunk::{Chunk, ChunkRef, Constant};
@@ -40,8 +40,12 @@ pub(crate) struct ResolvedLazyCallable {
 }
 
 pub(crate) type LazyCallableResolution = Arc<ResolvedLazyCallable>;
+pub(crate) struct LazyCallableCacheSlot {
+    pub(crate) execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+    pub(crate) resolution: Arc<tokio::sync::OnceCell<LazyCallableResolution>>,
+}
 pub(crate) type LazyCallableModuleCache =
-    Arc<VmMutex<BTreeMap<PathBuf, Arc<tokio::sync::OnceCell<LazyCallableResolution>>>>>;
+    Arc<VmMutex<BTreeMap<PathBuf, Vec<LazyCallableCacheSlot>>>>;
 
 /// RAII guard that starts a tracing span on creation and ends it on drop.
 pub(crate) struct ScopeSpan(u64);
@@ -166,7 +170,7 @@ pub(crate) struct LocalSlot {
 
 impl Drop for LocalSlot {
     fn drop(&mut self) {
-        // Slot locals hold script values directly (e.g. a `var` bound to a
+        // Slot locals hold script values directly (e.g. a `let` bound to a
         // deeply nested list). When a frame is torn down, the default
         // recursive drop of such a value would overflow the native stack and
         // abort the process. For the overwhelmingly common scalar slot this is
@@ -218,7 +222,7 @@ pub(crate) struct CallFrame {
     pub(crate) saved_source_dir: Option<std::path::PathBuf>,
     /// Module-local named functions available to symbolic calls within this frame.
     pub(crate) module_functions: Option<ModuleFunctionRegistry>,
-    /// Shared module-level env for top-level `var` / `let` bindings of
+    /// Shared module-level env for top-level `let` / `const` bindings of
     /// this frame's originating module. Looked up after `self.env` and
     /// before `self.globals` by `GetVar` / `SetVar`, giving each module
     /// its own live static state that persists across calls. See the
@@ -270,6 +274,44 @@ pub(crate) struct TaskScope {
     pub(crate) frame_depth: usize,
     /// Env scope depth at open, for unwind pruning.
     pub(crate) env_scope_depth: usize,
+}
+
+/// Terminal exit requested by any VM in one execution tree. A process exit is
+/// global control flow, so child VMs share this latch with their parent rather
+/// than relying on a task being explicitly awaited.
+pub(crate) struct ProcessExitRequest {
+    code: Mutex<Option<i32>>,
+    requested: AtomicBool,
+}
+
+impl ProcessExitRequest {
+    fn new() -> Self {
+        Self {
+            code: Mutex::new(None),
+            requested: AtomicBool::new(false),
+        }
+    }
+
+    fn request(&self, code: i32) {
+        let mut recorded = self
+            .code
+            .lock()
+            .expect("process exit request lock poisoned");
+        if recorded.is_none() {
+            *recorded = Some(code);
+            self.requested.store(true, Ordering::Release);
+        }
+    }
+
+    fn code(&self) -> Option<i32> {
+        if !self.requested.load(Ordering::Acquire) {
+            return None;
+        }
+        *self
+            .code
+            .lock()
+            .expect("process exit request lock poisoned")
+    }
 }
 
 /// Iterator state for for-in loops.
@@ -341,6 +383,8 @@ pub struct Vm {
     pub(crate) exception_handlers: Vec<ExceptionHandler>,
     /// Spawned async task handles.
     pub(crate) spawned_tasks: BTreeMap<String, VmTaskHandle>,
+    /// Shared terminal process-exit latch for this execution tree.
+    pub(crate) process_exit_request: Arc<ProcessExitRequest>,
     /// Shared process-local synchronization primitives inherited by child VMs.
     pub(crate) sync_runtime: Arc<crate::synchronization::VmSyncRuntime>,
     /// Shared process-local cells, maps, and mailboxes inherited by child VMs.
@@ -519,6 +563,7 @@ impl VmBaseline {
     }
 
     pub fn instantiate(&self) -> Vm {
+        crate::initialize_runtime_assets();
         let mut source_cache = BTreeMap::new();
         if let (Some(file), Some(text)) = (&self.source_file, &self.source_text) {
             source_cache.insert(std::path::PathBuf::from(file), text.clone());
@@ -540,6 +585,7 @@ impl VmBaseline {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
             inline_cache_sets: Vec::new(),
@@ -779,6 +825,7 @@ impl Vm {
     }
 
     pub fn new() -> Self {
+        crate::initialize_runtime_assets();
         Self {
             stack: Vec::with_capacity(256),
             env: VmEnv::new(),
@@ -792,6 +839,7 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            process_exit_request: Arc::new(ProcessExitRequest::new()),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
             inline_cache_sets: Vec::new(),
@@ -968,6 +1016,7 @@ impl Vm {
             frames: Vec::new(),
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
+            process_exit_request: Arc::clone(&self.process_exit_request),
             sync_runtime: self.sync_runtime.clone(),
             shared_state_runtime: self.shared_state_runtime.clone(),
             inline_cache_sets: Vec::new(),
@@ -1026,6 +1075,14 @@ impl Vm {
     /// closures while sharing the parent's builtins, globals, and module state.
     pub(crate) fn child_vm_for_host(&self) -> Vm {
         self.child_vm()
+    }
+
+    pub(crate) fn request_process_exit(&self, code: i32) {
+        self.process_exit_request.request(code);
+    }
+
+    pub(crate) fn requested_process_exit(&self) -> Option<i32> {
+        self.process_exit_request.code()
     }
 
     /// Request cancellation for every outstanding child task owned by this VM
@@ -1289,6 +1346,12 @@ impl Default for Vm {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn vm_construction_initializes_shared_secret_patterns() {
+        let _vm = Vm::new();
+        assert!(crate::secret_patterns::default_secret_patterns_initialized());
+    }
 
     fn baseline_with_stdlib(source: &str) -> VmBaseline {
         let mut vm = Vm::new();
