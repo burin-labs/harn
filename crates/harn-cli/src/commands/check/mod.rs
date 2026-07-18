@@ -1,6 +1,7 @@
 mod analysis;
 mod bundle;
 mod check_cmd;
+mod command;
 mod config;
 pub(crate) mod connector_matrix;
 mod driver;
@@ -26,6 +27,7 @@ pub(crate) use analysis::{
 };
 pub(crate) use bundle::build_bundle_manifest;
 pub(crate) use check_cmd::{check_file_inner, CheckReport, CHECK_SCHEMA_VERSION};
+pub(crate) use command::run_check_command;
 pub(crate) use config::{
     apply_harn_lint_config, apply_loaded_harn_lint_config, build_module_graph,
     build_module_graph_and_seed_analysis, build_module_graph_with_parsed_sources,
