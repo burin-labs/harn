@@ -188,6 +188,20 @@ pipeline test(task) {
     },
   )
   assert_eq(parse(alias_precedence, ["-7", "-2"]), Ok({options: {lucky: true, count: -2}, rest: []}))
+  const split_alias_spec = parser(
+    {
+      name: "split-alias",
+      args: [{name: "output", kind: "flag", long: "--output"}, {name: "json", kind: "switch", long: "--json"}],
+    },
+  )
+  assert_eq(
+    parse(split_alias_spec, ["--output", "--json"]),
+    argv_failure("value_required", "--output", "flag requires a value"),
+  )
+  assert_eq(
+    parse(split_alias_spec, ["--output=--json"]),
+    Ok({options: {output: "--json", json: false}, rest: []}),
+  )
   assert_eq(
     assert_throws(
       { -> parser(
@@ -232,6 +246,31 @@ pipeline test(task) {
   ]
   for invalid_spec in invalid_specs {
     assert_eq(assert_throws({ -> parser(invalid_spec.spec) }), invalid_spec.message)
+  }
+  const raw_invalid_spec = {
+    name: "raw-invalid",
+    args: [{name: "count", kind: "flag", long: "--count", parse: "int", default: "1"}],
+  }
+  assert_eq(
+    assert_throws({ -> parse(raw_invalid_spec, []) }),
+    "std/cli/argparse: default for arg 'count' must be int",
+  )
+  const invalid_aliases = [
+    {
+      spec: {name: "bad-short", args: [{name: "output", kind: "flag", short: "--output"}]},
+      message: "std/cli/argparse: short alias for arg 'output' must have form '-x'",
+    },
+    {
+      spec: {name: "bad-long", args: [{name: "output", kind: "flag", long: "-o"}]},
+      message: "std/cli/argparse: long alias for arg 'output' must have form '--name'",
+    },
+    {
+      spec: {name: "empty-long", args: [{name: "output", kind: "flag", long: "--"}]},
+      message: "std/cli/argparse: long alias for arg 'output' must have form '--name'",
+    },
+  ]
+  for invalid_alias in invalid_aliases {
+    assert_eq(assert_throws({ -> parser(invalid_alias.spec) }), invalid_alias.message)
   }
   harness.stdio.println("ok")
 }

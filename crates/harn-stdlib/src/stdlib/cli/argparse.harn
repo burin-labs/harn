@@ -211,14 +211,25 @@ fn __validate_arg_default(arg: ArgSpec) {
 
 fn __append_arg_aliases(arg: ArgSpec, aliases: list<string>) -> list<string> {
   let out = aliases
-  for alias in [arg.short, arg.long] {
-    if alias == nil {
-      continue
+  if arg.short != nil {
+    if !starts_with(arg.short, "-") || starts_with(arg.short, "--") || len(arg.short) != 2 {
+      throw "std/cli/argparse: short alias for arg '" + arg.name + "' must have form '-x'"
     }
-    if contains(out, alias) {
-      throw "std/cli/argparse: duplicate flag alias '" + alias + "'"
+    if contains(out, arg.short) {
+      throw "std/cli/argparse: duplicate flag alias '" + arg.short + "'"
     }
-    out = out.push(alias)
+    out = out.push(arg.short)
+  }
+  if arg.long != nil {
+    if !starts_with(arg.long, "--") || starts_with(arg.long, "---") || len(arg.long) <= 2
+      || contains(arg.long, "=")
+      || regex_match("\\s", arg.long) != nil {
+      throw "std/cli/argparse: long alias for arg '" + arg.name + "' must have form '--name'"
+    }
+    if contains(out, arg.long) {
+      throw "std/cli/argparse: duplicate flag alias '" + arg.long + "'"
+    }
+    out = out.push(arg.long)
   }
   return out
 }
@@ -288,6 +299,10 @@ fn __find_short(args: list<ArgSpec>, key: string) -> ArgSpec? {
     }
   }
   return nil
+}
+
+fn __is_declared_alias(args: list<ArgSpec>, token: string) -> bool {
+  return __find_long(args, token) != nil || __find_short(args, token) != nil
 }
 
 fn __positionals(args: list<ArgSpec>) -> list<ArgSpec> {
@@ -535,18 +550,23 @@ fn __finish_parse(collected: dict, rest: list<string>, args: list<ArgSpec>, pend
  * @errors: []
  */
 pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
+  const validated_spec = parser(spec)
   let collected = {}
   let rest = []
   let pending: ArgSpec? = nil
   let seen_dash_dash = false
   let positional_idx = 0
-  const positionals = __positionals(spec.args)
+  const positionals = __positionals(validated_spec.args)
   for arg_str in argv {
     if seen_dash_dash {
       rest = rest.push(arg_str)
       continue
     }
     if pending != nil {
+      if __is_declared_alias(validated_spec.args, arg_str) {
+        const label = pending.long ?? pending.short ?? pending.name
+        return Err(__argv_failure("value_required", label, "flag requires a value"))
+      }
       const recorded = __record_value(collected, pending, arg_str, pending.multi ?? false)
       if is_err(recorded) {
         return Err(unwrap_err(recorded))
@@ -559,7 +579,7 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
       seen_dash_dash = true
       continue
     }
-    if __accepts_signed_numeric_positional(spec.args, positionals, positional_idx, arg_str) {
+    if __accepts_signed_numeric_positional(validated_spec.args, positionals, positional_idx, arg_str) {
       const consumed = __consume_positional(collected, positionals, positional_idx, arg_str)
       if is_err(consumed) {
         return Err(unwrap_err(consumed))
@@ -573,7 +593,7 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
     if starts_with(arg_str, "--") && len(arg_str) > 2 {
       const body = substring(arg_str, 2, len(arg_str))
       const {key, value: value_opt} = __long_split(body)
-      const arg = __find_long(spec.args, key)
+      const arg = __find_long(validated_spec.args, key)
       if arg == nil {
         return Err(__argv_failure("unknown_flag", arg_str, "no flag named ${key}"))
       }
@@ -598,7 +618,7 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
     // Short flag: -x, -xVALUE
     if starts_with(arg_str, "-") && len(arg_str) > 1 {
       const short = substring(arg_str, 0, 2)
-      const arg = __find_short(spec.args, short)
+      const arg = __find_short(validated_spec.args, short)
       if arg == nil {
         return Err(__argv_failure("unknown_flag", arg_str, "no flag named ${short}"))
       }
@@ -630,7 +650,7 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
     collected = next.collected
     positional_idx = next.positional_idx
   }
-  return __finish_parse(collected, rest, spec.args, pending)
+  return __finish_parse(collected, rest, validated_spec.args, pending)
 }
 
 /**
