@@ -14,9 +14,6 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process;
 
-#[cfg(test)]
-use std::fs;
-
 use ed25519_dalek::Signer;
 use harn_parser::DiagnosticSeverity;
 use harn_vm::bytecode_cache;
