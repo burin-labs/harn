@@ -449,7 +449,7 @@ public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
 }
 
 public enum HarnACPPromptErrorSchema: String, Codable, Sendable, CaseIterable {
-    case harn.acp.promptError.v1 = "harn.acp.prompt_error.v1"
+    case harnAcpPromptErrorV1 = "harn.acp.prompt_error.v1"
 
     public static let allCases: [Self] = [
         "harn.acp.prompt_error.v1",

@@ -1133,7 +1133,7 @@ pub(super) fn swift_string_array(name: &str, values: &[&str]) -> String {
 pub(super) fn swift_case_name(value: &str) -> String {
     let mut out = String::new();
     for (index, part) in value
-        .split(['_', '-', '/'])
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
         .filter(|part| !part.is_empty())
         .enumerate()
     {

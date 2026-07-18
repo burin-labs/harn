@@ -145,7 +145,7 @@ fn generated_types_include_harn_wire_vocabularies() {
 }
 
 #[test]
-fn swift_case_name_escapes_reserved_keywords() {
+fn swift_case_name_emits_valid_identifiers() {
     // Bare `case private = ...` / `case public = ...` won't compile in
     // Swift — both are reserved keywords. The wire vocabulary uses these
     // (e.g. MCPCacheScope) so the emitter has to backtick them.
@@ -155,6 +155,14 @@ fn swift_case_name_escapes_reserved_keywords() {
     // Non-keyword identifiers should pass through unchanged.
     assert_eq!(swift_case_name("application_type"), "applicationType");
     assert_eq!(swift_case_name("session/close"), "sessionClose");
+    assert_eq!(
+        swift_case_name("harn.acp.prompt_error.v1"),
+        "harnAcpPromptErrorV1"
+    );
+    assert_eq!(
+        swift_case_name("session:prompt-error"),
+        "sessionPromptError"
+    );
     // CamelCased compounds that happen to start with a keyword fragment
     // (e.g. "private_room" -> "privateRoom") are valid identifiers and
     // must not be escaped.
