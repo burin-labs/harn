@@ -11,8 +11,8 @@ use super::helpers::vm_value_to_json;
 mod catalog_projection;
 mod execution_contract;
 use catalog_projection::{
-    reasoning_history_wire_field_value, toml_value_to_vm_value, tool_mode_parity_notes_value,
-    tool_mode_parity_value, tools_value,
+    insert_tool_mode_parity_fields, reasoning_history_wire_field_value, toml_value_to_vm_value,
+    tools_value,
 };
 use execution_contract::LLM_EXECUTION_CONTRACT_BUILTIN_DEF;
 
@@ -1226,14 +1226,7 @@ pub(crate) fn capabilities_to_vm_value(
             .map(|format| VmValue::String(arcstr::ArcStr::from(format)))
             .unwrap_or(VmValue::Nil),
     );
-    dict.insert(
-        crate::value::intern_key("tool_mode_parity"),
-        tool_mode_parity_value(caps),
-    );
-    dict.insert(
-        crate::value::intern_key("tool_mode_parity_notes"),
-        tool_mode_parity_notes_value(caps),
-    );
+    insert_tool_mode_parity_fields(&mut dict, caps);
     dict.insert(crate::value::intern_key("tools"), tools_value(caps));
     dict.insert(
         crate::value::intern_key("defer_loading"),
@@ -1656,6 +1649,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         crate::value::intern_key("capabilities"),
         string_list_to_vm_value(model.capabilities.clone()),
     );
+    insert_tool_mode_parity_fields(&mut dict, &capabilities);
     dict.insert(
         crate::value::intern_key("reasoning_effort_levels"),
         string_list_to_vm_value(capabilities.reasoning_effort_levels.clone()),
@@ -2413,7 +2407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_llm_catalog_surfaces_batch_metadata_for_scripts() {
+    fn test_llm_catalog_surfaces_batch_and_tool_parity_metadata_for_scripts() {
         super::super::capabilities::clear_user_overrides();
         let VmValue::List(entries) = llm_catalog_value() else {
             panic!("expected model catalog list");
@@ -2426,6 +2420,8 @@ mod tests {
                     && entry.get("id").map(VmValue::display) == Some("gpt-4o-mini".to_string())
             })
             .expect("openai gpt-4o-mini catalog row");
+        assert!(openai.contains_key("tool_mode_parity"));
+        assert!(openai.contains_key("tool_mode_parity_notes"));
         assert!(matches!(openai.get("batch_api"), Some(VmValue::Bool(true))));
         match openai.get("batch_wire_format") {
             Some(VmValue::String(value)) => assert_eq!(value.as_str(), "openai"),

@@ -1,7 +1,7 @@
 //! VM-value projections for catalog-owned capability metadata.
 
 use crate::llm::capabilities::Capabilities;
-use crate::value::VmValue;
+use crate::value::{intern_key, DictMap, VmValue};
 
 pub(super) fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
     match value {
@@ -36,6 +36,17 @@ pub(super) fn tool_mode_parity_notes_value(caps: &Capabilities) -> VmValue {
         .as_deref()
         .map(|notes| VmValue::String(arcstr::ArcStr::from(notes)))
         .unwrap_or(VmValue::Nil)
+}
+
+/// Tool-mode parity is catalog metadata, not a display-only capability detail.
+/// Keep every catalog projection on the same fields so callers do not need a
+/// second provider-specific lookup for the parity notes.
+pub(super) fn insert_tool_mode_parity_fields(dict: &mut DictMap, caps: &Capabilities) {
+    dict.insert(intern_key("tool_mode_parity"), tool_mode_parity_value(caps));
+    dict.insert(
+        intern_key("tool_mode_parity_notes"),
+        tool_mode_parity_notes_value(caps),
+    );
 }
 
 pub(super) fn reasoning_history_wire_field_value(caps: &Capabilities) -> VmValue {

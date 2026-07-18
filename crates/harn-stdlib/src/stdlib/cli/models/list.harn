@@ -1,289 +1,63 @@
 /**
  * `harn models list` renderer.
  *
- * The Rust dispatch shim in
- * `crates/harn-cli/src/commands/models/list.rs` detects installed Ollama
- * models out-of-process (sandboxed scripts can't run `ollama list`
- * directly) and hands off the discovered model ids plus the parsed
- * filter args as env vars. The catalog itself comes from the read-only
- * `harness.llm.catalog()` handle, so the script owns the entire filtering
- * and rendering pipeline end-to-end.
+ * Rust owns only the sandbox-external Ollama discovery and Clap argument
+ * collection. It hands one JSON payload to this script; Harn stdlib owns the
+ * catalog query contract, validation, ordering, and human projection.
  *
  * Inputs (from the dispatch shim):
- *   HARN_MODELS_LIST_PROVIDER       — optional provider filter ("" = all).
- *   HARN_MODELS_LIST_INSTALLED_ONLY — "1" iff `--installed-only`.
- *   HARN_MODELS_INSTALLED_OLLAMA    — JSON list<string> of installed
- *                                     Ollama model ids (may be empty).
- *   HARN_OUTPUT_JSON                — "1" for the JSON envelope, else
- *                                     human-readable table.
+ *   HARN_MODELS_LIST_QUERY_JSON — {provider?, where, sort?, columns?,
+ *                                  installed_only, installed_ollama}.
+ *   HARN_OUTPUT_JSON            — "1" for complete runtime catalog rows.
  */
-fn __dict_get_list(d: dict, key: string) -> list {
-  const v = d[key]
-  if type_of(v) == "list" {
-    return v
-  }
-  return []
-}
+import { json_mode, safe_list } from "std/cli/render"
+import {
+  catalog_with_installed_ollama_models,
+  model_catalog_query,
+  normalize_model_catalog_query,
+  render_model_catalog_table,
+} from "std/llm/catalog"
 
-fn __dict_get_string(d: dict, key: string, fallback: string) -> string {
-  const v = d[key]
-  if type_of(v) == "string" {
-    return v
-  }
-  return fallback
-}
+const LIST_QUERY_ENV = "HARN_MODELS_LIST_QUERY_JSON"
 
-fn __dict_get_bool(d: dict, key: string, fallback: bool) -> bool {
-  const v = d[key]
-  if type_of(v) == "bool" {
-    return v
+fn __read_query_payload(harness: Harness) -> dict {
+  const raw = harness.env.get_or(LIST_QUERY_ENV, "")
+  if raw == "" {
+    throw "internal error: " + LIST_QUERY_ENV + " not set"
   }
-  return fallback
-}
-
-/**
- * Build a set-like dict from a list of strings for O(1) membership.
- * Harn lists don't expose `contains`, so the alternative is a linear
- * scan per lookup — fine at today's catalog sizes, but the dict avoids
- * a quadratic blowup if the catalog grows.
- */
-fn __string_set(items: list) -> dict {
-  let out = {}
-  for item in items {
-    if type_of(item) == "string" {
-      out = out + {[item]: true}
-    }
+  const parsed = json_parse(raw)
+  if type_of(parsed) != "dict" {
+    throw "internal error: " + LIST_QUERY_ENV + " must be a JSON object"
   }
-  return out
-}
-
-/**
- * Group catalog entries by provider, dropping anything the filters
- * exclude. Returns a dict whose keys are provider names and whose
- * values are lists of `{id, capabilities, installed}` dicts.
- *
- * `installed` is only meaningful for ollama. The downstream renderers
- * decide whether to surface the flag.
- */
-fn __group_by_provider(
-  catalog: list,
-  provider_filter: string,
-  installed_only: bool,
-  installed_ollama: dict,
-) -> dict {
-  let groups = {}
-  for entry in catalog {
-    if type_of(entry) != "dict" {
-      continue
-    }
-    const provider = __dict_get_string(entry, "provider", "")
-    const id = __dict_get_string(entry, "id", "")
-    if provider == "" || id == "" {
-      continue
-    }
-    if provider_filter != "" && provider != provider_filter {
-      continue
-    }
-    const installed = provider == "ollama" && (installed_ollama[id] ?? false)
-    if installed_only && !installed {
-      continue
-    }
-    const capabilities = __dict_get_list(entry, "capabilities")
-    const item = {id: id, capabilities: capabilities, installed: installed}
-    const prior = if groups[provider] == nil {
-      []
-    } else {
-      groups[provider]
-    }
-    groups = groups + {[provider]: prior.push(item)}
-  }
-  return groups
-}
-
-/**
- * Synthesize installed Ollama models the catalog hasn't listed yet,
- * so users still see local models before curated metadata exists.
- */
-fn __augment_with_unknown_ollama(groups: dict, provider_filter: string, installed_ollama_list: list) -> dict {
-  const show_ollama = provider_filter == "" || provider_filter == "ollama"
-  if !show_ollama {
-    return groups
-  }
-  const existing = if groups["ollama"] == nil {
-    []
-  } else {
-    groups["ollama"]
-  }
-  let known_ids = {}
-  for item in existing {
-    if type_of(item) == "dict" {
-      const id = __dict_get_string(item, "id", "")
-      if id != "" {
-        known_ids = known_ids + {[id]: true}
-      }
-    }
-  }
-  let augmented = existing
-  for id in installed_ollama_list {
-    if type_of(id) != "string" {
-      continue
-    }
-    if known_ids[id] ?? false {
-      continue
-    }
-    augmented = augmented.push({id: id, capabilities: ["local"], installed: true})
-  }
-  if len(augmented) == 0 {
-    return groups
-  }
-  return groups + {ollama: augmented}
-}
-
-/**
- * Sort a list of strings lexicographically with an insertion sort.
- * Tiny lists (~tens of provider names; hundreds of model ids per
- * provider) keep this cheap and avoids depending on a comparator
- * the stdlib doesn't expose to scripts yet.
- */
-fn __sorted_strings(items: list) -> list {
-  let out = []
-  for item in items {
-    let idx = 0
-    while idx < len(out) && out[idx] < item {
-      idx = idx + 1
-    }
-    const head = out[0:idx]
-    const tail = out[idx:len(out)]
-    out = head.push(item) + tail
-  }
-  return out
-}
-
-fn __sort_models_by_id(models: list) -> list {
-  let out = []
-  for model in models {
-    const id = if type_of(model) == "dict" {
-      __dict_get_string(model, "id", "")
-    } else {
-      ""
-    }
-    let idx = 0
-    while idx < len(out) {
-      const other_id = if type_of(out[idx]) == "dict" {
-        __dict_get_string(out[idx], "id", "")
-      } else {
-        ""
-      }
-      if other_id >= id {
-        break
-      }
-      idx = idx + 1
-    }
-    const head = out[0:idx]
-    const tail = out[idx:len(out)]
-    out = head.push(model) + tail
-  }
-  return out
-}
-
-/**
- * Render the human-readable table. Providers and models are lexicographic;
- * each provider prints its name, then each model with tags / installed
- * marker, then a blank line.
- */
-fn __render_human(groups: dict) -> string {
-  const provider_names = __sorted_strings(keys(groups))
-  if len(provider_names) == 0 {
-    return "(no models match)\n"
-  }
-  let out = ""
-  for provider in provider_names {
-    out = out + provider + "\n"
-    const models = __sort_models_by_id(groups[provider])
-    for model in models {
-      const id = __dict_get_string(model, "id", "")
-      const installed = __dict_get_bool(model, "installed", false)
-      const suffix = if installed {
-        " [installed]"
-      } else {
-        ""
-      }
-      const tags = __dict_get_list(model, "capabilities")
-      const tag_text = if len(tags) == 0 {
-        ""
-      } else {
-        "  (" + join(tags, ", ") + ")"
-      }
-      out = out + "  " + id + suffix + tag_text + "\n"
-    }
-    out = out + "\n"
-  }
-  return out
-}
-
-/**
- * Build the JSON envelope:
- * `{"providers": [{"name": ..., "models": [{"id", "tags", ["installed"]}]}]}`.
- * `installed` only appears for ollama entries. Provider order is
- * lexicographic; model order within each provider preserves catalog order.
- */
-fn __render_envelope(groups: dict) -> string {
-  const provider_names = __sorted_strings(keys(groups))
-  let provider_list = []
-  for name in provider_names {
-    const models = groups[name]
-    let rendered = []
-    for model in models {
-      const id = __dict_get_string(model, "id", "")
-      const tags = __dict_get_list(model, "capabilities")
-      const entry = if name == "ollama" {
-        {id: id, tags: tags, installed: __dict_get_bool(model, "installed", false)}
-      } else {
-        {id: id, tags: tags}
-      }
-      rendered = rendered.push(entry)
-    }
-    provider_list = provider_list.push({name: name, models: rendered})
-  }
-  return json_stringify_pretty({providers: provider_list})
+  return parsed
 }
 
 fn main(harness: Harness) -> int {
-  const catalog = harness.llm.catalog()
-  const provider_filter = harness.env.get_or("HARN_MODELS_LIST_PROVIDER", "")
-  const installed_only = harness.env.get_or("HARN_MODELS_LIST_INSTALLED_ONLY", "0") == "1"
-  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
-  const installed_raw = harness.env.get_or("HARN_MODELS_INSTALLED_OLLAMA", "[]")
-  const installed_ollama_list = try {
-    json_parse(installed_raw)
+  const payload = try {
+    __read_query_payload(harness)
   } catch (e) {
+    harness.stdio.eprintln(to_string(e))
+    return 70
+  }
+  if json_mode(harness) && payload?.columns != nil {
     harness.stdio
-      .eprintln("internal error: failed to parse HARN_MODELS_INSTALLED_OLLAMA: " + e.message)
-    return 70
+      .eprintln(
+      "error: --columns cannot be combined with --json; JSON always returns complete catalog rows",
+    )
+    return 2
   }
-  if type_of(installed_ollama_list) != "list" {
-    harness.stdio.eprintln("internal error: HARN_MODELS_INSTALLED_OLLAMA must be a JSON list")
-    return 70
+  const query = try {
+    normalize_model_catalog_query(payload)
+  } catch (e) {
+    harness.stdio.eprintln("error: " + to_string(e))
+    return 2
   }
-  const installed_ollama_set = __string_set(installed_ollama_list)
-  const grouped = __group_by_provider(catalog, provider_filter, installed_only, installed_ollama_set)
-  // Synthesised entries are themselves installed, so they pass
-  // `--installed-only` too. Run the pass regardless of the flag; the
-  // dedup inside `__augment_with_unknown_ollama` keeps it idempotent.
-  const augmented = __augment_with_unknown_ollama(grouped, provider_filter, installed_ollama_list)
-  if json_mode {
-    harness.stdio.println(__render_envelope(augmented))
+  const catalog = catalog_with_installed_ollama_models(harness.llm.catalog(), safe_list(payload.installed_ollama))
+  const result = model_catalog_query(catalog, query)
+  if json_mode(harness) {
+    harness.stdio.println(json_stringify_pretty(result))
     return 0
   }
-  const text = __render_human(augmented)
-  // Provider listings end with a blank line; `(no models match)` does
-  // not. Strip the final newline so `harness.stdio.println` re-adds
-  // exactly one.
-  const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
-    text[0:len(text) - 1]
-  } else {
-    text
-  }
-  harness.stdio.println(trimmed)
+  harness.stdio.println(render_model_catalog_table(result.models, query))
   return 0
 }

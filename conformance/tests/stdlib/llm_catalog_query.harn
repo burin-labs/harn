@@ -1,0 +1,78 @@
+import {
+  catalog_with_installed_ollama_models,
+  model_catalog_query,
+  normalize_model_catalog_query,
+  render_model_catalog_table,
+} from "std/llm/catalog"
+
+pipeline test(task) {
+  const catalog = [
+    {
+      id: "alpha-expensive",
+      provider: "alpha",
+      tier: "frontier",
+      strengths: ["coding", "reasoning"],
+      open_weight: false,
+      context_window: 200,
+      pricing: {input_per_mtok: 5.0, output_per_mtok: 15.0, cache_read_per_mtok: 1.0},
+      tool_mode_parity: "native_unreliable",
+      tool_mode_parity_notes: "retry native tools",
+    },
+    {
+      id: "alpha-cheap",
+      provider: "alpha",
+      tier: "frontier",
+      strengths: ["coding"],
+      open_weight: false,
+      context_window: 100,
+      pricing: {input_per_mtok: 1.0, output_per_mtok: 3.0, cache_read_per_mtok: 0.2},
+      tool_mode_parity: "native_unreliable",
+      tool_mode_parity_notes: "retry native tools",
+    },
+    {
+      id: "alpha-metadata-pending",
+      provider: "alpha",
+      tier: "frontier",
+      strengths: ["coding"],
+      open_weight: false,
+      tool_mode_parity: "native_unreliable",
+      tool_mode_parity_notes: "retry native tools",
+    },
+    {
+      id: "open-coder",
+      provider: "beta",
+      tier: "frontier",
+      strengths: ["coding"],
+      open_weight: true,
+      context_window: 300,
+      pricing: {input_per_mtok: 0.5, output_per_mtok: 1.0, cache_read_per_mtok: 0.1},
+      tool_mode_parity: "interchangeable",
+    },
+  ]
+  const query = normalize_model_catalog_query(
+    {
+      where: ["tier=frontier,strengths=coding", "open_weight=false", "tool_support.parity=native_unreliable"],
+      sort: "pricing.input",
+      columns: "id,pricing.input,pricing.cache_read,tool_support.parity_notes",
+    },
+  )
+  const result = model_catalog_query(catalog, query)
+  __io_println(result.schemaVersion == 1)
+  __io_println(len(result.models) == 3)
+  __io_println(result.models[0].id == "alpha-cheap")
+  // Numeric sorts keep incomplete catalog rows last.
+  __io_println(result.models[2].id == "alpha-metadata-pending")
+  // Query results retain runtime rows rather than a lossy table projection.
+  __io_println(result.models[0].pricing.cache_read_per_mtok == 0.2)
+  __io_println(result.models[0].tool_mode_parity_notes == "retry native tools")
+  const rendered = render_model_catalog_table(result.models, query)
+  __io_println(rendered.contains("pricing.cache_read"))
+  __io_println(rendered.contains("retry native tools"))
+  const augmented = catalog_with_installed_ollama_models(
+    [{id: "curated", provider: "ollama", strengths: []}],
+    ["curated", "local-only"],
+  )
+  __io_println(len(augmented) == 2)
+  __io_println(augmented[0].installed && augmented[0].cataloged)
+  __io_println(augmented[1].id == "local-only" && augmented[1].installed && !augmented[1].cataloged)
+}
