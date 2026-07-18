@@ -290,7 +290,7 @@ impl TypeChecker {
     }
 
     /// Pre-populate placeholder signatures for every
-    /// `fn`/`pipeline`/`tool`/`let`/`var` name reachable from the
+    /// `fn`/`pipeline`/`tool`/`let`/`const` name reachable from the
     /// program (including names defined inside pipeline or fn bodies)
     /// so the strict cross-module undefined-call check can resolve
     /// forward references and recursive calls whose own scope does not

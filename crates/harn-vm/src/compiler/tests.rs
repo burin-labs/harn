@@ -189,7 +189,7 @@ fn test_compile_generic_ops_for_overloaded_or_mixed_cases() {
 
 #[test]
 fn monomorphic_var_keeps_typed_int_ops() {
-    // A `var` only ever reassigned through int-typed values is provably
+    // A `let` only ever reassigned through int-typed values is provably
     // monomorphic, so its arithmetic keeps the typed fast path even when the
     // use precedes the reassignment in source order.
     let chunk = compile_source(
