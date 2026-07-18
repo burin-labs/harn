@@ -62,7 +62,7 @@ fn workflow() {
         ...test,
         "runs-on": gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'"),
         needs: ["changes", "rust-builds"],
-        if: "always() && needs.rust-builds.result == 'skipped'",
+        if: "always() && !cancelled() && needs.rust-builds.result == 'skipped'",
       },
       "rust-builds": {
         ...rust,
@@ -188,6 +188,10 @@ pipeline test_rejects_consumers_that_cannot_reuse_the_completed_producer(task) {
   assert(
     package_errors
       .contains("ci.yml:package-audit must preserve package-only proof when rust-builds skips"),
+  )
+  assert(
+    package_errors
+      .contains("ci.yml:package-audit must stop promptly when its workflow is cancelled"),
   )
   const invalid_compiler_inputs = {
     ...valid,

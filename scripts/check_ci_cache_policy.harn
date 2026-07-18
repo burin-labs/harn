@@ -482,6 +482,9 @@ fn sccache_consumer_errors(workflow) -> list<string> {
     errors = errors
       + ["ci.yml:package-audit must preserve package-only proof when rust-builds skips"]
   }
+  if !contains(package_condition, "!cancelled()") {
+    errors = errors + ["ci.yml:package-audit must stop promptly when its workflow is cancelled"]
+  }
   const test_jobs = trim(
     step_by_name(test_job?.steps ?? [], "Run full environment-neutral test suite")?.env?.CARGO_BUILD_JOBS
       ?? "",

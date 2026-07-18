@@ -313,6 +313,7 @@ jobs:
     # the broader Rust graph intentionally skips.
     if: >-
       always()
+      && !cancelled()
       && needs.changes.outputs.package_audit == 'true'
       && (needs.rust-builds.result == 'success' || needs.rust-builds.result == 'skipped')
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404' }}
