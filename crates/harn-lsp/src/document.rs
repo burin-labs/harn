@@ -175,8 +175,12 @@ impl DocumentState {
         let has_selective_import = program
             .iter()
             .any(|node| matches!(&node.node, Node::SelectiveImport { .. }));
-        if let Some(file_path) = file_path.as_deref().filter(|_| has_selective_import) {
-            let module_graph = harn_modules::build_with_source(file_path, &self.source);
+        let module_graph = file_path
+            .as_deref()
+            .filter(|_| has_selective_import)
+            .map(|file_path| harn_modules::build_with_source(file_path, &self.source));
+        if let (Some(file_path), Some(module_graph)) = (file_path.as_deref(), module_graph.as_ref())
+        {
             for issue in module_graph.selective_import_issues(file_path) {
                 let code = harn_parser::DiagnosticCode::ImportSymbolMissing.to_string();
                 self.diagnostics.push(Diagnostic {
@@ -214,13 +218,27 @@ impl DocumentState {
             ..Default::default()
         };
         let externally_imported_names = std::collections::HashSet::new();
-        let lint_diags = harn_lint::lint_with_options(
-            &program,
-            &disabled_rules,
-            Some(&self.source),
-            &externally_imported_names,
-            &lint_options,
-        );
+        let lint_diags = if let (Some(file_path), Some(module_graph)) =
+            (file_path.as_deref(), module_graph.as_ref())
+        {
+            harn_lint::lint_with_module_graph(
+                &program,
+                &disabled_rules,
+                Some(&self.source),
+                &externally_imported_names,
+                module_graph,
+                file_path,
+                &lint_options,
+            )
+        } else {
+            harn_lint::lint_with_options(
+                &program,
+                &disabled_rules,
+                Some(&self.source),
+                &externally_imported_names,
+                &lint_options,
+            )
+        };
         for ld in &lint_diags {
             let severity = match ld.severity {
                 harn_lint::LintSeverity::Info => DiagnosticSeverity::INFORMATION,

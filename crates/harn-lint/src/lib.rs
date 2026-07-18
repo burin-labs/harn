@@ -264,6 +264,13 @@ fn lint_full(
             WildcardResolution::Resolved(exports) => Some(exports),
             WildcardResolution::Unknown => None,
         };
+        for issue in module_graph.selective_import_issues(file_path) {
+            linter
+                .invalid_selective_imports
+                .entry((issue.span.start, issue.span.end))
+                .or_default()
+                .insert(issue.name);
+        }
     }
     if let Some(threshold) = options.complexity_threshold {
         linter.complexity_threshold = threshold;

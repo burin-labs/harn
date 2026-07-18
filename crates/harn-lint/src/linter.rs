@@ -101,6 +101,10 @@ pub(crate) struct Linter<'a> {
     /// Functions in this set are not flagged as unused even if they have
     /// no local references, because another file explicitly imports them.
     pub(crate) externally_imported_names: HashSet<String>,
+    /// Selective imports rejected by the module graph. Derivative
+    /// `unused-import` warnings for the same name and statement would only
+    /// restate the primary resolution error and offer an unsafe autofix.
+    pub(crate) invalid_selective_imports: HashMap<(usize, usize), HashSet<String>>,
     /// Track whether the current traversal is inside a test pipeline body.
     pub(super) test_pipeline_depth: usize,
     /// Track type declarations for the `unused-type` lint rule.
@@ -195,6 +199,7 @@ impl<'a> Linter<'a> {
             source,
             file_path: None,
             externally_imported_names: HashSet::new(),
+            invalid_selective_imports: HashMap::new(),
             test_pipeline_depth: 0,
             type_declarations: Vec::new(),
             type_references: HashSet::new(),
@@ -2057,7 +2062,14 @@ impl<'a> Linter<'a> {
                 // A name used only in type position (`import { T }` consumed
                 // by annotations of a `pub type` / struct / enum alias) is
                 // still a real use.
-                .filter(|n| !self.references.contains(*n) && !self.type_references.contains(*n))
+                .filter(|name| {
+                    !self
+                        .invalid_selective_imports
+                        .get(&(import.span.start, import.span.end))
+                        .is_some_and(|invalid_names| invalid_names.contains(*name))
+                        && !self.references.contains(*name)
+                        && !self.type_references.contains(*name)
+                })
                 .collect();
             let all_unused = unused.len() == import.names.len();
             for name in &unused {
