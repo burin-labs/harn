@@ -114,6 +114,20 @@
 #                     whether assistant-role prefill turns are accepted.
 #   prefers_role_developer:
 #                     whether durable instructions should use `developer` role.
+#   system_message_placement:
+#                     how an interleaved `system`/`developer` message (an
+#                     operator directive placed mid-conversation, not the
+#                     leading system prompt) is carried on the wire. Known
+#                     values: `inline` (OpenAI Chat/Responses, Ollama — verbatim
+#                     at any position), `native_directive` (Anthropic Opus 4.8
+#                     — a validly-placed `system` message rides natively, else
+#                     folds), and `fold` (Gemini, Bedrock,
+#                     older/other Claude —
+#                     no positional system channel, so the directive folds into
+#                     the adjacent user turn as a `<system-reminder>` block).
+#                     Unset derives from `message_wire_format` (openai/ollama →
+#                     inline, else fold), so only the native Anthropic model
+#                     rows and Bedrock's non-`anthropic` catch-alls set it.
 #   prefers_xml_tools:
 #                     whether text-rendered tool specs should use XML wrappers.
 #   thinking_block_style:

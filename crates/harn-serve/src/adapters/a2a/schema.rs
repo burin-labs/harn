@@ -570,25 +570,7 @@ pub(super) fn param_accepts_structured_message(
     parts: &[JsonValue],
 ) -> bool {
     let has_non_text = parts.iter().any(|part| part_kind(part) != Some("text"));
-    if !has_non_text {
-        return false;
-    }
-    param
-        .type_expr
-        .as_ref()
-        .is_some_and(type_expr_accepts_json_object)
-        || param.input_schema.get("type").and_then(JsonValue::as_str) == Some("object")
-}
-
-pub(super) fn type_expr_accepts_json_object(type_expr: &harn_parser::TypeExpr) -> bool {
-    match type_expr {
-        harn_parser::TypeExpr::Named(name) => name == "dict",
-        harn_parser::TypeExpr::Shape(_) | harn_parser::TypeExpr::DictType(_, _) => true,
-        harn_parser::TypeExpr::Union(types) | harn_parser::TypeExpr::Intersection(types) => {
-            types.iter().any(type_expr_accepts_json_object)
-        }
-        _ => false,
-    }
+    has_non_text && param.accepts_json_object()
 }
 
 pub(super) fn caller_label(params: &JsonValue) -> String {
