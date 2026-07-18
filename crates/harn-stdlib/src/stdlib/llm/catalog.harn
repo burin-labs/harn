@@ -19,6 +19,19 @@ pub fn model_info(selector) {
 }
 
 /**
+ * Return the resolved model-route facts that are safe to persist in eval,
+ * replay, cost, and audit receipts. The runtime omits arbitrary
+ * operator-specific route overlay fields; `generation_defaults` contains only
+ * Harn's validated generation-default schema.
+ *
+ * @effects: []
+ * @errors: ["llm_execution_contract: selector is required"]
+ */
+pub fn execution_contract(selector) -> dict {
+  return llm_execution_contract(selector)
+}
+
+/**
  * Wraps llm_resolved_options(opts). opts.model is required; throws otherwise.
  *
  * @effects: []
