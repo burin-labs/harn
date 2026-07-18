@@ -21,6 +21,7 @@ pub const ACP_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_even
 pub const ACP_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
 pub const ACP_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
 pub const ACP_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
+pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str = "harn.acp.prompt_error.v1";
 
 /// JSON-RPC id values accepted by ACP requests and responses.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +185,32 @@ pub struct AcpJsonRpcError {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
+}
+
+/// Harn-owned machine data attached to a failed `session/prompt` response.
+///
+/// `message` remains lossless human diagnostics on the JSON-RPC error itself;
+/// hosts branch only on this stable class and never reconstruct it from prose.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AcpPromptErrorSchema {
+    #[serde(rename = "harn.acp.prompt_error.v1")]
+    V1,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPromptErrorData {
+    pub schema: AcpPromptErrorSchema,
+    pub terminal_class: harn_vm::llm::AgentTerminalClass,
+}
+
+impl AcpPromptErrorData {
+    pub fn new(terminal_class: harn_vm::llm::AgentTerminalClass) -> Self {
+        Self {
+            schema: AcpPromptErrorSchema::V1,
+            terminal_class,
+        }
+    }
 }
 
 /// Response envelope for failed ACP JSON-RPC calls.

@@ -10,6 +10,40 @@ use harn_parser::acp_ambient_globals::AcpAmbientGlobal;
 
 use super::{builtins, AcpBridge, AcpRuntimeConfigurator};
 
+#[derive(Debug)]
+pub(super) struct PromptExecutionError {
+    pub message: String,
+    pub terminal_class: harn_vm::llm::AgentTerminalClass,
+}
+
+impl PromptExecutionError {
+    fn from_vm_error(vm: &harn_vm::Vm, error: &harn_vm::VmError) -> Self {
+        let message = vm.format_runtime_error(error);
+        let thrown = harn_vm::llm::vm_value_to_json(&error.thrown_value());
+        let classification_input = if thrown.is_object() {
+            thrown
+        } else {
+            serde_json::json!({ "message": message.as_str() })
+        };
+        let terminal_class =
+            harn_vm::llm::agent_terminal_class("error", "", Some(&classification_input))
+                .unwrap_or(harn_vm::llm::AgentTerminalClass::GenericThrow);
+        Self {
+            message,
+            terminal_class,
+        }
+    }
+}
+
+impl From<String> for PromptExecutionError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            terminal_class: harn_vm::llm::AgentTerminalClass::GenericThrow,
+        }
+    }
+}
+
 pub(super) struct PromptGlobals<'a> {
     pub text: &'a str,
     pub content: &'a [serde_json::Value],
@@ -116,7 +150,7 @@ pub(super) async fn execute_chunk(
     host_bridge: Arc<harn_vm::bridge::HostBridge>,
     prompt: PromptGlobals<'_>,
     setup: VmSetup<'_>,
-) -> Result<String, String> {
+) -> Result<String, PromptExecutionError> {
     let vm_setup_started = Instant::now();
     let vm_setup_span =
         harn_vm::tracing::span_start(harn_vm::tracing::SpanKind::VmSetup, "acp_vm_setup".into());
@@ -248,10 +282,7 @@ pub(super) async fn execute_chunk(
     let execute_started = Instant::now();
     let result = match vm.execute_arc(std::sync::Arc::new(chunk)).await {
         Ok(_) => Ok(vm.output().to_string()),
-        Err(e) => {
-            let formatted = vm.format_runtime_error(&e);
-            Err(formatted)
-        }
+        Err(e) => Err(PromptExecutionError::from_vm_error(&vm, &e)),
     };
     let execute_ms = execute_started.elapsed().as_millis() as u64;
     bridge.send_log(

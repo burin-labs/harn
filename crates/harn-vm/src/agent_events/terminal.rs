@@ -16,6 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::llm::AgentTerminalClass;
+
 use super::agent::AgentEvent;
 
 /// Coarse, typed classification of why an agent-loop session terminated.
@@ -174,10 +176,8 @@ impl AgentTerminalOutcome {
 /// - `canonical_status`: `final_status` with empty normalized to `done`;
 /// - `stop_reason`: the sealed raw stop reason;
 /// - `has_error`: whether a terminal error was recorded;
-/// - `terminal_class`: the finalize host's error-only string class (e.g.
-///   `rate_limited`, `timeout`, `context_overflow`, `provider_misconfigured`,
-///   `host_bridge_unimplemented`, `no_llm_call`), used only to split an error
-///   into provider vs harness ownership.
+/// - `terminal_class`: the finalize host's fine-grained error class, used only
+///   to split an error into provider vs harness ownership.
 ///
 /// This is the single place stringly stop vocabulary is interpreted; every
 /// consumer reads the typed result instead.
@@ -186,6 +186,20 @@ pub fn classify_agent_terminal(
     stop_reason: &str,
     has_error: bool,
     terminal_class: Option<&str>,
+) -> AgentTerminalKind {
+    classify_agent_terminal_with_class(
+        canonical_status,
+        stop_reason,
+        has_error,
+        terminal_class.and_then(AgentTerminalClass::from_wire),
+    )
+}
+
+pub fn classify_agent_terminal_with_class(
+    canonical_status: &str,
+    stop_reason: &str,
+    has_error: bool,
+    terminal_class: Option<AgentTerminalClass>,
 ) -> AgentTerminalKind {
     match canonical_status {
         "suspended" => AgentTerminalKind::Suspended,
@@ -225,13 +239,12 @@ pub fn classify_agent_terminal(
 /// Split a terminal error into provider vs harness ownership using the
 /// finalize host's error class. Transport/provider classes attribute to the
 /// provider; everything else (host-bridge gaps, protocol failures, uncaught
-/// throws, no-LLM-call) is a harness/runtime fault.
-fn classify_error(terminal_class: Option<&str>) -> AgentTerminalKind {
-    match terminal_class {
-        Some("rate_limited" | "timeout" | "context_overflow" | "provider_misconfigured") => {
-            AgentTerminalKind::ProviderError
-        }
-        _ => AgentTerminalKind::RuntimeError,
+/// throws) is a harness/runtime fault.
+fn classify_error(terminal_class: Option<AgentTerminalClass>) -> AgentTerminalKind {
+    if terminal_class.is_some_and(AgentTerminalClass::is_provider_error) {
+        AgentTerminalKind::ProviderError
+    } else {
+        AgentTerminalKind::RuntimeError
     }
 }
 
@@ -346,21 +359,22 @@ mod tests {
             classify_agent_terminal("provider_error", "escalation_aborted", true, None),
             AgentTerminalKind::ProviderError,
         );
-        for class in [
-            "rate_limited",
-            "timeout",
-            "context_overflow",
-            "provider_misconfigured",
-        ] {
+        for class in AgentTerminalClass::ALL
+            .into_iter()
+            .filter(|class| class.is_provider_error())
+        {
             assert_eq!(
-                classify_agent_terminal("error", "boom", true, Some(class)),
+                classify_agent_terminal_with_class("error", "boom", true, Some(class)),
                 AgentTerminalKind::ProviderError,
                 "class {class} should attribute to the provider"
             );
         }
-        for class in ["host_bridge_unimplemented", "no_llm_call", "generic_throw"] {
+        for class in AgentTerminalClass::ALL
+            .into_iter()
+            .filter(|class| !class.is_provider_error())
+        {
             assert_eq!(
-                classify_agent_terminal("error", "boom", true, Some(class)),
+                classify_agent_terminal_with_class("error", "boom", true, Some(class)),
                 AgentTerminalKind::RuntimeError,
                 "class {class} should attribute to the harness"
             );
@@ -368,8 +382,13 @@ mod tests {
         // A `done` status that nonetheless carries a terminal error is an error,
         // classified by its class rather than reported as a completion.
         assert_eq!(
-            classify_agent_terminal("done", "completed", true, Some("no_llm_call")),
-            AgentTerminalKind::RuntimeError,
+            classify_agent_terminal_with_class(
+                "done",
+                "completed",
+                true,
+                Some(AgentTerminalClass::ProviderMisconfigured),
+            ),
+            AgentTerminalKind::ProviderError,
         );
     }
 
