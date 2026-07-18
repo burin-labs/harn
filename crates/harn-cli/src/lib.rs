@@ -77,6 +77,7 @@ pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 /// drives the async dispatcher in `async_main`.
 pub fn run() {
     install_broken_pipe_panic_hook();
+    harn_vm::initialize_runtime_assets();
     let raw_args = normalize_serve_args(bootstrap::args_after_pre_runtime_command());
 
     // Defeat rlib dead-code stripping of `#[harn_builtin]`-emitted statics
