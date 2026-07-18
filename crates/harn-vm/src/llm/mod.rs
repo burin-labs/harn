@@ -65,6 +65,7 @@ pub(crate) mod skill_score;
 mod stream_builtins;
 pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
+pub(crate) mod system_placement;
 mod token_count;
 pub mod tool_conformance;
 pub mod tool_scorecard;
@@ -843,36 +844,9 @@ mod tests {
         LlmCallOptions {
             provider: "mock".to_string(),
             model: "mock".to_string(),
-            api_key: String::new(),
-            api_mode: super::api::LlmApiMode::ChatCompletions,
-            route_policy: super::api::LlmRoutePolicy::Manual,
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::new(),
-            routing_decision: None,
-            routing_policy: None,
-            region: None,
-            session_id: None,
-            mock_scope: None,
-            dispatch_provenance: None,
-            reminders: None,
-            reminder_lifecycle: Vec::new(),
-            messages: Vec::new(),
-            system: None,
-            transcript_summary: None,
             max_tokens: 128,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            logprobs: false,
-            top_logprobs: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            fast: false,
             output_format: super::api::OutputFormat::JsonObject,
             response_format: Some("json".to_string()),
-            json_schema: None,
             output_schema: Some(serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -881,31 +855,7 @@ mod tests {
             })),
             output_validation: Some("error".to_string()),
             schema_stream_abort: true,
-            thinking: crate::llm::api::ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: false,
-            tools: None,
-            native_tools: None,
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            tool_search: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            stream: true,
-            timeout: None,
-            idle_timeout: None,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            budget: None,
-            prefill: None,
-            structural_experiment: None,
-            applied_structural_experiment: None,
+            ..LlmCallOptions::default()
         }
     }
 
