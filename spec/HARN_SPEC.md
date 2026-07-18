@@ -1227,7 +1227,7 @@ unresolved import itself still surfaces via the runtime loader.
 | `closure` | `{ x -> x + 1 }` | First-class function with captured environment |
 | `enum` | `Color.Red` | Enum variant, optionally with associated data |
 | `struct` | `Point({x: 3, y: 4})` | Struct instance with named fields |
-| `taskHandle` | (from `spawn`) | Opaque handle to an async task |
+| `task_handle` | (from `spawn`) | Opaque handle to an async task |
 | `Generator<T>` | regular `fn` containing `yield` | Existing synchronous generator value |
 | `Stream<T>` | `gen fn` containing `emit` | Lazy, single-pass stream value |
 | `Iter<T>` | `x.iter()` / `iter(x)` | Lazy, single-pass, fused iterator. See [Iterator protocol](#iterator-protocol) |
