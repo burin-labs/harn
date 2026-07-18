@@ -83,7 +83,7 @@ pipeline test_persona_prompt_eval_rubric(_task) {
   with_llm_script(
     [
       llm_text(
-        "{\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up work.\",\"goal\":\"Surface replies every four hours.\",\"template\":\"deterministic-sweeper\",\"cron\":{\"cron\":\"0 */4 * * *\",\"timezone\":\"UTC\"}}",
+        "{\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up work.\",\"goal\":\"Surface replies every four hours.\",\"template\":\"deterministic-sweeper\",\"source\":{\"kind\":\"cron\",\"cron\":\"0 */4 * * *\",\"timezone\":\"UTC\"}}",
       ),
     ],
     { ->
