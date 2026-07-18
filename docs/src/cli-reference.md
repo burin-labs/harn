@@ -849,6 +849,7 @@ harn check src/ tests/
 harn check --host-capabilities host-capabilities.json main.harn
 harn check --bundle-root .bundle main.harn
 harn check --invariants main.harn
+harn check --strict --strict-types src/
 harn check --workspace
 harn check --preflight warning src/
 ```
@@ -860,6 +861,7 @@ harn check --preflight warning src/
 | `--invariants` | Evaluate `@invariant(...)` annotations on functions, tools, and pipelines. Violations fail the check and are reported as `invariant[<name>]` diagnostics with concrete source spans. |
 | `--workspace` | Walk every path listed in `[workspace].pipelines` of the nearest `harn.toml`. Positional targets remain additive. |
 | `--preflight <severity>` | Override preflight diagnostic severity: `error` (default, fails the check), `warning` (reports but does not fail), or `off` (suppresses all preflight diagnostics). Overrides `[check].preflight_severity`. |
+| `--strict` | Treat every warning as a failure after rendering all files. Monotonically enables `[check].strict`; it never disables workspace strictness. |
 | `--strict-types` | Fail on unvalidated boundary-API values used in field or subscript access. |
 
 Files are checked on a parallel worker pool sized to the machine's available
@@ -927,6 +929,14 @@ project = ["ensure_enriched", "enrich"]
 workspace = ["read_text", "write_text"]
 
 [check]
+# Treat warnings from any check phase as failures. The one-shot equivalent is
+# `harn check --strict`; the CLI flag can enable but never disable this setting.
+strict = true
+
+# Enable boundary-value type checks persistently. Combine the one-shot flags as
+# `harn check --strict --strict-types` for a zero-warning type-safety gate.
+strict_types = true
+
 # Downgrade preflight errors to warnings (or suppress entirely with "off").
 # Keeps type diagnostics visible while an external capability schema is
 # still catching up to a host's live surface.

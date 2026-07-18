@@ -307,3 +307,15 @@ fn test_parses_check_connector_matrix_args() {
     assert_eq!(args.filter.as_deref(), Some("rate-limit"));
     assert_eq!(args.targets, vec!["fixtures/connectors"]);
 }
+
+#[test]
+fn test_parses_check_strict_args() {
+    let cli = Cli::parse_from(["harn", "check", "--strict", "--strict-types", "main.harn"]);
+
+    let Command::Check(args) = cli.command.unwrap() else {
+        panic!("expected check command");
+    };
+    assert!(args.strict);
+    assert!(args.strict_types);
+    assert_eq!(args.targets, vec!["main.harn"]);
+}

@@ -42,6 +42,7 @@ pub(crate) const CHECK_JOBS_ENV: &str = "HARN_CHECK_JOBS";
 pub(crate) struct CheckCliOverrides {
     pub host_capabilities: Option<String>,
     pub bundle_root: Option<String>,
+    pub strict: bool,
     pub strict_types: bool,
     pub preflight: Option<String>,
     pub invariants: bool,
@@ -284,6 +285,9 @@ fn build_check_contexts_with(
         }
         if let Some(path) = overrides.bundle_root.as_ref() {
             config.bundle_root = Some(path.clone());
+        }
+        if overrides.strict {
+            config.strict = true;
         }
         if overrides.strict_types {
             config.strict_types = true;

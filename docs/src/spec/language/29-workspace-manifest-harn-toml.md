@@ -12,6 +12,8 @@ up.
 
 ```toml
 [check]
+strict = true
+strict_types = true
 host_capabilities_path = "./schemas/host-capabilities.json"
 preflight_severity = "warning"          # "error" (default), "warning", "off"
 preflight_allow = ["mystery.*", "runtime.task"]
@@ -28,6 +30,12 @@ workspace = ["read_text", "write_text"]
   namespaced shape `{ capability: [op, ...], ... }`; nested
   `{ capabilities: { ... } }` wrappers and per-op metadata dictionaries
   are accepted.
+- `strict` treats warnings from every `harn check` phase as failures after all
+  files have been rendered. `harn check --strict` monotonically enables the
+  same policy for one invocation; it cannot disable manifest strictness.
+- `strict_types` enables boundary-value type checks persistently. Its one-shot
+  equivalent is `--strict-types`; combine it with `--strict` for a zero-warning
+  type-safety gate.
 - `preflight_severity` downgrades preflight diagnostics to warnings or
   suppresses them entirely. Type-checker and lint diagnostics are
   unaffected — preflight failures are reported under the `preflight`

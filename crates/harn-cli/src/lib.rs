@@ -479,6 +479,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             let overrides = commands::check::CheckCliOverrides {
                 host_capabilities: args.host_capabilities.clone(),
                 bundle_root: args.bundle_root.clone(),
+                strict: args.strict,
                 strict_types: args.strict_types,
                 preflight: args.preflight.clone(),
                 invariants: args.invariants,
