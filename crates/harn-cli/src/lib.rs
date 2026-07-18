@@ -473,18 +473,22 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 }
                 command_error("no .harn or .harn.txt files found under the given target(s)");
             }
-            let (module_graph, parsed_sources) =
-                commands::check::build_module_graph_with_parsed_sources(&files);
-            let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
             let overrides = commands::check::CheckCliOverrides::from(&args);
-            let checked = commands::check::check_files(
-                &files,
-                &module_graph,
-                parsed_sources,
-                &cross_file_imports,
-                &overrides,
-                !args.json,
-            );
+            let checked = if args.independent {
+                commands::check::check_files_independently(&files, &overrides, !args.json)
+            } else {
+                let (module_graph, parsed_sources) =
+                    commands::check::build_module_graph_with_parsed_sources(&files);
+                let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
+                commands::check::check_files(
+                    &files,
+                    &module_graph,
+                    parsed_sources,
+                    &cross_file_imports,
+                    &overrides,
+                    !args.json,
+                )
+            };
             let mut should_fail = false;
             let mut json_files = Vec::new();
             for checked_file in checked {

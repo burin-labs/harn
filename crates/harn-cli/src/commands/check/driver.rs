@@ -28,7 +28,7 @@ use std::sync::Mutex;
 
 use harn_parser::analysis::{AnalysisDatabase, SourceId, SourceVersion};
 
-use crate::package;
+use crate::{package, CLI_RUNTIME_STACK_SIZE};
 
 use super::check_cmd::{check_file_report_inner, CheckFileReport, CheckTextOutput};
 use super::host_capabilities::{resolve_host_capabilities, ResolvedHostCapabilities};
@@ -104,31 +104,80 @@ pub(crate) fn check_files(
     // particular, an external host-capability manifest is read and parsed once
     // per source directory instead of once per checked file.
     let config_by_dir = build_check_contexts(files, overrides);
-    let next = AtomicUsize::new(0);
+    run_ordered_checks(files, workers, AnalysisDatabase::new, |analysis, file| {
+        check_one(
+            analysis,
+            file,
+            module_graph,
+            &parsed_sources,
+            &config_by_dir,
+            cross_file_imports,
+            overrides,
+            want_text,
+        )
+    })
+}
 
+/// Check a source corpus with one-file module-resolution semantics while
+/// retaining one process and the native bounded worker pool.
+///
+/// A shared graph is the correct default for a project: sibling imports and
+/// cross-file lint exemptions must see each other. Fixture corpora are a
+/// different ownership boundary. Their files are independent programs, and a
+/// graph containing every fixture can make unrelated sources satisfy imports
+/// or activate type-aware lints that a one-file check would not see. The old
+/// workaround spawned `harn check` once per file. This path keeps the exact
+/// semantics without the process and CLI-startup amplification.
+pub(crate) fn check_files_independently(
+    files: &[PathBuf],
+    overrides: &CheckCliOverrides,
+    want_text: bool,
+) -> Vec<CheckedFile> {
+    let workers = worker_count(files.len());
+    let config_by_dir = build_check_contexts(files, overrides);
+    run_ordered_checks(
+        files,
+        workers,
+        || (),
+        |(), file| {
+            let (module_graph, parsed_sources) =
+                super::build_module_graph_with_parsed_sources(std::slice::from_ref(file));
+            let cross_file_imports = super::collect_cross_file_imports(&module_graph);
+            let parsed_sources = Mutex::new(parsed_sources);
+            let mut analysis = AnalysisDatabase::new();
+            check_one(
+                &mut analysis,
+                file,
+                &module_graph,
+                &parsed_sources,
+                &config_by_dir,
+                &cross_file_imports,
+                overrides,
+                want_text,
+            )
+        },
+    )
+}
+
+fn run_ordered_checks<State>(
+    files: &[PathBuf],
+    workers: usize,
+    init: impl Fn() -> State + Sync,
+    check: impl Fn(&mut State, &PathBuf) -> CheckedFile + Sync,
+) -> Vec<CheckedFile> {
+    let next = AtomicUsize::new(0);
     let run_worker = || {
-        let mut analysis = AnalysisDatabase::new();
-        let mut produced: Vec<(usize, CheckedFile)> = Vec::new();
+        let mut state = init();
+        let mut produced = Vec::new();
         loop {
             let index = next.fetch_add(1, Ordering::Relaxed);
             let Some(file) = files.get(index) else {
                 break;
             };
-            let checked = check_one(
-                &mut analysis,
-                file,
-                module_graph,
-                &parsed_sources,
-                &config_by_dir,
-                cross_file_imports,
-                overrides,
-                want_text,
-            );
-            produced.push((index, checked));
+            produced.push((index, check(&mut state, file)));
         }
         produced
     };
-
     let mut merged: Vec<Option<CheckedFile>> = Vec::with_capacity(files.len());
     merged.resize_with(files.len(), || None);
     if workers <= 1 {
@@ -137,7 +186,15 @@ pub(crate) fn check_files(
         }
     } else {
         let produced = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..workers).map(|_| scope.spawn(run_worker)).collect();
+            let handles: Vec<_> = (0..workers)
+                .map(|index| {
+                    std::thread::Builder::new()
+                        .name(format!("harn-check-{index}"))
+                        .stack_size(CLI_RUNTIME_STACK_SIZE)
+                        .spawn_scoped(scope, run_worker)
+                        .expect("failed to spawn harn check worker")
+                })
+                .collect();
             handles
                 .into_iter()
                 .flat_map(|handle| match handle.join() {
@@ -394,5 +451,65 @@ mod tests {
             contexts[&check_config_key(&file)].config.disable_rules,
             ["assert-outside-test"]
         );
+    }
+
+    fn diagnostic_facts(checked: &CheckedFile) -> Vec<(&str, Option<&str>, &str)> {
+        checked
+            .report
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.severity,
+                    diagnostic.code.as_deref(),
+                    diagnostic.message.as_str(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn independent_checks_match_one_target_module_semantics() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library.harn");
+        let consumer = dir.path().join("consumer.harn");
+        std::fs::write(&library, "fn helper() { return 1 }\n").unwrap();
+        std::fs::write(&consumer, "import { helper } from \"library\"\nhelper()\n").unwrap();
+        let overrides = CheckCliOverrides::default();
+
+        let (single_graph, single_sources) =
+            super::super::build_module_graph_with_parsed_sources(std::slice::from_ref(&library));
+        let single_imports = super::super::collect_cross_file_imports(&single_graph);
+        let single = check_files(
+            std::slice::from_ref(&library),
+            &single_graph,
+            single_sources,
+            &single_imports,
+            &overrides,
+            false,
+        );
+        let independent =
+            check_files_independently(&[library.clone(), consumer.clone()], &overrides, false);
+        assert_eq!(
+            diagnostic_facts(&independent[0]),
+            diagnostic_facts(&single[0])
+        );
+        assert!(diagnostic_facts(&single[0])
+            .iter()
+            .any(|(_, code, _)| *code == Some("HARN-LNT-019")));
+
+        let files = [library, consumer];
+        let (shared_graph, shared_sources) =
+            super::super::build_module_graph_with_parsed_sources(&files);
+        let shared_imports = super::super::collect_cross_file_imports(&shared_graph);
+        let shared = check_files(
+            &files,
+            &shared_graph,
+            shared_sources,
+            &shared_imports,
+            &overrides,
+            false,
+        );
+        assert_ne!(diagnostic_facts(&shared[0]), diagnostic_facts(&single[0]));
     }
 }

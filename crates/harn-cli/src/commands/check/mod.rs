@@ -31,7 +31,7 @@ pub(crate) use config::{
     build_module_graph_and_seed_analysis, build_module_graph_with_parsed_sources,
     collect_cross_file_imports, collect_harn_targets, load_harn_lint_config, HarnLintConfig,
 };
-pub(crate) use driver::{check_files, CheckCliOverrides};
+pub(crate) use driver::{check_files, check_files_independently, CheckCliOverrides};
 pub(crate) use fmt::{fmt_targets, fmt_targets_json, FmtMode, FMT_SCHEMA_VERSION};
 pub(crate) use harn_lint::path_is_stdlib_source;
 pub(crate) use host_capabilities::load_host_capabilities;
