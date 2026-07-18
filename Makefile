@@ -7,6 +7,7 @@ HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
 HARN_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --,$(HARN_BIN_CMD) --)
+HARN_NO_BUILD_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --no-build --,$(HARN_BIN_CMD) --no-build --)
 HARN_CMD_VERBOSE = $(HARN_CMD)
 HARN_CLI_CMD = $(HARN_CMD)
 HARN_BIN_ASSIGN = harn_bin="$$($(HARN_BIN_PRINT_CMD))"
@@ -511,13 +512,13 @@ check-run-view-fixtures:
 # canonical authoring source). Mirrors what release_gate.sh audit's
 # sync_language_spec.harn step does.
 sync-language-spec:
-	$(HARN_CMD) run scripts/sync_language_spec.harn
+	$(HARN_NO_BUILD_CMD) run scripts/sync_language_spec.harn
 
 # CI guard: fail if docs/src/language-spec.md is stale relative to
 # spec/HARN_SPEC.md. `make sync-language-spec` fixes it.
 check-language-spec:
 	@echo "=== Checking docs/src/language-spec.md is up to date ==="
-	@$(HARN_CMD) run scripts/sync_language_spec.harn -- --check
+	@$(HARN_NO_BUILD_CMD) run scripts/sync_language_spec.harn -- --check
 	@echo "    Language spec mirror OK."
 
 # Regenerate the LLM trigger quickref from the live ProviderCatalog metadata.
@@ -713,10 +714,10 @@ check-ported-handler-loc:
 # grandfathered at exact per-source counts so unrelated refactors cannot
 # conflict in a central baseline. Regeneration only tightens existing debt.
 check-source-file-lengths:
-	@$(HARN_CMD) run scripts/check_source_file_lengths.harn
+	@$(HARN_NO_BUILD_CMD) run scripts/check_source_file_lengths.harn
 
 update-source-file-length-baseline:
-	@$(HARN_CMD) run scripts/check_source_file_lengths.harn -- --update
+	@$(HARN_NO_BUILD_CMD) run scripts/check_source_file_lengths.harn -- --update
 
 check-python-boundary:
 	@$(HARN_CMD) run scripts/check_python_boundary.harn
