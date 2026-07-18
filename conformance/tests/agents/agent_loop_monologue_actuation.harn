@@ -71,6 +71,7 @@ pipeline default() {
 [[provider.mock]]
 model_match = "monologue-actuation-fixture"
 preferred_tool_format = "text"
+native_tools = true
 text_tool_wire_format_supported = true
 supports_assistant_prefill = true
 """,
