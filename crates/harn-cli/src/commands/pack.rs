@@ -875,8 +875,8 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         let module_artifact_opt =
             module_artifact::compile_module_artifact(&program, Some(module_str.clone())).ok();
 
-        let cache_key = bytecode_cache::CacheKey::from_source(module_path, &source);
-        let chunk_bytes = bytecode_cache::serialize_chunk_artifact(&cache_key, &entry_chunk)
+        let entry_cache_key = bytecode_cache::CacheKey::from_source(module_path, &source);
+        let chunk_bytes = bytecode_cache::serialize_chunk_artifact(&entry_cache_key, &entry_chunk)
             .map_err(|err| {
                 PackError::new(
                     "module.serialize_failed",
@@ -887,20 +887,23 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
                 )
             })?;
 
-        let module_artifact_bytes = match module_artifact_opt.as_ref() {
-            Some(artifact) => Some(
-                bytecode_cache::serialize_module_artifact(&cache_key, artifact).map_err(|err| {
-                    PackError::new(
-                        "module.serialize_failed",
-                        format!(
-                            "failed to serialize module artifact for {}: {err}",
-                            module_path.display()
-                        ),
-                    )
-                })?,
-            ),
-            None => None,
-        };
+        let module_artifact_bytes = module_artifact_opt
+            .as_ref()
+            .map(|artifact| {
+                let module_cache_key = bytecode_cache::CacheKey::from_module_source(&source);
+                bytecode_cache::serialize_module_artifact(&module_cache_key, artifact).map_err(
+                    |err| {
+                        PackError::new(
+                            "module.serialize_failed",
+                            format!(
+                                "failed to serialize module artifact for {}: {err}",
+                                module_path.display()
+                            ),
+                        )
+                    },
+                )
+            })
+            .transpose()?;
 
         let rel = relativize(&project_root, module_path).ok_or_else(|| {
             PackError::new(
