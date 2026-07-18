@@ -14,7 +14,31 @@ fake_harn="$fake_bin/harn"
 cat > "$fake_harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'fake harn\n'
+printf '%s\t%s\n' "$*" "HARN_BIN=$0" >> "$FAKE_CONFORMANCE_RECORD"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if [[ -f "$FAKE_AUDIT_ROOT/audit.started" ]]; then
+    break
+  fi
+  sleep 0.05
+done
+if [[ ! -f "$FAKE_AUDIT_ROOT/audit.started" ]]; then
+  echo "audit gates were not started before conformance completed" >&2
+  exit 41
+fi
+shard_index=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--shard-index" ]]; then
+    shard_index="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+if [[ -n "${FAKE_CONFORMANCE_FAIL_SHARD-}" && "$shard_index" == "$FAKE_CONFORMANCE_FAIL_SHARD" ]]; then
+  echo "fake conformance shard $shard_index failed" >&2
+  exit 44
+fi
+printf 'fake conformance shard %s ok\n' "$shard_index"
 SH
 chmod +x "$fake_harn"
 
@@ -28,18 +52,6 @@ if [[ "${1-}" == "--help" ]]; then
 fi
 
 printf '%s\t%s\tHARN_BIN=%s\n' "$(date +%s%N)" "$*" "${HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
-
-if [[ "$*" == "conformance" ]]; then
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if [[ -f "$FAKE_AUDIT_ROOT/audit.started" ]]; then
-      printf 'fake conformance ok\n'
-      exit 0
-    fi
-    sleep 0.05
-  done
-  echo "audit gates were not started before conformance completed" >&2
-  exit 41
-fi
 
 case "$*" in
   -j3\ -k\ -Otarget\ *)
@@ -65,8 +77,10 @@ SH
 chmod +x "$fake_bin/make"
 
 AUDIT_GATES_CONCURRENCY=3 \
+  HARN_CONFORMANCE_SHARDS=3 \
   HARN_BIN="$fake_harn" \
   FAKE_AUDIT_RECORD="$record" \
+  FAKE_CONFORMANCE_RECORD="$tmp_root/conformance-record.txt" \
   FAKE_AUDIT_ROOT="$tmp_root" \
   PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/audit_gates.sh" > "$tmp_root/audit.out"
@@ -81,11 +95,19 @@ if ! grep -Fxq "=== conformance and audit gates passed ===" "$tmp_root/audit.out
   cat "$tmp_root/audit.out" >&2
   exit 1
 fi
-if ! grep -Fq $'\tconformance\t'"HARN_BIN=$fake_harn" "$record"; then
-  echo "conformance did not receive the warmed HARN_BIN" >&2
-  cat "$record" >&2
+if [[ "$(wc -l < "$tmp_root/conformance-record.txt" | tr -d ' ')" != "3" ]]; then
+  echo "conformance did not run exactly three process shards" >&2
+  cat "$tmp_root/conformance-record.txt" >&2
   exit 1
 fi
+for shard_index in 1 2 3; do
+  expected="test conformance --shard-index $shard_index --shard-total 3"
+  if ! grep -Fq "$expected" "$tmp_root/conformance-record.txt"; then
+    echo "conformance shard invocation missing: $expected" >&2
+    cat "$tmp_root/conformance-record.txt" >&2
+    exit 1
+  fi
+done
 if ! grep -Fq $'\t-j3 -k -Otarget ' "$record"; then
   echo "audit gates did not use the configured make fanout" >&2
   cat "$record" >&2
@@ -100,14 +122,37 @@ fi
 : > "$record"
 rm -f "$tmp_root/audit.started"
 if AUDIT_GATES_CONCURRENCY=3 \
+  HARN_CONFORMANCE_SHARDS=3 \
   HARN_BIN="$fake_harn" \
   FAKE_AUDIT_RECORD="$record" \
+  FAKE_CONFORMANCE_RECORD="$tmp_root/conformance-fail-audit-record.txt" \
   FAKE_AUDIT_ROOT="$tmp_root" \
   FAKE_AUDIT_FAIL=1 \
   PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/audit_gates.sh" > "$tmp_root/audit-fail.out" 2>&1; then
   echo "audit_gates masked a failing audit fanout" >&2
   cat "$tmp_root/audit-fail.out" >&2
+  exit 1
+fi
+
+: > "$record"
+rm -f "$tmp_root/audit.started"
+if AUDIT_GATES_CONCURRENCY=3 \
+  HARN_CONFORMANCE_SHARDS=3 \
+  HARN_BIN="$fake_harn" \
+  FAKE_AUDIT_RECORD="$record" \
+  FAKE_CONFORMANCE_RECORD="$tmp_root/conformance-fail-record.txt" \
+  FAKE_CONFORMANCE_FAIL_SHARD=2 \
+  FAKE_AUDIT_ROOT="$tmp_root" \
+  PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/audit_gates.sh" > "$tmp_root/conformance-fail.out" 2>&1; then
+  echo "audit_gates masked a failing conformance shard" >&2
+  cat "$tmp_root/conformance-fail.out" >&2
+  exit 1
+fi
+if ! grep -Fq "FAIL: conformance shard(s) 2:44 failed" "$tmp_root/conformance-fail.out"; then
+  echo "audit_gates did not identify the failing conformance shard and status" >&2
+  cat "$tmp_root/conformance-fail.out" >&2
   exit 1
 fi
 if ! grep -Fq "FAIL: one or more audit gates failed" "$tmp_root/audit-fail.out"; then
