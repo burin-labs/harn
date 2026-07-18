@@ -1,4 +1,4 @@
-pub type AgentToolLifecycleErrorCategory = "schema_validation" | "tool_error" | "mcp_server_error" | "host_bridge_error" | "permission_denied" | "rejected_loop" | "parse_aborted" | "timeout" | "network" | "resource_busy" | "cancelled" | "unknown"
+pub type AgentToolLifecycleErrorCategory = "schema_validation" | "tool_error" | "mcp_server_error" | "host_bridge_error" | "permission_denied" | "rejected_loop" | "parse_aborted" | "timeout" | "network" | "resource_busy" | "cancelled" | "abandoned_at_loop_exit" | "unknown"
 
 pub type AgentToolMutationStatus = "applied" | "not_applied" | "unknown"
 
@@ -14,6 +14,7 @@ const TOOL_LIFECYCLE_ERROR_CATEGORIES = [
   "network",
   "resource_busy",
   "cancelled",
+  "abandoned_at_loop_exit",
   "unknown",
 ]
 

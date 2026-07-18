@@ -16,6 +16,7 @@ pipeline test() {
     "network",
     "resource_busy",
     "cancelled",
+    "abandoned_at_loop_exit",
     "unknown",
   ] {
     assert_eq(agent_tool_lifecycle_error_category(category), category)
