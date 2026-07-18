@@ -747,6 +747,9 @@ PY
   # selected release version explicitly so a Cargo.toml-only rewrite does not
   # force a second full CLI build.
   harn_cmd dump-protocol-artifacts --artifact-version "$next"
+  # The package/release payload is intentionally ignored rather than committed.
+  # Generate it once after the version bump; later audit/package steps verify
+  # the same target-independent bytes without per-target regeneration.
   make gen-cli-aot
   echo "Version updated: $current -> $next"
   echo "Next steps:"

@@ -16,7 +16,7 @@ HARN_PROTOCOL_ARTIFACT_CHECK_ARGS = $(if $(strip $(HARN_PROTOCOL_ARTIFACT_VERSIO
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-cli-aot check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
 
 check: all
 
@@ -420,16 +420,16 @@ portal:
 portal-demo:
 	./scripts/portal_demo.sh
 
-# Regenerate committed bytecode for the Harn-backed CLI commands. The generator
-# compiles harn-vm in Cargo's normal graph; harn-cli's build script only verifies
-# and embeds these outputs.
+# Generate a target-independent CLI AOT payload for package/release assembly.
+# The generator validates the full workspace; harn-cli's build script validates
+# and embeds only the package-local payload. Source builds use source fallback.
 gen-cli-aot:
 	$(HARN_CARGO_CMD) run -p harn-cli-aot-gen -- --workspace-root "$(CURDIR)"
 
 check-cli-aot:
-	@echo "=== Checking committed CLI AOT artifacts ==="
+	@echo "=== Checking release/package CLI AOT payload ==="
 	@$(HARN_CARGO_CMD) run -p harn-cli-aot-gen -- --workspace-root "$(CURDIR)" --check
-	@echo "    CLI AOT artifacts OK."
+	@echo "    CLI AOT payload OK."
 
 # Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib.
 # Run this whenever keywords or globally-available builtins change.
