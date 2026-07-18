@@ -1,4 +1,5 @@
 import { agent_loop_options } from "std/agent/options"
+import { assert_eq } from "std/testing"
 
 pipeline default() {
   // No explicit tool_format: resolves the GLOBAL text-channel default, now
@@ -54,21 +55,25 @@ pipeline default() {
   __io_println(explicit_ledger.task_ledger.root_task)
   __io_println(explicit_ledger.task_ledger.deliverables[0].id)
   const default_transport = agent_loop_options({provider: "mock"})
-  require default_transport._llm_caller_transport == {forwards_assistant_prefill: false}
+  assert_eq(default_transport._llm_caller_transport, {forwards_assistant_prefill: false})
   const prefill_transport = agent_loop_options({provider: "mock", llm_caller_transport: {forwards_assistant_prefill: true}})
-  require prefill_transport._llm_caller_transport == {forwards_assistant_prefill: true}
+  assert_eq(prefill_transport._llm_caller_transport, {forwards_assistant_prefill: true})
   const invalid_prefill = try {
     agent_loop_options({provider: "mock", llm_caller_transport: {forwards_assistant_prefill: "yes"}})
   }
-  require is_err(invalid_prefill)
-  require to_string(unwrap_err(invalid_prefill))
-    == "agent_loop: `llm_caller_transport.forwards_assistant_prefill` must be a bool; got string"
+  assert_eq(is_err(invalid_prefill), true)
+  assert_eq(
+    to_string(unwrap_err(invalid_prefill)),
+    "agent_loop: `llm_caller_transport.forwards_assistant_prefill` must be a bool; got string",
+  )
   const invalid_transport = try {
     agent_loop_options({provider: "mock", llm_caller_transport: true})
   }
-  require is_err(invalid_transport)
-  require to_string(unwrap_err(invalid_transport))
-    == "agent_loop: `llm_caller_transport` must be a dict or nil; got bool"
+  assert_eq(is_err(invalid_transport), true)
+  assert_eq(
+    to_string(unwrap_err(invalid_transport)),
+    "agent_loop: `llm_caller_transport` must be a dict or nil; got bool",
+  )
   const invalid_expose_decisions = try {
     agent_loop_options(
       {provider: "mock", iteration_budget: {mode: "adaptive", expose_decisions: "yes"}},
