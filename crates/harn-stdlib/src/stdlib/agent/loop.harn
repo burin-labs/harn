@@ -4417,17 +4417,6 @@ fn __agent_loop_run(message, session, initial_opts) {
         turn_opts = agent_apply_tool_surface_narrowing(turn_opts)
         turn_opts = agent_stance_apply(turn_opts)
         const turn_llm_opts = __agent_loop_effective_llm_options(turn_opts)
-        const monologue_actuation = agent_monologue_actuation_take(
-          session.session_id,
-          iteration_index + 1,
-          stall_state.monologue_actuation,
-          agent_monologue_actuation_config(turn_opts?.stall_diagnostics?.monologue_actuation),
-          agent_has_tools(turn_opts),
-          agent_supports_assistant_prefill(turn_llm_opts),
-          pending_prefill.prefill == "",
-          agent_tool_call_paradigm(turn_llm_opts),
-        )
-        stall_state = stall_state + {monologue_actuation: monologue_actuation.state}
         __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
         agent_autocompact_if_needed(session, turn_llm_opts)
         __agent_loop_checkpoint(session.session_id, "post_compact", {iteration: iteration_index + 1})
@@ -4473,6 +4462,17 @@ fn __agent_loop_run(message, session, initial_opts) {
           primary_model,
           opts,
         )
+        const monologue_actuation = agent_monologue_actuation_take(
+          session.session_id,
+          iteration_index + 1,
+          stall_state.monologue_actuation,
+          agent_monologue_actuation_config(turn_opts?.stall_diagnostics?.monologue_actuation),
+          agent_has_tools(turn_opts),
+          agent_supports_assistant_prefill(turn_llm_opts),
+          pending_prefill.prefill == "",
+          agent_tool_call_paradigm(turn_llm_opts),
+        )
+        stall_state = stall_state + {monologue_actuation: monologue_actuation.state}
         const one_shot_prefill = if monologue_actuation.applied {
           monologue_actuation.prefill
         } else {
