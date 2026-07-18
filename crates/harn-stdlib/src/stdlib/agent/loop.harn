@@ -16,6 +16,7 @@ import {
   agent_verify_completion_judge_cap,
   agent_verify_or_continue,
 } from "std/agent/judge"
+import { agent_invoke_llm } from "std/agent/llm_dispatch"
 import {
   agent_mcp_admit_bootstrap,
   agent_mcp_bootstrap_if_needed,
@@ -30,7 +31,6 @@ import {
   agent_merge_llm_options,
   agent_refresh_tool_format_for_route,
   agent_sanitize_model_options,
-  agent_supports_assistant_prefill,
   agent_tool_format,
 } from "std/agent/options"
 import {
@@ -54,7 +54,6 @@ import {
   agent_required_tools_inject_feedback,
   agent_required_tools_missing_from_session,
 } from "std/agent/required_tools"
-import { agent_loop_default_retry_predicate } from "std/agent/retry"
 import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
 import { agent_skills_match } from "std/agent/skills"
 import {
@@ -103,12 +102,7 @@ import {
   suspend_agent,
 } from "std/agent/workers"
 import { omit } from "std/json"
-import { with_retry } from "std/llm/handlers"
-import {
-  llm_arm_one_shot_prefill,
-  llm_call_options,
-  llm_clear_one_shot_prefill,
-} from "std/llm/options"
+import { llm_arm_one_shot_prefill, llm_clear_one_shot_prefill } from "std/llm/options"
 
 /**
  * Agent-loop budget timing must route through the VM-level harness clock so
@@ -129,155 +123,6 @@ const __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH = "post_tool_dispatch"
 const __AGENT_LOOP_HOST_INJECTION_TURN_BOUNDARY = "turn_boundary"
 
 const __AGENT_LOOP_HOST_INJECTION_AFTER_NEXT_TOOL_CALL = "after_next_tool_call"
-
-fn __default_invoke_llm(message, turn_system, llm_opts) {
-  // When a harness registers an `on_delta` callback, issue the per-turn call
-  // through the streaming transport so each visible-text chunk is observed as
-  // it arrives (enabling live rendering/masking of the token stream). The
-  // collector returns the SAME normalized result dict as `llm_call` — tool
-  // calls and usage are preserved, so tool dispatch downstream is unaffected.
-  // A custom `llm_caller` short-circuits before this default path, so a
-  // non-streaming caller simply never fires `on_delta`.
-  const on_delta = llm_opts?._on_delta
-  const call_opts = llm_opts
-  const result = try {
-    if type_of(on_delta) == "closure" {
-      __host_llm_stream_collect(message, turn_system, llm_call_options(call_opts), on_delta)
-    } else {
-      llm_call(message, turn_system, llm_call_options(call_opts))
-    }
-  }
-  if !is_err(result) {
-    return {ok: true, value: unwrap(result)}
-  }
-  const err = unwrap_err(result)
-  const normalized = __llm_provider_error(err, llm_opts)
-  const reason = if type_of(err) == "dict" {
-    err?.reason ?? ""
-  } else {
-    ""
-  }
-  if reason == "budget_exceeded" {
-    return {ok: false, status: "budget_exhausted", stop_reason: "budget_exhausted", error: normalized}
-  }
-  return {ok: false, status: "provider_error", stop_reason: "provider_error", error: normalized}
-}
-
-fn __messages_include_tool_result(messages) {
-  if type_of(messages) != "list" {
-    return false
-  }
-  for msg in messages {
-    const role = to_string(msg?.role ?? "")
-    if role == "tool" || role == "tool_result" {
-      return true
-    }
-  }
-  return false
-}
-
-fn __llm_error_field(err, key, fallback) {
-  if type_of(err) == "dict" {
-    const value = err[key]
-    if value != nil {
-      return to_string(value)
-    }
-  }
-  return fallback
-}
-
-fn __llm_provider_error(err, llm_opts) {
-  const message = __llm_error_field(err, "message", to_string(err))
-  const category = __llm_error_field(err, "category", error_category(err))
-  const reason = __llm_error_field(err, "reason", "")
-  const kind = __llm_error_field(err, "kind", "")
-  const provider = __llm_error_field(err, "provider", to_string(llm_opts?.provider ?? ""))
-  const model = __llm_error_field(err, "model", to_string(llm_opts?.model ?? ""))
-  return {
-    category: category,
-    reason: reason,
-    kind: kind,
-    provider: provider,
-    model: model,
-    message: message,
-    phase: "llm_call",
-    tool_format: to_string(llm_opts?.tool_format ?? ""),
-    after_tool_result: __messages_include_tool_result(llm_opts?.messages),
-  }
-}
-
-fn __agent_loop_emit_llm_call_start(llm_opts) {
-  const session_id = to_string(llm_opts?.session_id ?? "")
-  if session_id == "" {
-    return nil
-  }
-  let checkpoint = {
-    kind: "llm_call_start",
-    phase: "llm_call",
-    iteration: to_int(llm_opts?._iteration ?? 0),
-    attempt: to_int(llm_opts?._truncation_auto_continue_attempt ?? 0) + 1,
-    context_overflow_recovery_attempt: to_int(llm_opts?._context_overflow_recovery_attempt ?? 0),
-    provider: to_string(llm_opts?.provider ?? ""),
-    model: to_string(llm_opts?.model ?? ""),
-    tool_format: to_string(llm_opts?.tool_format ?? ""),
-    final_wrapup: llm_opts?._final_wrapup ?? false,
-  }
-  agent_emit_event(session_id, "typed_checkpoint", checkpoint)
-  return nil
-}
-
-fn __validate_caller_result(r) {
-  if type_of(r) != "dict" {
-    throw "agent_loop: llm_caller must return a dict; got " + type_of(r)
-  }
-  if r?.ok == nil {
-    throw "agent_loop: llm_caller result missing `ok`"
-  }
-  if r.ok && type_of(r?.value) != "dict" {
-    throw "agent_loop: llm_caller returned ok=true but `value` is not a dict"
-  }
-  if !r.ok && type_of(r?.status) != "string" {
-    throw "agent_loop: llm_caller returned ok=false but `status` is not a string"
-  }
-}
-
-fn __invoke_llm(message, turn_system, llm_opts) {
-  __agent_loop_emit_llm_call_start(llm_opts)
-  const caller = llm_opts?._llm_caller
-  if caller == nil {
-    const retry_cfg = llm_opts?._llm_retry
-    if retry_cfg != nil {
-      const retrying_default = with_retry(
-        { call -> __default_invoke_llm(call.prompt, call.system, call.opts) },
-        retry_cfg + {predicate: retry_cfg?.predicate ?? agent_loop_default_retry_predicate},
-      )
-      return retrying_default(
-        {
-          prompt: message,
-          system: turn_system,
-          opts: llm_opts,
-          turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
-        },
-      )
-    }
-    return __default_invoke_llm(message, turn_system, llm_opts)
-  }
-  let call = {
-    prompt: message,
-    system: turn_system,
-    opts: llm_opts,
-    turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
-  }
-  const result = try {
-    caller(call)
-  }
-  if is_err(result) {
-    throw unwrap_err(result)
-  }
-  const r = unwrap(result)
-  __validate_caller_result(r)
-  return r
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -398,7 +243,7 @@ fn __autocontinue_should_continue(call, turn_opts) {
 /**
  * Call the LLM, and on a length-truncated turn with an incomplete tool call,
  * AUTO-CONTINUE by re-issuing with a raised output cap (bounded). Returns the
- * same `{ok, value, ...}` shape `__invoke_llm` returns; callers consume the
+ * same `{ok, value, ...}` shape `agent_invoke_llm` returns; callers consume the
  * final (hopefully complete) result and run their normal parse/stall/dispatch
  * accounting on it. Falls back to the last truncated result once the cap is
  * exhausted, so the existing parse-guidance path still fires.
@@ -412,7 +257,7 @@ fn __invoke_llm_with_autocontinue(
   iteration_index,
 ) {
   const retry_llm_opts = llm_clear_one_shot_prefill(llm_opts)
-  let call = __invoke_llm(message, turn_system, llm_opts)
+  let call = agent_invoke_llm(message, turn_system, llm_opts)
   const max_continuations = __autocontinue_max_continuations(llm_opts)
   let attempts = 0
   let cap = llm_opts?.max_tokens ?? 0
@@ -439,7 +284,7 @@ fn __invoke_llm_with_autocontinue(
     cap = raised
     const retry_opts = retry_llm_opts
       + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
-    call = __invoke_llm(message, turn_system, retry_opts)
+    call = agent_invoke_llm(message, turn_system, retry_opts)
   }
   return call
 }
@@ -547,7 +392,7 @@ fn __agent_loop_recover_context_overflow(
 
 // -------------------------------------------------------------------------------------------------
 
-// Tool middleware seam — composable tool_caller (mirrors __invoke_llm).
+// Tool middleware seam — composable tool_caller (mirrors agent_invoke_llm).
 //
 // Each tool dispatch is funneled through `tool_caller(envelope, next)` when
 // the agent_loop options carry one. The envelope normalizes the call shape
@@ -4135,7 +3980,7 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     _iteration: iteration + 1,
     _final_wrapup: true,
   }
-  let call = __invoke_llm(message, turn_system, llm_opts)
+  let call = agent_invoke_llm(message, turn_system, llm_opts)
   if !call.ok {
     return false
   }
@@ -4270,7 +4115,7 @@ fn __agent_loop_apply_output_schema(final_result, opts, session, message, iterat
     _output_schema_repair: true,
   }
   const repair = try {
-    __invoke_llm(__agent_loop_output_schema_repair_prompt(schema, text), nil, repair_opts)
+    agent_invoke_llm(__agent_loop_output_schema_repair_prompt(schema, text), nil, repair_opts)
   }
   if is_err(repair) {
     return final_result + {output: direct.value, output_valid: false}
@@ -4468,7 +4313,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           stall_state.monologue_actuation,
           agent_monologue_actuation_config(turn_opts?.stall_diagnostics?.monologue_actuation),
           agent_has_tools(turn_opts),
-          agent_supports_assistant_prefill(turn_llm_opts),
+          turn_llm_opts,
           pending_prefill.prefill == "",
           agent_tool_call_paradigm(turn_llm_opts),
         )

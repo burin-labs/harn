@@ -1,8 +1,7 @@
 // @harn-entrypoint-category llm.stdlib
 //
-// std/llm/handlers — composable middleware around the (call) -> envelope
-// caller seam wired into agent_loop. Each `with_*` returns a NEW caller
-// closure that wraps `next`. Compose left-to-right via `compose`.
+// std/llm/handlers — composable middleware around agent_loop's caller seam.
+// Each `with_*` wraps `next`; compose left-to-right via `compose`.
 //
 // Caller shape:
 //   call    = {prompt, system, opts, turn: {iteration, session_id, attempt}}
@@ -13,9 +12,7 @@
 // "caller_skipped", "exception", "schema_validation", "rate_limited",
 // "timeout", "network", "provider_5xx", "stream_interrupt",
 // "context_window_exceeded", "auth", "policy_blocked", "circuit_open".
-// "context_overflow" (the tag `std/llm/safe` emits for the same
-// context-window condition) is treated as an alias of
-// "context_window_exceeded" by the default retry predicate.
+// "context_overflow" is an alias of "context_window_exceeded".
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
 import { llm_call_options, llm_clear_one_shot_prefill } from "std/llm/options"

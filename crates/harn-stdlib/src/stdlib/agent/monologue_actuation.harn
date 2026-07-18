@@ -82,6 +82,38 @@ pub fn agent_monologue_actuation_arm(
   return state + {pending: true}
 }
 
+/**
+ * Arm the actuation state nested in a stall observation without coupling the
+ * detector to the recovery state machine's internal update shape.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_monologue_actuation_arm_observation(observation: dict) -> dict {
+  return observation
+    + {
+    state: observation.state
+      + {
+      monologue_actuation: agent_monologue_actuation_arm(
+        observation.state.monologue_actuation,
+        observation.config.monologue_actuation,
+        to_string(observation.warning?.pattern ?? ""),
+      ),
+    },
+  }
+}
+
+fn __agent_monologue_actuation_route_supports_prefill(options) -> bool {
+  const capabilities = try {
+    provider_capabilities(options?.provider ?? "auto", options?.model ?? "")
+  }
+  if is_err(capabilities) || type_of(unwrap(capabilities)) != "dict" {
+    return false
+  }
+  return unwrap(capabilities)?.supports_assistant_prefill ?? false
+}
+
 fn __agent_monologue_actuation_receipt(
   session_id: string,
   iteration: int,
@@ -124,7 +156,7 @@ pub fn agent_monologue_actuation_take(
   state: MonologueActuationState,
   config: MonologueActuationConfig,
   has_tools: bool,
-  supports_assistant_prefill: bool,
+  llm_options,
   prefill_available: bool,
   paradigm = nil,
 ) -> MonologueActuationDecision {
@@ -186,7 +218,7 @@ pub fn agent_monologue_actuation_take(
       firing_count: cleared.firing_count,
       max_firings: config.max_firings,
     }
-  } else if !supports_assistant_prefill {
+  } else if !__agent_monologue_actuation_route_supports_prefill(llm_options) {
     {
       state: cleared,
       applied: false,

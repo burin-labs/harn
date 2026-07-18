@@ -5,8 +5,6 @@ import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
-// -------------------------------------------------------------------------------------------------
-
 // Typed option aliases (the documented way to build agent_loop options).
 //
 // Co-located with the `agent_loop_options` normalizer below so the alias and
@@ -15,9 +13,6 @@ import { project_context_profile } from "std/project"
 // `crates/harn-vm/src/orchestration/policy/types.rs` (`TurnPolicy`) and
 // `crates/harn-vm/src/orchestration/compaction.rs` (`CompactionPolicy`); key
 // parity is pinned by `crates/harn-vm/tests/typed_options_parity.rs`.
-
-// -------------------------------------------------------------------------------------------------
-
 /**
  * Iteration budget accepted by `agent_loop`'s `iteration_budget:` option.
  * Normalized by `__normalize_iteration_budget` below.
@@ -68,13 +63,6 @@ pub type RepairDiagnostics = {
 }
 
 /**
- * Opt-in bounded recovery for text-only no-progress turns. The stall detector
- * owns normalization and accounting; callers only choose whether to enable it
- * and, when useful, a per-run firing cap.
- */
-pub type MonologueActuation = {enabled?: bool, max_firings?: int}
-
-/**
  * Caller-facing `stall_diagnostics:` config. Normalized into the internal
  * `AgentStallConfig` shape by `std/agent/stall`.
  *
@@ -106,7 +94,7 @@ pub type StallDiagnostics = {
   reserved_terminal_verify?: bool,
   reserved_terminal_verify_iterations?: int,
   zero_write_terminal_verify?: bool,
-  monologue_actuation?: bool | MonologueActuation,
+  monologue_actuation?: bool | {enabled?: bool, max_firings?: int},
 }
 
 /**
@@ -2164,20 +2152,6 @@ fn __stack_configured_model_options(cfg, prefixes) {
  */
 pub fn agent_sanitize_model_options(options = nil, policy = nil) {
   return __stack_sanitize_result(options, policy).options
-}
-
-/**
- * Return whether the resolved provider/model route accepts an assistant
- * prefill. Capability lookup and its fail-closed fallback stay in the model
- * option owner so recovery policy never reconstructs catalog semantics.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn agent_supports_assistant_prefill(options = nil) -> bool {
-  const capabilities = __stack_capabilities(options)
-  return capabilities?.supports_assistant_prefill ?? false
 }
 
 /**
