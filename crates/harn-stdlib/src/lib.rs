@@ -147,6 +147,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/ensemble" => "stdlib/llm/ensemble.harn",
     "llm/rerank" => "stdlib/llm/rerank.harn",
     "agent/reasoning" => "stdlib/agent/reasoning.harn",
+    "agent/caller_transport" => "stdlib/agent/caller_transport.harn",
     "agent/options" => "stdlib/agent/options.harn",
     "agent/llm_dispatch" => "stdlib/agent/llm_dispatch.harn",
     "agent/prefill" => "stdlib/agent/prefill.harn",

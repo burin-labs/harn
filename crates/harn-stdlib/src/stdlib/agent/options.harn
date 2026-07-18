@@ -1,3 +1,8 @@
+import {
+  LlmCallerTransport,
+  __normalize_llm_caller_transport,
+  __validate_llm_caller,
+} from "std/agent/caller_transport"
 import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
@@ -44,17 +49,6 @@ pub type TurnPolicy = {
   allow_done_sentinel?: bool,
   max_prose_chars?: int,
 }
-
-/**
- * Explicit transport guarantees for a custom `llm_caller`.
- *
- * Harn cannot inspect an arbitrary caller closure, so recovery mechanisms stay
- * fail-closed unless the caller declares that it forwards the supplied
- * assistant prefill unchanged to the provider transport. This says nothing
- * about provider support; the resolved provider capability remains a separate
- * required gate.
- */
-pub type LlmCallerTransport = {forwards_assistant_prefill?: bool}
 
 /**
  * Nested repair-diagnostics config accepted under `stall_diagnostics`.
@@ -1120,30 +1114,6 @@ fn __validate_terminal_callback(value) {
   if type_of(value) != "closure" {
     throw "agent_loop: `terminal_callback` must be a closure or nil; got " + type_of(value)
   }
-}
-
-fn __validate_llm_caller(value) {
-  if value == nil {
-    return
-  }
-  if type_of(value) != "closure" {
-    throw "agent_loop: `llm_caller` must be a closure or nil; got " + type_of(value)
-  }
-}
-
-fn __normalize_llm_caller_transport(value) -> LlmCallerTransport {
-  if value == nil {
-    return {forwards_assistant_prefill: false}
-  }
-  if type_of(value) != "dict" {
-    throw "agent_loop: `llm_caller_transport` must be a dict or nil; got " + type_of(value)
-  }
-  const forwards_assistant_prefill = value?.forwards_assistant_prefill ?? false
-  if type_of(forwards_assistant_prefill) != "bool" {
-    throw "agent_loop: `llm_caller_transport.forwards_assistant_prefill` must be a bool; got "
-      + type_of(forwards_assistant_prefill)
-  }
-  return {forwards_assistant_prefill: forwards_assistant_prefill}
 }
 
 fn __validate_on_delta(value) {
