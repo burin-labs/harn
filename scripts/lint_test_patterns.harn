@@ -32,6 +32,12 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
   // Real subprocess lifecycle e2e: probes OS process-group death and
   // `background: true` survival, so the waits observe host process state.
   "crates/harn-hostlib/tests/process_tools_e2e.rs",
+  // Pre-existing interrupt-preemption test for a real subprocess: a spawned
+  // thread sleeps briefly to stage a delayed cancel-token flip (the shape a
+  // scope cancellation / deadline expiry takes mid-wait), proving the wait
+  // loop terminates the child and its grandchild. Extracted from process.rs's
+  // inline test mod, which was previously below this lint's file filter.
+  "crates/harn-vm/src/stdlib/process_tests.rs",
 ]
 
 // tokio::time::sleep in test files (outside start_paused = true tests).

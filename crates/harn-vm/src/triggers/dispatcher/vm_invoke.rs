@@ -224,6 +224,7 @@ impl DispatchProcessContextGuard {
                     branch: None,
                     base_ref: None,
                     cleanup: None,
+                    grants: Vec::new(),
                 })
             }
             None => None,
@@ -263,6 +264,7 @@ mod tests {
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         }
     }
 

@@ -25,6 +25,10 @@ pub(super) struct VmSetup<'a> {
     pub cwd: &'a Path,
     pub project_root: Option<&'a Path>,
     pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
+    /// The session's capability profile, resolved at `session/new`. When
+    /// present, its allowlist + grants govern this turn's subprocess
+    /// environments; when `None`, subprocesses inherit the server env (legacy).
+    pub session_profile: Option<harn_vm::security::SessionProfile>,
 }
 
 fn pipeline_name_for(source_path: Option<&Path>) -> String {
@@ -227,9 +231,20 @@ pub(super) async fn execute_chunk(
             .source_path
             .and_then(|p| p.parent())
             .map(|p| p.to_string_lossy().into_owned()),
+        // Non-secret receipts for the session's grants (empty for a hermetic or
+        // no-profile run) travel on the propagated execution record.
+        grants: setup
+            .session_profile
+            .as_ref()
+            .map(harn_vm::security::SessionProfile::receipts)
+            .unwrap_or_default(),
         ..Default::default()
     };
     harn_vm::stdlib::process::set_thread_execution_context(Some(execution));
+    // Install the session's capability profile so this turn's subprocesses build
+    // their environment through the closed allowlist + grants resolver. `None`
+    // leaves the legacy inherit-the-server-env behavior untouched.
+    harn_vm::stdlib::process::set_session_profile(setup.session_profile.clone());
     let execute_started = Instant::now();
     let result = match vm.execute_arc(std::sync::Arc::new(chunk)).await {
         Ok(_) => Ok(vm.output().to_string()),
@@ -247,6 +262,7 @@ pub(super) async fn execute_chunk(
             "execute_ms": execute_ms,
         })),
     );
+    harn_vm::stdlib::process::set_session_profile(None);
     harn_vm::stdlib::process::set_thread_execution_context(None);
     result
 }

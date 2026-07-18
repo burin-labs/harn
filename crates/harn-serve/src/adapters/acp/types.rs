@@ -194,11 +194,31 @@ pub struct AcpJsonRpcErrorResponse {
     pub error: AcpJsonRpcError,
 }
 
+/// The capability profile a client declares on `session/new`. Optional: absent,
+/// the session runs the legacy no-profile path (subprocesses inherit the server
+/// environment). Present, harn resolves it into a
+/// [`harn_vm::security::SessionProfile`] at launch and every prompt turn's
+/// subprocesses run under the closed allowlist + grants environment.
+///
+/// The launcher parses its own `--grant name=spec` strings at ITS boundary and
+/// sends harn this already-typed, value-free shape; harn does not parse flag
+/// strings. A hermetic kind with any grant is rejected at launch.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcpSessionProfileConfig {
+    pub kind: harn_vm::security::SessionProfileKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grants: Vec<harn_vm::security::GrantSpec>,
+}
+
 /// `session/new` params.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcpSessionNewParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// The session's declared capability profile, if any. See
+    /// [`AcpSessionProfileConfig`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<AcpSessionProfileConfig>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -207,6 +227,7 @@ impl AcpSessionNewParams {
     pub fn cwd(cwd: impl Into<String>) -> Self {
         Self {
             cwd: Some(cwd.into()),
+            profile: None,
             extra: BTreeMap::new(),
         }
     }

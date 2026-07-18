@@ -94,6 +94,13 @@ pub(super) struct Session {
     pub(super) budget: SessionBudget,
     /// Prompt executions emitted to profile output for this ACP session.
     pub(super) profile_turn: u64,
+    /// The capability profile this session launched under, resolved once at
+    /// `session/new` from the client's declared profile kind + grants. `None`
+    /// is the legacy path: no profile was declared, and the session's
+    /// subprocesses inherit the server environment unchanged. `Some(profile)`
+    /// switches subprocess env construction to the closed allowlist + grants
+    /// resolver for every prompt turn.
+    pub(super) capability_profile: Option<harn_vm::security::SessionProfile>,
 }
 
 pub(super) fn session_project_root_for_cwd(cwd: &Path) -> PathBuf {
