@@ -14,12 +14,9 @@
 # dir has not been modified within HARN_TARGET_GC_MIN_AGE_SECS (default 3h),
 # so an in-flight `make setup`/build is never touched.
 #
-# The machine-shared Cargo build-dir
-# ("$HARN_DEV_SETUP_STORAGE_ROOT/cargo-build-shared", emitted by
-# dev_setup.sh) is intentionally OUTSIDE the harn-target root and must never
-# be pruned here: it is shared by every worktree, so no per-worktree liveness
-# check applies. An assertion below pins the rm loop to a root whose basename
-# is exactly "harn-target".
+# Cargo's default build scratch lives inside each per-worktree target directory,
+# so the same liveness decision reclaims both. An assertion below pins the rm
+# loop to a root whose basename is exactly "harn-target".
 #
 # Usage:
 #   scripts/prune_stale_targets.sh [--dry-run]

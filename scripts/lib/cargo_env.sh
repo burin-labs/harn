@@ -1,10 +1,10 @@
 #!/bin/sh
 
 # Shared Cargo environment helpers for Harn's local hooks and CI/release
-# warm-build scripts. `build.build-dir` is independent from `target-dir`, so an
-# isolated target must override the machine-shared development build directory.
-# Cargo normally places intermediates directly in the target directory; using
-# that same path preserves warm artifacts from ordinary Cargo commands.
+# warm-build scripts. Cargo normally keeps intermediates in the target
+# directory, which is already stable and isolated per worktree. When a caller
+# explicitly selects another target, align any inherited custom build-dir with
+# that boundary as well.
 
 harn_export_cargo_build_dir_for_target() {
   target_dir=${1:-${CARGO_TARGET_DIR:-}}
