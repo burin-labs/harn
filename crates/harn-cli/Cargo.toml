@@ -14,12 +14,11 @@ build = "build.rs"
 # invoke the main CLI so hooks and release scripts don't need to spell
 # out `--bin harn` everywhere.
 default-run = "harn"
-# portal-dist/ is a gitignored build artifact produced by `npm run build` in
-# crates/harn-cli/portal. It is embedded at compile time via include_dir! in
-# src/commands/portal/assets.rs, so it must ship with the published crate.
-# The release workflow (scripts/release_ship.sh) builds the portal before
-# invoking cargo publish; this `include` field forces cargo to package the
-# resulting portal-dist/ tree even though it is gitignored.
+# portal-dist/ and generated/cli-bytecode/ are gitignored package payloads.
+# The former is produced by the portal build; the latter is target-independent
+# bytecode made by `make gen-cli-aot` immediately before package/release
+# assembly. Both are embedded at compile time and must therefore ship in the
+# published crate even though source checkouts do not track them.
 include = [
     "src/**/*",
     "data/**/*",
@@ -132,9 +131,10 @@ arcstr = { version = "1", features = ["serde", "std"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# The build script validates and embeds committed CLI AOT artifacts. Compilation
-# happens in the normal dependency graph through `harn-cli-aot-gen`, keeping
-# harn-vm out of Cargo's resolver-isolated build-dependency graph.
+# The build script validates and embeds an optional package-local CLI AOT
+# payload. Compilation happens in the normal dependency graph through
+# `harn-cli-aot-gen`, keeping harn-vm out of Cargo's resolver-isolated
+# build-dependency graph.
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

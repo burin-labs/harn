@@ -16,7 +16,14 @@
 //     scripts/audit_gates.sh (drift would not fail any PR);
 //   - a registry entry flagged make_all = true whose check is missing from
 //     the all: recipe (so `make all` would not catch it);
-//   - a declared output file that does not exist on disk.
+//   - a source-owned declared output file that does not exist on disk.
+//
+// Most artifacts use the default `lifecycle = "source"`: their generated
+// outputs are tracked and must be present in every checkout. A
+// `lifecycle = "release-package"` payload is deliberately untracked, produced
+// immediately before package/release assembly, and therefore has no checkout
+// presence requirement. Its CI check still must be wired like every other
+// drift guard.
 //
 // Pure validation logic lives in the pub fns; main does the filesystem reads.
 const REGISTRY = "scripts/generated_artifacts.toml"
@@ -149,13 +156,44 @@ pub fn artifact_flag_errors(
     errors = errors
       + ["[${aid}] make_all = true but `${check}` is missing from the `all:` recipe in the Makefile."]
   }
-  // Declared outputs must exist.
-  for out in art?.outputs ?? [] {
-    if missing_outputs.contains(out) {
-      errors = errors + ["[${aid}] declared output does not exist: ${out}"]
+  // Source-owned outputs must exist in the checkout. Release/package payloads
+  // are intentionally absent until their serial producer runs.
+  if (art?.lifecycle ?? "source") != "release-package" {
+    for out in art?.outputs ?? [] {
+      if missing_outputs.contains(out) {
+        errors = errors + ["[${aid}] declared output does not exist: ${out}"]
+      }
     }
   }
   return errors
+}
+
+/**
+ * Validate the closed artifact lifecycle vocabulary. Keeping this contract in
+ * the Harn registry checker prevents a misspelled lifecycle from silently
+ * weakening checkout-presence validation.
+ */
+pub fn artifact_lifecycle_errors(art) -> list {
+  const aid = art?.id ?? "<missing id>"
+  const lifecycle = art?.lifecycle ?? "source"
+  if lifecycle == "source" {
+    return []
+  }
+  if lifecycle == "release-package" {
+    let errors = []
+    if art?.ci != true {
+      errors = errors
+        + ["[${aid}] release-package artifacts must set ci = true for their serialized producer/check."]
+    }
+    if art?.make_all != false {
+      errors = errors
+        + [
+        "[${aid}] release-package artifacts must set make_all = false; a source checkout has no payload to check.",
+      ]
+    }
+    return errors
+  }
+  return ["[${aid}] unsupported lifecycle `${lifecycle}`; expected `source` or `release-package`."]
 }
 
 /**
@@ -235,6 +273,7 @@ pub fn validate(
     if !seen_ids.contains(aid) {
       seen_ids = seen_ids + [aid]
     }
+    errors = errors + artifact_lifecycle_errors(art)
     const check = art?.check ?? ""
     const gen = art?.gen ?? ""
     if check == "" {
