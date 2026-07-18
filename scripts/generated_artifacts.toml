@@ -163,6 +163,16 @@ ci = true
 make_all = true
 
 [[artifact]]
+id = "openapi-snapshot"
+description = "Harn Agents OpenAPI public path/schema surface snapshot and embedded server copy, generated from spec/openapi.yaml by scripts/check_openapi_snapshot.harn."
+gen = "gen-openapi-snapshot"
+check = "check-openapi-snapshot"
+outputs = ["spec/openapi.snapshot", "crates/harn-serve/openapi.yaml"]
+sources = ["spec/openapi.yaml"]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "session-bundle-schema"
 description = "JSON Schema for the session-bundle DTO, generated from the Rust SessionBundle type."
 gen = "gen-session-bundle-schema"
@@ -372,6 +382,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-crate-sibling-versions" = "source"
 "check-dependabot-groups" = "source"
 "check-language-spec" = "source"
+"check-openapi-snapshot" = "source"
 "check-docs-model-refs" = "source"
 "check-docs-links" = "source"
 "check-receipt-structs" = "source"
