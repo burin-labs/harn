@@ -278,6 +278,26 @@ fn gemini_message_parts(message: &serde_json::Value) -> Vec<serde_json::Value> {
     parts
 }
 
+/// Return Gemini's opaque thought signature from either a live provider
+/// response or Harn's portable provider-metadata fixture representation.
+pub(crate) fn gemini_tool_call_thought_signature(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("thoughtSignature")
+        .or_else(|| value.get("thought_signature"))
+        .or_else(|| {
+            value
+                .get("provider_metadata")
+                .and_then(|metadata| metadata.get("gemini"))
+                .and_then(|gemini| {
+                    gemini
+                        .get("thought_signature")
+                        .or_else(|| gemini.get("thoughtSignature"))
+                })
+        })
+        .and_then(serde_json::Value::as_str)
+        .filter(|signature| !signature.is_empty())
+}
+
 fn gemini_function_call_part(call: &serde_json::Value) -> Option<serde_json::Value> {
     let function = call.get("function").unwrap_or(call);
     let name = function
@@ -307,12 +327,7 @@ fn gemini_function_call_part(call: &serde_json::Value) -> Option<serde_json::Val
         function_call["id"] = serde_json::json!(id);
     }
     let mut part = serde_json::json!({ "functionCall": function_call });
-    if let Some(signature) = call
-        .get("thought_signature")
-        .or_else(|| call.get("thoughtSignature"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|signature| !signature.is_empty())
-    {
+    if let Some(signature) = gemini_tool_call_thought_signature(call) {
         part["thoughtSignature"] = serde_json::json!(signature);
     }
     Some(part)
@@ -421,10 +436,7 @@ pub(crate) fn parse_response(
     let mut raw_tool_calls = Vec::new();
     if let Some(parts) = json["candidates"][0]["content"]["parts"].as_array() {
         for (idx, part) in parts.iter().enumerate() {
-            let thought_signature = part
-                .get("thoughtSignature")
-                .and_then(|value| value.as_str())
-                .filter(|value| !value.is_empty());
+            let thought_signature = gemini_tool_call_thought_signature(part);
             if let Some(fragment) = part.get("text").and_then(|value| value.as_str()) {
                 if part.get("thought").and_then(|value| value.as_bool()) == Some(true) {
                     thinking.push_str(fragment);
@@ -1048,6 +1060,33 @@ mod tests {
         assert_eq!(
             body["contents"][1]["parts"][0]["functionResponse"],
             json!({"id": "call_1", "name": "lookup", "response": {"result": "ok"}})
+        );
+    }
+
+    #[test]
+    fn gemini_history_lowers_fixture_provider_metadata() {
+        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        payload.messages = vec![json!({
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_1",
+                "name": "lookup",
+                "arguments": {"query": "harn"},
+                "provider_metadata": {
+                    "gemini": {"thought_signature": "fixture-signature"}
+                }
+            }]
+        })];
+
+        let body = GeminiProvider::build_request_body(&payload);
+
+        assert_eq!(
+            body["contents"][0]["parts"][0]["functionCall"],
+            json!({"id": "call_1", "name": "lookup", "args": {"query": "harn"}})
+        );
+        assert_eq!(
+            body["contents"][0]["parts"][0]["thoughtSignature"],
+            "fixture-signature"
         );
     }
 

@@ -1144,6 +1144,7 @@ from `std/agent/options`.
 | `provider` | string | `"auto"` | Explicit provider wins. `"auto"` infers from `model`; see the resolution table below. |
 | `model` | string | (inferred) | Use catalog aliases such as `local-gemma4-e4b` for OpenAI-compatible local servers; use `ollama:gemma4:e4b` for Ollama. |
 | `model_role` | string | nil | Fill missing call options from `[model_roles.<role>]` before normal routing. Explicit options win. `model_role: "merge"` / `"fast_apply"` also reads `HARN_LLM_MERGE_*` and `HARN_LLM_FAST_APPLY_*` provider/model/route-policy overrides. |
+| `mock_scope` | string | `"default"` | Logical purpose bucket used only by deterministic mock-fixture replay. V1 fixtures match it before optional `default` fallback; real providers ignore it. |
 | `max_tokens` | int | 16384 | |
 | `temperature` | float | provider default | |
 | `logprobs` | bool | false | Request token log probabilities when the selected provider route supports them. |

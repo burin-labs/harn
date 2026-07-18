@@ -831,11 +831,8 @@ pub(crate) fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value
                         function_call["id"] = serde_json::json!(id);
                     }
                     let mut part = serde_json::json!({ "functionCall": function_call });
-                    if let Some(signature) = block
-                        .get("thoughtSignature")
-                        .or_else(|| block.get("thought_signature"))
-                        .and_then(|value| value.as_str())
-                        .filter(|value| !value.is_empty())
+                    if let Some(signature) =
+                        crate::llm::providers::gemini_tool_call_thought_signature(block)
                     {
                         part["thoughtSignature"] = serde_json::json!(signature);
                     }
@@ -899,20 +896,10 @@ pub(crate) fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value
                     let mut part = serde_json::json!({
                         "text": text.get("text").and_then(|value| value.as_str()).unwrap_or_default(),
                     });
-                    if let Some(signature) = block
-                        .get("thoughtSignature")
-                        .or_else(|| block.get("thought_signature"))
-                        .or_else(|| {
-                            block
-                                .get("provider_metadata")
-                                .and_then(|value| value.get("gemini"))
-                                .and_then(|value| value.get("thought_signature"))
-                        })
-                        .and_then(|value| value.as_str())
+                    if let Some(signature) =
+                        crate::llm::providers::gemini_tool_call_thought_signature(block)
                     {
-                        if !signature.is_empty() {
-                            part["thoughtSignature"] = serde_json::json!(signature);
-                        }
+                        part["thoughtSignature"] = serde_json::json!(signature);
                     }
                     return Some(part);
                 }
