@@ -1,5 +1,5 @@
 import {
-  agent_monologue_actuation_arm_observation,
+  agent_monologue_actuation_arm,
   agent_monologue_actuation_config,
   agent_monologue_actuation_initial_state,
 } from "std/agent/monologue_actuation"
@@ -1788,6 +1788,20 @@ fn __agent_stall_apply_action_signal(
   )
 }
 
+fn __agent_stall_arm_monologue_actuation(observation: AgentStallObservation) -> AgentStallObservation {
+  return observation
+    + {
+    state: observation.state
+      + {
+      monologue_actuation: agent_monologue_actuation_arm(
+        observation.state.monologue_actuation,
+        observation.config.monologue_actuation,
+        to_string(observation.warning?.pattern ?? ""),
+      ),
+    },
+  }
+}
+
 /**
  * agent_stall_observe_tool_calls detects degenerate agent loops, folds the
  * current-failure model when post-edit verification is enabled, and when the
@@ -1863,7 +1877,7 @@ pub fn agent_stall_observe_tool_calls(
       state: __agent_stall_fold_verify_state(resolved.state, observation.config, payload, turn_made_edit),
     }
   }
-  return agent_monologue_actuation_arm_observation(resolved)
+  return __agent_stall_arm_monologue_actuation(resolved)
 }
 
 /**

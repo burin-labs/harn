@@ -82,28 +82,6 @@ pub fn agent_monologue_actuation_arm(
   return state + {pending: true}
 }
 
-/**
- * Arm the actuation state nested in a stall observation without coupling the
- * detector to the recovery state machine's internal update shape.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn agent_monologue_actuation_arm_observation(observation: dict) -> dict {
-  return observation
-    + {
-    state: observation.state
-      + {
-      monologue_actuation: agent_monologue_actuation_arm(
-        observation.state.monologue_actuation,
-        observation.config.monologue_actuation,
-        to_string(observation.warning?.pattern ?? ""),
-      ),
-    },
-  }
-}
-
 fn __agent_monologue_actuation_route_supports_prefill(options) -> bool {
   const capabilities = try {
     provider_capabilities(options?.provider ?? "auto", options?.model ?? "")
