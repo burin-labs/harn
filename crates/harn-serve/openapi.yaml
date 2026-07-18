@@ -151,7 +151,7 @@ paths:
       operationId: getProviderCatalog
       summary: Read the normalized Harn provider/model catalog.
       description: |
-        Returns the same provider catalog v5 artifact shape as Harn's checked-in
+        Returns the same provider catalog v6 artifact shape as Harn's checked-in
         catalog, using the runtime's effective provider and capability overlays.
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
@@ -2183,10 +2183,10 @@ components:
       properties:
         schema_version:
           type: integer
-          enum: [5]
+          enum: [6]
         schema:
           type: string
-          enum: ["https://harnlang.com/schemas/provider-catalog.v5.json"]
+          enum: ["https://harnlang.com/schemas/provider-catalog.v6.json"]
         generated_by:
           type: string
         providers:

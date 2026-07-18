@@ -589,11 +589,11 @@ fn remote_catalog_rejects_stale_v2_schema() {
         Err(error) => error,
     };
     assert!(
-        error.contains("schema_version must be 5, got 2"),
+        error.contains("schema_version must be 6, got 2"),
         "unexpected stale-catalog rejection: {error}"
     );
     assert!(
-        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v5.json"),
+        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v6.json"),
         "unexpected stale-catalog rejection: {error}"
     );
 }

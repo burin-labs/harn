@@ -55,9 +55,10 @@ pub fn schema_value() -> Value {
             },
             "local_runtime": {
                 "type": "object",
-                "required": ["kind"],
+                "required": ["kind", "wire_protocol", "stop"],
                 "properties": {
                     "kind": {"enum": ["daemon_api", "managed_process", "external"]},
+                    "wire_protocol": {"enum": ["ollama_api", "open_ai_compatible"]},
                     "command": {"type": "string", "minLength": 1},
                     "prefix_args": {"type": "array", "items": {"type": "string"}},
                     "model_source": {"type": "string"},
