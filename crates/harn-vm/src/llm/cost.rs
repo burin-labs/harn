@@ -592,12 +592,27 @@ impl PricingSource {
     }
 }
 
+/// Resolve catalog pricing for the route identity reported by a transport.
+fn model_pricing_for_observed_route(
+    provider: &str,
+    model: &str,
+) -> Option<crate::llm_config::ModelPricing> {
+    crate::llm_config::model_pricing_per_mtok_for_route(provider, model).or_else(|| {
+        // Mock responses carry the modeled provider's model identity while the
+        // transport remains `mock`. Preserve catalog-backed budget accounting
+        // without weakening provider scoping for any real route.
+        (provider == "mock")
+            .then(|| crate::llm_config::model_pricing_per_mtok(model))
+            .flatten()
+    })
+}
+
 /// Resolve full pricing detail for a (provider, model) pair. Prefers the
-/// exact-id catalog entry, then falls back to provider-level economics.
+/// provider-scoped catalog entry, then falls back to provider economics.
 /// Returns `None` for unknown pricing — callers must decide whether to
 /// surface that explicitly or coerce to 0.0.
 pub(crate) fn pricing_detail_for(provider: &str, model: &str) -> Option<PricingDetail> {
-    if let Some(pricing) = crate::llm_config::model_pricing_per_mtok_for_route(provider, model) {
+    if let Some(pricing) = model_pricing_for_observed_route(provider, model) {
         return Some(PricingDetail {
             input_per_1k: pricing.input_per_mtok / 1000.0,
             output_per_1k: pricing.output_per_mtok / 1000.0,
@@ -624,8 +639,8 @@ fn pricing_detail_for_usage(
     model: &str,
     input_tokens: i64,
 ) -> Option<PricingDetail> {
-    if let Some(pricing) =
-        crate::llm_config::model_pricing_for_route_input_tokens(provider, model, input_tokens)
+    if let Some(pricing) = model_pricing_for_observed_route(provider, model)
+        .map(|pricing| pricing.for_input_tokens(input_tokens))
     {
         return Some(PricingDetail {
             input_per_1k: pricing.input_per_mtok / 1000.0,
@@ -1482,6 +1497,17 @@ mod tests {
         );
 
         crate::llm_config::clear_user_overrides();
+    }
+
+    #[test]
+    fn calculate_cost_for_mock_uses_the_modeled_catalog_price() {
+        let _guard = crate::llm::env_guard();
+        crate::llm_config::clear_user_overrides();
+
+        let mocked = calculate_cost_for_provider("mock", "gpt-4o-mini", 3_000, 4_000);
+        let live = calculate_cost_for_provider("openai", "gpt-4o-mini", 3_000, 4_000);
+        assert!(mocked > 0.001);
+        assert!((mocked - live).abs() < 1e-12);
     }
 
     #[test]
