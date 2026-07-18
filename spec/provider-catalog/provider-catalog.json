@@ -21442,22 +21442,26 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "effort_levels": [],
         "none_supported": false,
@@ -21472,18 +21476,7 @@
         "partial_failure": "per_request",
         "cancellation": "unknown",
         "discount_percent": 50,
-        "turnaround_hours": 24,
-        "max_requests": 50000,
-        "max_input_bytes": 209715200,
-        "result_retention_days": 30,
-        "security_notes": [
-          "Batch rate limits use a separate provider pool from synchronous model calls.",
-          "Output and error files can use a configurable expiration between 1 hour and 30 days."
-        ],
-        "operational_notes": [
-          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
-          "Use stable custom_id values to rejoin unordered output and error rows."
-        ]
+        "turnaround_hours": 24
       },
       "pricing": {
         "input_per_mtok": 0.6,
@@ -21499,6 +21492,8 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "thinking",
+        "structured_output",
         "batch"
       ],
       "family": "together",
@@ -27869,9 +27864,13 @@
       "family": "together",
       "capabilities": [
         "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
         "streaming",
-        "structured_output_mode:none",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
+        "thinking",
         "tools"
       ]
     },
