@@ -24,7 +24,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-harn=(./scripts/harn_bin.sh --)
+harn_bin="$(./scripts/harn_bin.sh --no-build --print)"
 json_tmp="$(mktemp)"
 actual_tmp="$(mktemp)"
 expected_tmp="$(mktemp)"
@@ -34,7 +34,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${harn[@]}" lint --json "$STDLIB_DIR" >"$json_tmp" 2>&1 || true
+"$harn_bin" lint --json "$STDLIB_DIR" >"$json_tmp" 2>&1 || true
 
 jq -r --arg code "$CODE" '
   def payload: .data? // .result? // .;
