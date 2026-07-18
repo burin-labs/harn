@@ -190,7 +190,7 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
   const outcome = __judge_classify_verdict(
     result?.verdict ?? "continue",
     done_verdicts,
-    [__judge_gap_feedback(specific_gaps), next_step, reasoning],
+    [next_step, __judge_gap_feedback(specific_gaps), reasoning],
     feedback_default,
   )
   return outcome

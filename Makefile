@@ -1,4 +1,4 @@
-.PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords verify-tree-sitter-parse check-generated-registry check-release-audit-contract check-ci-cache-policy
+.PHONY: setup setup-rust clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy
 .PHONY: test-pr-gate-post-warm-integrations
 
 HARN_BIN ?=
@@ -23,9 +23,15 @@ check: all
 setup:
 	./scripts/dev_setup.sh
 
-# Reclaim orphaned per-worktree Cargo target dirs under $TMPDIR/harn-target
-# (left behind when an agent/codex worktree is removed). Add --dry-run to
-# preview: make clean-stale-targets ARGS=--dry-run
+# Focused Rust setup for remote or constrained machines. It configures local
+# build paths and runs the workspace check without installing optional tools or
+# frontend dependencies.
+setup-rust:
+	HARN_DEV_SETUP_PROFILE=rust HARN_DEV_TARGET_WORKTREE_PATH="$(CURDIR)" ./scripts/dev_setup.sh
+
+# Reclaim orphaned per-worktree Cargo target dirs under known setup storage
+# roots (left behind when an agent/codex worktree is removed). Add
+# --dry-run to preview: make clean-stale-targets ARGS=--dry-run
 clean-stale-targets:
 	./scripts/prune_stale_targets.sh $(ARGS)
 
@@ -338,6 +344,7 @@ test-pr-gate-scripts:
 	./scripts/tests/hook_fast_default_mode_test.sh
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/hook_timing_instrument_test.sh
+	./scripts/tests/hook_registry_harn_bin_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
@@ -348,6 +355,7 @@ test-pr-gate-scripts:
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/release_smoke_workflow_test.sh
+	./scripts/tests/dev_setup_profile_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
 	./scripts/tests/cli_aot_merge_driver_test.sh
