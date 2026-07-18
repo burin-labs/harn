@@ -1156,7 +1156,12 @@ fn check_portal() -> Vec<DoctorCheck> {
 /// Checks the checked-in protocol artifacts against what the current binary
 /// would generate. Only runs inside the harn repo.
 fn check_protocol_artifacts() -> Vec<DoctorCheck> {
-    let Some(repo) = find_harn_repo_root(&std::env::current_dir().unwrap_or_default()) else {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    check_protocol_artifacts_from(&cwd)
+}
+
+fn check_protocol_artifacts_from(anchor: &Path) -> Vec<DoctorCheck> {
+    let Some(repo) = find_harn_repo_root(anchor) else {
         return vec![DoctorCheck {
             id: "protocol-artifacts".to_string(),
             status: DoctorStatus::Skip,
@@ -1468,7 +1473,12 @@ fn check_secret_providers() -> Vec<DoctorCheck> {
 }
 
 async fn check_manifest() -> Vec<DoctorCheck> {
-    let Some(path) = find_nearest_manifest(&std::env::current_dir().unwrap_or_default()) else {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    check_manifest_from(&cwd).await
+}
+
+async fn check_manifest_from(anchor: &Path) -> Vec<DoctorCheck> {
+    let Some(path) = find_nearest_manifest(anchor) else {
         return vec![DoctorCheck {
             id: String::new(),
             status: DoctorStatus::Warn,
@@ -1825,11 +1835,11 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_host_info, build_summary, check_event_log, check_hardware, check_manifest,
-        check_ollama, check_platform_capabilities, check_protocol_artifacts, find_harn_repo_root,
-        find_nearest_manifest, format_trigger_metrics, read_manifest, stdlib_capability_matrix,
-        target_doctor_checks, DoctorCheck, DoctorReport, DoctorStatus, HardwareSnapshot,
-        TargetInfo, DOCTOR_SCHEMA_VERSION,
+        build_host_info, build_summary, check_event_log, check_hardware, check_manifest_from,
+        check_ollama, check_platform_capabilities, check_protocol_artifacts_from,
+        find_harn_repo_root, find_nearest_manifest, format_trigger_metrics, read_manifest,
+        stdlib_capability_matrix, target_doctor_checks, DoctorCheck, DoctorReport, DoctorStatus,
+        HardwareSnapshot, TargetInfo, DOCTOR_SCHEMA_VERSION,
     };
     use crate::json_envelope::JsonOutput;
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
@@ -1952,7 +1962,6 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn check_manifest_reports_loaded_triggers() {
-        let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(dir.path().join(".git")).expect("git dir");
         std::fs::write(
@@ -1987,10 +1996,7 @@ pub fn on_new_issue(event: TriggerEvent) {
         )
         .expect("write lib");
 
-        let previous = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("set cwd");
-        let checks = check_manifest().await;
-        std::env::set_current_dir(previous).expect("restore cwd");
+        let checks = check_manifest_from(dir.path()).await;
 
         let trigger = checks
             .iter()
@@ -2251,12 +2257,8 @@ pub fn on_new_issue(event: TriggerEvent) {
 
     #[test]
     fn protocol_artifacts_check_skipped_outside_repo() {
-        let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd();
         let dir = tempdir_outside_ambient_repo();
-        let prev = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("set cwd");
-        let checks = check_protocol_artifacts();
-        std::env::set_current_dir(prev).expect("restore cwd");
+        let checks = check_protocol_artifacts_from(dir.path());
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].status, DoctorStatus::Skip);
         assert_eq!(checks[0].id, "protocol-artifacts");
