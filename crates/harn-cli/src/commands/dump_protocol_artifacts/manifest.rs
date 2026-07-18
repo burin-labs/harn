@@ -1,7 +1,7 @@
 use harn_serve::adapters::acp::{
-    ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
-    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{
@@ -111,6 +111,8 @@ pub(super) fn generate_manifest_for_version(artifact_version: &str) -> Result<St
             "toolCallStatuses": tool_call_status_values(),
             "toolCallErrorCategories": tool_call_error_category_values(),
             "toolMutationStatuses": tool_mutation_status_values(),
+            "promptErrorDataSchema": ACP_PROMPT_ERROR_DATA_SCHEMA,
+            "promptErrorTerminalClasses": agent_terminal_class_values(),
             "toolExecutorSimpleValues": ACP_TOOL_EXECUTOR_SIMPLE_VALUES,
             "workerStatuses": worker_status_values(),
         },
@@ -320,7 +322,14 @@ pub(super) fn generate_round_trip_fixture_for_version(
     let error_response = json!({
         "jsonrpc": "2.0",
         "id": "abc",
-        "error": {"code": -32601, "message": "method not found"},
+        "error": {
+            "code": -32000,
+            "message": "Provider-looking prose is not the authority",
+            "data": {
+                "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
+                "terminalClass": "tool_policy_rejected",
+            },
+        },
     });
     let a2a_task = json!({
         "id": "task-1",

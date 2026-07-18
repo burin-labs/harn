@@ -7,13 +7,20 @@
 // advanced, accusing it of narrating is wrong — it is making changes that are not
 // landing. These pin both branches.
 import { __progress_nudge_text } from "std/agent/loop"
+import { agent_tool_call_paradigm } from "std/agent/preflight"
+
+// The taught call syntax in the nudge is rendered from the format-aware
+// paradigm; these depth-framing tests use the text paradigm.
+fn text_paradigm() {
+  return agent_tool_call_paradigm({tool_format: "text"})
+}
 
 /**
  * depth>=4 with NO tool calls this turn: the legacy narration-loop framing is
  * correct (the model is churning pure prose).
  */
 pipeline test_depth4_toolless_keeps_narration_framing(_task) {
-  const msg = __progress_nudge_text(4, true, "text", false)
+  const msg = __progress_nudge_text(4, true, text_paradigm(), false)
   assert(
     contains(msg, "narration loop") && contains(msg, "Do not restate the plan"),
     "toolless depth>=4 must keep the narration-loop framing; got: ${msg}",
@@ -26,7 +33,7 @@ pipeline test_depth4_toolless_keeps_narration_framing(_task) {
  * toward a DIFFERENT change instead.
  */
 pipeline test_depth4_with_tool_calls_drops_narration_framing(_task) {
-  const msg = __progress_nudge_text(4, true, "text", true)
+  const msg = __progress_nudge_text(4, true, text_paradigm(), true)
   assert(
     !contains(msg, "narration loop"),
     "depth>=4 WITH real tool calls must NOT accuse the model of a narration loop; got: ${msg}",
@@ -46,9 +53,9 @@ pipeline test_depth4_with_tool_calls_drops_narration_framing(_task) {
  * accusation at depth 2/3 to begin with).
  */
 pipeline test_lower_depths_unchanged(_task) {
-  const d3 = __progress_nudge_text(3, true, "text", true)
+  const d3 = __progress_nudge_text(3, true, text_paradigm(), true)
   assert(contains(d3, "Still no progress after"), "depth 3 copy unchanged; got: ${d3}")
   assert(!contains(d3, "narration loop"), "depth 3 never asserted a narration loop; got: ${d3}")
-  const d2 = __progress_nudge_text(2, true, "text", false)
+  const d2 = __progress_nudge_text(2, true, text_paradigm(), false)
   assert(contains(d2, "No progress last turn"), "depth 2 copy unchanged; got: ${d2}")
 }

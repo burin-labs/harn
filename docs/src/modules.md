@@ -533,6 +533,7 @@ rows whose case or harness-config fingerprints are incompatible.
 | Function | Description |
 |---|---|
 | `aggregate_trials(name, outcomes, metadata?)` | Summarize trial outcomes into a generic eval row |
+| `eval_fingerprint_integrity(rows)` | Return the exact observed case-fingerprint map and require one complete, internally consistent harness generation |
 | `bootstrap_mean_ci(values, resamples, alpha, seed)` | Seeded bootstrap mean CI using high-bit LCG sampling |
 | `macro_pass_at_1(rows)` | Mean pass rate over decided cases with uniform case weights |
 | `reliability_breakdown(rows)` | All-pass, flaky, all-fail, and no-decision case buckets |

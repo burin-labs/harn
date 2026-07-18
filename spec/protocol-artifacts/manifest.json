@@ -271,6 +271,18 @@
       "transcript_projected",
       "worker_update"
     ],
+    "promptErrorDataSchema": "harn.acp.prompt_error.v1",
+    "promptErrorTerminalClasses": [
+      "context_overflow",
+      "provider_misconfigured",
+      "provider_unavailable",
+      "rate_limited",
+      "timeout",
+      "tool_policy_rejected",
+      "host_bridge_unimplemented",
+      "agent_loop_protocol_failure",
+      "generic_throw"
+    ],
     "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v0.12.2",
     "sessionUpdateVariants": [
       "user_message",
@@ -373,7 +385,7 @@
       "cancelled"
     ]
   },
-  "artifactVersion": "0.10.21",
+  "artifactVersion": "0.10.23",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",

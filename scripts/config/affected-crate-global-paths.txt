@@ -6,5 +6,7 @@ Cargo.lock
 rust-toolchain.toml
 Makefile
 scripts/affected-crates.harn
+scripts/ci/affected_crate_args.sh
 .config/nextest.toml
+spec/run-view-fixtures/
 .github/workflows/ci.yml

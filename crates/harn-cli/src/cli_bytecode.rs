@@ -1,9 +1,10 @@
 //! AOT-compiled bytecode for embedded CLI scripts (G7 / harn#2300).
 //!
 //! `harn-cli-aot-gen` compiles [`harn_stdlib::STDLIB_CLI_SCRIPTS`] into
-//! committed cache-format `.harnbc` artifacts. `build.rs` verifies their
-//! source, artifact, release, and compiler fingerprints. The committed table
-//! included here keeps each entry a static `&[u8]` baked into the binary.
+//! release/package cache-format `.harnbc` artifacts. The generator validates
+//! source and compiler freshness in the full workspace; `build.rs` validates
+//! the package-local manifest and payload before baking each entry into the
+//! binary. Source builds without that optional payload remain fully supported.
 //!
 //! ## Why this lives in `harn-cli` and not `harn-stdlib`
 //!
@@ -24,7 +25,7 @@
 //! header rejects the artifact and the loader falls back to source — no
 //! crash, no special handling.
 
-include!("../generated/cli_bytecode_table.rs");
+include!(concat!(env!("OUT_DIR"), "/cli_bytecode_table.rs"));
 
 /// Look up the precompiled bytecode for an embedded CLI script by its
 /// registered name (the same name passed to
@@ -41,11 +42,16 @@ pub(crate) fn find_cli_script_bytecode(name: &str) -> Option<&'static [u8]> {
 mod tests {
     use super::*;
 
-    /// Every script registered in `harn-stdlib` should have an AOT
-    /// committed artifact unless the manifest records an explicit
-    /// script-level skip reason.
+    /// A release/package build has an artifact for every registered CLI script
+    /// unless the manifest records an explicit script-level skip reason. A
+    /// source build deliberately exercises the zero-artifact fallback.
     #[test]
     fn every_cli_script_has_non_empty_bytecode_when_aot_enabled() {
+        if !CLI_AOT_PAYLOAD_PRESENT {
+            assert!(STDLIB_CLI_SCRIPT_BYTECODE.is_empty());
+            assert!(STDLIB_CLI_SCRIPT_BYTECODE_SKIPPED.is_empty());
+            return;
+        }
         assert!(!STDLIB_CLI_SCRIPT_BYTECODE.is_empty());
         for script in harn_stdlib::STDLIB_CLI_SCRIPTS {
             if STDLIB_CLI_SCRIPT_BYTECODE_SKIPPED

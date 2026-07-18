@@ -11,13 +11,13 @@ differences, persistence, replay, and evals.
 ```harn
 tool search(pattern: string) -> string {
   description "Search the project"
-  exec("rg", "--", pattern).stdout
+  return exec("rg", "--", pattern).stdout ?? ""
 }
 
 const result = agent_loop(
   "Find the failing test and fix it.",
   "You are a senior engineer.",
-  {loop_until_done: true, tools: search, max_iterations: 24}
+  {loop_until_done: true, tools: search, max_iterations: 24},
 )
 
 log(result.status)        // "done"
@@ -125,19 +125,19 @@ Tools are declared with typed parameters and an optional description:
 ```harn
 tool read(path: string) -> string {
   description "Read a file"
-  read_file(path)
+  return harness.fs.read_text(path)
 }
 
 tool test(filter: string) -> string {
   description "Run a targeted cargo test filter"
   const result = exec("cargo", "test", filter)
-  result.stdout + result.stderr
+  return (result.stdout ?? "") + (result.stderr ?? "")
 }
 
 const result = agent_loop(
   "Fix the failing test and verify the change.",
   "You are a senior engineer.",
-  {loop_until_done: true, tools: read, max_iterations: 24}
+  {loop_until_done: true, tools: read, max_iterations: 24},
 )
 ```
 
@@ -150,7 +150,8 @@ cache behavior, without touching the loop:
 ```harn
 import {default_llm_caller, with_retry, compose} from "std/llm/handlers"
 
-const caller = compose([with_retry({max_attempts: 4, backoff: "exponential"})])(default_llm_caller())
+const wrap = compose([with_retry({max_attempts: 4, backoff: "exponential"})])
+const caller = wrap(default_llm_caller())
 agent_loop(task, system, {loop_until_done: true, llm_caller: caller})
 ```
 
@@ -292,6 +293,7 @@ tool boundary; `queue` defers until the agent yields control.
 
 ```bash
 ./scripts/dev_setup.sh   # git hooks, cargo-nextest, sccache, portal frontend, workspace check
+make setup-rust          # focused Rust-only setup using a durable user-cache build root
 make all                 # fmt + lint + test
 make test                # Rust tests (uses cargo-nextest when available)
 make conformance         # .harn conformance suite

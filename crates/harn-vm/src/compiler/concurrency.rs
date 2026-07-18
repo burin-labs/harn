@@ -66,7 +66,7 @@ impl Compiler {
         fn_compiler.seed_captured_idents(body);
         fn_compiler.compile_block(body)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
-        let param_slots = crate::chunk::ParamSlot::vec_from_typed(&typed_params);
+        let param_slots = fn_compiler.compile_param_slots(&typed_params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         super::ensure_chunk_addressable(&fn_compiler.chunk, &format!("`{fn_name}`"), self.line)?;

@@ -287,6 +287,7 @@ pub(crate) struct LlmMockCall {
     pub compact: Option<bool>,
     pub include: Option<Vec<String>>,
     pub max_tool_calls: Option<i64>,
+    pub prefill: Option<String>,
 }
 
 type LlmMockScope = (
@@ -499,6 +500,7 @@ fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
             compact: request.compact,
             include: request.include.clone(),
             max_tool_calls: request.max_tool_calls,
+            prefill: request.prefill.clone(),
         });
     });
 }
@@ -935,6 +937,9 @@ fn record_unified_tape_llm_call(result: &LlmResult) {
                     "max_tool_calls".to_string(),
                     serde_json::json!(call.max_tool_calls),
                 );
+            }
+            if call.prefill.is_some() {
+                request.insert("prefill".to_string(), serde_json::json!(call.prefill));
             }
             let serialized =
                 serde_json::to_vec(&serde_json::Value::Object(request)).unwrap_or_default();

@@ -61,10 +61,10 @@ pub(crate) struct TestArgs {
     /// `--parallel` is set.
     #[arg(long = "jobs", short = 'j', value_name = "N", env = "HARN_TEST_JOBS")]
     pub jobs: Option<usize>,
-    /// 1-based shard index for user tests. Pair with `--shard-total`.
+    /// 1-based shard index for user or conformance tests. Pair with `--shard-total`.
     #[arg(long = "shard-index", value_name = "N", env = "HARN_TEST_SHARD_INDEX")]
     pub shard_index: Option<usize>,
-    /// Total number of user-test shards. Pair with `--shard-index`.
+    /// Total number of user or conformance test shards. Pair with `--shard-index`.
     #[arg(long = "shard-total", value_name = "N", env = "HARN_TEST_SHARD_TOTAL")]
     pub shard_total: Option<usize>,
     /// Re-run user tests when watched files change.

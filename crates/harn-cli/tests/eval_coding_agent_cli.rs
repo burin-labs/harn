@@ -212,6 +212,63 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
 }
 
 #[test]
+fn json_tool_run_stops_after_required_tool_and_final_answer() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = tmp.path().join("bench");
+    let args = EvalCodingAgentArgs {
+        fixtures: vec!["read-only-audit".to_string()],
+        models: vec!["mock:mock".to_string()],
+        tool_formats: vec!["json".to_string()],
+        output: Some(output.clone()),
+        env_files: Vec::new(),
+        include_local: false,
+        local_providers: Vec::new(),
+        max_local_models: 2,
+        keep_local_after_run: false,
+        max_runs: Some(1),
+        max_iterations: 4,
+        python: "python3".to_string(),
+        fail_on_unauthorized: false,
+        json: false,
+        step_judge: None,
+        step_judge_on_veto: None,
+        step_judge_adversarial: false,
+        structural_validator: None,
+        run_label: String::new(),
+        override_reason: None,
+        baseline_comparison_against: None,
+    };
+
+    let exit = run_in_harn_runtime(|| async move {
+        let _env_guard = env_lock::lock_env().lock().await;
+        harn_cli::commands::eval_coding_agent::run(args).await
+    });
+    assert_eq!(exit, 0, "mock JSON coding-agent eval should pass");
+
+    let per_run_raw = fs::read_to_string(output.join("per_run.jsonl")).expect("per-run result");
+    let per_run: serde_json::Value =
+        serde_json::from_str(per_run_raw.trim()).expect("per-run result parses as JSON");
+    assert_eq!(per_run["iterations"], 2);
+    assert_eq!(per_run["tool_calls"], 1);
+    assert_eq!(
+        per_run["successful_tools"],
+        serde_json::json!(["read_file"])
+    );
+
+    let transcript = fs::read_to_string(
+        output
+            .join("read-only-audit__mock_mock__json")
+            .join("transcript_events.jsonl"),
+    )
+    .expect("transcript events exist");
+    assert!(transcript.contains(r#""role":"assistant","text":"AUDIT_OK""#));
+    assert!(
+        !transcript.contains("Mock response to"),
+        "required-tool completion should prevent a third model call; got:\n{transcript}"
+    );
+}
+
+#[test]
 fn mock_matrix_resumes_completed_live_verify_cell_from_ledger() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let output = tmp.path().join("bench");

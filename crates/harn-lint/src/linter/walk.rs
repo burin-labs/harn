@@ -30,11 +30,20 @@ impl<'a> Linter<'a> {
                 ..
             } => {
                 self.known_functions.insert(name.clone());
-                if let Some(type_expr) = return_type {
-                    self.record_type_expr_references(type_expr);
+                self.record_callable_signature_type_references(params, return_type);
+                if *is_pub {
+                    self.check_public_api_types(
+                        "pipeline",
+                        name,
+                        params,
+                        return_type,
+                        snode.span,
+                        false,
+                    );
                 }
                 if return_type.is_none()
                     && *is_pub
+                    && !self.require_public_api_types
                     && !Self::is_entry_pipeline_name(name)
                     && !Self::is_test_pipeline_name(name)
                 {
@@ -56,9 +65,9 @@ impl<'a> Linter<'a> {
                 self.push_scope();
                 for p in params {
                     if let Some(scope) = self.scopes.last_mut() {
-                        scope.insert(p.clone());
+                        scope.insert(p.name.clone());
                     }
-                    self.references.insert(p.clone());
+                    self.references.insert(p.name.clone());
                 }
                 self.references.insert(name.clone());
                 if Self::is_test_pipeline_name(name) {
@@ -91,6 +100,16 @@ impl<'a> Linter<'a> {
                     is_pub: *is_pub,
                     is_method: self.in_impl_block,
                 });
+                if *is_pub {
+                    self.check_public_api_types(
+                        "fn",
+                        name,
+                        params,
+                        return_type,
+                        snode.span,
+                        self.require_stdlib_metadata,
+                    );
+                }
                 // Opt-in: `require_docstrings` via config, implied for
                 // stdlib sources (HARN-STD-101 defers to this rule when no
                 // doc block exists at all, so the stdlib gate must keep it

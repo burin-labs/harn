@@ -482,7 +482,12 @@ fn __seed_read_only_audit_native_mock() {
 
 fn __seed_read_only_audit_text_mock() {
   llm_mock({text: "<tool_call>\nread_file({ path: \"README.md\" })\n</tool_call>"})
-  llm_mock({text: "<user_response>AUDIT_OK</user_response>\n<done>##DONE##</done>"})
+  llm_mock({text: "AUDIT_OK"})
+}
+
+fn __seed_read_only_audit_json_mock() {
+  llm_mock({text: "```tool\n{\"name\":\"read_file\",\"args\":{\"path\":\"README.md\"}}\n```"})
+  llm_mock({text: "AUDIT_OK"})
 }
 
 fn __seed_no_tool_native_mock() {
@@ -537,6 +542,10 @@ fn __seed_mock(fixture: string, tool_format: string, python: string) {
   }
   if fixture == "read-only-audit" && tool_format == "native" {
     __seed_read_only_audit_native_mock()
+    return
+  }
+  if fixture == "read-only-audit" && tool_format == "json" {
+    __seed_read_only_audit_json_mock()
     return
   }
   if fixture == "read-only-audit" {
@@ -830,7 +839,7 @@ fn __run_fixture_agent(
   override_reason = nil,
   structural_validator_config = nil,
 ) {
-  const done_sentinel = if tool_format == "text" {
+  const done_sentinel = if tool_format == "text" || tool_format == "json" {
     "##DONE##"
   } else {
     nil
@@ -844,7 +853,7 @@ fn __run_fixture_agent(
     tools: tools,
     max_iterations: max_iterations,
     iteration_budget: {mode: "fixed", initial: max_iterations, max: max_iterations, extend_by: 0},
-    turn_policy: {allow_done_sentinel: tool_format == "text", max_prose_chars: 30000},
+    turn_policy: {allow_done_sentinel: tool_format == "text" || tool_format == "json", max_prose_chars: 30000},
     llm_options: {temperature: 0, max_tokens: 2048},
   }
   if step_judge_config != nil {
@@ -858,7 +867,7 @@ fn __run_fixture_agent(
       + {structural_validator: with_structural_validator(structural_validator_config)}
   }
   if fixture == "read-only-audit" {
-    return __run_preset_agent("audit", task, options)
+    return __run_preset_agent("audit", task, options + {require_successful_tools: ["read_file"]})
   }
   if fixture == "no-tool-diagnosis" {
     return __run_preset_agent(
@@ -985,7 +994,7 @@ fn main(harness: Harness) {
   const structural_validator_config = if args.structural_validator_json == "" {
     __default_structural_validator()
   } else {
-    let parsed = json_parse(args.structural_validator_json)
+    const parsed = json_parse(args.structural_validator_json)
     if parsed == nil || (type_of(parsed) == "bool" && !parsed) {
       nil
     } else {

@@ -14,31 +14,35 @@ const PERSONA_BLUEPRINT_SCHEMA_VERSION: string = "1"
 
 const __PERSONA_TEMPLATE_IDS: list<string> = ["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"]
 
-type PersonaBlueprintCron = {cron: string, timezone: string}
+pub type PersonaTemplateId = "deterministic-sweeper" | "hybrid-classify-then-act" | "frontier-judgment-loop"
 
-type PersonaBlueprintExternal = {provider: string, event: string}
+pub type PersonaBlueprintSourceKind = "cron" | "external"
 
-type PersonaBlueprint = {
+pub type PersonaBlueprintCron = {cron: string, timezone: string}
+
+pub type PersonaBlueprintExternal = {provider: string, event: string}
+
+pub type PersonaBlueprint = {
   schema_version: "1",
   name: string,
   description: string,
   goal: string,
-  template: string,
+  template: PersonaTemplateId,
   cron?: PersonaBlueprintCron,
   external?: PersonaBlueprintExternal,
 }
 
-type PersonaBlueprintDiagnostic = {code: string, path: string, message: string}
+pub type PersonaBlueprintDiagnostic = {code: string, path: string, message: string}
 
-type PersonaBlueprintValidationReport = {
+pub type PersonaBlueprintValidationReport = {
   valid: bool,
   schema_version?: string,
-  source_kind?: string,
+  source_kind?: PersonaBlueprintSourceKind,
   errors: list<PersonaBlueprintDiagnostic>,
   warnings: list<PersonaBlueprintDiagnostic>,
 }
 
-type PersonaBlueprintTrigger = {
+pub type PersonaBlueprintTrigger = {
   id: string,
   kind: string,
   provider: string,
@@ -49,21 +53,31 @@ type PersonaBlueprintTrigger = {
   handler: string,
 }
 
-type PersonaBlueprintLowering = {
+pub type PersonaBlueprintLowering = {
   profile: "prompt_compiled_v1",
-  template: string,
+  template: PersonaTemplateId,
   persona: {name: string, description: string, goal: string},
   policy: {autonomy_tier: "suggest", receipt_policy: "required"},
   triggers: list<PersonaBlueprintTrigger>,
 }
 
-type PersonaBlueprintCompileResult = Result<PersonaBlueprintLowering, PersonaBlueprintValidationReport>
+pub type PersonaBlueprintCompileResult = Result<PersonaBlueprintLowering, PersonaBlueprintValidationReport>
+
+fn __persona_blueprint_common_schema_fields() -> dict {
+  return {
+    schema_version: schema_literal(PERSONA_BLUEPRINT_SCHEMA_VERSION),
+    name: schema_string(),
+    description: schema_string(),
+    goal: schema_string(),
+    template: schema_enum(__PERSONA_TEMPLATE_IDS),
+  }
+}
 
 /**
  * persona_blueprint_schema.
  *
- * Returns the closed model-output schema. A blueprint has exactly one source
- * after semantic validation: either `cron` or `external`, never both.
+ * Returns the closed canonical blueprint schema. A blueprint has exactly one
+ * source after semantic validation: either `cron` or `external`, never both.
  *
  * @effects: []
  * @errors: []
@@ -71,12 +85,8 @@ type PersonaBlueprintCompileResult = Result<PersonaBlueprintLowering, PersonaBlu
  */
 pub fn persona_blueprint_schema() -> dict {
   return schema_closed_object(
-    {
-      schema_version: schema_literal(PERSONA_BLUEPRINT_SCHEMA_VERSION),
-      name: schema_string(),
-      description: schema_string(),
-      goal: schema_string(),
-      template: schema_enum(__PERSONA_TEMPLATE_IDS),
+    __persona_blueprint_common_schema_fields()
+      + {
       cron: schema_field(schema_closed_object({cron: schema_string(), timezone: schema_string()}), false),
       external: schema_field(schema_closed_object({provider: schema_string(), event: schema_string()}), false),
     },
@@ -113,15 +123,20 @@ fn __persona_blueprint_catalog_entry(providers, provider) {
 }
 
 fn __persona_blueprint_record(blueprint) -> PersonaBlueprint {
-  return {
+  let record: PersonaBlueprint = {
     schema_version: "1",
     name: blueprint.name,
     description: blueprint.description,
     goal: blueprint.goal,
     template: blueprint.template,
-    cron: blueprint.cron,
-    external: blueprint.external,
   }
+  if blueprint.cron != nil {
+    record = record + {cron: blueprint.cron}
+  }
+  if blueprint.external != nil {
+    record = record + {external: blueprint.external}
+  }
+  return record
 }
 
 fn __persona_blueprint_cron_fields(cron) -> list<string> {

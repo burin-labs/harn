@@ -5,8 +5,8 @@ use std::process::{Command, Stdio};
 use serde_json::json;
 
 use harn_serve::adapters::acp::{
-    HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS,
-    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    ACP_PROMPT_ERROR_DATA_SCHEMA, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
+    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_vm::llm::receipts::{
@@ -136,10 +136,16 @@ fn generated_types_include_harn_wire_vocabularies() {
     assert!(ts.contains("HARN_WORKER_STATUSES"));
     assert!(ts.contains("export interface ToolCallReceipt"));
     assert!(ts.contains("HARN_TOOL_CALL_RECEIPT_STATUSES"));
+    assert!(ts.contains("export interface HarnACPPromptErrorData"));
+    assert!(swift.contains("public struct HarnACPPromptErrorData"));
+    for value in agent_terminal_class_values() {
+        assert!(ts.contains(&value), "TypeScript artifact missing {value}");
+        assert!(swift.contains(&value), "Swift artifact missing {value}");
+    }
 }
 
 #[test]
-fn swift_case_name_escapes_reserved_keywords() {
+fn swift_case_name_emits_valid_identifiers() {
     // Bare `case private = ...` / `case public = ...` won't compile in
     // Swift — both are reserved keywords. The wire vocabulary uses these
     // (e.g. MCPCacheScope) so the emitter has to backtick them.
@@ -149,6 +155,14 @@ fn swift_case_name_escapes_reserved_keywords() {
     // Non-keyword identifiers should pass through unchanged.
     assert_eq!(swift_case_name("application_type"), "applicationType");
     assert_eq!(swift_case_name("session/close"), "sessionClose");
+    assert_eq!(
+        swift_case_name("harn.acp.prompt_error.v1"),
+        "harnAcpPromptErrorV1"
+    );
+    assert_eq!(
+        swift_case_name("session:prompt-error"),
+        "sessionPromptError"
+    );
     // CamelCased compounds that happen to start with a keyword fragment
     // (e.g. "private_room" -> "privateRoom") are valid identifiers and
     // must not be escaped.
@@ -176,6 +190,8 @@ fn generated_rust_includes_harn_wire_vocabularies() {
         "Rust artifact missing provenance header"
     );
     assert!(rust.contains("pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str ="));
+    assert!(rust.contains("pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str ="));
+    assert!(rust.contains("pub const AGENT_TERMINAL_CLASSES: &[&str] = &["));
     assert!(rust.contains(&format!(
         "pub const HARN_AGENT_EVENT_METHOD: &str = {};",
         json_string_literal(HARN_AGENT_EVENT_METHOD)
@@ -367,6 +383,8 @@ fn generated_python_includes_harn_wire_vocabularies() {
     assert!(py.contains("class ToolCallReceiptStatus(str, Enum):"));
     assert!(py.contains("class _HarnDataclass:"));
     assert!(py.contains("def is_request("));
+    assert!(py.contains("class HarnACPPromptErrorData(_HarnDataclass):"));
+    assert!(py.contains("class AgentTerminalClass(str, Enum):"));
     for value in HARN_SESSION_UPDATE_EXTENSIONS
         .iter()
         .chain(HARN_AGENT_EVENT_KINDS.iter())
@@ -403,6 +421,8 @@ fn generated_go_includes_harn_wire_vocabularies() {
     assert!(go.contains("var HarnWorkerStatuses = []HarnWorkerStatus"));
     assert!(go.contains("type ToolCallReceipt struct"));
     assert!(go.contains("var ToolCallReceiptStatuses = []ToolCallReceiptStatus"));
+    assert!(go.contains("type HarnACPPromptErrorData struct"));
+    assert!(go.contains("var AgentTerminalClasses = []AgentTerminalClass"));
     for value in HARN_SESSION_UPDATE_EXTENSIONS
         .iter()
         .chain(HARN_AGENT_EVENT_KINDS.iter())
@@ -417,6 +437,23 @@ fn generated_go_includes_harn_wire_vocabularies() {
     for value in worker_status_values() {
         assert!(go.contains(&value), "Go artifact missing {value}");
     }
+}
+
+#[test]
+fn acp_prompt_error_schema_matches_runtime_terminal_classes() {
+    let schema: serde_json::Value = serde_json::from_str(
+        &read_repo_text("conformance/protocols/schemas/acp-session-update.schema.json")
+            .expect("read ACP schema"),
+    )
+    .expect("parse ACP schema");
+    assert_eq!(
+        schema["$defs"]["HarnPromptErrorData"]["properties"]["schema"]["const"],
+        json!(ACP_PROMPT_ERROR_DATA_SCHEMA)
+    );
+    assert_eq!(
+        schema["$defs"]["HarnPromptErrorData"]["properties"]["terminalClass"]["enum"],
+        json!(agent_terminal_class_values())
+    );
 }
 
 #[test]
@@ -509,6 +546,10 @@ fn round_trip_fixture_matches_python_and_go_field_set() {
         fixture["mcpUnsupportedProtocolVersionError"]["error"]["code"],
         json!(MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE)
     );
+    assert_eq!(
+        fixture["envelopes"]["errorResponse"]["error"]["data"]["schema"],
+        json!(ACP_PROMPT_ERROR_DATA_SCHEMA)
+    );
     assert_eq!(fixture["toolCallReceipt"]["schema_version"], json!(1));
 }
 
@@ -574,6 +615,14 @@ fn manifest_advertises_python_and_go_bindings() {
     );
     assert_eq!(manifest["bindings"]["python"]["stability"], json!("stable"));
     assert_eq!(manifest["bindings"]["go"]["stability"], json!("stable"));
+    assert_eq!(
+        manifest["acp"]["promptErrorDataSchema"],
+        json!(ACP_PROMPT_ERROR_DATA_SCHEMA)
+    );
+    assert_eq!(
+        manifest["acp"]["promptErrorTerminalClasses"],
+        json!(agent_terminal_class_values())
+    );
     assert_eq!(
         manifest["receipts"]["toolCallReceiptSchemaVersion"],
         json!(TOOL_CALL_RECEIPT_SCHEMA_VERSION)
@@ -662,7 +711,9 @@ fn explicit_artifact_version_is_validated_and_stamped_everywhere() {
 #[test]
 fn committed_protocol_artifacts_match_generator() {
     let artifacts = generate_artifacts(env!("CARGO_PKG_VERSION")).expect("artifacts");
-    let output_root = repo_root().join("spec/protocol-artifacts");
+    let output_root = repo_root()
+        .expect("test must run from the Harn workspace")
+        .join("spec/protocol-artifacts");
     for artifact in artifacts {
         let path = output_root.join(&artifact.relative_path);
         let on_disk = fs::read_to_string(&path).unwrap_or_else(|error| {
@@ -679,4 +730,16 @@ fn committed_protocol_artifacts_match_generator() {
             path.display()
         );
     }
+}
+
+#[test]
+fn repo_root_is_discovered_at_runtime_for_relocated_cli() {
+    let checkout = tempfile::tempdir().expect("checkout");
+    fs::write(checkout.path().join("Cargo.toml"), "[workspace]\n").expect("workspace manifest");
+    let schemas = checkout.path().join("conformance/protocols/schemas");
+    fs::create_dir_all(&schemas).expect("protocol schemas");
+    let nested = checkout.path().join("crates/harn-cli");
+    fs::create_dir_all(&nested).expect("nested command directory");
+
+    assert_eq!(repo_root_from(&nested), Some(checkout.path().to_path_buf()));
 }

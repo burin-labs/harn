@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProviderDef {
     pub display_name: Option<String>,
     pub icon: Option<String>,
@@ -324,7 +324,7 @@ impl ProviderDef {
 
 /// Auth env var name(s) for the provider. Can be a single string or an array
 /// (tried in order until one is set).
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum AuthEnv {
     #[default]

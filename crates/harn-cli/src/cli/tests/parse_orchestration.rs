@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli::PersonaTemplateKind;
 
 #[test]
 fn test_parses_host_lease_acquire_contract() {
@@ -11,6 +12,8 @@ fn test_parses_host_lease_acquire_contract() {
         "build-01",
         "--owner",
         "eval-runner",
+        "--resource-class",
+        "rust-heavy",
         "--priority-class",
         "measurement",
         "--no-expiry",
@@ -34,10 +37,68 @@ fn test_parses_host_lease_acquire_contract() {
         acquire.priority_class,
         HostLeasePriorityArg::Measurement
     ));
+    assert!(matches!(
+        acquire.resource_class,
+        HostLeaseResourceClassArg::RustHeavy
+    ));
     assert!(acquire.no_expiry);
     assert_eq!(acquire.owner_pid, Some(42));
     assert_eq!(acquire.wait_ms, 30_000);
     assert!(acquire.json);
+}
+
+#[test]
+fn test_parses_supervised_cargo_lease_contract() {
+    let cli = Cli::parse_from([
+        "harn",
+        "host",
+        "lease",
+        "run",
+        "cargo",
+        "--owner",
+        "codex-0",
+        "--host",
+        "build-01",
+        "--wait-ms",
+        "30000",
+        "--workspace",
+        "/workspace",
+        "--target-dir",
+        "/target",
+        "--build-dir",
+        "/build",
+        "--",
+        "check",
+        "-p",
+        "harn-cli",
+    ]);
+
+    let Command::Host(args) = cli.command.unwrap() else {
+        panic!("expected host command");
+    };
+    let HostCommand::Lease(lease) = args.command;
+    let HostLeaseCommand::Run(run) = lease.command else {
+        panic!("expected host lease run command");
+    };
+    let HostLeaseRunCommand::Cargo(cargo) = run.command;
+    assert_eq!(cargo.owner, "codex-0");
+    assert_eq!(cargo.host.as_deref(), Some("build-01"));
+    assert!(matches!(
+        cargo.priority_class,
+        HostLeasePriorityArg::CiVerify
+    ));
+    assert_eq!(cargo.wait_ms, 30_000);
+    assert_eq!(cargo.workspace, PathBuf::from("/workspace"));
+    assert_eq!(cargo.target_dir, PathBuf::from("/target"));
+    assert_eq!(cargo.build_dir, Some(PathBuf::from("/build")));
+    assert_eq!(
+        cargo.cargo_args,
+        vec![
+            "check".to_string(),
+            "-p".to_string(),
+            "harn-cli".to_string()
+        ]
+    );
 }
 
 #[test]
@@ -589,6 +650,113 @@ fn test_parses_persona_check_flags() {
 }
 
 #[test]
+fn test_parses_manual_persona_new_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "new",
+        "incident_triager",
+        "--template",
+        "hybrid-classify-then-act",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::New(new) = args.command else {
+        panic!("expected persona new command");
+    };
+    assert_eq!(new.name.as_deref(), Some("incident_triager"));
+    assert_eq!(
+        new.template,
+        Some(PersonaTemplateKind::HybridClassifyThenAct)
+    );
+    assert!(new.from_prompt.is_none());
+}
+
+#[test]
+fn test_parses_persona_compile_prompt_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "compile-prompt",
+        "--prompt",
+        "Triage Slack alerts.",
+        "--name",
+        "alerts_triage",
+        "--provider",
+        "mock",
+        "--model",
+        "mock-model",
+        "--max-tokens",
+        "1200",
+        "--json",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::CompilePrompt(compile) = args.command else {
+        panic!("expected persona compile-prompt command");
+    };
+    assert_eq!(compile.prompt, "Triage Slack alerts.");
+    assert_eq!(compile.name.as_deref(), Some("alerts_triage"));
+    assert_eq!(compile.provider.as_deref(), Some("mock"));
+    assert_eq!(compile.model.as_deref(), Some("mock-model"));
+    assert_eq!(compile.max_tokens, 1200);
+    assert!(compile.json);
+}
+
+#[test]
+fn test_parses_persona_new_from_prompt_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "new",
+        "--from-prompt",
+        "Digest replies every four hours.",
+        "--name",
+        "reply_digest",
+        "--provider",
+        "mock",
+        "--max-tokens",
+        "512",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::New(new) = args.command else {
+        panic!("expected persona new command");
+    };
+    assert!(new.name.is_none());
+    assert!(new.template.is_none());
+    assert_eq!(
+        new.from_prompt.as_deref(),
+        Some("Digest replies every four hours.")
+    );
+    assert_eq!(new.prompt_name.as_deref(), Some("reply_digest"));
+    assert_eq!(new.provider.as_deref(), Some("mock"));
+    assert_eq!(new.max_tokens, Some(512));
+}
+
+#[test]
+fn test_persona_prompt_token_ceiling_is_hard() {
+    let error = Cli::try_parse_from([
+        "harn",
+        "persona",
+        "compile-prompt",
+        "--prompt",
+        "Compile this.",
+        "--max-tokens",
+        "1201",
+    ])
+    .unwrap_err();
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+}
+
+#[test]
 fn test_parses_persona_materialize_flags() {
     let cli = Cli::parse_from([
         "harn",
@@ -609,10 +777,55 @@ fn test_parses_persona_materialize_flags() {
     };
     assert_eq!(
         materialize.blueprint,
-        PathBuf::from("persona.blueprint.json")
+        Some(PathBuf::from("persona.blueprint.json"))
     );
+    assert!(materialize.compile_receipt.is_none());
     assert_eq!(materialize.output_root, PathBuf::from("generated-personas"));
     assert!(materialize.force);
+}
+
+#[test]
+fn test_parses_persona_materialize_compile_receipt() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "materialize",
+        "--compile-receipt",
+        "reviewed-receipt.json",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::Materialize(materialize) = args.command else {
+        panic!("expected persona materialize command");
+    };
+    assert!(materialize.blueprint.is_none());
+    assert_eq!(
+        materialize.compile_receipt,
+        Some(PathBuf::from("reviewed-receipt.json"))
+    );
+}
+
+#[test]
+fn test_persona_materialize_requires_exactly_one_input() {
+    let neither = Cli::try_parse_from(["harn", "persona", "materialize"]).unwrap_err();
+    assert_eq!(
+        neither.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument
+    );
+
+    let both = Cli::try_parse_from([
+        "harn",
+        "persona",
+        "materialize",
+        "--blueprint",
+        "blueprint.json",
+        "--compile-receipt",
+        "receipt.json",
+    ])
+    .unwrap_err();
+    assert_eq!(both.kind(), clap::error::ErrorKind::ArgumentConflict);
 }
 
 #[test]

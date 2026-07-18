@@ -37,8 +37,9 @@ pub use adapters::acp::{
     run_acp_channel_server, run_acp_channel_server_with_handle, run_acp_server,
     run_acp_websocket_server, AcpChannelHandle, AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta,
     AcpJsonRpcError, AcpJsonRpcErrorResponse, AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse,
-    AcpMeta, AcpOutput, AcpProfileConfig, AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer,
-    AcpServerConfig, AcpSessionCancelToolCallParams, AcpSessionIdParams, AcpSessionInjectContent,
+    AcpMeta, AcpOutput, AcpProfileConfig, AcpPromptErrorData, AcpPromptErrorSchema,
+    AcpRuntimeConfigurator, AcpSandboxConfig, AcpServer, AcpServerConfig,
+    AcpSessionCancelToolCallParams, AcpSessionIdParams, AcpSessionInjectContent,
     AcpSessionInjectMode, AcpSessionInjectParams, AcpSessionMessageIdParams, AcpSessionNewParams,
     AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionReplaceInjectParams,
     AcpSessionRestoreResult, AcpWebSocketServeOptions, NoopAcpRuntimeConfigurator,
@@ -46,6 +47,7 @@ pub use adapters::acp::{
     ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_LOAD,
     ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
     ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
+    ACP_PROMPT_ERROR_DATA_SCHEMA,
 };
 pub use adapters::api::{ApiHttpServeOptions, ApiServer, ApiServerConfig};
 pub use adapters::mcp::{

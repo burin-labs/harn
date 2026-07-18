@@ -9,10 +9,12 @@ use crate::vm::Vm;
 use super::helpers::vm_value_to_json;
 
 mod catalog_projection;
+mod execution_contract;
 use catalog_projection::{
-    reasoning_history_wire_field_value, tool_mode_parity_notes_value, tool_mode_parity_value,
-    tools_value,
+    reasoning_history_wire_field_value, toml_value_to_vm_value, tool_mode_parity_notes_value,
+    tool_mode_parity_value, tools_value,
 };
+use execution_contract::LLM_EXECUTION_CONTRACT_BUILTIN_DEF;
 
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
@@ -26,6 +28,7 @@ const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
     &LLM_INFER_PROVIDER_BUILTIN_DEF,
     &LLM_MODEL_TIER_BUILTIN_DEF,
     &LLM_RESOLVE_MODEL_BUILTIN_DEF,
+    &LLM_EXECUTION_CONTRACT_BUILTIN_DEF,
     &LLM_MODEL_INFO_BUILTIN_DEF,
     &LLM_KNOWN_MODELS_BUILTIN_DEF,
     &LLM_AVAILABLE_PROVIDERS_BUILTIN_DEF,
@@ -265,27 +268,6 @@ fn llm_reasoning_effort_budget_builtin(
     let level = args.first().map(|a| a.display()).unwrap_or_default();
     let budget = super::reasoning_policy::budget_for_reasoning_level(level.trim());
     Ok(VmValue::Int(i64::from(budget)))
-}
-
-fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
-    match value {
-        toml::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
-        toml::Value::Integer(i) => VmValue::Int(*i),
-        toml::Value::Float(f) => VmValue::Float(*f),
-        toml::Value::Boolean(b) => VmValue::Bool(*b),
-        toml::Value::Datetime(dt) => VmValue::String(arcstr::ArcStr::from(dt.to_string())),
-        toml::Value::Array(items) => {
-            let list: Vec<VmValue> = items.iter().map(toml_value_to_vm_value).collect();
-            VmValue::List(std::sync::Arc::new(list))
-        }
-        toml::Value::Table(table) => {
-            let mut dict = crate::value::DictMap::new();
-            for (k, v) in table {
-                dict.insert(crate::value::intern_key(k), toml_value_to_vm_value(v));
-            }
-            VmValue::dict(dict)
-        }
-    }
 }
 
 /// Return the loaded provider, alias, model, pricing, and availability catalog.

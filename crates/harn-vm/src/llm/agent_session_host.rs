@@ -840,7 +840,7 @@ async fn host_agent_session_finalize(
     // The lossless `reason` carries the raw stop reason (or the canonical status
     // when the loop sealed no stop reason).
     let terminal_outcome = crate::agent_events::AgentTerminalOutcome::new(
-        crate::agent_events::classify_agent_terminal(
+        crate::agent_events::classify_agent_terminal_with_class(
             &canonical_status,
             &stop_reason,
             terminal_error.is_some(),

@@ -166,8 +166,38 @@
           "properties": {
             "code": { "type": "integer" },
             "message": { "type": "string" },
-            "data": {}
+            "data": {
+              "if": {
+                "type": "object",
+                "required": ["schema"],
+                "properties": {
+                  "schema": { "const": "harn.acp.prompt_error.v1" }
+                }
+              },
+              "then": { "$ref": "#/$defs/HarnPromptErrorData" }
+            }
           }
+        }
+      }
+    },
+    "HarnPromptErrorData": {
+      "type": "object",
+      "required": ["schema", "terminalClass"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "harn.acp.prompt_error.v1" },
+        "terminalClass": {
+          "enum": [
+            "context_overflow",
+            "provider_misconfigured",
+            "provider_unavailable",
+            "rate_limited",
+            "timeout",
+            "tool_policy_rejected",
+            "host_bridge_unimplemented",
+            "agent_loop_protocol_failure",
+            "generic_throw"
+          ]
         }
       }
     },

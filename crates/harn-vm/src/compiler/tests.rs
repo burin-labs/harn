@@ -41,6 +41,14 @@ pub type Manifest = {schema_version: 1, items: list<Item>}
         parsed["properties"]["items"]["items"]["properties"]["id"]["type"], "string",
         "{rendered}"
     );
+    assert_eq!(
+        parsed["properties"]["items"]["items"]["properties"]["enabled"]["union"][0]["type"], "bool",
+        "{rendered}"
+    );
+    assert_eq!(
+        parsed["properties"]["items"]["items"]["properties"]["enabled"]["union"][1]["type"], "nil",
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -189,7 +197,7 @@ fn test_compile_generic_ops_for_overloaded_or_mixed_cases() {
 
 #[test]
 fn monomorphic_var_keeps_typed_int_ops() {
-    // A `var` only ever reassigned through int-typed values is provably
+    // A `let` only ever reassigned through int-typed values is provably
     // monomorphic, so its arithmetic keeps the typed fast path even when the
     // use precedes the reassignment in source order.
     let chunk = compile_source(
@@ -728,7 +736,7 @@ pipeline default() {}
         "active try/catch handlers must keep their owning frame alive",
     );
     assert!(
-        guarded_disasm.contains("CALL_BUILTIN"),
+        disasm_opcodes(&guarded_disasm).contains(&"CALL"),
         "the guarded return expression should still call the callee normally",
     );
 

@@ -91,6 +91,24 @@ pub fn model_params_for_route(provider: &str, model_id: &str) -> BTreeMap<String
     model_params_for_route_with_config(&config, provider, model_id)
 }
 
+/// Return the Harn-validated generation defaults that are safe to persist in
+/// an execution receipt.
+///
+/// Route-specific overlays remain intentionally free-form so operators can
+/// configure provider-specific request parameters. Those fields must still
+/// influence inference, but they are not part of Harn's stable, secret-free
+/// receipt contract. Keep this filter beside Harn's generation validator so hosts do
+/// not duplicate the generation-default schema.
+pub fn generation_defaults_for_route(
+    provider: &str,
+    model_id: &str,
+) -> BTreeMap<String, toml::Value> {
+    model_params_for_route(provider, model_id)
+        .into_iter()
+        .filter(|(key, value)| is_valid_generation_default(key, value))
+        .collect()
+}
+
 pub(crate) fn model_params_for_route_with_config(
     config: &ProvidersConfig,
     provider: &str,
@@ -212,27 +230,7 @@ pub fn model_default_issues(config: &ProvidersConfig) -> Vec<String> {
             if key == MODEL_DEFAULT_UNSET_KEY {
                 continue;
             }
-            let valid = match key.as_str() {
-                "temperature" => value
-                    .as_float()
-                    .is_some_and(|value| value.is_finite() && (0.0..=2.0).contains(&value)),
-                "frequency_penalty" | "presence_penalty" => value
-                    .as_float()
-                    .is_some_and(|value| value.is_finite() && (-2.0..=2.0).contains(&value)),
-                "top_p" => value
-                    .as_float()
-                    .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value)),
-                "top_k" => value.as_integer().is_some_and(|value| value >= 0),
-                "max_tokens" => value.as_integer().is_some_and(|value| value > 0),
-                "reasoning_effort" => value.as_str().is_some_and(|value| {
-                    matches!(
-                        value,
-                        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-                    )
-                }),
-                _ => false,
-            };
-            if !valid {
+            if !is_valid_generation_default(key, value) {
                 issues.push(format!(
                     "model_defaults.{selector}.{key} is not a supported generation default"
                 ));
@@ -289,6 +287,29 @@ fn is_supported_generation_default_key(key: &str) -> bool {
             | "max_tokens"
             | "reasoning_effort"
     )
+}
+
+fn is_valid_generation_default(key: &str, value: &toml::Value) -> bool {
+    match key {
+        "temperature" => value
+            .as_float()
+            .is_some_and(|value| value.is_finite() && (0.0..=2.0).contains(&value)),
+        "frequency_penalty" | "presence_penalty" => value
+            .as_float()
+            .is_some_and(|value| value.is_finite() && (-2.0..=2.0).contains(&value)),
+        "top_p" => value
+            .as_float()
+            .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value)),
+        "top_k" => value.as_integer().is_some_and(|value| value >= 0),
+        "max_tokens" => value.as_integer().is_some_and(|value| value > 0),
+        "reasoning_effort" => value.as_str().is_some_and(|value| {
+            matches!(
+                value,
+                "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+            )
+        }),
+        _ => false,
+    }
 }
 
 /// Get per-role LLM defaults, e.g. `[model_roles.merge]`.
@@ -429,7 +450,11 @@ pub fn known_model_names() -> Vec<String> {
 }
 
 pub fn alias_entries() -> Vec<(String, AliasDef)> {
-    effective_config().aliases.into_iter().collect()
+    effective_config()
+        .aliases
+        .iter()
+        .map(|(name, alias)| (name.clone(), alias.clone()))
+        .collect()
 }
 
 pub fn alias_tool_calling_entry(alias: &str) -> Option<AliasToolCallingDef> {
@@ -485,6 +510,36 @@ pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
         })
 }
 
+/// Return the collision-free catalog id for one concrete provider route.
+///
+/// Runtime transports use `wire_model`, while pricing and other catalog
+/// metadata are keyed by the authored catalog id. Resolve either identity
+/// without allowing an identically named model from another provider to win.
+pub fn model_catalog_id_for_route(provider: &str, model_id: &str) -> Option<String> {
+    let config = effective_config();
+    let normalized_id = normalize_model_id(model_id);
+    config
+        .models
+        .get_key_value(model_id)
+        .filter(|(_, model)| model.provider == provider)
+        .or_else(|| {
+            config
+                .models
+                .get_key_value(&normalized_id)
+                .filter(|(_, model)| model.provider == provider)
+        })
+        .or_else(|| {
+            config.models.iter().find(|(_, model)| {
+                model.provider == provider
+                    && model
+                        .wire_model
+                        .as_deref()
+                        .is_some_and(|wire| wire == model_id || wire == normalized_id.as_str())
+            })
+        })
+        .map(|(id, _)| id.clone())
+}
+
 pub fn model_rate_limits(model_id: &str) -> Option<RateLimitsDef> {
     model_catalog_entry(model_id).and_then(|model| model.rate_limits)
 }
@@ -505,6 +560,22 @@ pub fn model_ladder_names() -> Vec<String> {
 pub fn wire_model_id(model_id: &str) -> String {
     model_catalog_entry(model_id)
         .and_then(|model| model.wire_model)
+        .unwrap_or_else(|| model_id.to_string())
+}
+
+/// Resolve the model identity used by the capability matrix for one concrete
+/// provider route without deriving capability tags (which would recurse back
+/// into capability lookup). Collision-free catalog ids may differ from the
+/// upstream creator/model slug that provider-family rules match.
+pub(crate) fn capability_model_id(provider: &str, model_id: &str) -> String {
+    if !provider_has_feature(provider, "wire_model_capabilities") {
+        return model_id.to_string();
+    }
+    effective_config()
+        .models
+        .get(model_id)
+        .filter(|model| model.provider == provider)
+        .and_then(|model| model.wire_model.clone())
         .unwrap_or_else(|| model_id.to_string())
 }
 
@@ -734,7 +805,7 @@ pub fn default_model_for_provider(provider: &str) -> String {
 }
 
 pub fn qc_defaults() -> BTreeMap<String, String> {
-    effective_config().qc_defaults
+    effective_config().qc_defaults.clone()
 }
 
 pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
@@ -744,10 +815,24 @@ pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
         .and_then(|model| model.pricing.clone())
 }
 
+pub fn model_pricing_per_mtok_for_route(provider: &str, model_id: &str) -> Option<ModelPricing> {
+    let catalog_id = model_catalog_id_for_route(provider, model_id)?;
+    model_pricing_per_mtok(&catalog_id)
+}
+
 /// Per-MTok whole-request pricing selected for the provider-reported input
 /// usage. Models without input-token bands retain their base rates.
 pub fn model_pricing_for_input_tokens(model_id: &str, input_tokens: i64) -> Option<ModelPricing> {
     model_pricing_per_mtok(model_id).map(|pricing| pricing.for_input_tokens(input_tokens))
+}
+
+pub fn model_pricing_for_route_input_tokens(
+    provider: &str,
+    model_id: &str,
+    input_tokens: i64,
+) -> Option<ModelPricing> {
+    model_pricing_per_mtok_for_route(provider, model_id)
+        .map(|pricing| pricing.for_input_tokens(input_tokens))
 }
 
 /// Per-MTok pricing for a named serving tier, when the catalog declares one.
@@ -761,8 +846,17 @@ pub fn model_serving_tier_pricing_per_mtok(model_id: &str, tier_id: &str) -> Opt
         .and_then(|tier| tier.pricing.clone())
 }
 
+pub fn model_serving_tier_pricing_per_mtok_for_route(
+    provider: &str,
+    model_id: &str,
+    tier_id: &str,
+) -> Option<ModelPricing> {
+    let catalog_id = model_catalog_id_for_route(provider, model_id)?;
+    model_serving_tier_pricing_per_mtok(&catalog_id, tier_id)
+}
+
 pub fn pricing_per_1k_for(provider: &str, model_id: &str) -> Option<(f64, f64)> {
-    model_pricing_per_mtok(model_id)
+    model_pricing_per_mtok_for_route(provider, model_id)
         .map(|pricing| {
             (
                 pricing.input_per_mtok / 1000.0,

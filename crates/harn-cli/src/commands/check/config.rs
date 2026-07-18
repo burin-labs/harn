@@ -2,17 +2,20 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process;
 
-use crate::config as harn_config;
 use crate::package::CheckConfig;
+use harn_modules::project_config as harn_config;
 use harn_parser::analysis::{AnalysisDatabase, SourceId, SourceVersion};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HarnLintConfig {
     pub(crate) disabled: Vec<String>,
     pub(crate) require_file_header: bool,
+    pub(crate) require_docstrings: bool,
+    pub(crate) require_public_api_types: bool,
     pub(crate) complexity_threshold: Option<usize>,
     pub(crate) persona_step_allowlist: Vec<String>,
     pub(crate) template_variant_branch_threshold: Option<usize>,
+    pub(crate) severity_overrides: HashMap<String, harn_lint::LintSeverity>,
 }
 
 pub(crate) fn load_harn_lint_config(path: &Path) -> HarnLintConfig {
@@ -20,9 +23,12 @@ pub(crate) fn load_harn_lint_config(path: &Path) -> HarnLintConfig {
         Ok(cfg) => HarnLintConfig {
             disabled: cfg.lint.disabled.unwrap_or_default(),
             require_file_header: cfg.lint.require_file_header.unwrap_or(false),
+            require_docstrings: cfg.lint.require_docstrings.unwrap_or(false),
+            require_public_api_types: cfg.lint.require_public_api_types.unwrap_or(false),
             complexity_threshold: cfg.lint.complexity_threshold,
             persona_step_allowlist: cfg.lint.persona_step_allowlist,
             template_variant_branch_threshold: cfg.lint.template_variant_branch_threshold,
+            severity_overrides: cfg.lint.severity,
         },
         Err(e) => {
             eprintln!("warning: {e}");
@@ -32,9 +38,6 @@ pub(crate) fn load_harn_lint_config(path: &Path) -> HarnLintConfig {
 }
 
 /// Merge `[lint].disabled` from the nearest harn.toml into `disable_rules`.
-/// The `require_file_header` flag is handled separately via
-/// [`harn_lint_require_file_header`] so it can be enabled without a full
-/// `[check]` section.
 pub(crate) fn apply_harn_lint_config(path: &Path, config: &mut CheckConfig) {
     apply_loaded_harn_lint_config(&load_harn_lint_config(path), config);
 }
@@ -45,84 +48,6 @@ pub(crate) fn apply_loaded_harn_lint_config(lint: &HarnLintConfig, config: &mut 
             config.disable_rules.push(rule.clone());
         }
     }
-}
-
-/// Read `[lint] require_file_header` from the nearest harn.toml, defaulting
-/// to `false`. Invalid config is treated as `false` and surfaced via a
-/// warning.
-pub(crate) fn harn_lint_require_file_header(path: &Path) -> bool {
-    match harn_config::load_for_path(path) {
-        Ok(cfg) => cfg.lint.require_file_header.unwrap_or(false),
-        Err(e) => {
-            eprintln!("warning: {e}");
-            false
-        }
-    }
-}
-
-/// Read `[lint] require_docstrings` from the nearest harn.toml, defaulting
-/// to `false`. Gates the opt-in `missing-harndoc` rule on public
-/// functions; stdlib sources enforce docstrings regardless.
-pub(crate) fn harn_lint_require_docstrings(path: &Path) -> bool {
-    match harn_config::load_for_path(path) {
-        Ok(cfg) => cfg.lint.require_docstrings.unwrap_or(false),
-        Err(e) => {
-            eprintln!("warning: {e}");
-            false
-        }
-    }
-}
-
-/// Read `[lint] complexity_threshold` from the nearest harn.toml. Returns
-/// `None` when unset or when the manifest is missing/malformed — the
-/// linter falls back to `harn_lint::DEFAULT_COMPLEXITY_THRESHOLD`.
-pub(crate) fn harn_lint_complexity_threshold(path: &Path) -> Option<usize> {
-    match harn_config::load_for_path(path) {
-        Ok(cfg) => cfg.lint.complexity_threshold,
-        Err(e) => {
-            eprintln!("warning: {e}");
-            None
-        }
-    }
-}
-
-/// Read `[lint] persona_step_allowlist` from the nearest harn.toml.
-pub(crate) fn harn_lint_persona_step_allowlist(path: &Path) -> Vec<String> {
-    match harn_config::load_for_path(path) {
-        Ok(cfg) => cfg.lint.persona_step_allowlist,
-        Err(e) => {
-            eprintln!("warning: {e}");
-            Vec::new()
-        }
-    }
-}
-
-/// Per-rule severity overrides from `[lint.severity]` (#2851), parsed to
-/// [`harn_lint::LintSeverity`]. An unrecognized severity string is dropped
-/// with a warning rather than failing the run.
-pub(crate) fn harn_lint_severity_overrides(
-    path: &Path,
-) -> std::collections::HashMap<String, harn_lint::LintSeverity> {
-    let raw = match harn_config::load_for_path(path) {
-        Ok(cfg) => cfg.lint.severity,
-        Err(e) => {
-            eprintln!("warning: {e}");
-            return std::collections::HashMap::new();
-        }
-    };
-    raw.into_iter()
-        .filter_map(
-            |(rule, severity)| match severity.to_ascii_lowercase().as_str() {
-                "error" => Some((rule, harn_lint::LintSeverity::Error)),
-                "warning" | "warn" => Some((rule, harn_lint::LintSeverity::Warning)),
-                "info" => Some((rule, harn_lint::LintSeverity::Info)),
-                other => {
-                    eprintln!("warning: [lint.severity] `{rule}`: unknown severity `{other}`");
-                    None
-                }
-            },
-        )
-        .collect()
 }
 
 pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {

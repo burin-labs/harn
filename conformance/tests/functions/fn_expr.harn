@@ -12,7 +12,7 @@ pipeline test(task) {
   // As function argument
   const items = [1, 2, 3]
   const doubled = items.map(fn(x) { return x * 2 })
-  assert(doubled == [2, 4, 6], "fn expr as argument")
+  assert_eq(doubled, [2, 4, 6], "fn expr as argument")
   // Implicit return (last expression)
   const square = fn(x) { x * x }
   assert(square(4) == 16, "fn expr implicit return")

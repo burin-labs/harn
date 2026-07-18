@@ -3,5 +3,5 @@ name = "harn"
 
 [setup]
 script = '''
-./scripts/dev_setup.sh
+make setup-rust
 '''

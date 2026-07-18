@@ -69,6 +69,10 @@ conformance/tests/**/.harn/test-timings.json
 # JavaScript, portal, and website artifacts.
 node_modules/
 /crates/harn-cli/portal-dist/
+# Target-independent CLI AOT payload; generated only for package/release
+# assembly and embedded by harn-cli/build.rs when present.
+/crates/harn-cli/generated/cli-bytecode-manifest.json
+/crates/harn-cli/generated/cli-bytecode/
 docs/dist/
 website/.ssr/
 website/dist/

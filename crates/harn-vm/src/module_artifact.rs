@@ -20,7 +20,7 @@ use crate::value::VmError;
 /// A single `import`-style declaration inside a module. Re-resolved at
 /// instantiation time so that the cached artifact does not bake in
 /// stale resolved paths.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleImportSpec {
     pub path: String,
     pub selected_names: Option<Vec<String>>,
@@ -32,7 +32,7 @@ pub struct ModuleImportSpec {
 /// into a fresh env, minting closures for each entry in
 /// [`functions`](Self::functions), and re-issuing every nested
 /// [`imports`](Self::imports).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleArtifact {
     pub imports: Vec<ModuleImportSpec>,
     pub init_chunk: Option<CachedChunk>,
@@ -44,10 +44,10 @@ pub struct ModuleArtifact {
     /// the instantiated module env and binds it into importers. Disjoint from
     /// [`functions`](Self::functions) and [`public_type_names`](Self::public_type_names).
     pub public_value_names: HashSet<String>,
-    /// Names of `pub type` aliases. Type aliases are erased at runtime — they
-    /// carry no value of their own — but importers may still name them in a
-    /// selective `import { T } from "..."` (for annotations and
-    /// schema-as-type use), so the loader must accept these names.
+    /// Names of erased public type declarations (`type`, `enum`, and
+    /// `interface`). They carry no runtime value of their own, but importers
+    /// may still name them in selective imports. Public structs are excluded:
+    /// they export a real constructor through [`functions`](Self::functions).
     pub public_type_names: HashSet<String>,
     /// JSON-Schema lowering (serialized as canonical JSON text) for each
     /// `pub type` alias whose body can be expressed as a schema. The loader
@@ -55,6 +55,31 @@ pub struct ModuleArtifact {
     /// as `output_schema: ImportedAlias` see the same value a local alias
     /// lowers to at compile time. Subset of [`public_type_names`](Self::public_type_names).
     pub public_type_schemas: BTreeMap<String, String>,
+}
+
+impl ModuleArtifact {
+    /// Bind relocatable cached bytecode to the source path used by this load.
+    ///
+    /// Module artifacts may move beside their source (`harn precompile`) or
+    /// inside a package. Source paths are diagnostic/debug context, not a
+    /// compilation input, so deserialize once and stamp every nested chunk at
+    /// the load boundary instead of duplicating otherwise-identical artifacts.
+    pub(crate) fn bind_source_file(&mut self, source_path: &Path) {
+        let source_file = source_path.display().to_string();
+        if let Some(chunk) = &mut self.init_chunk {
+            bind_chunk_source_file(chunk, &source_file);
+        }
+        for function in self.functions.values_mut() {
+            bind_chunk_source_file(&mut function.chunk, &source_file);
+        }
+    }
+}
+
+fn bind_chunk_source_file(chunk: &mut CachedChunk, source_file: &str) {
+    chunk.source_file = Some(source_file.to_string());
+    for function in &mut chunk.functions {
+        bind_chunk_source_file(&mut function.chunk, source_file);
+    }
 }
 
 /// Compile a parsed `.harn` module into the serializable artifact shape.
@@ -122,12 +147,33 @@ pub fn compile_module_artifact(
             harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
             _ => node,
         };
-        if let harn_parser::Node::TypeDecl {
-            name, is_pub: true, ..
-        } = &inner.node
-        {
-            public_type_names.insert(name.clone());
-            continue;
+        match &inner.node {
+            harn_parser::Node::TypeDecl {
+                name, is_pub: true, ..
+            }
+            | harn_parser::Node::EnumDecl {
+                name, is_pub: true, ..
+            }
+            | harn_parser::Node::InterfaceDecl { name, .. } => {
+                public_type_names.insert(name.clone());
+                continue;
+            }
+            harn_parser::Node::StructDecl {
+                name,
+                fields,
+                is_pub,
+                ..
+            } => {
+                let constructor = crate::Compiler::new()
+                    .compile_struct_constructor(name, fields)
+                    .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
+                functions.insert(name.clone(), constructor.freeze_for_cache());
+                if *is_pub {
+                    public_names.insert(name.clone());
+                }
+                continue;
+            }
+            _ => {}
         }
         // `pub const` / `pub let`: record the exported value-binding names. The
         // value itself is produced when the init chunk is replayed at
@@ -144,6 +190,24 @@ pub fn compile_module_artifact(
         } = &inner.node
         {
             collect_binding_identifier_names(pattern, &mut public_value_names);
+            continue;
+        }
+        if let harn_parser::Node::Pipeline {
+            name,
+            params,
+            body,
+            extends,
+            is_pub,
+            ..
+        } = &inner.node
+        {
+            let pipeline = crate::Compiler::new()
+                .compile_pipeline_callable(program, name, params, body, extends.as_deref())
+                .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
+            functions.insert(name.clone(), pipeline.freeze_for_cache());
+            if *is_pub {
+                public_names.insert(name.clone());
+            }
             continue;
         }
         let harn_parser::Node::FnDecl {

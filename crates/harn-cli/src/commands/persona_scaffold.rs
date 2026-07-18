@@ -1,19 +1,11 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use include_dir::{include_dir, Dir};
-use serde::Deserialize;
 
 use crate::cli::{PersonaMaterializeArgs, PersonaNewArgs, PersonaTemplateKind};
-use crate::dispatch;
-use crate::env_guard::ScopedEnvVar;
 
-const PERSONA_BLUEPRINT_ENV: &str = "HARN_PERSONA_BLUEPRINT_JSON";
-
-// Embedded CLI scripts receive their input through scoped process environment.
-// Keep that bridge serialized so concurrent in-process callers cannot cross wires.
-static MATERIALIZE_DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+use super::persona_prompt::{self, PromptCompiledPersona, PromptCompiledPersonaLowering};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersonaScaffoldResult {
@@ -25,7 +17,14 @@ static PERSONA_TEMPLATE_ASSETS: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/assets/persona-templates");
 
 async fn scaffold_persona(args: &PersonaNewArgs) -> Result<PersonaScaffoldResult, String> {
-    let name = normalize_name(&args.name)?;
+    let raw_name = args
+        .name
+        .as_deref()
+        .ok_or_else(|| "manual persona scaffolding requires a name".to_string())?;
+    let template = args
+        .template
+        .ok_or_else(|| "manual persona scaffolding requires --template".to_string())?;
+    let name = normalize_name(raw_name)?;
     let target_root = args.output_root.join(&name);
     if target_root.exists() && !args.force {
         return Err(format!(
@@ -34,7 +33,7 @@ async fn scaffold_persona(args: &PersonaNewArgs) -> Result<PersonaScaffoldResult
         ));
     }
 
-    let prepared = prepare_persona_package(&args.output_root, &name, args.template)?;
+    let prepared = prepare_persona_package(&args.output_root, &name, template)?;
     validate_prepared_persona(&prepared, &name).await?;
     publish_prepared_persona(prepared, target_root, args.force)
 }
@@ -46,8 +45,13 @@ pub async fn scaffold_persona_package(
     force: bool,
 ) -> Result<PersonaScaffoldResult, String> {
     let args = PersonaNewArgs {
-        name: name.to_string(),
-        template: parse_template_kind(template)?,
+        name: Some(name.to_string()),
+        template: Some(parse_template_kind(template)?),
+        from_prompt: None,
+        prompt_name: None,
+        provider: None,
+        model: None,
+        max_tokens: None,
         output_root: output_root.to_path_buf(),
         force,
     };
@@ -57,7 +61,12 @@ pub async fn scaffold_persona_package(
 async fn materialize_persona(
     args: &PersonaMaterializeArgs,
 ) -> Result<PersonaScaffoldResult, String> {
-    materialize_persona_package(&args.blueprint, &args.output_root, args.force).await
+    let lowering = match (&args.blueprint, &args.compile_receipt) {
+        (Some(blueprint), None) => persona_prompt::compile_blueprint_path(blueprint).await?,
+        (None, Some(receipt)) => persona_prompt::compile_reviewed_receipt_path(receipt).await?,
+        _ => return Err("exactly one persona materialization input is required".to_string()),
+    };
+    materialize_prompt_compiled_lowering(lowering, &args.output_root, args.force).await
 }
 
 pub async fn materialize_persona_package(
@@ -65,7 +74,15 @@ pub async fn materialize_persona_package(
     output_root: &Path,
     force: bool,
 ) -> Result<PersonaScaffoldResult, String> {
-    let lowering = compile_prompt_compiled_lowering(blueprint_path).await?;
+    let lowering = persona_prompt::compile_blueprint_path(blueprint_path).await?;
+    materialize_prompt_compiled_lowering(lowering, output_root, force).await
+}
+
+pub(super) async fn materialize_prompt_compiled_lowering(
+    lowering: PromptCompiledPersonaLowering,
+    output_root: &Path,
+    force: bool,
+) -> Result<PersonaScaffoldResult, String> {
     let name = normalize_name(&lowering.persona.name)?;
     let template = parse_template_kind(&lowering.template)?;
     let target_root = output_root.join(&name);
@@ -83,13 +100,33 @@ pub async fn materialize_persona_package(
 }
 
 pub(crate) async fn run_new(args: &PersonaNewArgs) -> Result<(), String> {
-    let result = scaffold_persona(args).await?;
+    let (result, name) = if let Some(prompt) = args.from_prompt.as_deref() {
+        let compiled = persona_prompt::compile_prompt(
+            prompt,
+            args.prompt_name.as_deref(),
+            args.provider.as_deref(),
+            args.model.as_deref(),
+            args.max_tokens,
+        )
+        .await?;
+        let lowering = compiled.receipt.into_lowering()?;
+        let name = lowering.persona.name.clone();
+        let result =
+            materialize_prompt_compiled_lowering(lowering, &args.output_root, args.force).await?;
+        (result, name)
+    } else {
+        let name = args
+            .name
+            .as_deref()
+            .ok_or_else(|| "manual persona scaffolding requires a name".to_string())?;
+        (scaffold_persona(args).await?, normalize_name(name)?)
+    };
     println!("created persona package {}", result.root.display());
     for file in &result.files {
         println!("  create {}", file.display());
     }
     println!();
-    println!("  harn persona doctor {}", normalize_name(&args.name)?);
+    println!("  harn persona doctor {name}");
     Ok(())
 }
 
@@ -100,44 +137,6 @@ pub(crate) async fn run_materialize(args: &PersonaMaterializeArgs) -> Result<(),
         println!("  create {}", file.display());
     }
     Ok(())
-}
-
-async fn compile_prompt_compiled_lowering(
-    blueprint_path: &Path,
-) -> Result<PromptCompiledPersonaLowering, String> {
-    let bytes = fs::read(blueprint_path)
-        .map_err(|error| format!("failed to read {}: {error}", blueprint_path.display()))?;
-    let blueprint = String::from_utf8(bytes).map_err(|error| {
-        format!(
-            "persona blueprint {} must be UTF-8 JSON: {error}",
-            blueprint_path.display()
-        )
-    })?;
-
-    let _dispatch = MATERIALIZE_DISPATCH_LOCK.lock().await;
-    let _blueprint = ScopedEnvVar::set(PERSONA_BLUEPRINT_ENV, &blueprint);
-    let outcome = dispatch::run_embedded_script("personas/materialize", Vec::new(), true).await;
-    if outcome.exit_code != 0 {
-        let detail = outcome.stderr.trim();
-        return Err(if detail.is_empty() {
-            "persona blueprint compiler failed".to_string()
-        } else {
-            format!("persona blueprint compiler failed: {detail}")
-        });
-    }
-
-    let response = serde_json::from_str::<MaterializeCompileResponse>(outcome.stdout.trim())
-        .map_err(|error| format!("persona blueprint compiler returned invalid JSON: {error}"))?;
-    if !response.ok {
-        return Err(response
-            .error
-            .unwrap_or_else(|| "persona blueprint failed Harn validation".to_string()));
-    }
-    let lowering = response
-        .lowering
-        .ok_or_else(|| "persona blueprint compiler returned no lowering".to_string())?;
-    lowering.validate_materialization_contract()?;
-    Ok(lowering)
 }
 
 fn normalize_name(raw: &str) -> Result<String, String> {
@@ -196,108 +195,6 @@ struct TemplateIdentity {
 struct PreparedPersonaPackage {
     staging: tempfile::TempDir,
     relative_files: Vec<PathBuf>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MaterializeCompileResponse {
-    ok: bool,
-    lowering: Option<PromptCompiledPersonaLowering>,
-    error: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PromptCompiledPersonaLowering {
-    // Closed enum decoding is the boundary validation for this fixed profile.
-    // The materializer projects its one supported policy; consumers do not
-    // reinterpret it.
-    #[expect(
-        dead_code,
-        reason = "Serde decodes the closed lowering contract at this boundary."
-    )]
-    profile: PromptCompiledProfile,
-    template: String,
-    persona: PromptCompiledPersona,
-    #[expect(
-        dead_code,
-        reason = "Serde decodes the closed lowering contract at this boundary."
-    )]
-    policy: PromptCompiledPolicy,
-    triggers: Vec<PromptCompiledTrigger>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum PromptCompiledProfile {
-    PromptCompiledV1,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PromptCompiledPersona {
-    name: String,
-    description: String,
-    goal: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PromptCompiledPolicy {
-    #[expect(
-        dead_code,
-        reason = "Serde decodes the closed lowering contract at this boundary."
-    )]
-    autonomy_tier: SuggestAutonomyTier,
-    #[expect(
-        dead_code,
-        reason = "Serde decodes the closed lowering contract at this boundary."
-    )]
-    receipt_policy: RequiredReceiptPolicy,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum SuggestAutonomyTier {
-    Suggest,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum RequiredReceiptPolicy {
-    Required,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PromptCompiledTrigger {
-    id: String,
-    kind: String,
-    provider: String,
-    events: Vec<String>,
-    secrets: BTreeMap<String, String>,
-    schedule: Option<String>,
-    timezone: Option<String>,
-    handler: String,
-}
-
-impl PromptCompiledPersonaLowering {
-    fn validate_materialization_contract(&self) -> Result<(), String> {
-        if self.triggers.len() != 1 {
-            return Err("prompt_compiled_v1 lowering must contain exactly one trigger".to_string());
-        }
-        let trigger = &self.triggers[0];
-        if trigger.events.is_empty() {
-            return Err("prompt_compiled_v1 lowering trigger must include an event".to_string());
-        }
-        let expected_handler = format!("persona://{}", self.persona.name);
-        if trigger.handler != expected_handler {
-            return Err(format!(
-                "prompt_compiled_v1 lowering handler must be {expected_handler:?}"
-            ));
-        }
-        Ok(())
-    }
 }
 
 impl TemplateIdentity {
@@ -901,6 +798,69 @@ mod tests {
 
     use super::*;
 
+    fn reviewed_compile_receipt() -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": "harn.persona.prompt_compile.v1",
+            "ok": true,
+            "prompt_digest": "sha256:prompt",
+            "catalog_digest": "sha256:catalog",
+            "checkpoint": {
+                "status": "accepted",
+                "attempts": 1,
+                "repaired": false,
+                "provider": "mock",
+                "model": "mock",
+            },
+            "usage": {
+                "input_tokens": 11,
+                "output_tokens": 7,
+                "total_tokens": 18,
+                "realized_cost_usd": 0.0,
+            },
+            "blueprint": {
+                "schema_version": "1",
+                "name": "accepted_prompt_watch",
+                "description": "Watches accepted prompt receipts.",
+                "goal": "Prove the accepted receipt enters the canonical transaction.",
+                "template": "deterministic-sweeper",
+                "cron": {"cron": "0 9 * * *", "timezone": "UTC"},
+            },
+            "lowering": {
+                "profile": "prompt_compiled_v1",
+                "template": "deterministic-sweeper",
+                "persona": {
+                    "name": "accepted_prompt_watch",
+                    "description": "Watches accepted prompt receipts.",
+                    "goal": "Prove the accepted receipt enters the canonical transaction.",
+                },
+                "policy": {
+                    "autonomy_tier": "suggest",
+                    "receipt_policy": "required",
+                },
+                "triggers": [{
+                    "id": "accepted_prompt_watch-cron",
+                    "kind": "cron",
+                    "provider": "cron",
+                    "events": ["cron.tick"],
+                    "secrets": {},
+                    "schedule": "0 9 * * *",
+                    "timezone": "UTC",
+                    "handler": "persona://accepted_prompt_watch",
+                }],
+            },
+            "error": null,
+        })
+    }
+
+    fn materialize_args(receipt: PathBuf, output_root: PathBuf) -> PersonaMaterializeArgs {
+        PersonaMaterializeArgs {
+            blueprint: None,
+            compile_receipt: Some(receipt),
+            output_root,
+            force: false,
+        }
+    }
+
     #[test]
     fn prompt_rendering_templates_declare_their_read_capability() {
         for template in [
@@ -994,6 +954,120 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn accepted_reviewed_receipt_revalidates_then_enters_the_strict_transaction() {
+        let temp = tempfile::tempdir().unwrap();
+        let receipt_path = temp.path().join("reviewed-receipt.json");
+        fs::write(&receipt_path, reviewed_compile_receipt().to_string()).unwrap();
+        let output_root = temp.path().join("personas");
+
+        let result = materialize_persona(&materialize_args(receipt_path, output_root))
+            .await
+            .expect("materialize accepted reviewed prompt receipt");
+
+        let manifest = toml::from_str::<toml::Value>(
+            &fs::read_to_string(result.root.join("harn.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["personas"][0]["autonomy_tier"].as_str(),
+            Some("suggest")
+        );
+        assert_eq!(
+            manifest["personas"][0]["receipt_policy"].as_str(),
+            Some("required")
+        );
+        assert_eq!(manifest["triggers"].as_array().unwrap().len(), 1);
+        assert_eq!(manifest["triggers"][0]["kind"].as_str(), Some("cron"));
+        assert_eq!(
+            manifest["triggers"][0]["handler"].as_str(),
+            Some("persona://accepted_prompt_watch")
+        );
+        assert!(result.root.join("src/accepted_prompt_watch.harn").is_file());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rejected_reviewed_receipts_publish_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        let cases_root = temp.path().join("cases");
+        fs::create_dir_all(&cases_root).unwrap();
+
+        let mut wrong_version = reviewed_compile_receipt();
+        wrong_version["schema_version"] = serde_json::json!("harn.persona.prompt_compile.v2");
+        let mut failed = reviewed_compile_receipt();
+        failed["ok"] = serde_json::json!(false);
+        failed["checkpoint"]["status"] = serde_json::json!("validator_rejected");
+        failed["error"] = serde_json::json!({"code": "rejected", "message": "not accepted"});
+        let mut missing_blueprint = reviewed_compile_receipt();
+        missing_blueprint
+            .as_object_mut()
+            .unwrap()
+            .remove("blueprint");
+        let mut missing_lowering = reviewed_compile_receipt();
+        missing_lowering.as_object_mut().unwrap().remove("lowering");
+        let mut drifted_lowering = reviewed_compile_receipt();
+        drifted_lowering["lowering"]["triggers"][0]["schedule"] = serde_json::json!("0 10 * * *");
+        let mut invalid_catalog = reviewed_compile_receipt();
+        invalid_catalog["blueprint"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cron");
+        invalid_catalog["blueprint"]["external"] =
+            serde_json::json!({"provider": "missing", "event": "missing.event"});
+
+        let serde_cases = [
+            ("malformed", None, "invalid"),
+            ("wrong-version", Some(wrong_version), "unknown variant"),
+        ];
+        let stable_cases = [
+            ("failed", failed, "rejected: not accepted"),
+            (
+                "missing-blueprint",
+                missing_blueprint,
+                "persona compile receipt has no blueprint",
+            ),
+            (
+                "missing-lowering",
+                missing_lowering,
+                "persona compile receipt has no reviewed lowering",
+            ),
+            (
+                "drifted-lowering",
+                drifted_lowering,
+                "persona compile receipt lowering no longer matches current Harn lowering; compile and review a fresh receipt",
+            ),
+            (
+                "invalid-catalog",
+                invalid_catalog,
+                "unknown_provider: provider `missing` is not in the live trigger catalog",
+            ),
+        ];
+
+        for (name, receipt, expected) in serde_cases {
+            let receipt_path = cases_root.join(format!("{name}.json"));
+            let contents =
+                receipt.map_or_else(|| "not-json".to_string(), |value| value.to_string());
+            fs::write(&receipt_path, contents).unwrap();
+            let output_root = cases_root.join(format!("{name}-output"));
+            let error = materialize_persona(&materialize_args(receipt_path, output_root.clone()))
+                .await
+                .expect_err(name);
+            assert!(error.contains(expected), "{name}: {error}");
+            assert!(!output_root.exists(), "{name} published output");
+        }
+
+        for (name, receipt, expected) in stable_cases {
+            let receipt_path = cases_root.join(format!("{name}.json"));
+            fs::write(&receipt_path, receipt.to_string()).unwrap();
+            let output_root = cases_root.join(format!("{name}-output"));
+            let error = materialize_persona(&materialize_args(receipt_path, output_root.clone()))
+                .await
+                .expect_err(name);
+            assert_eq!(error, expected, "{name}");
+            assert!(!output_root.exists(), "{name} published output");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn materialize_preserves_an_external_trigger_without_cron_fields() {
         let temp = tempfile::tempdir().unwrap();
         let blueprint = temp.path().join("blueprint.json");
@@ -1062,7 +1136,9 @@ mod tests {
           "error": null
         }"#;
 
-        assert!(serde_json::from_str::<MaterializeCompileResponse>(response).is_err());
+        assert!(
+            serde_json::from_str::<persona_prompt::MaterializeCompileResponse>(response).is_err()
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

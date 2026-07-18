@@ -83,6 +83,53 @@ pub(crate) fn resolve_runtime_personas(
     Ok(resolved)
 }
 
+/// Project an installed package's canonical root triggers only after their
+/// target persona has crossed the activation-ledger boundary.
+pub(crate) fn installed_persona_trigger_configs(
+    personas: &[ResolvedRuntimePersona],
+) -> Result<Vec<ResolvedTriggerConfig>, PackageError> {
+    let mut triggers = Vec::new();
+    for resolved in personas {
+        let Some(guard) = &resolved.execution_guard else {
+            continue;
+        };
+        let Some((package_alias, persona_name)) = resolved.id.split_once('/') else {
+            return Err(PackageError::Manifest(format!(
+                "activated installed persona '{}' must use <package>/<persona> identity",
+                resolved.id
+            )));
+        };
+        let bytes = guard
+            .verify_entry_source(&resolved.manifest_path)
+            .map_err(|error| PackageError::Manifest(error.to_string()))?;
+        let source = std::str::from_utf8(&bytes).map_err(|error| {
+            PackageError::Manifest(format!(
+                "activated package manifest {} is not valid UTF-8: {error}",
+                resolved.manifest_path.display()
+            ))
+        })?;
+        let manifest = toml::from_str::<Manifest>(source).map_err(|error| {
+            PackageError::Manifest(format!(
+                "failed to parse activated package manifest {}: {error}",
+                resolved.manifest_path.display()
+            ))
+        })?;
+        let unqualified_handler = format!("persona://{persona_name}");
+        let qualified_handler = format!("persona://{}", resolved.id);
+        for mut trigger in resolved_triggers_from_manifest(&manifest, &resolved.manifest_dir) {
+            let handler = trigger.handler.trim();
+            if handler != unqualified_handler && handler != qualified_handler {
+                continue;
+            }
+            trigger.id = format!("{package_alias}/{}", trigger.id);
+            trigger.handler.clone_from(&qualified_handler);
+            trigger.execution_guard = Some(Arc::clone(guard));
+            triggers.push(trigger);
+        }
+    }
+    Ok(triggers)
+}
+
 pub(crate) fn persona_runtime_handler_for_trigger(
     extensions: &RuntimeExtensions,
     trigger: &ResolvedTriggerConfig,

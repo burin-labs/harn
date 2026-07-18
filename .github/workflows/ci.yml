@@ -16,8 +16,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Incremental fights the within-job sccache wrapper. Persistent reuse is
-  # owned by the coarse Rust cache action below.
+  # Incremental fights the within-job sccache wrapper. Cross-run reuse is
+  # owned by each lane's persistent compiler-object cache. Do not persist a
+  # shared target/: independent PR and merge-group builds overlap, and Cargo
+  # fingerprints/build-script OUT_DIR artifacts are not safe to share across
+  # those checkouts.
   CARGO_INCREMENTAL: "0"
   # Promote build warnings to errors so platform-specific warnings can't
   # silently accumulate (Windows-only deprecations, dead_code for cfg-gated
@@ -325,6 +328,8 @@ jobs:
           shared-key: package-audit
           cache-on-failure: true
           cache-bin: false
+      - name: Generate release/package CLI AOT payload
+        run: make gen-cli-aot && make check-cli-aot
       - name: Check published crate packages
         id: release-audit-package
         run: ./scripts/verify_crate_packages.sh
@@ -340,11 +345,12 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
 
-  # The long Linux Rust lanes are intentionally one matrix job with
+  # The compile-bearing Linux Rust lanes are intentionally one matrix job with
   # fail-fast enabled: if any required Rust lane fails, GitHub cancels the
-  # sibling Rust lanes that are still queued or running. That keeps the
-  # existing parallel critical path when the branch is healthy while avoiding
-  # needless minutes after the branch is already known-bad.
+  # sibling Rust lane that is still queued or running. The test row is the one
+  # behavior build producer: it compiles the suite once on persistent storage,
+  # runs the environment-neutral tests there, and publishes only the small
+  # security/CLI payload that must execute on GitHub Ubuntu.
   rust-builds:
     name: ${{ matrix.name }}
     needs: changes
@@ -383,26 +389,9 @@ jobs:
             rust_components: clippy
           - kind: test
             name: Rust test
-            # The sandbox escape suite requires Linux Landlock. Blacksmith's
-            # current kernel does not expose it, so this security proof stays
-            # on GitHub-hosted Ubuntu rather than being skipped or weakened.
-            runner: ubuntu-latest
-            cache_key: workspace-test
-            # Affected-crate selection (#2663) diffs `origin/<base>...HEAD`,
-            # which needs the merge-base on PRs. Unused on merge_group/push.
-            fetch_depth: 0
-            rust_components: ""
-          - kind: audit
-            name: Harn conformance + audit
-            # Conformance exercises host-tool and sandbox semantics, including
-            # result capture behavior that differs on the Blacksmith image.
-            # Keep product-semantics proofs on the same GitHub Ubuntu contract
-            # as the Landlock escape suite.
-            runner: ubuntu-latest
-            cache_key: workspace-audit
-            # Full history + tags so the changelog retroactive-edit check can
-            # traverse BASE..HEAD and inspect commit trailers.
-            fetch_depth: 0
+            runner: blacksmith-8vcpu-ubuntu-2404
+            cache_key: workspace-behavior
+            fetch_depth: 1
             rust_components: ""
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -429,9 +418,9 @@ jobs:
       - uses: ./.github/actions/sccache
         with:
           cache-key: ${{ matrix.cache_key }}
-          sticky: ${{ matrix.kind == 'lint' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
       - uses: ./.github/actions/rust-cache
-        if: matrix.kind != 'lint' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
+        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
         continue-on-error: true
         with:
           shared-key: ${{ matrix.cache_key }}
@@ -439,9 +428,8 @@ jobs:
       - name: Install cargo-nextest
         if: matrix.kind == 'test'
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
-        continue-on-error: true
         with:
-          tool: nextest@0.9.133
+          tool: nextest@0.9.132
       # `make lint` also runs `lint-no-xfail-regression`, which compiles
       # `harn-cli` via `cargo run` just to walk conformance/ and count
       # `@xfail:` markers. That ~1-2 min cost is paid by the harn-audit lane
@@ -454,90 +442,38 @@ jobs:
         env:
           RUN_PROMPT_PROSE_RATCHET: ${{ needs.changes.outputs.prompt_prose }}
         run: ./scripts/ci/run_rust_lint_lane.sh
-      # SAFETY PRINCIPLE — prune for PR fast feedback, run the FULL suite on
-      # the merge queue and non-metadata push backstop (#2663). On `pull_request`
-      # events we run only the tests in crates affected by the diff, expanded
-      # by the reverse-dependency closure (a change to crate X must test X and
-      # everything that depends on X). On `merge_group` (the speculative merge
-      # commit — the ONLY place a cross-PR interaction regression is caught)
-      # and non-metadata `push` to main we run the WHOLE workspace
-      # unconditionally. Global changes (Cargo.lock,
-      # .cargo/, toolchain, this workflow) auto-fall-back to the full
-      # workspace inside the buildless `scripts/ci/affected_crate_args.sh`
-      # bootstrap selector.
-      - name: Run affected-crate tests (PR fast feedback)
-        if: matrix.kind == 'test' && github.event_name == 'pull_request'
+      - name: Build portable behavior payload
+        if: matrix.kind == 'test'
         env:
-          # This Landlock-capable GitHub runner retains the proven two-job cap;
-          # four jobs exceeded its memory in harn#4293/#4302.
-          CARGO_BUILD_JOBS: "2"
-          NEXTEST_PROFILE: ci
-          # Route the (event-derived) base ref through env vars rather than
-          # expanding `${{ }}` inside the run: script — inline expansion in a
-          # shell block is a template-injection sink (zizmor). Env-var
-          # assignment is safe; the script reads the value via "$BASE_REF".
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          AFFECTED_BASE: origin/${{ github.event.pull_request.base.ref }}
-        run: |
-          # fetch-depth:0 gives full history; ensure the base branch is present
-          # as a remote-tracking ref so `origin/<base>...HEAD` resolves its
-          # merge-base for the diff.
-          git fetch --no-tags origin "$BASE_REF"
-          scripts/ci/run_rust_test_lane.sh make test-affected
-      - name: Run full test suite (merge queue + non-metadata push backstop)
+          CARGO_BUILD_JOBS: "4"
+        run: >-
+          ./scripts/ci/behavior_artifact.sh build
+          "$RUNNER_TEMP/harn-behavior.tar.zst"
+          "$GITHUB_SHA"
+      # Blacksmith already proved that the full suite has exactly one
+      # incompatible case on its kernel: the Landlock escape test. Run every
+      # other default-suite test against the just-built graph here, then run
+      # that one security proof from the archived harn-vm binary on GitHub
+      # Ubuntu below. No test is skipped without an owning execution lane.
+      - name: Run full environment-neutral test suite
         id: release-audit-rust-test
-        if: matrix.kind == 'test' && github.event_name != 'pull_request'
+        if: matrix.kind == 'test'
         env:
-          # See the PR fast-feedback test step above. This is the queue-critical
-          # path where cold-cache speculative merge commits have been OOM-killed.
-          CARGO_BUILD_JOBS: "2"
+          CARGO_BUILD_JOBS: "4"
+          HARN_LLM_CALLS_DISABLED: "1"
           NEXTEST_PROFILE: ci
-        run: scripts/ci/run_rust_test_lane.sh make test
-      # These checks use the harn CLI and generated artifacts, but they do not
-      # need to serialize behind clippy and nextest.
-      #
-      # `scripts/audit_gates.sh` builds the harn CLI + runs the conformance
-      # suite ONCE (the serial long pole), exports the warm `target/debug/harn`
-      # as HARN_BIN so no downstream gate re-walks cargo's build graph, then
-      # hands the ~25 independent gates to `make -j -k`. Every gate reuses the
-      # warm binary and is independent of its siblings, so the tail collapses
-      # from a serial `sum(gates)` to a parallel `max(gate)` and `-k` reports
-      # every gate's verdict instead of stopping at the first failure. This
-      # mirrors the proven `release_gate.sh audit` fan-out.
-      #
-      # The gate set is the same battery that used to run as a serial chain
-      # here: test-agent-scripts, protocol-conformance, lint-no-xfail-regression,
-      # lint-harn, fmt-harn, and the check-* drift/audit guards (highlight,
-      # language-spec, grammar/trigger keywords, provider/connector matrices,
-      # docs snippets/cli-flags/model-refs, diagnostics catalog, protocol +
-      # connector-schema + session-bundle + run-view-fixture drift, provider
-      # catalog + refresh workflow, workflow quickstart, vm rss soak).
-      # mcp-rc-conformance stays pruned (subset of the parallel nextest lane).
-      # The `verify-tree-sitter-parse` gate (in audit_gates.sh) loads the
-      # compiled tree-sitter grammar. Install Node + the tree-sitter CLI and
-      # compile the shared library from the committed tree-sitter-harn/src
-      # BEFORE the audit fanout so the sweep only has to parse. `touch
-      # src/parser.c` keeps the sweep from treating the just-checked-out
-      # (equal-mtime) parser.c as stale and paying the multi-minute
-      # `tree-sitter generate` fallback — the committed parser.c is
-      # authoritative here, so we compile it directly (~1s) rather than
-      # regenerate it.
-      - uses: ./.github/actions/node-cache
-        if: matrix.kind == 'audit'
+        run: >-
+          scripts/ci/run_rust_test_lane.sh
+          cargo nextest run --workspace --profile ci
+          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
+      - name: Upload portable behavior payload
+        if: matrix.kind == 'test'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          node-version: "22"
-          cache-dependency-path: tree-sitter-harn/package-lock.json
-      - name: Build tree-sitter grammar for the parse sweep
-        if: matrix.kind == 'audit'
-        working-directory: tree-sitter-harn
-        run: |
-          npm ci
-          touch src/parser.c
-          ./scripts/tree-sitter-cli.sh build
-      - name: Run Harn conformance and audit
-        id: release-audit-harn
-        if: matrix.kind == 'audit'
-        run: ./scripts/audit_gates.sh
+          path: ${{ runner.temp }}/harn-behavior.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
       # sccache-action starts a long-lived `sccache --start-server` daemon that
       # outlives every job step. GitHub's post-job "Cleaning up orphan
       # processes" phase then terminates it, and on the ubuntu lanes that
@@ -550,36 +486,117 @@ jobs:
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
 
+  rust-security:
+    name: Rust security proof
+    needs: [changes, rust-builds]
+    if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
+        with:
+          tool: nextest@0.9.132
+      - name: Download portable behavior payload
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: harn-behavior.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify portable behavior payload
+        run: >-
+          ./scripts/ci/behavior_artifact.sh restore
+          "$RUNNER_TEMP/harn-behavior.tar.zst"
+          "$RUNNER_TEMP/harn-behavior"
+          "$GITHUB_SHA"
+      - name: Run Landlock escape proof on GitHub Ubuntu
+        id: release-audit-rust-security
+        run: >-
+          cargo nextest run --profile ci
+          --archive-file "$RUNNER_TEMP/harn-behavior/harn-security.tar.zst"
+          --workspace-remap "$GITHUB_WORKSPACE"
+          -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'
+
+  harn-audit:
+    name: Harn conformance + audit
+    needs: [changes, rust-builds]
+    if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Changelog history is a runtime audit input; compilation already
+          # happened once in rust-builds.
+          fetch-depth: 0
+      - name: Download portable behavior payload
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: harn-behavior.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify portable behavior payload
+        run: >-
+          ./scripts/ci/behavior_artifact.sh restore
+          "$RUNNER_TEMP/harn-behavior.tar.zst"
+          "$RUNNER_TEMP/harn-behavior"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: tree-sitter-harn/package-lock.json
+      - name: Build tree-sitter grammar for the parse sweep
+        working-directory: tree-sitter-harn
+        run: |
+          npm ci
+          touch src/parser.c
+          ./scripts/tree-sitter-cli.sh build
+      - name: Run Harn conformance and audit
+        id: release-audit-harn
+        env:
+          AUDIT_GATES_CONCURRENCY: "4"
+          HARN_CONFORMANCE_SHARDS: "4"
+        run: ./scripts/audit_gates.sh
+      - name: Summarize rolling merge-group wall time
+        if: github.event_name == 'merge_group' && steps.release-audit-harn.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          "$HARN_BIN" run scripts/ci_walltime_report.harn -- --limit 50
+          >> "$GITHUB_STEP_SUMMARY"
+
   audit-scripts:
     name: Audit scripts
-    needs: changes
-    # Heavy Linux lane (compiles the harn CLI via `cargo run`). Skipped on a
-    # docs/website/markdown-only PR; forced on for merge_group / push (see the
-    # `changes` job). ci-status treats a skip here as PASS.
-    if: needs.changes.outputs.rust == 'true'
-    # Mixed audit gates. Pure Python / shell checks stay first for fast
-    # failure. Harn-backed targets run after persistent sccache is configured
-    # and through one warm HARN_BIN, so this lane does not compile the CLI more
-    # than once and then re-walk cargo's build graph for later
-    # script checks.
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
-    # Linux-only line-tables-only debuginfo, matching rust-builds (see that
-    # job's env note). This lane compiles harn through cargo, so it benefits
-    # from the same link-time/disk trim.
-    env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      SCCACHE_BASEDIRS: ${{ github.workspace }}
-      SCCACHE_CACHE_SIZE: 15G
-      # Link with mold, same as rust-builds (see that job's RUSTFLAGS note:
-      # job-level RUSTFLAGS clobbers the workflow `-D warnings`, so re-state it
-      # and append the mold link-arg). Linux-only.
-      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+    needs: [changes, rust-builds]
+    if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+    # This is now an execution-only consumer of the exact Harn CLI built by
+    # rust-builds. Four CPUs are ample once the duplicate Cargo graph is gone.
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # Full history + tags so the changelog retroactive-edit check can
           # traverse BASE..HEAD and inspect commit trailers.
           fetch-depth: 0
+      - name: Download portable behavior payload
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: harn-behavior.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify portable behavior payload
+        run: >-
+          ./scripts/ci/behavior_artifact.sh restore
+          "$RUNNER_TEMP/harn-behavior.tar.zst"
+          "$RUNNER_TEMP/harn-behavior"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
       # `make spec-lint` must run the repository's declared Redocly CLI, not
       # let npx fall back to an unrelated registry package. Keep this install
       # in the already-required audit lane, where the snapshot check can reuse
@@ -589,15 +606,6 @@ jobs:
           node-version: "22"
           cache-dependency-path: package-lock.json
       - run: npm ci
-      # Install mold early so the later `cargo run --bin harn` link steps use
-      # it. apt's `mold` does not replace /usr/bin/ld; rustc opts in via the
-      # `-fuse-ld=mold` RUSTFLAGS link-arg above.
-      - name: Install mold linker
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       # Pure-shell grep gate: agent-facing hostlib paths must be
       # forward-slash-normalized on every platform (see
       # scripts/check_agent_path_normalization.sh). Kept with the other
@@ -605,22 +613,7 @@ jobs:
       - run: make lint-agent-path-normalization
       - name: Run pre-warm shell gates without Cargo
         run: ./scripts/tests/pr_gate_pre_warm_boundary_test.sh
-      - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/sccache
-        with:
-          cache-key: audit-scripts
-          sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
-      - uses: ./.github/actions/rust-cache
-        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
-        continue-on-error: true
-        with:
-          shared-key: audit-scripts
-          cache-on-failure: true
-          cache-bin: false
-      - name: Warm Harn CLI
-        run: ./scripts/ci_warm_harn_bin.sh
-      # These targets invoke Harn, so keep them after cache restore and the
-      # warm HARN_BIN export.
+      # These targets invoke the verified artifact HARN_BIN directly.
       - run: make test-pr-gate-post-warm-integrations
       - name: Check OpenAPI contract
         run: make spec-lint
@@ -639,7 +632,6 @@ jobs:
       # that keeps scripts/generated_artifacts.toml in agreement with the
       # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the
       # warm HARN_BIN; pure shell/Python guards stay cheap either way.
-      - run: make check-cli-aot
       - run: make check-receipt-structs
       - run: make check-docs-links
       - run: make check-tree-sitter-keywords
@@ -650,11 +642,6 @@ jobs:
         # HEAD^1 is the current base, while the event payload's PR-open base
         # SHA can become stale as main advances.
         run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn -- --base HEAD^1'
-      # Gracefully stop the sccache daemon so the post-job orphan-cleanup phase
-      # has nothing to terminate (see the Stop-sccache note in rust-builds).
-      - name: Summarize and stop sccache
-        if: always()
-        run: ./scripts/ci/finalize_sccache.sh
 
   windows-plan:
     name: Windows CI routing
@@ -787,7 +774,7 @@ jobs:
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         continue-on-error: true
         with:
-          tool: nextest@0.9.133
+          tool: nextest@0.9.132
       # Don't gate the whole pipeline on the full Windows test surface yet —
       # this job exists to catch hard regressions (compile breaks, missing
       # cfg-gates, hardcoded `/bin/sh`, etc.). PRs compile the changed crates
@@ -1036,6 +1023,9 @@ jobs:
         # `-D warnings` (from the job env) promotes every warning to a hard
         # failure so it fails the PR instead of the release.
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Typecheck generated Swift protocol bindings
+        shell: bash
+        run: xcrun swiftc -typecheck spec/protocol-artifacts/HarnProtocol.swift
       # Gracefully stop the sccache daemon so the post-job orphan-cleanup phase
       # has nothing to terminate (see the Stop-sccache note in rust-builds).
       - name: Stop sccache server
@@ -1148,7 +1138,7 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
-          tool: nextest@0.9.133
+          tool: nextest@0.9.132
       - run: make test-e2e
         env:
           NEXTEST_PROFILE: e2e
@@ -1163,7 +1153,7 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [runner-availability, changes, fmt, package-audit, lint-md, rust-builds, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
+    needs: [runner-availability, changes, fmt, package-audit, lint-md, rust-builds, rust-security, harn-audit, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
         env:
@@ -1220,11 +1210,37 @@ jobs:
             exit 1
           fi
 
+          rust_security_result="${{ needs['rust-security'].result }}"
+          echo "Rust security proof: $rust_security_result"
+          if [ "$rust_security_result" != "success" ]; then
+            if [ "$rust_security_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+              :
+            else
+              echo "::error::Rust security proof failed or skipped while Rust proof was required."
+              exit 1
+            fi
+          fi
+
+          harn_audit_result="${{ needs['harn-audit'].result }}"
+          echo "Harn conformance + audit: $harn_audit_result"
+          if [ "$harn_audit_result" != "success" ]; then
+            if [ "$harn_audit_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+              :
+            else
+              echo "::error::Harn conformance + audit failed or skipped while Rust proof was required."
+              exit 1
+            fi
+          fi
+
           audit_scripts_result="${{ needs['audit-scripts'].result }}"
           echo "Audit scripts: $audit_scripts_result"
-          if [ "$audit_scripts_result" != "success" ] && [ "$audit_scripts_result" != "skipped" ]; then
-            echo "::error::Audit scripts failed."
-            exit 1
+          if [ "$audit_scripts_result" != "success" ]; then
+            if [ "$audit_scripts_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+              :
+            else
+              echo "::error::Audit scripts failed or skipped while Rust proof was required."
+              exit 1
+            fi
           fi
 
           # The Windows job runs on `push` to main and on pull requests whose

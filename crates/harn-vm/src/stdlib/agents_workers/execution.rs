@@ -33,6 +33,10 @@ fn execution_record(profile: &WorkerExecutionProfile) -> crate::orchestration::R
         branch: None,
         base_ref: None,
         cleanup: None,
+        // Grant receipts are recorded on the session-level execution record, not
+        // a fan-out worker's; the worker inherits the live profile via the
+        // ambient session-profile scope.
+        grants: Vec::new(),
     };
     if let Some(worktree) = &profile.worktree {
         record.adapter = Some("worktree".to_string());

@@ -511,3 +511,24 @@ fn matrix_max_runs_bounds_fixture_model_tool_product() {
     let empty = build_matrix(&fixtures, &selectors, &tool_formats, Some(0));
     assert!(empty.is_empty());
 }
+
+#[test]
+fn tool_format_matrix_accepts_every_runtime_tool_grammar() {
+    assert_eq!(
+        normalize_tool_formats(&[
+            "Native".to_string(),
+            "text".to_string(),
+            "json".to_string(),
+            "JSON".to_string(),
+        ]),
+        Ok(vec![
+            "native".to_string(),
+            "text".to_string(),
+            "json".to_string(),
+        ])
+    );
+    assert_eq!(
+        normalize_tool_formats(&["xml".to_string()]),
+        Err("unsupported --tool-format `xml`; expected `native`, `text`, or `json`".to_string())
+    );
+}

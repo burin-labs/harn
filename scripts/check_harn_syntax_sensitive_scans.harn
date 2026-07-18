@@ -11,7 +11,7 @@ const SKIP_SEGMENTS = [
   "/target/",
 ]
 
-const SCANNED_SUFFIXES = [".harn", ".harn.prompt", ".md", ".prompt", ".rs", ".ts", ".tsx"]
+const SCANNED_SUFFIXES = [".harn", ".md", ".prompt", ".rs", ".ts", ".tsx"]
 
 fn repo_root() -> string {
   return path_normalize(path_join(source_dir(), ".."))
@@ -31,19 +31,9 @@ fn rel_path(path: string, root: string) -> string {
 }
 
 fn is_skipped(path: string) -> bool {
-  const wrapped = "/" + replace(path, "\\", "/")
+  const wrapped = "/" + replace(path, "\\", "/") + "/"
   for segment in SKIP_SEGMENTS {
     if wrapped.contains(segment) {
-      return true
-    }
-  }
-  return false
-}
-
-fn has_scanned_suffix(path: string) -> bool {
-  const lower = path.lower()
-  for suffix in SCANNED_SUFFIXES {
-    if lower.ends_with(suffix) {
       return true
     }
   }
@@ -57,15 +47,68 @@ pub fn harn_syntax_sensitive_files(root: string = "") -> list<string> {
     path_normalize(root)
   }
   let out: list<string> = []
-  for path in find_files(resolved_root, "**/*") {
-    const rel = rel_path(path, resolved_root)
-    if is_skipped(rel) || !has_scanned_suffix(rel) || !harness.fs.exists(path)
-      || !harness.fs.stat(path).is_file {
+  for suffix in SCANNED_SUFFIXES {
+    const pattern = "**/*" + suffix
+    for path in find_files(resolved_root, pattern) {
+      const rel = rel_path(path, resolved_root)
+      if !is_skipped(rel) {
+        out = out.push(rel)
+      }
+    }
+  }
+  return out.unique().sort()
+}
+
+fn git_candidate_files(root: string) -> list<string>? {
+  const args = [
+    "-C",
+    root,
+    "grep",
+    "-F",
+    "-Il",
+    "-e",
+    "let\\\\s",
+    "-e",
+    "tool_registry",
+    "--",
+    "*.harn",
+    "*.md",
+    "*.prompt",
+    "*.rs",
+    "*.ts",
+    "*.tsx",
+  ]
+  const result = harness.process.spawn_captured({cmd: "git", args: args})
+  if result.exit_code != 0 && result.exit_code != 1 {
+    return nil
+  }
+  let files: list<string> = []
+  for path in result.stdout.lines() {
+    const rel = path.trim()
+    if rel != "" && !is_skipped(rel) {
+      files = files.push(rel)
+    }
+  }
+  // `git grep` intentionally avoids walking ignored build output, but a local
+  // pre-commit check must still see newly authored source before it is staged.
+  const untracked = harness.process
+    .spawn_captured({cmd: "git", args: ["-C", root, "ls-files", "--others", "--exclude-standard"]})
+  if untracked.exit_code != 0 {
+    return nil
+  }
+  for path in untracked.stdout.lines() {
+    const rel = path.trim()
+    if rel == "" || is_skipped(rel) {
       continue
     }
-    out = out + [rel]
+    for suffix in SCANNED_SUFFIXES {
+      if rel.lower().ends_with(suffix) {
+        files = files.push(rel)
+        break
+      }
+    }
   }
-  return out.sort()
+  return files.unique().sort()
 }
 
 fn line_finding(path: string, line: int, kind: string, message: string) -> dict {
@@ -96,25 +139,25 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
     const line_no = index + 1
     if line_has_let_only_harn_binding_regex(line) {
       findings = findings
-        + [
+        .push(
         line_finding(
           path,
           line_no,
           "let-only-harn-binding-regex",
           "Harn binding regex matches `let` but not `const`; use a shared parser/codemod helper or accept both `const` and `let`.",
         ),
-      ]
+      )
     }
     if line_has_stale_var_tool_registry_example(line) {
       findings = findings
-        + [
+        .push(
         line_finding(
           path,
           line_no,
           "stale-var-tool-registry-example",
           "Harn examples should not teach removed `var`; use `let` for mutable tool registries or `const` for immutable values.",
         ),
-      ]
+      )
     }
     index = index + 1
   }
@@ -128,13 +171,14 @@ pub fn check_harn_syntax_sensitive_scans(root: string = "") -> dict {
     path_normalize(root)
   }
   let findings = []
-  for rel in harn_syntax_sensitive_files(resolved_root) {
+  const candidates = git_candidate_files(resolved_root)
+    ?? harn_syntax_sensitive_files(resolved_root)
+  for rel in candidates {
     const path = path_join(resolved_root, rel)
-    if !harness.fs.exists(path) {
-      continue
-    }
     const text = harness.fs.read_text(path)
-    findings = findings + harn_syntax_sensitive_scan_text(rel, text)
+    for finding in harn_syntax_sensitive_scan_text(rel, text) {
+      findings = findings.push(finding)
+    }
   }
   return {root: resolved_root, findings: findings, violation_count: len(findings)}
 }
@@ -150,7 +194,7 @@ fn render_report(report: dict) -> string {
   ]
   for finding in report.findings {
     lines = lines
-      + [
+      .push(
       "- "
         + to_string(finding.path)
         + ":"
@@ -159,7 +203,7 @@ fn render_report(report: dict) -> string {
         + to_string(finding.kind)
         + "] "
         + to_string(finding.message),
-    ]
+    )
   }
   return join(lines, "\n")
 }

@@ -1,5 +1,7 @@
 use harn_parser::{Node, SNode, TypeExpr};
 
+mod bindings;
+mod catalogs;
 mod closures;
 mod concurrency;
 mod decls;
@@ -10,6 +12,7 @@ mod hitl;
 mod optimizer;
 mod patterns;
 mod pipe;
+mod pipelines;
 mod state;
 mod statements;
 #[cfg(test)]
@@ -121,9 +124,31 @@ struct LoopContext {
 }
 
 #[derive(Clone, Copy, Debug)]
+enum LocalStorage {
+    Slot(u16),
+    /// An environment-backed cell that still participates in lexical
+    /// shadowing. Captured mutable bindings use cells so closures see later
+    /// writes, but a later same-named declaration must not retroactively
+    /// redirect earlier references into a new local slot.
+    Environment,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocalBindingKind {
+    Value,
+    Callable,
+}
+
+#[derive(Clone, Copy, Debug)]
 struct LocalBinding {
-    slot: u16,
+    storage: LocalStorage,
+    kind: LocalBindingKind,
     mutable: bool,
+}
+
+struct EnumCatalogSnapshot {
+    names: std::collections::HashSet<String>,
+    variant_owners: std::collections::HashMap<String, Vec<String>>,
 }
 
 /// Compiles an AST into bytecode.
@@ -138,6 +163,15 @@ pub struct Compiler {
     /// pattern (`Ok(v)`, `Some(x)`) resolve to its enum without
     /// qualification when the variant name is unambiguous.
     enum_variant_owners: std::collections::HashMap<String, Vec<String>>,
+    /// Source spans of enums predeclared into the module catalog. Re-visiting
+    /// those AST nodes during bytecode emission must not replace the final
+    /// prepass view with an earlier duplicate declaration.
+    predeclared_enum_declarations: std::collections::HashSet<(usize, usize)>,
+    /// Catalog snapshots paired with lexical bytecode scopes. Enum
+    /// declarations update the active catalog in source order; restoring the
+    /// snapshot on scope exit prevents a block-local enum from leaking into
+    /// later outer match patterns.
+    enum_catalog_scopes: Vec<EnumCatalogSnapshot>,
     /// Track struct type names to declared field order for indexed instances.
     struct_layouts: std::collections::HashMap<String, Vec<String>>,
     /// Track interface names → method names for runtime enforcement.
@@ -170,7 +204,7 @@ pub struct Compiler {
     /// from the parser's diagnostic type checker so compile-only callers keep
     /// working without a required type-check pass.
     type_scopes: Vec<std::collections::HashMap<String, TypeExpr>>,
-    /// `(span.start, span.end)` of every mutable binding (`var` / `for`-item)
+    /// `(span.start, span.end)` of every mutable binding (`let` / `for`-item)
     /// proven *monomorphic*: its value keeps a single primitive type across its
     /// initializer and every reassignment in scope. Only these bindings may
     /// carry an initializer-inferred primitive type fact into typed-opcode
@@ -185,9 +219,10 @@ pub struct Compiler {
     /// Current-chunk string constant index. This avoids repeatedly scanning the
     /// constant pool while compiling name-heavy scripts.
     string_constants: std::collections::HashMap<String, u16>,
-    /// Lexical variable slots for the current compiled frame. The compiler
-    /// only consults this for names declared inside the current function-like
-    /// body; all unresolved names stay on the existing dynamic/name path.
+    /// Lexical bindings for the current compiled frame. Ordinary locals use
+    /// indexed slots; mutable values captured by nested callables retain an
+    /// environment-backed marker so lexical shadowing and dynamic cell access
+    /// agree on the same declaration.
     local_scopes: Vec<std::collections::HashMap<String, LocalBinding>>,
     /// True when this compiler is emitting code outside any function-like
     /// scope (module top-level statements). `try*` is rejected here
@@ -195,16 +230,10 @@ pub struct Compiler {
     /// Pipeline bodies and nested `Compiler::new()` instances (fn,
     /// closure, tool, etc.) flip this to false before compiling.
     module_level: bool,
-    /// Names referenced inside a nested closure of the body this compiler is
-    /// emitting. A mutable (`let`) local whose name is in this set is captured
-    /// by a closure, so it is boxed into a shared cell (`Op::DefCell`) rather
-    /// than a by-value local slot — this is what makes closure capture
-    /// **by reference** (harn#4479). Recomputed per function-like body via
-    /// [`Compiler::seed_captured_idents`]; an over-approximation (a shadowed or
-    /// read-only capture may be boxed) is safe — it only forgoes the slot fast
-    /// path for that one local. `const` locals and params are immutable and
-    /// never boxed.
-    captured_idents: std::collections::HashSet<String>,
+    /// Source bindings captured by a nested callable in the body this compiler
+    /// emits. Identity includes the declaration span, so a shadowing parameter
+    /// or block-local never boxes an unrelated same-named `let`.
+    captured_bindings: std::collections::HashSet<harn_parser::lexical::BindingId>,
 }
 
 impl Compiler {
@@ -262,7 +291,7 @@ impl Compiler {
                     _ => self.infer_expr_type(value),
                 };
                 self.compile_node(value)?;
-                self.compile_destructuring(pattern, true)?;
+                self.compile_destructuring(pattern, true, snode.span)?;
                 // A `let` is reassignable, so its initializer-inferred primitive
                 // type is only safe for typed-opcode specialization when the
                 // binding is provably monomorphic (proven by
@@ -288,7 +317,7 @@ impl Compiler {
                     _ => self.infer_expr_type(value),
                 };
                 self.compile_node(value)?;
-                self.compile_destructuring(pattern, false)?;
+                self.compile_destructuring(pattern, false, snode.span)?;
                 self.record_binding_type(pattern, binding_type.clone());
                 self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
             }
@@ -412,7 +441,7 @@ impl Compiler {
                 iterable,
                 body,
             } => {
-                self.compile_for_in(pattern, iterable, body)?;
+                self.compile_for_in(pattern, iterable, body, snode.span)?;
             }
             Node::ReturnStmt { value } => {
                 self.compile_return_stmt(value)?;
@@ -658,10 +687,15 @@ impl Compiler {
             // every value-discarding context (`compile_top_level_declarations`
             // pops nothing) — a latent imbalance surfaced by the #2622 balance
             // assertion.
+            Node::EnumDecl { name, variants, .. } => {
+                let declaration = (snode.span.start, snode.span.end);
+                if !self.predeclared_enum_declarations.contains(&declaration) {
+                    self.register_enum_decl(name, variants);
+                }
+            }
             Node::Pipeline { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
-            | Node::EnumDecl { .. }
             | Node::InterfaceDecl { .. } => {}
             Node::TryCatch {
                 has_catch: _,

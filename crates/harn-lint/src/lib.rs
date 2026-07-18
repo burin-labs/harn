@@ -270,6 +270,7 @@ fn lint_full(
     }
     linter.require_stdlib_metadata = options.require_stdlib_metadata;
     linter.require_docstrings = options.require_docstrings;
+    linter.require_public_api_types = options.require_public_api_types;
     linter
         .persona_step_allowlist
         .extend(options.persona_step_allowlist.iter().cloned());

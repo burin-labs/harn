@@ -114,6 +114,7 @@ while IFS= read -r run_id; do
         "Package audit",
         "Rust lint",
         "Rust test",
+        "Rust security proof",
         "Harn conformance + audit",
         "Audit scripts",
         "Windows cross-compile check"

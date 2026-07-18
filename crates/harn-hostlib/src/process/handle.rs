@@ -147,7 +147,9 @@ pub struct SpawnSpec {
     pub env_remove: Vec<String>,
     /// How to treat the parent's environment.
     pub env_mode: EnvMode,
-    /// Whether stdin will be written to (`true`) or piped to /dev/null (`false`).
+    /// Whether stdin is available. Captured-output processes receive a pipe;
+    /// inherited-output processes inherit the caller's terminal. `false`
+    /// connects the child to the null device.
     pub use_stdin: bool,
     /// Set the child's process group to its own pid (`setpgid(0, 0)`). Used
     /// for long-running handles so the kill-by-pgid path works.
@@ -159,6 +161,11 @@ pub struct SpawnSpec {
 /// Child stdout/stderr attachment strategy for a spawned process.
 #[derive(Clone, Debug)]
 pub enum OutputCapture {
+    /// Inherit the caller's stdout and stderr. When [`SpawnSpec::use_stdin`]
+    /// is true, stdin is inherited too; captured-output modes instead expose a
+    /// writable pipe. Intended for supervised CLI workloads whose output
+    /// remains user-facing rather than model-facing.
+    Inherit,
     /// Capture stdout/stderr through pipes owned by the parent process.
     Pipe,
     /// Capture stdout/stderr through pre-created private files.
@@ -339,6 +346,11 @@ pub fn current_spawner() -> Arc<dyn ProcessSpawner> {
 /// BEFORE any sandbox wrapper is applied, so a `sandbox-exec`/`bwrap` prefix
 /// can't bury the real command.
 pub fn spawn_process(spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
+    validate_process_spec(&spec)?;
+    current_spawner().spawn(spec)
+}
+
+pub(crate) fn validate_process_spec(spec: &SpawnSpec) -> Result<(), ProcessError> {
     let workspace_roots: Vec<String> = spec
         .cwd
         .as_ref()
@@ -351,7 +363,7 @@ pub fn spawn_process(spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessE
     ) {
         return Err(ProcessError::CatastrophicFloor(reason));
     }
-    current_spawner().spawn(spec)
+    Ok(())
 }
 
 #[cfg(test)]

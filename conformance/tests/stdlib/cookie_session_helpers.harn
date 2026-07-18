@@ -51,7 +51,7 @@ pipeline test(task) {
   log("session")
   const round_trip = cookie_round_trip("sid=old; theme=light", [set_cookie, cookie_delete("sid", {secure: false})])
   assert_eq(round_trip.cookies.theme, "light")
-  assert(round_trip.cookies.sid == nil)
+  assert_eq(round_trip.cookies.sid, nil)
   const from_cookie = session_from_cookies(round_trip.cookie_header, "harn_session", "secret")
   assert(from_cookie.ok)
   assert_eq(from_cookie.payload.user, "alice")

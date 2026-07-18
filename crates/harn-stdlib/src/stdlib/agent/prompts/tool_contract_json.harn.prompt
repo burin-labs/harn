@@ -12,8 +12,7 @@ Emit each tool call as ONE fenced block that opens with a line that is exactly `
 
 Rules the runtime enforces:
 
-- Each ```` ```tool ```` block holds exactly ONE JSON object `{ "name": ..., "args": { ... } }`. Arrays, scalars, and trailing bytes after the object are rejected.
-- For SEVERAL tool calls in one turn, emit SEVERAL ```` ```tool ```` blocks (N blocks for N calls). Do not put more than one object in a block and do not wrap calls in a JSON array.
+- Each tool call is ONE JSON object `{ "name": ..., "args": { ... } }`. To call SEVERAL tools in one turn, emit the objects one after another — either as several ```` ```tool ```` blocks OR as several objects inside one ```` ```tool ```` block (one object per line). Both mean the same ordered batch of calls, run in sequence. Do NOT wrap calls in a JSON array `[ ... ]` — a batch is consecutive objects, not an array.
 - `name` is a non-empty string naming the tool. `args` is a JSON object; omit it (or use `{}`) only when the tool takes no arguments.
 - {{ body_hint }}
 - The body channel is a JSON string, so backticks (```` ``` ````), `<<EOF`, `}`, and `</tool>` need NO escaping — they are literal bytes inside the quoted string. Never use a heredoc (`<<EOF`), a Markdown code fence around the call, or a triple-quoted string for argument content.

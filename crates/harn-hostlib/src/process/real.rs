@@ -3,7 +3,7 @@
 
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
-use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, LazyLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -28,137 +28,8 @@ pub fn default_spawner() -> Arc<dyn ProcessSpawner> {
 
 impl ProcessSpawner for RealSpawner {
     fn spawn(&self, spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
-        if spec.program.is_empty() {
-            return Err(ProcessError::InvalidArgv(
-                "first element of argv must be a non-empty program name".to_string(),
-            ));
-        }
-
-        let mut command = process_sandbox::std_command_for(&spec.program, &spec.args)
-            .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
-
-        if let Some(cwd) = spec.cwd.as_ref() {
-            process_sandbox::enforce_process_cwd(cwd)
-                .map_err(|e| ProcessError::SandboxCwd(format!("{e:?}")))?;
-            command.current_dir(cwd);
-        }
-
-        match spec.env_mode {
-            // `Replace` starts from an empty environment, so nothing to strip.
-            EnvMode::Replace => {
-                command.env_clear();
-            }
-            // `InheritClean`/`Patch` inherit the full parent environment. Strip
-            // secret-bearing variables (provider `*_API_KEY`s, `GITHUB_TOKEN`,
-            // `HARN_CLOUD_API_KEY`, etc.) so build/test commands — and the model
-            // that reads their stdout as the tool result — never see them.
-            // Caller-supplied `env` below is applied afterward and is an
-            // explicit opt-in, so it is intentionally not filtered here.
-            EnvMode::InheritClean | EnvMode::Patch => {
-                for (key, _) in std::env::vars_os() {
-                    if let Some(name) = key.to_str() {
-                        if super::handle::is_sensitive_env_name(name) {
-                            command.env_remove(&key);
-                        }
-                    }
-                }
-            }
-        }
-        // Caller-requested inherited-env strips (e.g. a harness spawning a
-        // child harn/burin process that must not write into the parent's
-        // event-log or transcript dirs). Applied before `spec.env`, so an
-        // explicitly supplied override still wins.
-        for key in &spec.env_remove {
-            command.env_remove(key);
-        }
-        for (key, value) in &spec.env {
-            command.env(key, value);
-        }
-
-        // Point the child's temp dir at a sandbox-writable, workspace-local
-        // location so compiler linkers (rustc/cc/ld, Go, Swift, …) and other
-        // toolchains that honor TMPDIR/TMP/TEMP don't false-fail trying to write
-        // intermediates to the unwritable system /tmp under a restricted
-        // sandbox profile. Applied after the caller's `spec.env` so an explicit
-        // caller-set TMPDIR wins; only keys the caller did not set receive the
-        // overlay. No-op when the active profile is unrestricted or no writable
-        // workspace root is available. TMPDIR/TMP/TEMP are workspace paths, not
-        // secrets, so this does not widen the env-secret-scrub surface above.
-        for (key, value) in process_sandbox::active_workspace_tmpdir_env() {
-            if spec.env.contains_key(&key) {
-                continue;
-            }
-            command.env(key, value);
-        }
-
-        // Pin tool *message* output to a deterministic English/UTF-8 locale so
-        // downstream English-diagnostic matchers (deterministic syntax repair,
-        // error-signature grounding, completion/pass-fail classification) do not
-        // misfire for a non-Anglosphere user whose shell localizes compiler/test
-        // output. A user-inherited `LC_ALL` overrides `LC_MESSAGES`, so strip it
-        // first — unless the caller pinned it. Then apply the overlay with the
-        // same caller-wins rule as the TMPDIR overlay above.
-        if !spec
-            .env
-            .contains_key(process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV)
-        {
-            command.env_remove(process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV);
-        }
-        for (key, value) in process_sandbox::deterministic_message_locale_env() {
-            if spec.env.contains_key(&key) {
-                continue;
-            }
-            command.env(key, value);
-        }
-
-        if spec.configure_process_group {
-            configure_background_process_group(&mut command);
-        }
-        let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
-        command.env(
-            harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
-            &cleanup_token,
-        );
-
-        match &spec.output_capture {
-            OutputCapture::Pipe => {
-                command.stdout(Stdio::piped());
-                command.stderr(Stdio::piped());
-            }
-            OutputCapture::File {
-                stdout_path,
-                stderr_path,
-            } => {
-                let stdout = OpenOptions::new()
-                    .write(true)
-                    .truncate(true)
-                    .open(stdout_path)
-                    .map_err(|error| {
-                        ProcessError::Spawn(format!("open stdout capture: {error}"))
-                    })?;
-                let stderr = OpenOptions::new()
-                    .write(true)
-                    .truncate(true)
-                    .open(stderr_path)
-                    .map_err(|error| {
-                        ProcessError::Spawn(format!("open stderr capture: {error}"))
-                    })?;
-                command.stdout(Stdio::from(stdout));
-                command.stderr(Stdio::from(stderr));
-            }
-        }
-        command.stdin(if spec.use_stdin {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        });
-
-        let child = command.spawn().map_err(|e| {
-            if let Some(violation) = process_sandbox::process_spawn_error(&e) {
-                return ProcessError::SandboxSpawn(format!("{violation:?}"));
-            }
-            ProcessError::Spawn(format!("{e}"))
-        })?;
+        let (mut command, cleanup_token) = prepare_command(&spec, None)?;
+        let child = command.spawn().map_err(map_spawn_error)?;
 
         let pid = child.id();
         let pgid = child_process_group_id(pid);
@@ -181,6 +52,160 @@ impl ProcessSpawner for RealSpawner {
             stderr_taken: false,
         }))
     }
+}
+
+fn prepare_command(
+    spec: &SpawnSpec,
+    cleanup_token: Option<String>,
+) -> Result<(Command, String), ProcessError> {
+    if spec.program.is_empty() {
+        return Err(ProcessError::InvalidArgv(
+            "first element of argv must be a non-empty program name".to_string(),
+        ));
+    }
+
+    let mut command = process_sandbox::std_command_for(&spec.program, &spec.args)
+        .map_err(|e| ProcessError::SandboxSetup(format!("{e:?}")))?;
+
+    if let Some(cwd) = spec.cwd.as_ref() {
+        process_sandbox::enforce_process_cwd(cwd)
+            .map_err(|e| ProcessError::SandboxCwd(format!("{e:?}")))?;
+        command.current_dir(cwd);
+    }
+
+    match spec.env_mode {
+        // `Replace` starts from an empty environment, so nothing to strip.
+        EnvMode::Replace => {
+            command.env_clear();
+        }
+        // `InheritClean`/`Patch` inherit the full parent environment. Strip
+        // secret-bearing variables (provider `*_API_KEY`s, `GITHUB_TOKEN`,
+        // `HARN_CLOUD_API_KEY`, etc.) so build/test commands — and the model
+        // that reads their stdout as the tool result — never see them.
+        // Caller-supplied `env` below is applied afterward and is an
+        // explicit opt-in, so it is intentionally not filtered here.
+        EnvMode::InheritClean | EnvMode::Patch => {
+            for (key, _) in std::env::vars_os() {
+                if let Some(name) = key.to_str() {
+                    if super::handle::is_sensitive_env_name(name) {
+                        command.env_remove(&key);
+                    }
+                }
+            }
+        }
+    }
+    // Caller-requested inherited-env strips (e.g. a harness spawning a
+    // child harn/burin process that must not write into the parent's
+    // event-log or transcript dirs). Applied before `spec.env`, so an
+    // explicitly supplied override still wins.
+    for key in &spec.env_remove {
+        command.env_remove(key);
+    }
+    for (key, value) in &spec.env {
+        command.env(key, value);
+    }
+
+    // Point the child's temp dir at a sandbox-writable, workspace-local
+    // location so compiler linkers (rustc/cc/ld, Go, Swift, …) and other
+    // toolchains that honor TMPDIR/TMP/TEMP don't false-fail trying to write
+    // intermediates to the unwritable system /tmp under a restricted
+    // sandbox profile. Applied after the caller's `spec.env` so an explicit
+    // caller-set TMPDIR wins; only keys the caller did not set receive the
+    // overlay. No-op when the active profile is unrestricted or no writable
+    // workspace root is available. TMPDIR/TMP/TEMP are workspace paths, not
+    // secrets, so this does not widen the env-secret-scrub surface above.
+    for (key, value) in process_sandbox::active_workspace_tmpdir_env() {
+        if spec.env.contains_key(&key) {
+            continue;
+        }
+        command.env(key, value);
+    }
+
+    // Pin tool *message* output to a deterministic English/UTF-8 locale so
+    // downstream English-diagnostic matchers (deterministic syntax repair,
+    // error-signature grounding, completion/pass-fail classification) do not
+    // misfire for a non-Anglosphere user whose shell localizes compiler/test
+    // output. A user-inherited `LC_ALL` overrides `LC_MESSAGES`, so strip it
+    // first — unless the caller pinned it. Then apply the overlay with the
+    // same caller-wins rule as the TMPDIR overlay above.
+    if !spec
+        .env
+        .contains_key(process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV)
+    {
+        command.env_remove(process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV);
+    }
+    for (key, value) in process_sandbox::deterministic_message_locale_env() {
+        if spec.env.contains_key(&key) {
+            continue;
+        }
+        command.env(key, value);
+    }
+
+    if spec.configure_process_group {
+        configure_background_process_group(&mut command);
+    }
+    let cleanup_token =
+        cleanup_token.unwrap_or_else(harn_vm::op_interrupt::new_process_cleanup_token);
+    command.env(
+        harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
+        &cleanup_token,
+    );
+
+    match &spec.output_capture {
+        OutputCapture::Inherit => {
+            command.stdout(Stdio::inherit());
+            command.stderr(Stdio::inherit());
+        }
+        OutputCapture::Pipe => {
+            command.stdout(Stdio::piped());
+            command.stderr(Stdio::piped());
+        }
+        OutputCapture::File {
+            stdout_path,
+            stderr_path,
+        } => {
+            let stdout = OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(stdout_path)
+                .map_err(|error| ProcessError::Spawn(format!("open stdout capture: {error}")))?;
+            let stderr = OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(stderr_path)
+                .map_err(|error| ProcessError::Spawn(format!("open stderr capture: {error}")))?;
+            command.stdout(Stdio::from(stdout));
+            command.stderr(Stdio::from(stderr));
+        }
+    }
+    command.stdin(match (&spec.output_capture, spec.use_stdin) {
+        (OutputCapture::Inherit, true) => Stdio::inherit(),
+        (_, true) => Stdio::piped(),
+        (_, false) => Stdio::null(),
+    });
+
+    Ok((command, cleanup_token))
+}
+
+fn map_spawn_error(error: io::Error) -> ProcessError {
+    if let Some(violation) = process_sandbox::process_spawn_error(&error) {
+        return ProcessError::SandboxSpawn(format!("{violation:?}"));
+    }
+    ProcessError::Spawn(error.to_string())
+}
+
+/// Replace the current Unix process through the same prepared-command path as
+/// normal hostlib spawns. A successful call never returns.
+#[cfg(unix)]
+pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallible, ProcessError> {
+    use std::os::unix::process::CommandExt;
+
+    super::handle::validate_process_spec(&spec)?;
+    let inherited_cleanup_token = std::env::var(harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV)
+        .ok()
+        .filter(|token| !token.is_empty());
+    let (mut command, _cleanup_token) = prepare_command(&spec, inherited_cleanup_token)?;
+    Err(map_spawn_error(command.exec()))
 }
 
 struct RealProcess {
@@ -315,11 +340,29 @@ struct RealKiller {
 
 impl ProcessKiller for RealKiller {
     fn kill(&self) -> ProcessCleanupReport {
-        harn_vm::op_interrupt::signal_pid_tree_group_and_token_with_report(
+        let report = harn_vm::op_interrupt::signal_pid_tree_group_and_token_with_report(
             self.pid,
             Some(&self.cleanup_token),
             9,
-        )
+        );
+        #[cfg(target_os = "windows")]
+        terminate_process(self.pid);
+        report
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn terminate_process(pid: u32) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+
+    let handle = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
+    if handle.is_null() {
+        return;
+    }
+    unsafe {
+        TerminateProcess(handle, 1);
+        CloseHandle(handle);
     }
 }
 

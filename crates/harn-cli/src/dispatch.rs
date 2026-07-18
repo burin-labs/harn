@@ -21,9 +21,9 @@
 //!
 //! ## AOT fast path (G7 / harn#2300)
 //!
-//! [`crate::cli_bytecode`] precompiles every embedded script at build
-//! time into a `.harnbc` artifact (the same on-disk format the runtime
-//! bytecode cache writes). When AOT is enabled (the default; opt out
+//! [`crate::cli_bytecode`] embeds every embedded script from the optional
+//! release/package AOT payload as a `.harnbc` artifact (the same on-disk
+//! format the runtime bytecode cache writes). When AOT is enabled (the default; opt out
 //! with [`DISABLE_AOT_ENV`]) the wedge writes that artifact adjacent
 //! to its source tempfile before handing off to `execute_run`. The
 //! runtime's existing `adjacent_cache_path` check picks the artifact

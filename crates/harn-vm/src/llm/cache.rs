@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::runtime_limits::RuntimeLimits;
-use crate::runtime_sqlite::{configure_runtime_sqlite, DEFAULT_BUSY_TIMEOUT};
+use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteSchema, DEFAULT_BUSY_TIMEOUT};
 use crate::stdlib::clock::now_wall_ms;
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -19,20 +19,22 @@ use crate::vm::Vm;
 const DEFAULT_NAMESPACE: &str = "default";
 const DEFAULT_TTL_SECONDS: u64 = 600;
 const DEFAULT_MAX_ENTRIES: usize = RuntimeLimits::DEFAULT.max_std_cache_entries;
-const SQLITE_CREATE_TABLE: &str = concat!(
-    "CREATE TABLE IF NOT EXISTS cache_entries (",
-    "namespace TEXT NOT NULL,",
-    "cache_key TEXT NOT NULL,",
-    "value_json TEXT NOT NULL,",
-    "created_at_ms INTEGER NOT NULL,",
-    "expires_at_ms INTEGER,",
-    "last_accessed_ms INTEGER NOT NULL,",
-    "PRIMARY KEY(namespace, cache_key)",
-    ");",
-);
-const SQLITE_CREATE_LRU_INDEX: &str = concat!(
-    "CREATE INDEX IF NOT EXISTS idx_cache_entries_lru ",
-    "ON cache_entries(namespace, last_accessed_ms);",
+const SQLITE_SCHEMA: RuntimeSqliteSchema = RuntimeSqliteSchema::new(
+    "llm_cache",
+    1,
+    concat!(
+        "CREATE TABLE IF NOT EXISTS cache_entries (",
+        "namespace TEXT NOT NULL,",
+        "cache_key TEXT NOT NULL,",
+        "value_json TEXT NOT NULL,",
+        "created_at_ms INTEGER NOT NULL,",
+        "expires_at_ms INTEGER,",
+        "last_accessed_ms INTEGER NOT NULL,",
+        "PRIMARY KEY(namespace, cache_key)",
+        ");",
+        "CREATE INDEX IF NOT EXISTS idx_cache_entries_lru ",
+        "ON cache_entries(namespace, last_accessed_ms);",
+    ),
 );
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -588,12 +590,8 @@ fn sqlite_connection(path: &Path) -> Result<Connection, VmError> {
         })?;
     }
     let conn = Connection::open(path).map_err(sqlite_error)?;
-    configure_runtime_sqlite(&conn, DEFAULT_BUSY_TIMEOUT)
+    initialize_runtime_sqlite(&conn, DEFAULT_BUSY_TIMEOUT, &SQLITE_SCHEMA)
         .map_err(|error| VmError::Runtime(format!("cache sqlite setup error: {error}")))?;
-    conn.execute_batch(SQLITE_CREATE_TABLE)
-        .map_err(sqlite_error)?;
-    conn.execute_batch(SQLITE_CREATE_LRU_INDEX)
-        .map_err(sqlite_error)?;
     Ok(conn)
 }
 

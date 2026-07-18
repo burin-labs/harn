@@ -102,7 +102,7 @@ impl Compiler {
                 fn_compiler.chunk.emit(Op::Nil, self.line);
                 fn_compiler.chunk.emit(Op::Return, self.line);
 
-                let param_slots = crate::chunk::ParamSlot::vec_from_typed(params);
+                let param_slots = fn_compiler.compile_param_slots(params);
                 let has_runtime_type_checks =
                     CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
                 super::ensure_chunk_addressable(
@@ -143,13 +143,33 @@ impl Compiler {
         name: &str,
         fields: &[StructField],
     ) -> Result<(), CompileError> {
-        // Emit a constructor: StructName({field: val, ...}) -> StructInstance.
+        let func = self.compile_struct_constructor(name, fields)?;
+        let fn_idx = self.chunk.functions.len();
+        self.chunk.functions.push(Arc::new(func));
+        self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+        self.emit_define_binding(name, false);
+        Ok(())
+    }
+
+    /// Compile the runtime constructor paired with a struct declaration.
+    ///
+    /// Module artifacts call this directly so an imported `pub struct`
+    /// exports the same constructor closure as an in-file declaration.
+    pub(crate) fn compile_struct_constructor(
+        &self,
+        name: &str,
+        fields: &[StructField],
+    ) -> Result<CompiledFunction, CompileError> {
         let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
+        fn_compiler.struct_layouts.insert(
+            name.to_string(),
+            fields.iter().map(|field| field.name.clone()).collect(),
+        );
         let params = vec![TypedParam::untyped("__fields")];
         fn_compiler.declare_param_slots(&params);
         fn_compiler.emit_default_preamble(&params)?;
@@ -168,11 +188,11 @@ impl Compiler {
         fn_compiler.chunk.emit_u8(Op::Call, 3, self.line);
         fn_compiler.chunk.emit(Op::Return, self.line);
 
-        let param_slots = crate::chunk::ParamSlot::vec_from_typed(&params);
+        let param_slots = fn_compiler.compile_param_slots(&params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         super::ensure_chunk_addressable(&fn_compiler.chunk, &format!("fn `{name}`"), self.line)?;
-        let func = CompiledFunction {
+        Ok(CompiledFunction {
             name: name.to_string(),
             type_params: Vec::new(),
             nominal_type_names: fn_compiler.nominal_type_names(),
@@ -183,12 +203,7 @@ impl Compiler {
             is_stream: false,
             has_rest_param: false,
             has_runtime_type_checks,
-        };
-        let fn_idx = self.chunk.functions.len();
-        self.chunk.functions.push(Arc::new(func));
-        self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
-        self.emit_define_binding(name, false);
-        Ok(())
+        })
     }
 
     pub(super) fn emit_string_list(&mut self, values: &[String]) {

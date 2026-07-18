@@ -34,7 +34,7 @@ impl Formatter<'_> {
                     String::new()
                 };
                 let prefix_len = self.indent * 2 + pub_prefix.len() + 9 + name.len() + 1;
-                let params_str = self.format_string_list_wrapped(params, prefix_len, self.indent);
+                let params_str = self.format_typed_params_wrapped(params, prefix_len, self.indent);
                 self.writeln(&format!(
                     "{pub_prefix}pipeline {name}({params_str}){ret}{throws_str}{ext} {{"
                 ));

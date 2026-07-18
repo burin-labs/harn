@@ -231,7 +231,7 @@ pub(super) fn result_cache_key(
         &super::check_cmd::CHECK_SCHEMA_VERSION.to_le_bytes(),
     );
     fold("source-hash", &base.source_hash);
-    fold("import-graph-hash", &base.import_graph_hash);
+    fold("compilation-context-hash", &base.context_hash);
     fold("harn-version", base.harn_version.as_bytes());
     fold("compiler-tag", &[base.compiler_tag]);
     fold("check-fingerprint", CHECK_FINGERPRINT.as_bytes());

@@ -4,12 +4,6 @@ spec/HARN_SPEC.md merge=harn-generated eol=lf
 docs/src/language-spec.md merge=harn-generated eol=lf
 docs/src/diagnostics.md merge=harn-generated eol=lf
 docs/diagnostics-catalog.json merge=harn-generated eol=lf
-# CLI AOT embeds the shared stdlib graph, so any stdlib change rewrites its
-# derived manifest and bytecode. Keep the current generated side on a rebase;
-# `make check-cli-aot` remains the freshness authority after the merge.
-crates/harn-cli/generated/cli-bytecode-manifest.json merge=harn-generated eol=lf
-crates/harn-cli/generated/cli_bytecode_table.rs merge=harn-generated eol=lf
-crates/harn-cli/generated/cli-bytecode/* merge=harn-generated -text
 docs/llm/harn-triggers-quickref.md eol=lf
 docs/src/provider-matrix.md eol=lf
 docs/src/connectors/parity-matrix.md eol=lf

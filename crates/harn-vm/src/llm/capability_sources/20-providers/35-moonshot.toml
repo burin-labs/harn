@@ -1,19 +1,43 @@
 # ---------- Moonshot AI — direct Kimi K2 (OpenAI-compatible /v1) -------------
-# Moonshot's first-party API serves the Kimi K2 family with reliable native
-# tool calls, an inline thinking mode, prompt caching, and multimodal input.
-# K2.7 Code additionally accepts video. Catalog keys are `moonshot/<wire>`
-# (e.g. `moonshot/kimi-k2.6`), so the patterns match the `*kimi*` substring
-# to cover both the prefixed catalog key and the bare wire id.
+# Moonshot's first-party API serves the Kimi K2 family with native tool calls,
+# an inline thinking mode, prompt caching, and multimodal input. K2.7 Code
+# additionally accepts video. Catalog keys are `moonshot/<wire>` (e.g.
+# `moonshot/kimi-k2.6`), so the patterns match the `*kimi*` substring to cover
+# both the prefixed catalog key and the bare wire id.
+#
+# TOOL-CHANNEL CAVEAT (credentialed probe 2026-07-18, harn 0.10.23 binary,
+# direct Moonshot /v1, N=2 per case). The whole Kimi family reasons, and that
+# interacts with tool calling two ways:
+#   1. FORCED tool_choice (`required` or a named function) returns HTTP 400
+#      "tool_choice '...' is incompatible with thinking enabled". This is the
+#      likely cause of the "empty completion, end_turn, 0 tokens, $0" agent-loop
+#      drops reported on Kimi (a 400 bills nothing) — NOT a native-emission
+#      drop. Keep `allowed_tool_choice_modes` to `["auto", "none"]` for every
+#      Kimi route; never advertise `required`.
+#   2. With `tool_choice: auto` the native channel is reliable — k2.6 and k3
+#      both carried a backslash/quote/unicode large-string argument byte-exact
+#      2/2. The TEXT channel is model-dependent: k3 parsed byte-exact, but k2.6
+#      burned its whole budget in the reasoning channel (finish_reason=length,
+#      empty content) and never emitted the `<tool_call>` — so do NOT flip the
+#      general (k2.5/k2.6) Kimi rule to json/text; native+auto is its reliable
+#      path.
 
 [[provider.moonshot]]
 model_match = "*kimi-k3*"
-# Moonshot documents K3 as an OpenAI-compatible native-tool route. Keep text
-# support available as an unmeasured fallback, but do not call the two modes
-# interchangeable until a credentialed probe has evidence.
+# K3 credentialed probe (2026-07-18, harn 0.10.23 binary, direct Moonshot
+# /v1, N=2): with `tool_choice: auto` the native channel carried the
+# echo_marker call's backslash/quote/unicode large-string argument byte-exact
+# (2/2), and the Harn text-tool channel emitted a parseable `<tool_call>`
+# block byte-exact (2/2) with no reasoning-channel over-run — native and text
+# are interchangeable here. FORCED tool_choice is the footgun: K3 always
+# reasons (`reasoning_effort: max`), and Moonshot rejects `tool_choice:
+# "required"` / a named function with HTTP 400 "tool_choice '...' is
+# incompatible with thinking enabled". So `required` is dropped from
+# allowed_tool_choice_modes below; only `auto`/`none` are real modes.
 native_tools = true
 preferred_tool_format = "native"
-tool_mode_parity = "unknown"
-tool_mode_parity_notes = "Moonshot documents native OpenAI-compatible tools; credentialed Harn probe not run because MOONSHOT_API_KEY is unavailable in this lane."
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode."
 structured_output = "native"
 # K3 always reasons through the OpenAI-compatible `reasoning_effort` field;
 # it accepts only the `max` effort below, rather than a generic enabled mode.
@@ -21,7 +45,10 @@ thinking_modes = ["effort"]
 vision = true
 vision_supported = true
 prompt_caching = true
-allowed_tool_choice_modes = ["auto", "none", "required"]
+# Forced tool_choice (`required` / a named function) returns HTTP 400
+# "incompatible with thinking enabled" on K3's mandatory reasoning (measured
+# 2026-07-18); only `auto`/`none` are real modes.
+allowed_tool_choice_modes = ["auto", "none"]
 requires_tool_result_adjacency = true
 # K3 always reasons, accepts only `reasoning_effort: max`, requires
 # `max_completion_tokens`, and rejects fixed sampling/penalty knobs.

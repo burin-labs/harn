@@ -1,6 +1,6 @@
 use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypedParam};
 
-use crate::chunk::Op;
+use crate::chunk::{Op, ParamSlot};
 
 use super::Compiler;
 
@@ -14,6 +14,24 @@ enum PrimitiveType {
 }
 
 impl Compiler {
+    /// Build runtime parameter metadata from the compiler's normalized types.
+    ///
+    /// Parser annotations retain source-level alias names for diagnostics.
+    /// Runtime guards must instead carry the recursively expanded shape so an
+    /// imported or cached callable enforces `type Count = int` as `int`.
+    pub(super) fn compile_param_slots(&self, params: &[TypedParam]) -> Vec<ParamSlot> {
+        params
+            .iter()
+            .map(|param| {
+                let type_expr = param
+                    .type_expr
+                    .as_ref()
+                    .map(|type_expr| self.expand_alias(type_expr));
+                ParamSlot::from_typed_param_with_type(param, type_expr)
+            })
+            .collect()
+    }
+
     pub(super) fn record_param_types(&mut self, params: &[TypedParam]) {
         for param in params {
             if let Some(type_expr) = &param.type_expr {
@@ -330,7 +348,7 @@ impl Compiler {
     /// Canonical primitive tag (`"int"` / `"float"` / `"bool"` / `"string"`)
     /// for a type expression that resolves to one of the four
     /// specialization-relevant primitives, else `None`. `nil` is excluded
-    /// because no typed opcode specializes on it. Used by the monomorphic-var
+    /// because no typed opcode specializes on it. Used by the monomorphic-let
     /// analysis and the mutable-binding gate.
     pub(super) fn primitive_type_tag(&self, type_expr: &TypeExpr) -> Option<&'static str> {
         match Self::primitive_kind(&self.expand_alias(type_expr)) {
@@ -343,7 +361,7 @@ impl Compiler {
     }
 
     /// Drop an initializer-inferred *primitive* type for a reassignable binding
-    /// (`var` / `for`-item) that the monomorphic analysis did not prove safe, so
+    /// (`let` / `for`-item) that the monomorphic analysis did not prove safe, so
     /// typed-opcode specialization stays sound. Non-primitive types and
     /// proven-monomorphic bindings pass through unchanged.
     pub(super) fn gate_mutable_primitive_type(
@@ -367,7 +385,7 @@ impl Compiler {
         }
     }
 
-    /// Gate the inferred item type of a `for`-loop binding the same way `var`
+    /// Gate the inferred item type of a `for`-loop binding the same way `let`
     /// bindings are gated. For a simple `for name in …` the primitive item type
     /// is kept only when no body reassignment can change `name`'s primitive
     /// kind. A destructuring item pattern (`for [a, b] in …`) is left untouched
@@ -445,7 +463,7 @@ impl Compiler {
         found
     }
 
-    /// Prove which mutable `var` bindings declared at the top level of `stmts`
+    /// Prove which mutable `let` bindings declared at the top level of `stmts`
     /// are *monomorphic* — their value keeps one primitive type across the
     /// initializer and every reassignment reachable in this scope — and record
     /// their spans in [`Compiler::monomorphic_bindings`].
@@ -453,17 +471,17 @@ impl Compiler {
     /// This is the soundness gate for typed-opcode specialization. A typed op
     /// such as `AddInt` hard-errors when an operand is not the expected
     /// primitive at runtime, so the compiler may only emit it for operands whose
-    /// type it can *prove*, not merely guess. A `var`'s initializer type is a
+    /// type it can *prove*, not merely guess. A `let`'s initializer type is a
     /// guess: the binding can later be reassigned through an `any`-typed value
     /// (which the type checker accepts as assignable to the inferred type) of a
     /// different runtime primitive, at which point a hard-committed `AddInt`
     /// would spuriously throw on a program the generic path runs correctly.
     ///
-    /// Only `var`/`for`-item bindings need this gate. `let`/`const` are
-    /// immutable — the runtime rejects reassignment — so their initializer type
-    /// is sound as-is and is left untouched.
+    /// Only `let`/`for`-item bindings need this gate. `const` is immutable —
+    /// the runtime rejects reassignment — so its initializer type is sound
+    /// as-is and is left untouched.
     ///
-    /// Strategy: gather the primitive-typed `var` candidates, collect every
+    /// Strategy: gather the primitive-typed `let` candidates, collect every
     /// reassignment to each (the only way Harn can rebind a name; there is no
     /// destructuring assignment and values are immutable, so an `Identifier`
     /// assignment target is the sole rebind site), then run a monotone fixpoint.
@@ -489,7 +507,7 @@ impl Compiler {
         //    later same-name `let` in this block is a redeclaration we leave on
         //    the generic path (it would not be reached as a candidate here).
         //    (`let` is the mutable binding form; `const` is immutable and never
-        //    a monomorphic-var candidate.)
+        //    a monomorphic-let candidate.)
         let mut order: Vec<String> = Vec::new();
         let mut tag: std::collections::HashMap<String, &'static str> =
             std::collections::HashMap::new();
@@ -527,7 +545,7 @@ impl Compiler {
 
         // 3. Seed map: bindings whose primitive type is stable across this
         //    subtree and can therefore be assumed while proving the candidates —
-        //    immutable `let`/`const`, plus `var`/`for`-item bindings that are
+        //    immutable `const`, plus `let`/`for`-item bindings that are
         //    never reassigned here. This lets a candidate that depends on a
         //    sibling binding introduced later or in a nested scope (notably
         //    `for n in xs { sum = sum + n }`) still be proven monomorphic. A
@@ -625,7 +643,7 @@ impl Compiler {
 
     /// Build the seed assumptions for the monomorphic fixpoint: every binding in
     /// `stmts`' subtree whose value provably keeps a single primitive type here.
-    /// Immutable `let`/`const` always qualify; `var` and `for`-item bindings
+    /// Immutable `const` always qualifies; `let` and `for`-item bindings
     /// qualify only when their name is never reassigned in this subtree.
     fn collect_primitive_seeds(
         &self,
@@ -709,7 +727,7 @@ impl Compiler {
     }
 
     /// Prove a single `for`-loop item binding is monomorphic over `body`: it is
-    /// reassignable per iteration like a `var`, so the same gate applies. The
+    /// reassignable per iteration like a `let`, so the same gate applies. The
     /// item starts each iteration at `item_tag`; the binding stays monomorphic
     /// only if every reassignment in the loop body again yields `item_tag`.
     pub(super) fn for_item_binding_is_monomorphic(
