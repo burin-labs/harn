@@ -58,6 +58,12 @@ pub type StageContract = {
  * Rust twin: `ModelPolicy` in
  * `crates/harn-vm/src/orchestration/policy/types.rs`.
  */
+type WorkflowTurnPolicy = {
+  require_action_or_yield?: bool,
+  allow_done_sentinel?: bool,
+  max_prose_chars?: int,
+}
+
 pub type ModelPolicySpec = {
   provider?: string,
   model?: string,
@@ -72,7 +78,7 @@ pub type ModelPolicySpec = {
   post_turn_callback?: any,
   stop_after_successful_tools?: list<string>,
   require_successful_tools?: list,
-  turn_policy?: {require_action_or_yield?: bool, allow_done_sentinel?: bool, max_prose_chars?: int},
+  turn_policy?: WorkflowTurnPolicy,
   tool_format?: string,
   native_tool_fallback?: string,
 }
@@ -210,7 +216,7 @@ type WorkflowModelPolicy = {
   reasoning_task?: string,
   nudge?: any,
   tool_examples?: string,
-  turn_policy?: string,
+  turn_policy?: WorkflowTurnPolicy,
   stop_after_successful_tools?: list<string>,
   require_successful_tools?: list<string>,
   max_iterations?: int,
