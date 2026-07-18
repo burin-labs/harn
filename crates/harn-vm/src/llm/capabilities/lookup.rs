@@ -131,20 +131,24 @@ pub fn lookup_with_user_overrides(
     model: &str,
     user_overrides: Option<&CapabilitiesFile>,
 ) -> Capabilities {
+    let model = crate::llm_config::capability_model_id(provider, model);
     finish_lookup(
         provider,
-        lookup_with(provider, model, builtin(), user_overrides),
+        lookup_with(provider, &model, builtin(), user_overrides),
     )
 }
 
 pub fn lookup_with_base_file(provider: &str, model: &str, base: &CapabilitiesFile) -> Capabilities {
-    finish_lookup(provider, lookup_with(provider, model, base, None))
+    let model = crate::llm_config::capability_model_id(provider, model);
+    finish_lookup(provider, lookup_with(provider, &model, base, None))
 }
 
 fn finish_lookup(provider: &str, mut caps: Capabilities) -> Capabilities {
-    if provider != "openai" && provider != "mock" {
+    if provider != "mock" && !crate::llm_config::provider_has_feature(provider, "responses_api") {
         caps.responses_api = false;
         caps.chat_completions_unsupported = false;
+    }
+    if provider != "openai" && provider != "mock" {
         caps.hosted_tools.clear();
         caps.remote_mcp = false;
         caps.conversation_state = false;
@@ -653,40 +657,6 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
             assert!(caps.reasoning_tools_require_responses);
             assert!(!caps.temperature_supported);
         }
-    }
-
-    #[test]
-    fn openai_codex_models_are_responses_only() {
-        reset();
-        // *-codex routes are served only by the Responses API; flag them so
-        // Harn auto-routes instead of returning a silent chat/completions 404.
-        for model in [
-            "gpt-5-codex",
-            "gpt-5.1-codex",
-            "gpt-5.1-codex-max",
-            "gpt-5.1-codex-mini",
-            "gpt-5.2-codex",
-            "gpt-5.3-codex",
-        ] {
-            let caps = lookup("openai", model);
-            assert!(
-                caps.chat_completions_unsupported,
-                "{model} must be flagged responses-only"
-            );
-            assert!(caps.responses_api, "{model} must advertise responses_api");
-            assert!(
-                caps.requires_completion_tokens,
-                "{model} is a reasoning model"
-            );
-        }
-        // Non-codex gpt-5 stays on the chat lane.
-        assert!(!lookup("openai", "gpt-5.5").chat_completions_unsupported);
-        // The flag is cleared for non-openai providers: the Responses
-        // auto-route only dials the OpenAI Responses API, so an OpenRouter
-        // mirror of a codex id (served over OpenRouter's own endpoint) and any
-        // other provider must NOT carry the flag.
-        assert!(!lookup("openrouter", "openai/gpt-5.2-codex").chat_completions_unsupported);
-        assert!(!lookup("zai", "glm-5.2").chat_completions_unsupported);
     }
 
     #[test]

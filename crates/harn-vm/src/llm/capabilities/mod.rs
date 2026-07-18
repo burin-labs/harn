@@ -33,6 +33,10 @@ pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml"
 mod audit;
 mod lookup;
 #[cfg(test)]
+#[cfg(test)]
+mod lookup_tests_gateway;
+#[cfg(test)]
+mod lookup_tests_responses;
 mod lookup_tests_kimi;
 #[cfg(test)]
 mod lookup_tests_system_placement;

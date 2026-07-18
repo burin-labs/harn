@@ -597,7 +597,7 @@ impl PricingSource {
 /// Returns `None` for unknown pricing — callers must decide whether to
 /// surface that explicitly or coerce to 0.0.
 pub(crate) fn pricing_detail_for(provider: &str, model: &str) -> Option<PricingDetail> {
-    if let Some(pricing) = crate::llm_config::model_pricing_per_mtok(model) {
+    if let Some(pricing) = crate::llm_config::model_pricing_per_mtok_for_route(provider, model) {
         return Some(PricingDetail {
             input_per_1k: pricing.input_per_mtok / 1000.0,
             output_per_1k: pricing.output_per_mtok / 1000.0,
@@ -624,7 +624,9 @@ fn pricing_detail_for_usage(
     model: &str,
     input_tokens: i64,
 ) -> Option<PricingDetail> {
-    if let Some(pricing) = crate::llm_config::model_pricing_for_input_tokens(model, input_tokens) {
+    if let Some(pricing) =
+        crate::llm_config::model_pricing_for_route_input_tokens(provider, model, input_tokens)
+    {
         return Some(PricingDetail {
             input_per_1k: pricing.input_per_mtok / 1000.0,
             output_per_1k: pricing.output_per_mtok / 1000.0,
@@ -652,11 +654,14 @@ pub(crate) fn pricing_detail_for_tier(
     input_tokens: i64,
 ) -> Option<PricingDetail> {
     if served_fast {
-        if let Some(mut pricing) = crate::llm_config::model_serving_tier_pricing_per_mtok(
+        if let Some(mut pricing) = crate::llm_config::model_serving_tier_pricing_per_mtok_for_route(
+            provider,
             model,
             crate::llm::serving_tiers::FAST_TIER_ID,
         ) {
-            if let Some(model_pricing) = crate::llm_config::model_pricing_per_mtok(model) {
+            if let Some(model_pricing) =
+                crate::llm_config::model_pricing_per_mtok_for_route(provider, model)
+            {
                 pricing.input_token_bands = model_pricing.input_token_bands;
             }
             let pricing = pricing.for_input_tokens(input_tokens);
@@ -1324,56 +1329,6 @@ fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerIn
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn install_banded_pricing_model() {
-        let mut overlay = crate::llm_config::ProvidersConfig::default();
-        let mut model = crate::llm_config::embedded_config(None)
-            .models
-            .get("gpt-4o-mini")
-            .expect("embedded fixture model")
-            .clone();
-        model.name = "Banded pricing fixture".to_string();
-        model.pricing = Some(crate::llm_config::ModelPricing {
-            input_per_mtok: 1.0,
-            output_per_mtok: 10.0,
-            cache_read_per_mtok: Some(0.1),
-            cache_write_per_mtok: Some(1.25),
-            input_token_bands: vec![crate::llm_config::InputTokenPricingBand {
-                minimum_input_tokens: 1_000,
-                input_multiplier: 2.0,
-                output_multiplier: 1.5,
-            }],
-        });
-        overlay
-            .models
-            .insert("test/banded-pricing".to_string(), model);
-        crate::llm_config::set_user_overrides(Some(overlay));
-    }
-
-    #[test]
-    fn whole_request_pricing_band_drives_cost_and_cache_accounting() {
-        let _guard = crate::llm::env_guard();
-        install_banded_pricing_model();
-
-        let below = calculate_cost_for_provider("openai", "test/banded-pricing", 999, 100);
-        let at_band = calculate_cost_for_provider("openai", "test/banded-pricing", 1_000, 100);
-        assert!((below - 0.001999).abs() < 1e-12);
-        assert!((at_band - 0.0035).abs() < 1e-12);
-
-        // Cached input remains part of the threshold decision, then each token
-        // class bills once at the selected whole-request rates.
-        let cached = calculate_cost_for_provider_with_cache(
-            "openai",
-            "test/banded-pricing",
-            1_000,
-            100,
-            800,
-            0,
-        );
-        assert!((cached - 0.00206).abs() < 1e-12);
-
-        crate::llm_config::clear_user_overrides();
-    }
 
     #[test]
     fn calculate_cost_uses_catalog_model_pricing() {

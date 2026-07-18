@@ -1,0 +1,50 @@
+# Curated Vercel AI Gateway routes used by Harn's provider probes and Burin's
+# model picker. Catalog keys are provider-qualified to avoid colliding with
+# direct and OpenRouter routes; `wire_model` is the creator/model slug Vercel
+# expects. Prices and context windows come from the Gateway model catalog and
+# were verified on 2026-07-17.
+
+[models."vercel/openai/gpt-5.4-nano"]
+name = "GPT-5.4 Nano (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "openai/gpt-5.4-nano"
+logical_model = "openai-gpt-5.4-nano"
+equivalence_group = "openai-gpt-5.4-nano"
+served_variant = "vercel-ai-gateway"
+api_dialect = "openai_chat"
+context_window = 400000
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "tool_use", "reasoning"]
+
+[models."vercel/anthropic/claude-haiku-4.5"]
+name = "Claude Haiku 4.5 (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "anthropic/claude-haiku-4.5"
+logical_model = "anthropic-claude-haiku-4.5"
+equivalence_group = "anthropic-claude-haiku-4.5"
+served_variant = "vercel-ai-gateway"
+api_dialect = "openai_chat"
+context_window = 200000
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "vision"]
+
+[models."vercel/google/gemini-3.1-flash-lite-preview"]
+name = "Gemini 3.1 Flash Lite Preview (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "google/gemini-3.1-flash-lite-preview"
+logical_model = "google-gemini-3.1-flash-lite-preview"
+equivalence_group = "google-gemini-3.1-flash-lite-preview"
+served_variant = "vercel-ai-gateway"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "long_context", "tool_use", "reasoning", "vision"]

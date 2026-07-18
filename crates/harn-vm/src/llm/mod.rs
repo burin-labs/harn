@@ -38,6 +38,8 @@ pub(crate) mod cost;
 #[cfg(test)]
 mod cost_context_tests;
 pub(crate) mod cost_route;
+#[cfg(test)]
+mod cost_route_pricing_tests;
 pub(crate) mod daemon;
 pub mod eval;
 pub(crate) mod fake;

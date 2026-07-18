@@ -141,9 +141,9 @@ pub(crate) fn extract_llm_options(
     let caps = crate::llm::capabilities::lookup(&provider, &model);
     let mut api_mode = parse_api_mode_option(options.as_ref())?;
     if enforce_responses_provider_gate(api_mode, &provider) {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "api_mode: \"responses\" is only supported by provider \"openai\"; got provider \"{provider}\""
-        )))));
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            format!("api_mode: \"responses\" is not supported by provider \"{provider}\""),
+        ))));
     }
     let session_id = opt_str(&options, "session_id")
         .filter(|value| !value.is_empty())

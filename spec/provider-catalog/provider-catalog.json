@@ -1236,7 +1236,7 @@
     },
     {
       "id": "vercel_ai_gateway",
-      "display_name": "Vercel Ai Gateway",
+      "display_name": "Vercel AI Gateway",
       "classification": "hosted",
       "endpoint": {
         "base_url": "https://ai-gateway.vercel.sh/v1",
@@ -1260,6 +1260,7 @@
         "openai_chat_completions"
       ],
       "features": [
+        "responses_api",
         "native_tools",
         "reasoning",
         "prompt_caching"
@@ -21440,26 +21441,22 @@
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "native",
+      "structured_output": "none",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
+        "thinking_block_style": "none"
       },
       "reasoning": {
-        "modes": [
-          "enabled"
-        ],
+        "modes": [],
         "effort_supported": false,
         "effort_levels": [],
         "none_supported": false,
@@ -21474,7 +21471,18 @@
         "partial_failure": "per_request",
         "cancellation": "unknown",
         "discount_percent": 50,
-        "turnaround_hours": 24
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
       },
       "pricing": {
         "input_per_mtok": 0.6,
@@ -21490,8 +21498,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "thinking",
-        "structured_output",
         "batch"
       ],
       "family": "together",
@@ -21768,6 +21774,255 @@
         "agentic",
         "coding",
         "long_context",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "vercel/anthropic/claude-haiku-4.5",
+      "name": "Claude Haiku 4.5 (Vercel AI Gateway)",
+      "provider": "vercel_ai_gateway",
+      "aliases": [
+        "vercel-claude-haiku-4.5"
+      ],
+      "context_window": 200000,
+      "logical_model": "anthropic-claude-haiku-4.5",
+      "equivalence_group": "anthropic-claude-haiku-4.5",
+      "served_variant": "vercel-ai-gateway",
+      "wire_model": "anthropic/claude-haiku-4.5",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": true,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 5.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 1.25
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-haiku",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "vercel/google/gemini-3.1-flash-lite-preview",
+      "name": "Gemini 3.1 Flash Lite Preview (Vercel AI Gateway)",
+      "provider": "vercel_ai_gateway",
+      "aliases": [
+        "vercel-gemini-3.1-flash-lite"
+      ],
+      "context_window": 1048576,
+      "logical_model": "google-gemini-3.1-flash-lite-preview",
+      "equivalence_group": "google-gemini-3.1-flash-lite-preview",
+      "served_variant": "vercel-ai-gateway",
+      "wire_model": "google/gemini-3.1-flash-lite-preview",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.25,
+        "output_per_mtok": 1.5,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "vercel/openai/gpt-5.4-nano",
+      "name": "GPT-5.4 Nano (Vercel AI Gateway)",
+      "provider": "vercel_ai_gateway",
+      "aliases": [
+        "vercel-gpt-5.4-nano"
+      ],
+      "context_window": 400000,
+      "logical_model": "openai-gpt-5.4-nano",
+      "equivalence_group": "openai-gpt-5.4-nano",
+      "served_variant": "vercel-ai-gateway",
+      "wire_model": "openai/gpt-5.4-nano",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [],
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 1.25,
+        "cache_read_per_mtok": 0.02,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
         "tool_use",
         "reasoning"
       ]
@@ -23428,6 +23683,21 @@
       "name": "together-qwen3.7-max",
       "model_id": "Qwen/Qwen3.7-Max",
       "provider": "together"
+    },
+    {
+      "name": "vercel-claude-haiku-4.5",
+      "model_id": "vercel/anthropic/claude-haiku-4.5",
+      "provider": "vercel_ai_gateway"
+    },
+    {
+      "name": "vercel-gemini-3.1-flash-lite",
+      "model_id": "vercel/google/gemini-3.1-flash-lite-preview",
+      "provider": "vercel_ai_gateway"
+    },
+    {
+      "name": "vercel-gpt-5.4-nano",
+      "model_id": "vercel/openai/gpt-5.4-nano",
+      "provider": "vercel_ai_gateway"
     }
   ],
   "variants": [
@@ -27598,13 +27868,9 @@
       "family": "together",
       "capabilities": [
         "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
         "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
+        "structured_output_mode:none",
         "text_tools",
-        "thinking",
         "tools"
       ]
     },
@@ -27666,6 +27932,69 @@
         "text_tools",
         "thinking",
         "tools"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "anthropic/claude-haiku-4.5",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "Claude Haiku 4.5 (Vercel AI Gateway)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "native_tools",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "google/gemini-3.1-flash-lite-preview",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "Gemini 3.1 Flash Lite Preview (Vercel AI Gateway)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "openai/gpt-5.4-nano",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "GPT-5.4 Nano (Vercel AI Gateway)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
       ]
     },
     {

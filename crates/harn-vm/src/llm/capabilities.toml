@@ -4114,14 +4114,31 @@ tool_mode_parity = "unknown"
 tool_mode_parity_notes = "GitHub Models publishes capability flags per catalog model; Harn needs route-specific probes before assuming native/text tool parity."
 
 [[provider.vercel_ai_gateway]]
-model_match = "*"
+model_match = "google/gemini-3.1*"
+extends = true
 native_tools = true
 preferred_tool_format = "native"
+thinking_modes = ["enabled", "adaptive"]
+prompt_caching = true
+cache_breakpoint_style = "last_block"
+vision_supported = true
+vision = true
+audio_supported = true
+pdf_supported = true
 structured_output = "native"
 structured_output_mode = "native_json"
 text_tool_wire_format_supported = true
-tool_mode_parity = "unknown"
-tool_mode_parity_notes = "Vercel AI Gateway forwards to many upstreams; model-specific provider quirks should override this transport-level default."
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.vercel_ai_gateway]]
+model_match = "*"
+extends = true
+responses_api = true
 
 [[provider.cloudflare_ai_gateway]]
 model_match = "*"
@@ -5726,7 +5743,9 @@ siliconflow = "openai"
 parasail = "openai"
 atlas = "openai"
 github_models = "openai"
-vercel_ai_gateway = "openai"
+# Creator/model slugs need the same routed-model capability rows as OpenRouter
+# before falling through to the shared OpenAI-compatible transport defaults.
+vercel_ai_gateway = "openrouter"
 cloudflare_ai_gateway = "openai"
 inception = "openai"
 friendli = "openai"

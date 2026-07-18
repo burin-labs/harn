@@ -549,13 +549,14 @@ url = "https://models.github.ai/catalog/models"
 # Vercel AI Gateway — one OpenAI-compatible endpoint for providers routed
 # through a Vercel project.
 [providers.vercel_ai_gateway]
+display_name = "Vercel AI Gateway"
 base_url = "https://ai-gateway.vercel.sh/v1"
 base_url_env = "VERCEL_AI_GATEWAY_BASE_URL"
 auth_style = "bearer"
 auth_env = ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"]
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
-features = ["native_tools", "reasoning", "prompt_caching"]
+features = ["responses_api", "native_tools", "reasoning", "prompt_caching"]
 
 [providers.vercel_ai_gateway.healthcheck]
 method = "GET"

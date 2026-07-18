@@ -169,7 +169,14 @@ pub(crate) async fn run_tool_probe(args: ProviderToolProbeArgs) {
     }
 }
 
-async fn dispatch_provider_tool_probe(args: ProviderToolProbeArgs) -> i32 {
+async fn dispatch_provider_tool_probe(mut args: ProviderToolProbeArgs) -> i32 {
+    args.model = match resolve_tool_probe_wire_model(&args.provider, &args.model) {
+        Ok(model) => model,
+        Err(error) => {
+            eprintln!("{error}");
+            return 1;
+        }
+    };
     if args.dry_run_request {
         return crate::commands::providers::render_tool_probe_request(&args);
     }
@@ -191,6 +198,20 @@ async fn dispatch_provider_tool_probe(args: ProviderToolProbeArgs) -> i32 {
         return render_exit;
     }
     i32::from(probe_failed)
+}
+
+fn resolve_tool_probe_wire_model(provider: &str, selector: &str) -> Result<String, String> {
+    let resolved = harn_vm::llm_config::resolve_model_info(selector);
+    if (resolved.alias.is_some()
+        || harn_vm::llm_config::model_catalog_entry(&resolved.id).is_some())
+        && resolved.provider != provider
+    {
+        return Err(format!(
+            "error: model selector `{selector}` resolves to provider `{}`, not requested provider `{provider}`",
+            resolved.provider
+        ));
+    }
+    Ok(harn_vm::llm_config::wire_model_id(&resolved.id))
 }
 
 async fn aggregate_tool_conformance_report(
@@ -334,4 +355,25 @@ async fn dispatch_provider_cache_probe(args: ProviderCacheProbeArgs) -> i32 {
     // A supported route that never caches, or contradictory provider fields, is
     // a real conformance failure; a non-cache provider is not.
     i32::from(dogfood_failure)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_tool_probe_wire_model;
+
+    #[test]
+    fn tool_probe_resolves_alias_to_provider_wire_model() {
+        assert_eq!(
+            resolve_tool_probe_wire_model("vercel_ai_gateway", "vercel-gpt-5.4-nano")
+                .expect("alias resolves"),
+            "openai/gpt-5.4-nano"
+        );
+    }
+
+    #[test]
+    fn tool_probe_rejects_alias_for_a_different_provider() {
+        let error = resolve_tool_probe_wire_model("openai", "vercel-gpt-5.4-nano")
+            .expect_err("provider mismatch");
+        assert!(error.contains("vercel_ai_gateway"));
+    }
 }

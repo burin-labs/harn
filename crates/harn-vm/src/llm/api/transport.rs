@@ -192,11 +192,10 @@ pub(super) async fn vm_call_llm_api(
     // `vm_call_llm_api` funnel (not `chat_impl`) because `openai` is a built-in
     // dialect, not a `provider_register`-ed provider, so it takes the
     // unregistered fallback below and never reaches `chat_impl`. Pure
-    // capability lookup — the `*-codex` match lives in the OpenAI capability
-    // rows, no model-name branch here.
-    if provider == "openai"
-        && (opts.api_mode == crate::llm::api::LlmApiMode::Responses
-            || crate::llm::capabilities::lookup(provider, &opts.model).chat_completions_unsupported)
+    // capability lookup — the `*-codex` match lives in the OpenAI capability rows.
+    let caps = crate::llm::capabilities::lookup(provider, &opts.model);
+    if (opts.api_mode == crate::llm::api::LlmApiMode::Responses && caps.responses_api)
+        || (provider == "openai" && caps.chat_completions_unsupported)
     {
         return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
     }
@@ -1577,6 +1576,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                     .filter(|value| !value.is_empty());
                 telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
             }
+            telemetry.capture_provider_metadata(&json);
         }
     }
 

@@ -621,7 +621,8 @@ pub(crate) fn parse_openai_responses_response(
         })
         .map(str::to_string);
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
-    let telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
+    let mut telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
+    telemetry.capture_provider_metadata(json);
 
     Ok(LlmResult {
         text,
@@ -1092,7 +1093,8 @@ pub(crate) fn parse_llm_response(
         let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
         let stop_reason = finish_reason.map(|s| s.to_string());
         let request_id = json["id"].as_str().filter(|value| !value.is_empty());
-        let telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
+        let mut telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
+        telemetry.capture_provider_metadata(json);
         let billed_length_truncation =
             is_length_stop_reason(stop_reason.as_deref()) && output_tokens > 0;
 
@@ -2387,36 +2389,6 @@ mod tests {
             Some("get_weather"),
             "reference name preserved"
         );
-    }
-
-    #[test]
-    fn openai_parser_preserves_partial_usage_in_telemetry() {
-        // OpenAI-compatible local servers (vLLM, MLX) often report only
-        // `prompt_tokens` and `completion_tokens`. The parser must still
-        // surface those values in the telemetry envelope rather than
-        // dropping them on the floor — otherwise eval dashboards see
-        // empty per-call accounting and have to fall back to
-        // wall-clock heuristics.
-        let response = serde_json::json!({
-            "id": "chatcmpl-abc",
-            "choices": [{
-                "message": {"content": "done"},
-                "finish_reason": "stop"
-            }],
-            "usage": {"prompt_tokens": 314, "completion_tokens": 27}
-        });
-
-        let result = parse_llm_response(&response, "vllm", "qwen3.6", false, false)
-            .expect("parser succeeds");
-
-        assert_eq!(
-            result.telemetry.source,
-            crate::llm::api::telemetry_source::OPENAI_USAGE
-        );
-        assert_eq!(result.telemetry.server_prompt_tokens, Some(314));
-        assert_eq!(result.telemetry.server_output_tokens, Some(27));
-        assert_eq!(result.telemetry.server_prompt_eval_ms, None);
-        assert_eq!(result.telemetry.request_id.as_deref(), Some("chatcmpl-abc"));
     }
 
     #[test]

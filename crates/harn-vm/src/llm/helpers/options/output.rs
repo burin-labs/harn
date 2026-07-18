@@ -60,7 +60,9 @@ pub(super) fn enforce_responses_provider_gate(
     mode: crate::llm::api::LlmApiMode,
     provider: &str,
 ) -> bool {
-    mode == crate::llm::api::LlmApiMode::Responses && provider != "openai" && provider != "mock"
+    mode == crate::llm::api::LlmApiMode::Responses
+        && provider != "mock"
+        && !crate::llm_config::provider_has_feature(provider, "responses_api")
 }
 
 pub(super) fn parse_provider_tools_option(
