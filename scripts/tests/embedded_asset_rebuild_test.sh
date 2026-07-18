@@ -21,6 +21,16 @@ tmp_root=$(mktemp -d)
 persona_backup="$tmp_root/persona-asset"
 portal_backup="$tmp_root/portal-dist"
 portal_dist_existed=0
+target_dir="$tmp_root/target"
+build_dir="$tmp_root/build"
+
+# The post-warm gate already owns an executable built from this worktree. Reuse
+# that target when possible so this causality proof only recompiles harn-cli
+# after each mutation. Direct callers still get a private target/build pair.
+if [[ "${HARN_BIN:-}" == "$repo_root/target/"* && -x "$HARN_BIN" ]]; then
+  target_dir=$(cd "$(dirname "$HARN_BIN")/.." && pwd)
+  build_dir=""
+fi
 
 cp -p "$persona_asset" "$persona_backup"
 if [[ -d "$portal_dist" ]]; then
@@ -43,10 +53,11 @@ trap cleanup EXIT
 run_check() {
   local log_path=$1
   shift
-  HARN_DISABLE_AUTO_HOOK_SETUP=1 \
-    CARGO_TARGET_DIR="$tmp_root/target" \
-    CARGO_BUILD_BUILD_DIR="$tmp_root/build" \
-    "$repo_root/scripts/cargo_with_worktree_build_dir.sh" "$@" -p harn-cli --bin harn \
+  local -a cargo_env=(HARN_DISABLE_AUTO_HOOK_SETUP=1 "CARGO_TARGET_DIR=$target_dir")
+  if [[ -n "$build_dir" ]]; then
+    cargo_env+=("CARGO_BUILD_BUILD_DIR=$build_dir")
+  fi
+  env "${cargo_env[@]}" "$repo_root/scripts/cargo_with_worktree_build_dir.sh" "$@" -p harn-cli --bin harn \
     >"$log_path" 2>&1
 }
 
