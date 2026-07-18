@@ -254,10 +254,7 @@ impl EventLogSink {
                     .lock()
                     .expect("event-log sink error mutex poisoned")
                     .clone();
-                let flush_result = log
-                    .flush()
-                    .await
-                    .map_err(|error| AgentEventSinkError::new("event_log", error));
+                let flush_result = flush_event_log(log.clone()).await;
                 append_error.map_or(flush_result, Err)
             }
         }
@@ -292,15 +289,41 @@ async fn run_event_log_sink_worker(
                 }
             }
             EventLogSinkCommand::Flush(reply) => {
-                let flush_result = log
-                    .flush()
-                    .await
-                    .map_err(|error| AgentEventSinkError::new("event_log", error));
+                let flush_result = flush_event_log(log.clone()).await;
                 let result = first_error.clone().map_or(flush_result, Err);
                 let _ = reply.send(result);
             }
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum EventLogFlushSchedule {
+    AsyncExecutor,
+    BlockingPool,
+}
+
+pub(super) fn event_log_flush_schedule(log: &AnyEventLog) -> EventLogFlushSchedule {
+    if matches!(log, AnyEventLog::Sqlite(_)) {
+        EventLogFlushSchedule::BlockingPool
+    } else {
+        EventLogFlushSchedule::AsyncExecutor
+    }
+}
+
+async fn flush_event_log(log: Arc<AnyEventLog>) -> Result<(), AgentEventSinkError> {
+    let result = if event_log_flush_schedule(&log) == EventLogFlushSchedule::BlockingPool
+        && tokio::runtime::Handle::try_current().is_ok()
+    {
+        tokio::task::spawn_blocking(move || futures::executor::block_on(log.flush()))
+            .await
+            .map_err(|error| {
+                AgentEventSinkError::new("event_log", format!("flush task failed: {error}"))
+            })?
+    } else {
+        log.flush().await
+    };
+    result.map_err(|error| AgentEventSinkError::new("event_log", error))
 }
 
 impl AgentEventSink for JsonlEventSink {

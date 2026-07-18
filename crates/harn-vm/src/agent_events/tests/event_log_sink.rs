@@ -1,9 +1,11 @@
 use std::sync::{Arc, Mutex};
 
+use crate::agent_events::sinks::{event_log_flush_schedule, EventLogFlushSchedule};
 use crate::agent_events::{
-    clear_session_sinks, emit_event, flush_session_sinks, register_sink, register_wildcard_sink,
-    unregister_wildcard_sink, AgentEvent, AgentEventSink, AgentEventSinkError, AgentEventSinkFlush,
-    EventLogSink, MultiSink, ToolCallStatus, ToolMutationStatus,
+    clear_session_sinks, emit_event, flush_and_clear_session_sinks, flush_session_sinks,
+    register_sink, register_wildcard_sink, session_external_sink_count, unregister_wildcard_sink,
+    AgentEvent, AgentEventSink, AgentEventSinkError, AgentEventSinkFlush, EventLogSink, MultiSink,
+    ToolCallStatus, ToolMutationStatus,
 };
 use crate::event_log::{AnyEventLog, EventLog, MemoryEventLog, SqliteEventLog, Topic};
 
@@ -217,6 +219,49 @@ async fn cancelled_flush_does_not_consume_sticky_append_error() {
 
     assert_eq!(error.sink(), "event_log");
     assert!(error.message().contains("readonly") || error.message().contains("read-only"));
+}
+
+#[test]
+fn sqlite_full_checkpoint_uses_the_blocking_pool() {
+    let temp = tempfile::tempdir().expect("event-log tempdir");
+    let sqlite = AnyEventLog::Sqlite(
+        SqliteEventLog::open(temp.path().join("events.sqlite"), 8).expect("open sqlite event log"),
+    );
+    let memory = AnyEventLog::Memory(MemoryEventLog::new(8));
+
+    assert_eq!(
+        event_log_flush_schedule(&sqlite),
+        EventLogFlushSchedule::BlockingPool
+    );
+    assert_eq!(
+        event_log_flush_schedule(&memory),
+        EventLogFlushSchedule::AsyncExecutor
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn flush_and_clear_removes_sinks_after_append_failure() {
+    let session_id = "failed-append-clear-session";
+    let temp = tempfile::tempdir().expect("event-log tempdir");
+    let path = temp.path().join("events.sqlite");
+    drop(SqliteEventLog::open(path.clone(), 8).expect("initialize writable event log"));
+    let read_only = SqliteEventLog::open_read_only(path, 8).expect("open read-only event log");
+    register_sink(
+        session_id,
+        EventLogSink::new(Arc::new(AnyEventLog::Sqlite(read_only)), session_id),
+    );
+    emit_event(&AgentEvent::AgentMessageChunk {
+        session_id: session_id.into(),
+        content: "append must fail before cleanup".into(),
+    });
+
+    let error = flush_and_clear_session_sinks(session_id)
+        .await
+        .expect_err("append failure must cross the cleanup barrier");
+
+    assert_eq!(error.sink(), "event_log");
+    assert!(error.message().contains("readonly") || error.message().contains("read-only"));
+    assert_eq!(session_external_sink_count(session_id), 0);
 }
 
 #[tokio::test(flavor = "current_thread")]

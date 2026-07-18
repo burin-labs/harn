@@ -8,6 +8,20 @@ impl Drop for ResetActiveEventLog {
     }
 }
 
+#[test]
+fn cancelled_prompt_retains_persistence_failure_metadata() {
+    let error =
+        harn_vm::agent_events::AgentEventSinkError::new("event_log", "injected append failure");
+
+    let result = super::super::prompt::cancelled_prompt_result(Some(&error));
+
+    assert_eq!(result["stopReason"], "cancelled");
+    assert!(result["_meta"]["harn"]["persistenceError"]
+        .as_str()
+        .expect("persistence error metadata")
+        .contains("injected append failure"));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn completed_prompt_is_durable_before_immediate_session_load() {
     let local = tokio::task::LocalSet::new();

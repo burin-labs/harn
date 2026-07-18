@@ -147,6 +147,15 @@ pub async fn flush_session_sinks(session_id: &str) -> Result<(), AgentEventSinkE
     flush_all_sinks(sinks).await
 }
 
+/// Flush every sink that can observe `session_id`, then remove the
+/// session-scoped registrations. The removal still happens when persistence
+/// fails so a completed transport cannot leak live sinks into a later turn.
+pub async fn flush_and_clear_session_sinks(session_id: &str) -> Result<(), AgentEventSinkError> {
+    let result = flush_session_sinks(session_id).await;
+    clear_session_sinks(session_id);
+    result
+}
+
 /// Opaque handle returned by [`register_wildcard_sink`]. Pass back to
 /// [`unregister_wildcard_sink`] to drop the registration without
 /// disturbing other wildcard observers. Cloneable so a sink owner can

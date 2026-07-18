@@ -276,11 +276,10 @@ impl AcpServer {
         &mut self,
         session_id: &str,
     ) -> Result<(), harn_vm::agent_events::AgentEventSinkError> {
-        let flush_result = flush_session_sinks(session_id).await;
+        let flush_result = flush_and_clear_session_sinks(session_id).await;
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.host_bridge = None;
         }
-        clear_session_sinks(session_id);
         flush_result
     }
 

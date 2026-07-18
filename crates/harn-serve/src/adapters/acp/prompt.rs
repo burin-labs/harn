@@ -289,6 +289,14 @@ impl AcpServer {
 
         match result {
             Ok(output) => {
+                if cancellation.cancelled.load(Ordering::SeqCst) {
+                    send_json_response(
+                        &send_output,
+                        &id_owned,
+                        cancelled_prompt_result(sink_flush_error.as_ref()),
+                    );
+                    return;
+                }
                 if let Some(error) = sink_flush_error {
                     self.send_prompt_error(
                         &sid,
@@ -302,13 +310,9 @@ impl AcpServer {
                 if !output.is_empty() {
                     bridge.send_update(&output);
                 }
-                let stop_reason = if cancellation.cancelled.load(Ordering::SeqCst) {
-                    "cancelled".to_string()
-                } else {
-                    host_bridge_for_response
-                        .take_prompt_stop_reason()
-                        .unwrap_or_else(|| "end_turn".to_string())
-                };
+                let stop_reason = host_bridge_for_response
+                    .take_prompt_stop_reason()
+                    .unwrap_or_else(|| "end_turn".to_string());
                 if stop_reason != "cancelled" {
                     #[cfg(feature = "hostlib")]
                     let fs_snapshot_ids = harn_hostlib::fs_snapshot::list_snapshots(&session_id)
@@ -337,22 +341,34 @@ impl AcpServer {
                 );
             }
             Err(e) => {
+                if cancellation.cancelled.load(Ordering::SeqCst) {
+                    send_json_response(
+                        &send_output,
+                        &id_owned,
+                        cancelled_prompt_result(sink_flush_error.as_ref()),
+                    );
+                    return;
+                }
                 let message = match sink_flush_error {
                     Some(error) => {
                         format!("{}; failed to persist agent events: {error}", e.message)
                     }
                     None => e.message,
                 };
-                if cancellation.cancelled.load(Ordering::SeqCst) {
-                    send_json_response(
-                        &send_output,
-                        &id_owned,
-                        serde_json::json!({"stopReason": "cancelled"}),
-                    );
-                } else {
-                    self.send_prompt_error_with_class(&sid, &id_owned, &message, e.terminal_class);
-                }
+                self.send_prompt_error_with_class(&sid, &id_owned, &message, e.terminal_class);
             }
         }
     }
+}
+
+pub(super) fn cancelled_prompt_result(
+    persistence_error: Option<&harn_vm::agent_events::AgentEventSinkError>,
+) -> serde_json::Value {
+    let mut result = serde_json::json!({"stopReason": "cancelled"});
+    if let Some(error) = persistence_error {
+        result["_meta"] = serde_json::json!({
+            "harn": {"persistenceError": error.to_string()}
+        });
+    }
+    result
 }
