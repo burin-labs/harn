@@ -31,6 +31,7 @@ pub mod autonomy;
 pub(crate) mod aws_sigv4;
 pub mod bridge;
 mod builtin_id;
+pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
 pub mod channel_guardrails;
@@ -660,6 +661,7 @@ pub fn reset_thread_local_state() {
     events::reset_event_sinks();
     tracing::set_tracing_enabled(false);
     tracing::reset_tracing();
+    builtin_profile::reset();
     agent_events::reset_all_sinks();
     agent_sessions::reset_session_store();
     mcp_registry::reset();
@@ -677,6 +679,33 @@ mod reset_leak_tests {
     //! the registry is empty again.
     use super::*;
     use crate::value::VmValue;
+
+    /// The recorder is enabled per RUN but lives for the PROCESS, so an
+    /// embedder that runs one script with `--profile` and the next without it
+    /// would keep paying for bookkeeping nobody reads and fold the second run's
+    /// builtins into the first run's totals. Enablement therefore ends where
+    /// every other process-global ends: here.
+    #[test]
+    fn reset_disables_and_drains_builtin_profile() {
+        let _guard = builtin_profile::test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        builtin_profile::enable();
+        builtin_profile::record("run_shell", std::time::Duration::from_millis(5));
+        assert!(builtin_profile::is_enabled());
+        assert!(!builtin_profile::snapshot().is_empty());
+
+        reset_thread_local_state();
+
+        assert!(
+            !builtin_profile::is_enabled(),
+            "a profiled run must not leave the recorder on for the next one"
+        );
+        assert!(
+            builtin_profile::snapshot().is_empty(),
+            "builtin totals must be empty after reset"
+        );
+    }
 
     /// The changed-path map is the authoritative source for a sub-agent's
     /// `files_written` receipt, is process-global, and is drained only at

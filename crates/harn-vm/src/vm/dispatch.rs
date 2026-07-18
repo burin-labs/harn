@@ -9,6 +9,22 @@ use super::{
     VmBuiltinMetadata,
 };
 
+/// Everything that watches one builtin call, held open for its duration.
+///
+/// A builtin reaches its handler through one of three paths (two sync fast
+/// paths that differ only in where the arguments live, and the async/bridge
+/// path). Each used to open the auto-trace span itself, so an observer added to
+/// one path silently missed the other two — per-builtin cost recording was
+/// added to the async path first and reported nothing, because a `let` binding
+/// in the arm nobody takes looks exactly like a working one.
+///
+/// Opening this is the one thing a dispatch path must do before invoking a
+/// handler. New observers belong here, not at a call site.
+struct BuiltinObservation<'a> {
+    _span: Option<ScopeSpan>,
+    _timer: Option<crate::builtin_profile::BuiltinTimer<'a>>,
+}
+
 impl Vm {
     fn builtin_span_kind(name: &str) -> Option<crate::tracing::SpanKind> {
         match name {
@@ -18,6 +34,33 @@ impl Vm {
             "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
             _ => None,
         }
+    }
+
+    /// Open the observation scope for one builtin call. Both members are inert
+    /// unless the operator asked for the corresponding output.
+    ///
+    /// The guard is returned BOXED, and only when something is actually being
+    /// observed. A builtin call reaches the VM recursively (a builtin invokes a
+    /// pipeline that dispatches more builtins), so this guard is a live local on
+    /// every frame of that recursion. Held by value, the ~48-byte aggregate did
+    /// not just add its own size per frame — as a recursive-frame local it
+    /// shifted the compiler's spill/inline decisions, so the real growth
+    /// exceeded `size_of::<BuiltinObservation>()` and overflowed the stack on
+    /// deep dispatch even with profiling OFF (both members `None`). Returning
+    /// `Option<Box<_>>` keeps the frame local pointer-sized (an 8-byte niche
+    /// `None` on the inert hot path, with no allocation) and only touches the
+    /// heap when an observer is genuinely active. See harn#4928.
+    fn observe_builtin_call(name: &str) -> Option<Box<BuiltinObservation<'_>>> {
+        let span = Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+        let timer = crate::builtin_profile::BuiltinTimer::start(name);
+        if span.is_none() && timer.is_none() {
+            // Inert: nothing to observe. No allocation, an 8-byte `None` local.
+            return None;
+        }
+        Some(Box::new(BuiltinObservation {
+            _span: span,
+            _timer: timer,
+        }))
     }
 
     fn is_runtime_context_builtin(name: &str) -> bool {
@@ -487,8 +530,7 @@ impl Vm {
             Ok(builtin) => builtin,
             Err(error) => return Some(Err(error)),
         };
-        let _span =
-            Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+        let _observe = Self::observe_builtin_call(name);
         if let Err(error) = args.with_slice(|slice| self.validate_sync_builtin_args(name, slice)) {
             return Some(Err(error));
         }
@@ -519,8 +561,7 @@ impl Vm {
             )));
         }
 
-        let _span =
-            Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+        let _observe = Self::observe_builtin_call(name);
         if let Err(error) = self.validate_sync_builtin_args(name, &self.stack[args_start..]) {
             return Some(Err(error));
         }
@@ -535,9 +576,7 @@ impl Vm {
         args: Vec<VmValue>,
         direct_id: Option<BuiltinId>,
     ) -> Result<VmValue, VmError> {
-        // Auto-trace LLM calls and tool calls.
-        let _span =
-            Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+        let _observe = Self::observe_builtin_call(name);
 
         // Sandbox check: deny builtins blocked by --deny/--allow flags.
         if self.denied_builtins.contains(name) {
