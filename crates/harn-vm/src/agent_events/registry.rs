@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
-use super::{AgentEvent, AgentEventSink};
+use super::{AgentEvent, AgentEventSink, AgentEventSinkError};
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -128,40 +128,25 @@ pub fn mirror_session_sinks(source_session_id: &str, target_session_id: &str) {
 /// session-scoped fan-out so per-session sinks always see the event
 /// first when ordering matters.
 pub fn emit_event(event: &AgentEvent) {
-    let sinks: Vec<Arc<dyn AgentEventSink>> = {
-        let reg = external_sinks().read().expect("sink registry poisoned");
-        #[cfg(test)]
-        {
-            reg.get(event.session_id())
-                .map(|sinks| sinks.iter().map(|sink| sink.sink.clone()).collect())
-                .unwrap_or_default()
-        }
-        #[cfg(not(test))]
-        {
-            reg.get(event.session_id()).cloned().unwrap_or_default()
-        }
-    };
+    for sink in session_sink_snapshot(event.session_id()) {
+        sink.handle_event(event);
+    }
+    for sink in wildcard_sink_snapshot() {
+        sink.handle_event(event);
+    }
+}
+
+/// Establish a causal persistence barrier for every session-scoped and
+/// wildcard sink that would receive an event for `session_id`. Events emitted
+/// after the registry snapshots are outside the barrier; every event accepted
+/// before them is awaited without polling.
+pub async fn flush_session_sinks(session_id: &str) -> Result<(), AgentEventSinkError> {
+    let mut sinks = session_sink_snapshot(session_id);
+    sinks.extend(wildcard_sink_snapshot());
     for sink in sinks {
-        sink.handle_event(event);
+        sink.flush().await?;
     }
-    let wildcard_sinks: Vec<Arc<dyn AgentEventSink>> = {
-        let reg = wildcard_sinks().read().expect("wildcard registry poisoned");
-        #[cfg(test)]
-        {
-            let owner = std::thread::current().id();
-            reg.iter()
-                .filter(|entry| entry.owner == owner)
-                .map(|entry| entry.sink.clone())
-                .collect()
-        }
-        #[cfg(not(test))]
-        {
-            reg.iter().map(|entry| entry.sink.clone()).collect()
-        }
-    };
-    for sink in wildcard_sinks {
-        sink.handle_event(event);
-    }
+    Ok(())
 }
 
 /// Opaque handle returned by [`register_wildcard_sink`]. Pass back to
@@ -191,6 +176,36 @@ type WildcardSinkRegistry = RwLock<Vec<WildcardSinkEntry>>;
 fn wildcard_sinks() -> &'static WildcardSinkRegistry {
     static REGISTRY: OnceLock<WildcardSinkRegistry> = OnceLock::new();
     REGISTRY.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+fn session_sink_snapshot(session_id: &str) -> Vec<Arc<dyn AgentEventSink>> {
+    let reg = external_sinks().read().expect("sink registry poisoned");
+    #[cfg(test)]
+    {
+        reg.get(session_id)
+            .map(|sinks| sinks.iter().map(|sink| sink.sink.clone()).collect())
+            .unwrap_or_default()
+    }
+    #[cfg(not(test))]
+    {
+        reg.get(session_id).cloned().unwrap_or_default()
+    }
+}
+
+fn wildcard_sink_snapshot() -> Vec<Arc<dyn AgentEventSink>> {
+    let reg = wildcard_sinks().read().expect("wildcard registry poisoned");
+    #[cfg(test)]
+    {
+        let owner = std::thread::current().id();
+        reg.iter()
+            .filter(|entry| entry.owner == owner)
+            .map(|entry| entry.sink.clone())
+            .collect()
+    }
+    #[cfg(not(test))]
+    {
+        reg.iter().map(|entry| entry.sink.clone()).collect()
+    }
 }
 
 fn next_wildcard_handle() -> WildcardSinkHandle {

@@ -1,34 +1,9 @@
 use super::*;
-use harn_vm::event_log::EventLog as _;
 
-async fn wait_for_agent_event_log_entries(
-    log: &std::sync::Arc<harn_vm::event_log::AnyEventLog>,
-    session_id: &str,
-    expected: usize,
-) {
-    let topic = harn_vm::event_log::Topic::new(format!(
-        "observability.agent_events.{}",
-        harn_vm::event_log::sanitize_topic_component(session_id)
-    ))
-    .expect("session event topic");
-    for _ in 0..20 {
-        let entries = log
-            .read_range(&topic, None, expected)
-            .await
-            .expect("read event log");
-        if entries.len() >= expected {
-            return;
-        }
-        tokio::task::yield_now().await;
-    }
-    let entries = log
-        .read_range(&topic, None, expected)
+async fn flush_agent_event_sinks(session_id: &str) {
+    harn_vm::agent_events::flush_session_sinks(session_id)
         .await
-        .expect("read event log after wait");
-    panic!(
-        "expected {expected} persisted event-log entries for {session_id}, saw {}",
-        entries.len()
-    );
+        .expect("flush session agent-event sinks");
 }
 
 fn install_test_agent_event_log_sink(
@@ -433,7 +408,7 @@ async fn acp_session_resume_includes_current_mode_state_without_replay() {
         session_id: session_id.clone(),
         content: "do not replay me".to_string(),
     });
-    wait_for_agent_event_log_entries(&log, &session_id, 1).await;
+    flush_agent_event_sinks(&session_id).await;
 
     server
         .handle_incoming_message(serde_json::json!({
@@ -521,7 +496,7 @@ async fn acp_session_load_replays_persisted_agent_events() {
         session_id: session_id.clone(),
         plan: serde_json::json!([{"content": "do the thing", "status": "pending"}]),
     });
-    wait_for_agent_event_log_entries(&log, &session_id, 2).await;
+    flush_agent_event_sinks(&session_id).await;
 
     server
         .handle_incoming_message(serde_json::json!({
@@ -588,7 +563,7 @@ async fn acp_session_load_restores_persisted_session_unknown_to_server() {
         session_id: session_id.clone(),
         content: "restored history".to_string(),
     });
-    wait_for_agent_event_log_entries(&log, &session_id, 1).await;
+    flush_agent_event_sinks(&session_id).await;
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
