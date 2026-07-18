@@ -51,6 +51,7 @@ baseline and treatment with distinct commits, then render the paired gate:
 ```bash
 HARN_PERSONA_EVAL_BASELINE_COMMIT=<baseline-sha> \
 HARN_PERSONA_EVAL_TREATMENT_COMMIT=<treatment-sha> \
+HARN_PERSONA_EVAL_PROVIDER=<provider> \
 HARN_PERSONA_EVAL_MODEL=<model> \
 HARN_PERSONA_EVAL_SPLIT=meter-holdout \
 HARN_EVENT_LOG_BACKEND=sqlite \
@@ -58,10 +59,12 @@ HARN_EVENT_LOG_SQLITE_PATH="$HOME/.harn/persona-prompt-evals.sqlite" \
 harn run report.harn
 ```
 
-The report requires at least five trials for every case, complete and
-internally consistent case and harness fingerprints, and complete paired
-coverage. Mixed harness generations under one commit/model/split key fail the
-gate instead of being pooled. It reports macro pass@1,
+The report requires at least five decided trials (PASS or FAIL) for every case,
+exact case and harness fingerprints from the current frozen manifest, and
+complete paired coverage. Skips remain reported but never buy statistical
+power. Mixed harness generations and stale or foreign cohort identities under
+one commit/model/split key fail the gate instead of being pooled. It reports
+macro pass@1,
 all-pass/flaky/all-fail reliability, skip and timeout rates, worst source
 group, mean wall time, total cost, cost per solved case, valid packages per
 dollar, failure buckets, paired 95% bootstrap CI, realized CI half-width, and

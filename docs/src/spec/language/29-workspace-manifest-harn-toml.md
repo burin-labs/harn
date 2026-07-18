@@ -409,7 +409,7 @@ The module exposes:
 | Function | Contract |
 |---|---|
 | `aggregate_trials(name, outcomes, metadata?)` | Collapses trial outcomes into counts, `PASS`/`FAIL`/`FLAKY`/`skip` status, majority, mean/stdev wall time, and cost fields |
-| `eval_fingerprint_integrity(rows)` | Reports whether every raw row has a case and harness fingerprint, every case has one stable fingerprint, and the cohort has exactly one harness generation |
+| `eval_fingerprint_integrity(rows)` | Returns the exact observed case-fingerprint map and reports whether every raw row has a case and harness fingerprint, every case has one stable fingerprint, and the cohort has exactly one harness generation |
 | `bootstrap_mean_ci(values, resamples, alpha, seed)` | Returns `{mean, lo, hi, std, n}` for a seeded bootstrap; resample indices are drawn from the high-order LCG state bits so power-of-two case counts do not collapse the CI |
 | `macro_pass_at_1(rows)` | Computes the uniform-case-weighted mean pass rate over decided cases |
 | `reliability_breakdown(rows)` | Returns all-pass, flaky, all-fail, and no-decision fractions plus raw case counts |

@@ -108,7 +108,13 @@ pipeline test(task) {
   ]
   assert_eq(
     eval_fingerprint_integrity(fingerprint_rows),
-    {complete: true, consistent: true, harness_fingerprints: ["cfg-1"], inconsistent_cases: []},
+    {
+      complete: true,
+      consistent: true,
+      case_fingerprints: {"case-a": "a", "case-b": "b"},
+      harness_fingerprints: ["cfg-1"],
+      inconsistent_cases: [],
+    },
   )
   const mixed_fingerprints = eval_fingerprint_integrity(
     fingerprint_rows

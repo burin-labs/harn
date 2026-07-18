@@ -1,5 +1,6 @@
 import "std/eval/stats"
 import { is_absolute } from "std/path"
+import { persona_prompt_eval_manifest } from "./run.harn"
 
 fn __group_rows(rows: list) -> dict {
   let grouped = {}
@@ -41,8 +42,16 @@ fn __failure_buckets(rows: list) -> dict {
   return buckets
 }
 
-fn __all_have_trials(rows: list, minimum: int) -> bool {
-  return len(rows) > 0 && rows.all({ row -> row.trials >= minimum })
+fn __all_have_decided_trials(rows: list, minimum: int) -> bool {
+  return len(rows) > 0 && rows.all({ row -> row.passes + row.fails >= minimum })
+}
+
+fn __case_fingerprints(manifest: dict) -> dict<string, string> {
+  let expected: dict<string, string> = {}
+  for eval_case in manifest.cases {
+    expected = expected + {[eval_case.id]: eval_case.case_fingerprint}
+  }
+  return expected
 }
 
 /** Aggregate one raw persona eval ledger cohort into meter-stick metrics. */
@@ -54,9 +63,7 @@ pub fn persona_prompt_eval_cohort(rows: list, minimum_trials: int = 5) -> dict {
   return {
     cases: len(aggregated),
     trials: len(rows),
-    minimum_trials_met: __all_have_trials(aggregated, minimum_trials),
-    fingerprints_complete: fingerprint_integrity.complete,
-    fingerprints_consistent: fingerprint_integrity.consistent,
+    minimum_trials_met: __all_have_decided_trials(aggregated, minimum_trials),
     fingerprint_integrity: fingerprint_integrity,
     macro_pass_at_1: macro_pass_at_1(aggregated),
     reliability: reliability_breakdown(aggregated),
@@ -89,11 +96,17 @@ pub fn persona_prompt_eval_comparison(
   treatment_commit: string,
   model: string,
   split: string,
-  expected_cases: int,
+  expected_case_fingerprints: dict<string, string>,
+  expected_harness_fingerprint: string,
   minimum_trials: int = 5,
 ) -> dict {
   const baseline = persona_prompt_eval_cohort(baseline_rows, minimum_trials)
   const treatment = persona_prompt_eval_cohort(treatment_rows, minimum_trials)
+  const expected_cases = len(expected_case_fingerprints)
+  const baseline_identity_matches = baseline.fingerprint_integrity.case_fingerprints == expected_case_fingerprints
+    && baseline.fingerprint_integrity.harness_fingerprints == [expected_harness_fingerprint]
+  const treatment_identity_matches = treatment.fingerprint_integrity.case_fingerprints == expected_case_fingerprints
+    && treatment.fingerprint_integrity.harness_fingerprints == [expected_harness_fingerprint]
   const paired = paired_delta_report(baseline.rows, treatment.rows)
   const regression = regression_gate(baseline.rows, treatment.rows)
   const gate_evaluable = minimum_trials >= 5
@@ -105,10 +118,12 @@ pub fn persona_prompt_eval_comparison(
     && contains(["meter-tune", "meter-holdout"], split)
     && baseline.minimum_trials_met
     && treatment.minimum_trials_met
-    && baseline.fingerprints_complete
-    && treatment.fingerprints_complete
-    && baseline.fingerprints_consistent
-    && treatment.fingerprints_consistent
+    && baseline.fingerprint_integrity.complete
+    && treatment.fingerprint_integrity.complete
+    && baseline.fingerprint_integrity.consistent
+    && treatment.fingerprint_integrity.consistent
+    && baseline_identity_matches
+    && treatment_identity_matches
     && baseline.cases == expected_cases
     && treatment.cases == expected_cases
     && paired.n_cases == expected_cases
@@ -124,8 +139,10 @@ pub fn persona_prompt_eval_comparison(
     treatment_commit: treatment_commit,
     gate_evaluable: gate_evaluable,
     confirmed_improvement: confirmed_improvement,
-    baseline: baseline,
-    treatment: treatment,
+    expected_harness_fingerprint: expected_harness_fingerprint,
+    expected_case_fingerprints: expected_case_fingerprints,
+    baseline: baseline + {matches_frozen_manifest: baseline_identity_matches},
+    treatment: treatment + {matches_frozen_manifest: treatment_identity_matches},
     paired_delta: paired,
     realized_ci_half_width: (paired.ci_hi - paired.ci_lo) / 2.0,
     regression_gate: regression,
@@ -144,6 +161,7 @@ pub fn persona_prompt_eval_comparison(
 fn main(harness: Harness) -> int {
   const baseline_commit = harness.env.get_or("HARN_PERSONA_EVAL_BASELINE_COMMIT", "")
   const treatment_commit = harness.env.get_or("HARN_PERSONA_EVAL_TREATMENT_COMMIT", "")
+  const provider = harness.env.get_or("HARN_PERSONA_EVAL_PROVIDER", "")
   const model = harness.env.get_or("HARN_PERSONA_EVAL_MODEL", "")
   const split = harness.env.get_or("HARN_PERSONA_EVAL_SPLIT", "meter-holdout")
   const minimum_trials = to_int(harness.env.get_or("HARN_PERSONA_EVAL_MIN_TRIALS", "5")) ?? 5
@@ -152,13 +170,14 @@ fn main(harness: Harness) -> int {
     && ledger_path != ""
     && is_absolute(ledger_path)
   if baseline_commit == "" || treatment_commit == "" || baseline_commit == treatment_commit
+    || provider == ""
     || model == ""
     || !contains(["meter-tune", "meter-holdout"], split)
     || minimum_trials < 5
     || !shared_ledger {
     harness.stdio
       .eprintln(
-      "set distinct commits, model, frozen split, N>=5, and an absolute shared SQLite event-log path",
+      "set distinct commits, provider, model, frozen split, N>=5, and an absolute shared SQLite event-log path",
     )
     return 2
   }
@@ -171,8 +190,9 @@ fn main(harness: Harness) -> int {
   const baseline_rows = eval_ledger_read(common + {commit: baseline_commit}).rows
   const treatment_rows = eval_ledger_read(common + {commit: treatment_commit}).rows
   const manifest_path = path_join(source_dir(), "harn.eval.toml")
-  const manifest = eval_pack_manifest(toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: source_dir()})
-  const expected_cases = len(manifest.split[split] ?? [])
+  const raw = eval_pack_manifest(toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: source_dir()})
+  const manifest = persona_prompt_eval_manifest(raw, split, minimum_trials, provider, model, ledger_path)
+  const identity_plan = eval_ledger_resolve_resume_plan(manifest, common + {commit: baseline_commit})
   const report = persona_prompt_eval_comparison(
     baseline_rows,
     treatment_rows,
@@ -180,7 +200,8 @@ fn main(harness: Harness) -> int {
     treatment_commit,
     model,
     split,
-    expected_cases,
+    __case_fingerprints(manifest),
+    identity_plan.harness_config_fingerprint,
     minimum_trials,
   )
   harness.stdio.println(json_stringify_pretty(report))

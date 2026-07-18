@@ -20,6 +20,32 @@ fn __selected_cases(manifest, split: string) -> list {
   return manifest.cases.filter({ entry -> contains(ids, entry.id) }).to_list()
 }
 
+/** Build the exact normalized manifest shared by execution and evidence checks. */
+pub fn persona_prompt_eval_manifest(
+  raw: dict,
+  split: string,
+  trials: int,
+  provider: string,
+  model: string,
+  ledger_path: string = "",
+) -> dict {
+  return eval_pack_manifest(
+    raw
+      + {
+      base_dir: source_dir(),
+      trials: trials,
+      cases: __selected_cases(raw, split),
+      split: persona_prompt_eval_selected_split(raw, split),
+      executor: if ledger_path != "" {
+        persona_prompt_eval_executor(raw.executor, ledger_path)
+      } else {
+        raw.executor
+      },
+      metadata: raw.metadata + {provider: provider, model: model},
+    },
+  )
+}
+
 pub fn persona_prompt_eval_selected_split(manifest: dict, split: string) -> dict {
   if split == "all" {
     return manifest.split ?? {}
@@ -68,21 +94,7 @@ fn main(harness: Harness) -> int {
       return 2
     }
   }
-  const manifest = eval_pack_manifest(
-    raw
-      + {
-      base_dir: source_dir(),
-      trials: trials,
-      cases: cases,
-      split: persona_prompt_eval_selected_split(raw, split),
-      executor: if shared_ledger_path != "" {
-        persona_prompt_eval_executor(raw.executor, shared_ledger_path)
-      } else {
-        raw.executor
-      },
-      metadata: raw.metadata + {provider: provider, model: model},
-    },
-  )
+  const manifest = persona_prompt_eval_manifest(raw, split, trials, provider, model, shared_ledger_path)
   let options = {
     namespace: raw.metadata.ledger_namespace,
     suite: raw.id,

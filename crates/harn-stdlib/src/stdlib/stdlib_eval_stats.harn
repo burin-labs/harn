@@ -39,6 +39,7 @@ type EvalAxisBreakdown = {
 type EvalFingerprintIntegrity = {
   complete: bool,
   consistent: bool,
+  case_fingerprints: dict<string, string>,
   harness_fingerprints: list<string>,
   inconsistent_cases: list<string>,
 }
@@ -237,6 +238,7 @@ pub fn eval_fingerprint_integrity(rows: list) -> EvalFingerprintIntegrity {
   return {
     complete: !missing,
     consistent: len(inconsistent_cases) == 0 && len(harness_fingerprints) == 1,
+    case_fingerprints: case_fingerprints,
     harness_fingerprints: harness_fingerprints.sort(),
     inconsistent_cases: inconsistent_cases.sort(),
   }
