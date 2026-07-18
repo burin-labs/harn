@@ -32,6 +32,9 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
   // Real subprocess lifecycle e2e: probes OS process-group death and
   // `background: true` survival, so the waits observe host process state.
   "crates/harn-hostlib/tests/process_tools_e2e.rs",
+  // Physical lease-ownership e2e: waits for an orphaned Cargo PID to become
+  // observable/dead across exact SIGKILL boundaries.
+  "crates/harn-cli/tests/host_lease_crash_cli.rs",
   // Pre-existing interrupt-preemption test for a real subprocess: a spawned
   // thread sleeps briefly to stage a delayed cancel-token flip (the shape a
   // scope cancellation / deadline expiry takes mid-wait), proving the wait
@@ -62,6 +65,7 @@ const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
   // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
   // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
   "crates/harn-hostlib/tests/process_tools_e2e.rs",
+  "crates/harn-cli/tests/host_lease_crash_cli.rs",
 ]
 
 // SystemTime::now() in test files — use injected clock / MockClock instead.
@@ -132,6 +136,7 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/routes_graph_dispatch.rs",
   "crates/harn-cli/tests/flow_ship_cli.rs",
   "crates/harn-cli/tests/host_lease_cli.rs",
+  "crates/harn-cli/tests/host_lease_crash_cli.rs",
   "crates/harn-cli/tests/harn_serve_mcp_cli.rs",
   "crates/harn-cli/tests/llm_mock_cli.rs",
   "crates/harn-cli/tests/mcp_server_cli.rs",

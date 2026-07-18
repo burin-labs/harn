@@ -47,13 +47,11 @@ impl ReplayCache for InMemoryReplayCache {
 /// A replay cache that never caches — every `get` misses and every `put`
 /// is dropped.
 ///
-/// The dispatch core memoizes by `(adapter, function, arguments)` so that
-/// retrying an idempotent agent task is free. That is exactly the wrong
-/// default for an HTTP host: two `POST`s with identical bodies are two
-/// distinct requests, and a cached reply to the second would silently
-/// skip the handler's side effects. `harn serve site` installs this so a
-/// live route runs its handler on every request, the way an HTTP server
-/// must.
+/// Dispatch replay is opt-in through an adapter-supplied retry identity. A
+/// host can still install this cache to disable replay globally, including
+/// for callers that supply such an identity. `harn serve site` uses it as a
+/// defense in depth: two HTTP requests with identical bodies remain distinct
+/// requests and each runs the handler's side effects.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoReplayCache;
 

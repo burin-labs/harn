@@ -256,7 +256,19 @@ else
   cargo_package -p harn-cli --allow-dirty --no-verify "${local_harn_patches[@]}"
 fi
 if [[ "${HARN_BOOTSTRAP_NEW_CRATES:-0}" != "1" ]]; then
-  extract_package harn-cli "$(package_version harn-cli)"
+  cli_version="$(package_version harn-cli)"
+  extract_package harn-cli "$cli_version"
+  cli_pkg="$tmp/harn-cli-$cli_version"
+
+  # harn-cli must package with the target-independent AOT payload, but its
+  # build script cannot rely on sibling workspace sources after extraction.
+  # This is the direct proof: require the payload and compile the tarball from
+  # outside the workspace with the same local dependency patch set.
+  echo "=== Check extracted harn-cli package with required AOT payload ==="
+  HARN_REQUIRE_CLI_AOT=1 \
+    CARGO_TARGET_DIR="$package_check_target_dir" \
+    CARGO_BUILD_BUILD_DIR="$package_check_build_dir" \
+    cargo check --manifest-path "$cli_pkg/Cargo.toml" "${local_harn_patches[@]}"
 fi
 
 echo "Package verification complete"

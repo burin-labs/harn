@@ -802,7 +802,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             .await;
         }
         Command::Host(args) => {
-            let exit = commands::host::run(args);
+            let exit = commands::host::run(args).await;
             if exit != 0 {
                 process::exit(exit);
             }

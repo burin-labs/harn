@@ -5,30 +5,39 @@ use serde::Serialize;
 
 use crate::cli::{
     HostArgs, HostCommand, HostLeaseAcquireArgs, HostLeaseArgs, HostLeaseCommand,
-    HostLeasePriorityArg, HostLeaseReleaseArgs, HostLeaseRenewArgs, HostLeaseStatusArgs,
+    HostLeasePriorityArg, HostLeaseReleaseArgs, HostLeaseRenewArgs, HostLeaseResourceClassArg,
+    HostLeaseStatusArgs,
 };
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonError};
 
-pub const HOST_LEASE_CLI_SCHEMA_VERSION: u32 = 1;
+pub const HOST_LEASE_CLI_SCHEMA_VERSION: u32 = 2;
 const EX_TEMPFAIL: i32 = 75;
 
-pub(crate) fn run(args: HostArgs) -> i32 {
+mod cargo_run;
+
+pub(crate) async fn run(args: HostArgs) -> i32 {
     match args.command {
-        HostCommand::Lease(args) => run_lease(args),
+        HostCommand::Lease(args) => run_lease(args).await,
     }
 }
 
-fn run_lease(args: HostLeaseArgs) -> i32 {
-    let json = lease_command_json(&args.command);
+async fn run_lease(args: HostLeaseArgs) -> i32 {
+    let command = match args.command {
+        HostLeaseCommand::RunCargoWorker(args) => return cargo_run::run_cargo_worker(args),
+        command => command,
+    };
+    let json = lease_command_json(&command);
     let store = match harn_hostlib::HostLeaseStore::from_env() {
         Ok(store) => store,
         Err(error) => return print_error("host_lease_store", &error.to_string(), json),
     };
-    match args.command {
+    match command {
         HostLeaseCommand::Acquire(args) => acquire(&store, args),
         HostLeaseCommand::Renew(args) => renew(&store, args),
         HostLeaseCommand::Release(args) => release(&store, args),
         HostLeaseCommand::Status(args) => status(&store, args),
+        HostLeaseCommand::Run(args) => cargo_run::run_supervised(&store, args).await,
+        HostLeaseCommand::RunCargoWorker(_) => unreachable!("worker returned before store setup"),
     }
 }
 
@@ -38,6 +47,7 @@ fn lease_command_json(command: &HostLeaseCommand) -> bool {
         HostLeaseCommand::Renew(args) => args.json,
         HostLeaseCommand::Release(args) => args.json,
         HostLeaseCommand::Status(args) => args.json,
+        HostLeaseCommand::Run(_) | HostLeaseCommand::RunCargoWorker(_) => false,
     }
 }
 
@@ -48,6 +58,8 @@ fn acquire(store: &harn_hostlib::HostLeaseStore, args: HostLeaseAcquireArgs) -> 
         .unwrap_or_else(harn_hostlib::HostLeaseStore::default_host);
     let request = harn_hostlib::HostLeaseRequest {
         host,
+        resource_class: resource_class(args.resource_class),
+        execution_context: None,
         owner: args.owner,
         priority_class: priority(args.priority_class),
         ttl_ms: (!args.no_expiry).then_some(args.ttl_ms),
@@ -120,7 +132,12 @@ fn renew(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRenewArgs) -> i32 
     let host = args
         .host
         .unwrap_or_else(harn_hostlib::HostLeaseStore::default_host);
-    match store.renew(&host, &args.lease_id, args.ttl_ms) {
+    match store.renew_for_resource(
+        &host,
+        resource_class(args.resource_class),
+        &args.lease_id,
+        args.ttl_ms,
+    ) {
         Ok(receipt) if receipt.renewed => {
             print_success(&receipt, args.json, |_| {
                 format!("Renewed lease {}", args.lease_id)
@@ -144,7 +161,7 @@ fn release(store: &harn_hostlib::HostLeaseStore, args: HostLeaseReleaseArgs) -> 
     let host = args
         .host
         .unwrap_or_else(harn_hostlib::HostLeaseStore::default_host);
-    match store.release(&host, &args.lease_id) {
+    match store.release_for_resource(&host, resource_class(args.resource_class), &args.lease_id) {
         Ok(receipt) if receipt.released => {
             print_success(&receipt, args.json, |_| {
                 format!("Released lease {}", args.lease_id)
@@ -168,7 +185,7 @@ fn status(store: &harn_hostlib::HostLeaseStore, args: HostLeaseStatusArgs) -> i3
     let host = args
         .host
         .unwrap_or_else(harn_hostlib::HostLeaseStore::default_host);
-    match store.status(&host) {
+    match store.status_for_resource(&host, resource_class(args.resource_class)) {
         Ok(state) => {
             print_success(&state, args.json, |state| match state.active.as_ref() {
                 Some(active) => format!(
@@ -186,12 +203,21 @@ fn status(store: &harn_hostlib::HostLeaseStore, args: HostLeaseStatusArgs) -> i3
     }
 }
 
-fn priority(value: HostLeasePriorityArg) -> harn_hostlib::HostLeasePriorityClass {
+pub(super) fn priority(value: HostLeasePriorityArg) -> harn_hostlib::HostLeasePriorityClass {
     match value {
         HostLeasePriorityArg::Interactive => harn_hostlib::HostLeasePriorityClass::Interactive,
         HostLeasePriorityArg::Measurement => harn_hostlib::HostLeasePriorityClass::Measurement,
         HostLeasePriorityArg::CiVerify => harn_hostlib::HostLeasePriorityClass::CiVerify,
         HostLeasePriorityArg::Deferrable => harn_hostlib::HostLeasePriorityClass::Deferrable,
+    }
+}
+
+fn resource_class(value: HostLeaseResourceClassArg) -> harn_hostlib::HostLeaseResourceClass {
+    match value {
+        HostLeaseResourceClassArg::WholeMachine => {
+            harn_hostlib::HostLeaseResourceClass::WholeMachine
+        }
+        HostLeaseResourceClassArg::RustHeavy => harn_hostlib::HostLeaseResourceClass::RustHeavy,
     }
 }
 
