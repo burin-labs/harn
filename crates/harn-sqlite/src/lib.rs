@@ -328,10 +328,11 @@ fn require_file_initialized_impl<E>(
 /// Initialize a transient database with the same atomic schema-marker contract.
 ///
 /// No filesystem lock or WAL promotion is performed because the connection is
-/// not shared across processes. A process-local lock serializes first use of
-/// named shared-memory databases; ready connections avoid it. The callback
-/// follows the same transaction-local effects and at-most-once invocation
-/// contract as [`initialize_file`].
+/// not shared across processes. A process-local lock serializes connection
+/// configuration, readiness inspection, and first use of named shared-memory
+/// databases because shared-cache schema reads conflict with schema creation.
+/// The callback follows the same transaction-local effects and at-most-once
+/// invocation contract as [`initialize_file`].
 pub fn initialize_transient<E, F>(
     connection: &Connection,
     busy_timeout: Duration,
@@ -345,16 +346,10 @@ where
     if let Some(path) = main_database_path(connection) {
         return Err(InitializationError::FileBackedTransient { path });
     }
-    configure_connection(connection)?;
-    match schema_is_ready(connection, schema) {
-        Ok(true) => return Ok(()),
-        Ok(false) => {}
-        Err(error) if initialization_stage_is_busy_or_locked(&error) => {}
-        Err(error) => return Err(error),
-    }
     let _initialization_lock = TRANSIENT_INITIALIZATION_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    configure_connection(connection)?;
     if schema_is_ready(connection, schema)? {
         return Ok(());
     }
