@@ -167,6 +167,7 @@ fn __agent_monologue_actuation_receipt(
       firing_count: decision.firing_count,
       max_firings: decision.max_firings,
       tool_format: tool_format,
+      write_tool: decision.write_tool,
       trigger: decision.trigger,
     },
   )
@@ -191,7 +192,7 @@ pub fn agent_monologue_actuation_take(
   llm_options,
   prefill_available: bool,
   paradigm = nil,
-  commit_tool_name = "",
+  commit_tool_name: string = "",
 ) -> MonologueActuationDecision {
   if !state.pending {
     return {
@@ -199,6 +200,7 @@ pub fn agent_monologue_actuation_take(
       applied: false,
       reason: "not_pending",
       prefill: "",
+      write_tool: commit_tool_name,
       trigger: "",
       firing_count: state.firing_count,
       max_firings: config.max_firings,
@@ -296,8 +298,9 @@ pub fn agent_monologue_actuation_take(
       max_firings: config.max_firings,
     }
   }
-  __agent_monologue_actuation_receipt(session_id, iteration, decision, tool_format)
-  return decision
+  const attributed_decision: MonologueActuationDecision = decision + {write_tool: commit_tool_name}
+  __agent_monologue_actuation_receipt(session_id, iteration, attributed_decision, tool_format)
+  return attributed_decision
 }
 
 /**
