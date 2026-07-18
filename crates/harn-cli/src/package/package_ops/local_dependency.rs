@@ -109,7 +109,8 @@ fn failed_install_with_rollback(
 struct FileSnapshot {
     path: PathBuf,
     before: Option<Vec<u8>>,
-    installed: Option<Option<Vec<u8>>>,
+    installed: Option<Vec<u8>>,
+    installed_recorded: bool,
 }
 
 impl FileSnapshot {
@@ -119,23 +120,25 @@ impl FileSnapshot {
             path,
             before,
             installed: None,
+            installed_recorded: false,
         })
     }
 
     fn record_current(&mut self) -> Result<(), PackageError> {
-        self.installed = Some(read_optional_file(&self.path)?);
+        self.installed = read_optional_file(&self.path)?;
+        self.installed_recorded = true;
         Ok(())
     }
 
     fn restore(self) -> Result<(), PackageError> {
-        let installed = self.installed.ok_or_else(|| {
-            PackageError::Ops(format!(
+        if !self.installed_recorded {
+            return Err(PackageError::Ops(format!(
                 "local dependency rollback for {} has no installed-state snapshot",
                 self.path.display()
-            ))
-        })?;
+            )));
+        }
         let current = read_optional_file(&self.path)?;
-        if current != installed {
+        if current != self.installed {
             return Err(PackageError::Ops(format!(
                 "refusing to roll back local dependency install because {} changed afterward",
                 self.path.display()
