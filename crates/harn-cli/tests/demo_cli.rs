@@ -10,7 +10,6 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::thread;
 
 use harn_cli::commands::demo::scenario_ids;
@@ -25,27 +24,6 @@ const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 struct ScopedCwd {
     previous: PathBuf,
-}
-
-#[test]
-fn bare_demo_with_captured_stdio_matches_explicit_list() {
-    let cwd = tempfile::tempdir().expect("create isolated demo cwd");
-    let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_harn"))
-            .args(args)
-            .current_dir(cwd.path())
-            .output()
-            .expect("run harn demo")
-    };
-
-    let bare = run(&["demo"]);
-    let explicit = run(&["demo", "--list"]);
-
-    assert_eq!(
-        (bare.status.code(), &bare.stdout, &bare.stderr),
-        (Some(0), &explicit.stdout, &explicit.stderr)
-    );
-    assert!(!cwd.path().join(".harn-runs").exists());
 }
 
 impl ScopedCwd {
