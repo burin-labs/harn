@@ -382,6 +382,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-crate-sibling-versions" = "source"
 "check-dependabot-groups" = "source"
 "check-language-spec" = "source"
+"check-openapi-snapshot" = "source"
 "check-docs-model-refs" = "source"
 "check-docs-links" = "source"
 "check-receipt-structs" = "source"
