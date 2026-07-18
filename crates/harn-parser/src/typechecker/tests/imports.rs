@@ -142,3 +142,36 @@ pipeline t(task) {
         "expected imported argument error, got: {errors:?}"
     );
 }
+
+#[test]
+fn imported_pipeline_signatures_check_arguments() {
+    let imported = parse_program(
+        r"
+pub pipeline publish(version: string, dry_run: bool) -> bool {
+  return !dry_run
+}
+",
+    );
+    let program = parse_program(
+        r"
+pipeline caller(task) {
+  publish(42, false)
+}
+",
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_callable_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("expected string") && error.contains("found int")),
+        "expected imported pipeline argument error, got: {errors:?}"
+    );
+}

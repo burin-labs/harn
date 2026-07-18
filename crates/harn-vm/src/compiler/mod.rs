@@ -204,7 +204,7 @@ pub struct Compiler {
     /// from the parser's diagnostic type checker so compile-only callers keep
     /// working without a required type-check pass.
     type_scopes: Vec<std::collections::HashMap<String, TypeExpr>>,
-    /// `(span.start, span.end)` of every mutable binding (`var` / `for`-item)
+    /// `(span.start, span.end)` of every mutable binding (`let` / `for`-item)
     /// proven *monomorphic*: its value keeps a single primitive type across its
     /// initializer and every reassignment in scope. Only these bindings may
     /// carry an initializer-inferred primitive type fact into typed-opcode

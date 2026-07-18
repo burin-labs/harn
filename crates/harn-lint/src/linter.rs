@@ -25,6 +25,7 @@ use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case
 use crate::rule::{Rule, RuleCtx};
 
 mod discarded_result;
+mod public_api_types;
 mod walk;
 
 use discarded_result::BlockKind;
@@ -143,6 +144,13 @@ pub(crate) struct Linter<'a> {
     /// warn (`missing-harndoc`). Opt-in via `[lint] require_docstrings`;
     /// implied by `require_stdlib_metadata`.
     pub(crate) require_docstrings: bool,
+    /// Whether public function and pipeline signatures must be completely
+    /// annotated. Opt-in for ordinary packages.
+    pub(crate) require_public_api_types: bool,
+    /// Lazily-lexed source tokens shared by declaration-level rules. Without
+    /// this cache, enabling a public-API policy re-tokenizes the entire file
+    /// once per declaration.
+    pub(super) cached_source_tokens: Option<Vec<harn_lexer::Token>>,
     /// Lazily-lexed comment tokens, cached so the `missing-harndoc`
     /// suppression gate (which runs per public item) does not re-tokenize
     /// the whole source each time.
@@ -200,6 +208,8 @@ impl<'a> Linter<'a> {
             mcp_registry_missing_annotation_spans: HashMap::new(),
             require_stdlib_metadata: false,
             require_docstrings: false,
+            require_public_api_types: false,
+            cached_source_tokens: None,
             cached_comment_toks: None,
             rules,
             rules_visit_nodes,
@@ -522,57 +532,6 @@ impl<'a> Linter<'a> {
             )),
             fix: None,
         });
-    }
-
-    /// Narrow a declaration span (which covers the whole `fn`/`pipeline`/`tool`
-    /// node, signature through body) down to just the keyword + name on the
-    /// signature's first line, so name-anchored lints underline `fn run_agent`
-    /// instead of carpeting hundreds of columns across the entire function.
-    ///
-    /// The AST does not carry a separate identifier span, so we recover it from
-    /// the source: scan forward from the decl span's start for the `name`
-    /// identifier as a whole word and end the narrow span just past it. Falls
-    /// back to the original span when the source is unavailable or the name
-    /// can't be located (e.g. synthetic nodes), preserving prior behavior.
-    pub(super) fn name_anchored_span(&self, name: &str, span: Span) -> Span {
-        let Some(source) = self.source else {
-            return span;
-        };
-        if name.is_empty() || span.start >= span.end {
-            return span;
-        }
-        // Confine the search to the first line of the decl so we never grab a
-        // same-named token from the body.
-        let scan_end = source[span.start..span.end]
-            .find('\n')
-            .map_or(span.end, |nl| span.start + nl);
-        let Some(haystack) = source.get(span.start..scan_end) else {
-            return span;
-        };
-        let mut search_from = 0;
-        while let Some(rel) = haystack[search_from..].find(name) {
-            let match_start = search_from + rel;
-            let match_end = match_start + name.len();
-            let prev_ok = match_start == 0
-                || !haystack[..match_start]
-                    .chars()
-                    .next_back()
-                    .is_some_and(|c| c.is_alphanumeric() || c == '_');
-            let next_ok = !haystack[match_end..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-            if prev_ok && next_ok {
-                return Span::with_offsets(
-                    span.start,
-                    span.start + match_end,
-                    span.line,
-                    span.column,
-                );
-            }
-            search_from = match_start + 1;
-        }
-        span
     }
 
     /// Score the body of a function/tool and emit a
@@ -2098,7 +2057,7 @@ impl<'a> Linter<'a> {
                 // A name used only in type position (`import { T }` consumed
                 // by annotations of a `pub type` / struct / enum alias) is
                 // still a real use.
-                .filter(|n| !self.references.contains(*n) && !self.type_references.contains(*n))
+                .filter(|name| import.is_unused(name, &self.references, &self.type_references))
                 .collect();
             let all_unused = unused.len() == import.names.len();
             for name in &unused {

@@ -113,5 +113,104 @@ pub pipeline run(value) {
         panic!("expected pipeline result dict, got {result:?}");
     };
     assert!(matches!(result.get("received"), Some(VmValue::Int(42))));
+
+    let repeated = vm
+        .execute_callable(&callable, &[VmValue::Int(43)])
+        .await
+        .expect("repeated pipeline execution does not bind exports into the caller");
+    let VmValue::Dict(repeated) = repeated else {
+        panic!("expected repeated pipeline result dict, got {repeated:?}");
+    };
+    let Some(VmValue::Int(received)) = repeated.get("received") else {
+        panic!(
+            "expected int field `received`, got {:?}",
+            repeated.get("received")
+        );
+    };
+    assert_eq!(*received, 43);
     assert_eq!(vm.source_dir.as_deref(), Some(caller_dir.path()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_pipeline_callable_rejects_wrong_typed_argument() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let module_path = dir.path().join("workflow.harn");
+    std::fs::write(
+        &module_path,
+        r"
+pub pipeline run(value: int) -> int {
+  return value
+}
+",
+    )
+    .expect("write pipeline module");
+    let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
+    let error = Vm::new()
+        .execute_callable(&callable, &[VmValue::String("wrong".into())])
+        .await
+        .expect_err("typed pipeline rejects the wrong runtime argument");
+
+    assert_eq!(
+        error.to_string(),
+        "Runtime error: TypeError: parameter 'value' expected int, got string (wrong)"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_pipeline_callable_resolves_module_type_alias_guard() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let module_path = dir.path().join("workflow.harn");
+    std::fs::write(
+        &module_path,
+        r"
+type Count = int
+
+pub pipeline run(value: Count) -> int {
+  return value
+}
+",
+    )
+    .expect("write pipeline module");
+    let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
+    let error = Vm::new()
+        .execute_callable(&callable, &[VmValue::String("wrong".into())])
+        .await
+        .expect_err("module alias guards the exported pipeline argument");
+
+    assert_eq!(
+        error.to_string(),
+        "Runtime error: TypeError: parameter 'value' expected int, got string (wrong)"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_pipeline_callable_accepts_explicit_nil_for_optional_shape_field() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let module_path = dir.path().join("workflow.harn");
+    std::fs::write(
+        &module_path,
+        r"
+type Options = {enabled?: bool}
+
+pub pipeline run(options: Options) -> bool {
+  return options.enabled == nil
+}
+",
+    )
+    .expect("write pipeline module");
+    let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
+    let options = VmValue::dict(std::collections::BTreeMap::from([(
+        "enabled".to_string(),
+        VmValue::Nil,
+    )]));
+
+    let result = Vm::new()
+        .execute_callable(&callable, &[options])
+        .await
+        .expect("optional shape field accepts explicit nil");
+
+    let VmValue::Bool(field_is_nil) = result else {
+        panic!("expected bool pipeline result, got {result:?}");
+    };
+    assert!(field_is_nil, "expected explicit nil to remain nil");
 }

@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 
 type HookTimingEvent = {
   ts: string?,
@@ -569,32 +569,37 @@ pub fn render_hook_timing_report(report: HookTimingReport, limit: int) -> string
   return join(lines, "\n")
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "input", flags: ["--input"], parse: "string", default: ""},
-    {kind: "option", name: "limit", flags: ["--limit"], parse: "int", default: 10},
-    {kind: "option", name: "repo", flags: ["--repo"], parse: "string", default: ""},
-    {kind: "option", name: "hook", flags: ["--hook"], parse: "string", default: ""},
-    {kind: "option", name: "min_ms", flags: ["--min-ms"], parse: "int", default: 0},
-    {kind: "flag", name: "json", flags: ["--json"], default: false},
-    {kind: "flag", name: "budgets", flags: ["--budgets"], default: false},
-    {kind: "flag", name: "worktrees", flags: ["--worktrees"], default: false},
-  ]
+fn arg_spec() {
+  return parser(
+    {
+      name: "hook_timing_summary",
+      args: [
+        {kind: "flag", name: "input", long: "--input", parse: "string", default: ""},
+        {kind: "flag", name: "limit", long: "--limit", parse: "int", default: 10},
+        {kind: "flag", name: "repo", long: "--repo", parse: "string", default: ""},
+        {kind: "flag", name: "hook", long: "--hook", parse: "string", default: ""},
+        {kind: "flag", name: "min_ms", long: "--min-ms", parse: "int", default: 0},
+        {kind: "switch", name: "json", long: "--json", default: false},
+        {kind: "switch", name: "budgets", long: "--budgets", default: false},
+        {kind: "switch", name: "worktrees", long: "--worktrees", default: false},
+      ],
+    },
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio.println(usage())
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     harness.stdio.eprintln("")
     harness.stdio.eprintln(usage())
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const input = if to_string(parsed?.input ?? "") == "" {
     default_hook_timing_path(harness.env.get("HOME") ?? "")
   } else {

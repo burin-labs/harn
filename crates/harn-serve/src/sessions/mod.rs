@@ -18,7 +18,7 @@ pub use harn_session_store::{
     EventPage, EventRedactor, EventSignature, ForkResult, ListFilter, MemorySessionStore,
     ReadRange, RetentionPolicy, SessionEventKind, SessionId, SessionMeta, SessionSigner,
     SessionStatus, SessionStore, SharedArchiveSink, SharedEventRedactor, SharedSessionStore,
-    Snapshot, SnapshotId, SqliteSessionStore, StoreError, StoreHooks, StoreResult, StoredEvent,
-    SweepReport, Tombstone, TruncateResult, VerifyError, VerifyFailure, VerifyReport,
+    Snapshot, SnapshotId, SqliteSessionStore, StoreContention, StoreError, StoreHooks, StoreResult,
+    StoredEvent, SweepReport, Tombstone, TruncateResult, VerifyError, VerifyFailure, VerifyReport,
     MAX_READ_BATCH, SIGNATURE_ALGORITHM,
 };

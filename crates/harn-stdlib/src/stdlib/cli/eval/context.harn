@@ -213,9 +213,10 @@ fn __render_summary_line(report: dict) -> string {
 /**
  * Entrypoint. Returns an integer exit code rather than calling
  * `exit()` so the dispatch wedge's captured stdout/stderr buffers
- * flush back to the Rust shim — `exit()` in the embedded `harn run`
- * pipeline calls `std::process::exit` which terminates the host
- * binary mid-render and drops the captured streams.
+ * flush back to the Rust shim on the normal render path — `exit()` in
+ * the embedded `harn run` pipeline raises `VmError::ProcessExit`
+ * (since #4963 it no longer calls `std::process::exit`), unwinding the
+ * pipeline mid-render instead of returning through the shim.
  */
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_EVAL_CONTEXT_REPORT_JSON", "")

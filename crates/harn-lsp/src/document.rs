@@ -1,11 +1,12 @@
 use harn_parser::analysis::{
     AnalysisDatabase, AnalysisError, SourceId, SourceVersion, TypeCheckConfig,
 };
-use harn_parser::SNode;
+use harn_parser::{Node, SNode};
 use tower_lsp::lsp_types::*;
 
 use crate::helpers::{
-    diagnostic_data_value, lexer_error_to_diagnostic, parser_error_to_diagnostic, span_to_range,
+    diagnostic_data_value, lexer_error_to_diagnostic, parser_error_to_diagnostic,
+    span_to_full_range, span_to_range,
 };
 use crate::rules::{RuleDiagnostic, RuleWorkspace};
 use crate::symbols::{build_symbol_table, SymbolInfo};
@@ -171,22 +172,73 @@ impl DocumentState {
         self.invariant_diagnostics = invariant_report.diagnostics;
 
         let file_path = uri.and_then(|uri| uri.to_file_path().ok());
+        let has_selective_import = program
+            .iter()
+            .any(|node| matches!(&node.node, Node::SelectiveImport { .. }));
+        let module_graph = file_path
+            .as_deref()
+            .filter(|_| has_selective_import)
+            .map(|file_path| harn_modules::build_with_source(file_path, &self.source));
+        if let (Some(file_path), Some(module_graph)) = (file_path.as_deref(), module_graph.as_ref())
+        {
+            for issue in module_graph.selective_import_issues(file_path) {
+                let code = harn_parser::DiagnosticCode::ImportSymbolMissing.to_string();
+                self.diagnostics.push(Diagnostic {
+                    range: span_to_full_range(&issue.span, &self.source),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("harn-preflight".to_string()),
+                    code: Some(NumberOrString::String(code.clone())),
+                    message: issue.message(),
+                    data: Some(serde_json::json!({
+                        "code": code,
+                        "help": issue.help(),
+                    })),
+                    ..Default::default()
+                });
+            }
+        }
         let is_stdlib_source = file_path
             .as_deref()
             .is_some_and(harn_lint::path_is_stdlib_source);
+        let project_lint = file_path
+            .as_deref()
+            .and_then(|path| harn_modules::project_config::load_for_path(path).ok())
+            .map(|config| config.lint)
+            .unwrap_or_default();
+        let disabled_rules = project_lint.disabled.clone().unwrap_or_default();
         let lint_options = harn_lint::LintOptions {
             file_path: file_path.as_deref(),
+            require_file_header: project_lint.require_file_header.unwrap_or(false),
+            require_docstrings: project_lint.require_docstrings.unwrap_or(false),
             require_stdlib_metadata: is_stdlib_source,
+            require_public_api_types: project_lint.require_public_api_types.unwrap_or(false),
+            complexity_threshold: project_lint.complexity_threshold,
+            persona_step_allowlist: &project_lint.persona_step_allowlist,
+            severity_overrides: project_lint.severity.clone(),
             ..Default::default()
         };
         let externally_imported_names = std::collections::HashSet::new();
-        let lint_diags = harn_lint::lint_with_options(
-            &program,
-            &[],
-            Some(&self.source),
-            &externally_imported_names,
-            &lint_options,
-        );
+        let lint_diags = if let (Some(file_path), Some(module_graph)) =
+            (file_path.as_deref(), module_graph.as_ref())
+        {
+            harn_lint::lint_with_module_graph(
+                &program,
+                &disabled_rules,
+                Some(&self.source),
+                &externally_imported_names,
+                module_graph,
+                file_path,
+                &lint_options,
+            )
+        } else {
+            harn_lint::lint_with_options(
+                &program,
+                &disabled_rules,
+                Some(&self.source),
+                &externally_imported_names,
+                &lint_options,
+            )
+        };
         for ld in &lint_diags {
             let severity = match ld.severity {
                 harn_lint::LintSeverity::Info => DiagnosticSeverity::INFORMATION,
@@ -239,11 +291,28 @@ mod tests {
     use super::DocumentState;
     use crate::rules::RuleWorkspace;
     use std::path::Path;
-    use tower_lsp::lsp_types::Url;
+    use tower_lsp::lsp_types::{
+        Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url,
+    };
 
     fn write(path: &Path, content: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, content).unwrap();
+    }
+
+    fn selective_import_diagnostic(message: &str, help: &str) -> Diagnostic {
+        Diagnostic {
+            range: Range::new(Position::new(0, 0), Position::new(0, 38)),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::String("HARN-IMP-002".to_string())),
+            source: Some("harn-preflight".to_string()),
+            message: message.to_string(),
+            data: Some(serde_json::json!({
+                "code": "HARN-IMP-002",
+                "help": help,
+            })),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -339,6 +408,126 @@ fn handler() {
                 .iter()
                 .map(|diag| (&diag.code, &diag.message))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn project_public_api_type_policy_surfaces_as_lsp_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        write(
+            &temp.path().join("harn.toml"),
+            "[lint]\nrequire_public_api_types = true\n\n[lint.severity]\nmissing-public-api-type = \"error\"\n",
+        );
+        let path = temp.path().join("src/main.harn");
+        let source = "pub pipeline ship(task) {\n  return task\n}\n";
+        write(&path, source);
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+
+        let diagnostics = state
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.code.clone(),
+                    diagnostic.severity,
+                    diagnostic.source.clone(),
+                    diagnostic.message.clone(),
+                    diagnostic.range,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            diagnostics,
+            vec![
+                (
+                    Some(tower_lsp::lsp_types::NumberOrString::String(
+                        "HARN-LNT-067".to_string(),
+                    )),
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR),
+                    Some("harn-lint".to_string()),
+                    "[missing-public-api-type] public pipeline `ship` parameter `task` is missing an explicit type".to_string(),
+                    tower_lsp::lsp_types::Range::new(
+                        tower_lsp::lsp_types::Position::new(0, 18),
+                        tower_lsp::lsp_types::Position::new(0, 19),
+                    ),
+                ),
+                (
+                    Some(tower_lsp::lsp_types::NumberOrString::String(
+                        "HARN-LNT-067".to_string(),
+                    )),
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR),
+                    Some("harn-lint".to_string()),
+                    "[missing-public-api-type] public pipeline `ship` is missing an explicit return type".to_string(),
+                    tower_lsp::lsp_types::Range::new(
+                        tower_lsp::lsp_types::Position::new(0, 13),
+                        tower_lsp::lsp_types::Position::new(0, 14),
+                    ),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn absent_selective_import_surfaces_from_unsaved_lsp_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.harn");
+        write(
+            &temp.path().join("types.harn"),
+            "pub type Receipt = {ok: bool}\n",
+        );
+        write(&path, "import { Receipt } from \"./types\"\n");
+        let source = "import { StaleReceipt } from \"./types\"\n";
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+        assert_eq!(
+            state.diagnostics,
+            vec![selective_import_diagnostic(
+                "imported symbol `StaleReceipt` does not exist in `./types`",
+                "update the import to a symbol exported by `./types`",
+            )]
+        );
+    }
+
+    #[test]
+    fn private_selective_import_surfaces_full_lsp_diagnostic() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.harn");
+        write(
+            &temp.path().join("types.harn"),
+            "pub type Receipt = {ok: bool}\ntype LocalReceipt = {ok: bool}\n",
+        );
+        write(&path, "import { Receipt } from \"./types\"\n");
+        let source = "import { LocalReceipt } from \"./types\"\n";
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+
+        assert_eq!(
+            state.diagnostics,
+            vec![selective_import_diagnostic(
+                "imported symbol `LocalReceipt` is not exported by `./types` — it is defined there but not `pub`",
+                "mark `LocalReceipt` as `pub` in `./types` to export it",
+            )]
         );
     }
 

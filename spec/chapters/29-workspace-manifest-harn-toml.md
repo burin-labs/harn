@@ -821,6 +821,7 @@ guide for harn-canon rules is in
 disabled = ["unused-import"]
 require_file_header = false
 require_docstrings = false
+require_public_api_types = false
 complexity_threshold = 25
 persona_step_allowlist = ["legacy_helper"]
 ```
@@ -834,6 +835,11 @@ persona_step_allowlist = ["legacy_helper"]
   default — out of the box, `pub fn` needs no docs, and editor
   tooling derives a usage example from the type signature. Embedded
   stdlib sources enforce docstrings regardless of this flag.
+- `require_public_api_types` opts into `missing-public-api-type`, which
+  requires explicit parameter and return annotations on every public function
+  and pipeline. Private callables remain inferable, and explicit `unknown` or
+  `any` satisfies the declaration contract. The same policy is available for
+  a focused migration with `harn lint --require-public-api-types`.
 - `complexity_threshold` overrides the default cyclomatic-complexity
   warning threshold (default **25**, chosen to match Clippy's
   `cognitive_complexity` default). Set lower to tighten, higher to

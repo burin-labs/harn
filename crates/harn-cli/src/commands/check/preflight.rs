@@ -75,7 +75,7 @@ pub(super) fn collect_preflight_diagnostics_with_host_capabilities(
     );
 
     scan_import_collisions(&canonical, source, program, &mut diagnostics);
-    scan_selective_import_visibility(&canonical, source, program, module_graph, &mut diagnostics);
+    scan_selective_import_visibility(&canonical, source, module_graph, &mut diagnostics);
     scan_re_export_conflicts(&canonical, source, program, module_graph, &mut diagnostics);
     scan_static_tool_surface_preflight(&canonical, source, program, config, &mut diagnostics);
     scan_effect_inheritance_preflight(&canonical, source, program, &mut diagnostics);

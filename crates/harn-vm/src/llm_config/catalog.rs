@@ -91,6 +91,24 @@ pub fn model_params_for_route(provider: &str, model_id: &str) -> BTreeMap<String
     model_params_for_route_with_config(&config, provider, model_id)
 }
 
+/// Return the Harn-validated generation defaults that are safe to persist in
+/// an execution receipt.
+///
+/// Route-specific overlays remain intentionally free-form so operators can
+/// configure provider-specific request parameters. Those fields must still
+/// influence inference, but they are not part of Harn's stable, secret-free
+/// receipt contract. Keep this filter beside Harn's generation validator so hosts do
+/// not duplicate the generation-default schema.
+pub fn generation_defaults_for_route(
+    provider: &str,
+    model_id: &str,
+) -> BTreeMap<String, toml::Value> {
+    model_params_for_route(provider, model_id)
+        .into_iter()
+        .filter(|(key, value)| is_valid_generation_default(key, value))
+        .collect()
+}
+
 pub(crate) fn model_params_for_route_with_config(
     config: &ProvidersConfig,
     provider: &str,
@@ -212,27 +230,7 @@ pub fn model_default_issues(config: &ProvidersConfig) -> Vec<String> {
             if key == MODEL_DEFAULT_UNSET_KEY {
                 continue;
             }
-            let valid = match key.as_str() {
-                "temperature" => value
-                    .as_float()
-                    .is_some_and(|value| value.is_finite() && (0.0..=2.0).contains(&value)),
-                "frequency_penalty" | "presence_penalty" => value
-                    .as_float()
-                    .is_some_and(|value| value.is_finite() && (-2.0..=2.0).contains(&value)),
-                "top_p" => value
-                    .as_float()
-                    .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value)),
-                "top_k" => value.as_integer().is_some_and(|value| value >= 0),
-                "max_tokens" => value.as_integer().is_some_and(|value| value > 0),
-                "reasoning_effort" => value.as_str().is_some_and(|value| {
-                    matches!(
-                        value,
-                        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-                    )
-                }),
-                _ => false,
-            };
-            if !valid {
+            if !is_valid_generation_default(key, value) {
                 issues.push(format!(
                     "model_defaults.{selector}.{key} is not a supported generation default"
                 ));
@@ -289,6 +287,29 @@ fn is_supported_generation_default_key(key: &str) -> bool {
             | "max_tokens"
             | "reasoning_effort"
     )
+}
+
+fn is_valid_generation_default(key: &str, value: &toml::Value) -> bool {
+    match key {
+        "temperature" => value
+            .as_float()
+            .is_some_and(|value| value.is_finite() && (0.0..=2.0).contains(&value)),
+        "frequency_penalty" | "presence_penalty" => value
+            .as_float()
+            .is_some_and(|value| value.is_finite() && (-2.0..=2.0).contains(&value)),
+        "top_p" => value
+            .as_float()
+            .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value)),
+        "top_k" => value.as_integer().is_some_and(|value| value >= 0),
+        "max_tokens" => value.as_integer().is_some_and(|value| value > 0),
+        "reasoning_effort" => value.as_str().is_some_and(|value| {
+            matches!(
+                value,
+                "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+            )
+        }),
+        _ => false,
+    }
 }
 
 /// Get per-role LLM defaults, e.g. `[model_roles.merge]`.
@@ -429,7 +450,11 @@ pub fn known_model_names() -> Vec<String> {
 }
 
 pub fn alias_entries() -> Vec<(String, AliasDef)> {
-    effective_config().aliases.into_iter().collect()
+    effective_config()
+        .aliases
+        .iter()
+        .map(|(name, alias)| (name.clone(), alias.clone()))
+        .collect()
 }
 
 pub fn alias_tool_calling_entry(alias: &str) -> Option<AliasToolCallingDef> {
@@ -780,7 +805,7 @@ pub fn default_model_for_provider(provider: &str) -> String {
 }
 
 pub fn qc_defaults() -> BTreeMap<String, String> {
-    effective_config().qc_defaults
+    effective_config().qc_defaults.clone()
 }
 
 pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {

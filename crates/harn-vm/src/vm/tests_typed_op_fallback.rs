@@ -83,7 +83,7 @@ fn annotated_let_initializer_from_dynamic_float_falls_back() {
 
 #[test]
 fn annotated_var_initializer_from_dynamic_float_falls_back() {
-    // The `var` analogue: an annotated, never-reassigned `var` whose initializer
+    // The `let` analogue: an annotated, never-reassigned `let` whose initializer
     // is a dynamic float. (The monomorphic-binding analysis trusts it because it
     // is never reassigned; the runtime guard is what keeps it sound.)
     let result = assert_opt_matches_unopt(

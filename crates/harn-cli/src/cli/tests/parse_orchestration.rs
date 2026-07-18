@@ -777,10 +777,55 @@ fn test_parses_persona_materialize_flags() {
     };
     assert_eq!(
         materialize.blueprint,
-        PathBuf::from("persona.blueprint.json")
+        Some(PathBuf::from("persona.blueprint.json"))
     );
+    assert!(materialize.compile_receipt.is_none());
     assert_eq!(materialize.output_root, PathBuf::from("generated-personas"));
     assert!(materialize.force);
+}
+
+#[test]
+fn test_parses_persona_materialize_compile_receipt() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "materialize",
+        "--compile-receipt",
+        "reviewed-receipt.json",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::Materialize(materialize) = args.command else {
+        panic!("expected persona materialize command");
+    };
+    assert!(materialize.blueprint.is_none());
+    assert_eq!(
+        materialize.compile_receipt,
+        Some(PathBuf::from("reviewed-receipt.json"))
+    );
+}
+
+#[test]
+fn test_persona_materialize_requires_exactly_one_input() {
+    let neither = Cli::try_parse_from(["harn", "persona", "materialize"]).unwrap_err();
+    assert_eq!(
+        neither.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument
+    );
+
+    let both = Cli::try_parse_from([
+        "harn",
+        "persona",
+        "materialize",
+        "--blueprint",
+        "blueprint.json",
+        "--compile-receipt",
+        "receipt.json",
+    ])
+    .unwrap_err();
+    assert_eq!(both.kind(), clap::error::ErrorKind::ArgumentConflict);
 }
 
 #[test]

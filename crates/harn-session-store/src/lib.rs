@@ -46,6 +46,6 @@ pub use sqlite::SqliteSessionStore;
 pub use store::{
     CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
     SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, SharedSessionStore,
-    Snapshot, SnapshotId, StoreError, StoreHooks, StoreResult, SweepReport, TruncateResult,
-    VerifyFailure, VerifyReport, MAX_READ_BATCH,
+    Snapshot, SnapshotId, StoreContention, StoreError, StoreHooks, StoreResult, SweepReport,
+    TruncateResult, VerifyFailure, VerifyReport, MAX_READ_BATCH,
 };

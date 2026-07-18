@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 
 const ARTIFACTS_REL = "spec/protocol-artifacts"
 
@@ -125,27 +125,32 @@ pub fn check_burin_protocol_bindings(
   }
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "burin_root", flags: ["--burin-root"], parse: "string", default: ""},
-    {kind: "flag", name: "required", flags: ["--required"], default: false},
-  ]
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_burin_protocol_bindings",
+      args: [
+        {kind: "flag", name: "burin_root", long: "--burin-root", parse: "string", default: ""},
+        {kind: "switch", name: "required", long: "--required", default: false},
+      ],
+    },
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio
       .println(
       "usage: harn run scripts/check_burin_protocol_bindings.harn -- [--burin-root PATH] [--required]",
     )
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const report = check_burin_protocol_bindings(to_string(parsed?.burin_root ?? ""), parsed?.required ?? false)
   if report.status == "missing_root" {
     if parsed?.required ?? false {

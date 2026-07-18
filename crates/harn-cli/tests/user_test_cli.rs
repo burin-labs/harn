@@ -7,6 +7,45 @@ fn binary_path() -> std::path::PathBuf {
 }
 
 #[test]
+fn std_testing_temp_dir_works_in_the_default_run_sandbox() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let script = temp.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { with_temp_dir } from "std/testing"
+
+pipeline main() {
+  const result = with_temp_dir(
+    { dir ->
+      harness.fs.write_text(dir + "/value.txt", "sandboxed")
+      {dir: dir, value: harness.fs.read_text(dir + "/value.txt")}
+    },
+  )
+  assert_eq(result.value, "sandboxed")
+  assert_eq(harness.fs.exists(result.dir), false)
+  __io_println("sandbox-temp-ok")
+}
+"#,
+    )
+    .expect("write sandbox fixture");
+
+    let output = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["run", script.to_str().expect("script path is UTF-8")])
+        .output()
+        .expect("spawn sandboxed harn run");
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "sandbox-temp-ok\n");
+}
+
+#[test]
 fn user_tests_emit_progress_and_timing_summary() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let suite = temp.path().join("suite");

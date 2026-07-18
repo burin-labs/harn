@@ -80,16 +80,13 @@ fn rule_targets_harn(src: &str) -> bool {
         == Some("harn")
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn lint_file_inner(
     analysis: &mut AnalysisDatabase,
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
-    require_file_header: bool,
-    complexity_threshold: Option<usize>,
-    persona_step_allowlist: &[String],
+    lint_config: &super::config::HarnLintConfig,
     script_rule_diagnostics: &[harn_lint::LintDiagnostic],
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().into_owned();
@@ -102,14 +99,15 @@ pub(crate) fn lint_file_inner(
     let native_rule_paths = project_native_rule_paths(path);
     let options = harn_lint::LintOptions {
         file_path: Some(path),
-        require_file_header,
-        require_docstrings: super::harn_lint_require_docstrings(path),
-        complexity_threshold,
-        persona_step_allowlist,
+        require_file_header: lint_config.require_file_header,
+        require_docstrings: lint_config.require_docstrings,
+        require_public_api_types: lint_config.require_public_api_types,
+        complexity_threshold: lint_config.complexity_threshold,
+        persona_step_allowlist: &lint_config.persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
         engine_rules: &engine_rules,
         native_rule_paths: &native_rule_paths,
-        severity_overrides: super::harn_lint_severity_overrides(path),
+        severity_overrides: lint_config.severity_overrides.clone(),
     };
     // Generated files (`*.generated.harn`) skip style/declaration lints inside
     // `lint_with_module_graph`; type diagnostics still flow so real correctness
@@ -176,9 +174,7 @@ pub(crate) fn lint_fix_file(
     config: &CheckConfig,
     externally_imported_names: &HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
-    require_file_header: bool,
-    complexity_threshold: Option<usize>,
-    persona_step_allowlist: &[String],
+    lint_config: &super::config::HarnLintConfig,
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().into_owned();
     let output = analyze_file(analysis, path, config, module_graph)
@@ -190,14 +186,15 @@ pub(crate) fn lint_fix_file(
     let native_rule_paths = project_native_rule_paths(path);
     let options = harn_lint::LintOptions {
         file_path: Some(path),
-        require_file_header,
-        require_docstrings: super::harn_lint_require_docstrings(path),
-        complexity_threshold,
-        persona_step_allowlist,
+        require_file_header: lint_config.require_file_header,
+        require_docstrings: lint_config.require_docstrings,
+        require_public_api_types: lint_config.require_public_api_types,
+        complexity_threshold: lint_config.complexity_threshold,
+        persona_step_allowlist: &lint_config.persona_step_allowlist,
         require_stdlib_metadata: path_is_stdlib_source(path),
         engine_rules: &engine_rules,
         native_rule_paths: &native_rule_paths,
-        severity_overrides: super::harn_lint_severity_overrides(path),
+        severity_overrides: lint_config.severity_overrides.clone(),
     };
     // Generated files self-skip style lints inside `lint_with_module_graph`, so
     // no style-lint autofix edits are produced for them.

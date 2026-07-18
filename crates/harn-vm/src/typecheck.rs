@@ -550,11 +550,11 @@ mod tests {
 
     #[test]
     fn shape_validates_required_fields() {
-        let shape = TypeExpr::Shape(vec![harn_parser::ShapeField {
-            name: "x".into(),
-            type_expr: ty_int(),
-            optional: false,
-        }]);
+        let shape = TypeExpr::Shape(vec![harn_parser::ShapeField::synthetic(
+            "x",
+            ty_int(),
+            false,
+        )]);
         let mut good = std::collections::BTreeMap::new();
         good.insert("x".to_string(), vm_int(7));
         assert!(matches_type(&VmValue::dict(good), &shape));

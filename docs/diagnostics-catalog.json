@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 66
+      "count": 67
     },
     {
       "id": "FMT",
@@ -2389,6 +2389,15 @@
       "code": "HARN-LNT-066",
       "category": "LNT",
       "summary": "the result of a pure collection method is discarded, so the call has no effect on the receiver",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-067",
+      "category": "LNT",
+      "summary": "public callable parameter or return is missing an explicit type",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

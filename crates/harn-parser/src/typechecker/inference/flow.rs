@@ -960,11 +960,11 @@ impl TypeChecker {
             // Path: defer via `{tag: literal}` intersect/subtract, which
             // re-derives the matched variant / residual union from the path's
             // natural type at read time.
-            let schema = TypeExpr::Shape(vec![ShapeField {
-                name: tag_field,
-                type_expr: discriminant_literal_type(&tag_value),
-                optional: false,
-            }]);
+            let schema = TypeExpr::Shape(vec![ShapeField::synthetic(
+                tag_field,
+                discriminant_literal_type(&tag_value),
+                false,
+            )]);
             Refinements {
                 truthy_paths: vec![(key.clone(), PathNarrowing::Intersect(schema.clone()))],
                 falsy_paths: vec![(key, PathNarrowing::Subtract(schema))],
@@ -1002,9 +1002,8 @@ impl TypeChecker {
                         .map(|f| {
                             if f.name == *key {
                                 ShapeField {
-                                    name: f.name.clone(),
-                                    type_expr: f.type_expr.clone(),
                                     optional: false,
+                                    ..f.clone()
                                 }
                             } else {
                                 f.clone()
@@ -1022,11 +1021,11 @@ impl TypeChecker {
         if let Some(path_key) = reference_path_key(object) {
             // `{key: any}` required: intersecting with the path's shape marks
             // the field required (and drops `nil` members) at read time.
-            let schema = TypeExpr::Shape(vec![ShapeField {
-                name: key.clone(),
-                type_expr: TypeExpr::Named("any".into()),
-                optional: false,
-            }]);
+            let schema = TypeExpr::Shape(vec![ShapeField::synthetic(
+                key.clone(),
+                TypeExpr::Named("any".into()),
+                false,
+            )]);
             return Refinements {
                 truthy_paths: vec![(path_key, PathNarrowing::Intersect(schema))],
                 ..Refinements::default()

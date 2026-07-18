@@ -17,6 +17,10 @@ use crate::commands;
 use crate::commands::check::collect_preflight_diagnostics_with_module_graph as preflight_diagnostics;
 use crate::package::{self, CheckConfig, PreflightSeverity};
 
+#[path = "fix/lint_context.rs"]
+mod lint_context;
+use lint_context::FixLintContext;
+
 pub(crate) const FIX_PLAN_SCHEMA_VERSION: u32 = 2;
 pub(crate) const FIX_APPLY_SCHEMA_VERSION: u32 = 2;
 
@@ -626,20 +630,8 @@ fn count_remaining_diagnostics(target: &Path) -> Result<RemainingDiagnostics, St
             .filter(|diag| !harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules))
             .count();
 
-        let persona_step_allowlist = commands::check::harn_lint_persona_step_allowlist(file);
-        let engine_rules = commands::check::project_engine_rule_sources(file);
-        let native_rule_paths = commands::check::project_native_rule_paths(file);
-        let options = harn_lint::LintOptions {
-            file_path: Some(file),
-            require_file_header: commands::check::harn_lint_require_file_header(file),
-            require_docstrings: commands::check::harn_lint_require_docstrings(file),
-            complexity_threshold: commands::check::harn_lint_complexity_threshold(file),
-            persona_step_allowlist: &persona_step_allowlist,
-            require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
-            engine_rules: &engine_rules,
-            native_rule_paths: &native_rule_paths,
-            severity_overrides: commands::check::harn_lint_severity_overrides(file),
-        };
+        let lint_context = FixLintContext::load(file);
+        let options = lint_context.options(file);
         count += harn_lint::lint_with_module_graph(
             &program,
             &config.disable_rules,
@@ -708,20 +700,8 @@ fn collect_file_candidates(
         });
     }
 
-    let persona_step_allowlist = commands::check::harn_lint_persona_step_allowlist(file);
-    let engine_rules = commands::check::project_engine_rule_sources(file);
-    let native_rule_paths = commands::check::project_native_rule_paths(file);
-    let lint_options = harn_lint::LintOptions {
-        file_path: Some(file),
-        require_file_header: commands::check::harn_lint_require_file_header(file),
-        require_docstrings: commands::check::harn_lint_require_docstrings(file),
-        complexity_threshold: commands::check::harn_lint_complexity_threshold(file),
-        persona_step_allowlist: &persona_step_allowlist,
-        require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
-        engine_rules: &engine_rules,
-        native_rule_paths: &native_rule_paths,
-        severity_overrides: commands::check::harn_lint_severity_overrides(file),
-    };
+    let lint_context = FixLintContext::load(file);
+    let lint_options = lint_context.options(file);
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,
@@ -1160,9 +1140,7 @@ fn collect_callable_infos(
                 else {
                     continue;
                 };
-                let param_names = params.iter().cloned().collect::<BTreeSet<_>>();
-                let mut bound_names = param_names.clone();
-                collect_binding_names(body, &mut bound_names);
+                let bound_names = callable_bound_names(params, body);
                 infos.push(CallableInfo {
                     name: name.clone(),
                     span: inner.span,

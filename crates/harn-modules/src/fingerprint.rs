@@ -103,7 +103,7 @@ fn canonicalize_top_level(snode: &SNode) -> Option<String> {
         } => is_pub.then(|| {
             format!(
                 "pipeline:{name}({params}){ret}{extends}",
-                params = params.join(","),
+                params = format_typed_params(params),
                 ret = format_return(return_type),
                 extends = extends
                     .as_deref()
@@ -415,6 +415,13 @@ mod tests {
     fn changing_public_return_type_flips_fingerprint() {
         let before = fp("pub fn make() -> string { \"x\" }\n");
         let after = fp("pub fn make() -> int { 1 }\n");
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn changing_public_pipeline_parameter_type_flips_fingerprint() {
+        let before = fp("pub pipeline deploy(config: string) -> bool { true }\n");
+        let after = fp("pub pipeline deploy(config: dict) -> bool { true }\n");
         assert_ne!(before, after);
     }
 
