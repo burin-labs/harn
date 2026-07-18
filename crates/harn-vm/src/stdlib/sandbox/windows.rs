@@ -16,7 +16,10 @@ use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeleteAppContainerProfile,
     DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
 };
-use windows_sys::Win32::Security::{PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES};
+use windows_sys::Win32::Security::{
+    CreateWellKnownSid, WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
+    PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SECURITY_MAX_SID_SIZE, SID_AND_ATTRIBUTES,
+};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
@@ -32,6 +35,7 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS, JOB_OBJECT_UILIMIT_WRITECLIPBOARD,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
+use windows_sys::Win32::System::SystemServices::SE_GROUP_ENABLED;
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
     InitializeProcThreadAttributeList, ResumeThread, TerminateProcess, UpdateProcThreadAttribute,
@@ -41,7 +45,8 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::{
-    policy_allows_workspace_write, process_sandbox_developer_toolchain_read_roots,
+    policy_allows_network, policy_allows_workspace_write,
+    process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
     process_spawn_error, sandbox_rejection, unavailable, PrepareOutcome, ProcessCommandConfig,
@@ -124,7 +129,8 @@ pub(super) fn sandboxed_output(
         "pending",
         format!("start program={program:?} argc={}", args.len()),
     );
-    let profile = AppContainerProfile::create()?;
+    let mut process_capabilities = ProcessCapabilities::for_policy(policy)?;
+    let profile = AppContainerProfile::create(&mut process_capabilities)?;
     let trace_label = profile.label().to_string();
     sandbox_trace(&trace_label, "profile created");
     let sid_string = profile.sid_string()?;
@@ -142,7 +148,7 @@ pub(super) fn sandboxed_output(
         stdout_pipe.write.raw(),
         stderr_pipe.write.raw(),
     ];
-    let mut security_capabilities = profile.security_capabilities();
+    let mut security_capabilities = profile.security_capabilities(&mut process_capabilities);
     let mut attributes = ProcThreadAttributes::new(2)?;
     sandbox_trace(&trace_label, "process attributes allocated");
     attributes.update(
@@ -260,20 +266,20 @@ struct AppContainerProfile {
 }
 
 impl AppContainerProfile {
-    fn create() -> io::Result<Self> {
+    fn create(process_capabilities: &mut ProcessCapabilities) -> io::Result<Self> {
         let id = PROFILE_COUNTER.fetch_add(1, Ordering::Relaxed);
         let name = format!("harn.sandbox.{}.{}", std::process::id(), id);
         let wide_name = str_to_wide(&name);
         let display = str_to_wide("Harn Sandbox");
-        let description = str_to_wide("Harn per-process no-capability sandbox");
+        let description = str_to_wide("Harn per-process capability sandbox");
         let mut sid = std::ptr::null_mut();
         let hr = unsafe {
             CreateAppContainerProfile(
                 wide_name.as_ptr(),
                 display.as_ptr(),
                 description.as_ptr(),
-                std::ptr::null(),
-                0,
+                process_capabilities.attributes_mut_ptr(),
+                process_capabilities.count(),
                 &mut sid,
             )
         };
@@ -295,11 +301,14 @@ impl AppContainerProfile {
         &self.label
     }
 
-    fn security_capabilities(&self) -> SECURITY_CAPABILITIES {
+    fn security_capabilities(
+        &self,
+        process_capabilities: &mut ProcessCapabilities,
+    ) -> SECURITY_CAPABILITIES {
         SECURITY_CAPABILITIES {
             AppContainerSid: self.sid,
-            Capabilities: std::ptr::null_mut(),
-            CapabilityCount: 0,
+            Capabilities: process_capabilities.attributes_mut_ptr(),
+            CapabilityCount: process_capabilities.count(),
             Reserved: 0,
         }
     }
@@ -342,6 +351,67 @@ impl AppContainerProfile {
             ("TEMP".to_string(), temp.to_string_lossy().into_owned()),
             ("TMP".to_string(), temp.to_string_lossy().into_owned()),
         ])
+    }
+}
+
+struct ProcessCapabilities {
+    // The attribute records point into these allocations. Boxes keep the SID
+    // addresses stable if the owning vector or this struct moves.
+    _sid_storage: Vec<Box<[u8; SECURITY_MAX_SID_SIZE as usize]>>,
+    attributes: Vec<SID_AND_ATTRIBUTES>,
+}
+
+impl ProcessCapabilities {
+    fn for_policy(policy: &CapabilityPolicy) -> io::Result<Self> {
+        if !policy_allows_network(policy) {
+            return Ok(Self {
+                _sid_storage: Vec::new(),
+                attributes: Vec::new(),
+            });
+        }
+
+        let mut sid_storage = Vec::with_capacity(2);
+        let mut attributes = Vec::with_capacity(2);
+        for sid_type in [
+            WinCapabilityInternetClientSid,
+            WinCapabilityPrivateNetworkClientServerSid,
+        ] {
+            let mut sid = Box::new([0u8; SECURITY_MAX_SID_SIZE as usize]);
+            let mut sid_size = SECURITY_MAX_SID_SIZE;
+            if unsafe {
+                CreateWellKnownSid(
+                    sid_type,
+                    std::ptr::null_mut(),
+                    sid.as_mut_ptr().cast(),
+                    &mut sid_size,
+                )
+            } == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            attributes.push(SID_AND_ATTRIBUTES {
+                Sid: sid.as_mut_ptr().cast(),
+                Attributes: SE_GROUP_ENABLED as u32,
+            });
+            sid_storage.push(sid);
+        }
+
+        Ok(Self {
+            _sid_storage: sid_storage,
+            attributes,
+        })
+    }
+
+    fn attributes_mut_ptr(&mut self) -> *mut SID_AND_ATTRIBUTES {
+        if self.attributes.is_empty() {
+            std::ptr::null_mut()
+        } else {
+            self.attributes.as_mut_ptr()
+        }
+    }
+
+    fn count(&self) -> u32 {
+        u32::try_from(self.attributes.len()).expect("process capability count fits in u32")
     }
 }
 
@@ -922,5 +992,27 @@ mod tests {
             roots.iter().any(|path| path.ends_with(".cargo")),
             "explicit Windows preset requests should still materialize developer/package roots"
         );
+    }
+
+    #[test]
+    fn network_policy_materializes_public_and_private_capabilities() {
+        let denied = ProcessCapabilities::for_policy(&CapabilityPolicy {
+            side_effect_level: Some("process_exec".to_string()),
+            ..Default::default()
+        })
+        .expect("construct denied capability set");
+        assert_eq!(denied.count(), 0);
+
+        let allowed = ProcessCapabilities::for_policy(&CapabilityPolicy {
+            side_effect_level: Some("network".to_string()),
+            ..Default::default()
+        })
+        .expect("construct network capability set");
+        assert_eq!(allowed.count(), 2);
+        assert!(allowed.attributes.iter().all(|entry| !entry.Sid.is_null()));
+        assert!(allowed
+            .attributes
+            .iter()
+            .all(|entry| entry.Attributes == SE_GROUP_ENABLED as u32));
     }
 }

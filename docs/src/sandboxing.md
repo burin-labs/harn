@@ -10,9 +10,19 @@ Direct `harn run` invocations install a `worktree` capability policy
 before the VM starts. The policy roots filesystem and process-cwd
 access at the nearest `harn.toml` project root, or at the invocation
 working directory when no manifest is present, and sets the
-side-effect ceiling below `network`. Pass `--no-sandbox` to opt out
-for a single run; the CLI prints a warning when that escape hatch is
-used.
+side-effect ceiling below `network`. Pass `--allow-process-network`
+when a command spawned by the script must open a network socket; this
+raises only the side-effect ceiling and keeps the worktree filesystem
+and process sandbox active. Pass `--no-sandbox` to opt out entirely for
+a single run; the CLI prints a warning when that escape hatch is used.
+
+The process-network opt-in is deliberately broader than Harn's egress
+allowlist. `HARN_EGRESS_ALLOW` and `egress_policy(...)` constrain HTTP,
+provider, connector, and other network calls owned by the Harn runtime.
+The current OS subprocess backends can allow or deny addressable sockets,
+but cannot enforce hostname rules on arbitrary child-process traffic.
+Use `--allow-process-network` only for a command whose network behavior is
+trusted and independently scoped.
 
 ## Sandbox profiles
 
@@ -301,6 +311,7 @@ successor when one exists.
 | explicit `process_sandbox.presets` includes `developer_toolchains` / `package_manager_config` | `icacls /grant *<sid>:(OI)(CI)RX /T /C` on existing home-scoped preset roots | explicit preset requests get read-only access; omitted presets are not materialized as recursive ACL grants on Windows |
 | `process_sandbox.read_roots` / `.write_roots` | `icacls /grant *<sid>:(OI)(CI)RX` or Modify | process-only roots, with writes gated by workspace-write capability |
 | always | `CreateJobObjectW` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `_DIE_ON_UNHANDLED_EXCEPTION`, `_ACTIVE_PROCESS` (cap 32), `_PROCESS_MEMORY` (cap 512 MiB) | resource caps and lifecycle binding |
+| `side_effect_level >= network` | AppContainer `internetClient` and `privateNetworkClientServer` capability SIDs | public-network client access plus private-network client and server (inbound) access; otherwise the AppContainer receives no network capability |
 | always | direct `CreateProcessW` with `CREATE_NO_WINDOW`, explicit handle list, `STARTF_USESTDHANDLES`, and Job Object UI restrictions | stdin/stdout/stderr inheritance is restricted to the three pipes the runtime created, console commands do not bind to an interactive desktop, and child UI escape surfaces stay disabled |
 
 `std::process::Command` cannot carry an AppContainer
