@@ -2,18 +2,38 @@ use super::*;
 use crate::package::test_support::*;
 
 fn installed_persona_project(root: &Path, root_manifest: &str, with_trigger: bool) -> PathBuf {
+    installed_persona_project_fixture(root, root_manifest, &["reviewer"], with_trigger, "")
+}
+
+fn installed_persona_project_fixture(
+    root: &Path,
+    root_manifest: &str,
+    persona_names: &[&str],
+    with_persona_trigger: bool,
+    root_triggers: &str,
+) -> PathBuf {
     let root_manifest =
         format!("{root_manifest}\n[dependencies]\nagents = {{ path = \"vendor/agents\" }}\n");
     let anchor = write_trigger_project(root, &root_manifest, None);
-    let mut lock =
-        install_test_persona_package(root, "agents", vec!["reviewer".to_string()], &["reviewer"]);
+    let mut lock = install_test_persona_package(
+        root,
+        "agents",
+        persona_names
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect(),
+        persona_names,
+    );
     let dependency_source = root.join("vendor/agents");
     fs::create_dir_all(&dependency_source).unwrap();
     lock.packages[0].source = path_source_uri(&dependency_source.canonicalize().unwrap()).unwrap();
-    if with_trigger {
+    if with_persona_trigger || !root_triggers.is_empty() {
         let package_manifest = current_packages_dir(root).join("agents").join(MANIFEST);
         let mut body = fs::read_to_string(&package_manifest).unwrap();
-        body.push_str("triggers = [\"github.pr_opened\"]\n");
+        if with_persona_trigger {
+            body.push_str("triggers = [\"github.pr_opened\"]\n");
+        }
+        body.push_str(root_triggers);
         fs::write(&package_manifest, body).unwrap();
         lock.packages[0].content_hash = Some(
             compute_content_hash(package_manifest.parent().unwrap()).expect("package content hash"),
@@ -221,6 +241,164 @@ fn installed_persona_is_inert_until_activation_and_deactivation_is_reversible() 
     deactivate_persona(Some(&tmp.path().join(MANIFEST)), "agents/reviewer", 200).unwrap();
     let deactivated = try_load_runtime_extensions(&anchor).unwrap();
     assert!(deactivated.runtime_personas.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn activated_installed_persona_projects_its_canonical_root_trigger() {
+    let tmp = tempfile::tempdir().unwrap();
+    let anchor = installed_persona_project_fixture(
+        tmp.path(),
+        "[package]\nname = \"consumer\"\n",
+        &["reviewer", "observer"],
+        false,
+        r#"
+[[triggers]]
+id = "review-digest"
+kind = "cron"
+provider = "cron"
+match = { events = ["tick"] }
+handler = "persona://reviewer"
+schedule = "0 */4 * * *"
+timezone = "UTC"
+secrets = { signing_secret = "cron/signing-secret" }
+
+[[triggers]]
+id = "observer-events"
+kind = "webhook"
+provider = "github"
+match = { events = ["issue_opened"] }
+handler = "persona://observer"
+
+[[triggers]]
+id = "unrelated-worker"
+kind = "webhook"
+provider = "github"
+match = { events = ["pr_opened"] }
+handler = "worker://review-queue"
+"#,
+    );
+
+    let installed = try_load_runtime_extensions(&anchor).unwrap();
+    assert!(installed.triggers.is_empty());
+
+    activate_persona(
+        Some(&tmp.path().join(MANIFEST)),
+        "agents/reviewer",
+        &PersonaAttenuation::default(),
+        100,
+    )
+    .unwrap();
+    let activated = try_load_runtime_extensions(&anchor).unwrap();
+    assert_eq!(activated.triggers.len(), 1);
+    let trigger = &activated.triggers[0];
+    assert_eq!(trigger.id, "agents/review-digest");
+    assert_eq!(trigger.handler, "persona://agents/reviewer");
+    assert_eq!(trigger.kind, TriggerKind::Cron);
+    assert_eq!(trigger.provider.as_str(), "cron");
+    assert_eq!(trigger.match_.events, vec!["tick"]);
+    assert_eq!(
+        trigger.kind_specific.get("schedule"),
+        Some(&toml::Value::String("0 */4 * * *".to_string()))
+    );
+    assert_eq!(
+        trigger.kind_specific.get("timezone"),
+        Some(&toml::Value::String("UTC".to_string()))
+    );
+    assert_eq!(
+        trigger.secrets.get("signing_secret").map(String::as_str),
+        Some("cron/signing-secret")
+    );
+    let collected = collect_manifest_triggers(&mut test_vm(), &activated)
+        .await
+        .expect("qualified activated package trigger should collect");
+    assert_eq!(collected.len(), 1);
+    assert!(matches!(
+        &collected[0].handler,
+        CollectedTriggerHandler::Persona { binding, .. }
+            if binding.name == "agents/reviewer"
+    ));
+
+    deactivate_persona(Some(&tmp.path().join(MANIFEST)), "agents/reviewer", 200).unwrap();
+    let deactivated = try_load_runtime_extensions(&anchor).unwrap();
+    assert!(deactivated.triggers.is_empty());
+}
+
+#[test]
+fn activated_installed_trigger_ids_are_namespaced_by_dependency_alias() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let anchor = write_trigger_project(
+        root,
+        r#"
+[package]
+name = "consumer"
+
+[dependencies]
+agents = { path = "vendor/agents" }
+auditors = { path = "vendor/auditors" }
+"#,
+        None,
+    );
+    let mut lock =
+        install_test_persona_package(root, "agents", vec!["reviewer".to_string()], &["reviewer"]);
+    add_test_persona_package(
+        root,
+        &mut lock,
+        "auditors",
+        vec!["reviewer".to_string()],
+        &["reviewer"],
+    );
+
+    for alias in ["agents", "auditors"] {
+        let package_dir = current_packages_dir(root).join(alias);
+        let mut manifest = fs::read_to_string(package_dir.join(MANIFEST)).unwrap();
+        manifest.push_str(
+            r#"
+[[triggers]]
+id = "shared-event"
+kind = "webhook"
+provider = "github"
+match = { events = ["pr_opened"] }
+handler = "persona://reviewer"
+"#,
+        );
+        fs::write(package_dir.join(MANIFEST), manifest).unwrap();
+        let source = root.join("vendor").join(alias);
+        fs::create_dir_all(&source).unwrap();
+        fs::copy(package_dir.join(MANIFEST), source.join(MANIFEST)).unwrap();
+        fs::copy(
+            package_dir.join("workflow.harn"),
+            source.join("workflow.harn"),
+        )
+        .unwrap();
+        let entry = lock
+            .packages
+            .iter_mut()
+            .find(|entry| entry.name == alias)
+            .unwrap();
+        entry.source = path_source_uri(&source.canonicalize().unwrap()).unwrap();
+        entry.content_hash = Some(compute_content_hash(&package_dir).unwrap());
+    }
+    write_runtime_test_lock(root, &lock);
+    try_load_runtime_extensions(&anchor).expect("fixture dependencies should materialize");
+
+    for id in ["agents/reviewer", "auditors/reviewer"] {
+        activate_persona(
+            Some(&root.join(MANIFEST)),
+            id,
+            &PersonaAttenuation::default(),
+            100,
+        )
+        .unwrap();
+    }
+    let extensions = try_load_runtime_extensions(&anchor).unwrap();
+    let mut ids = extensions
+        .triggers
+        .iter()
+        .map(|trigger| trigger.id.as_str())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["agents/shared-event", "auditors/shared-event"]);
 }
 
 #[test]
