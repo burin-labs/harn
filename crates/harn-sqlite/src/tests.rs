@@ -133,7 +133,7 @@ fn read_only_ready_check_waits_for_schema_commit() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database = dir.path().join("runtime.sqlite");
     let writer_database = database.clone();
-    let reader_database = database.clone();
+    let reader_database = database;
     let (writer_ready_tx, writer_ready_rx) = mpsc::channel();
     let (writer_release_tx, writer_release_rx) = mpsc::channel();
     let (reader_done_tx, reader_done_rx) = mpsc::channel();
