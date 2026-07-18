@@ -4357,7 +4357,7 @@ in Harn.
   — both route through a new `skill/match` JSON-RPC bridge method.
   - Activation binds the skill's `prompt` body into the effective
     system prompt, narrows the tool surface via its `allowed_tools`
-    allowlist (union when multiple skills are active), and calls
+    whitelist (union when multiple skills are active), and calls
     its `on_activate` hook. Deactivation (in `sticky: false` mode)
     unwinds everything and calls `on_deactivate`.
   - `disable-model-invocation: true` and `user-invocable: false`
