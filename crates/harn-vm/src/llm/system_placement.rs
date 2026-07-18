@@ -11,9 +11,10 @@
 //!   `developer` message at any position.
 //! - **Anthropic Opus 4.8** accepts an interleaved `system` directive, but only
 //!   when it follows a `user` turn (or an assistant turn ending in a
-//!   `server_tool_use` block), is the last message or is followed by an
-//!   `assistant` turn, and is not `messages[0]`. Consecutive directives must be
-//!   merged into one message. Anywhere else — or on any older/other Claude —
+//!   `server_tool_use` block with no unresolved client `tool_use`), is the last
+//!   message or is followed by an `assistant` turn, and is not `messages[0]`.
+//!   Consecutive directives must merge into one message. Anywhere else — or on
+//!   any older/other Claude —
 //!   the Messages API rejects it with HTTP 400.
 //! - **Gemini / Bedrock** have no positional system channel at all; a
 //!   `systemInstruction` / `system[]` field is top-level only.
@@ -136,8 +137,21 @@ fn contains_tool_result(message: &Value) -> bool {
         })
 }
 
+fn assistant_has_client_tool_use(message: &Value) -> bool {
+    is_assistant(message)
+        && message
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|blocks| {
+                blocks
+                    .iter()
+                    .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+            })
+}
+
 /// Anthropic permits a native system message after an assistant turn whose
-/// final block is the provider's exact `server_tool_use` wire event.
+/// final block is the provider's exact `server_tool_use` wire event and which
+/// has no unresolved client tool call awaiting a `tool_result` continuation.
 fn assistant_ends_with_server_tool_use(message: &Value) -> bool {
     if !is_assistant(message) {
         return false;
@@ -151,7 +165,7 @@ fn assistant_ends_with_server_tool_use(message: &Value) -> bool {
     else {
         return false;
     };
-    block_type == "server_tool_use"
+    block_type == "server_tool_use" && !assistant_has_client_tool_use(message)
 }
 
 fn has_native_content_shape(message: &Value) -> bool {
@@ -266,6 +280,49 @@ pub(crate) fn normalize_conversation(
             index += 1;
         }
         let end = index;
+
+        let crosses_client_tool_result = start > 0
+            && assistant_has_client_tool_use(&input[start - 1])
+            && index < input.len()
+            && is_user(&input[index])
+            && contains_tool_result(&input[index]);
+        if crosses_client_tool_result {
+            out.push(input[index].clone());
+            index += 1;
+
+            if native
+                && input[start..end].iter().all(has_native_content_shape)
+                && (index == input.len() || is_assistant(&input[index]))
+            {
+                out.push(merge_native_section(&input[start..end]));
+                continue;
+            }
+
+            let text = input[start..end]
+                .iter()
+                .map(message_text)
+                .filter(|text| !text.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            if text.is_empty() {
+                continue;
+            }
+            let reminder = system_reminder_block(&text);
+            if index < input.len() && is_assistant(&input[index]) {
+                out.push(input[index].clone());
+                index += 1;
+            }
+            if index < input.len() && is_user(&input[index]) && !contains_tool_result(&input[index])
+            {
+                let mut next = input[index].clone();
+                prepend_text_to_content(message_content_mut(&mut next), &reminder);
+                out.push(next);
+                index += 1;
+            } else {
+                out.push(serde_json::json!({"role": "user", "content": reminder}));
+            }
+            continue;
+        }
 
         if native && is_valid_native_section(&input, start, end) {
             out.push(merge_native_section(&input[start..end]));
@@ -420,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn fold_between_tool_use_and_result_preserves_the_pair() {
+    fn fold_between_tool_use_and_result_preserves_result_only_continuation() {
         let mut messages = vec![
             json!({"role": "assistant", "content": [{
                 "type": "tool_use", "id": "toolu_1", "name": "run", "input": {}
@@ -429,6 +486,7 @@ mod tests {
             json!({"role": "user", "content": [{
                 "type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"
             }]}),
+            json!({"role": "assistant", "content": "continued"}),
         ];
         let mut system = None;
         normalize_conversation(&mut messages, &mut system, SystemMessagePlacement::Fold);
@@ -438,10 +496,11 @@ mod tests {
                 json!({"role": "assistant", "content": [{
                     "type": "tool_use", "id": "toolu_1", "name": "run", "input": {}
                 }]}),
-                json!({"role": "user", "content": [
-                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"},
-                    {"type": "text", "text": system_reminder_block("new constraint")},
-                ]}),
+                json!({"role": "user", "content": [{
+                    "type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"
+                }]}),
+                json!({"role": "assistant", "content": "continued"}),
+                json!({"role": "user", "content": system_reminder_block("new constraint")}),
             ]
         );
     }
