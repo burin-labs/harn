@@ -280,8 +280,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             let sandbox_options = if args.no_sandbox {
                 commands::run::RunSandboxOptions::disabled()
             } else {
-                commands::run::RunSandboxOptions::default()
-                    .with_process_network(args.allow_process_network)
+                commands::run::RunSandboxOptions::sandboxed(args.allow_process_network)
                     .with_write_roots(args.write_root.iter().cloned())
                     .with_read_only_roots(args.read_only_root.iter().cloned())
             };

@@ -54,10 +54,12 @@ mod locked_append;
 mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
+mod policy;
 #[cfg(target_os = "windows")]
 mod windows;
 
 pub(crate) use locked_append::AppendLockOptions;
+pub(crate) use policy::allows_network as policy_allows_network;
 
 const HANDLER_SANDBOX_ENV: &str = "HARN_HANDLER_SANDBOX";
 #[cfg(any(unix, windows))]
@@ -2312,21 +2314,6 @@ fn is_dev_fd_descriptor(path: &Path) -> bool {
         return false;
     };
     !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
-pub(crate) fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
-    use crate::tool_annotations::SideEffectLevel;
-    policy
-        .side_effect_level
-        .as_ref()
-        .map(|level| SideEffectLevel::rank_str(level) >= SideEffectLevel::Network.rank())
-        .unwrap_or(true)
 }
 
 #[cfg(any(
