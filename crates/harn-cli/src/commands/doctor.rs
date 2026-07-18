@@ -18,8 +18,10 @@ use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::package;
 
 mod next_step;
+mod repo_checks;
 
 use next_step::next_step_suggestion;
+use repo_checks::{check_protocol_artifacts, find_harn_repo_root};
 
 /// Env var the embedded `cli/doctor` script reads to pick up the raw
 /// `DoctorReport` payload (renderable shape — no envelope wrapper).
@@ -1153,83 +1155,6 @@ fn check_portal() -> Vec<DoctorCheck> {
     checks
 }
 
-/// Checks the checked-in protocol artifacts against what the current binary
-/// would generate. Only runs inside the harn repo.
-fn check_protocol_artifacts() -> Vec<DoctorCheck> {
-    let cwd = std::env::current_dir().unwrap_or_default();
-    check_protocol_artifacts_from(&cwd)
-}
-
-fn check_protocol_artifacts_from(anchor: &Path) -> Vec<DoctorCheck> {
-    let Some(repo) = find_harn_repo_root(anchor) else {
-        return vec![DoctorCheck {
-            id: "protocol-artifacts".to_string(),
-            status: DoctorStatus::Skip,
-            label: "protocol-artifacts".to_string(),
-            detail: "not running inside the harn repo; skipping artifact drift check".to_string(),
-            ..Default::default()
-        }];
-    };
-
-    let ts_path = repo.join("spec/protocol-artifacts/harn-protocol.ts");
-    let Ok(text) = fs::read_to_string(&ts_path) else {
-        return vec![DoctorCheck {
-            id: "protocol-artifacts".to_string(),
-            status: DoctorStatus::Warn,
-            label: "protocol-artifacts".to_string(),
-            detail: format!("unable to read {}", ts_path.display()),
-            fix_command: Some("make gen-protocol-artifacts".to_string()),
-            docs_url: Some("https://harnlang.com/docs/protocol-artifacts.html".to_string()),
-            blocks: vec!["release"],
-        }];
-    };
-
-    // The TS artifact records the harn version it was generated against:
-    //   export const HARN_PROTOCOL_ARTIFACT_VERSION = "0.8.4"
-    let pinned_version = text
-        .lines()
-        .find_map(|line| {
-            line.split_once("HARN_PROTOCOL_ARTIFACT_VERSION = \"")
-                .map(|(_, rest)| rest)
-                .and_then(|rest| rest.split_once('"').map(|(v, _)| v.to_string()))
-        })
-        .unwrap_or_default();
-    let current = env!("CARGO_PKG_VERSION");
-    if pinned_version.is_empty() {
-        return vec![DoctorCheck {
-            id: "protocol-artifacts".to_string(),
-            status: DoctorStatus::Warn,
-            label: "protocol-artifacts".to_string(),
-            detail: format!(
-                "could not parse HARN_PROTOCOL_ARTIFACT_VERSION from {}",
-                ts_path.display()
-            ),
-            fix_command: Some("make gen-protocol-artifacts".to_string()),
-            docs_url: Some("https://harnlang.com/docs/protocol-artifacts.html".to_string()),
-            blocks: vec!["release"],
-        }];
-    }
-    if pinned_version == current {
-        vec![DoctorCheck {
-            id: "protocol-artifacts".to_string(),
-            status: DoctorStatus::Ok,
-            label: "protocol-artifacts".to_string(),
-            detail: format!("pinned at v{pinned_version}"),
-            ..Default::default()
-        }]
-    } else {
-        vec![DoctorCheck {
-            id: "protocol-artifacts".to_string(),
-            status: DoctorStatus::Fail,
-            label: "protocol-artifacts".to_string(),
-            detail: format!("stale: pinned v{pinned_version}, current v{current}"),
-            fix_command: Some("make gen-protocol-artifacts".to_string()),
-            docs_url: Some("https://harnlang.com/docs/protocol-artifacts.html".to_string()),
-            blocks: vec!["release"],
-        }]
-    }
-}
-
 /// Best-effort platform capability probes. None of these block builds; they
 /// help the contributor understand what features will work on this machine.
 fn check_platform_capabilities() -> Vec<DoctorCheck> {
@@ -1333,23 +1258,6 @@ fn browser_opener() -> Option<&'static str> {
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn browser_opener() -> Option<&'static str> {
     None
-}
-
-/// Walk up from `start` looking for a marker that uniquely identifies the
-/// harn repo (the checked-in protocol artifacts directory). Returns the repo
-/// root when found.
-fn find_harn_repo_root(start: &Path) -> Option<PathBuf> {
-    let mut dir = start.to_path_buf();
-    loop {
-        if dir.join("spec/protocol-artifacts/manifest.json").is_file()
-            && dir.join("crates/harn-cli/Cargo.toml").is_file()
-        {
-            return Some(dir);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
 }
 
 fn check_provider_selection() -> Vec<DoctorCheck> {
@@ -1836,39 +1744,12 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 mod tests {
     use super::{
         build_host_info, build_summary, check_event_log, check_hardware, check_manifest_from,
-        check_ollama, check_platform_capabilities, check_protocol_artifacts_from,
-        find_harn_repo_root, find_nearest_manifest, format_trigger_metrics, read_manifest,
-        stdlib_capability_matrix, target_doctor_checks, DoctorCheck, DoctorReport, DoctorStatus,
-        HardwareSnapshot, TargetInfo, DOCTOR_SCHEMA_VERSION,
+        check_ollama, check_platform_capabilities, find_nearest_manifest, format_trigger_metrics,
+        read_manifest, stdlib_capability_matrix, target_doctor_checks, DoctorCheck, DoctorReport,
+        DoctorStatus, HardwareSnapshot, TargetInfo, DOCTOR_SCHEMA_VERSION,
     };
     use crate::json_envelope::JsonOutput;
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
-    use std::path::Path;
-
-    fn tempdir_outside_ambient_repo() -> tempfile::TempDir {
-        let ambient = std::env::current_dir().expect("cwd");
-        let temp_root = std::env::temp_dir();
-        let ambient_repo = find_harn_repo_root(&ambient)
-            .or_else(|| {
-                ambient
-                    .ancestors()
-                    .find(|path| path.join(".git").exists())
-                    .map(Path::to_path_buf)
-            })
-            .unwrap_or_else(|| ambient.clone());
-        if !temp_root.starts_with(&ambient_repo) {
-            return tempfile::tempdir().expect("tempdir");
-        }
-        let parent = ambient_repo
-            .parent()
-            .unwrap_or_else(|| Path::new("/"))
-            .join(".harn-cli-test-tmp");
-        std::fs::create_dir_all(&parent).expect("test temp parent");
-        tempfile::Builder::new()
-            .prefix("harn-cli-doctor-")
-            .tempdir_in(parent)
-            .expect("tempdir")
-    }
 
     #[test]
     fn build_healthcheck_url_uses_base_and_path() {
@@ -2231,37 +2112,6 @@ pub fn on_new_issue(event: TriggerEvent) {
             panic!("expected multiple auth envs");
         };
         assert_eq!(names, vec!["FIRST".to_string(), "SECOND".to_string()]);
-    }
-
-    #[test]
-    fn find_harn_repo_root_walks_up_from_nested_dir() {
-        let root = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(root.path().join("spec/protocol-artifacts")).unwrap();
-        std::fs::write(
-            root.path().join("spec/protocol-artifacts/manifest.json"),
-            "{}",
-        )
-        .unwrap();
-        std::fs::create_dir_all(root.path().join("crates/harn-cli")).unwrap();
-        std::fs::write(root.path().join("crates/harn-cli/Cargo.toml"), "").unwrap();
-
-        let nested = root.path().join("crates/harn-cli/src/commands");
-        std::fs::create_dir_all(&nested).unwrap();
-
-        let found = find_harn_repo_root(&nested).expect("repo root");
-        assert_eq!(found, root.path());
-
-        let unrelated = tempdir_outside_ambient_repo();
-        assert!(find_harn_repo_root(unrelated.path()).is_none());
-    }
-
-    #[test]
-    fn protocol_artifacts_check_skipped_outside_repo() {
-        let dir = tempdir_outside_ambient_repo();
-        let checks = check_protocol_artifacts_from(dir.path());
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].status, DoctorStatus::Skip);
-        assert_eq!(checks[0].id, "protocol-artifacts");
     }
 
     #[test]
