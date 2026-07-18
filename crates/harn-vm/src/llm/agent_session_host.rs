@@ -851,7 +851,7 @@ async fn host_agent_session_finalize(
         &session_id,
         &canonical_status,
         &stop_reason,
-        terminal_class,
+        terminal_class.map(super::agent_terminal_class::AgentTerminalClass::as_str),
         terminal_error.as_ref(),
     )
     .await?;

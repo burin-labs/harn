@@ -21,18 +21,18 @@ pub(super) async fn initialize(
     system_prompt: Option<String>,
 ) -> Result<InitializedSession, VmError> {
     let has_live_session = crate::agent_sessions::exists(session_id);
-    let hydrated = crate::agent_session_journal::hydrate_and_configure(
+    let prepared = crate::agent_session_journal::prepare(
         session_id,
         options,
         format!("agent_run_{}", uuid::Uuid::now_v7()),
         format!("agent_turn_{}", uuid::Uuid::now_v7()),
     )
     .await?;
-    let has_canonical_history = !hydrated.messages.is_empty();
+    let has_canonical_history = !prepared.transcript.messages.is_empty();
     let session_id = if has_canonical_history && !has_live_session {
         let seeded_session_id = crate::agent_sessions::seed_from_messages(
             Some(session_id.to_string()),
-            &hydrated.messages,
+            &prepared.transcript.messages,
             serde_json::json!({}),
             system_prompt,
             None,
@@ -40,13 +40,14 @@ pub(super) async fn initialize(
         .map_err(VmError::Runtime)?;
         crate::agent_sessions::restore_message_event_ids(
             &seeded_session_id,
-            &hydrated.source_event_ids,
+            &prepared.transcript.source_event_ids,
         )
         .map_err(VmError::Runtime)?;
         seeded_session_id
     } else {
         crate::agent_sessions::open_or_create(Some(session_id.to_string()))
     };
+    crate::agent_sessions::install_journal(&session_id, prepared.state)?;
     Ok(InitializedSession {
         session_id,
         has_canonical_history,
@@ -70,7 +71,7 @@ pub(super) async fn flush_init_terminal(
     );
     crate::agent_sessions::append_event(session_id, event).map_err(VmError::Runtime)?;
     crate::agent_session_journal::flush(session_id).await?;
-    crate::agent_session_journal::clear(session_id);
+    crate::agent_sessions::clear_journal(session_id);
     Ok(())
 }
 
@@ -95,7 +96,7 @@ pub(super) async fn flush_terminal(
     );
     crate::agent_sessions::append_event(session_id, event).map_err(VmError::Runtime)?;
     crate::agent_session_journal::flush(session_id).await?;
-    crate::agent_session_journal::clear(session_id);
+    crate::agent_sessions::clear_journal(session_id);
     Ok(())
 }
 

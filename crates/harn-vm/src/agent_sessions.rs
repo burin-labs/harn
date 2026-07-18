@@ -45,6 +45,8 @@ pub use changed_paths::{
     clear_all_session_changed_paths, clear_session_changed_paths, record_session_changed_path,
     session_changed_paths, take_session_changed_paths,
 };
+mod journal;
+pub(crate) use journal::{clear_journal, install_journal, next_journal_event, pop_journal_event};
 
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
 const LIVE_CLIENT_PERMISSION_EVENT_KIND: &str = "live_session_permission_route";
@@ -189,6 +191,10 @@ pub struct SessionState {
     /// It lives with the transcript so pre-loop injections and resumed loops
     /// cannot lose security provenance.
     pub taint: Vec<crate::security::TaintRecord>,
+    /// Pending canonical transcript mutations for the active agent run. This
+    /// shares the session record's lifecycle so reset and eviction cannot
+    /// leave a second ambient journal behind.
+    pub(crate) transcript_journal: Option<crate::agent_session_journal::JournalState>,
 }
 
 impl SessionState {
@@ -222,6 +228,7 @@ impl SessionState {
             redo_stack: Vec::new(),
             text_tool_call_seq: 0,
             taint: Vec::new(),
+            transcript_journal: None,
         }
     }
 
@@ -461,7 +468,6 @@ pub fn reset_session_store() {
     CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().clear());
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
     clear_all_session_changed_paths();
-    crate::agent_session_journal::reset();
     reset_default_transcript_budget_policy();
 }
 
@@ -1665,7 +1671,7 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
             .unwrap_or(VmValue::Nil);
         apply_transcript_with_budget(state, VmValue::dict(next), "inject_message")?;
         crate::agent_session_journal::enqueue_message(
-            id,
+            &mut state.transcript_journal,
             crate::llm::helpers::vm_value_to_json(&transcript_event),
             crate::llm::helpers::vm_value_to_json(&persisted_message),
         );
@@ -2133,7 +2139,7 @@ fn inject_typed_message(
             .unwrap_or(VmValue::Nil);
         apply_transcript_with_budget(state, VmValue::dict(next), "inject_host_event")?;
         crate::agent_session_journal::enqueue_message(
-            id,
+            &mut state.transcript_journal,
             crate::llm::helpers::vm_value_to_json(&journal_event),
             crate::llm::helpers::vm_value_to_json(&persisted_message),
         );
@@ -2956,7 +2962,7 @@ fn append_event_to_state(
         VmValue::List(std::sync::Arc::new(events)),
     );
     apply_transcript_with_budget(state, VmValue::dict(next), action)?;
-    crate::agent_session_journal::enqueue_audit_event(&state.id, journal_event);
+    crate::agent_session_journal::enqueue_audit_event(&mut state.transcript_journal, journal_event);
     Ok(())
 }
 
@@ -3017,7 +3023,7 @@ pub fn replace_messages_with_summary(
         }
         apply_transcript_with_budget(state, VmValue::dict(next), "replace_messages")?;
         crate::agent_session_journal::enqueue_messages_replaced(
-            id,
+            &mut state.transcript_journal,
             messages.to_vec(),
             summary.map(str::to_string),
             source_event_ids,

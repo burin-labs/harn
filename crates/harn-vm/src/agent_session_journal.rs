@@ -5,12 +5,11 @@
 //! at existing async agent-loop boundaries. `AgentEvent` sinks stay strictly
 //! observability-only: a filtered or failed sink can never alter durability.
 
-use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::path::PathBuf;
 
 use harn_session_store::{
     AppendEvent, EventIdentity, EventIdentityField, SessionEventKind, SessionStore,
+    SqliteSessionStore,
 };
 
 use crate::stdlib::session_store;
@@ -18,7 +17,7 @@ use crate::value::{DictMap, VmError};
 
 #[derive(Clone)]
 struct JournalConfig {
-    root: PathBuf,
+    store: SqliteSessionStore,
     run_id: String,
     turn_id: String,
 }
@@ -43,14 +42,26 @@ enum TranscriptMutation {
     },
 }
 
-struct JournalState {
+pub(crate) struct JournalState {
     config: JournalConfig,
     pending: VecDeque<TranscriptMutation>,
 }
 
-thread_local! {
-    static JOURNALS: RefCell<std::collections::BTreeMap<String, JournalState>> =
-        const { RefCell::new(std::collections::BTreeMap::new()) };
+impl JournalState {
+    pub(crate) fn next_event(&self) -> Result<Option<(SqliteSessionStore, AppendEvent)>, VmError> {
+        self.pending
+            .front()
+            .cloned()
+            .map(|mutation| {
+                append_event_for_mutation(&self.config, mutation)
+                    .map(|event| (self.config.store.clone(), event))
+            })
+            .transpose()
+    }
+
+    pub(crate) fn pop_front(&mut self) {
+        self.pending.pop_front();
+    }
 }
 
 #[derive(Default)]
@@ -59,52 +70,43 @@ pub(crate) struct HydratedTranscript {
     pub source_event_ids: Vec<Option<String>>,
 }
 
-/// Open the canonical session and install its per-agent-run journal before
-/// lifecycle hooks can mutate the in-memory transcript.
-pub(crate) async fn hydrate_and_configure(
+pub(crate) struct PreparedJournal {
+    pub transcript: HydratedTranscript,
+    pub state: JournalState,
+}
+
+/// Open the canonical session once and prepare its per-agent-run journal.
+/// The caller installs the returned state after creating or hydrating the
+/// corresponding VM session record.
+pub(crate) async fn prepare(
     session_id: &str,
     options: &DictMap,
     run_id: String,
     turn_id: String,
-) -> Result<HydratedTranscript, VmError> {
+) -> Result<PreparedJournal, VmError> {
     let root = session_store::canonical_store_root(Some(options))?;
     let store = session_store::open_canonical_agent_session(&root, session_id).await?;
     let events = session_store::read_all_events(&store, session_id).await?;
-    let hydrated = hydrate_events(events);
-    let config = JournalConfig {
-        root,
-        run_id,
-        turn_id,
-    };
-    JOURNALS.with(|journals| {
-        let mut journals = journals.borrow_mut();
-        if journals
-            .get(session_id)
-            .is_some_and(|journal| !journal.pending.is_empty())
-        {
-            return Err(VmError::Runtime(format!(
-                "agent transcript journal for `{session_id}` has unflushed mutations"
-            )));
-        }
-        journals.insert(
-            session_id.to_string(),
-            JournalState {
-                config,
-                pending: VecDeque::new(),
+    Ok(PreparedJournal {
+        transcript: hydrate_events(events),
+        state: JournalState {
+            config: JournalConfig {
+                store,
+                run_id,
+                turn_id,
             },
-        );
-        Ok(())
-    })?;
-    Ok(hydrated)
+            pending: VecDeque::new(),
+        },
+    })
 }
 
 pub(crate) fn enqueue_message(
-    session_id: &str,
+    journal: &mut Option<JournalState>,
     transcript_event: serde_json::Value,
     raw_message: serde_json::Value,
 ) {
     enqueue(
-        session_id,
+        journal,
         TranscriptMutation::MessageAdded {
             transcript_event,
             raw_message,
@@ -112,21 +114,24 @@ pub(crate) fn enqueue_message(
     );
 }
 
-pub(crate) fn enqueue_audit_event(session_id: &str, transcript_event: serde_json::Value) {
+pub(crate) fn enqueue_audit_event(
+    journal: &mut Option<JournalState>,
+    transcript_event: serde_json::Value,
+) {
     enqueue(
-        session_id,
+        journal,
         TranscriptMutation::AuditEventAdded { transcript_event },
     );
 }
 
 pub(crate) fn enqueue_messages_replaced(
-    session_id: &str,
+    journal: &mut Option<JournalState>,
     messages: Vec<serde_json::Value>,
     summary: Option<String>,
     source_event_ids: Vec<Option<String>>,
 ) {
     enqueue(
-        session_id,
+        journal,
         TranscriptMutation::MessagesReplaced {
             messages,
             summary,
@@ -136,12 +141,12 @@ pub(crate) fn enqueue_messages_replaced(
 }
 
 pub(crate) fn enqueue_message_removed(
-    session_id: &str,
+    journal: &mut Option<JournalState>,
     source_event_id: String,
     raw_message: serde_json::Value,
 ) {
     enqueue(
-        session_id,
+        journal,
         TranscriptMutation::MessageRemoved {
             source_event_id,
             raw_message,
@@ -149,12 +154,10 @@ pub(crate) fn enqueue_message_removed(
     );
 }
 
-fn enqueue(session_id: &str, mutation: TranscriptMutation) {
-    JOURNALS.with(|journals| {
-        if let Some(journal) = journals.borrow_mut().get_mut(session_id) {
-            journal.pending.push_back(mutation);
-        }
-    });
+fn enqueue(journal: &mut Option<JournalState>, mutation: TranscriptMutation) {
+    if let Some(journal) = journal {
+        journal.pending.push_back(mutation);
+    }
 }
 
 /// Persist queued mutations in chronological order. A mutation remains queued
@@ -162,42 +165,15 @@ fn enqueue(session_id: &str, mutation: TranscriptMutation) {
 /// retryable without a background writer or a best-effort drop.
 pub(crate) async fn flush(session_id: &str) -> Result<(), VmError> {
     loop {
-        let next = JOURNALS.with(|journals| {
-            journals.borrow().get(session_id).and_then(|journal| {
-                journal
-                    .pending
-                    .front()
-                    .cloned()
-                    .map(|mutation| (journal.config.clone(), mutation))
-            })
-        });
-        let Some((config, mutation)) = next else {
+        let Some((store, event)) = crate::agent_sessions::next_journal_event(session_id)? else {
             return Ok(());
         };
-
-        let store = session_store::open_canonical_agent_session(&config.root, session_id).await?;
-        let event = append_event_for_mutation(&config, mutation)?;
         store
             .append(session_id, event)
             .await
             .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
-
-        JOURNALS.with(|journals| {
-            if let Some(journal) = journals.borrow_mut().get_mut(session_id) {
-                journal.pending.pop_front();
-            }
-        });
+        crate::agent_sessions::pop_journal_event(session_id);
     }
-}
-
-pub(crate) fn clear(session_id: &str) {
-    JOURNALS.with(|journals| {
-        journals.borrow_mut().remove(session_id);
-    });
-}
-
-pub(crate) fn reset() {
-    JOURNALS.with(|journals| journals.borrow_mut().clear());
 }
 
 fn append_event_for_mutation(
@@ -481,25 +457,48 @@ mod tests {
         })
     }
 
+    async fn prepare_test_journal(
+        session_id: &str,
+        options: &DictMap,
+        run_id: &str,
+        turn_id: &str,
+    ) -> (HydratedTranscript, Option<JournalState>) {
+        let prepared = prepare(session_id, options, run_id.to_string(), turn_id.to_string())
+            .await
+            .expect("prepare journal");
+        crate::agent_sessions::open_or_create(Some(session_id.to_string()));
+        (prepared.transcript, Some(prepared.state))
+    }
+
+    fn install_test_journal(session_id: &str, journal: &mut Option<JournalState>) {
+        crate::agent_sessions::install_journal(
+            session_id,
+            journal.take().expect("prepared journal state"),
+        )
+        .expect("install journal");
+    }
+
+    fn mapping_config() -> JournalConfig {
+        JournalConfig {
+            store: SqliteSessionStore::open_in_memory().expect("in-memory store"),
+            run_id: "run-tool".to_string(),
+            turn_id: "turn-tool".to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn journal_persists_identity_hydrates_and_replays_replacements() {
-        reset();
+        crate::agent_sessions::reset_session_store();
         let root = tempfile::tempdir().expect("temp root");
         let options = options(root.path());
         let session_id = "journal-round-trip";
 
-        let initial = hydrate_and_configure(
-            session_id,
-            &options,
-            "run-first".to_string(),
-            "turn-first".to_string(),
-        )
-        .await
-        .expect("configure initial journal");
+        let (initial, mut journal) =
+            prepare_test_journal(session_id, &options, "run-first", "turn-first").await;
         assert!(initial.messages.is_empty());
 
         enqueue_message(
-            session_id,
+            &mut journal,
             transcript_event("event-user", "message", "user"),
             serde_json::json!({
                 "role": "user",
@@ -508,7 +507,7 @@ mod tests {
             }),
         );
         enqueue_message(
-            session_id,
+            &mut journal,
             transcript_event("event-tool", "tool_result", "tool_result"),
             serde_json::json!({
                 "role": "tool_result",
@@ -516,6 +515,7 @@ mod tests {
                 "content": "tool output",
             }),
         );
+        install_test_journal(session_id, &mut journal);
         flush(session_id).await.expect("flush messages");
 
         let store = session_store::open_canonical_agent_session(root.path(), session_id)
@@ -542,15 +542,9 @@ mod tests {
             Some(&"tool-1".to_string())
         );
 
-        clear(session_id);
-        let hydrated = hydrate_and_configure(
-            session_id,
-            &options,
-            "run-second".to_string(),
-            "turn-second".to_string(),
-        )
-        .await
-        .expect("hydrate persisted messages");
+        crate::agent_sessions::reset_session_store();
+        let (hydrated, mut journal) =
+            prepare_test_journal(session_id, &options, "run-second", "turn-second").await;
         assert_eq!(hydrated.messages.len(), 2);
         assert_eq!(hydrated.messages[0]["content"], "persist me");
         assert_eq!(
@@ -562,7 +556,7 @@ mod tests {
         );
 
         enqueue_message_removed(
-            session_id,
+            &mut journal,
             "event-tool".to_string(),
             serde_json::json!({
                 "role": "tool_result",
@@ -570,36 +564,26 @@ mod tests {
                 "content": "tool output",
             }),
         );
+        install_test_journal(session_id, &mut journal);
         flush(session_id).await.expect("flush durable removal");
-        clear(session_id);
+        crate::agent_sessions::reset_session_store();
 
-        let removed = hydrate_and_configure(
-            session_id,
-            &options,
-            "run-removal".to_string(),
-            "turn-removal".to_string(),
-        )
-        .await
-        .expect("hydrate durable removal");
+        let (removed, mut journal) =
+            prepare_test_journal(session_id, &options, "run-removal", "turn-removal").await;
         assert_eq!(removed.messages.len(), 1);
 
         enqueue_messages_replaced(
-            session_id,
+            &mut journal,
             vec![serde_json::json!({"role": "assistant", "content": "retained turn"})],
             Some("compacted context".to_string()),
             vec![Some("compacted-assistant".to_string())],
         );
+        install_test_journal(session_id, &mut journal);
         flush(session_id).await.expect("flush replacement");
-        clear(session_id);
+        crate::agent_sessions::reset_session_store();
 
-        let compacted = hydrate_and_configure(
-            session_id,
-            &options,
-            "run-third".to_string(),
-            "turn-third".to_string(),
-        )
-        .await
-        .expect("hydrate replacement");
+        let (compacted, mut journal) =
+            prepare_test_journal(session_id, &options, "run-third", "turn-third").await;
         assert_eq!(compacted.messages.len(), 2);
         assert_eq!(compacted.messages[0]["content"], "compacted context");
         assert_eq!(compacted.messages[1]["content"], "retained turn");
@@ -609,38 +593,101 @@ mod tests {
         );
 
         enqueue_message_removed(
-            session_id,
+            &mut journal,
             "new-in-memory-event".to_string(),
             serde_json::json!({"role": "assistant", "content": "retained turn"}),
         );
+        install_test_journal(session_id, &mut journal);
         flush(session_id).await.expect("flush fallback removal");
-        clear(session_id);
+        crate::agent_sessions::reset_session_store();
 
-        let removed_compacted = hydrate_and_configure(
-            session_id,
-            &options,
-            "run-fallback".to_string(),
-            "turn-fallback".to_string(),
-        )
-        .await
-        .expect("hydrate fallback removal");
+        let (removed_compacted, _) =
+            prepare_test_journal(session_id, &options, "run-fallback", "turn-fallback").await;
         assert_eq!(removed_compacted.messages.len(), 1);
         assert_eq!(
             removed_compacted.messages[0]["content"],
             "compacted context"
         );
-        clear(session_id);
-        reset();
+        crate::agent_sessions::reset_session_store();
+    }
+
+    #[tokio::test]
+    async fn failed_append_keeps_the_mutation_queued() {
+        crate::agent_sessions::reset_session_store();
+        let root = tempfile::tempdir().expect("temp root");
+        let options = options(root.path());
+        let session_id = "journal-failed-append";
+        let prepared = prepare(
+            session_id,
+            &options,
+            "run-failure".to_string(),
+            "turn-failure".to_string(),
+        )
+        .await
+        .expect("prepare journal");
+        let store = prepared.state.config.store.clone();
+        crate::agent_sessions::open_or_create(Some(session_id.to_string()));
+        let mut journal = Some(prepared.state);
+        enqueue_message(
+            &mut journal,
+            transcript_event("event-failure", "message", "user"),
+            serde_json::json!({"role": "user", "content": "must remain queued"}),
+        );
+        install_test_journal(session_id, &mut journal);
+        store
+            .close(session_id)
+            .await
+            .expect("close canonical session");
+
+        let error = flush(session_id)
+            .await
+            .expect_err("append to a closed session must fail");
+        assert!(error.to_string().contains("closed"));
+        assert!(
+            crate::agent_sessions::next_journal_event(session_id)
+                .expect("inspect queued mutation")
+                .is_some(),
+            "a failed append must not discard its pending mutation"
+        );
+        crate::agent_sessions::reset_session_store();
+    }
+
+    #[tokio::test]
+    async fn active_run_identity_cannot_be_overwritten() {
+        crate::agent_sessions::reset_session_store();
+        let root = tempfile::tempdir().expect("temp root");
+        let options = options(root.path());
+        let session_id = crate::agent_sessions::open_or_create(Some("journal-active-run".into()));
+        let first = prepare(
+            &session_id,
+            &options,
+            "run-first".to_string(),
+            "turn-first".to_string(),
+        )
+        .await
+        .expect("prepare first journal");
+        let second = prepare(
+            &session_id,
+            &options,
+            "run-second".to_string(),
+            "turn-second".to_string(),
+        )
+        .await
+        .expect("prepare second journal");
+
+        crate::agent_sessions::install_journal(&session_id, first.state)
+            .expect("install first journal");
+        let error = crate::agent_sessions::install_journal(&session_id, second.state)
+            .expect_err("a second active run must not replace the first run identity");
+        assert!(error.to_string().contains("already has an active journal"));
+
+        crate::agent_sessions::reset_session_store();
     }
 
     #[test]
     fn singular_tool_call_message_uses_tool_call_row() {
         let event = append_event_for_mutation(
-            &JournalConfig {
-                root: PathBuf::new(),
-                run_id: "run-tool".to_string(),
-                turn_id: "turn-tool".to_string(),
-            },
+            &mapping_config(),
             TranscriptMutation::MessageAdded {
                 transcript_event: transcript_event("event-call", "message", "assistant"),
                 raw_message: serde_json::json!({
@@ -662,11 +709,7 @@ mod tests {
     #[test]
     fn tool_lifecycle_event_uses_tool_call_row_and_metadata_identity() {
         let event = append_event_for_mutation(
-            &JournalConfig {
-                root: PathBuf::new(),
-                run_id: "run-tool".to_string(),
-                turn_id: "turn-tool".to_string(),
-            },
+            &mapping_config(),
             TranscriptMutation::AuditEventAdded {
                 transcript_event: serde_json::json!({
                     "id": "event-call",
@@ -687,7 +730,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn generic_agent_loop_persists_canonical_transcript_lifecycle() {
-        reset();
+        crate::agent_sessions::reset_session_store();
         crate::reset_thread_local_state();
         let root = tempfile::tempdir().expect("temp root");
         let root_literal = serde_json::to_string(
@@ -806,7 +849,7 @@ pipeline main(task) {{
                 && event.headers.get("turn_id") == Some(turn_id)
         }));
 
-        reset();
+        crate::agent_sessions::reset_session_store();
         crate::reset_thread_local_state();
     }
 }
