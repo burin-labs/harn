@@ -38,6 +38,13 @@ esac
 SH
 chmod +x "$fake_bin/cargo"
 
+cat > "$fake_bin/harn-lease" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "$FAKE_HARN_LEASE_RECORD"
+SH
+chmod +x "$fake_bin/harn-lease"
+
 cat > "$fake_bin/python3" <<'SH'
 #!/usr/bin/env bash
 echo "python3 must not run" >&2
@@ -80,6 +87,44 @@ PATH="$fake_bin:$PATH" \
 if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$custom_build_dir" "$record"; then
   echo "wrapper did not preserve explicit CARGO_BUILD_BUILD_DIR" >&2
   cat "$record" >&2
+  exit 1
+fi
+
+lease_record="$tmp_root/harn-lease-record.txt"
+PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  CARGO_BUILD_BUILD_DIR="$custom_build_dir" \
+  HARN_CARGO_LEASE_RUNNER=harn-lease \
+  HARN_CARGO_LEASE_OWNER=lease-test \
+  HARN_CARGO_LEASE_HOST=mac-local \
+  HARN_CARGO_LEASE_WAIT_MS=123 \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+
+cat > "$tmp_root/expected-harn-lease-record.txt" <<EOF
+host
+lease
+run
+cargo
+--owner
+lease-test
+--workspace
+$repo_root
+--target-dir
+$target_dir
+--build-dir
+$custom_build_dir
+--host
+mac-local
+--wait-ms
+123
+--
+test
+-p
+harn-vm
+EOF
+if ! diff -u "$tmp_root/expected-harn-lease-record.txt" "$lease_record"; then
+  echo "wrapper did not route the isolated Cargo invocation through Harn" >&2
   exit 1
 fi
 

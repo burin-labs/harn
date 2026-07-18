@@ -27,4 +27,34 @@ else
   harn_export_cargo_build_dir_for_target "$CARGO_TARGET_DIR" || true
 fi
 
+if [[ -n "${HARN_CARGO_LEASE_RUNNER:-}" ]]; then
+  if [[ "$HARN_CARGO_LEASE_RUNNER" == */* ]]; then
+    lease_runner="$HARN_CARGO_LEASE_RUNNER"
+  else
+    lease_runner="$(command -v "$HARN_CARGO_LEASE_RUNNER" || true)"
+  fi
+  if [[ -z "$lease_runner" || ! -x "$lease_runner" ]]; then
+    echo "error: HARN_CARGO_LEASE_RUNNER must resolve to an executable Harn binary" >&2
+    exit 1
+  fi
+
+  workspace="$(cd "$script_dir/.." && pwd -P)"
+  lease_args=(
+    host lease run cargo
+    --owner "${HARN_CARGO_LEASE_OWNER:-cargo-wrapper}"
+    --workspace "$workspace"
+    --target-dir "$CARGO_TARGET_DIR"
+  )
+  if [[ -n "${CARGO_BUILD_BUILD_DIR:-}" ]]; then
+    lease_args+=(--build-dir "$CARGO_BUILD_BUILD_DIR")
+  fi
+  if [[ -n "${HARN_CARGO_LEASE_HOST:-}" ]]; then
+    lease_args+=(--host "$HARN_CARGO_LEASE_HOST")
+  fi
+  if [[ -n "${HARN_CARGO_LEASE_WAIT_MS:-}" ]]; then
+    lease_args+=(--wait-ms "$HARN_CARGO_LEASE_WAIT_MS")
+  fi
+  exec "$lease_runner" "${lease_args[@]}" -- "$@"
+fi
+
 exec cargo "$@"

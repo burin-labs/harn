@@ -147,6 +147,7 @@ processes must serialize work on one host:
 ```bash
 harn host lease acquire \
     --host build-01 \
+    --resource-class rust-heavy \
     --owner eval-runner \
     --priority-class measurement \
     --no-expiry \
@@ -168,12 +169,55 @@ without mistaking unavailable process visibility for death. This is the
 appropriate lifetime for an authoritative measurement that must not expire
 mid-run.
 
-Inspect and release the same host explicitly:
+`whole-machine` remains the default resource class for existing callers.
+`rust-heavy` is a separate capacity-one class for CPU-, linker-, and
+cache-intensive Cargo work, so independent Rust verification can serialize
+without conflating it with every host-level activity. Inspect and release the
+same resource explicitly:
 
 ```bash
-harn host lease status --host build-01 --json
-harn host lease release --host build-01 --lease-id "$lease_id" --json
+harn host lease status --host build-01 --resource-class rust-heavy --json
+harn host lease release \
+    --host build-01 \
+    --resource-class rust-heavy \
+    --lease-id "$lease_id" \
+    --json
 ```
+
+For Cargo work, use the supervised boundary instead of manually acquiring a
+lease around a launcher process:
+
+```bash
+harn host lease run cargo \
+    --host build-01 \
+    --owner ci-verify \
+    --workspace "$workspace" \
+    --target-dir "$CARGO_TARGET_DIR" \
+    --build-dir "$CARGO_BUILD_BUILD_DIR" \
+    -- test -p harn-vm
+```
+
+The worker acquires `rust-heavy` before Cargo starts. On Unix it replaces
+itself with Cargo, preserving the lease-owner PID. On Windows it enrolls itself
+in a kill-on-close Job Object before spawning Cargo, so losing the worker also
+terminates its descendants before the lease can be recovered. On normal
+completion the supervisor writes a redacted receipt under
+`~/.harn/host-leases/receipts/` containing wait time, hold time, exit status,
+resource identity, and hashed workspace/target/build identities.
+
+The existing worktree Cargo wrapper can opt a heavy invocation into this
+boundary without changing its artifact-isolation policy:
+
+```bash
+HARN_CARGO_LEASE_RUNNER=/path/to/prebuilt/harn \
+HARN_CARGO_LEASE_OWNER=ci-verify \
+HARN_CARGO_LEASE_WAIT_MS=600000 \
+./scripts/cargo_with_worktree_build_dir.sh test -p harn-vm
+```
+
+The runner must already exist; the wrapper never builds Harn recursively.
+Leave the variable unset for formatting, metadata reads, and other static
+commands that do not need the `rust-heavy` resource.
 
 State defaults to `~/.harn/host-leases`. Set `HARN_HOST_LEASE_ROOT` to isolate
 tests or relocate state for processes running under the same OS account. A
