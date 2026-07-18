@@ -81,11 +81,16 @@ assert_rebuilt_for() {
   fi
 }
 
-# Cargo tracks rerun-if-changed inputs by mtime. Pin the baseline fixture to a
-# past timestamp so the mutation is distinguishable even on coarse filesystems.
-touch -t 200001010101 "$persona_asset"
-run_check "$tmp_root/persona-baseline.log" check --quiet
-sleep 1
+# Materialize both watched roots before the single baseline build. Cargo tracks
+# rerun-if-changed inputs by mtime, so pin each fixture to the past and make the
+# later mutations distinguishable even on coarse filesystems.
+mkdir -p "$(dirname "$portal_asset")"
+if [[ ! -f "$portal_asset" ]]; then
+  printf '%s\n' '// portal fallback asset for embedded watcher coverage' > "$portal_asset"
+fi
+touch -t 200001010101 "$persona_asset" "$portal_asset"
+run_check "$tmp_root/baseline.log" check --quiet
+
 printf '\n# embedded asset rebuild test marker\n' >> "$persona_asset"
 run_check "$tmp_root/persona-dirty.log" -vv check
 assert_rebuilt_for \
@@ -93,18 +98,9 @@ assert_rebuilt_for \
   "$tmp_root/persona-dirty.log" \
   "crates/harn-cli/assets/persona-templates"
 
-# Refresh after restoration before exercising the second root. Without this,
-# Cargo could cite the first restoration and falsely attribute the dirty build
-# to the portal asset.
-cp -p "$persona_backup" "$persona_asset"
-run_check "$tmp_root/persona-restored.log" check --quiet
-
-mkdir -p "$(dirname "$portal_asset")"
-if [[ ! -f "$portal_asset" ]]; then
-  printf '%s\n' '// portal fallback asset for embedded watcher coverage' > "$portal_asset"
-fi
-run_check "$tmp_root/portal-baseline.log" check --quiet
-sleep 1
+# Leave the persona mutation in place: its fingerprint is now current, so the
+# next Cargo check can attribute the only new change to the portal root without
+# paying for a separate restoration build.
 printf '\n// embedded asset rebuild test marker\n' >> "$portal_asset"
 run_check "$tmp_root/portal-dirty.log" -vv check
 assert_rebuilt_for "portal asset" "$tmp_root/portal-dirty.log" "$portal_dist"
