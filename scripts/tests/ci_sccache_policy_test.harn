@@ -81,6 +81,11 @@ fn workflow() {
             if: "matrix.kind == 'behavior'",
             env: {CARGO_BUILD_JOBS: "4"},
           },
+          {
+            name: "Prove embedded assets invalidate the warm CLI",
+            if: "matrix.kind == 'behavior'",
+            run: "HARN_BIN=target/debug/harn cargo metadata --format-version 1 --no-deps scripts/tests/embedded_asset_rebuild_test.sh",
+          },
         ],
       },
       "rust-test": {
@@ -112,6 +117,12 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
   const errors = ci_sccache_policy_errors(invalid_action, invalid_workflow)
   assert(
     errors.contains(".github/actions/sccache/action.yml must use exactly one pinned sticky-disk action"),
+  )
+  assert(
+    errors
+      .contains(
+      "ci.yml:rust-builds must run the embedded-asset rebuild proof on the warm behavior graph",
+    ),
   )
   assert(
     errors.contains("ci.yml:package-audit must retain rust-cache only on the GitHub-hosted fallback"),
