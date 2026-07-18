@@ -1244,6 +1244,7 @@ impl<'a> Linter<'a> {
                 }
                 self.imports.push(ImportInfo {
                     names: names.clone(),
+                    invalid_names: Default::default(),
                     span: snode.span,
                     is_pub: *is_pub,
                 });

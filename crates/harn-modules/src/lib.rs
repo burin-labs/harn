@@ -1088,6 +1088,13 @@ fn load_module(
         collect_type_declarations(node, &mut module.type_declarations);
         collect_callable_declarations(node, &mut module.callable_declarations);
     }
+    if let Some(stdlib_module) = stdlib_module_from_path(path) {
+        module.own_exports.extend(
+            stdlib::builtin_reexports(stdlib_module)
+                .iter()
+                .map(|name| (*name).to_string()),
+        );
+    }
     // Seed the transitive `exports` set from local exports plus selective
     // re-export names. Wildcard re-exports are folded in by
     // [`resolve_re_exports`] after every module has been loaded.

@@ -344,6 +344,23 @@ fn stdlib_imports_resolve_to_embedded_sources() {
 }
 
 #[test]
+fn stdlib_builtin_reexports_participate_in_static_resolution() {
+    let tmp = tempfile::tempdir().unwrap();
+    let entry = write_file(
+        tmp.path(),
+        "entry.harn",
+        "import { assert_eq } from \"std/testing\"\nassert_eq(1, 1)\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    assert_eq!(graph.selective_import_issues(&entry), Vec::new());
+    assert_eq!(
+        graph.imported_names_for_file(&entry),
+        Some(HashSet::from(["assert_eq".to_string()])),
+    );
+}
+
+#[test]
 fn stdlib_internal_imports_resolve_without_leaking_to_callers() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
