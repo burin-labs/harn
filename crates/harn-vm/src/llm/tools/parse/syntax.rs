@@ -433,12 +433,14 @@ pub(crate) struct HeredocSpan {
 
 /// Why a `<<` opener is not a complete heredoc. Carries the tag where one was
 /// read so the value parser can reproduce its precise model-facing diagnostics.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum HeredocError {
     /// `<<` was not followed by an identifier tag (e.g. a bare shift operator).
     MissingTag,
     /// The opening `<<TAG` line was not terminated by a newline.
     MissingNewline { tag: String },
+    /// A count-anchored opener declared an integer that does not fit in `usize`.
+    InvalidCount { tag: String },
     /// End of input reached before a line opening with the closing tag.
     Unterminated { tag: String },
 }
@@ -490,7 +492,11 @@ pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, Hered
             digits_end += 1;
         }
         if digits_end > digits_start {
-            declared_lines = src[digits_start..digits_end].parse::<usize>().ok();
+            declared_lines = Some(
+                src[digits_start..digits_end]
+                    .parse::<usize>()
+                    .map_err(|_| HeredocError::InvalidCount { tag: tag.clone() })?,
+            );
             pos = digits_end;
         }
     }
@@ -554,7 +560,7 @@ pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, Hered
 
 /// Scan the body of a count-anchored `<<TAG:N` heredoc (harn#5033): exactly `n`
 /// physical lines starting at `content_start`, then a line that — after leading
-/// whitespace — is the closing `tag` at a word boundary.
+/// whitespace — is exactly the closing `tag` plus an optional CR line ending.
 ///
 /// The returned `content` is the BYTE-EXACT slice of those `n` newline-terminated
 /// lines, INCLUDING each line's trailing `\n` (so a payload's final newline and
@@ -592,11 +598,7 @@ fn scan_counted_heredoc_body(
     let line = &src[line_start..pos];
     let leading_ws_len = line.len() - line.trim_start().len();
     let after_ws = &line[leading_ws_len..];
-    let closes = after_ws.strip_prefix(&tag).is_some_and(|rest| {
-        rest.chars()
-            .next()
-            .is_none_or(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'))
-    });
+    let closes = after_ws.strip_suffix('\r').unwrap_or(after_ws) == tag;
     if !closes {
         return Err(HeredocError::Unterminated { tag });
     }
@@ -936,6 +938,9 @@ pub(super) fn find_close_tag(src: &str, from: usize, needle: &str) -> CloseScan 
                 | Err(HeredocError::Unterminated { .. }) => {
                     return CloseScan::NeedMore;
                 }
+                // More bytes cannot make an overflowing count valid. Keep
+                // scanning so the owning value parser can emit InvalidCount.
+                Err(HeredocError::InvalidCount { .. }) => {}
                 // Not a heredoc (bare `<<`); fall through and treat as content.
                 Err(HeredocError::MissingTag) => {}
             },
@@ -1109,6 +1114,35 @@ mod counted_heredoc_tests {
     #[test]
     fn counted_empty_body_is_valid() {
         assert_eq!(body("<<E:0\nE").unwrap(), "");
+    }
+
+    #[test]
+    fn counted_integer_body_is_content() {
+        assert_eq!(body("<<E:1\n123\nE").unwrap(), "123\n");
+    }
+
+    #[test]
+    fn counted_close_accepts_indentation_and_crlf_only() {
+        assert_eq!(body("<<E:1\r\na\r\n  E\r\n").unwrap(), "a\r\n");
+    }
+
+    #[test]
+    fn counted_close_rejects_trailing_bytes() {
+        let expected = Err(HeredocError::Unterminated {
+            tag: "E".to_string(),
+        });
+        assert_eq!(body("<<E:1\na\nE trailing"), expected);
+        assert_eq!(body("<<E:1\na\nE "), expected);
+    }
+
+    #[test]
+    fn counted_overflow_is_typed_invalid_not_legacy_fallback() {
+        assert_eq!(
+            body("<<E:184467440737095516160\na\nE"),
+            Err(HeredocError::InvalidCount {
+                tag: "E".to_string(),
+            })
+        );
     }
 
     #[test]

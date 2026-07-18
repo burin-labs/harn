@@ -98,6 +98,15 @@ pub(super) fn is_heredoc_opener(value: &str) -> bool {
     }
 }
 
+/// Counted openers are unambiguous framing declarations. Unlike legacy
+/// `<<TAG`, they must never survive as literal arguments when a body is absent.
+fn is_counted_heredoc_opener(value: &str) -> bool {
+    is_heredoc_opener(value)
+        && value.rsplit_once(':').is_some_and(|(_, count)| {
+            !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit())
+        })
+}
+
 /// Walk one ```` ```tool ```` block, delegating each trailing heredoc body to the
 /// shared [`scan_heredoc`] authority, and return its header, decoded heredoc
 /// bodies, and the offset past its close fence.
@@ -201,15 +210,13 @@ pub(super) fn line_at(src: &str, start: usize) -> (&str, usize, usize) {
 /// Bind each argument in `args` whose value is a heredoc opener to the trailing
 /// heredoc body that declared the same opener, claiming it from `pool`.
 ///
-/// A heredoc-opener value with no matching trailing body is LEFT UNCHANGED (a
-/// literal `<<EOF` line of file content survives — the #5015 promise), never a
-/// forced error; a malformed body is already a fail-loud block error from
-/// [`consume_tool_block`]. Any body left in `pool` after the whole batch — a
-/// trailing heredoc no argument declared — is reported by the caller.
+/// An ambiguous uncounted opener with no matching body is left unchanged so a
+/// literal `<<EOF` survives. A counted opener is an explicit framing declaration
+/// and fails closed when no matching body exists.
 pub(super) fn apply_segments(
     args: &mut serde_json::Map<String, serde_json::Value>,
     pool: &mut Vec<VerbatimSegment>,
-) {
+) -> Result<(), BlockError> {
     let openers: Vec<(String, String)> = args
         .iter()
         .filter_map(|(key, value)| {
@@ -220,10 +227,32 @@ pub(super) fn apply_segments(
         })
         .collect();
 
+    for (_, opener) in &openers {
+        if !is_counted_heredoc_opener(opener) {
+            continue;
+        }
+        let required = openers
+            .iter()
+            .filter(|(_, candidate)| candidate == opener)
+            .count();
+        let available = pool
+            .iter()
+            .filter(|segment| &segment.opener == opener)
+            .count();
+        if available < required {
+            return Err(BlockError::InvalidJson {
+                detail: format!(
+                    "counted verbatim declaration `{opener}` has {available} matching bodies, expected {required}"
+                ),
+            });
+        }
+    }
+
     for (key, opener) in openers {
         if let Some(index) = pool.iter().position(|segment| segment.opener == opener) {
             let segment = pool.remove(index);
             args.insert(key, serde_json::Value::String(segment.value));
         }
     }
+    Ok(())
 }

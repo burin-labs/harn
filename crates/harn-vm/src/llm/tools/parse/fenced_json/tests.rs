@@ -930,6 +930,76 @@ fn verbatim_wrong_count_fails_loud() {
     );
 }
 
+fn assert_verbatim_rejected(block: &str, expected_error_count: usize) {
+    let out = parse(block);
+    assert_eq!(out.calls, Vec::<serde_json::Value>::new());
+    assert_eq!(out.errors.len(), expected_error_count, "{:?}", out.errors);
+}
+
+#[test]
+fn verbatim_count_overflow_never_downgrades_or_dispatches() {
+    assert_verbatim_rejected(
+        "```tool\n{ \"name\": \"write_file\", \"args\": { \"content\": \"<<C:184467440737095516160\" } }\n\
+         <<C:184467440737095516160\nbody\nC\n```",
+        1,
+    );
+}
+
+#[test]
+fn verbatim_counted_close_with_suffix_never_drops_bytes_or_dispatches() {
+    assert_verbatim_rejected(
+        "```tool\n{ \"name\": \"write_file\", \"args\": { \"content\": \"<<C:1\" } }\n\
+         <<C:1\nbody\nC trailing payload\n```",
+        1,
+    );
+}
+
+#[test]
+fn verbatim_counted_declaration_without_body_never_dispatches() {
+    assert_verbatim_rejected(
+        "```tool\n{\"name\":\"write_file\",\"args\":{\"content\":\"<<C:1\"}}\n```",
+        1,
+    );
+}
+
+#[test]
+fn verbatim_mismatched_counted_body_never_dispatches() {
+    assert_verbatim_rejected(
+        "```tool\n{\"name\":\"write_file\",\"args\":{\"content\":\"<<C:1\"}}\n\
+         <<D:1\nbody\nD\n```",
+        1,
+    );
+}
+
+#[test]
+fn verbatim_one_of_two_missing_counted_bodies_never_dispatches() {
+    assert_verbatim_rejected(
+        "```tool\n{\"name\":\"edit_file\",\"args\":{\"old\":\"<<OLD:1\",\"new\":\"<<NEW:1\"}}\n\
+         <<OLD:1\nbefore\nOLD\n```",
+        1,
+    );
+}
+
+#[test]
+fn verbatim_duplicate_counted_declarations_need_distinct_bodies() {
+    assert_verbatim_rejected(
+        "```tool\n{\"name\":\"edit_file\",\"args\":{\"old\":\"<<BODY:1\",\"new\":\"<<BODY:1\"}}\n\
+         <<BODY:1\nonly one\nBODY\n```",
+        1,
+    );
+}
+
+#[test]
+fn verbatim_counted_crlf_close_round_trips() {
+    let out = parse(
+        "```tool\r\n{\"name\":\"write_file\",\"args\":{\"content\":\"<<C:1\"}}\r\n\
+         <<C:1\r\nbody\r\n  C\r\n```",
+    );
+    assert_eq!(out.errors, Vec::<String>::new());
+    assert_eq!(out.calls.len(), 1);
+    assert_eq!(arg(&out.calls[0], "content").unwrap(), "body\r\n");
+}
+
 // #5015 PRESERVATION: an argument whose value is literally `<<EOF` with NO
 // trailing heredoc body stays a literal string — never misread as a declaration.
 #[test]

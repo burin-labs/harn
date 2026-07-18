@@ -371,6 +371,7 @@ fn parse_block_bodies(
     let trimmed = body.trim();
     let mut calls = Vec::new();
     let mut errors = Vec::new();
+    let mut verbatim_framing_failed = false;
     // Verbatim segments (harn#5033) are matched to sentinel-valued arguments by
     // name as each object is parsed; leftovers below are a header/segment
     // mismatch that must fail loud rather than silently drop a payload.
@@ -392,7 +393,12 @@ fn parse_block_bodies(
                 saw_value = true;
                 match value {
                     serde_json::Value::Object(mut map) => {
-                        inject_verbatim_segments(&mut map, &mut pool);
+                        if let Err(err) = inject_verbatim_segments(&mut map, &mut pool) {
+                            errors.push(err);
+                            verbatim_framing_failed = true;
+                            pool.clear();
+                            continue;
+                        }
                         match normalize_json_tool_call_object(map, false) {
                             Ok(call) => calls.push(call),
                             Err(err) => errors.push(err),
@@ -421,12 +427,17 @@ fn parse_block_bodies(
     // A trailing heredoc no argument's value declared is a header/body mismatch —
     // fail loud so a stray body is never silently dropped.
     for leftover in &pool {
+        verbatim_framing_failed = true;
         errors.push(BlockError::InvalidJson {
             detail: format!(
                 "a verbatim heredoc `{}` trails the block but no argument's value declared it",
                 leftover.opener
             ),
         });
+    }
+
+    if verbatim_framing_failed {
+        calls.clear();
     }
 
     if !saw_value && errors.is_empty() {
@@ -441,20 +452,21 @@ fn parse_block_bodies(
 fn inject_verbatim_segments(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     pool: &mut Vec<VerbatimSegment>,
-) {
+) -> Result<(), BlockError> {
     let args_key = if obj.contains_key("args") {
         "args"
     } else if obj.contains_key("arguments") {
         "arguments"
     } else {
-        return;
+        return Ok(());
     };
     if let Some(args) = obj
         .get_mut(args_key)
         .and_then(serde_json::Value::as_object_mut)
     {
-        verbatim::apply_segments(args, pool);
+        verbatim::apply_segments(args, pool)?;
     }
+    Ok(())
 }
 
 /// Normalize one JSON tool-call object into Harn's `{ name, arguments }`
