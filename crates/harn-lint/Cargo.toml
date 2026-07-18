@@ -21,5 +21,8 @@ harn-rules = { path = "../harn-rules", version = "=0.10.23" }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libloading = "0.9"
 
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
 [lints]
 workspace = true

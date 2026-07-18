@@ -3269,6 +3269,7 @@ dependencies = [
  "harn-rules",
  "harn-vm",
  "libloading 0.9.0",
+ "tokio",
 ]
 
 [[package]]

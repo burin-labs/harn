@@ -49,7 +49,7 @@ impl Compiler {
             string_constants: std::collections::HashMap::new(),
             local_scopes: vec![std::collections::HashMap::new()],
             module_level: true,
-            captured_idents: std::collections::HashSet::new(),
+            captured_bindings: std::collections::HashSet::new(),
         }
     }
 
@@ -326,12 +326,20 @@ impl Compiler {
         if let Some(sn) = main {
             self.compile_top_level_declarations(program)?;
             if let Node::Pipeline { body, extends, .. } = peel_node(sn) {
-                if let Some(parent_name) = extends {
-                    self.compile_parent_pipeline(program, parent_name)?;
-                }
-                let saved = std::mem::replace(&mut self.module_level, false);
-                self.compile_block(body)?;
-                self.module_level = saved;
+                self.compile_with_pipeline_captures(
+                    program,
+                    body,
+                    extends.as_deref(),
+                    |compiler| {
+                        if let Some(parent_name) = extends {
+                            compiler.compile_parent_pipeline(program, parent_name)?;
+                        }
+                        let saved = std::mem::replace(&mut compiler.module_level, false);
+                        let result = compiler.compile_block(body);
+                        compiler.module_level = saved;
+                        result
+                    },
+                )?;
                 pipeline_emits_value = true;
             }
         } else {
@@ -441,20 +449,28 @@ impl Compiler {
                 ..
             } = peel_node(sn)
             {
-                if let Some(parent_name) = extends {
-                    self.compile_parent_pipeline(program, parent_name)?;
-                }
-                let saved = std::mem::replace(&mut self.module_level, false);
-                if bind_params_from_globals {
-                    for param in params {
-                        self.define_local_slot(param, false);
-                        let idx = self.string_constant(param);
-                        self.chunk.emit_u16(Op::GetVar, idx, self.line);
-                        self.emit_init_or_define_binding(param, false);
-                    }
-                }
-                self.compile_block(body)?;
-                self.module_level = saved;
+                self.compile_with_pipeline_captures(
+                    program,
+                    body,
+                    extends.as_deref(),
+                    |compiler| {
+                        if let Some(parent_name) = extends {
+                            compiler.compile_parent_pipeline(program, parent_name)?;
+                        }
+                        let saved = std::mem::replace(&mut compiler.module_level, false);
+                        if bind_params_from_globals {
+                            for param in params {
+                                compiler.define_local_slot(param, false);
+                                let idx = compiler.string_constant(param);
+                                compiler.chunk.emit_u16(Op::GetVar, idx, compiler.line);
+                                compiler.emit_init_or_define_binding(param, false);
+                            }
+                        }
+                        let result = compiler.compile_block(body);
+                        compiler.module_level = saved;
+                        result
+                    },
+                )?;
             }
         }
 
@@ -463,28 +479,6 @@ impl Compiler {
         self.chunk.emit(Op::Return, self.line);
         super::ensure_chunk_addressable(&self.chunk, "the pipeline body", self.line)?;
         Ok(self.chunk)
-    }
-
-    /// Recursively compile parent pipeline bodies (for extends).
-    pub(super) fn compile_parent_pipeline(
-        &mut self,
-        program: &[SNode],
-        parent_name: &str,
-    ) -> Result<(), CompileError> {
-        let parent = program
-            .iter()
-            .find(|sn| matches!(&sn.node, Node::Pipeline { name, .. } if name == parent_name));
-        if let Some(sn) = parent {
-            if let Node::Pipeline { body, extends, .. } = &sn.node {
-                if let Some(grandparent) = extends {
-                    self.compile_parent_pipeline(program, grandparent)?;
-                }
-                for stmt in body {
-                    self.compile_discarded_stmt(stmt)?;
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Emit bytecode preamble for default parameter values.
@@ -925,38 +919,23 @@ impl Compiler {
         }
     }
 
-    /// Seed [`Compiler::captured_idents`] for the function-like body about to be
-    /// compiled: every identifier that appears anywhere inside a nested closure
-    /// literal in `body`. A mutable local whose name lands here is captured by a
-    /// closure and must be boxed into a shared cell (see [`Self::is_boxed_capture`]).
-    /// Called once per body — `fn`/closure/`tool` bodies, pipeline bodies, and
-    /// the module top level — each with its own set.
+    /// Seed exact source bindings captured by nested callables in the body
+    /// about to be compiled. Parser-owned lexical analysis accounts for
+    /// parameters, patterns, blocks, loops, catches, selects, and nested
+    /// callable boundaries before the VM decides whether to use `DefCell`.
     pub(super) fn seed_captured_idents(&mut self, body: &[SNode]) {
-        let mut set = std::collections::HashSet::new();
-        for sn in body {
-            collect_closure_capture_idents(sn, &mut set);
-        }
-        self.captured_idents = set;
+        self.captured_bindings = harn_parser::lexical::captured_bindings_in_nested_callables(body);
     }
 
-    /// Whether a binding named `name` declared `mutable` here must be boxed into
-    /// a shared cell because a nested closure captures it. Only mutable (`let`)
-    /// bindings qualify: `const` locals and params are immutable in Harn (they
-    /// can be neither rebound nor mutated in place), so a by-value snapshot of
-    /// them is already indistinguishable from a shared reference.
+    /// Whether this mutable source binding must be boxed into a shared cell
+    /// because a nested callable captures this exact declaration.
     #[inline]
-    fn is_boxed_capture(&self, name: &str, mutable: bool) -> bool {
-        mutable && self.captured_idents.contains(name)
+    fn is_boxed_capture(&self, binding: &harn_parser::lexical::BindingId, mutable: bool) -> bool {
+        mutable && self.captured_bindings.contains(binding)
     }
 
     fn define_local_slot(&mut self, name: &str, mutable: bool) -> Option<u16> {
-        if self.module_level
-            || harn_parser::is_discard_name(name)
-            || self.is_boxed_capture(name, mutable)
-        {
-            // A boxed capture lives in the env behind a shared cell, never in a
-            // by-value local slot, so its reads/writes route through the
-            // cell-aware env path (`GetVar`/`SetVar`) shared with the closure.
+        if self.module_level || harn_parser::is_discard_name(name) {
             return None;
         }
         let current = self.local_scopes.last_mut()?;
@@ -1000,18 +979,32 @@ impl Compiler {
     }
 
     pub(super) fn emit_define_binding(&mut self, name: &str, mutable: bool) {
-        if self.is_boxed_capture(name, mutable) {
-            // Box a closure-captured mutable local into a shared cell. Runs
-            // regardless of `module_level`: a captured top-level `let` needs the
-            // same shared cell so a top-level closure observes its writes.
-            let idx = self.string_constant(name);
-            self.chunk.emit_u16(Op::DefCell, idx, self.line);
-        } else if let Some(slot) = self.define_local_slot(name, mutable) {
+        if let Some(slot) = self.define_local_slot(name, mutable) {
             self.chunk.emit_u16(Op::DefLocalSlot, slot, self.line);
         } else {
             let idx = self.string_constant(name);
             let op = if mutable { Op::DefVar } else { Op::DefLet };
             self.chunk.emit_u16(op, idx, self.line);
+        }
+    }
+
+    /// Define a binding parsed from source. Synthetic compiler temporaries use
+    /// [`Self::emit_define_binding`] and are deliberately absent from lexical
+    /// capture analysis.
+    pub(super) fn emit_source_binding(
+        &mut self,
+        name: &str,
+        mutable: bool,
+        binding: harn_parser::lexical::BindingId,
+    ) {
+        if self.is_boxed_capture(&binding, mutable) {
+            // Box a closure-captured mutable local into a shared cell. Runs
+            // regardless of `module_level`: a captured top-level `let` needs the
+            // same shared cell so a top-level closure observes its writes.
+            let idx = self.string_constant(name);
+            self.chunk.emit_u16(Op::DefCell, idx, self.line);
+        } else {
+            self.emit_define_binding(name, mutable);
         }
     }
 
@@ -1629,60 +1622,5 @@ impl Compiler {
 impl Default for Compiler {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Collect into `set` every identifier that appears inside a nested closure
-/// literal reachable from `node` (without descending past `node` itself if it
-/// is not a closure). A `Node::Closure`/`FnDecl`/`ToolDecl` body has *all* of
-/// its identifiers harvested (via [`collect_all_idents`], which recurses
-/// through its own nested closures too, so a name captured across several
-/// closure levels is still recorded); any other node is only traversed to find
-/// the closures within it. The current body's own top-level identifiers are
-/// therefore never added unless they also appear inside a closure — which is
-/// exactly the "is this local captured?" question.
-fn collect_closure_capture_idents(node: &SNode, set: &mut std::collections::HashSet<String>) {
-    match super::peel_node(node) {
-        Node::Closure { body, .. } | Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => {
-            for sn in body {
-                collect_all_idents(sn, set);
-            }
-        }
-        // `parallel`/`spawn` bodies are lowered (in `compile_parallel` /
-        // `compile_spawn_expr`) into nested closures that capture the enclosing
-        // environment exactly like a closure literal — each concurrent branch
-        // runs `closure.clone()`, sharing the captured `Cell`s by `Arc`. A
-        // mutable local mutated inside such a body must therefore be boxed too;
-        // otherwise its write lands in the branch's private env copy and is
-        // silently lost — the very by-value regression this cutover removes,
-        // but re-introduced *only* for concurrent code. The driving
-        // `expr`/options run in the enclosing scope, so we still descend into
-        // `expr` to find any closure literals nested there.
-        Node::Parallel { expr, body, .. } => {
-            for sn in body {
-                collect_all_idents(sn, set);
-            }
-            collect_closure_capture_idents(expr, set);
-        }
-        Node::SpawnExpr { body } => {
-            for sn in body {
-                collect_all_idents(sn, set);
-            }
-        }
-        _ => {
-            for child in harn_parser::visit::immediate_children(node) {
-                collect_closure_capture_idents(child, set);
-            }
-        }
-    }
-}
-
-/// Add every `Node::Identifier` name anywhere under `node` (inclusive) to `set`.
-fn collect_all_idents(node: &SNode, set: &mut std::collections::HashSet<String>) {
-    if let Node::Identifier(name) = super::peel_node(node) {
-        set.insert(name.clone());
-    }
-    for child in harn_parser::visit::immediate_children(node) {
-        collect_all_idents(child, set);
     }
 }

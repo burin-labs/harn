@@ -1,4 +1,5 @@
-use harn_parser::{is_discard_name, BindingPattern, Node, SNode};
+use harn_lexer::Span;
+use harn_parser::{is_discard_name, lexical::BindingId, BindingPattern, Node, SNode};
 
 use crate::chunk::{Constant, Op};
 
@@ -6,12 +7,27 @@ use super::error::CompileError;
 use super::Compiler;
 
 impl Compiler {
-    fn emit_binding_target(&mut self, name: &str, mutable: bool) {
+    fn emit_binding_target(&mut self, name: &str, mutable: bool, declaration: Span) {
         if is_discard_name(name) {
             self.chunk.emit(Op::Pop, self.line);
             return;
         }
-        self.emit_define_binding(name, mutable);
+        self.emit_source_binding(
+            name,
+            mutable,
+            BindingId::from_declaration(name, declaration),
+        );
+    }
+
+    /// Match patterns bind ephemeral, immutable locals rather than source
+    /// declarations. They have no declaration identity for capture analysis,
+    /// so preserve the ordinary scoped-binding lowering.
+    fn emit_match_binding(&mut self, name: &str) {
+        if is_discard_name(name) {
+            self.chunk.emit(Op::Pop, self.line);
+            return;
+        }
+        self.emit_define_binding(name, false);
     }
 
     /// Compile a destructuring binding pattern.
@@ -21,10 +37,11 @@ impl Compiler {
         &mut self,
         pattern: &BindingPattern,
         is_mutable: bool,
+        declaration: Span,
     ) -> Result<(), CompileError> {
         match pattern {
             BindingPattern::Identifier(name) => {
-                self.emit_binding_target(name, is_mutable);
+                self.emit_binding_target(name, is_mutable, declaration);
             }
             BindingPattern::Dict(fields) => {
                 // Runtime `__assert_dict(value)` type check on the RHS.
@@ -58,7 +75,7 @@ impl Compiler {
                         self.chunk.patch_jump(end);
                     }
                     let binding_name = field.alias.as_deref().unwrap_or(&field.key);
-                    self.emit_binding_target(binding_name, is_mutable);
+                    self.emit_binding_target(binding_name, is_mutable, declaration);
                 }
 
                 if let Some(rest) = rest_field {
@@ -74,7 +91,7 @@ impl Compiler {
                         .emit_u16(Op::BuildList, non_rest.len() as u16, self.line);
                     self.chunk.emit_u8(Op::Call, 2, self.line);
                     let rest_name = &rest.key;
-                    self.emit_binding_target(rest_name, is_mutable);
+                    self.emit_binding_target(rest_name, is_mutable, declaration);
                 } else {
                     self.chunk.emit(Op::Pop, self.line);
                 }
@@ -96,12 +113,12 @@ impl Compiler {
                 let first_key_idx = self.string_constant("first");
                 self.chunk
                     .emit_u16(Op::GetProperty, first_key_idx, self.line);
-                self.emit_binding_target(first_name, is_mutable);
+                self.emit_binding_target(first_name, is_mutable, declaration);
 
                 let second_key_idx = self.string_constant("second");
                 self.chunk
                     .emit_u16(Op::GetProperty, second_key_idx, self.line);
-                self.emit_binding_target(second_name, is_mutable);
+                self.emit_binding_target(second_name, is_mutable, declaration);
                 // No trailing Pop: GetProperty consumed the source pair.
             }
             BindingPattern::List(elements) => {
@@ -135,7 +152,7 @@ impl Compiler {
                         self.chunk.emit(Op::Pop, self.line);
                         self.chunk.patch_jump(end);
                     }
-                    self.emit_binding_target(&elem.name, is_mutable);
+                    self.emit_binding_target(&elem.name, is_mutable, declaration);
                 }
 
                 if let Some(rest) = rest_elem {
@@ -147,7 +164,7 @@ impl Compiler {
                     self.chunk.emit_u16(Op::Constant, start_idx, self.line);
                     self.chunk.emit(Op::Nil, self.line);
                     self.chunk.emit(Op::Slice, self.line);
-                    self.emit_binding_target(&rest.name, is_mutable);
+                    self.emit_binding_target(&rest.name, is_mutable, declaration);
                 } else {
                     self.chunk.emit(Op::Pop, self.line);
                 }
@@ -283,7 +300,7 @@ impl Compiler {
                 let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
                 self.chunk.emit_u16(Op::Constant, idx_const, self.line);
                 self.chunk.emit(Op::Subscript, self.line);
-                self.emit_binding_target(binding_name, false);
+                self.emit_match_binding(binding_name);
             }
         }
 
@@ -435,7 +452,7 @@ impl Compiler {
                 Node::Identifier(name) => {
                     self.begin_scope();
                     self.chunk.emit(Op::Dup, self.line);
-                    self.emit_binding_target(name, false);
+                    self.emit_match_binding(name);
                     // Optional guard
                     if let Some(ref guard) = arm.guard {
                         self.compile_node(guard)?;
@@ -518,7 +535,7 @@ impl Compiler {
                         let key_idx = self.string_constant(key);
                         self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                         self.chunk.emit(Op::Subscript, self.line);
-                        self.emit_binding_target(binding, false);
+                        self.emit_match_binding(binding);
                     }
 
                     // Optional guard
@@ -619,7 +636,7 @@ impl Compiler {
                         let idx_const = self.chunk.add_constant(Constant::Int(*i as i64));
                         self.chunk.emit_u16(Op::Constant, idx_const, self.line);
                         self.chunk.emit(Op::Subscript, self.line);
-                        self.emit_binding_target(name, false);
+                        self.emit_match_binding(name);
                     }
 
                     // `...rest` binds the tail `list[leading..]`. `Dup` first so
@@ -631,7 +648,7 @@ impl Compiler {
                         self.chunk.emit_u16(Op::Constant, start_idx, self.line);
                         self.chunk.emit(Op::Nil, self.line);
                         self.chunk.emit(Op::Slice, self.line);
-                        self.emit_binding_target(rest_name, false);
+                        self.emit_match_binding(rest_name);
                     }
 
                     // Optional guard

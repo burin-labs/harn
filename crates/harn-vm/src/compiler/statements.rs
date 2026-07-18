@@ -514,6 +514,7 @@ impl Compiler {
         pattern: &harn_parser::BindingPattern,
         iterable: &SNode,
         body: &[SNode],
+        declaration: harn_lexer::Span,
     ) -> Result<(), CompileError> {
         let item_type = self.infer_for_item_type(iterable);
         self.compile_node(iterable)?;
@@ -531,7 +532,7 @@ impl Compiler {
         let exit_jump_pos = self.chunk.emit_jump(Op::IterNext, self.line);
         self.begin_scope();
         let finally_floor = self.finally_bodies.len();
-        self.compile_destructuring(pattern, true)?;
+        self.compile_destructuring(pattern, true, declaration)?;
         // A `for`-item binding is reassignable per iteration, so — like a `var`
         // — its inferred primitive type may only feed typed-opcode
         // specialization when no reassignment in the loop body can change its
