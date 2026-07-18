@@ -33,6 +33,17 @@ pub type PersonaBlueprint = {
   external?: PersonaBlueprintExternal,
 }
 
+type PersonaPromptBlueprintSource = {kind: "cron", cron: string, timezone: string} | {kind: "external", provider: string, event: string}
+
+type PersonaPromptBlueprintCandidate = {
+  schema_version: "1",
+  name: string,
+  description: string,
+  goal: string,
+  template: PersonaTemplateId,
+  source: PersonaPromptBlueprintSource,
+}
+
 pub type PersonaBlueprintDiagnostic = {code: string, path: string, message: string}
 
 pub type PersonaBlueprintValidationReport = {
@@ -111,11 +122,21 @@ pub type PersonaPromptCompileReceipt = {
   error?: PersonaBlueprintDiagnostic,
 }
 
+fn __persona_blueprint_common_schema_fields() -> dict {
+  return {
+    schema_version: schema_literal(PERSONA_BLUEPRINT_SCHEMA_VERSION),
+    name: schema_string(),
+    description: schema_string(),
+    goal: schema_string(),
+    template: schema_enum(__PERSONA_TEMPLATE_IDS),
+  }
+}
+
 /**
  * persona_blueprint_schema.
  *
- * Returns the closed model-output schema. A blueprint has exactly one source
- * after semantic validation: either `cron` or `external`, never both.
+ * Returns the closed canonical blueprint schema. A blueprint has exactly one
+ * source after semantic validation: either `cron` or `external`, never both.
  *
  * @effects: []
  * @errors: []
@@ -123,14 +144,28 @@ pub type PersonaPromptCompileReceipt = {
  */
 pub fn persona_blueprint_schema() -> dict {
   return schema_closed_object(
-    {
-      schema_version: schema_literal(PERSONA_BLUEPRINT_SCHEMA_VERSION),
-      name: schema_string(),
-      description: schema_string(),
-      goal: schema_string(),
-      template: schema_enum(__PERSONA_TEMPLATE_IDS),
+    __persona_blueprint_common_schema_fields()
+      + {
       cron: schema_field(schema_closed_object({cron: schema_string(), timezone: schema_string()}), false),
       external: schema_field(schema_closed_object({provider: schema_string(), event: schema_string()}), false),
+    },
+  )
+}
+
+fn __persona_prompt_blueprint_schema() -> dict {
+  return schema_closed_object(
+    __persona_blueprint_common_schema_fields()
+      + {
+      source: schema_union(
+        [
+          schema_closed_object(
+            {kind: schema_literal("cron"), cron: schema_string(), timezone: schema_string()},
+          ),
+          schema_closed_object(
+            {kind: schema_literal("external"), provider: schema_string(), event: schema_string()},
+          ),
+        ],
+      ),
     },
   )
 }
@@ -274,6 +309,18 @@ pub fn persona_blueprint_validate(blueprint, providers = nil) -> PersonaBlueprin
       warnings: [],
     }
   }
+  const has_cron = blueprint.cron != nil
+  const has_external = blueprint.external != nil
+  if has_cron == has_external {
+    return __persona_blueprint_finalize(
+      __persona_blueprint_error(
+        __persona_blueprint_blank_report(blueprint),
+        "source_count",
+        "",
+        "persona blueprint must select exactly one source: cron or external",
+      ),
+    )
+  }
   const shape = schema_check(blueprint, persona_blueprint_schema())
   let report = __persona_blueprint_blank_report(blueprint)
   if is_err(shape) {
@@ -301,18 +348,6 @@ pub fn persona_blueprint_validate(blueprint, providers = nil) -> PersonaBlueprin
   }
   if !__persona_blueprint_nonempty(blueprint.goal) {
     report = __persona_blueprint_error(report, "empty_goal", "goal", "goal must not be blank")
-  }
-  const has_cron = blueprint.cron != nil
-  const has_external = blueprint.external != nil
-  if has_cron == has_external {
-    return __persona_blueprint_finalize(
-      __persona_blueprint_error(
-        report,
-        "source_count",
-        "",
-        "persona blueprint must select exactly one source: cron or external",
-      ),
-    )
   }
   const catalog = providers ?? list_providers()
   if has_cron {
@@ -417,18 +452,35 @@ fn __persona_prompt_grounding(user_prompt: string, catalog: list<PersonaPromptCa
   return "Compile the user's request into exactly one closed PersonaBlueprint JSON object.\n"
     + "Do not emit TOML, Harn source, paths, tools, capabilities, budgets, model policy, filters, destinations, or authority.\n"
     + "Choose one template: deterministic-sweeper for periodic watches/digests; hybrid-classify-then-act for event triage; frontier-judgment-loop only for bounded judgment work.\n"
-    + "Choose exactly one source: cron {cron, timezone} or external {provider, event}. External events must begin with '<provider>.'.\n"
+    + "Set source to exactly one closed variant: {kind: 'cron', cron, timezone} or {kind: 'external', provider, event}. External events must begin with '<provider>.'.\n"
     + "Live provider transports: "
     + json_stringify(catalog)
     + "\nExamples:\n"
-    + "SDK watch -> {\"schema_version\":\"1\",\"name\":\"sdk_watch\",\"description\":\"Narrates meaningful SDK changes.\",\"goal\":\"Watch the SDK and explain meaningful changes every morning.\",\"template\":\"deterministic-sweeper\",\"cron\":{\"cron\":\"0 9 * * *\",\"timezone\":\"UTC\"}}\n"
-    + "Slack triage -> {\"schema_version\":\"1\",\"name\":\"alerts_triage\",\"description\":\"Classifies incoming alerts.\",\"goal\":\"Page, investigate, or ignore each alert.\",\"template\":\"hybrid-classify-then-act\",\"external\":{\"provider\":\"slack\",\"event\":\"slack.message\"}}\n"
-    + "Four-hour digest -> {\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up work.\",\"goal\":\"Surface replies and follow-ups every four hours.\",\"template\":\"deterministic-sweeper\",\"cron\":{\"cron\":\"0 */4 * * *\",\"timezone\":\"UTC\"}}\n"
+    + "SDK watch -> {\"schema_version\":\"1\",\"name\":\"sdk_watch\",\"description\":\"Narrates meaningful SDK changes.\",\"goal\":\"Watch the SDK and explain meaningful changes every morning.\",\"template\":\"deterministic-sweeper\",\"source\":{\"kind\":\"cron\",\"cron\":\"0 9 * * *\",\"timezone\":\"UTC\"}}\n"
+    + "Slack triage -> {\"schema_version\":\"1\",\"name\":\"alerts_triage\",\"description\":\"Classifies incoming alerts.\",\"goal\":\"Page, investigate, or ignore each alert.\",\"template\":\"hybrid-classify-then-act\",\"source\":{\"kind\":\"external\",\"provider\":\"slack\",\"event\":\"slack.message\"}}\n"
+    + "Four-hour digest -> {\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up work.\",\"goal\":\"Surface replies and follow-ups every four hours.\",\"template\":\"deterministic-sweeper\",\"source\":{\"kind\":\"cron\",\"cron\":\"0 */4 * * *\",\"timezone\":\"UTC\"}}\n"
     + "User request:\n"
     + user_prompt
 }
 
-fn __persona_prompt_with_name_override(blueprint, options: PersonaPromptCompileOptions) {
+fn __persona_prompt_candidate_blueprint(
+  candidate: PersonaPromptBlueprintCandidate,
+  options: PersonaPromptCompileOptions,
+) -> PersonaBlueprint {
+  let blueprint: PersonaBlueprint = {
+    schema_version: "1",
+    name: candidate.name,
+    description: candidate.description,
+    goal: candidate.goal,
+    template: candidate.template,
+  }
+  if candidate.source.kind == "cron" {
+    blueprint = blueprint
+      + {cron: {cron: candidate.source.cron, timezone: candidate.source.timezone}}
+  } else {
+    blueprint = blueprint
+      + {external: {provider: candidate.source.provider, event: candidate.source.event}}
+  }
   if options.name_override != nil {
     return blueprint + {name: options.name_override}
   }
@@ -563,7 +615,7 @@ pub fn persona_compile_prompt(
   const checkpoint = typed_output_checkpoint(
     "personas.compile_prompt",
     __persona_prompt_grounding(trim(prompt), catalog),
-    persona_blueprint_schema(),
+    __persona_prompt_blueprint_schema(),
     {
       provider: opts.provider,
       model: opts.model,
@@ -573,7 +625,7 @@ pub fn persona_compile_prompt(
       repair: {enabled: false},
     },
     fn(candidate) {
-      const normalized = __persona_prompt_with_name_override(candidate, opts)
+      const normalized = __persona_prompt_candidate_blueprint(candidate, opts)
       const validation = persona_blueprint_validate(normalized, live_providers)
       return {
         ok: validation.valid,
@@ -585,7 +637,7 @@ pub fn persona_compile_prompt(
   const usage = __persona_prompt_usage(checkpoint)
   if !checkpoint.ok {
     if checkpoint.status == "validator_rejected" {
-      const blueprint = __persona_blueprint_record(__persona_prompt_with_name_override(checkpoint.data, opts))
+      const blueprint = __persona_prompt_candidate_blueprint(checkpoint.data, opts)
       const validation = persona_blueprint_validate(blueprint, live_providers)
       return {
         schema_version: "harn.persona.prompt_compile.v1",
@@ -615,7 +667,7 @@ pub fn persona_compile_prompt(
       error: {code: checkpoint.error_category ?? "schema_rejected", path: "", message: checkpoint.error},
     }
   }
-  const blueprint = __persona_blueprint_record(__persona_prompt_with_name_override(checkpoint.data, opts))
+  const blueprint = __persona_prompt_candidate_blueprint(checkpoint.data, opts)
   const validation = persona_blueprint_validate(blueprint, live_providers)
   const compiled = persona_blueprint_compile(blueprint, live_providers)
   if is_err(compiled) {

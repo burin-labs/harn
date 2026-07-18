@@ -15,3 +15,5 @@ persona://alerts_triage
 slack/signing_secret
 false
 true
+false
+true
