@@ -39,8 +39,8 @@ fn options(session, actuation = nil, tool_format = "text") {
     stall_diagnostics = stall_diagnostics + {monologue_actuation: actuation}
   }
   return {
-    provider: "testcatalog",
-    model: "monologue-actuation-fixture",
+    provider: "mock",
+    model: "claude-opus-3-5",
     tools: lookup_tools(),
     tool_format: tool_format,
     loop_until_done: true,
@@ -66,19 +66,6 @@ fn run_case(script, session, actuation = nil, tool_format = "text") {
 }
 
 pipeline default() {
-  provider_capabilities_install(
-    """
-[[provider.testcatalog]]
-model_match = "monologue-actuation-fixture"
-preferred_tool_format = "text"
-native_tools = true
-text_tool_wire_format_supported = true
-supports_assistant_prefill = true
-""",
-  )
-  defer {
-    provider_capabilities_clear()
-  }
   const off = run_case(
     [
       llm_text("I should inspect app.txt before editing."),
