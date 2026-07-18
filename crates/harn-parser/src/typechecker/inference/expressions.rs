@@ -220,8 +220,9 @@ impl TypeChecker {
         params: &[TypedParam],
         body: &[SNode],
         throws_span: Span,
+        enclosing_scope: &TypeScope,
     ) {
-        let mut body_scope = TypeScope::child_of(&self.scope);
+        let mut body_scope = enclosing_scope.child();
         for param in params {
             let param_type = if param.rest {
                 param
@@ -259,12 +260,13 @@ impl TypeChecker {
         param_names: &[String],
         body: &[SNode],
         throws_span: Span,
+        enclosing_scope: &TypeScope,
     ) {
         let params: Vec<TypedParam> = param_names
             .iter()
             .map(|name| TypedParam::untyped(name.as_str()))
             .collect();
-        self.check_declared_throws(declared, &params, body, throws_span);
+        self.check_declared_throws(declared, &params, body, throws_span, enclosing_scope);
     }
 
     pub(in crate::typechecker) fn infer_list_literal_type(
@@ -442,41 +444,18 @@ impl TypeChecker {
                     self.define_enum_pattern_bindings(enum_name, method, args, value_type, scope);
                 }
             }
-            // Bare call-shaped variant pattern (`Ok(v)`): resolve the enum
-            // from the scrutinee's static type, or — for an untyped
-            // scrutinee — from the unique visible enum declaring the
-            // variant (mirroring the compiler's resolution rule; payloads
-            // then bind gradually).
+            // Bare call-shaped variant patterns use the same catalog decision
+            // as codegen. The scrutinee type refines payload types only after
+            // a globally unique owner has established the pattern's identity.
             Node::FunctionCall { name, args, .. } => {
-                let enum_name = self.enum_name_of_scrutinee(value_type, scope).or_else(|| {
-                    let owners = scope.enum_owners_of_variant(name);
-                    match owners.as_slice() {
-                        [only] => Some(only.clone()),
-                        _ => None,
-                    }
-                });
-                if let Some(enum_name) = enum_name {
-                    self.define_enum_pattern_bindings(&enum_name, name, args, value_type, scope);
+                let catalog = scope.lexical_match_pattern_catalog();
+                if let crate::lexical::BareVariantResolution::Unique(enum_name) =
+                    catalog.resolve_bare_variant(name)
+                {
+                    self.define_enum_pattern_bindings(enum_name, name, args, value_type, scope);
                 }
             }
             _ => {}
-        }
-    }
-
-    /// The enum a match scrutinee's static type resolves to, if any. Powers
-    /// bare call-shaped variant patterns (`Ok(v)` without `Result.`).
-    pub(in crate::typechecker) fn enum_name_of_scrutinee(
-        &self,
-        value_type: Option<&TypeExpr>,
-        scope: &TypeScope,
-    ) -> Option<String> {
-        match self.resolve_alias(value_type?, scope) {
-            TypeExpr::Named(name) | TypeExpr::Applied { name, .. }
-                if scope.get_enum(&name).is_some() =>
-            {
-                Some(name)
-            }
-            _ => None,
         }
     }
 

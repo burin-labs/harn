@@ -569,9 +569,9 @@ pub fn workflow_session_compact(prev, options) {
  * @errors: []
  */
 pub fn workflow_reset(prev, carry_summary) {
-  const transcript = prev?.transcript ?? prev
-  if carry_summary && transcript_summary(transcript) {
-    return transcript_compact(transcript, {keep_last: 0})
+  const current_transcript = prev?.transcript ?? prev
+  if carry_summary && transcript_summary(current_transcript) {
+    return transcript_compact(current_transcript, {keep_last: 0})
   }
   return transcript()
 }

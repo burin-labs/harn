@@ -36,6 +36,7 @@ use super::super::union::{
     narrow_to_single, reference_path_key, simplify_union, without_nil, DiscriminantValue,
 };
 use super::super::{InlayHintInfo, TypeChecker};
+use super::decls::CallableDeclarationContext;
 use super::flow::{pattern_alternatives, resolve_union_shape_members};
 
 #[derive(Clone, Copy)]

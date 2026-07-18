@@ -2,7 +2,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::pin_mut;
 use tokio::sync::broadcast;
 
 use crate::trust_graph::{policy_for_autonomy_tier, AutonomyTier};
@@ -82,8 +81,11 @@ impl Dispatcher {
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), wait_lease));
         let prior_hitl_state = crate::stdlib::hitl::take_hitl_state();
         crate::stdlib::hitl::reset_hitl_state();
-        let future = async { vm.execute_callable(callable, &args).await };
-        pin_mut!(future);
+        // A callable expands into the complete recursive VM dispatch future.
+        // Keep that graph off the host thread's stack at the trigger boundary;
+        // one allocation per trigger is bounded, while stack-pinning here makes
+        // unrelated compiler/runtime growth capable of overflowing embedders.
+        let mut future = Box::pin(async { vm.execute_callable(callable, &args).await });
         let mut poll = tokio::time::interval(Duration::from_millis(100));
         let result = loop {
             tokio::select! {
@@ -155,7 +157,7 @@ impl Dispatcher {
         cancel_rx: &mut broadcast::Receiver<()>,
         timeout: Option<Duration>,
     ) -> Result<VmValue, DispatchError> {
-        let future = self.invoke_vm_callable(
+        let future = Box::pin(self.invoke_vm_callable(
             callable,
             binding_key,
             event,
@@ -165,8 +167,7 @@ impl Dispatcher {
             autonomy_tier,
             None,
             cancel_rx,
-        );
-        pin_mut!(future);
+        ));
         if let Some(timeout) = timeout {
             match tokio::time::timeout(timeout, future).await {
                 Ok(result) => result,

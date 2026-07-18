@@ -130,6 +130,16 @@ pub mod trust_graph;
 pub(crate) mod url_encoding;
 pub mod user_dirs;
 
+/// Initialize process-wide assets whose construction should happen before an
+/// embedding host enters an async request or VM execution stack.
+///
+/// Hosts should call this once at startup. The operation is idempotent, and VM
+/// construction retains a fallback for embedders that do not have an explicit
+/// bootstrap phase.
+pub fn initialize_runtime_assets() {
+    secret_patterns::initialize_default_secret_patterns();
+}
+
 /// Crate-wide deterministic clock mock used by stdlib time builtins, the
 /// trigger dispatcher, the cron scheduler, and Rust-side tests. Re-exports
 /// the long-lived implementation under `triggers::test_util::clock` so all

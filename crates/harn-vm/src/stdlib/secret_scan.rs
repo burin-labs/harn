@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
 use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
-use crate::secret_patterns::{SecretPatternSpec, DEFAULT_SECRET_PATTERN_SPECS};
+use crate::secret_patterns::{compiled_default_secret_patterns, PRECISION_HEURISTIC};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -32,23 +32,6 @@ pub struct SecretFinding {
     pub fingerprint: String,
 }
 
-struct SecretRule {
-    spec: &'static SecretPatternSpec,
-    regex: Regex,
-}
-
-static SECRET_RULES: LazyLock<Vec<SecretRule>> = LazyLock::new(|| {
-    DEFAULT_SECRET_PATTERN_SPECS
-        .iter()
-        .map(|spec| SecretRule {
-            spec,
-            regex: Regex::new(spec.regex).unwrap_or_else(|error| {
-                panic!("invalid {} secret scan regex: {error}", spec.detector)
-            }),
-        })
-        .collect()
-});
-
 static HIGH_ENTROPY_ASSIGNMENT_RULE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"(?im)(?:secret|token|api[_-]?key|access[_-]?key|password|passwd|pwd|client[_-]?secret|private[_-]?key)[^\n:=]{0,32}(?::|=)\s*["']([A-Za-z0-9+/=_\.-]{20,})["']"#,
@@ -60,7 +43,7 @@ pub fn scan_content(content: &str) -> Vec<SecretFinding> {
     let line_starts = line_starts(content);
     let mut findings = Vec::new();
 
-    for rule in SECRET_RULES.iter() {
+    for rule in compiled_default_secret_patterns() {
         for mat in rule.regex.find_iter(content) {
             findings.push(build_finding(
                 content,
@@ -89,7 +72,7 @@ pub fn scan_content(content: &str) -> Vec<SecretFinding> {
             "high-entropy-credential-assignment",
             "trufflehog",
             "High-entropy secret assignment",
-            crate::secret_patterns::PRECISION_HEURISTIC,
+            PRECISION_HEURISTIC,
             secret.start(),
             secret.end(),
             secret.as_str(),

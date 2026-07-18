@@ -21,6 +21,7 @@
 mod arithmetic;
 mod call;
 mod call_named;
+mod call_support;
 mod collections;
 mod comparison;
 mod control_flow;
