@@ -78,15 +78,22 @@ const __AGENT_READ_ONLY_SIDE_EFFECTS = ["none", "read_only"]
  */
 pub fn agent_tool_is_read_only(entry, policy = nil, tool_name = "") -> bool {
   const annotations = agent_tool_annotations(entry, policy, tool_name)
-  const kind = annotations?.kind
-  if kind != nil {
-    return contains(__AGENT_READ_ONLY_TOOL_KINDS, lowercase(to_string(kind)))
+  if annotations?.destructiveHint == true {
+    return false
   }
-  const level = annotations?.side_effect_level
-  if level != nil {
-    return contains(__AGENT_READ_ONLY_SIDE_EFFECTS, lowercase(to_string(level)))
+  const kind = lowercase(to_string(annotations?.kind ?? ""))
+  const level = lowercase(to_string(annotations?.side_effect_level ?? ""))
+  const read_only_hint = annotations?.readOnlyHint
+  if kind != "" && !contains(__AGENT_READ_ONLY_TOOL_KINDS, kind) {
+    return false
   }
-  return annotations?.readOnlyHint == true && annotations?.destructiveHint != true
+  if level != "" && !contains(__AGENT_READ_ONLY_SIDE_EFFECTS, level) {
+    return false
+  }
+  if read_only_hint != nil && !(type_of(read_only_hint) == "bool" && read_only_hint) {
+    return false
+  }
+  return kind != "" || level != "" || (type_of(read_only_hint) == "bool" && read_only_hint)
 }
 
 fn __agent_tool_registry_entries(registry) {
@@ -118,14 +125,18 @@ fn __agent_tool_find_entry(registry, name) {
 
 fn __agent_tool_is_workspace_write(entry, policy, name) -> bool {
   const annotations = agent_tool_annotations(entry, policy, name)
-  if annotations?.destructiveHint == true {
+  if annotations?.destructiveHint == true || annotations?.readOnlyHint == true {
     return false
   }
   const kind = lowercase(to_string(annotations?.kind ?? ""))
-  if kind != "" {
-    return kind == "edit"
+  const level = lowercase(to_string(annotations?.side_effect_level ?? ""))
+  if kind != "" && kind != "edit" {
+    return false
   }
-  return lowercase(to_string(annotations?.side_effect_level ?? "")) == "workspace_write"
+  if level != "" && level != "workspace_write" {
+    return false
+  }
+  return kind == "edit" || level == "workspace_write"
 }
 
 /**
