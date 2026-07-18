@@ -58,7 +58,8 @@ chmod +x "$fake_harn"
 
 record="$tmp_root/harn-record.txt"
 env_record="$tmp_root/harn-env-record.txt"
-HARN_RELEASE_ROOT="$release_root" \
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+  HARN_RELEASE_ROOT="$release_root" \
   HARN_BIN="$fake_harn" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \
@@ -86,7 +87,8 @@ if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$expected_build" "$env_record"; then
   exit 1
 fi
 
-HARN_RELEASE_ROOT="$release_root" \
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+  HARN_RELEASE_ROOT="$release_root" \
   HARN_BIN="$fake_harn" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \

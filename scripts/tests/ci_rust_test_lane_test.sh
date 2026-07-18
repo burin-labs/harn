@@ -10,7 +10,8 @@ summary="$tmpdir/summary.md"
 log="$tmpdir/output.log"
 
 # shellcheck disable=SC2016 # child bash expands CARGO_BUILD_JOBS
-GITHUB_STEP_SUMMARY="$summary" "$script" bash -c 'test "$CARGO_BUILD_JOBS" = "2"' \
+env -u CARGO_BUILD_JOBS GITHUB_STEP_SUMMARY="$summary" \
+  "$script" bash -c 'test "$CARGO_BUILD_JOBS" = "2"' \
   >"$log" 2>&1
 grep -q 'CARGO_BUILD_JOBS=2' "$summary"
 grep -q 'Rust test resources before' "$summary"
