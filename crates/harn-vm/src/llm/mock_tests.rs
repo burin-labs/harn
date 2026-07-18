@@ -133,15 +133,29 @@ fn request_with_scope(prompt: &str, scope: Option<&str>) -> LlmRequestPayload {
     LlmRequestPayload::from(&opts)
 }
 
-/// Assemble a v1 fixture from JSON entries, assigning stable entry ids by
-/// position exactly as the file loader would.
+/// Assemble an in-memory v1 fixture for queue-matching tests. Parser tests
+/// separately require authored metadata; these tests focus on store behavior.
 fn v1_fixture(strict_scopes: bool, entries: &[serde_json::Value]) -> LlmMockFixture {
     let mocks = entries
         .iter()
         .enumerate()
         .map(|(idx, value)| {
-            crate::llm::jsonl::parse_llm_mock_value_versioned(value, 1, idx)
-                .expect("parse v1 fixture entry")
+            let mut entry = value.as_object().expect("fixture entry object").clone();
+            entry
+                .entry("id".to_string())
+                .or_insert_with(|| serde_json::json!(format!("test-{idx}")));
+            entry
+                .entry("scope".to_string())
+                .or_insert_with(|| serde_json::json!(DEFAULT_MOCK_SCOPE));
+            entry
+                .entry("consume".to_string())
+                .or_insert_with(|| serde_json::json!("once"));
+            crate::llm::jsonl::parse_llm_mock_value_versioned(
+                &serde_json::Value::Object(entry),
+                1,
+                idx,
+            )
+            .expect("parse v1 fixture entry")
         })
         .collect();
     LlmMockFixture {

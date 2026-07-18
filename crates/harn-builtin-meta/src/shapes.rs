@@ -289,6 +289,7 @@ pub const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("system", TY_STRING),
     ShapeFieldDescriptor::optional("messages", TY_LIST),
     ShapeFieldDescriptor::optional("session_id", TY_STRING),
+    ShapeFieldDescriptor::optional("mock_scope", TY_STRING),
     ShapeFieldDescriptor::optional("system_preamble", TY_ANY),
     ShapeFieldDescriptor::optional("system_prefix", TY_ANY),
     ShapeFieldDescriptor::optional("system_context", TY_ANY),

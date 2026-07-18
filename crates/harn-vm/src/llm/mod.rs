@@ -358,7 +358,8 @@ pub use self::healthcheck::{
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::{vm_value_to_json, vm_value_to_json_strict};
 pub use self::jsonl::{
-    load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned, serialize_llm_mock,
+    load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned,
+    parse_llm_mocks_jsonl, serialize_llm_mock, serialize_llm_mock_fixture,
 };
 pub use self::mock::{
     clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mock_fixture,
