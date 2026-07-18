@@ -252,11 +252,10 @@ mod tests {
             }],
             init_chunk: Some(init_chunk.freeze_for_cache()),
             functions: BTreeMap::new(),
-            public_names: ["answer".to_string()].into_iter().collect(),
-            public_value_names: ["value".to_string()].into_iter().collect(),
-            public_type_names: ["Result".to_string()].into_iter().collect(),
-            public_type_schemas: [("Result".to_string(), "{}".to_string())]
-                .into_iter()
+            public_names: std::iter::once("answer".to_string()).collect(),
+            public_value_names: std::iter::once("value".to_string()).collect(),
+            public_type_names: std::iter::once("Result".to_string()).collect(),
+            public_type_schemas: std::iter::once(("Result".to_string(), "{}".to_string()))
                 .collect(),
         };
 
