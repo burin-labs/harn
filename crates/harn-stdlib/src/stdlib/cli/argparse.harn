@@ -45,8 +45,9 @@ pub type CliParseCode = "missing_required" | "unknown_flag" | "unknown_arg" | "v
  * - `help`: one-line description.
  * - `parse`: primitive decoder: string | int | float | bool | list.
  * - `separator`: delimiter for list decoding; defaults to `,`.
- * - `default`: already-typed value when omitted; falls back to false for
- *   switches and `[]` for multi flags.
+ * - `default`: already-typed value when an optional argument is omitted;
+ *   optional switches fall back to false and optional multi flags to `[]`.
+ *   A default does not satisfy `required: true`.
  */
 pub type ArgSpec = {
   name: string,

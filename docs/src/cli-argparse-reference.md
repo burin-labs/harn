@@ -23,7 +23,7 @@ scope. Top-level clap dispatch already owns those concerns.
 
 ## API
 
-```harn
+```harn,ignore
 pub fn parser(spec: ParserSpec) -> ParserSpec
 
 pub fn parse(
@@ -43,7 +43,7 @@ pub fn render_help(spec: ParserSpec) -> string
 
 `CliInvocation<T>` has two fields:
 
-```harn
+```harn,ignore
 {options: T, rest: list<string>}
 ```
 
@@ -77,7 +77,7 @@ const forwarded = invocation.rest
 
 `ParserSpec` is:
 
-```harn
+```harn,ignore
 {
   name: string,
   about?: string,
@@ -100,7 +100,7 @@ Each `ArgSpec` supports:
 | `help` | One-line help text. |
 | `parse` | `"string"` (default), `"int"`, `"float"`, `"bool"`, or `"list"`. |
 | `separator` | Delimiter for `parse: "list"`; defaults to `","`. |
-| `default` | Already-typed, non-`nil` value inserted unchanged when the argument is absent. |
+| `default` | Already-typed, non-`nil` value inserted unchanged when an optional argument is absent. It does not satisfy `required: true`. |
 
 A switch never consumes a value: its presence produces `true`, and its
 implicit default is `false`. A `multi` flag implicitly defaults to `[]`.
@@ -109,8 +109,10 @@ declared.
 
 Defaults are not strings waiting to be decoded. For example, an integer
 flag uses `default: 4`, not `default: "4"`, and a list flag uses a list
-value. Explicit defaults, the switch `false` default, and the `multi`
-`[]` default are applied before the required-argument check.
+value. Required presence is checked first: a required flag or switch must
+appear in argv even if its spec declares a default. Explicit defaults, the
+switch `false` default, and the `multi` `[]` default are then applied to
+omitted optional arguments.
 
 ## Primitive decoding
 
@@ -186,7 +188,7 @@ control them.
 
 `parse` and `parse_typed` return `CliParseFailure` in `Result.Err`:
 
-```harn
+```harn,ignore
 {
   kind: "cli_parse_failure",
   stage: "argv" | "schema",
