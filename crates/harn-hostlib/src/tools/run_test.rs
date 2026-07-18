@@ -107,7 +107,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         argv,
     };
     let summary = artifacts.compute_summary();
-    let handle = store_run(artifacts);
+    let handle = store_run(artifacts, summary);
 
     let mut builder = ResponseBuilder::new()
         .int("exit_code", outcome.exit_code as i64)

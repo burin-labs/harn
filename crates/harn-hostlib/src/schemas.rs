@@ -1302,6 +1302,19 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/lint/run.response.json"),
     ),
+    // verdict/
+    (
+        "verdict",
+        "issue",
+        SchemaKind::Request,
+        include_str!("../schemas/verdict/issue.request.json"),
+    ),
+    (
+        "verdict",
+        "issue",
+        SchemaKind::Response,
+        include_str!("../schemas/verdict/issue.response.json"),
+    ),
 ];
 
 /// Look up a single schema as raw JSON text.

@@ -90,6 +90,41 @@ impl std::fmt::Debug for VmRngHandle {
     }
 }
 
+/// A host-minted proof-of-execution receipt: the payload of a positive
+/// `Verdict`. Constructed ONLY by the verdict issuance capability
+/// (`harness.verdict.issue`) from the host-owned record of a REAL `run_test`
+/// execution — resolved by its opaque `result_handle`, whose disposition the
+/// host froze at execution time. Issuance reads no caller-supplied filesystem
+/// bytes, so a caller can forge neither the receipt's TYPE (no literal syntax,
+/// no public builtin hands back the bare handle) nor its PROVENANCE (an authored
+/// file has no handle in the execution store). It is refused by the durable
+/// serialization seams, so a positive verdict cannot be minted, forged, or
+/// replayed by asserting scalars or fabricating evidence. The content hash + run
+/// identity close the tamper and cross-run-replay classes: the hash fingerprints
+/// the bytes the host captured, and consumers reject a receipt whose
+/// `execution_scope` differs from the active run.
+#[derive(Debug, Clone)]
+pub struct VmVerdictReceipt {
+    /// Stable identity of the attested execution — the `run_test` `result_handle`
+    /// the host recorded the run under.
+    pub artifact_id: Arc<str>,
+    /// `sha256:HEX` of the output the host captured from the real execution,
+    /// snapshotted when the run was recorded.
+    pub content_hash: Arc<str>,
+    /// Passing and total checked-unit counts the host COMPUTED from the real
+    /// execution, never a caller scalar. `passed > 0` is required to mint.
+    pub passed: u32,
+    pub total: u32,
+    /// The execution scope that PRODUCED the evidence — captured at `run_test`
+    /// record time, not at receipt-mint time. `verdict_all` rejects receipts
+    /// whose `execution_scope` differ (cross-run replay) AND requires the active
+    /// scope to still equal it, so a receipt cannot be replayed into a later run.
+    pub execution_scope: Arc<str>,
+    /// Optional subject identity (which unit-of-work the evidence attests). Folded
+    /// in when the artifact carries it; when absent it is a NAMED limit (PR body).
+    pub subject: Option<Arc<str>>,
+}
+
 /// A held synchronization permit for mutex/semaphore/gate primitives.
 #[derive(Debug, Clone)]
 pub struct VmSyncPermitHandle {

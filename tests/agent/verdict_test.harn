@@ -1,0 +1,39 @@
+// Run: harn test tests/agent/verdict_test.harn
+//
+// Pure-path unit tests for the typed three-valued disposition `std/agent/verdict`.
+// The positive path (`verdict_from_run` / `verdict_all`) and the unforgeability
+// negatives are host-backed (they mint / resolve the opaque `verdict_receipt` via
+// `harness.verdict`), so they live in the harness-backed executed-negatives suite
+// (`verdict_host_test.harn`) and the Rust issuance-boundary tests; here we lock the
+// pure disposition helpers that take no harness.
+import {
+  verdict_disposition,
+  verdict_evidence_ref,
+  verdict_fail,
+  verdict_indeterminate,
+  verdict_is_indeterminate,
+  verdict_is_pass,
+} from "std/agent/verdict"
+
+pipeline test_fail_disposition(_task) {
+  const v = verdict_fail("evidence_red", "2 tests failing")
+  assert_eq(verdict_disposition(v), "fail")
+  assert_eq(verdict_is_pass(v), false)
+  assert_eq(verdict_is_indeterminate(v), false)
+  assert_eq(verdict_evidence_ref(v), "")
+}
+
+pipeline test_indeterminate_disposition(_task) {
+  const v = verdict_indeterminate("judge_unavailable", "model 503")
+  assert_eq(verdict_disposition(v), "indeterminate")
+  assert_eq(verdict_is_indeterminate(v), true)
+  assert_eq(verdict_is_pass(v), false)
+  assert_eq(verdict_evidence_ref(v), "")
+}
+
+pipeline test_fail_and_indeterminate_are_distinct_from_pass(_task) {
+  // The class-kill in miniature: neither the negative nor the undecided value
+  // ever reports "pass". A pass is obtainable only through host issuance.
+  assert_eq(verdict_disposition(verdict_fail("x")), "fail")
+  assert_eq(verdict_disposition(verdict_indeterminate("y")), "indeterminate")
+}

@@ -110,6 +110,16 @@ impl Vm {
     }
 
     async fn execute_scoped(&mut self, chunk: ChunkRef) -> Result<VmValue, VmError> {
+        // Establish the immutable owner of THIS program run. Every real
+        // `run_test` executed under it captures this scope, and verdict
+        // issuance mints a positive verdict only when the active scope still
+        // equals the one that produced the evidence — binding proof-of-execution
+        // to the run that produced it and failing closed once this run ends.
+        // The VM owns this (unlike request_id, a served-ingress-only concept),
+        // so standalone `harn run`/`harn test` are scoped too.
+        let _execution_scope = crate::observability::execution_scope::enter_execution_scope(
+            crate::observability::execution_scope::mint_execution_scope(),
+        );
         let _execution_activity = self
             .wait_for_graph
             .register_task(self.runtime_context.task_id.clone());

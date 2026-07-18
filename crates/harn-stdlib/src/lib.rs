@@ -194,6 +194,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/lanes" => "stdlib/agent/lanes.harn",
     "agent/overlays" => "stdlib/agent/overlays.harn",
     "agent/sitrep" => "stdlib/agent/sitrep.harn",
+    "agent/verdict" => "stdlib/agent/verdict.harn",
     "agent/judge_internals" => "stdlib/agent/judge_internals.harn",
     "agent/judge" => "stdlib/agent/judge.harn",
     "agent/guardrails" => "stdlib/agent/guardrails.harn",

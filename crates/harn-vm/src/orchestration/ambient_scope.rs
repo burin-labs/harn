@@ -102,6 +102,12 @@ pub(crate) struct AmbientExecutionScope {
     /// workers inherit the parent's bridge so `host_call` remains routed to the
     /// session host even when their workspace differs from the process cwd.
     host_bridge: Option<std::sync::Arc<crate::bridge::HostBridge>>,
+    /// The verdict execution-scope owner stack. Unlike `session_stack`, this is
+    /// INHERITED by fan-out workers and inline subtasks: they are part of the
+    /// SAME program run, so a `run_test` executed in a fan-out body must record
+    /// (and later issue) under the run's owner. Without this, a verdict issued
+    /// from inside `parallel` would fail closed (the owner would read empty).
+    execution_scope: Vec<std::sync::Arc<str>>,
     trusted_depth: usize,
     command_hook_depth: usize,
 }
@@ -159,6 +165,12 @@ impl AmbientExecutionScope {
                 swap_runtime_provider_endpoint_overrides,
             ),
             capability_overrides: clone_via_swap(swap_capability_overrides),
+            // The program-run owner IS inherited: a fan-out worker executes the
+            // same run's tools, so its `run_test` records under (and issues in)
+            // that run's scope.
+            execution_scope: clone_via_swap(
+                crate::observability::execution_scope::swap_execution_scope_stack,
+            ),
             ..Self::default()
         }
     }
@@ -207,6 +219,9 @@ impl AmbientExecutionScope {
                 swap_runtime_provider_endpoint_overrides,
             ),
             capability_overrides: clone_via_swap(swap_capability_overrides),
+            execution_scope: clone_via_swap(
+                crate::observability::execution_scope::swap_execution_scope_stack,
+            ),
             trusted_depth: clone_via_swap(swap_trusted_bridge_depth),
             command_hook_depth: clone_via_swap(swap_command_policy_hook_depth),
         }
@@ -235,6 +250,9 @@ impl AmbientExecutionScope {
                 self.runtime_provider_endpoint_overrides,
             ),
             capability_overrides: swap_capability_overrides(self.capability_overrides),
+            execution_scope: crate::observability::execution_scope::swap_execution_scope_stack(
+                self.execution_scope,
+            ),
             trusted_depth: swap_trusted_bridge_depth(self.trusted_depth),
             command_hook_depth: swap_command_policy_hook_depth(self.command_hook_depth),
         }
@@ -351,6 +369,10 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
         AmbientScoping::Captured,
     ),
     ("LLM_CAPABILITY_OVERRIDES_CONTEXT", AmbientScoping::Captured),
+    // Verdict execution-scope owner: INHERITED (unlike the session stack) because
+    // a fan-out worker runs the same program run and its run_test must record /
+    // issue under that run's owner. See observability/execution_scope.rs.
+    ("ACTIVE_EXECUTION_SCOPE_STACK", AmbientScoping::Captured),
     // --- Uncaptured: audited capability/identity context, same shape, NOT yet
     // read across a fan-out child's awaits. Wire each into the scope the day it
     // becomes cross-task-read (mirrors AUDITED_LATENT_CAPABILITIES). ---
@@ -1208,6 +1230,7 @@ mod tests {
             "LLM_CONFIG_OVERRIDES_CONTEXT",
             "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
             "LLM_CAPABILITY_OVERRIDES_CONTEXT",
+            "ACTIVE_EXECUTION_SCOPE_STACK",
         ]
         .into_iter()
         .collect();

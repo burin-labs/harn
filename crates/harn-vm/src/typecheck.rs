@@ -147,6 +147,7 @@ fn matches_type_with_generics(
             "rng" => matches!(value, VmValue::Rng(_)),
             "sync_permit" => matches!(value, VmValue::SyncPermit(_)),
             "mcp_client" => matches!(value, VmValue::McpClient(_)),
+            "verdict_receipt" => matches!(value, VmValue::VerdictReceipt(_)),
             "pair" => matches!(value, VmValue::Pair(_)),
             "enum" => matches!(value, VmValue::EnumVariant(_)),
             "struct" => matches!(value, VmValue::StructInstance(_)),
