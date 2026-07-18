@@ -181,7 +181,18 @@ impl PreparedModuleCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::Op;
+    use crate::module_artifact::compile_module_artifact_from_source;
+    use harn_parser::TypeExpr;
+
+    fn named_list_element(type_expr: &Option<TypeExpr>) -> &str {
+        match type_expr {
+            Some(TypeExpr::List(inner)) => match inner.as_ref() {
+                TypeExpr::Named(name) => name,
+                other => panic!("expected named list element, got {other:?}"),
+            },
+            other => panic!("expected list parameter type, got {other:?}"),
+        }
+    }
 
     fn empty_artifact() -> Arc<PreparedModuleArtifact> {
         Arc::new(PreparedModuleArtifact::from_cached(ModuleArtifact {
@@ -242,22 +253,17 @@ mod tests {
 
     #[test]
     fn hydration_moves_module_owned_storage() {
-        let mut init_chunk = Chunk::new();
-        init_chunk.emit(Op::Return, 1);
-        let artifact = ModuleArtifact {
-            imports: vec![ModuleImportSpec {
-                path: "std/testing".to_string(),
-                selected_names: Some(vec!["assert_eq".to_string()]),
-                is_pub: false,
-            }],
-            init_chunk: Some(init_chunk.freeze_for_cache()),
-            functions: BTreeMap::new(),
-            public_names: std::iter::once("answer".to_string()).collect(),
-            public_value_names: std::iter::once("value".to_string()).collect(),
-            public_type_names: std::iter::once("Result".to_string()).collect(),
-            public_type_schemas: std::iter::once(("Result".to_string(), "{}".to_string()))
-                .collect(),
-        };
+        let source = r#"
+import { assert_eq } from "std/testing"
+pub type Result = {value: int}
+pub const value = 1
+pub fn answer(items: list<string>) {
+  fn nested() { return 42 }
+  return items
+}
+"#;
+        let artifact = compile_module_artifact_from_source(Path::new("owned.harn"), source)
+            .expect("compile typed module artifact");
 
         let imports = artifact.imports.as_ptr();
         let import_path = artifact.imports[0].path.as_ptr();
@@ -268,6 +274,14 @@ mod tests {
             .as_ptr();
         let selected_name = artifact.imports[0].selected_names.as_ref().unwrap()[0].as_ptr();
         let init_code = artifact.init_chunk.as_ref().unwrap().code.as_ptr();
+        let (function_key, function) = artifact.functions.first_key_value().unwrap();
+        let function_key = function_key.as_ptr();
+        let function_name = function.name.as_ptr();
+        let function_code = function.chunk.code.as_ptr();
+        let param_name = function.params[0].name.as_ptr();
+        let param_type_name = named_list_element(&function.params[0].type_expr).as_ptr();
+        let nested_name = function.chunk.functions[0].name.as_ptr();
+        let nested_code = function.chunk.functions[0].chunk.code.as_ptr();
         let public_name = artifact.public_names.get("answer").unwrap().as_ptr();
         let public_value_name = artifact.public_value_names.get("value").unwrap().as_ptr();
         let public_type_name = artifact.public_type_names.get("Result").unwrap().as_ptr();
@@ -294,6 +308,24 @@ mod tests {
         assert_eq!(
             hydrated.init_chunk.as_ref().unwrap().code.as_ptr(),
             init_code
+        );
+        let (hydrated_function_key, hydrated_function) =
+            hydrated.functions.first_key_value().unwrap();
+        assert_eq!(hydrated_function_key.as_ptr(), function_key);
+        assert_eq!(hydrated_function.name.as_ptr(), function_name);
+        assert_eq!(hydrated_function.chunk.code.as_ptr(), function_code);
+        assert_eq!(hydrated_function.params[0].name.as_ptr(), param_name);
+        assert_eq!(
+            named_list_element(&hydrated_function.params[0].type_expr).as_ptr(),
+            param_type_name
+        );
+        assert_eq!(
+            hydrated_function.chunk.functions[0].name.as_ptr(),
+            nested_name
+        );
+        assert_eq!(
+            hydrated_function.chunk.functions[0].chunk.code.as_ptr(),
+            nested_code
         );
         assert_eq!(
             hydrated.public_names.get("answer").unwrap().as_ptr(),

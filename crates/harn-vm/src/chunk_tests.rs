@@ -1,10 +1,22 @@
 use std::sync::Arc;
 
+use harn_parser::TypeExpr;
+
 use super::{
     Chunk, CompiledFunction, Constant, DirectCallState, DirectCallTarget, InlineCacheEntry,
     MethodCacheTarget, Op, ParamSlot, PropertyCacheTarget,
 };
 use crate::BuiltinId;
+
+fn named_list_element(type_expr: &Option<TypeExpr>) -> &str {
+    match type_expr {
+        Some(TypeExpr::List(inner)) => match inner.as_ref() {
+            TypeExpr::Named(name) => name,
+            other => panic!("expected named list element, got {other:?}"),
+        },
+        other => panic!("expected list parameter type, got {other:?}"),
+    }
+}
 
 #[test]
 fn op_from_byte_matches_repr_order() {
@@ -212,7 +224,9 @@ fn cached_chunk_hydration_moves_owned_storage() {
         nominal_type_names: vec!["Widget".to_string()],
         params: vec![ParamSlot {
             name: "value".to_string(),
-            type_expr: None,
+            type_expr: Some(TypeExpr::List(Box::new(TypeExpr::Named(
+                "Widget".to_string(),
+            )))),
             runtime_guard: None,
             has_default: false,
         }],
@@ -242,6 +256,7 @@ fn cached_chunk_hydration_moves_owned_storage() {
     let type_params = cached.functions[0].type_params.as_ptr();
     let nominal_type_names = cached.functions[0].nominal_type_names.as_ptr();
     let param_name = cached.functions[0].params[0].name.as_ptr();
+    let param_type_name = named_list_element(&cached.functions[0].params[0].type_expr).as_ptr();
     let nested_code = cached.functions[0].chunk.code.as_ptr();
 
     let hydrated = Chunk::from_cached(cached);
@@ -259,6 +274,10 @@ fn cached_chunk_hydration_moves_owned_storage() {
         nominal_type_names
     );
     assert_eq!(hydrated.functions[0].params[0].name.as_ptr(), param_name);
+    assert_eq!(
+        named_list_element(&hydrated.functions[0].params[0].type_expr).as_ptr(),
+        param_type_name
+    );
     assert_eq!(hydrated.functions[0].chunk.code.as_ptr(), nested_code);
 }
 

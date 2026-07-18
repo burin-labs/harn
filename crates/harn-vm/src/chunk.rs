@@ -452,7 +452,7 @@ pub struct CachedCompiledFunction {
     pub(crate) has_runtime_type_checks: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct CachedParamSlot {
     pub(crate) name: String,
     pub(crate) type_expr: Option<TypeExpr>,
