@@ -848,57 +848,6 @@ async fn session_prompt_compile_error_clears_active_inject_bridge() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn session_prompt_error_preserves_structured_terminal_class() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {"cwd": "."},
-        }))
-        .await;
-    let created = recv_json(&mut rx).await;
-    let session_id = created["result"]["sessionId"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/prompt",
-            "params": {
-                "sessionId": session_id,
-                "prompt": [{
-                    "type": "text",
-                    "text": "pipeline main() { throw_error(\"provider rate limit 429 in /tmp/run-429/result\", \"tool_rejected\") }",
-                }],
-            },
-        }))
-        .await;
-
-    for _ in 0..6 {
-        let message = recv_json(&mut rx).await;
-        if message["id"] == 2 {
-            assert_eq!(message["error"]["code"], -32000);
-            assert_eq!(
-                message["error"]["data"],
-                serde_json::json!({
-                    "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
-                    "terminalClass": "tool_policy_rejected",
-                })
-            );
-            return;
-        }
-    }
-    panic!("runtime failure should answer session/prompt");
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn session_prompt_validation_errors_are_typed_protocol_failures() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
@@ -909,7 +858,7 @@ async fn session_prompt_validation_errors_are_typed_protocol_failures() {
             2,
             serde_json::json!({
                 "sessionId": "unknown-session",
-                "prompt": "unknown session",
+                "prompt": [{"type": "text", "text": "unknown session"}],
             }),
         ),
     ] {

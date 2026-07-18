@@ -44,6 +44,41 @@ impl From<String> for PromptExecutionError {
     }
 }
 
+#[cfg(test)]
+mod prompt_execution_error_tests {
+    use super::*;
+
+    #[test]
+    fn typed_vm_category_outweighs_misleading_message_prose() {
+        let vm = harn_vm::Vm::new();
+        let error = harn_vm::VmError::CategorizedError {
+            category: harn_vm::ErrorCategory::ToolRejected,
+            message: "provider rate limit 429 in /tmp/run-429/result".to_string(),
+        };
+
+        let prompt_error = PromptExecutionError::from_vm_error(&vm, &error);
+        assert_eq!(
+            prompt_error.terminal_class,
+            harn_vm::llm::AgentTerminalClass::ToolPolicyRejected
+        );
+    }
+
+    #[test]
+    fn ambiguous_vm_category_does_not_claim_provider_provenance() {
+        let vm = harn_vm::Vm::new();
+        let error = harn_vm::VmError::CategorizedError {
+            category: harn_vm::ErrorCategory::Auth,
+            message: "missing harness tenant principal".to_string(),
+        };
+
+        let prompt_error = PromptExecutionError::from_vm_error(&vm, &error);
+        assert_eq!(
+            prompt_error.terminal_class,
+            harn_vm::llm::AgentTerminalClass::GenericThrow
+        );
+    }
+}
+
 pub(super) struct PromptGlobals<'a> {
     pub text: &'a str,
     pub content: &'a [serde_json::Value],

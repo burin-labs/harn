@@ -191,6 +191,11 @@ fn agent_terminal_class_from_structured_error(
     if terminal_error_signal_matches(error, |signal| signal == "no_llm_call") {
         return Some(AgentTerminalClass::ProviderMisconfigured);
     }
+    if terminal_error_signal_matches(error, |signal| {
+        matches!(signal, "tool_rejected" | "egress_blocked")
+    }) {
+        return Some(AgentTerminalClass::ToolPolicyRejected);
+    }
     if terminal_error_has_after_tool_result_format(error) {
         return Some(AgentTerminalClass::AgentLoopProtocolFailure);
     }
