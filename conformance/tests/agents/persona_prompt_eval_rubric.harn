@@ -18,10 +18,10 @@ const PROVIDERS = [
   },
 ]
 
-fn trial_rows(commit: string, passes: int, harness_fingerprint: string) -> list {
+fn trial_rows(commit: string, passes: int, harness_fingerprint: string, trials: int = 5) -> list {
   let rows = []
   for case_name in ["cron-case", "external-case"] {
-    for trial in range(5) {
+    for trial in range(trials) {
       const pass = trial < passes
       rows = rows
         + [
@@ -129,6 +129,7 @@ pipeline test_persona_prompt_eval_rubric(_task) {
     "treatment",
     "mock",
     "meter-holdout",
+    2,
   )
   assert_eq(comparison.gate_evaluable, true)
   assert_eq(comparison.confirmed_improvement, true)
@@ -140,6 +141,7 @@ pipeline test_persona_prompt_eval_rubric(_task) {
     "treatment",
     "mock",
     "meter-holdout",
+    2,
   )
   assert_eq(mismatched.gate_evaluable, false)
   assert_eq(mismatched.verdict, "insufficient_evidence")
@@ -150,10 +152,33 @@ pipeline test_persona_prompt_eval_rubric(_task) {
     "treatment",
     "mock",
     "meter-holdout",
+    2,
   )
   assert_eq(mixed_generation.treatment.fingerprints_complete, true)
   assert_eq(mixed_generation.treatment.fingerprints_consistent, false)
   assert_eq(mixed_generation.gate_evaluable, false)
   assert_eq(mixed_generation.verdict, "insufficient_evidence")
+  const partial = persona_prompt_eval_comparison(
+    baseline.filter({ row -> row.case_name == "cron-case" }).to_list(),
+    treatment.filter({ row -> row.case_name == "cron-case" }).to_list(),
+    "baseline",
+    "treatment",
+    "mock",
+    "meter-holdout",
+    2,
+  )
+  assert_eq(partial.gate_evaluable, false)
+  const underpowered = persona_prompt_eval_comparison(
+    trial_rows("baseline", 0, "harness-v1", 3),
+    trial_rows("treatment", 3, "harness-v1", 3),
+    "baseline",
+    "treatment",
+    "mock",
+    "meter-holdout",
+    2,
+  )
+  assert_eq(underpowered.gate_evaluable, false)
+  const ad_hoc_split = persona_prompt_eval_comparison(baseline, treatment, "baseline", "treatment", "mock", "ad-hoc", 2)
+  assert_eq(ad_hoc_split.gate_evaluable, false)
   log("persona prompt eval rubric ok")
 }
