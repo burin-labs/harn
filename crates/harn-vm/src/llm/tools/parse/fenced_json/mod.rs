@@ -2,9 +2,10 @@
 //!
 //! A peer to [`super::tagged`] (heredoc/bare text protocol) and the native
 //! provider channel. The grammar is deliberately delimiter-safe: a tool call
-//! is one ```` ```tool ```` fenced block whose body is a single strict-JSON
-//! `{ "name": ..., "args": { ... } }` object. N calls in a turn means N
-//! fenced blocks.
+//! is a strict-JSON `{ "name": ..., "args": { ... } }` object inside a
+//! ```` ```tool ```` fenced block. N calls in a turn are N such objects,
+//! emitted either as N separate blocks or as N objects inside one block (the
+//! natural batch shape) — both are the same ordered batch.
 //!
 //! The load-bearing invariant: **a JSON string cannot contain a raw newline**.
 //! Any ```` ``` ```` a model wants to put *inside* file content lives inside a
@@ -67,9 +68,10 @@ impl BlockError {
                  ```tool ... ``` block and close it with a line that is exactly ```.",
                 open_line + 1
             ),
-            BlockError::ExpectedSingleObject => "A ```tool block must contain exactly one JSON \
-                 object `{ \"name\": ..., \"args\": { ... } }`. Arrays, scalars, and trailing \
-                 bytes are rejected; emit one ```tool block per tool call."
+            BlockError::ExpectedSingleObject => "A ```tool block must contain one or more JSON \
+                 objects `{ \"name\": ..., \"args\": { ... } }`, one per tool call (several calls \
+                 in a turn may share one block or use several blocks). Arrays, scalars, and other \
+                 non-object entries are rejected."
                 .to_string(),
             BlockError::MissingName => "The ```tool JSON object is missing a non-empty string \
                  `name`. Shape: `{ \"name\": \"edit\", \"args\": { ... } }`."
@@ -125,15 +127,16 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
                  requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
             ));
         }
-        match parse_block_body(&block.body, block.open_line) {
-            Ok((name, arguments)) => {
-                calls.push(serde_json::json!({
-                    "id": format!("tc_{}", calls.len()),
-                    "name": name,
-                    "arguments": arguments,
-                }));
-            }
-            Err(err) => errors.push(err.into_message()),
+        let (block_calls, block_errors) = parse_block_bodies(&block.body, block.open_line);
+        for (name, arguments) in block_calls {
+            calls.push(serde_json::json!({
+                "id": format!("tc_{}", calls.len()),
+                "name": name,
+                "arguments": arguments,
+            }));
+        }
+        for err in block_errors {
+            errors.push(err.into_message());
         }
     }
 
@@ -231,6 +234,16 @@ fn chunk_fence_blocks(src: &str) -> (Vec<FenceBlock>, String, Vec<String>, Vec<S
                         idx += 1;
                         break;
                     }
+                    // A new fence-open line while still inside a block means the
+                    // model used the opener as a SEPARATOR between calls and never
+                    // closed the first block. Treat it as an implicit close and
+                    // reopen: end this block here without consuming the line, so
+                    // the outer loop starts a fresh block at the new opener. Safe
+                    // under the no-raw-newline invariant — a ```tool line cannot
+                    // sit inside a JSON string value.
+                    if fence_open_kind(lines[idx]).is_some() {
+                        break;
+                    }
                     body_lines.push(lines[idx]);
                     idx += 1;
                 }
@@ -320,53 +333,75 @@ fn collapse_prose(lines: &[&str]) -> String {
     lines.join("\n").trim().to_string()
 }
 
-/// LAYER 1: parse one block body as a strict single JSON `{ name, args }`
-/// object and return `(name, arguments)`.
+/// LAYER 1: parse one block body as an ORDERED BATCH of JSON `{ name, args }`
+/// objects, returning the parsed calls plus any errors.
 ///
-/// Rejects arrays/scalars/trailing bytes (`ExpectedSingleObject`), a missing
-/// or empty `name` (`MissingName`), and a non-object `args` (`ArgsNotObject`).
-/// Absent `args` is treated as `{}` (downstream `validate_tool_args` enforces
-/// required params, identical to the tagged path). A body that is incomplete
-/// JSON at EOF reports `Unterminated` so a truncated call is never half-applied.
-fn parse_block_body(
+/// The turn contract is "N calls per turn": a model may emit N calls as N
+/// separate ```tool blocks OR as N JSON objects inside ONE ```tool block (the
+/// natural batch shape a model reaches for when it wants several reads at once).
+/// Both mean the same ordered batch of calls. Each complete object is parsed
+/// independently, so a batch is never dropped wholesale: when a later object in
+/// the block is truncated or malformed, the complete objects before it are still
+/// salvaged as calls and the failing tail surfaces an error for re-teaching.
+///
+/// Per-object rejects mirror the single-object contract: a missing/empty `name`
+/// (`MissingName`), a non-object `args` (`ArgsNotObject`), and a non-object entry
+/// such as an array or scalar (`ExpectedSingleObject`). A body that ends with an
+/// incomplete JSON object reports `Unterminated` so a truncated call is never
+/// half-applied; the complete objects before the cut are still returned.
+fn parse_block_bodies(
     body: &str,
     open_line: usize,
-) -> Result<(String, serde_json::Value), BlockError> {
+) -> (Vec<(String, serde_json::Value)>, Vec<BlockError>) {
     let trimmed = body.trim();
+    let mut calls = Vec::new();
+    let mut errors = Vec::new();
     if trimmed.is_empty() {
-        return Err(BlockError::Unterminated { open_line });
+        errors.push(BlockError::Unterminated { open_line });
+        return (calls, errors);
     }
 
-    // Strict single-object parse: a Deserializer stream that yields exactly one
-    // object value and nothing but whitespace after it. Trailing non-whitespace
-    // bytes -> ExpectedSingleObject; a second value -> ExpectedSingleObject.
+    // Stream consecutive top-level JSON values. Each complete object becomes one
+    // call; the stream stops at the first structural break (EOF mid-object, or a
+    // non-JSON token such as a stray fence line), preserving every object parsed
+    // before the break.
     let mut stream = serde_json::Deserializer::from_str(trimmed).into_iter::<serde_json::Value>();
-    let first = match stream.next() {
-        Some(Ok(value)) => value,
-        Some(Err(err)) => {
-            if err.is_eof() {
-                // Incomplete JSON at end of block: a truncated string or
-                // mid-token cut. Never half-apply — name the open fence.
-                return Err(BlockError::Unterminated { open_line });
+    let mut saw_value = false;
+    loop {
+        match stream.next() {
+            Some(Ok(value)) => {
+                saw_value = true;
+                match value {
+                    serde_json::Value::Object(map) => {
+                        match normalize_json_tool_call_object(map, false) {
+                            Ok(call) => calls.push(call),
+                            Err(err) => errors.push(err),
+                        }
+                    }
+                    _ => errors.push(BlockError::ExpectedSingleObject),
+                }
             }
-            return Err(BlockError::InvalidJson {
-                detail: format!("{} (near `{}`)", err, preview_str(trimmed, 80)),
-            });
+            Some(Err(err)) if err.is_eof() => {
+                // Incomplete JSON at end of block: a truncated string or mid-token
+                // cut. Never half-apply — name the open fence. Objects already
+                // parsed in this block are kept.
+                errors.push(BlockError::Unterminated { open_line });
+                break;
+            }
+            Some(Err(err)) => {
+                errors.push(BlockError::InvalidJson {
+                    detail: format!("{} (near `{}`)", err, preview_str(trimmed, 80)),
+                });
+                break;
+            }
+            None => break,
         }
-        None => return Err(BlockError::Unterminated { open_line }),
-    };
-    // Reject any trailing value/bytes after the single object.
-    let consumed = stream.byte_offset();
-    if !trimmed[consumed..].trim().is_empty() {
-        return Err(BlockError::ExpectedSingleObject);
     }
 
-    let obj = match first {
-        serde_json::Value::Object(map) => map,
-        _ => return Err(BlockError::ExpectedSingleObject),
-    };
-
-    normalize_json_tool_call_object(obj, false)
+    if !saw_value && errors.is_empty() {
+        errors.push(BlockError::Unterminated { open_line });
+    }
+    (calls, errors)
 }
 
 /// Normalize one JSON tool-call object into Harn's `{ name, arguments }`
@@ -414,7 +449,13 @@ fn parse_bare_json_tool_call(body: &str) -> Result<(String, serde_json::Value), 
     {
         return Err(BlockError::ExpectedSingleObject);
     }
-    parse_block_body(body, 0)
+    // Bare (un-fenced) recovery is single-object only: require exactly one clean
+    // object with no trailing/partial bytes before accepting it.
+    let (calls, errors) = parse_block_bodies(body, 0);
+    match (calls.len(), errors.is_empty()) {
+        (1, true) => Ok(calls.into_iter().next().unwrap()),
+        _ => Err(BlockError::ExpectedSingleObject),
+    }
 }
 
 /// A tool-call envelope located anywhere at the top level of the response.
