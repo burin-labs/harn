@@ -1,4 +1,4 @@
-pipeline test(task) -> int {
+pipeline test(task: any) -> int {
   log("typed pipeline ok")
   return 42
 }

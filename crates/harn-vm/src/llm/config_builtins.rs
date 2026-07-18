@@ -9,10 +9,12 @@ use crate::vm::Vm;
 use super::helpers::vm_value_to_json;
 
 mod catalog_projection;
+mod execution_contract;
 use catalog_projection::{
-    reasoning_history_wire_field_value, tool_mode_parity_notes_value, tool_mode_parity_value,
+    insert_tool_mode_parity_fields, reasoning_history_wire_field_value, toml_value_to_vm_value,
     tools_value,
 };
+use execution_contract::LLM_EXECUTION_CONTRACT_BUILTIN_DEF;
 
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
@@ -26,6 +28,7 @@ const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
     &LLM_INFER_PROVIDER_BUILTIN_DEF,
     &LLM_MODEL_TIER_BUILTIN_DEF,
     &LLM_RESOLVE_MODEL_BUILTIN_DEF,
+    &LLM_EXECUTION_CONTRACT_BUILTIN_DEF,
     &LLM_MODEL_INFO_BUILTIN_DEF,
     &LLM_KNOWN_MODELS_BUILTIN_DEF,
     &LLM_AVAILABLE_PROVIDERS_BUILTIN_DEF,
@@ -265,27 +268,6 @@ fn llm_reasoning_effort_budget_builtin(
     let level = args.first().map(|a| a.display()).unwrap_or_default();
     let budget = super::reasoning_policy::budget_for_reasoning_level(level.trim());
     Ok(VmValue::Int(i64::from(budget)))
-}
-
-fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
-    match value {
-        toml::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
-        toml::Value::Integer(i) => VmValue::Int(*i),
-        toml::Value::Float(f) => VmValue::Float(*f),
-        toml::Value::Boolean(b) => VmValue::Bool(*b),
-        toml::Value::Datetime(dt) => VmValue::String(arcstr::ArcStr::from(dt.to_string())),
-        toml::Value::Array(items) => {
-            let list: Vec<VmValue> = items.iter().map(toml_value_to_vm_value).collect();
-            VmValue::List(std::sync::Arc::new(list))
-        }
-        toml::Value::Table(table) => {
-            let mut dict = crate::value::DictMap::new();
-            for (k, v) in table {
-                dict.insert(crate::value::intern_key(k), toml_value_to_vm_value(v));
-            }
-            VmValue::dict(dict)
-        }
-    }
 }
 
 /// Return the loaded provider, alias, model, pricing, and availability catalog.
@@ -1244,14 +1226,7 @@ pub(crate) fn capabilities_to_vm_value(
             .map(|format| VmValue::String(arcstr::ArcStr::from(format)))
             .unwrap_or(VmValue::Nil),
     );
-    dict.insert(
-        crate::value::intern_key("tool_mode_parity"),
-        tool_mode_parity_value(caps),
-    );
-    dict.insert(
-        crate::value::intern_key("tool_mode_parity_notes"),
-        tool_mode_parity_notes_value(caps),
-    );
+    insert_tool_mode_parity_fields(&mut dict, caps);
     dict.insert(crate::value::intern_key("tools"), tools_value(caps));
     dict.insert(
         crate::value::intern_key("defer_loading"),
@@ -1674,6 +1649,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         crate::value::intern_key("capabilities"),
         string_list_to_vm_value(model.capabilities.clone()),
     );
+    insert_tool_mode_parity_fields(&mut dict, &capabilities);
     dict.insert(
         crate::value::intern_key("reasoning_effort_levels"),
         string_list_to_vm_value(capabilities.reasoning_effort_levels.clone()),
@@ -2431,7 +2407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_llm_catalog_surfaces_batch_metadata_for_scripts() {
+    fn test_llm_catalog_surfaces_batch_and_tool_parity_metadata_for_scripts() {
         super::super::capabilities::clear_user_overrides();
         let VmValue::List(entries) = llm_catalog_value() else {
             panic!("expected model catalog list");
@@ -2444,6 +2420,8 @@ mod tests {
                     && entry.get("id").map(VmValue::display) == Some("gpt-4o-mini".to_string())
             })
             .expect("openai gpt-4o-mini catalog row");
+        assert!(openai.contains_key("tool_mode_parity"));
+        assert!(openai.contains_key("tool_mode_parity_notes"));
         assert!(matches!(openai.get("batch_api"), Some(VmValue::Bool(true))));
         match openai.get("batch_wire_format") {
             Some(VmValue::String(value)) => assert_eq!(value.as_str(), "openai"),

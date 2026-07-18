@@ -7,6 +7,7 @@ HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
 HARN_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --,$(HARN_BIN_CMD) --)
+HARN_NO_BUILD_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --no-build --,$(HARN_BIN_CMD) --no-build --)
 HARN_CMD_VERBOSE = $(HARN_CMD)
 HARN_CLI_CMD = $(HARN_CMD)
 HARN_BIN_ASSIGN = harn_bin="$$($(HARN_BIN_PRINT_CMD))"
@@ -376,6 +377,7 @@ test-pr-gate-post-warm-integrations:
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/embedded_asset_rebuild_test.sh
 
@@ -511,13 +513,13 @@ check-run-view-fixtures:
 # canonical authoring source). Mirrors what release_gate.sh audit's
 # sync_language_spec.harn step does.
 sync-language-spec:
-	$(HARN_CMD) run scripts/sync_language_spec.harn
+	$(HARN_NO_BUILD_CMD) run scripts/sync_language_spec.harn
 
 # CI guard: fail if docs/src/language-spec.md is stale relative to
 # spec/HARN_SPEC.md. `make sync-language-spec` fixes it.
 check-language-spec:
 	@echo "=== Checking docs/src/language-spec.md is up to date ==="
-	@$(HARN_CMD) run scripts/sync_language_spec.harn -- --check
+	@$(HARN_NO_BUILD_CMD) run scripts/sync_language_spec.harn -- --check
 	@echo "    Language spec mirror OK."
 
 # Regenerate the LLM trigger quickref from the live ProviderCatalog metadata.
@@ -713,10 +715,10 @@ check-ported-handler-loc:
 # grandfathered at exact per-source counts so unrelated refactors cannot
 # conflict in a central baseline. Regeneration only tightens existing debt.
 check-source-file-lengths:
-	@$(HARN_CMD) run scripts/check_source_file_lengths.harn
+	@$(HARN_NO_BUILD_CMD) run scripts/check_source_file_lengths.harn
 
 update-source-file-length-baseline:
-	@$(HARN_CMD) run scripts/check_source_file_lengths.harn -- --update
+	@$(HARN_NO_BUILD_CMD) run scripts/check_source_file_lengths.harn -- --update
 
 check-python-boundary:
 	@$(HARN_CMD) run scripts/check_python_boundary.harn
@@ -771,3 +773,31 @@ check-release-audit-contract:
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
 	@$(HARN_CMD) run scripts/check_ci_cache_policy.harn
+
+# Fast "before you declare clean" drift preflight. The member set is DERIVED
+# from the [preflight.dispatch] table in scripts/generated_artifacts.toml (the
+# single source of truth), tier = source: audits that read committed files at
+# interpret time, so they are trustworthy the instant you save a file — no
+# rebuild needed. `make check-generated-registry` guarantees every check-*
+# target is classified there, so this set can never silently omit a guard.
+# `make all` remains the full slow gate; this is the seconds-scale local gate.
+# For guards whose verdict depends on current binary semantics (generated
+# output, parser, checker, or linter), run `check-drift-binary` after a rebuild
+# or with a fresh HARN_BIN; stale executable bytes can false-pass those guards.
+check-drift:
+	@echo "=== Fast drift preflight (source-reading tier) ==="
+	@harn_bin="$$(HARN_BIN_NO_BUILD=1 $(HARN_BIN_PRINT_CMD))" || exit 1; \
+	members="$$($$harn_bin run scripts/drift_preflight_members.harn -- --tier source)" || exit 1; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" $$members
+	@echo "    Drift preflight (source) OK."
+
+# Binary-semantics drift tier: each member's verdict depends on current
+# executable behavior, so a stale binary can false-pass. Run this only with a
+# binary built from current source (after `make build` / with a fresh HARN_BIN);
+# CI is safe because CI's HARN_BIN is freshly built.
+check-drift-binary:
+	@echo "=== Drift preflight (binary-semantics tier; needs a fresh HARN_BIN) ==="
+	@harn_bin="$$(HARN_BIN_NO_BUILD=1 $(HARN_BIN_PRINT_CMD))" || exit 1; \
+	members="$$($$harn_bin run scripts/drift_preflight_members.harn -- --tier binary)" || exit 1; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" $$members
+	@echo "    Drift preflight (binary) OK."

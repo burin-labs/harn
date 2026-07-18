@@ -103,6 +103,7 @@ for routes that declare video support. `std/llm/media` also provides
 | `cache_read_tokens` | int | Prompt tokens served from provider-side cache when supported |
 | `cache_write_tokens` | int | Prompt tokens written into provider-side cache when supported |
 | `cache_creation_input_tokens` | int | Anthropic-compatible alias for `cache_write_tokens` |
+| `usage.cost_usd` | float \| nil | Catalog-priced response cost; `nil` when pricing is unknown |
 | `cache_hit_ratio` | float | Fraction of prompt tokens served from provider-side cache |
 | `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; cache writes can be negative when writes cost more than normal input |
 | `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
@@ -403,7 +404,7 @@ Envelope fields:
 | `attempts` | int | Number of model calls made. `1` = no retries; `2+` = schema retries kicked in. `0` only when arg parsing failed before any call. |
 | `repaired` | bool | `true` when the repair pass produced valid JSON. |
 | `extracted_json` | bool | `true` when JSON had to be lifted from prose / markdown fences. |
-| `usage` | `{input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_creation_input_tokens, cache_hit_ratio, cache_savings_usd, served_fast}` | Token and prompt-cache accounting from the final attempt. |
+| `usage` | dict | Final-attempt token, priced-cost, and prompt-cache accounting. Unknown `cost_usd` stays `nil`. |
 | `model` | string | Model that produced the final attempt. |
 | `provider` | string | Provider that produced the final attempt. |
 

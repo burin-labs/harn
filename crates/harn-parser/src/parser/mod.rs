@@ -487,6 +487,55 @@ interface Repository<T> {
     }
 
     #[test]
+    fn parses_typed_and_legacy_pipeline_parameters() {
+        let program = parse_source(
+            "pub pipeline deploy(config: DeployConfig, dry_run: bool) -> string {\n  return \"ok\"\n}\npipeline legacy(task) {}\n",
+        )
+        .expect("typed pipeline parameters should parse");
+
+        let Node::Pipeline { params, .. } = &program[0].node else {
+            panic!("expected typed pipeline");
+        };
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].name, "config");
+        assert_eq!(
+            params[0].type_expr,
+            Some(TypeExpr::Named("DeployConfig".to_string()))
+        );
+        assert_eq!(params[1].name, "dry_run");
+        assert_eq!(
+            params[1].type_expr,
+            Some(TypeExpr::Named("bool".to_string()))
+        );
+
+        let Node::Pipeline { params, .. } = &program[1].node else {
+            panic!("expected legacy pipeline");
+        };
+        assert_eq!(params, &[TypedParam::untyped("task")]);
+    }
+
+    #[test]
+    fn rejects_pipeline_parameter_defaults_and_rest_parameters() {
+        let default_error = parse_source("pipeline deploy(config: dict = {}) {}")
+            .expect_err("pipeline defaults must stay unsupported");
+        assert!(
+            default_error
+                .to_string()
+                .contains("Pipeline parameters do not support default values"),
+            "unexpected error: {default_error}"
+        );
+
+        let rest_error = parse_source("pipeline deploy(...configs: dict) {}")
+            .expect_err("pipeline rest parameters must stay unsupported");
+        assert!(
+            rest_error
+                .to_string()
+                .contains("Pipeline parameters do not support rest parameters"),
+            "unexpected error: {rest_error}"
+        );
+    }
+
+    #[test]
     fn parses_durable_persona_annotation_values() {
         let source = r#"
 @persona(

@@ -52,6 +52,7 @@ pub mod persona;
 pub mod persona_activation;
 pub mod persona_dispatch;
 pub mod persona_doctor;
+pub mod persona_prompt;
 pub mod persona_scaffold;
 pub mod persona_supervision;
 pub(crate) mod pg_codegen;

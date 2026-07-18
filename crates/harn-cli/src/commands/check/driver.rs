@@ -42,9 +42,23 @@ pub(crate) const CHECK_JOBS_ENV: &str = "HARN_CHECK_JOBS";
 pub(crate) struct CheckCliOverrides {
     pub host_capabilities: Option<String>,
     pub bundle_root: Option<String>,
+    pub strict: bool,
     pub strict_types: bool,
     pub preflight: Option<String>,
     pub invariants: bool,
+}
+
+impl From<&crate::cli::CheckArgs> for CheckCliOverrides {
+    fn from(args: &crate::cli::CheckArgs) -> Self {
+        Self {
+            host_capabilities: args.host_capabilities.clone(),
+            bundle_root: args.bundle_root.clone(),
+            strict: args.strict,
+            strict_types: args.strict_types,
+            preflight: args.preflight.clone(),
+            invariants: args.invariants,
+        }
+    }
 }
 
 /// One file's finished check: the structured report, the strictness the
@@ -284,6 +298,9 @@ fn build_check_contexts_with(
         }
         if let Some(path) = overrides.bundle_root.as_ref() {
             config.bundle_root = Some(path.clone());
+        }
+        if overrides.strict {
+            config.strict = true;
         }
         if overrides.strict_types {
             config.strict_types = true;

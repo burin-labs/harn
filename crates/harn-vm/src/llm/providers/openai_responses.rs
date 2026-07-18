@@ -1,4 +1,4 @@
-//! Native OpenAI Responses API provider path.
+//! OpenAI Responses-compatible provider path.
 //!
 //! This is intentionally separate from the OpenAI-compatible chat-completions
 //! adapter. Responses has first-class hosted tools, provider-managed
@@ -7,6 +7,8 @@
 //! OpenAI-compatible providers.
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ThinkingConfig};
+#[cfg(test)]
+use crate::llm::providers::schema_compat::tests::closed_discriminated_union_schema;
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
@@ -22,11 +24,16 @@ impl OpenAiResponsesProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        if request.provider != "openai" {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "api_mode: \"responses\" is only supported by provider \"openai\"; got provider \"{}\"",
-                request.provider
-            )))));
+        if request.provider != "openai"
+            && request.provider != "mock"
+            && !crate::llm_config::provider_has_feature(&request.provider, "responses_api")
+        {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                format!(
+                    "api_mode: \"responses\" is not supported by provider \"{}\"",
+                    request.provider
+                ),
+            ))));
         }
 
         let clock = harn_clock::RealClock::arc();
@@ -58,23 +65,28 @@ impl OpenAiResponsesProvider {
         let req = resolved.apply_headers(req, &request.api_key);
         let response = req.send().await.map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "openai Responses API error: {}",
+                "{} Responses API error: {}",
+                request.provider,
                 crate::egress::redact_reqwest_error(&error)
             ))))
         })?;
 
         if !response.status().is_success() {
-            return Err(crate::llm::api::err_for_non_success("openai", response).await);
+            return Err(crate::llm::api::err_for_non_success(&request.provider, response).await);
         }
 
         let json: serde_json::Value = response.json().await.map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "openai Responses API response parse error: {error}"
+                "{} Responses API response parse error: {error}",
+                request.provider
             ))))
         })?;
 
-        let mut result =
-            crate::llm::api::parse_openai_responses_response(&json, "openai", &request.model)?;
+        let mut result = crate::llm::api::parse_openai_responses_response(
+            &json,
+            &request.provider,
+            &request.model,
+        )?;
         if result.telemetry.client_wall_ms.is_none() {
             result.telemetry.client_wall_ms = Some(elapsed_ms(&*clock, started_ms));
         }
@@ -90,7 +102,7 @@ impl OpenAiResponsesProvider {
     }
 
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
-        let caps = crate::llm::capabilities::lookup("openai", &opts.model);
+        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
             "model": wire_model,
@@ -692,6 +704,35 @@ mod tests {
     }
 
     #[test]
+    fn vercel_responses_body_uses_wire_model_and_gateway_routing_options() {
+        let mut opts = crate::llm::api::options::base_opts("vercel_ai_gateway");
+        opts.model = "vercel/openai/gpt-5.4-nano".to_string();
+        opts.api_mode = LlmApiMode::Responses;
+        opts.provider_overrides = Some(serde_json::json!({
+            "providerOptions": {
+                "gateway": {
+                    "sort": "cost",
+                    "models": ["google/gemini-3.1-flash-lite-preview"]
+                }
+            }
+        }));
+        let payload = LlmRequestPayload::from(&opts);
+
+        let mut body = OpenAiResponsesProvider::build_request_body(&payload);
+        crate::llm::provider::apply_provider_wire_overrides(
+            &mut body,
+            payload.provider_overrides.as_ref(),
+        );
+
+        assert_eq!(body["model"], "openai/gpt-5.4-nano");
+        assert_eq!(body["providerOptions"]["gateway"]["sort"], "cost");
+        assert_eq!(
+            body["providerOptions"]["gateway"]["models"][0],
+            "google/gemini-3.1-flash-lite-preview"
+        );
+    }
+
+    #[test]
     fn responses_body_maps_structured_output_and_controls() {
         let mut opts = crate::llm::api::options::base_opts("openai");
         opts.model = "gpt-5.4".to_string();
@@ -821,6 +862,30 @@ mod tests {
         assert!(body["tools"][1]["parameters"]["properties"]["mode"]
             .get("oneOf")
             .is_none());
+    }
+
+    #[test]
+    fn responses_body_preserves_closed_discriminated_union_as_any_of() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.4".to_string();
+        opts.api_mode = LlmApiMode::Responses;
+        opts.output_format = OutputFormat::JsonSchema {
+            schema: closed_discriminated_union_schema("oneOf", "const"),
+            strict: true,
+        };
+        let payload = LlmRequestPayload::from(&opts);
+
+        let body = OpenAiResponsesProvider::build_request_body(&payload);
+
+        assert_eq!(
+            body["text"]["format"],
+            serde_json::json!({
+                "type": "json_schema",
+                "name": "response",
+                "schema": closed_discriminated_union_schema("anyOf", "enum"),
+                "strict": true
+            })
+        );
     }
 
     #[test]

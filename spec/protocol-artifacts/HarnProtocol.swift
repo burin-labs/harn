@@ -8,6 +8,7 @@ public enum HarnProtocolConstants {
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let harnAgentEventMethod = "_harn/agentEvent"
     public static let harnProviderCatalogMethod = "_harn/providerCatalog"
+    public static let acpPromptErrorDataSchema = "harn.acp.prompt_error.v1"
     public static let mcpProtocolVersion = "2025-11-25"
     public static let mcpStableProtocolVersion = "2025-11-25"
     public static let mcpDraftProtocolVersion = "DRAFT-2026-v1"
@@ -351,6 +352,7 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
     case parseAborted = "parse_aborted"
     case timeout = "timeout"
     case network = "network"
+    case resourceBusy = "resource_busy"
     case cancelled = "cancelled"
     case abandonedAtLoopExit = "abandoned_at_loop_exit"
     case unknown = "unknown"
@@ -365,6 +367,7 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
         "parse_aborted",
         "timeout",
         "network",
+        "resource_busy",
         "cancelled",
         "abandoned_at_loop_exit",
         "unknown",
@@ -421,6 +424,45 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
         "stopped",
         "cancelled",
     ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
+    case contextOverflow = "context_overflow"
+    case providerMisconfigured = "provider_misconfigured"
+    case providerUnavailable = "provider_unavailable"
+    case rateLimited = "rate_limited"
+    case timeout = "timeout"
+    case resourceBusy = "resource_busy"
+    case toolPolicyRejected = "tool_policy_rejected"
+    case hostBridgeUnimplemented = "host_bridge_unimplemented"
+    case agentLoopProtocolFailure = "agent_loop_protocol_failure"
+    case genericThrow = "generic_throw"
+
+    public static let allCases: [Self] = [
+        "context_overflow",
+        "provider_misconfigured",
+        "provider_unavailable",
+        "rate_limited",
+        "timeout",
+        "resource_busy",
+        "tool_policy_rejected",
+        "host_bridge_unimplemented",
+        "agent_loop_protocol_failure",
+        "generic_throw",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnACPPromptErrorSchema: String, Codable, Sendable, CaseIterable {
+    case harnAcpPromptErrorV1 = "harn.acp.prompt_error.v1"
+
+    public static let allCases: [Self] = [
+        "harn.acp.prompt_error.v1",
+    ].map { Self(rawValue: $0)! }
+}
+
+public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
+    public var schema: HarnACPPromptErrorSchema
+    public var terminalClass: HarnAgentTerminalClass
 }
 
 public enum HarnToolCallReceiptStatus: String, Codable, Sendable, CaseIterable {

@@ -12,7 +12,3 @@
   directive — where before, an interleaved system message worked on OpenAI, was
   hoisted into the global system prompt on Gemini/Bedrock, and was rejected
   outright by Anthropic.
-
-- **Reliable cleanup receipts for cancelled background commands.** Finalized
-  cancellation results now synchronize on process-tree cleanup completion, so
-  callers waiting for a timed-out command always receive its cleanup evidence.

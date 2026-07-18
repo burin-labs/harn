@@ -377,7 +377,7 @@ fn read_to_string(path: string) -> string {
             .iter()
             .find(|s| s.name == "main" && s.kind == HarnSymbolKind::Pipeline)
             .expect("should find main pipeline");
-        assert_eq!(sym.signature.as_deref(), Some("pipeline main"));
+        assert_eq!(sym.signature.as_deref(), Some("pipeline main()"));
         assert_eq!(sym.doc_comment.as_deref(), Some("Main entry point."));
     }
 

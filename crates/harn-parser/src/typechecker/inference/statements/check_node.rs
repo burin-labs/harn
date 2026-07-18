@@ -253,7 +253,7 @@ impl TypeChecker {
             } => {
                 let callable_return_type =
                     Self::callable_return_type(*is_stream, return_type, body)
-                        .or_else(|| self.infer_unannotated_fn_return(params, body));
+                        .or_else(|| self.infer_unannotated_fn_return(params, body, scope));
                 let sig = Self::fn_signature_from_parts(
                     params,
                     callable_return_type,
@@ -272,10 +272,10 @@ impl TypeChecker {
                     body,
                     where_clauses,
                     *is_stream,
-                    span,
+                    CallableDeclarationContext { span, scope },
                 );
                 if let Some(declared) = throws {
-                    self.check_declared_throws(declared, params, body, span);
+                    self.check_declared_throws(declared, params, body, span, scope);
                 }
             }
 
@@ -299,9 +299,10 @@ impl TypeChecker {
                     span,
                     "tool result",
                     "tool return type declared here",
+                    scope,
                 );
                 if let Some(declared) = throws {
-                    self.check_declared_throws(declared, params, body, span);
+                    self.check_declared_throws(declared, params, body, span, scope);
                 }
             }
 
@@ -468,7 +469,7 @@ impl TypeChecker {
                 } else {
                     // Each iteration binds the element; destructure against its
                     // type so dict/list patterns in `for`-`in` gain the same
-                    // inference as in `let`/`var`.
+                    // inference as in `let`/`const`.
                     let elem_source = iter_type
                         .as_ref()
                         .and_then(|ty| self.iterable_item_type(ty, scope));
@@ -1382,16 +1383,7 @@ impl TypeChecker {
                 ..
             } => {
                 let mut closure_scope = scope.child();
-                for p in params {
-                    closure_scope.define_var(&p.name, p.type_expr.clone());
-                    if p.type_expr
-                        .as_ref()
-                        .is_some_and(|ty| !Self::contains_wildcard_type(ty))
-                    {
-                        closure_scope.mark_annotated(&p.name);
-                    }
-                    closure_scope.clear_nil_widenable(&p.name);
-                }
+                self.check_and_define_declared_parameters(params, &mut closure_scope);
                 self.fn_depth += 1;
                 let saved_stream_depth = self.stream_fn_depth;
                 let saved_stream_emit_types = self.stream_emit_types.clone();
@@ -1406,7 +1398,7 @@ impl TypeChecker {
                 self.fn_depth -= 1;
 
                 if let Some(declared) = throws {
-                    self.check_declared_throws(declared, params, body, span);
+                    self.check_declared_throws(declared, params, body, span, scope);
                 }
 
                 if let Some(expected_return) = return_type {

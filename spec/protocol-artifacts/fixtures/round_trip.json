@@ -45,8 +45,12 @@
     },
     "errorResponse": {
       "error": {
-        "code": -32601,
-        "message": "method not found"
+        "code": -32000,
+        "data": {
+          "schema": "harn.acp.prompt_error.v1",
+          "terminalClass": "tool_policy_rejected"
+        },
+        "message": "Provider-looking prose is not the authority"
       },
       "id": "abc",
       "jsonrpc": "2.0"

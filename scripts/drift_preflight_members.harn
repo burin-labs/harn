@@ -1,0 +1,58 @@
+// Emit the space-separated Makefile check-* targets for one drift-preflight
+// tier, derived from the [preflight.dispatch] table in
+// scripts/generated_artifacts.toml — the single source of truth for how every
+// check-* target dispatches:
+//
+//   source   -> reads committed files at interpret time; trustworthy the
+//               instant you save a file (no rebuild). Members of `check-drift`.
+//   binary   -> verdict depends on current harn binary semantics (generated
+//               output, parser, checker, or linter); FALSE-PASSES on stale
+//               executable bytes, so only trustworthy with a freshly built
+//               HARN_BIN. Members of `check-drift-binary`.
+//   excluded -> needs cargo build/test, an external toolchain, a sibling repo
+//               checkout, or executes runtime fixtures; not a fast file-drift
+//               scan and in neither preflight.
+//
+// `make check-generated-registry` audits that EVERY check-* Makefile target is
+// classified in that table, so the tiers this script derives can never silently
+// omit a guard. Pure selection lives in `members_for_tier`; main does the read.
+import { parse_args } from "std/cli"
+
+const REGISTRY = "scripts/generated_artifacts.toml"
+
+fn arg_spec() -> list {
+  return [{kind: "option", name: "tier", flags: ["--tier"], default: ""}]
+}
+
+/**
+ * The Makefile targets classified as `tier` in the dispatch table, sorted for
+ * deterministic output. `dispatch` maps a target name to its tier string.
+ */
+pub fn members_for_tier(dispatch: dict, tier: string) -> list {
+  let out = []
+  for name in dispatch.keys().sort() {
+    if dispatch[name] == tier {
+      out = out + [name]
+    }
+  }
+  return out
+}
+
+fn main(harness: Harness) {
+  const parsed = parse_args(argv, arg_spec())
+  const tier = trim(parsed?.tier ?? "")
+  if tier != "source" && tier != "binary" {
+    harness.stdio
+      .eprintln("usage: harn run scripts/drift_preflight_members.harn -- --tier source|binary")
+    exit(2)
+  }
+  const registry = toml_parse(harness.fs.read_text(REGISTRY))
+  const dispatch = registry?.preflight?.dispatch ?? {}
+  const members = members_for_tier(dispatch, tier)
+  if members.count == 0 {
+    harness.stdio.eprintln("error: no `${tier}`-tier drift checks in ${REGISTRY} [preflight.dispatch]")
+    exit(1)
+  }
+  harness.stdio.println(join(members, " "))
+  return nil
+}

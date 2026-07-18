@@ -89,10 +89,15 @@ import {
 } from "std/agent/state"
 import { agent_step_judge } from "std/agent/step_judge"
 import {
+  agent_collapse_duplicate_read_calls,
   agent_tool_annotations,
   agent_tool_calls_are_read_only,
   agent_tool_entry_annotations,
 } from "std/agent/tool_annotations"
+import {
+  agent_tool_lifecycle_error_category,
+  agent_tool_mutation_status,
+} from "std/agent/tool_lifecycle"
 import {
   agent_tool_search_emit_queries,
   agent_tool_search_inject_if_needed,
@@ -111,10 +116,7 @@ import {
   llm_enable_equivalent_failover,
 } from "std/llm/options"
 
-/**
- * Agent-loop budget timing must route through the VM-level harness clock so
- * paused-clock tests, replay, and capability analysis see the same clock source.
- */
+/** Route agent-loop budget timing through the harness clock for deterministic replay and tests. */
 fn __agent_loop_clock_now_ms() {
   return harness.clock.now_ms()
 }
@@ -722,67 +724,6 @@ fn __tool_terminal_status(result) -> string {
   return "failed"
 }
 
-fn __tool_lifecycle_error_category(raw) {
-  if raw == nil {
-    return nil
-  }
-  const category = to_string(raw)
-  if category == "" {
-    return nil
-  }
-  if contains(
-    [
-      "schema_validation",
-      "tool_error",
-      "mcp_server_error",
-      "host_bridge_error",
-      "permission_denied",
-      "rejected_loop",
-      "parse_aborted",
-      "timeout",
-      "network",
-      "cancelled",
-      "unknown",
-    ],
-    category,
-  ) {
-    return category
-  }
-  if contains(["intra_turn_failure_fanout_collapsed", "intra_turn_resource_fail_fast"], category) {
-    return "rejected_loop"
-  }
-  if contains(["tool_rejected", "consent_denied", "egress_blocked", "scope_violation"], category) {
-    return "permission_denied"
-  }
-  if contains(
-    ["schema_violation", "schema_stream_aborted", "validator_failure", "repair_failed"],
-    category,
-  ) {
-    return "schema_validation"
-  }
-  if contains(["rate_limit", "overloaded", "server_error", "transient_network"], category) {
-    return "network"
-  }
-  if contains(["tool_middleware_exception", "tool_parallel_dispatch_exception", "generic"], category) {
-    return "tool_error"
-  }
-  if contains(["auth", "channel_closed", "not_found", "circuit_open", "budget_exceeded"], category) {
-    return "host_bridge_error"
-  }
-  return "unknown"
-}
-
-fn __tool_lifecycle_mutation_status(raw) {
-  if raw == nil {
-    return "unknown"
-  }
-  const status = to_string(raw)
-  if contains(["applied", "not_applied", "unknown"], status) {
-    return status
-  }
-  return "unknown"
-}
-
 fn __emit_tool_lifecycle_finish(envelope, result) {
   const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
@@ -805,7 +746,7 @@ fn __emit_tool_lifecycle_finish(envelope, result) {
     tool_name: tool_name,
     status: __tool_terminal_status(result),
     raw_output: raw_output,
-    mutation_status: __tool_lifecycle_mutation_status(result?.mutation_status),
+    mutation_status: agent_tool_mutation_status(result?.mutation_status),
   }
   if result?.error != nil {
     payload = payload + {error: result.error}
@@ -817,7 +758,7 @@ fn __emit_tool_lifecycle_finish(envelope, result) {
   if result?.execution_duration_ms != nil {
     payload = payload + {execution_duration_ms: result.execution_duration_ms}
   }
-  const error_category = __tool_lifecycle_error_category(result?.error_category)
+  const error_category = agent_tool_lifecycle_error_category(result?.error_category)
   if error_category != nil {
     payload = payload + {error_category: error_category}
   }
@@ -2014,7 +1955,7 @@ fn __intra_turn_result_mutation_status(result) -> string {
   if type_of(result) != "dict" {
     return "unknown"
   }
-  return __tool_lifecycle_mutation_status(result?.mutation_status)
+  return agent_tool_mutation_status(result?.mutation_status)
 }
 
 fn __intra_turn_result_mutated(result) {
@@ -4440,11 +4381,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           __resolve_tool_calls(llm_result, parsed)
         }
         const recovered_batch_drop = __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts)
-        tool_calls = recovered_batch_drop.tool_calls
+        tool_calls = agent_collapse_duplicate_read_calls(recovered_batch_drop.tool_calls, turn_opts?.tools, turn_opts)
         const recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
           normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
         } else {
-          normalized
+          normalized + {tool_calls: tool_calls}
         }
         agent_session_record_assistant(session.session_id, recorded_assistant)
         const had_parse_errors_base = __maybe_inject_parse_error_feedback(

@@ -29,6 +29,13 @@
 //! hermetic definition — the same resolver, exercised with an empty grant set —
 //! not a separately maintained path that could drift from the lane path.
 //!
+//! "Single code path" here means the two profiles do not branch — it is not by
+//! itself a guarantee that every spawn seam calls this. That coverage is what
+//! [`crate::stdlib::process::session_closed_env`] owns: it is the one adapter
+//! from a live profile to a child environment, and any new `Command` builder
+//! must route through it or it silently reopens the boundary. `harn-vm`'s
+//! `session_profile_env_leak` test pins each seam against that regression.
+//!
 //! # Single owner
 //!
 //! [`ENV_ALLOWLIST`] is the one place the admitted names live. Nothing else in

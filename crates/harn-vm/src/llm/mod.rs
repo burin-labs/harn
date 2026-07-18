@@ -16,6 +16,7 @@ mod agent_runtime;
 pub(crate) mod agent_session_host;
 mod agent_session_transcript;
 mod agent_terminal_class;
+pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
 mod agent_tools;
 pub mod api;
 #[cfg(test)]
@@ -37,6 +38,8 @@ pub(crate) mod cost;
 #[cfg(test)]
 mod cost_context_tests;
 pub(crate) mod cost_route;
+#[cfg(test)]
+mod cost_route_pricing_tests;
 pub(crate) mod daemon;
 pub mod eval;
 pub(crate) mod fake;

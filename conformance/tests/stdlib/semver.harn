@@ -1,13 +1,23 @@
 import {
+  BumpKind,
+  Version,
   add_v,
   bump_type,
   is_v_semver,
+  max_canonical_tag,
   next,
   parse,
   strip_v,
   version_from_release_branch,
   version_from_tag,
 } from "std/semver"
+
+fn typed_bump(current: Version, target: Version) -> BumpKind? {
+  return bump_type(
+    "${current.major}.${current.minor}.${current.patch}",
+    "${target.major}.${target.minor}.${target.patch}",
+  )
+}
 
 /**
  * `show` makes empty-string and nil cases visible in the .expected file
@@ -34,18 +44,62 @@ pipeline test(task) {
   log(show(add_v("")))
   // is_v_semver
   log(is_v_semver("v1.2.3"))
+  log(is_v_semver("v0.0.0"))
   log(is_v_semver("v1.2"))
   log(is_v_semver("1.2.3"))
+  log(is_v_semver("v01.2.3"))
+  log(is_v_semver("v1.02.3"))
+  log(is_v_semver("v1.2.03"))
   log(is_v_semver("v1.2.3-rc.1"))
+  log(is_v_semver("v1.2.3+ci.42"))
+  log(is_v_semver("v999999999999999999999999999999.2.3"))
   log(is_v_semver(nil))
   // parse: dict shape and rejection
   const parsed = parse("v1.2.3")
   log(parsed.major)
   log(parsed.minor)
   log(parsed.patch)
+  const zero = parse("0.0.0")
+  log(zero.major)
+  log(zero.minor)
+  log(zero.patch)
   log(show(parse("1.2")))
   log(show(parse("1.2.foo")))
   log(show(parse("-1.2.3")))
+  log(show(parse("01.2.3")))
+  log(show(parse("1.02.3")))
+  log(show(parse("1.2.03")))
+  log(show(parse("999999999999999999999999999999.2.3")))
+  // max_canonical_tag: numeric precedence, filtering, and order independence
+  log(show(max_canonical_tag([])))
+  log(
+    show(
+      max_canonical_tag(
+        [
+          "1.2.3",
+          "v01.2.3",
+          "v1.2.3-rc.1",
+          "v1.2.3+ci.42",
+          "v999999999999999999999999999999.2.3",
+          "v1.999999999999999999999999999999.3",
+          "v1.2.999999999999999999999999999999",
+        ],
+      ),
+    ),
+  )
+  log(show(max_canonical_tag(["v0.0.0"])))
+  log(show(max_canonical_tag(["v1.2.3", "v1.2.3"])))
+  log(show(max_canonical_tag(["v1.2.9", "v1.2.10"])))
+  log(show(max_canonical_tag(["v2.9.99", "v2.10.0", "v1.999.999"])))
+  log(show(max_canonical_tag(["v1.999.999", "v2.10.0", "v2.9.99"])))
+  log(show(max_canonical_tag(["v9.99.99", "v10.0.0"])))
+  log(show(max_canonical_tag(["v9223372036854775808.0.0", "v9223372036854775807.0.0"])))
+  log(
+    show(max_canonical_tag(["v4.0.0-rc.1", "v3.0.0", "v5.0.0+build.1", "v03.0.2", "3.0.1", "v2.99.99"])),
+  )
+  log(
+    show(max_canonical_tag(["v2.99.99", "3.0.1", "v03.0.2", "v5.0.0+build.1", "v3.0.0", "v4.0.0-rc.1"])),
+  )
   // next: bump returns bare X.Y.Z
   log(next("1.2.3", "patch"))
   log(next("1.2.3", "minor"))
@@ -59,8 +113,11 @@ pipeline test(task) {
   log(show(bump_type("1.2.3", "1.2.5")))
   log(show(bump_type("1.2.3", "1.5.0")))
   log(show(bump_type("1.2.3", "1.3.5")))
+  log(show(typed_bump({major: 1, minor: 2, patch: 3}, {major: 1, minor: 2, patch: 4})))
   // version_from_release_branch
   log(show(version_from_release_branch("release/v1.2.3")))
+  log(show(version_from_release_branch("release/vv1.2.3")))
+  log(show(version_from_release_branch("release/v01.2.3")))
   log(show(version_from_release_branch("release/1.2.3")))
   log(show(version_from_release_branch("main")))
   log(show(version_from_release_branch("release/v1.2")))

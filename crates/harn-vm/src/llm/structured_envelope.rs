@@ -551,6 +551,7 @@ fn empty_usage_dict() -> crate::value::DictMap {
         crate::value::intern_key("cache_savings_usd"),
         VmValue::Float(0.0),
     );
+    usage.insert(crate::value::intern_key("cost_usd"), VmValue::Nil);
     usage
 }
 
@@ -571,6 +572,7 @@ fn build_usage_dict(outcome: &SchemaLoopOutcome) -> VmValue {
         "cache_creation_input_tokens",
         "cache_hit_ratio",
         "cache_savings_usd",
+        "cost_usd",
     ] {
         if let Some(v) = dict.get(key) {
             usage.insert(crate::value::intern_key(key), v.clone());
@@ -641,6 +643,91 @@ mod tests {
             schema_retries_budget: 2,
             output_validation_mode: String::from("error"),
         }
+    }
+
+    fn priced_outcome(errors: Vec<&str>) -> SchemaLoopOutcome {
+        let result = crate::llm::api::LlmResult {
+            text: "{\"decision\":\"wait\"}".to_string(),
+            tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
+            input_tokens: 1_000,
+            output_tokens: 1_000,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_supported: true,
+            model: "claude-sonnet-4-20250514".to_string(),
+            provider: "anthropic".to_string(),
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: Some("stop".to_string()),
+            served_fast: false,
+            blocks: Vec::new(),
+            logprobs: Vec::new(),
+            telemetry: crate::llm::api::ProviderTelemetry::default(),
+        };
+        SchemaLoopOutcome {
+            vm_result: crate::llm::api::vm_build_llm_result(&result, None, None, None),
+            raw_text: String::from("{\"decision\":\"wait\"}"),
+            errors: errors.into_iter().map(String::from).collect(),
+            attempts: 1,
+            schema_retries_budget: 2,
+            output_validation_mode: String::from("error"),
+        }
+    }
+
+    fn envelope_usage(envelope: &VmValue) -> &crate::value::DictMap {
+        let dict = envelope.as_dict().expect("envelope dict");
+        let Some(VmValue::Dict(usage)) = dict.get("usage") else {
+            panic!("missing usage dict: {dict:?}");
+        };
+        usage
+    }
+
+    #[test]
+    fn structured_success_and_validation_failure_preserve_final_usage() {
+        let _guard = crate::llm::env_guard();
+        crate::llm_config::clear_user_overrides();
+        let outcome = priced_outcome(vec!["decision must be merge"]);
+        let canonical_usage = outcome
+            .vm_result
+            .as_dict()
+            .and_then(|dict| dict.get("usage"))
+            .expect("canonical usage");
+        let expected_cost = crate::llm::cost::pricing_aware_call_cost(
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            1_000,
+            1_000,
+        )
+        .expect("catalog-priced result");
+
+        let success = envelope_success(&outcome, false);
+        let failure = envelope_failure(&outcome, EnvelopeFailureKind::SchemaValidation, false);
+
+        let canonical_usage = crate::llm::vm_value_to_json(canonical_usage);
+        let success_usage =
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&success).clone().into()));
+        let failure_usage =
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&failure).clone().into()));
+        assert_eq!(success_usage, canonical_usage);
+        assert_eq!(failure_usage, canonical_usage);
+        assert_eq!(success_usage["cost_usd"], serde_json::json!(expected_cost));
+        assert_eq!(failure_usage["cost_usd"], serde_json::json!(expected_cost));
+    }
+
+    #[test]
+    fn empty_structured_usage_keeps_cost_unknown() {
+        let transport = envelope_from_transport_error(
+            &VmError::Runtime("offline".to_string()),
+            "nonexistent_provider",
+            "ghost-model",
+        );
+        let usage =
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&transport).clone().into()));
+        assert_eq!(
+            usage.as_object().and_then(|usage| usage.get("cost_usd")),
+            Some(&serde_json::Value::Null)
+        );
     }
 
     #[test]

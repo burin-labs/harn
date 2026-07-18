@@ -103,4 +103,56 @@ if [[ -s "$record" ]]; then
   exit 1
 fi
 
+: > "$record"
+CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  HARN_BIN_NO_BUILD=1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/env-no-build.out"
+if ! grep -Fxq "$expected_bin" "$tmp_root/env-no-build.out"; then
+  echo "HARN_BIN_NO_BUILD did not return the target-dir executable" >&2
+  cat "$tmp_root/env-no-build.out" >&2
+  exit 1
+fi
+if [[ -s "$record" ]]; then
+  echo "HARN_BIN_NO_BUILD invoked cargo" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+missing_target="$tmp_root/missing-target"
+: > "$record"
+if CARGO_TARGET_DIR="$missing_target" \
+  FAKE_CARGO_RECORD="$record" \
+  HARN_BIN_NO_BUILD=1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/env-no-build-missing.out" \
+  2> "$tmp_root/env-no-build-missing.err"; then
+  echo "HARN_BIN_NO_BUILD accepted a missing worktree binary" >&2
+  exit 1
+fi
+if ! grep -Fq "no fresh worktree harn binary found" "$tmp_root/env-no-build-missing.err"; then
+  echo "HARN_BIN_NO_BUILD missing-binary error was not attributable" >&2
+  cat "$tmp_root/env-no-build-missing.err" >&2
+  exit 1
+fi
+if [[ -s "$record" ]]; then
+  echo "HARN_BIN_NO_BUILD invoked cargo while reporting a missing binary" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+if HARN_BIN_NO_BUILD=typo "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/env-no-build-invalid.out" \
+  2> "$tmp_root/env-no-build-invalid.err"; then
+  echo "harn_bin accepted an invalid HARN_BIN_NO_BUILD value" >&2
+  exit 1
+fi
+if ! grep -Fq "HARN_BIN_NO_BUILD must be 0 or 1" "$tmp_root/env-no-build-invalid.err"; then
+  echo "invalid HARN_BIN_NO_BUILD error was not attributable" >&2
+  cat "$tmp_root/env-no-build-invalid.err" >&2
+  exit 1
+fi
+
 echo "harn_bin_resolver_test: ok"

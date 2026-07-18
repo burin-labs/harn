@@ -1,0 +1,139 @@
+version = 1
+id = "persona-prompt-compiler-v1"
+name = "Prompt-to-persona compile and activation"
+description = "Frozen semantic cases for one-shot persona compilation, strict materialization, and synthetic daemon dispatch."
+trials = 5
+executor = { argv = ["harn", "run", "executor.harn"], timeout_seconds = 300 }
+
+[metadata]
+provider = "mock"
+model = "mock"
+max_tokens = 512
+prompt_version = "persona-prompt-compact-v1"
+ledger_namespace = "persona-prompt-compiler-v1"
+
+[split]
+meter-tune = [
+  "sdk-watch-daily",
+  "slack-alert-triage",
+  "reply-digest-four-hour",
+  "release-watch-weekday",
+  "slack-mention-review",
+  "issue-digest-weekly",
+]
+meter-holdout = [
+  "commit-narrator-nightly",
+  "slack-customer-escalation",
+  "followup-digest-six-hour",
+  "release-event-review",
+  "dependency-audit-weekday",
+  "slack-incident-classifier",
+]
+
+[[cases]]
+id = "sdk-watch-daily"
+kind = "live-verify"
+task = "Create a persona that reviews acme/sdk every day at 09:00 UTC and narrates meaningful API changes."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "sdk-watch-daily"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/sdk-watch-daily.json"]
+metadata = { group = "cron", expected = { name = "sdk_watch_daily", template = "deterministic-sweeper", source_kind = "cron", cron = "0 9 * * *", timezone = "UTC" } }
+
+[[cases]]
+id = "slack-alert-triage"
+kind = "live-verify"
+task = "Create a persona for each Slack alert message that classifies it as page me, start investigating, or ignore."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "slack-alert-triage"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/slack-alert-triage.json"]
+metadata = { group = "external", expected = { name = "slack_alert_triage", template = "hybrid-classify-then-act", source_kind = "external", provider = "slack", event = "slack.message" } }
+
+[[cases]]
+id = "reply-digest-four-hour"
+kind = "live-verify"
+task = "Create a persona that produces a digest of messages needing replies or follow-up every four hours in UTC."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "reply-digest-four-hour"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/reply-digest-four-hour.json"]
+metadata = { group = "cron", expected = { name = "reply_digest_four_hour", template = "deterministic-sweeper", source_kind = "cron", cron = "0 */4 * * *", timezone = "UTC" } }
+
+[[cases]]
+id = "release-watch-weekday"
+kind = "live-verify"
+task = "Create a persona that summarizes dependency release changes at 08:30 America/Los_Angeles every weekday."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "release-watch-weekday"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/release-watch-weekday.json"]
+metadata = { group = "cron", expected = { name = "release_watch_weekday", template = "deterministic-sweeper", source_kind = "cron", cron = "30 8 * * 1-5", timezone = "America/Los_Angeles" } }
+
+[[cases]]
+id = "slack-mention-review"
+kind = "live-verify"
+task = "Create a persona that reviews each Slack message mentioning the team and recommends the next response."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "slack-mention-review"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/slack-mention-review.json"]
+metadata = { group = "external", expected = { name = "slack_mention_review", template = "hybrid-classify-then-act", source_kind = "external", provider = "slack", event = "slack.message" } }
+
+[[cases]]
+id = "issue-digest-weekly"
+kind = "live-verify"
+task = "Create a persona that prepares a GitHub issue follow-up digest at 16:00 UTC every Friday."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "issue-digest-weekly"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/issue-digest-weekly.json"]
+metadata = { group = "cron", expected = { name = "issue_digest_weekly", template = "deterministic-sweeper", source_kind = "cron", cron = "0 16 * * 5", timezone = "UTC" } }
+
+[[cases]]
+id = "commit-narrator-nightly"
+kind = "live-verify"
+task = "Create a persona that narrates meaningful post-deploy commit changes every night at 23:00 UTC."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "commit-narrator-nightly"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/commit-narrator-nightly.json"]
+metadata = { group = "cron", expected = { name = "commit_narrator_nightly", template = "deterministic-sweeper", source_kind = "cron", cron = "0 23 * * *", timezone = "UTC" } }
+
+[[cases]]
+id = "slack-customer-escalation"
+kind = "live-verify"
+task = "Create a persona that examines each Slack customer-escalation message and recommends page, investigate, or defer."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "slack-customer-escalation"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/slack-customer-escalation.json"]
+metadata = { group = "external", expected = { name = "slack_customer_escalation", template = "hybrid-classify-then-act", source_kind = "external", provider = "slack", event = "slack.message" } }
+
+[[cases]]
+id = "followup-digest-six-hour"
+kind = "live-verify"
+task = "Create a persona that surfaces conversations requiring follow-up every six hours in Europe/London."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "followup-digest-six-hour"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/followup-digest-six-hour.json"]
+metadata = { group = "cron", expected = { name = "followup_digest_six_hour", template = "deterministic-sweeper", source_kind = "cron", cron = "0 */6 * * *", timezone = "Europe/London" } }
+
+[[cases]]
+id = "release-event-review"
+kind = "live-verify"
+task = "Create a persona that reviews every GitHub release event and explains whether downstream work is needed."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "release-event-review"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/release-event-review.json"]
+metadata = { group = "external", expected = { name = "release_event_review", template = "hybrid-classify-then-act", source_kind = "external", provider = "github", event = "github.release" } }
+
+[[cases]]
+id = "dependency-audit-weekday"
+kind = "live-verify"
+task = "Create a persona that audits dependency changes at 07:15 UTC every Monday through Friday."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "dependency-audit-weekday"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/dependency-audit-weekday.json"]
+metadata = { group = "cron", expected = { name = "dependency_audit_weekday", template = "deterministic-sweeper", source_kind = "cron", cron = "15 7 * * 1-5", timezone = "UTC" } }
+
+[[cases]]
+id = "slack-incident-classifier"
+kind = "live-verify"
+task = "Create a persona that classifies each Slack incident message and recommends the safest response."
+workspace = "."
+verify_command = { argv = ["harn", "run", "verify.harn", "--", "slack-incident-classifier"], timeout_seconds = 30 }
+expected_output_paths = ["receipts/slack-incident-classifier.json"]
+metadata = { group = "external", expected = { name = "slack_incident_classifier", template = "hybrid-classify-then-act", source_kind = "external", provider = "slack", event = "slack.message" } }

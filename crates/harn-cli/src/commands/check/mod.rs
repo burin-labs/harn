@@ -29,9 +29,7 @@ pub(crate) use check_cmd::{check_file_inner, CheckReport, CHECK_SCHEMA_VERSION};
 pub(crate) use config::{
     apply_harn_lint_config, apply_loaded_harn_lint_config, build_module_graph,
     build_module_graph_and_seed_analysis, build_module_graph_with_parsed_sources,
-    collect_cross_file_imports, collect_harn_targets, harn_lint_complexity_threshold,
-    harn_lint_persona_step_allowlist, harn_lint_require_docstrings, harn_lint_require_file_header,
-    harn_lint_severity_overrides, load_harn_lint_config,
+    collect_cross_file_imports, collect_harn_targets, load_harn_lint_config, HarnLintConfig,
 };
 pub(crate) use driver::{check_files, CheckCliOverrides};
 pub(crate) use fmt::{fmt_targets, fmt_targets_json, FmtMode, FMT_SCHEMA_VERSION};
@@ -40,7 +38,7 @@ pub(crate) use host_capabilities::load_host_capabilities;
 pub(crate) use lint::{
     lint_file_inner, lint_fix_file, project_engine_rule_sources, project_native_rule_paths,
 };
-pub(crate) use lint_report::{lint_file_report, LintFileReport, LintReport, LINT_SCHEMA_VERSION};
+pub(crate) use lint_report::{run_lint_json, LintJsonOptions, LintReport, LINT_SCHEMA_VERSION};
 pub(crate) use preflight::is_preflight_allowed;
 pub(crate) use script_rules::run_project_script_rules;
 pub(crate) use template_lint::{collect_lint_targets, lint_prompt_file_inner};
