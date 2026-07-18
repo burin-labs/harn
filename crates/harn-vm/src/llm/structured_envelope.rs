@@ -706,9 +706,9 @@ mod tests {
 
         let canonical_usage = crate::llm::vm_value_to_json(canonical_usage);
         let success_usage =
-            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&success).clone()));
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&success).clone().into()));
         let failure_usage =
-            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&failure).clone()));
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&failure).clone().into()));
         assert_eq!(success_usage, canonical_usage);
         assert_eq!(failure_usage, canonical_usage);
         assert_eq!(success_usage["cost_usd"], serde_json::json!(expected_cost));
@@ -723,7 +723,7 @@ mod tests {
             "ghost-model",
         );
         let usage =
-            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&transport).clone()));
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&transport).clone().into()));
         assert_eq!(
             usage.as_object().and_then(|usage| usage.get("cost_usd")),
             Some(&serde_json::Value::Null)
