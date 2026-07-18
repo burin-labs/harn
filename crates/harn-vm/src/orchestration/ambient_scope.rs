@@ -39,6 +39,7 @@ use super::policy::{
     swap_approval_policy_stack, swap_execution_policy_stack, swap_trusted_bridge_depth,
     CapabilityPolicy, ToolApprovalPolicy,
 };
+use super::tool_precheck::{swap_tool_precheck_depth, swap_tool_precheck_stack};
 use super::{swap_mutation_session, MutationSessionRecord, RunExecutionRecord};
 use crate::agent_sessions::swap_current_session_stack;
 use crate::autonomy::{swap_autonomy_policy_stack, AutonomyPolicy};
@@ -104,6 +105,12 @@ pub(crate) struct AmbientExecutionScope {
     host_bridge: Option<std::sync::Arc<crate::bridge::HostBridge>>,
     trusted_depth: usize,
     command_hook_depth: usize,
+    /// Deterministic pre-approval tool-deny closures. Inherited by a spawned
+    /// worker (like the command policy) so a sub-agent honors the same
+    /// prechecks unless it installs its own; the re-entrancy depth begins
+    /// fresh for a new logical call stack.
+    precheck: Vec<std::sync::Arc<crate::value::VmClosure>>,
+    precheck_depth: usize,
 }
 
 /// Clone the contents of one ambient slot without disturbing it: swap it out,
@@ -146,6 +153,7 @@ impl AmbientExecutionScope {
     pub(crate) fn capture_inherited() -> Self {
         Self {
             command: clone_via_swap(swap_command_policy_stack),
+            precheck: clone_via_swap(swap_tool_precheck_stack),
             permissions: clone_via_swap(swap_dynamic_permission_stack),
             runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
@@ -209,6 +217,8 @@ impl AmbientExecutionScope {
             capability_overrides: clone_via_swap(swap_capability_overrides),
             trusted_depth: clone_via_swap(swap_trusted_bridge_depth),
             command_hook_depth: clone_via_swap(swap_command_policy_hook_depth),
+            precheck: clone_via_swap(swap_tool_precheck_stack),
+            precheck_depth: clone_via_swap(swap_tool_precheck_depth),
         }
     }
 
@@ -237,6 +247,8 @@ impl AmbientExecutionScope {
             capability_overrides: swap_capability_overrides(self.capability_overrides),
             trusted_depth: swap_trusted_bridge_depth(self.trusted_depth),
             command_hook_depth: swap_command_policy_hook_depth(self.command_hook_depth),
+            precheck: swap_tool_precheck_stack(self.precheck),
+            precheck_depth: swap_tool_precheck_depth(self.precheck_depth),
         }
     }
 }
@@ -330,6 +342,10 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     ("ACTIVE_HARN_CONNECTOR_CTX", AmbientScoping::Captured),
     ("TRUSTED_BRIDGE_CALL_DEPTH", AmbientScoping::Captured),
     ("COMMAND_POLICY_HOOK_DEPTH", AmbientScoping::Captured),
+    // Deterministic pre-approval tool-deny seam: a spawned worker inherits the
+    // parent's prechecks and carries its own re-entrancy depth across awaits.
+    ("TOOL_PRECHECK_STACK", AmbientScoping::Captured),
+    ("TOOL_PRECHECK_DEPTH", AmbientScoping::Captured),
     // F1: cwd/env/source-dir + capability path-scope root.
     ("VM_EXECUTION_CONTEXT", AmbientScoping::Captured),
     ("VM_SOURCE_DIR", AmbientScoping::Captured),
@@ -1199,6 +1215,8 @@ mod tests {
             "ACTIVE_HARN_CONNECTOR_CTX",
             "TRUSTED_BRIDGE_CALL_DEPTH",
             "COMMAND_POLICY_HOOK_DEPTH",
+            "TOOL_PRECHECK_STACK",
+            "TOOL_PRECHECK_DEPTH",
             "VM_EXECUTION_CONTEXT",
             "VM_SOURCE_DIR",
             "CURRENT_MUTATION_SESSION",

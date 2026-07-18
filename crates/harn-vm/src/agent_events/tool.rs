@@ -232,13 +232,17 @@ pub enum DenialGate {
     HostRejected,
     /// A registered pre-tool hook returned `deny`.
     HookDeny,
+    /// An embedder-registered deterministic precheck refused the call before
+    /// any approval prompt was emitted, so a predetermined-denied call never
+    /// asks the human (harn pre-approval deny seam).
+    DeterministicPrecheck,
     /// Gate could not be classified.
     #[default]
     Unknown,
 }
 
 impl DenialGate {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::ToolCeiling,
         Self::MalformedToolWrapper,
         Self::CapabilityCeiling,
@@ -249,6 +253,7 @@ impl DenialGate {
         Self::ApprovalUnavailable,
         Self::HostRejected,
         Self::HookDeny,
+        Self::DeterministicPrecheck,
         Self::Unknown,
     ];
 
@@ -264,6 +269,7 @@ impl DenialGate {
             Self::ApprovalUnavailable => "approval_unavailable",
             Self::HostRejected => "host_rejected",
             Self::HookDeny => "hook_deny",
+            Self::DeterministicPrecheck => "deterministic_precheck",
             Self::Unknown => "unknown",
         }
     }
@@ -337,6 +343,18 @@ pub struct ToolDenial {
     /// ceiling. Other denial gates omit this field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub side_effect_ceiling: Option<SideEffectCeilingDetails>,
+    /// Machine-facing refusal fact — a stable, secret-free reason (e.g. the
+    /// matched policy pattern) for audit records and structured logs. Distinct
+    /// from `reason`, which is the model-facing text. Set by gates that split
+    /// their refusal by audience (the deterministic pre-approval precheck);
+    /// omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub machine_reason: Option<String>,
+    /// One plain sentence for a human reading an approval/denial surface, with
+    /// no model-teaching prose. Set by audience-splitting gates; omitted
+    /// otherwise, in which case an embedder falls back to `reason`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub human_summary: Option<String>,
 }
 
 impl ToolDenial {
@@ -360,6 +378,8 @@ impl ToolDenial {
             denial_class: None,
             class_repeat_count: None,
             side_effect_ceiling: None,
+            machine_reason: None,
+            human_summary: None,
         }
     }
 
@@ -384,6 +404,8 @@ impl ToolDenial {
             denial_class: None,
             class_repeat_count: None,
             side_effect_ceiling: None,
+            machine_reason: None,
+            human_summary: None,
         }
     }
 
@@ -398,6 +420,20 @@ impl ToolDenial {
     /// interactive ACP host is available.
     pub fn with_side_effect_ceiling(mut self, details: SideEffectCeilingDetails) -> Self {
         self.side_effect_ceiling = Some(details);
+        self
+    }
+
+    /// Attach machine- and human-facing renderings of this refusal so an
+    /// embedder can surface the right text per audience without re-parsing the
+    /// model-facing `reason`. Either field may be `None`, in which case the
+    /// embedder falls back to `reason`.
+    pub fn with_audiences(
+        mut self,
+        machine_reason: Option<String>,
+        human_summary: Option<String>,
+    ) -> Self {
+        self.machine_reason = machine_reason;
+        self.human_summary = human_summary;
         self
     }
 

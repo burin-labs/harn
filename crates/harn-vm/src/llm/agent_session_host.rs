@@ -117,6 +117,7 @@ struct InstalledPolicies {
     pushed_approval: bool,
     pushed_command: bool,
     pushed_permissions: bool,
+    pushed_precheck: bool,
 }
 
 pub(crate) struct SessionPolicyGuard {
@@ -3542,8 +3543,13 @@ pub(crate) fn install_session_policy_guard(
 /// adjacent to that function so the list cannot drift: any new policy-shaped
 /// option MUST be added here, otherwise the tool-dispatch fast path would
 /// skip installing it.
-const SESSION_POLICY_OPTION_KEYS: [&str; 4] =
-    ["policy", "approval_policy", "command_policy", "permissions"];
+const SESSION_POLICY_OPTION_KEYS: [&str; 5] = [
+    "policy",
+    "approval_policy",
+    "command_policy",
+    "permissions",
+    "tool_precheck",
+];
 
 /// Whether `opts_map` carries any policy/permission-shaped key that
 /// [`install_session_policy_guard`] would act on. Presence is checked, not
@@ -3586,6 +3592,14 @@ fn install_session_policies_inner(
         installed.pushed_command = true;
     }
 
+    if let Some(precheck) = crate::orchestration::parse_tool_precheck_value(
+        opts_map.get("tool_precheck"),
+        "agent_loop.tool_precheck",
+    )? {
+        crate::orchestration::push_tool_precheck(precheck);
+        installed.pushed_precheck = true;
+    }
+
     if let Some(permissions) = permissions::parse_dynamic_permission_policy(
         opts_map.get("permissions"),
         "agent_loop.permissions",
@@ -3598,6 +3612,9 @@ fn install_session_policies_inner(
 }
 
 fn release_session_policies(installed: &InstalledPolicies) {
+    if installed.pushed_precheck {
+        crate::orchestration::pop_tool_precheck();
+    }
     if installed.pushed_permissions {
         permissions::pop_dynamic_permission_policy();
     }

@@ -1,0 +1,99 @@
+// Deterministic pre-approval tool-deny seam (harn pre-approval deny seam).
+//
+// Regression for the 2026-07-18 Burin dogfood repro: a `run` command that the
+// embedder had already decided to block (`ls *`) still triggered a
+// `session/request_permission` approval prompt, which the user approved, only
+// for the command to be denied afterward. An embedder-registered `tool_precheck`
+// must be consulted BEFORE the approval gate, so a predetermined-denied call is
+// refused straight to the model — no prompt — carrying the audience-split
+// refusal.
+fn run_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a shell command",
+    {
+      handler: { _ -> {status: "completed", stdout: "", exit_code: 0} },
+      parameters: {command: {type: "string", description: "The command to run"}},
+      returns: {type: "object"},
+    },
+  )
+  return tools
+}
+
+// A precheck that refuses the `run` tool for standalone exploration, returning
+// the audience-split denial (model cue + machine reason + human summary).
+fn ls_precheck() {
+  return { call ->
+    const command = to_string(call?.arguments?.command ?? "")
+    if call?.tool == "run" && command.starts_with("ls ") {
+      return {
+        deny: true,
+        model_cue: "command denied by policy pattern 'ls *'; use `look` for known files",
+        machine_reason: "pattern 'ls *'",
+        human_summary: "Blocked by command policy (pattern 'ls *') — the agent was redirected to a safer tool.",
+      }
+    }
+    return nil
+  }
+}
+
+pipeline default() {
+  const tools = run_tools()
+  // An approval policy that ASKS for `run`. With no host bridge wired in this
+  // context, an ask that actually reaches the prompt comes back
+  // `approval_unavailable`; a precheck that pre-empts the prompt comes back
+  // `deterministic_precheck`. That difference is the ordering proof.
+  const asking_policy = {require_approval: ["run"]}
+  // 1. Precheck denies BEFORE the approval prompt: the gate is the precheck,
+  //    not any approval outcome, so no permission request was emitted.
+  const denied = agent_dispatch_tool_call(
+    {id: "c1", name: "run", arguments: {command: "ls src"}},
+    tools,
+    {approval_policy: asking_policy, tool_precheck: ls_precheck()},
+  )
+  assert(denied.ok == false, "precheck-denied run must not succeed")
+  assert(
+    denied.denial.gate == "deterministic_precheck",
+    "precheck must pre-empt the approval prompt, got gate: ${denied.denial.gate}",
+  )
+  assert(
+    denied.denial.machine_reason == "pattern 'ls *'",
+    "machine_reason rides the denial: ${denied.denial.machine_reason}",
+  )
+  assert(
+    denied.denial.human_summary
+      == "Blocked by command policy (pattern 'ls *') — the agent was redirected to a safer tool.",
+    "human_summary rides the denial: ${denied.denial.human_summary}",
+  )
+  assert(
+    to_string(denied.denial.reason).starts_with("command denied by policy pattern 'ls *'"),
+    "model-facing reason keeps the teaching cue: ${denied.denial.reason}",
+  )
+  // 2. Control — SAME asking policy, NO precheck: the call is NOT resolved by
+  //    the precheck gate (it either reaches the approval prompt or, under an
+  //    auto-approving host, succeeds), confirming the precheck — not some other
+  //    gate — is what suppressed the prompt in case 1.
+  const asked = agent_dispatch_tool_call(
+    {id: "c2", name: "run", arguments: {command: "ls src"}},
+    tools,
+    {approval_policy: asking_policy},
+  )
+  assert(
+    (asked?.denial?.gate ?? "") != "deterministic_precheck",
+    "without a precheck the call is not resolved by the precheck gate: ${asked?.denial?.gate}",
+  )
+  // 3. A precheck that returns nil (allows) does NOT block: the call falls
+  //    through to the normal gates exactly as without a precheck.
+  const allowed = agent_dispatch_tool_call(
+    {id: "c3", name: "run", arguments: {command: "cargo build"}},
+    tools,
+    {approval_policy: asking_policy, tool_precheck: ls_precheck()},
+  )
+  assert(
+    (allowed?.denial?.gate ?? "") != "deterministic_precheck",
+    "a precheck that returns nil must not block: ${allowed?.denial?.gate}",
+  )
+  __io_println("tool_precheck_ok")
+}
