@@ -77,24 +77,37 @@ pipeline test_persona_prompt_compile(_task) {
       assert(sdk.usage.output_tokens > 0, "compiler receipt records realized output tokens")
       assert_eq(sdk.usage.total_tokens, sdk.usage.input_tokens + sdk.usage.output_tokens)
       const prompt_schema = schema_json(llm_mock_calls()[0].output_format.schema)
-      assert_eq(prompt_schema.type, "object")
-      assert(contains(prompt_schema.required, "source"), "model schema requires one source")
-      const source_union = prompt_schema.properties.source.oneOf
-      assert_eq(len(source_union), 2)
-      const cron_source = source_union.find({ branch -> branch.properties.kind.const == "cron" })
-      guard cron_source != nil else {
-        throw "model schema has no cron source branch"
-      }
-      assert_eq(cron_source.additionalProperties, false)
-      assert_eq(cron_source.required.sort(), ["cron", "kind", "timezone"])
-      assert_eq(cron_source.properties.external, nil)
-      const external_source = source_union.find({ branch -> branch.properties.kind.const == "external" })
-      guard external_source != nil else {
-        throw "model schema has no external source branch"
-      }
-      assert_eq(external_source.additionalProperties, false)
-      assert_eq(external_source.required.sort(), ["event", "kind", "provider"])
-      assert_eq(external_source.properties.cron, nil)
+      assert_eq(
+        prompt_schema,
+        {
+          type: "object",
+          properties: {
+            schema_version: {const: "1"},
+            name: {type: "string"},
+            description: {type: "string"},
+            goal: {type: "string"},
+            template: {enum: ["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"]},
+            source: {
+              oneOf: [
+                {
+                  type: "object",
+                  properties: {kind: {const: "cron"}, cron: {type: "string"}, timezone: {type: "string"}},
+                  required: ["cron", "kind", "timezone"],
+                  additionalProperties: false,
+                },
+                {
+                  type: "object",
+                  properties: {kind: {const: "external"}, provider: {type: "string"}, event: {type: "string"}},
+                  required: ["event", "kind", "provider"],
+                  additionalProperties: false,
+                },
+              ],
+            },
+          },
+          required: ["description", "goal", "name", "schema_version", "source", "template"],
+          additionalProperties: false,
+        },
+      )
       const sdk_lowering = sdk.lowering
       guard sdk_lowering != nil else {
         throw "SDK prompt did not lower"

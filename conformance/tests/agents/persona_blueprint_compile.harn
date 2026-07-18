@@ -76,4 +76,15 @@ pipeline main() {
   )
   __io_println(missing_source.valid)
   __io_println(missing_source.errors.any({ error -> error.code == "source_count" }))
+  const malformed_without_source = persona_blueprint_validate(
+    {
+      schema_version: "1",
+      name: "bad-name",
+      description: " ",
+      goal: "",
+      template: "deterministic-sweeper",
+    },
+    slack_catalog,
+  )
+  __io_println(json_stringify(malformed_without_source))
 }

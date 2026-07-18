@@ -309,18 +309,6 @@ pub fn persona_blueprint_validate(blueprint, providers = nil) -> PersonaBlueprin
       warnings: [],
     }
   }
-  const has_cron = blueprint.cron != nil
-  const has_external = blueprint.external != nil
-  if has_cron == has_external {
-    return __persona_blueprint_finalize(
-      __persona_blueprint_error(
-        __persona_blueprint_blank_report(blueprint),
-        "source_count",
-        "",
-        "persona blueprint must select exactly one source: cron or external",
-      ),
-    )
-  }
   const shape = schema_check(blueprint, persona_blueprint_schema())
   let report = __persona_blueprint_blank_report(blueprint)
   if is_err(shape) {
@@ -348,6 +336,18 @@ pub fn persona_blueprint_validate(blueprint, providers = nil) -> PersonaBlueprin
   }
   if !__persona_blueprint_nonempty(blueprint.goal) {
     report = __persona_blueprint_error(report, "empty_goal", "goal", "goal must not be blank")
+  }
+  const has_cron = blueprint.cron != nil
+  const has_external = blueprint.external != nil
+  if has_cron == has_external {
+    return __persona_blueprint_finalize(
+      __persona_blueprint_error(
+        report,
+        "source_count",
+        "",
+        "persona blueprint must select exactly one source: cron or external",
+      ),
+    )
   }
   const catalog = providers ?? list_providers()
   if has_cron {
