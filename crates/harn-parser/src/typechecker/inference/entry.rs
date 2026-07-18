@@ -15,6 +15,7 @@ use super::super::scope::{
     EnumDeclInfo, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo, TypeScope,
 };
 use super::super::{InlayHintInfo, TypeChecker, TypeDiagnostic};
+use super::decls::CallableDeclarationContext;
 
 impl TypeChecker {
     pub(in crate::typechecker) fn check_inner(
@@ -183,8 +184,10 @@ impl TypeChecker {
                         body,
                         where_clauses,
                         *is_stream,
-                        snode.span,
-                        body_scope.as_ref(),
+                        CallableDeclarationContext {
+                            span: snode.span,
+                            scope: body_scope.as_ref(),
+                        },
                     );
                     if let Some(declared_throws) = throws {
                         self.check_declared_throws(

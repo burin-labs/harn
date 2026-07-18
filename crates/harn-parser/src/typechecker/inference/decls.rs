@@ -15,6 +15,12 @@ use super::super::scope::{FnSignature, InferredType, TypeScope};
 use super::super::union::simplify_union;
 use super::super::TypeChecker;
 
+#[derive(Clone, Copy)]
+pub(in crate::typechecker) struct CallableDeclarationContext<'a> {
+    pub span: Span,
+    pub scope: &'a TypeScope,
+}
+
 impl TypeChecker {
     /// Check a parameter default before introducing the parameter itself.
     /// Earlier parameters are already in `scope`; the current parameter and
@@ -430,8 +436,7 @@ impl TypeChecker {
         body: &[SNode],
         where_clauses: &[WhereClause],
         is_stream: bool,
-        expected_span: Span,
-        enclosing_scope: &TypeScope,
+        declaration: CallableDeclarationContext<'_>,
     ) {
         self.fn_depth += 1;
         let saved_stream_depth = self.stream_fn_depth;
@@ -451,8 +456,7 @@ impl TypeChecker {
             body,
             where_clauses,
             is_stream,
-            expected_span,
-            enclosing_scope,
+            declaration,
         );
         if is_stream {
             self.stream_emit_types.pop();
@@ -540,10 +544,9 @@ impl TypeChecker {
         body: &[SNode],
         where_clauses: &[WhereClause],
         is_stream: bool,
-        expected_span: Span,
-        enclosing_scope: &TypeScope,
+        declaration: CallableDeclarationContext<'_>,
     ) {
-        let mut fn_scope = enclosing_scope.child();
+        let mut fn_scope = declaration.scope.child();
         // Register generic type parameters so they are treated as compatible
         // with any concrete type during type checking.
         for tp in type_params {
@@ -605,7 +608,7 @@ impl TypeChecker {
             let mut ret_scope = fn_scope.clone();
             ret_scope.restore_narrowed_vars();
             for stmt in body {
-                self.check_return_type(stmt, ret_type, expected_span, &mut ret_scope);
+                self.check_return_type(stmt, ret_type, declaration.span, &mut ret_scope);
             }
             if !is_stream
                 && !Self::body_contains_yield(body)
@@ -618,7 +621,7 @@ impl TypeChecker {
                         "function can fall through without returning {}",
                         format_type(ret_type)
                     ),
-                    expected_span,
+                    declaration.span,
                 );
             }
         }

@@ -272,8 +272,7 @@ impl TypeChecker {
                     body,
                     where_clauses,
                     *is_stream,
-                    span,
-                    scope,
+                    CallableDeclarationContext { span, scope },
                 );
                 if let Some(declared) = throws {
                     self.check_declared_throws(declared, params, body, span, scope);
