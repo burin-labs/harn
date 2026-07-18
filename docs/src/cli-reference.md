@@ -1130,7 +1130,7 @@ without any API keys, project setup, or network access. Designed for
 the cold-start "what does Harn actually do?" moment.
 
 ```bash
-harn demo                         # menu of bundled scenarios (default: merge-captain)
+harn demo                         # interactive menu on a TTY; prints the list otherwise
 harn demo merge-captain           # persona-supervised PR triage with structured receipts
 harn demo review-captain          # HITL clarifying-question loop on a 5-file diff
 harn demo provider-race           # latency-aware provider race with cost attribution
