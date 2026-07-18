@@ -837,6 +837,11 @@ fn build_vm_args(
             values.iter().map(json_to_vm_value).collect::<Vec<_>>()
         }
         CallArguments::Named(values) => {
+            // Tolerate clients that emit a single-object-param tool's arguments
+            // FLAT at the top level instead of nested under the parameter name
+            // (harn#5039). See `lift_flat_single_object_arg`.
+            let lifted = lift_flat_single_object_arg(params, values);
+            let values: &BTreeMap<String, serde_json::Value> = lifted.as_ref().unwrap_or(values);
             let mut args = Vec::new();
             let mut saw_gap = false;
             for param in params {
@@ -868,6 +873,49 @@ fn build_vm_args(
 
     prefix.extend(rest);
     Ok(prefix)
+}
+
+/// Tolerate MCP/JSON-RPC clients that emit a single-object-parameter tool's
+/// arguments FLAT at the top level instead of nested under the parameter name
+/// (harn#5039).
+///
+/// Harn projects `pub fn tool(params: { field: T, .. })` into an MCP
+/// `inputSchema` that nests every field under `params`. Some model clients
+/// (notably local/open-weight models) ignore that wrapper and emit the inner
+/// fields at the top level — e.g. `{ "events_dir": ".." }` instead of
+/// `{ "params": { "events_dir": ".." } }`. Bound by name, those flat keys match
+/// no parameter and are dropped, so the tool silently runs on its default and
+/// reports the field as "required".
+///
+/// When the function declares exactly one object-typed parameter and the
+/// incoming named map both (a) omits that parameter's own name and (b) is
+/// non-empty, wrap the whole map as that parameter's value. This is:
+/// - **idempotent** — a correctly-nested `{ "params": { .. } }` call already
+///   contains the parameter name, so it is passed through untouched;
+/// - **strictly additive** — it only rewrites calls whose keys would otherwise
+///   all be dropped (the parameter falling back to its default), never a call
+///   that already binds the parameter;
+/// - **shape-guarded** — it fires only for object-typed parameters, so a scalar
+///   single-parameter tool still reports a clear "missing required argument"
+///   instead of a spurious type error.
+///
+/// Returns the rewritten map when the lift applies, else `None` (bind the
+/// original arguments unchanged).
+fn lift_flat_single_object_arg(
+    params: &[crate::ExportedParam],
+    values: &BTreeMap<String, serde_json::Value>,
+) -> Option<BTreeMap<String, serde_json::Value>> {
+    let [only] = params else {
+        return None;
+    };
+    if only.rest || !only.accepts_json_object() {
+        return None;
+    }
+    if values.is_empty() || values.contains_key(&only.name) {
+        return None;
+    }
+    let wrapped = serde_json::Value::Object(values.clone().into_iter().collect());
+    Some(BTreeMap::from([(only.name.clone(), wrapped)]))
 }
 
 /// `true` when the first exported param is the canonical `harness`
@@ -1009,6 +1057,125 @@ pub fn greet(name: string) -> string {
 
         assert_eq!(response.value, serde_json::json!("alice"));
         assert!(!response.cached);
+    }
+
+    /// harn#5039: a single-object-param tool (the `pub fn tool(params: {..})`
+    /// convention) whose MCP `inputSchema` nests fields under `params` must
+    /// still bind when a client emits those fields FLAT at the top level, the
+    /// exact 6/6-failing shape the local model produced against
+    /// `burin-harness-debugger` (`{events_dir: ".."}` rather than
+    /// `{params: {events_dir: ".."}}`). The flat keys must reach the parameter
+    /// instead of being dropped so the tool falls back to its default.
+    async fn dispatch_echo_params(arguments: CallArguments) -> serde_json::Value {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn stage_triage(
+  params: {events_dir: string, verdict_path?: string} = {events_dir: ""},
+) -> dict {
+  return params
+}
+"#,
+        )
+        .expect("write script");
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        core.dispatch(CallRequest {
+            adapter: "mcp".to_string(),
+            function: "stage_triage".to_string(),
+            arguments,
+            auth: AuthRequest::default(),
+            caller: "tester".to_string(),
+            replay_key: None,
+            trace_id: None,
+            parent_span_id: None,
+            metadata: BTreeMap::new(),
+            cancel_token: None,
+            agent_session_id: None,
+            agent_event_sink: None,
+            actor_chain: None,
+            actor_chain_hop: None,
+            progress: None,
+            tenant_id: None,
+            request_id: None,
+            auth_context: None,
+            auth_principal: None,
+        })
+        .await
+        .expect("dispatch")
+        .value
+    }
+
+    #[tokio::test]
+    async fn flat_single_object_arg_binds_like_nested_5039() {
+        // FLAT emission (local-model shape) now reaches the `params` parameter.
+        let flat = dispatch_echo_params(CallArguments::Named(BTreeMap::from([(
+            "events_dir".to_string(),
+            serde_json::json!("/runs/20260717-175909"),
+        )])))
+        .await;
+        assert_eq!(
+            flat,
+            serde_json::json!({ "events_dir": "/runs/20260717-175909" }),
+            "flat top-level args must be lifted into the single object parameter",
+        );
+
+        // Correctly-nested emission (Claude shape) is untouched — idempotent.
+        let nested = dispatch_echo_params(CallArguments::Named(BTreeMap::from([(
+            "params".to_string(),
+            serde_json::json!({ "events_dir": "/runs/nested" }),
+        )])))
+        .await;
+        assert_eq!(
+            nested,
+            serde_json::json!({ "events_dir": "/runs/nested" }),
+            "a correctly-nested call must not be double-lifted",
+        );
+
+        // No arguments falls back to the declared default (no spurious lift).
+        let empty = dispatch_echo_params(CallArguments::Named(BTreeMap::new())).await;
+        assert_eq!(empty, serde_json::json!({ "events_dir": "" }));
+    }
+
+    #[test]
+    fn flat_lift_is_scoped_to_single_object_param() {
+        use crate::ExportedParam;
+
+        let obj_param = |name: &str| ExportedParam {
+            name: name.to_string(),
+            type_expr: None,
+            input_schema: serde_json::json!({ "type": "object", "properties": {} }),
+            has_default: true,
+            rest: false,
+        };
+        let scalar_param = |name: &str| ExportedParam {
+            name: name.to_string(),
+            type_expr: None,
+            input_schema: serde_json::json!({ "type": "string" }),
+            has_default: false,
+            rest: false,
+        };
+        let flat = BTreeMap::from([("events_dir".to_string(), serde_json::json!("x"))]);
+
+        // Single object param, flat args, param name absent -> lift.
+        let params = [obj_param("params")];
+        let lifted = lift_flat_single_object_arg(&params, &flat).expect("lift");
+        assert_eq!(lifted["params"], serde_json::json!({ "events_dir": "x" }));
+
+        // Param name already present -> no lift (idempotent).
+        let nested = BTreeMap::from([("params".to_string(), serde_json::json!({ "a": 1 }))]);
+        assert!(lift_flat_single_object_arg(&params, &nested).is_none());
+
+        // Scalar single param -> no lift (preserves clear "missing required arg").
+        assert!(lift_flat_single_object_arg(&[scalar_param("name")], &flat).is_none());
+
+        // Multiple params -> no lift (normal named binding).
+        assert!(lift_flat_single_object_arg(&[obj_param("a"), obj_param("b")], &flat).is_none());
+
+        // Empty args -> no lift (default applies).
+        assert!(lift_flat_single_object_arg(&params, &BTreeMap::new()).is_none());
     }
 
     #[cfg(feature = "hostlib")]

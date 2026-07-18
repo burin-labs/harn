@@ -16,6 +16,40 @@ pub struct ExportedParam {
     pub rest: bool,
 }
 
+impl ExportedParam {
+    /// Whether this parameter accepts a JSON object value — an inline or aliased
+    /// object shape (declared type, or a projected `inputSchema` carrying
+    /// `"type": "object"` / `properties`) or a bare `dict`. The single owner of
+    /// the "is this a wrapper object parameter" question, shared by the A2A
+    /// structured-message lift and the MCP flat-argument lift so both adapters
+    /// agree on which single-parameter tools take an object.
+    pub fn accepts_json_object(&self) -> bool {
+        self.type_expr
+            .as_ref()
+            .is_some_and(type_expr_accepts_json_object)
+            || self
+                .input_schema
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                == Some("object")
+            || self.input_schema.get("properties").is_some()
+    }
+}
+
+/// Whether a declared type expression accepts a JSON object value: a bare
+/// `dict`, an inline object shape, a `DictType`, or any union/intersection
+/// member that does. Backs [`ExportedParam::accepts_json_object`].
+pub fn type_expr_accepts_json_object(type_expr: &TypeExpr) -> bool {
+    match type_expr {
+        TypeExpr::Named(name) => name == "dict",
+        TypeExpr::Shape(_) | TypeExpr::DictType(_, _) => true,
+        TypeExpr::Union(types) | TypeExpr::Intersection(types) => {
+            types.iter().any(type_expr_accepts_json_object)
+        }
+        _ => false,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExportedCallableKind {
     Function,
