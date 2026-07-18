@@ -131,6 +131,7 @@ pub type LlmCallOptions = {
   timeout?: int,
   timeout_ms?: int,
   messages?: list,
+  prefill?: string,
   transcript?: dict,
   session_id?: string,
   system?: string,
@@ -288,6 +289,43 @@ fn __llm_call_option_keys() {
  */
 pub fn llm_call_options(options = nil) {
   return pick_keys(options ?? {}, __llm_call_option_keys(), {drop_nil: true})
+}
+
+fn __llm_one_shot_prefill_options(options) -> dict {
+  if type_of(options) == "dict" {
+    return options
+  }
+  return {}
+}
+
+/**
+ * Arm `prefill` for one logical LLM request. The marker is intentionally
+ * private to the runtime; `llm_clear_one_shot_prefill` is the only supported
+ * way for retry/recovery code to consume it without disturbing ordinary
+ * caller-supplied prefills.
+ *
+ * @api_stability: experimental
+ */
+pub fn llm_arm_one_shot_prefill(prefill: string, options = nil) -> dict {
+  const base = __llm_one_shot_prefill_options(options)
+  if prefill == "" {
+    return base
+  }
+  return base + {prefill: prefill, _harn_one_shot_prefill: true}
+}
+
+/**
+ * Clear only an armed Harn one-shot prefill. This is the retry/recovery
+ * boundary: regular prefills retain their existing multi-attempt behavior.
+ *
+ * @api_stability: experimental
+ */
+pub fn llm_clear_one_shot_prefill(options = nil) -> dict {
+  const base = __llm_one_shot_prefill_options(options)
+  if base?._harn_one_shot_prefill != true {
+    return base
+  }
+  return base.remove("prefill").remove("_harn_one_shot_prefill")
 }
 
 /**

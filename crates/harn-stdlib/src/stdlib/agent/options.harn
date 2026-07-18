@@ -68,6 +68,13 @@ pub type RepairDiagnostics = {
 }
 
 /**
+ * Opt-in bounded recovery for text-only no-progress turns. The stall detector
+ * owns normalization and accounting; callers only choose whether to enable it
+ * and, when useful, a per-run firing cap.
+ */
+pub type MonologueActuation = {enabled?: bool, max_firings?: int}
+
+/**
  * Caller-facing `stall_diagnostics:` config. Normalized into the internal
  * `AgentStallConfig` shape by `std/agent/stall`.
  *
@@ -99,6 +106,7 @@ pub type StallDiagnostics = {
   reserved_terminal_verify?: bool,
   reserved_terminal_verify_iterations?: int,
   zero_write_terminal_verify?: bool,
+  monologue_actuation?: bool | MonologueActuation,
 }
 
 /**
@@ -233,6 +241,7 @@ pub type AgentLoopOptions = {
   timeout?: int,
   timeout_ms?: int,
   messages?: list,
+  prefill?: string,
   history?: list,
   transcript?: dict,
   session_id?: string,
@@ -2155,6 +2164,20 @@ fn __stack_configured_model_options(cfg, prefixes) {
  */
 pub fn agent_sanitize_model_options(options = nil, policy = nil) {
   return __stack_sanitize_result(options, policy).options
+}
+
+/**
+ * Return whether the resolved provider/model route accepts an assistant
+ * prefill. Capability lookup and its fail-closed fallback stay in the model
+ * option owner so recovery policy never reconstructs catalog semantics.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_supports_assistant_prefill(options = nil) -> bool {
+  const capabilities = __stack_capabilities(options)
+  return capabilities?.supports_assistant_prefill ?? false
 }
 
 /**

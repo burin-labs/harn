@@ -1,0 +1,148 @@
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn lookup_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Read evidence.",
+    {
+      handler: { args -> "evidence for " + to_string(args?.path) },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn lookup_call(id = "lookup") {
+  return llm_tool_call("lookup", {path: id}, id)
+}
+
+fn overflow_turn() {
+  return {
+    error: {
+      status: 400,
+      reason: "context_overflow",
+      message: "mock HTTP 400 [context_overflow]: prompt is too long",
+    },
+  }
+}
+
+fn truncated_turn() {
+  return {text: "<tool_call>lookup({ path: \"app.txt\"", stop_reason: "length"}
+}
+
+fn options(session, extra = nil) {
+  return {
+    provider: "mock",
+    model: "one-shot-prefill-fixture",
+    tools: lookup_tools(),
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    done_judge: nil,
+    max_iterations: 10,
+    session_id: session,
+  }
+    + (extra ?? {})
+}
+
+pipeline default() {
+  // Nested LLM options override a top-level prefill, and the final wrap-up
+  // receives neither persistent value after the first main request consumes it.
+  with_llm_script(
+    [lookup_call(), llm_text("Final response.")],
+    { ->
+      const session = "one-shot-prefill-wrapup-" + uuid()
+      const result = agent_loop(
+        "Inspect evidence.",
+        nil,
+        options(
+          session,
+          {prefill: "top-level", llm_options: {prefill: "nested"}, max_iterations: 1, final_wrapup: true},
+        ),
+      )
+      const calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(calls[0].prefill)
+      __io_println(calls[1].prefill == nil)
+    },
+  )
+  // Truncation auto-continuation is a second physical request, and later
+  // ordinary requests also stay clear.
+  with_llm_script(
+    [truncated_turn(), lookup_call(), llm_text("Done. ##DONE##")],
+    { ->
+      const session = "one-shot-prefill-truncation-" + uuid()
+      const result = agent_loop(
+        "Inspect evidence.",
+        nil,
+        options(session, {prefill: "<tool_call>", tool_format: "text"}),
+      )
+      const calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(calls[0].prefill == "<tool_call>")
+      __io_println(calls[1].prefill == nil)
+      __io_println(calls[2].prefill == nil)
+    },
+  )
+  // The default transport retry wrapper clears only Harn's one-shot marker.
+  with_llm_script(
+    [
+      {error: {category: "rate_limit", message: "mock 429 transient"}},
+      lookup_call(),
+      llm_text("Done. ##DONE##"),
+    ],
+    { ->
+      const session = "one-shot-prefill-retry-" + uuid()
+      const result = agent_loop("Inspect evidence.", nil, options(session, {prefill: "retry-once"}))
+      const calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(calls[0].prefill == "retry-once")
+      __io_println(calls[1].prefill == nil)
+      __io_println(calls[2].prefill == nil)
+    },
+  )
+  // A callback arms the transport after enough observations exist for real
+  // context recovery. The overflow retry must not replay the prefill.
+  const tool_turns = atomic(0)
+  with_llm_script(
+    [
+      lookup_call("a"),
+      lookup_call("b"),
+      lookup_call("c"),
+      lookup_call("d"),
+      overflow_turn(),
+      lookup_call("recovered"),
+      llm_text("Done. ##DONE##"),
+    ],
+    { ->
+      const session = "one-shot-prefill-overflow-" + uuid()
+      const result = agent_loop(
+        "Inspect evidence.",
+        nil,
+        options(
+          session,
+          {
+            post_turn_callback: { info ->
+              if len(info?.successful_tool_names ?? []) == 0 {
+                return nil
+              }
+              const count = atomic_add(tool_turns, 1)
+              if count == 4 {
+                return {prefill: "overflow-once"}
+              }
+              return nil
+            },
+          },
+        ),
+      )
+      const calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(calls[4].prefill == "overflow-once")
+      __io_println(calls[5].prefill == nil)
+    },
+  )
+}

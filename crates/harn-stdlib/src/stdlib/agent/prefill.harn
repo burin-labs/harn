@@ -1,0 +1,41 @@
+// @harn-entrypoint-category agent.stdlib
+import { agent_merge_llm_options } from "std/agent/options"
+
+/**
+ * A pending agent-loop prefill and the persistent options with that value
+ * removed. The loop may arm `prefill` on its next main request; auxiliary and
+ * later requests receive `options`.
+ */
+pub type AgentOneShotPrefill = {options: dict, prefill: string}
+
+/**
+ * Consume the effective agent-loop prefill once. Nested `llm_options` retains
+ * its normal override precedence, while both persistent locations are cleared
+ * before skill, compaction, classifier, or terminal work can observe them.
+ *
+ * @effects: []
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_take_one_shot_prefill(options = nil) -> AgentOneShotPrefill {
+  const base = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  const nested = if type_of(base?.llm_options) == "dict" {
+    base.llm_options
+  } else {
+    {}
+  }
+  const effective = agent_merge_llm_options(base, nested)
+  const value = effective?.prefill
+  if value != nil && type_of(value) != "string" {
+    throw "agent_loop: prefill must be a string or nil; got " + type_of(value)
+  }
+  let cleaned = base.remove("prefill")
+  if type_of(base?.llm_options) == "dict" {
+    cleaned = cleaned + {llm_options: nested.remove("prefill")}
+  }
+  return {options: cleaned, prefill: value ?? ""}
+}

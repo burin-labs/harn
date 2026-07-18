@@ -18,7 +18,7 @@
 // "context_window_exceeded" by the default retry predicate.
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
-import { llm_call_options } from "std/llm/options"
+import { llm_call_options, llm_clear_one_shot_prefill } from "std/llm/options"
 import {
   __wrap_llm_result,
   parse_first_json,
@@ -328,7 +328,10 @@ pub fn with_retry(next, opts = nil) {
     let attempt = 1
     let last_envelope = {ok: false, status: "exception", error: "with_retry: no attempts"}
     while attempt <= max_attempts {
-      const attempt_call = call + {turn: base_turn + {attempt: attempt}}
+      let attempt_call = call + {turn: base_turn + {attempt: attempt}}
+      if attempt > 1 {
+        attempt_call = attempt_call + {opts: llm_clear_one_shot_prefill(call?.opts)}
+      }
       const envelope = __safe_invoke(next, attempt_call)
       last_envelope = envelope
       const should_retry = if predicate != nil {

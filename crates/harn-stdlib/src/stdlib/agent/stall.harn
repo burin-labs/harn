@@ -1,4 +1,11 @@
 import {
+  MonologueActuationConfig,
+  MonologueActuationState,
+  agent_monologue_actuation_arm,
+  agent_monologue_actuation_config,
+  agent_monologue_actuation_initial_state,
+} from "std/agent/monologue_actuation"
+import {
   agent_emit_event,
   agent_session_inject_feedback,
   agent_session_totals,
@@ -207,6 +214,7 @@ type AgentStallConfig = {
   verify_state_stall_turns: int,
   verify_state_recurrence_hard: int,
   no_verifier_progress_limit: int,
+  monologue_actuation: MonologueActuationConfig,
   progress_signal?: any,
   remediation_delivered?: any,
   action_signal?: any,
@@ -299,6 +307,7 @@ type AgentStallState = {
   verify_signature_counts: dict,
   remediation_delivered_signature: string,
   remediation_delivered_count: int,
+  monologue_actuation: MonologueActuationState,
 }
 
 /**
@@ -445,6 +454,7 @@ fn __agent_stall_default_config() -> AgentStallConfig {
     verify_state_stall_turns: STALL_VERIFY_STATE_STALL_TURNS,
     verify_state_recurrence_hard: STALL_VERIFY_STATE_RECURRENCE_HARD,
     no_verifier_progress_limit: STALL_NO_VERIFIER_PROGRESS_LIMIT,
+    monologue_actuation: agent_monologue_actuation_config(),
     progress_signal: nil,
     remediation_delivered: nil,
     action_signal: nil,
@@ -571,6 +581,7 @@ fn __agent_stall_config(value) -> AgentStallConfig {
       STALL_NO_VERIFIER_PROGRESS_LIMIT,
       1,
     ),
+    monologue_actuation: agent_monologue_actuation_config(value?.monologue_actuation),
     progress_signal: __agent_stall_closure(
       __agent_stall_repair_value(value, repair_diagnostics, "progress_signal"),
       "progress_signal",
@@ -640,6 +651,7 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     verify_signature_counts: {},
     remediation_delivered_signature: "",
     remediation_delivered_count: 0,
+    monologue_actuation: agent_monologue_actuation_initial_state(),
   }
 }
 
@@ -1910,6 +1922,25 @@ fn __agent_stall_apply_action_signal(
 }
 
 /**
+ * Remember a qualifying text-only stall until the next turn's real tool
+ * paradigm and provider capabilities are known. Deferring that decision avoids
+ * leaking a text call opener into native routes or unsupported providers.
+ */
+fn __agent_stall_arm_monologue_actuation(observation: AgentStallObservation) -> AgentStallObservation {
+  return observation
+    + {
+    state: observation.state
+      + {
+      monologue_actuation: agent_monologue_actuation_arm(
+        observation.state.monologue_actuation,
+        observation.config.monologue_actuation,
+        to_string(observation.warning?.pattern ?? ""),
+      ),
+    },
+  }
+}
+
+/**
  * agent_stall_observe_tool_calls detects degenerate agent loops, folds the
  * current-failure model when post-edit verification is enabled, and when the
  * evidence-aware repair nudge is enabled (`stall_diagnostics.repair_aware`)
@@ -1977,13 +2008,14 @@ pub fn agent_stall_observe_tool_calls(
     payload,
     defer_feedback,
   )
-  if observation.config.progress_signal == nil {
-    return signaled
+  let resolved = signaled
+  if observation.config.progress_signal != nil {
+    resolved = resolved
+      + {
+      state: __agent_stall_fold_verify_state(resolved.state, observation.config, payload, turn_made_edit),
+    }
   }
-  return signaled
-    + {
-    state: __agent_stall_fold_verify_state(signaled.state, observation.config, payload, turn_made_edit),
-  }
+  return __agent_stall_arm_monologue_actuation(resolved)
 }
 
 /**

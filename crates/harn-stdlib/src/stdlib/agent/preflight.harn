@@ -122,7 +122,16 @@ pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
   return p.call_open + to_string(name) + "({ " + rendered + " })" + p.call_close
 }
 
-fn __agent_has_tools(opts) {
+/**
+ * Return whether an agent option shape carries at least one usable tool
+ * registry. Keeping this contract in preflight lets recovery and prompt
+ * policy share the same tool-availability definition.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_has_tools(opts = nil) -> bool {
   const registry = opts?.tools
   if registry == nil {
     return false
@@ -151,7 +160,7 @@ fn __agent_loop_contract_prompt(opts) {
     {
       loop_until_done: loop_until_done,
       exit_when_verified: opts?.exit_when_verified ?? false,
-      has_tools: __agent_has_tools(opts),
+      has_tools: agent_has_tools(opts),
       native_mode: mode == "native",
       native_done: mode == "native",
       calls_label: paradigm.call_noun + "s",
@@ -164,7 +173,7 @@ fn __agent_loop_contract_prompt(opts) {
 }
 
 fn __agent_native_tool_contract_prompt(opts) {
-  if !__agent_has_tools(opts) || __agent_tool_format(opts) != "native" {
+  if !agent_has_tools(opts) || __agent_tool_format(opts) != "native" {
     return ""
   }
   return render_agent_prompt_id(
@@ -175,7 +184,7 @@ fn __agent_native_tool_contract_prompt(opts) {
 }
 
 fn __agent_json_tool_contract_prompt(opts) {
-  if !__agent_has_tools(opts) || __agent_tool_format(opts) != "json" {
+  if !agent_has_tools(opts) || __agent_tool_format(opts) != "json" {
     return ""
   }
   return render_agent_prompt_id(
