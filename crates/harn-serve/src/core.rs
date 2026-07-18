@@ -455,11 +455,7 @@ impl DispatchCore {
         // paid for.
         let _limit_guard = self.check_limits(&request, function)?;
 
-        let replay_key = request
-            .replay_key
-            .clone()
-            .map(ReplayKey)
-            .or_else(|| Some(self.default_replay_key(&request)));
+        let replay_key = request.replay_key.clone().map(ReplayKey);
         if let Some(key) = replay_key.as_ref() {
             if let Some(cached) = self.config.replay_cache.get(key).await? {
                 return Ok(CallResponse {
@@ -583,25 +579,6 @@ impl DispatchCore {
                 retry_after_ms,
             }),
         }
-    }
-
-    fn default_replay_key(&self, request: &CallRequest) -> ReplayKey {
-        let args = match &request.arguments {
-            CallArguments::Named(values) => serde_json::Value::Object(
-                values
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect(),
-            ),
-            CallArguments::Positional(values) => serde_json::Value::Array(values.clone()),
-        };
-        let key = serde_json::json!({
-            "adapter": &request.adapter,
-            "function": &request.function,
-            "actor_chain": request.actor_chain.as_ref().map(ActorChain::to_json_value),
-            "arguments": harn_vm::mcp_file_upload::redact_data_uris_for_logs(&args),
-        });
-        ReplayKey(serde_json::to_string(&key).unwrap_or_default())
     }
 
     async fn invoke_function(
@@ -963,6 +940,106 @@ fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct TrackingReplayCache {
+        inner: InMemoryReplayCache,
+        gets: AtomicUsize,
+        puts: AtomicUsize,
+    }
+
+    impl TrackingReplayCache {
+        fn counts(&self) -> (usize, usize) {
+            (
+                self.gets.load(Ordering::SeqCst),
+                self.puts.load(Ordering::SeqCst),
+            )
+        }
+    }
+
+    #[async_trait]
+    impl ReplayCache for TrackingReplayCache {
+        async fn get(&self, key: &ReplayKey) -> Result<Option<ReplayCacheEntry>, DispatchError> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            self.inner.get(key).await
+        }
+
+        async fn put(&self, key: ReplayKey, value: ReplayCacheEntry) -> Result<(), DispatchError> {
+            self.puts.fetch_add(1, Ordering::SeqCst);
+            self.inner.put(key, value).await
+        }
+    }
+
+    struct CountingVmConfigurator {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl VmConfigurator for CountingVmConfigurator {
+        fn configure(&self, vm: &mut Vm) -> Result<(), DispatchError> {
+            let calls = self.calls.clone();
+            vm.register_builtin("test_increment_call_count", move |_args, _output| {
+                let count = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                Ok(VmValue::Int(
+                    count.try_into().expect("test call count fits in i64"),
+                ))
+            });
+            Ok(())
+        }
+    }
+
+    fn replay_test_fixture() -> (
+        tempfile::TempDir,
+        DispatchCore,
+        Arc<AtomicUsize>,
+        Arc<TrackingReplayCache>,
+    ) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r"
+pub fn observe_execution() -> int {
+  return test_increment_call_count()
+}
+",
+        )
+        .expect("write script");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let cache = Arc::new(TrackingReplayCache::default());
+        let mut config = DispatchCoreConfig::for_script(&script);
+        config.replay_cache = cache.clone();
+        config.vm_configurator = Arc::new(CountingVmConfigurator {
+            calls: calls.clone(),
+        });
+        let core = DispatchCore::new(config).expect("core");
+        (dir, core, calls, cache)
+    }
+
+    fn replay_test_request(replay_key: Option<&str>) -> CallRequest {
+        CallRequest {
+            adapter: "mcp".to_string(),
+            function: "observe_execution".to_string(),
+            arguments: CallArguments::Named(BTreeMap::new()),
+            auth: AuthRequest::default(),
+            caller: "tester".to_string(),
+            replay_key: replay_key.map(str::to_string),
+            trace_id: None,
+            parent_span_id: None,
+            metadata: BTreeMap::new(),
+            cancel_token: None,
+            agent_session_id: None,
+            agent_event_sink: None,
+            actor_chain: None,
+            actor_chain_hop: None,
+            progress: None,
+            tenant_id: None,
+            request_id: None,
+            auth_context: None,
+            auth_principal: None,
+        }
+    }
 
     #[tokio::test]
     async fn dispatch_executes_exported_function() {
@@ -1117,172 +1194,47 @@ pipeline default(task) {
     }
 
     #[tokio::test]
-    async fn dispatch_uses_replay_cache_before_reinvoking() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
-            r#"
-pub fn greet(name: string) -> string {
-  return "fresh"
-}
-"#,
-        )
-        .expect("write script");
-
-        let cache = Arc::new(InMemoryReplayCache::new());
-        cache
-            .put(
-                ReplayKey("fixed-key".to_string()),
-                ReplayCacheEntry {
-                    value: serde_json::json!("cached"),
-                    printed_output: String::new(),
-                },
-            )
-            .await
-            .expect("seed cache");
-
-        let mut config = DispatchCoreConfig::for_script(&script);
-        config.replay_cache = cache;
-        let core = DispatchCore::new(config).expect("core");
-        let response = core
-            .dispatch(CallRequest {
-                adapter: "mcp".to_string(),
-                function: "greet".to_string(),
-                arguments: CallArguments::Named(BTreeMap::from([(
-                    "name".to_string(),
-                    serde_json::json!("alice"),
-                )])),
-                auth: AuthRequest::default(),
-                caller: "tester".to_string(),
-                replay_key: Some("fixed-key".to_string()),
-                trace_id: None,
-                parent_span_id: None,
-                metadata: BTreeMap::new(),
-                cancel_token: None,
-                agent_session_id: None,
-                agent_event_sink: None,
-                actor_chain: None,
-                actor_chain_hop: None,
-                progress: None,
-                tenant_id: None,
-                request_id: None,
-                auth_context: None,
-                auth_principal: None,
-            })
-            .await
-            .expect("dispatch");
-
-        assert_eq!(response.value, serde_json::json!("cached"));
-        assert!(response.cached);
-    }
-
-    #[test]
-    fn default_replay_key_redacts_data_uri_payloads() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
-            r"
-pub fn inspect(upload: string) -> string {
-  return upload
-}
-",
-        )
-        .expect("write script");
-
-        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-        let request = |payload: serde_json::Value| CallRequest {
-            adapter: "mcp".to_string(),
-            function: "inspect".to_string(),
-            arguments: CallArguments::Named(BTreeMap::from([("upload".to_string(), payload)])),
-            auth: AuthRequest::default(),
-            caller: "tester".to_string(),
-            replay_key: None,
-            trace_id: None,
-            parent_span_id: None,
-            metadata: BTreeMap::new(),
-            cancel_token: None,
-            agent_session_id: None,
-            agent_event_sink: None,
-            actor_chain: None,
-            actor_chain_hop: None,
-            progress: None,
-            tenant_id: None,
-            request_id: None,
-            auth_context: None,
-            auth_principal: None,
-        };
+    async fn dispatch_without_replay_key_executes_each_request_without_cache_access() {
+        let (_dir, core, calls, cache) = replay_test_fixture();
 
         let first = core
-            .default_replay_key(&request(serde_json::json!(
-                "data:text/plain;base64,aGVsbG8="
-            )))
-            .0;
+            .dispatch(replay_test_request(None))
+            .await
+            .expect("first dispatch");
         let second = core
-            .default_replay_key(&request(serde_json::json!(
-                "data:text/plain;base64,d29ybGQ="
-            )))
-            .0;
+            .dispatch(replay_test_request(None))
+            .await
+            .expect("second dispatch");
 
-        assert!(first.contains("data:text/plain;redacted;sha256="));
-        assert!(!first.contains("aGVsbG8="));
-        assert!(!second.contains("d29ybGQ="));
-        assert_ne!(first, second);
+        assert_eq!(
+            [first.value, second.value],
+            [serde_json::json!(1), serde_json::json!(2)]
+        );
+        assert_eq!([first.cached, second.cached], [false, false]);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(cache.counts(), (0, 0));
     }
 
-    #[test]
-    fn default_replay_key_includes_actor_chain() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
-            r"
-pub fn inspect(value: string) -> string {
-  return value
-}
-",
-        )
-        .expect("write script");
-
-        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-        let request = |actor_chain: ActorChain| CallRequest {
-            adapter: "mcp".to_string(),
-            function: "inspect".to_string(),
-            arguments: CallArguments::Named(BTreeMap::from([(
-                "value".to_string(),
-                serde_json::json!("same"),
-            )])),
-            auth: AuthRequest::default(),
-            caller: "tester".to_string(),
-            replay_key: None,
-            trace_id: None,
-            parent_span_id: None,
-            metadata: BTreeMap::new(),
-            cancel_token: None,
-            agent_session_id: None,
-            agent_event_sink: None,
-            actor_chain: Some(actor_chain),
-            actor_chain_hop: None,
-            progress: None,
-            tenant_id: None,
-            request_id: None,
-            auth_context: None,
-            auth_principal: None,
-        };
+    #[tokio::test]
+    async fn dispatch_with_same_explicit_replay_key_executes_once_and_replays_once() {
+        let (_dir, core, calls, cache) = replay_test_fixture();
 
         let first = core
-            .default_replay_key(&request(
-                ActorChain::new("user:kenneth").pushed("agent:root"),
-            ))
-            .0;
+            .dispatch(replay_test_request(Some("fixed-key")))
+            .await
+            .expect("first dispatch");
         let second = core
-            .default_replay_key(&request(ActorChain::new("user:maya").pushed("agent:root")))
-            .0;
+            .dispatch(replay_test_request(Some("fixed-key")))
+            .await
+            .expect("second dispatch");
 
-        assert_ne!(first, second);
-        assert!(first.contains(r#""sub":"user:kenneth""#));
-        assert!(second.contains(r#""sub":"user:maya""#));
+        assert_eq!(
+            [first.value, second.value],
+            [serde_json::json!(1), serde_json::json!(1)]
+        );
+        assert_eq!([first.cached, second.cached], [false, true]);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(cache.counts(), (2, 1));
     }
 
     #[tokio::test]
