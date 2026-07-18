@@ -1233,45 +1233,6 @@ location and OAuth/service-account authentication. OpenAI-compatible Gemini
 routes such as OpenRouter remain OpenAI-wire routes and use OpenAI-style
 `tools`, `tool_calls`, and structured-output parameters.
 
-### Mid-conversation system & developer messages
-
-A conversation `messages` array (or a transcript built with `add_user` /
-`add_assistant` / `add_system`, or `add_message(convo, "developer", ...)`) may
-carry a `system`- or `developer`-role message **anywhere**, not just at the
-front — an operator instruction delivered mid-conversation (a mode switch, a
-runtime-fetched constraint, injected state). Harn makes that portable: at the request boundary
-it rewrites the interleaved directive to the exact form the target route
-accepts, driven by the `system_message_placement` capability. You write the same
-script for every provider; you never hit a provider-specific placement 400 or a
-silently-repositioned directive.
-
-```harn
-let convo = add_user(transcript_from_messages([]), "My name is Ada.")
-convo = add_assistant(convo, "Nice to meet you, Ada.")
-convo = add_system(convo, "For the rest of this conversation, reply only in French.")
-convo = add_user(convo, "What is my name?")
-
-// Same script on every route:
-llm_call("", nil, {provider: "anthropic", model: "claude-opus-4-8", messages: transcript_messages(convo)})
-llm_call("", nil, {provider: "anthropic", model: "claude-haiku-4-5", messages: transcript_messages(convo)})
-llm_call("", nil, {provider: "openai",    model: "gpt-5.4",          messages: transcript_messages(convo)})
-```
-
-Per-route behavior (capability-driven, not hardcoded):
-
-| Placement | Routes | Interleaved directive becomes |
-|---|---|---|
-| `inline` | OpenAI Chat/Responses, Ollama | Carried verbatim at its position (these APIs accept `system`/`developer` anywhere). |
-| `native_directive` | Claude Opus 4.8 | A validly-placed message rides natively as `role: "system"`; consecutive directives merge into one message while retaining ordered content blocks and cache metadata. Anything with an invalid neighbor folds instead. `developer` collapses to `system`. |
-| `fold` | Gemini, Bedrock, older/other Claude | No positional system channel, so the directive folds into the adjacent user turn as a `<system-reminder>` block — its position and operator intent survive instead of being hoisted into the global system prompt or 400ing. |
-
-A **leading** run of `system`/`developer` messages is always the system prompt
-and merges into the top-level `system` field on every route. Only *interleaved*
-directives are governed by `system_message_placement` — unset derives from the
-wire dialect (OpenAI/Ollama → `inline`, else `fold`), so the safe default never
-400s. The normalization runs at the wire boundary only; the persisted transcript
-keeps the original roles.
-
 ### Reranking and self-certainty
 
 ```harn

@@ -173,10 +173,9 @@ impl serde::Serialize for PromptCacheTtl {
 /// Provider API surface for a call. OpenAI-compatible providers default to
 /// chat completions; the native OpenAI Responses path is explicit because it
 /// has different request, tool, and transcript semantics.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum LlmApiMode {
-    #[default]
     ChatCompletions,
     Responses,
 }
@@ -210,10 +209,9 @@ impl ToolSearchConfig {
 }
 
 /// First-class cost/latency routing policy for `llm_call`.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LlmRoutePolicy {
     /// Keep the historical provider/model resolution path.
-    #[default]
     Manual,
     /// Pin to a concrete alias, model id, or `provider:model` selector.
     Always(String),
@@ -514,82 +512,6 @@ pub(crate) struct LlmCallOptions {
         Option<crate::llm::structural_experiments::AppliedStructuralExperiment>,
 }
 
-impl Default for LlmCallOptions {
-    /// Neutral, empty options. Every construction site sets the fields it
-    /// cares about and spreads the rest with `..Default::default()`, so a new
-    /// field slots in here alone instead of at every hand-built call site.
-    ///
-    /// The one non-`Default`-derivable value is `stream: true` — the
-    /// documented default transport, and what nearly every caller wants.
-    /// `max_tokens: 0` is a sentinel: providers clamp it up to their own
-    /// per-model floor, and the script-facing extractor overrides it with the
-    /// documented `16384` default.
-    fn default() -> Self {
-        Self {
-            provider: String::new(),
-            model: String::new(),
-            api_key: String::new(),
-            api_mode: LlmApiMode::default(),
-            route_policy: LlmRoutePolicy::default(),
-            fallback_chain: Vec::new(),
-            route_fallbacks: Vec::new(),
-            routing_decision: None,
-            routing_policy: None,
-            region: None,
-            session_id: None,
-            mock_scope: None,
-            dispatch_provenance: None,
-            reminders: None,
-            reminder_lifecycle: Vec::new(),
-            messages: Vec::new(),
-            system: None,
-            transcript_summary: None,
-            max_tokens: 0,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            logprobs: false,
-            top_logprobs: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            fast: false,
-            output_format: OutputFormat::default(),
-            response_format: None,
-            json_schema: None,
-            output_schema: None,
-            output_validation: None,
-            schema_stream_abort: false,
-            thinking: ThinkingConfig::default(),
-            anthropic_beta_features: Vec::new(),
-            vision: false,
-            tools: None,
-            native_tools: None,
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            tool_search: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            idle_timeout: None,
-            stream: true,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            budget: None,
-            prefill: None,
-            structural_experiment: None,
-            applied_structural_experiment: None,
-        }
-    }
-}
-
 /// Resolve effective request timeout: explicit value > `HARN_LLM_TIMEOUT` env >
 /// model-catalog `stream_timeout` > 120s default.
 ///
@@ -840,12 +762,6 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             mock_scope: opts.mock_scope.clone(),
         };
         apply_thinking_disable_directive(&mut payload);
-        // Rewrite interleaved system/developer messages to the form this route
-        // accepts (native directive, inline, or folded `<system-reminder>`),
-        // so a mid-conversation operator instruction is portable instead of a
-        // per-provider footgun. Runs at the egress boundary only — the
-        // persisted transcript keeps the original roles.
-        crate::llm::system_placement::normalize_payload_system_messages(&mut payload);
         payload
     }
 }
@@ -890,25 +806,36 @@ fn apply_thinking_disable_directive(payload: &mut LlmRequestPayload) {
 
 #[cfg(test)]
 pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
-    // A populated carry-through fixture: every field below is set to a
-    // deliberately non-neutral value so payload-round-trip tests can prove it
-    // survives `From<&LlmCallOptions>`. Fields that equal `default()` (routing,
-    // observability, `thinking: Disabled`, `schema_stream_abort: false`,
-    // `stream: true`, the Responses knobs) are spread in — a new field defaults
-    // here instead of forcing an edit to this fixture and every sibling.
     LlmCallOptions {
         provider: provider.to_string(),
         model: "test-model".to_string(),
+        api_key: String::new(),
+        api_mode: LlmApiMode::ChatCompletions,
+        route_policy: LlmRoutePolicy::Manual,
+        fallback_chain: Vec::new(),
+        route_fallbacks: Vec::new(),
+        routing_decision: None,
+        routing_policy: None,
+        region: None,
+        session_id: None,
+        mock_scope: None,
+        dispatch_provenance: None,
+        reminders: None,
+        reminder_lifecycle: Vec::new(),
         messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
+        system: None,
         transcript_summary: Some("summary".to_string()),
         max_tokens: 64,
         temperature: Some(0.2),
         top_p: Some(0.8),
         top_k: Some(40),
+        logprobs: false,
+        top_logprobs: None,
         stop: Some(vec!["STOP".to_string()]),
         seed: Some(7),
         frequency_penalty: Some(0.1),
         presence_penalty: Some(0.2),
+        fast: false,
         output_format: OutputFormat::JsonSchema {
             schema: serde_json::json!({"type": "object"}),
             strict: true,
@@ -917,18 +844,40 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         json_schema: Some(serde_json::json!({"type": "object"})),
         output_schema: Some(serde_json::json!({"type": "object"})),
         output_validation: Some("error".to_string()),
+        // Default-off in the test fixture: most callers stream
+        // non-JSON text and would unexpectedly abort if the watch ran.
+        // Tests that exercise the mid-stream abort opt in explicitly.
+        schema_stream_abort: false,
+        thinking: ThinkingConfig::Disabled,
+        anthropic_beta_features: Vec::new(),
+        vision: false,
         tools: Some(VmValue::String(arcstr::ArcStr::from("vm-local-tools"))),
         native_tools: Some(vec![
             serde_json::json!({"type": "function", "function": {"name": "tool"}}),
         ]),
+        provider_tools: Vec::new(),
         tool_choice: Some(serde_json::json!({
             "type": "function",
             "function": {"name": "tool"}
         })),
+        tool_search: None,
         cache: true,
+        prompt_cache_ttl: None,
+        stream: true,
         timeout: Some(5),
+        idle_timeout: None,
         provider_overrides: Some(serde_json::json!({"custom_flag": true})),
-        ..LlmCallOptions::default()
+        previous_response_id: None,
+        store: None,
+        background: None,
+        truncation: None,
+        compact: None,
+        include: None,
+        max_tool_calls: None,
+        budget: None,
+        prefill: None,
+        structural_experiment: None,
+        applied_structural_experiment: None,
     }
 }
 
