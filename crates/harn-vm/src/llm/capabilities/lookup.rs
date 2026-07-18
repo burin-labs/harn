@@ -126,6 +126,18 @@ pub fn lookup(provider: &str, model: &str) -> Capabilities {
     lookup_with_user_overrides(provider, model, user.as_ref())
 }
 
+pub(crate) fn should_use_responses_transport(
+    provider: &str,
+    model: &str,
+    explicit_responses: bool,
+) -> bool {
+    let selected = explicit_responses
+        && (provider == "openai"
+            || crate::llm_config::provider_has_feature(provider, "responses_api"));
+    let required = provider == "openai" && lookup(provider, model).chat_completions_unsupported;
+    selected || required
+}
+
 pub fn lookup_with_user_overrides(
     provider: &str,
     model: &str,

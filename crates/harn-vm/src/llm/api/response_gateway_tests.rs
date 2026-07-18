@@ -1,4 +1,5 @@
-use super::response::parse_llm_response;
+use super::parse_llm_response;
+use crate::llm::capabilities::should_use_responses_transport;
 
 #[test]
 fn openai_parser_preserves_partial_usage_in_telemetry() {
@@ -15,7 +16,7 @@ fn openai_parser_preserves_partial_usage_in_telemetry() {
         parse_llm_response(&response, "vllm", "qwen3.6", false, false).expect("parser succeeds");
     assert_eq!(
         result.telemetry.source,
-        super::telemetry_source::OPENAI_USAGE
+        crate::llm::api::telemetry_source::OPENAI_USAGE
     );
     assert_eq!(result.telemetry.server_prompt_tokens, Some(314));
     assert_eq!(result.telemetry.server_output_tokens, Some(27));
@@ -58,4 +59,24 @@ fn openai_parser_preserves_gateway_routing_metadata() {
             .and_then(serde_json::Value::as_str),
         Some("openai")
     );
+}
+
+#[test]
+fn responses_transport_routing_is_provider_capability_driven() {
+    assert!(should_use_responses_transport("openai", "gpt-5.4", true));
+    assert!(should_use_responses_transport(
+        "vercel_ai_gateway",
+        "creator/new-model",
+        true,
+    ));
+    assert!(!should_use_responses_transport(
+        "anthropic",
+        "claude-sonnet-4.6",
+        true,
+    ));
+    assert!(should_use_responses_transport(
+        "openai",
+        "gpt-5.3-codex",
+        false,
+    ));
 }

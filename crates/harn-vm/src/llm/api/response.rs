@@ -8,6 +8,10 @@ use super::openai_normalize::{append_paragraph, normalize_openai_message_text};
 use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::ProviderTelemetry;
 
+#[cfg(test)]
+#[path = "response_gateway_tests.rs"]
+mod gateway_tests;
+
 fn render_reasoning_summary_value(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(text) => text.trim().to_string(),

@@ -89,6 +89,7 @@ import {
 } from "std/agent/state"
 import { agent_step_judge } from "std/agent/step_judge"
 import {
+  agent_collapse_duplicate_read_calls,
   agent_tool_annotations,
   agent_tool_calls_are_read_only,
   agent_tool_entry_annotations,
@@ -111,10 +112,7 @@ import {
   llm_enable_equivalent_failover,
 } from "std/llm/options"
 
-/**
- * Agent-loop budget timing must route through the VM-level harness clock so
- * paused-clock tests, replay, and capability analysis see the same clock source.
- */
+/** Route agent-loop budget timing through the harness clock for deterministic replay and tests. */
 fn __agent_loop_clock_now_ms() {
   return harness.clock.now_ms()
 }
@@ -1570,44 +1568,6 @@ fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
       ?? annotations?.mutation,
   )
   return mutation == "workspace_write"
-}
-
-fn __intra_turn_annotations_are_read_only(annotations) -> bool {
-  if type_of(annotations) != "dict" {
-    return false
-  }
-  if annotations?.readOnlyHint == true || annotations?.read_only_hint == true {
-    return true
-  }
-  const side_effect = __intra_turn_annotation_text(
-    annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-      ?? annotations?.sideEffect,
-  )
-  return side_effect == "read_only"
-}
-
-fn __collapse_duplicate_text_read_calls(tool_calls, tools, options) {
-  const format = lowercase(to_string(options?.tool_format ?? ""))
-  if format != "text" && format != "json" {
-    return tool_calls
-  }
-  let kept = []
-  let seen = []
-  for call in tool_calls {
-    const name = to_string(call?.name ?? call?.tool_name ?? "")
-    const entry = __tool_registry_entry(tools, name)
-    const annotations = __tool_resource_annotations(entry, options?.policy, name)
-    const read_only = __intra_turn_annotations_are_read_only(annotations)
-    const signature = __intra_turn_call_signature(call)
-    if read_only && signature != nil && contains(seen, signature) {
-      continue
-    }
-    kept = kept.push(call)
-    if read_only && signature != nil {
-      seen = seen.push(signature)
-    }
-  }
-  return kept
 }
 
 fn __intra_turn_annotation_path_params(annotations) {
@@ -4478,8 +4438,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           __resolve_tool_calls(llm_result, parsed)
         }
         const recovered_batch_drop = __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts)
-        tool_calls = recovered_batch_drop.tool_calls
-        tool_calls = __collapse_duplicate_text_read_calls(tool_calls, turn_opts?.tools, turn_opts)
+        tool_calls = agent_collapse_duplicate_read_calls(recovered_batch_drop.tool_calls, turn_opts?.tools, turn_opts)
         const recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
           normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
         } else {

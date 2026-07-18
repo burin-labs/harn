@@ -13,8 +13,6 @@ mod openai_normalize;
 pub(crate) mod options;
 mod partial_tool_args;
 mod response;
-#[cfg(test)]
-mod response_gateway_tests;
 mod result;
 mod schema_stream;
 mod telemetry;

@@ -45,6 +45,7 @@ mod overrides;
 mod rule;
 mod tool_format;
 
+pub(crate) use lookup::should_use_responses_transport;
 pub(crate) use overrides::swap_user_overrides;
 
 pub use audit::{

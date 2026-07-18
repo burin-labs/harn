@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
-use crate::llm::capabilities::WireDialect;
+use crate::llm::capabilities::{should_use_responses_transport, WireDialect};
 use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{
     append_paragraph, debug_log_message_shapes, extract_openai_delta_field_str,
 };
-use super::options::{DeltaSender, LlmRequestPayload};
+use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{
     billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
@@ -184,17 +184,14 @@ pub(super) async fn vm_call_llm_api(
         )?;
     }
 
-    // OpenAI `*-codex` routes are served ONLY by the Responses API and return
-    // HTTP 404 ("Use the v1/responses endpoint instead") on
-    // `/v1/chat/completions`. Route them through the Responses provider even
-    // when the caller did not explicitly request `api_mode: "responses"`, so a
-    // codex model can never be a silent 404. This lives in the shared
-    // `vm_call_llm_api` funnel (not `chat_impl`) because `openai` is a built-in
-    // dialect, not a `provider_register`-ed provider, so it takes the
-    // unregistered fallback below and never reaches `chat_impl`. Explicit
-    // Responses routing follows provider features; the implicit `*-codex`
-    // match remains model-capability-driven.
-    if should_use_responses_transport(provider, &opts.model, opts.api_mode) {
+    // Route explicit Responses requests through providers that advertise the
+    // transport. OpenAI models that reject Chat Completions (such as Codex)
+    // also select Responses implicitly through the model capability matrix.
+    if should_use_responses_transport(
+        provider,
+        &opts.model,
+        opts.api_mode == LlmApiMode::Responses,
+    ) {
         return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
     }
 
@@ -220,53 +217,6 @@ pub(super) async fn vm_call_llm_api(
     };
 
     vm_call_llm_api_with_body(opts, delta_tx, body, dialect).await
-}
-
-fn should_use_responses_transport(
-    provider: &str,
-    model: &str,
-    api_mode: crate::llm::api::LlmApiMode,
-) -> bool {
-    let explicit_responses = api_mode == crate::llm::api::LlmApiMode::Responses
-        && (provider == "openai"
-            || crate::llm_config::provider_has_feature(provider, "responses_api"));
-    let responses_only_openai_model = provider == "openai"
-        && crate::llm::capabilities::lookup(provider, model).chat_completions_unsupported;
-    explicit_responses || responses_only_openai_model
-}
-
-#[cfg(test)]
-mod responses_transport_routing_tests {
-    use super::should_use_responses_transport;
-    use crate::llm::api::LlmApiMode;
-
-    #[test]
-    fn explicit_responses_routes_openai_and_gateway_unknown_models() {
-        assert!(should_use_responses_transport(
-            "openai",
-            "gpt-5.4",
-            LlmApiMode::Responses
-        ));
-        assert!(should_use_responses_transport(
-            "vercel_ai_gateway",
-            "creator/new-model",
-            LlmApiMode::Responses
-        ));
-        assert!(!should_use_responses_transport(
-            "anthropic",
-            "claude-sonnet-4.6",
-            LlmApiMode::Responses
-        ));
-    }
-
-    #[test]
-    fn responses_only_openai_models_route_without_an_explicit_mode() {
-        assert!(should_use_responses_transport(
-            "openai",
-            "gpt-5.3-codex",
-            LlmApiMode::ChatCompletions
-        ));
-    }
 }
 
 /// Dispatch to a registered provider by name.
