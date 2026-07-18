@@ -19,23 +19,6 @@ fn proof_step(
   return {id: id, condition: condition, run: run, required_env: required_env}
 }
 
-fn conformance_contract_job(kind: string, name: string) -> ReleaseAuditCiJob {
-  return {
-    name: name,
-    job_id: "harn-conformance",
-    matrix_kind: kind,
-    proofs: ["harn-audit"],
-    steps: [
-      proof_step(
-        "release-audit-harn-conformance",
-        "",
-        "\"$HARN_BIN\" test conformance --shard-index \${{ matrix.shard }} --shard-total 4",
-        {HARN_LLM_CALLS_DISABLED: "1"},
-      ),
-    ],
-  }
-}
-
 fn contract() -> ReleaseAuditContract {
   return {
     schema_version: "harn.release_audit_contract.v1",
@@ -96,12 +79,8 @@ fn contract() -> ReleaseAuditContract {
           ),
         ],
       },
-      conformance_contract_job("shard-1", "Harn conformance (1/4)"),
-      conformance_contract_job("shard-2", "Harn conformance (2/4)"),
-      conformance_contract_job("shard-3", "Harn conformance (3/4)"),
-      conformance_contract_job("shard-4", "Harn conformance (4/4)"),
       {
-        name: "Harn audit",
+        name: "Harn conformance + audit",
         job_id: "harn-audit",
         matrix_kind: "",
         proofs: ["harn-audit"],
@@ -110,7 +89,7 @@ fn contract() -> ReleaseAuditContract {
             "release-audit-harn",
             "",
             "./scripts/audit_gates.sh",
-            {AUDIT_GATES_SKIP_CONFORMANCE: "1"},
+            {AUDIT_GATES_CONCURRENCY: "2", HARN_CONFORMANCE_SHARDS: "2"},
           ),
         ],
       },
@@ -150,7 +129,7 @@ fn jobs() {
     },
     {
       id: 3,
-      name: "Harn conformance (1/4)",
+      name: "Harn conformance + audit",
       url: "https://github.com/burin-labs/harn/actions/runs/123/job/3",
       status: "completed",
       conclusion: "success",
@@ -159,34 +138,6 @@ fn jobs() {
       id: 6,
       name: "Rust security proof",
       url: "https://github.com/burin-labs/harn/actions/runs/123/job/6",
-      status: "completed",
-      conclusion: "success",
-    },
-    {
-      id: 7,
-      name: "Harn conformance (2/4)",
-      url: "https://github.com/burin-labs/harn/actions/runs/123/job/7",
-      status: "completed",
-      conclusion: "success",
-    },
-    {
-      id: 8,
-      name: "Harn conformance (3/4)",
-      url: "https://github.com/burin-labs/harn/actions/runs/123/job/8",
-      status: "completed",
-      conclusion: "success",
-    },
-    {
-      id: 9,
-      name: "Harn conformance (4/4)",
-      url: "https://github.com/burin-labs/harn/actions/runs/123/job/9",
-      status: "completed",
-      conclusion: "success",
-    },
-    {
-      id: 10,
-      name: "Harn audit",
-      url: "https://github.com/burin-labs/harn/actions/runs/123/job/10",
       status: "completed",
       conclusion: "success",
     },
@@ -324,11 +275,7 @@ pipeline test_release_audit_contract_reads_typed_result_from_disk(task) {
           "Rust lint",
           "Rust test",
           "Rust security proof",
-          "Harn conformance (1/4)",
-          "Harn conformance (2/4)",
-          "Harn conformance (3/4)",
-          "Harn conformance (4/4)",
-          "Harn audit",
+          "Harn conformance + audit",
         ],
       )
       harness.fs.write_text(path, "{invalid")
@@ -375,31 +322,12 @@ pipeline test_release_audit_ci_contract_drift(task) {
           },
         ],
       },
-      "harn-conformance": {
-        strategy: {
-          matrix: {
-            include: [
-              {kind: "shard-1", name: "Harn conformance (1/4)"},
-              {kind: "shard-2", name: "Harn conformance (2/4)"},
-              {kind: "shard-3", name: "Harn conformance (3/4)"},
-              {kind: "shard-4", name: "Harn conformance (4/4)"},
-            ],
-          },
-        },
-        steps: [
-          {
-            id: "release-audit-harn-conformance",
-            env: {HARN_LLM_CALLS_DISABLED: "1"},
-            run: "\"$HARN_BIN\" test conformance --shard-index \${{ matrix.shard }} --shard-total 4",
-          },
-        ],
-      },
       "harn-audit": {
-        name: "Harn audit",
+        name: "Harn conformance + audit",
         steps: [
           {
             id: "release-audit-harn",
-            env: {AUDIT_GATES_SKIP_CONFORMANCE: "1"},
+            env: {AUDIT_GATES_CONCURRENCY: "2", HARN_CONFORMANCE_SHARDS: "2"},
             run: "./scripts/audit_gates.sh",
           },
         ],
@@ -456,6 +384,22 @@ pipeline test_release_audit_ci_contract_drift(task) {
       },
     ).errors,
     ["proof environment drift: release-audit-rust-test:HARN_LLM_CALLS_DISABLED"],
+  )
+  assert_eq(
+    release_audit_ci_contract_report(
+      cfg,
+      {
+        ...ci,
+        jobs: {
+          ...ci.jobs,
+          "harn-audit": {
+            ...ci.jobs["harn-audit"],
+            steps: [{id: "release-audit-harn", env: {AUDIT_GATES_CONCURRENCY: "2"}, run: "./scripts/audit_gates.sh"}],
+          },
+        },
+      },
+    ).errors,
+    ["proof environment drift: release-audit-harn:HARN_CONFORMANCE_SHARDS"],
   )
   assert_eq(
     release_audit_ci_contract_report(

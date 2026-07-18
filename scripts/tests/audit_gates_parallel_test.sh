@@ -119,29 +119,6 @@ if ! grep -Fq "check-ported-handler-loc" "$record"; then
   exit 1
 fi
 
-# CI runs the same audit fanout beside separately distributed conformance jobs.
-# That mode must not accidentally execute even one local conformance shard.
-: > "$record"
-rm -f "$tmp_root/audit.started"
-AUDIT_GATES_CONCURRENCY=3 \
-  AUDIT_GATES_SKIP_CONFORMANCE=1 \
-  HARN_BIN="$fake_harn" \
-  FAKE_AUDIT_RECORD="$record" \
-  FAKE_CONFORMANCE_RECORD="$tmp_root/audit-only-conformance-record.txt" \
-  FAKE_AUDIT_ROOT="$tmp_root" \
-  PATH="$fake_bin:$PATH" \
-  "$repo_root/scripts/audit_gates.sh" > "$tmp_root/audit-only.out"
-if [[ -e "$tmp_root/audit-only-conformance-record.txt" ]]; then
-  echo "audit-only mode unexpectedly executed conformance" >&2
-  cat "$tmp_root/audit-only-conformance-record.txt" >&2
-  exit 1
-fi
-if ! grep -Fxq "=== audit gates passed ===" "$tmp_root/audit-only.out"; then
-  echo "audit-only mode did not report its exact proof boundary" >&2
-  cat "$tmp_root/audit-only.out" >&2
-  exit 1
-fi
-
 : > "$record"
 rm -f "$tmp_root/audit.started"
 if AUDIT_GATES_CONCURRENCY=3 \
