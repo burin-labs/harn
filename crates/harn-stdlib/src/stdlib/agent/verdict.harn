@@ -15,7 +15,9 @@
  * the party that observed execution, never ASSERTED by the caller. The `pass`
  * variant carries a `proof: verdict_receipt` — an OPAQUE host value minted only
  * by `harness.verdict.issue`, and only from the host-owned record of a REAL
- * `run_test` execution (resolved by its opaque `result_handle`). Issuance reads
+ * `run_test` execution whose plan the host discovered in the active workspace
+ * (resolved by its opaque `result_handle`). Caller-authored argv may execute for
+ * diagnostics but has no positive verdict authority. Issuance reads
  * no caller-supplied filesystem bytes: a file written by the caller has no
  * handle, so it can never earn a pass — the proof is bound to execution the host
  * itself ran and observed, not to evidence the caller authored. No `.harn` code
@@ -52,8 +54,9 @@ pub type Verdict = VerdictPass | VerdictFailShape | VerdictIndeterminateShape
  * opaque receipt — but only when the host's OWN frozen disposition for that
  * execution is green. Maps the host outcome onto a Verdict: a red execution is
  * `fail`; a run with no handle, an unrecorded handle, or a zero-pass / unparsed
- * execution is `indeterminate` (never a pass — the caller can neither assert a
- * pass nor fabricate the evidence, because issuance reads no caller bytes).
+ * execution, caller-selected argv, or a plan outside the active workspace is
+ * `indeterminate` (never a pass — the caller can neither assert a pass nor
+ * fabricate the evidence, because issuance reads no caller bytes).
  *
  * @effects: [host]
  * @errors: [runtime]

@@ -102,6 +102,31 @@ impl crate::vm::Vm {
                 .unwrap_or_default()
         };
         let field_int = |k: &str| -> i64 { dict.get(k).and_then(|v| v.as_int()).unwrap_or(0) };
+        let artifact_id = field_str("artifact_id");
+        let artifact_hash = field_str("artifact_hash");
+        let plan_id = field_str("plan_id");
+        let workspace_hash = field_str("workspace_hash");
+        let command_hash = field_str("command_hash");
+        let execution_scope = field_str("execution_scope");
+        let passed = field_int("passed").max(0) as u32;
+        let total = field_int("total").max(0) as u32;
+        if artifact_id.is_empty()
+            || artifact_hash.is_empty()
+            || plan_id.is_empty()
+            || workspace_hash.is_empty()
+            || command_hash.is_empty()
+            || execution_scope.is_empty()
+            || passed == 0
+            || total < passed
+        {
+            let mut unavailable = dict.clone();
+            unavailable.put_str("outcome", "unavailable");
+            unavailable.put_str(
+                "detail",
+                "host verdict response lacked complete authorized execution provenance",
+            );
+            return VmValue::dict_map(unavailable);
+        }
         let subject_raw = field_str("subject");
         let subject = if subject_raw.is_empty() {
             None
@@ -113,12 +138,14 @@ impl crate::vm::Vm {
         // through on the `"pass"` dict — NOT to a consumption-time request id. A
         // `"pass"` is only reached after the hostlib scope gate confirmed the
         // active scope equals this owner, so it is always present here.
-        let execution_scope = field_str("execution_scope");
         let receipt = VmVerdictReceipt {
-            artifact_id: std::sync::Arc::from(field_str("artifact_id").as_str()),
-            content_hash: std::sync::Arc::from(field_str("artifact_hash").as_str()),
-            passed: field_int("passed").max(0) as u32,
-            total: field_int("total").max(0) as u32,
+            artifact_id: std::sync::Arc::from(artifact_id.as_str()),
+            content_hash: std::sync::Arc::from(artifact_hash.as_str()),
+            plan_id: std::sync::Arc::from(plan_id.as_str()),
+            workspace_hash: std::sync::Arc::from(workspace_hash.as_str()),
+            command_hash: std::sync::Arc::from(command_hash.as_str()),
+            passed,
+            total,
             execution_scope: std::sync::Arc::from(execution_scope.as_str()),
             subject,
         };
@@ -138,6 +165,9 @@ mod verdict_same_run_tests {
         VmValue::verdict_receipt(VmVerdictReceipt {
             artifact_id: Arc::from("art"),
             content_hash: Arc::from("sha256:abc"),
+            plan_id: Arc::from("sha256:plan"),
+            workspace_hash: Arc::from("sha256:workspace"),
+            command_hash: Arc::from("sha256:command"),
             passed: 1,
             total: 1,
             execution_scope: Arc::from(scope),

@@ -92,9 +92,10 @@ impl std::fmt::Debug for VmRngHandle {
 
 /// A host-minted proof-of-execution receipt: the payload of a positive
 /// `Verdict`. Constructed ONLY by the verdict issuance capability
-/// (`harness.verdict.issue`) from the host-owned record of a REAL `run_test`
-/// execution — resolved by its opaque `result_handle`, whose disposition the
-/// host froze at execution time. Issuance reads no caller-supplied filesystem
+/// (`harness.verdict.issue`) from the host-owned record of a REAL, unfiltered,
+/// workspace-discovered `run_test` execution — resolved by its opaque
+/// `result_handle`, whose disposition the host froze at execution time.
+/// Issuance reads no caller-supplied filesystem
 /// bytes, so a caller can forge neither the receipt's TYPE (no literal syntax,
 /// no public builtin hands back the bare handle) nor its PROVENANCE (an authored
 /// file has no handle in the execution store). It is refused by the durable
@@ -111,6 +112,12 @@ pub struct VmVerdictReceipt {
     /// `sha256:HEX` of the output the host captured from the real execution,
     /// snapshotted when the run was recorded.
     pub content_hash: Arc<str>,
+    /// Identity of the host-discovered test plan that selected the command.
+    pub plan_id: Arc<str>,
+    /// Hash of the active workspace root the plan was discovered within.
+    pub workspace_hash: Arc<str>,
+    /// Hash of the exact argv selected and executed by the host.
+    pub command_hash: Arc<str>,
     /// Passing and total checked-unit counts the host COMPUTED from the real
     /// execution, never a caller scalar. `passed > 0` is required to mint.
     pub passed: u32,

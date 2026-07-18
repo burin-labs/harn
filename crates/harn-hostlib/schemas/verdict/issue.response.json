@@ -9,7 +9,11 @@
     "total": { "type": "integer", "minimum": 0 },
     "artifact_id": { "type": "string" },
     "artifact_hash": { "type": "string" },
-    "subject": { "type": "string" },
+    "execution_scope": { "type": ["string", "null"] },
+    "plan_id": { "type": ["string", "null"] },
+    "workspace_hash": { "type": ["string", "null"] },
+    "command_hash": { "type": ["string", "null"] },
+    "subject": { "type": ["string", "null"] },
     "detail": { "type": "string" }
   },
   "required": ["outcome", "passed", "total", "artifact_id", "artifact_hash", "detail"],

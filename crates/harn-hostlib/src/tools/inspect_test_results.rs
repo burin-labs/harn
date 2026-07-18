@@ -47,6 +47,53 @@ pub(crate) struct RawArtifacts {
     pub(crate) ecosystem: Option<String>,
     #[allow(dead_code)]
     pub(crate) argv: Vec<String>,
+    /// Present only when the host selected the command from workspace
+    /// discovery. Caller-supplied argv and caller-filtered partial plans remain
+    /// executable but are never proof authority for a positive verdict.
+    pub(crate) authorized_test_plan: Option<AuthorizedTestPlanIdentity>,
+}
+
+/// Host-owned identity of the discovered test plan that was actually
+/// executed. Only `tools/run_test` constructs this, after binding discovery to
+/// the active workspace and before spawning the selected argv.
+#[derive(Debug, Clone)]
+pub(crate) struct AuthorizedTestPlanIdentity {
+    pub(crate) plan_id: String,
+    pub(crate) workspace_hash: String,
+    pub(crate) command_hash: String,
+}
+
+impl AuthorizedTestPlanIdentity {
+    pub(crate) fn discovered(
+        workspace: &std::path::Path,
+        ecosystem: &str,
+        argv: &[String],
+    ) -> Self {
+        fn tagged_hash(parts: &[&[u8]]) -> String {
+            let mut hasher = Sha256::new();
+            for part in parts {
+                hasher.update((part.len() as u64).to_be_bytes());
+                hasher.update(part);
+            }
+            format!("sha256:{}", hex::encode(hasher.finalize()))
+        }
+
+        let workspace_text = workspace.to_string_lossy();
+        let workspace_hash = tagged_hash(&[workspace_text.as_bytes()]);
+        let argv_bytes: Vec<&[u8]> = argv.iter().map(|arg| arg.as_bytes()).collect();
+        let command_hash = tagged_hash(&argv_bytes);
+        let plan_id = tagged_hash(&[
+            b"host-discovered-test-plan-v1",
+            ecosystem.as_bytes(),
+            workspace_hash.as_bytes(),
+            command_hash.as_bytes(),
+        ]);
+        Self {
+            plan_id,
+            workspace_hash,
+            command_hash,
+        }
+    }
 }
 
 /// Three-way summary surfaced inline by `run_test`. Same shape as the

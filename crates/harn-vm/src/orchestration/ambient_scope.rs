@@ -124,6 +124,18 @@ fn clone_via_swap<T: Clone + Default>(swap: impl Fn(T) -> T) -> T {
 }
 
 impl AmbientExecutionScope {
+    /// Capture the caller's full ambient context for one top-level VM run and
+    /// append a fresh execution owner. The resulting scope is installed by
+    /// [`scope_ambient`] around every poll of the VM future, so two top-level
+    /// executions interleaved on one thread never observe each other's owner.
+    /// Keeping the captured stack beneath the fresh owner preserves nested VM
+    /// execution: completion restores the exact outer ambient context.
+    pub(crate) fn capture_for_top_level_execution(owner: std::sync::Arc<str>) -> Self {
+        let mut scope = Self::capture_for_inline_subtask();
+        scope.execution_scope.push(owner);
+        scope
+    }
+
     /// Snapshot the ambient context a child inherits from its parent at spawn
     /// time: the command-policy stack, dynamic-permission stack, and the
     /// runtime-context overlay (so the child's events keep the parent's
