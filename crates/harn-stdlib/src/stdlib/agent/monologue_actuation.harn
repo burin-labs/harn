@@ -6,6 +6,7 @@ import {
 import { agent_has_tools, agent_render_tool_call_prefix } from "std/agent/preflight"
 import { agent_emit_event } from "std/agent/state"
 import { agent_tool_resolve_workspace_write_name } from "std/agent/tool_annotations"
+import { llm_has_explicit_routing_owner } from "std/llm/options"
 
 /**
  * Bounded, opt-in recovery for tool-less action narration or a repeated
@@ -73,9 +74,9 @@ pub fn agent_monologue_actuation_initial_state() -> MonologueActuationState {
 }
 
 /**
- * Fold one turn into the actuation trigger. Tool-less monologue warnings arm
- * immediately; explicitly read-only calls arm only after a bounded streak.
- * Any other action resets that streak.
+ * Fold a pre-dispatch stall warning into the actuation trigger. Completed tool
+ * dispatches advance their own streak through
+ * `agent_monologue_actuation_observe_completed_dispatch`.
  *
  * @effects: []
  * @errors: []
@@ -85,7 +86,6 @@ pub fn agent_monologue_actuation_observe(
   state: MonologueActuationState,
   config: MonologueActuationConfig,
   warning_pattern: string,
-  turn_read_only: bool,
 ) -> MonologueActuationState {
   if !config.enabled {
     return state
@@ -93,24 +93,55 @@ pub fn agent_monologue_actuation_observe(
   if warning_pattern == "no_progress_monologue" {
     return state + {pending: true, pending_trigger: warning_pattern}
   }
-  if !turn_read_only {
+  return state
+}
+
+/**
+ * Advance the read-only streak from one completed dispatch. The loop supplies
+ * a product-error-aware all-success predicate and the streak captured before
+ * the current turn was reset to a non-success default. Failed, mixed, empty,
+ * and undispatched turns therefore cannot receive grounding credit.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_monologue_actuation_observe_completed_dispatch(
+  state: MonologueActuationState,
+  config: MonologueActuationConfig,
+  prior_read_only_streak: int,
+  successful_read_only: bool,
+) -> MonologueActuationState {
+  if !config.enabled {
+    return state
+  }
+  if !successful_read_only {
     return state + {read_only_streak: 0}
   }
-  const next = state + {read_only_streak: state.read_only_streak + 1}
+  const next = state + {read_only_streak: prior_read_only_streak + 1}
   if next.read_only_streak < config.read_only_turns {
     return next
   }
   return next + {pending: true, pending_trigger: "read_only_streak"}
 }
 
-fn __agent_monologue_actuation_route_supports_prefill(options) -> bool {
+fn __agent_monologue_actuation_route_suppression(options) -> string {
+  if options?._llm_caller != nil {
+    return "external_llm_caller_unsupported"
+  }
+  if llm_has_explicit_routing_owner(options) || options?.equivalent_failover != nil {
+    return "multi_route_prefill_unsupported"
+  }
   const capabilities = try {
     provider_capabilities(options?.provider ?? "auto", options?.model ?? "")
   }
   if is_err(capabilities) || type_of(unwrap(capabilities)) != "dict" {
-    return false
+    return "assistant_prefill_unsupported"
   }
-  return unwrap(capabilities)?.supports_assistant_prefill ?? false
+  if !(unwrap(capabilities)?.supports_assistant_prefill ?? false) {
+    return "assistant_prefill_unsupported"
+  }
+  return ""
 }
 
 fn __agent_monologue_actuation_receipt(
@@ -181,6 +212,7 @@ pub fn agent_monologue_actuation_take(
   } else {
     call_open
   }
+  const route_suppression = __agent_monologue_actuation_route_suppression(llm_options)
   const decision = if !config.enabled {
     {
       state: cleared,
@@ -241,11 +273,11 @@ pub fn agent_monologue_actuation_take(
       firing_count: cleared.firing_count,
       max_firings: config.max_firings,
     }
-  } else if !__agent_monologue_actuation_route_supports_prefill(llm_options) {
+  } else if route_suppression != "" {
     {
       state: cleared,
       applied: false,
-      reason: "assistant_prefill_unsupported",
+      reason: route_suppression,
       prefill: "",
       trigger: trigger,
       firing_count: cleared.firing_count,

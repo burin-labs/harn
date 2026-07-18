@@ -17,6 +17,12 @@ true
 0
 done
 true
+0
+done
+true
+0
+done
+true
 json
 done
 true
@@ -25,6 +31,12 @@ tool_call_opener_unavailable
 done
 true
 0
+done
+true
+external_llm_caller_unsupported
+done
+true
+multi_route_prefill_unsupported
 done
 true
 true
