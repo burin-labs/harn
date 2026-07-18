@@ -1,4 +1,4 @@
-import { persona_compile_prompt } from "std/personas/compiler"
+import { persona_compile_prompt } from "std/personas/prompt_compiler"
 import { llm_text, with_llm_script } from "std/testing"
 import { persona_prompt_eval_comparison } from "../../../evals/persona_prompt_compiler/report.harn"
 import {

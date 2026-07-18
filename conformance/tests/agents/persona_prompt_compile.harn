@@ -1,4 +1,4 @@
-import { persona_compile_prompt } from "std/personas/compiler"
+import { persona_compile_prompt } from "std/personas/prompt_compiler"
 import "std/schema"
 import { llm_text, with_llm_script } from "std/testing"
 
