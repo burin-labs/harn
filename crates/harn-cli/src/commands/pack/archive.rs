@@ -20,7 +20,7 @@ use crate::command_error;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::skill_provenance;
 
-use super::{PackError, DEFAULT_PACK_FILE_MODE};
+use super::{adjacent_with_extension, blake3_hash, PackError, DEFAULT_PACK_FILE_MODE};
 
 #[derive(Debug)]
 pub struct PackUnpackOutcome {

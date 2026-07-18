@@ -11,9 +11,11 @@
 //! signature (if any), and cross-checks every per-module BLAKE3.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process;
+
+#[cfg(test)]
+use std::fs;
 
 use ed25519_dalek::Signer;
 use harn_parser::DiagnosticSeverity;
@@ -24,7 +26,7 @@ use harn_vm::orchestration::{
     ConnectorRequirement, Ed25519Signature, EnvironmentRequirements, HarnpackEntry, ModuleEntry,
     RetryPolicySpec, SBOMDoc, SBOMPackage, SBOMRelationship, ToolEntry, WorkflowBundle,
     WorkflowBundlePolicy, WorkflowBundleReplayMetadata, WorkflowBundleTrigger,
-    HARNPACK_MANIFEST_PATH, WORKFLOW_BUNDLE_SCHEMA_VERSION,
+    WORKFLOW_BUNDLE_SCHEMA_VERSION,
 };
 use harn_vm::Compiler;
 use harn_vm::{AutonomyTier, TrustRecord};
@@ -1198,7 +1200,7 @@ fn relativize(root: &Path, target: &Path) -> Option<PathBuf> {
     None
 }
 
-fn adjacent_with_extension(rel: &Path, extension: &str) -> Option<PathBuf> {
+pub(super) fn adjacent_with_extension(rel: &Path, extension: &str) -> Option<PathBuf> {
     let stem = rel.file_stem()?.to_string_lossy().into_owned();
     if stem.is_empty() {
         return None;
@@ -1218,7 +1220,7 @@ fn adjacent_with_extension(rel: &Path, extension: &str) -> Option<PathBuf> {
     Some(adjacent)
 }
 
-fn blake3_hash(bytes: &[u8]) -> String {
+pub(super) fn blake3_hash(bytes: &[u8]) -> String {
     format!("blake3:{}", blake3::hash(bytes))
 }
 
