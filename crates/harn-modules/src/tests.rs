@@ -282,6 +282,40 @@ fn absent_selective_type_import_is_classified_before_runtime() {
 }
 
 #[test]
+fn unused_absent_selective_value_import_is_classified() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(root, "values.harn", "pub const CurrentValue = 1\n");
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import { StaleValue } from \"./values\"\npub fn run() -> int { 1 }\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let issues = graph.selective_import_issues(&entry);
+    assert_eq!(
+        issues
+            .iter()
+            .map(|issue| (
+                issue.name.as_str(),
+                issue.module.as_str(),
+                issue.kind,
+                issue.message(),
+                issue.help(),
+            ))
+            .collect::<Vec<_>>(),
+        vec![(
+            "StaleValue",
+            "./values",
+            SelectiveImportIssueKind::Missing,
+            "imported symbol `StaleValue` does not exist in `./values`".to_string(),
+            "update the import to a symbol exported by `./values`".to_string(),
+        )]
+    );
+}
+
+#[test]
 fn source_override_drives_root_import_analysis() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -450,10 +484,11 @@ fn pub_import_selective_re_exports_named_symbols() {
         "src.harn",
         "pub fn alpha() { 1 }\npub fn beta() { 2 }\n",
     );
-    write_file(root, "facade.harn", "pub import { alpha } from \"./src\"\n");
+    let facade = write_file(root, "facade.harn", "pub import { alpha } from \"./src\"\n");
     let entry = write_file(root, "entry.harn", "import \"./facade\"\nalpha()\n");
 
     let graph = build(std::slice::from_ref(&entry));
+    assert_eq!(graph.selective_import_issues(&facade), Vec::new());
     let imported = graph
         .imported_names_for_file(&entry)
         .expect("entry should resolve");
@@ -495,12 +530,12 @@ fn pub_import_chain_resolves_definition_to_origin() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     write_file(root, "inner.harn", "pub fn deep() { 1 }\n");
-    write_file(
+    let middle = write_file(
         root,
         "middle.harn",
         "pub import { deep } from \"./inner\"\n",
     );
-    write_file(
+    let outer = write_file(
         root,
         "outer.harn",
         "pub import { deep } from \"./middle\"\n",
@@ -512,6 +547,9 @@ fn pub_import_chain_resolves_definition_to_origin() {
     );
 
     let graph = build(std::slice::from_ref(&entry));
+    assert_eq!(graph.selective_import_issues(&middle), Vec::new());
+    assert_eq!(graph.selective_import_issues(&outer), Vec::new());
+    assert_eq!(graph.selective_import_issues(&entry), Vec::new());
     let def = graph
         .definition_of(&entry, "deep")
         .expect("definition_of should follow chain");

@@ -5,7 +5,8 @@ use harn_parser::{Node, SNode};
 use tower_lsp::lsp_types::*;
 
 use crate::helpers::{
-    diagnostic_data_value, lexer_error_to_diagnostic, parser_error_to_diagnostic, span_to_range,
+    diagnostic_data_value, lexer_error_to_diagnostic, parser_error_to_diagnostic,
+    span_to_full_range, span_to_range,
 };
 use crate::rules::{RuleDiagnostic, RuleWorkspace};
 use crate::symbols::{build_symbol_table, SymbolInfo};
@@ -179,7 +180,7 @@ impl DocumentState {
             for issue in module_graph.selective_import_issues(file_path) {
                 let code = harn_parser::DiagnosticCode::ImportSymbolMissing.to_string();
                 self.diagnostics.push(Diagnostic {
-                    range: span_to_range(&issue.span),
+                    range: span_to_full_range(&issue.span, &self.source),
                     severity: Some(DiagnosticSeverity::ERROR),
                     source: Some("harn-preflight".to_string()),
                     code: Some(NumberOrString::String(code.clone())),
@@ -272,11 +273,28 @@ mod tests {
     use super::DocumentState;
     use crate::rules::RuleWorkspace;
     use std::path::Path;
-    use tower_lsp::lsp_types::Url;
+    use tower_lsp::lsp_types::{
+        Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url,
+    };
 
     fn write(path: &Path, content: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, content).unwrap();
+    }
+
+    fn selective_import_diagnostic(message: &str, help: &str) -> Diagnostic {
+        Diagnostic {
+            range: Range::new(Position::new(0, 0), Position::new(0, 38)),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::String("HARN-IMP-002".to_string())),
+            source: Some("harn-preflight".to_string()),
+            message: message.to_string(),
+            data: Some(serde_json::json!({
+                "code": "HARN-IMP-002",
+                "help": help,
+            })),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -457,40 +475,41 @@ fn handler() {
             &uri,
             &workspace,
         );
-        let diagnostics = state
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic.code
-                    == Some(tower_lsp::lsp_types::NumberOrString::String(
-                        "HARN-IMP-002".to_string(),
-                    ))
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 1);
-        let diagnostic = diagnostics[0];
-        assert_eq!(diagnostic.source.as_deref(), Some("harn-preflight"));
         assert_eq!(
-            diagnostic.severity,
-            Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR)
+            state.diagnostics,
+            vec![selective_import_diagnostic(
+                "imported symbol `StaleReceipt` does not exist in `./types`",
+                "update the import to a symbol exported by `./types`",
+            )]
         );
-        assert_eq!(
-            diagnostic.message,
-            "imported symbol `StaleReceipt` does not exist in `./types`"
+    }
+
+    #[test]
+    fn private_selective_import_surfaces_full_lsp_diagnostic() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.harn");
+        write(
+            &temp.path().join("types.harn"),
+            "pub type Receipt = {ok: bool}\ntype LocalReceipt = {ok: bool}\n",
         );
-        assert_eq!(
-            diagnostic.range,
-            tower_lsp::lsp_types::Range::new(
-                tower_lsp::lsp_types::Position::new(0, 0),
-                tower_lsp::lsp_types::Position::new(0, 1),
-            )
+        write(&path, "import { Receipt } from \"./types\"\n");
+        let source = "import { LocalReceipt } from \"./types\"\n";
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn",
+            &uri,
+            &workspace,
         );
+
         assert_eq!(
-            diagnostic.data,
-            Some(serde_json::json!({
-                "code": "HARN-IMP-002",
-                "help": "update the import to a symbol exported by `./types`",
-            }))
+            state.diagnostics,
+            vec![selective_import_diagnostic(
+                "imported symbol `LocalReceipt` is not exported by `./types` — it is defined there but not `pub`",
+                "mark `LocalReceipt` as `pub` in `./types` to export it",
+            )]
         );
     }
 
