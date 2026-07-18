@@ -1,0 +1,17 @@
+input.harn
+3
+1.5
+true
+a,b
+x,y,z,w
+false
+safe
+tail
+argv:invalid_value:count
+argv:invalid_value:count
+argv:invalid_value:ratio
+true
+schema:schema_mismatch:root
+true
+argv:missing_required
+true

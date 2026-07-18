@@ -2,12 +2,12 @@ import { parse, parser } from "std/cli/argparse"
 
 fn main(harness: Harness) {
   const spec = parser({name: "demo", args: [{name: "model", kind: "flag", short: "-m", long: "--model"}]})
-  const a = parse(spec, ["-m", "claude-opus"])
-  const b = parse(spec, ["--model", "claude-haiku"])
-  const c = parse(spec, ["--model=claude-sonnet"])
-  const d = parse(spec, ["-mclaude-inline"])
-  harness.stdio.println(a.ok.model)
-  harness.stdio.println(b.ok.model)
-  harness.stdio.println(c.ok.model)
-  harness.stdio.println(d.ok.model)
+  const a = unwrap(parse(spec, ["-m", "claude-opus"]))
+  const b = unwrap(parse(spec, ["--model", "claude-haiku"]))
+  const c = unwrap(parse(spec, ["--model=claude-sonnet"]))
+  const d = unwrap(parse(spec, ["-mclaude-inline"]))
+  harness.stdio.println(a.options.model)
+  harness.stdio.println(b.options.model)
+  harness.stdio.println(c.options.model)
+  harness.stdio.println(d.options.model)
 }

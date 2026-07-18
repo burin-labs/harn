@@ -10,8 +10,8 @@ fn main(harness: Harness) {
       ],
     },
   )
-  const r = parse(spec, ["foo.txt", "bar.txt"])
-  harness.stdio.println(r.ok.input)
-  harness.stdio.println(r.ok.output)
-  harness.stdio.println(len(r.ok.rest))
+  const invocation = unwrap(parse(spec, ["foo.txt", "bar.txt"]))
+  harness.stdio.println(invocation.options.input)
+  harness.stdio.println(invocation.options.output)
+  harness.stdio.println(len(invocation.rest))
 }

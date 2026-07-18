@@ -4,9 +4,9 @@ fn main(harness: Harness) {
   const spec = parser(
     {name: "demo", args: [{name: "model", kind: "flag", short: "-m", long: "--model", multi: true}]},
   )
-  const r = parse(spec, ["-m", "a", "--model", "b", "--model=c"])
-  harness.stdio.println(len(r.ok.model))
-  for m in r.ok.model {
+  const invocation = unwrap(parse(spec, ["-m", "a", "--model", "b", "--model=c"]))
+  harness.stdio.println(len(invocation.options.model))
+  for m in invocation.options.model {
     harness.stdio.println(m)
   }
 }

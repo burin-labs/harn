@@ -1,0 +1,120 @@
+import { parse, parse_typed, parser } from "std/cli/argparse"
+import {
+  schema_bool,
+  schema_closed_object,
+  schema_default,
+  schema_float,
+  schema_int,
+  schema_list,
+  schema_object,
+  schema_string,
+} from "std/schema"
+
+type Options = {
+  input: string,
+  count: int,
+  ratio: float,
+  enabled: bool,
+  tag: list<string>,
+  label: list<string>,
+  json: bool,
+  mode: string,
+}
+
+fn options_schema() -> Schema<Options> {
+  return schema_closed_object(
+    {
+      input: schema_string(),
+      count: schema_int(),
+      ratio: schema_float(),
+      enabled: schema_bool(),
+      tag: schema_list(schema_string()),
+      label: schema_list(schema_string()),
+      json: schema_bool(),
+      mode: schema_default(schema_string(), "safe"),
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  const spec = parser(
+    {
+      name: "demo",
+      args: [
+        {name: "input", kind: "positional"},
+        {name: "count", kind: "flag", long: "--count", parse: "int", required: true},
+        {name: "ratio", kind: "flag", long: "--ratio", parse: "float", default: 1.5},
+        {name: "enabled", kind: "flag", long: "--enabled", parse: "bool", required: true},
+        {name: "tag", kind: "flag", long: "--tag", multi: true},
+        {name: "label", kind: "flag", long: "--label", parse: "list", separator: ":", multi: true},
+        {name: "json", kind: "switch", long: "--json"},
+        {name: "mode", kind: "flag", long: "--mode"},
+      ],
+    },
+  )
+  const invocation = unwrap(
+    parse_typed<Options>(
+      spec,
+      [
+        "input.harn",
+        "--count",
+        "3",
+        "--enabled=yes",
+        "--tag",
+        "a",
+        "--tag=b",
+        "--label",
+        " x::y ",
+        "--label=z:w",
+        "--",
+        "tail",
+      ],
+      options_schema(),
+      true,
+    ),
+  )
+  harness.stdio.println(invocation.options.input)
+  harness.stdio.println(invocation.options.count)
+  harness.stdio.println(invocation.options.ratio)
+  harness.stdio.println(invocation.options.enabled)
+  harness.stdio.println(join(invocation.options.tag, ","))
+  harness.stdio.println(join(invocation.options.label, ","))
+  harness.stdio.println(invocation.options.json)
+  harness.stdio.println(invocation.options.mode)
+  harness.stdio.println(join(invocation.rest, ","))
+  const invalid = unwrap_err(parse(spec, ["input.harn", "--count", "three"]))
+  harness.stdio.println(invalid.stage + ":" + invalid.code + ":" + invalid.issues[0].arg)
+  const int_overflow = unwrap_err(parse(spec, ["input.harn", "--count", "999999999999999999999999999999999999999"]))
+  harness.stdio
+    .println(int_overflow.stage + ":" + int_overflow.code + ":" + int_overflow.issues[0].arg)
+  const float_overflow = unwrap_err(parse(spec, ["input.harn", "--count", "1", "--ratio", "1e999999", "--enabled", "true"]))
+  harness.stdio
+    .println(float_overflow.stage + ":" + float_overflow.code + ":" + float_overflow.issues[0].arg)
+  const roundtrip = try {
+    json_parse(json_stringify(invalid))
+  }
+  harness.stdio.println(is_ok(roundtrip))
+  const extra_spec = parser(
+    {
+      name: "extra",
+      args: [{name: "input", kind: "positional"}, {name: "extra", kind: "switch", long: "--extra"}],
+    },
+  )
+  const closed = unwrap_err(
+    parse_typed(extra_spec, ["input.harn", "--extra"], schema_closed_object({input: schema_string()})),
+  )
+  harness.stdio.println(closed.stage + ":" + closed.code + ":" + closed.issues[0].path)
+  const open = parse_typed(extra_spec, ["input.harn", "--extra"], schema_object({input: schema_string()}))
+  harness.stdio.println(is_ok(open))
+  const missing = unwrap_err(parse(spec, []))
+  harness.stdio.println(missing.stage + ":" + missing.code)
+  const invalid_spec = try {
+    parser(
+      {
+        name: "bad",
+        args: [{name: "first", kind: "switch", long: "--same"}, {name: "second", kind: "switch", long: "--same"}],
+      },
+    )
+  }
+  harness.stdio.println(is_err(invalid_spec))
+}
