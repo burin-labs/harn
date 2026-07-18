@@ -158,13 +158,13 @@ fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
   const escape_tool = cfg?.escape_tool ?? "request_write_access"
   const consent = cfg?.consent_check
   const handler = { args ->
-    let justification = to_string(args?.justification ?? "")
-    let verdict = if consent != nil {
+    const justification = to_string(args?.justification ?? "")
+    const verdict = if consent != nil {
       consent(justification, session_id)
     } else {
       agent_stance_default_consent_check(justification, session_id)
     }
-    let granted = (verdict?.verdict ?? "deny") == "grant"
+    const granted = (verdict?.verdict ?? "deny") == "grant"
     agent_emit_event(
       session_id,
       if granted {
