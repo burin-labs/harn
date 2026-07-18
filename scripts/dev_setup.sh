@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 SETUP_STATE_DIR="${HARN_DEV_SETUP_STATE_DIR:-$ROOT_DIR/.codex/dev-setup}"
+SETUP_PROFILE="${HARN_DEV_SETUP_PROFILE:-full}"
+MANAGED_CARGO_CONFIG_MARKER="harn-dev-setup-managed"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -19,17 +21,36 @@ derive_target_dir() {
   local worktree_leaf worktree_parent
   worktree_leaf="$(basename "${worktree_path}")"
   worktree_parent="$(basename "$(dirname "${worktree_path}")")"
-  printf '%s/harn-target/%s-%s\n' "${TMPDIR:-/tmp}" "${worktree_parent}" "${worktree_leaf}"
+  printf '%s/harn-target/%s-%s\n' "${HARN_DEV_SETUP_STORAGE_ROOT}" "${worktree_parent}" "${worktree_leaf}"
 }
 
 derive_build_dir() {
-  # One shared build-dir per machine (per-user on macOS, where $TMPDIR is
-  # per-user), NOT per-worktree: Cargo's own fingerprinting dedupes
+  # One shared build-dir per storage root (per-user by default), NOT
+  # per-worktree: Cargo's own fingerprinting dedupes
   # intermediate artifacts (registry deps, build scripts) across every
   # worktree that shares the path, while the per-worktree target-dir above
   # keeps final binaries isolated. sccache cannot provide this cross-worktree
   # dedup because its Rust hash is target-dir-path-dependent.
-  printf '%s/cargo-build-shared\n' "${TMPDIR:-/tmp}"
+  printf '%s/cargo-build-shared\n' "${HARN_DEV_SETUP_STORAGE_ROOT}"
+}
+
+derive_storage_root() {
+  if [[ -n "${HARN_DEV_SETUP_STORAGE_ROOT:-}" ]]; then
+    printf '%s\n' "${HARN_DEV_SETUP_STORAGE_ROOT}"
+  elif [[ "${SETUP_PROFILE}" == "rust" ]]; then
+    printf '%s/harn/dev-setup\n' "${XDG_CACHE_HOME:-$HOME/.cache}"
+  else
+    printf '%s\n' "${TMPDIR:-/tmp}"
+  fi
+}
+
+derive_tool_target_dir() {
+  if [[ -n "${HARN_DEV_SETUP_TOOL_TARGET_DIR:-}" ]]; then
+    printf '%s\n' "${HARN_DEV_SETUP_TOOL_TARGET_DIR}"
+    return
+  fi
+
+  printf '%s/harn/cargo-install\n' "${XDG_CACHE_HOME:-$HOME/.cache}"
 }
 
 write_build_config() {
@@ -64,6 +85,7 @@ write_build_config() {
     -v rustc_wrapper="${rustc_wrapper}" \
     -v target_dir="${target_dir}" \
     -v build_dir="${build_dir}" \
+    -v managed_marker="${MANAGED_CARGO_CONFIG_MARKER}" \
     -v drop_generated_target_dir="${drop_generated_target_dir}" \
     -v drop_generated_build_dir="${drop_generated_build_dir}" \
     '
@@ -85,17 +107,25 @@ write_build_config() {
         value ~ "/T/+cargo-build-shared$"
     }
 
+    function is_managed_line(line) {
+      return line ~ "#[[:space:]]*" managed_marker "[[:space:]]*$"
+    }
+
+    function managed_value_line(key, value) {
+      return key " = \"" value "\" # " managed_marker
+    }
+
     function print_missing_build_values() {
       if (rustc_wrapper != "" && !saw_rustc_wrapper) {
         print "rustc-wrapper = \"" rustc_wrapper "\""
         saw_rustc_wrapper = 1
       }
       if (target_dir != "" && !saw_target_dir) {
-        print "target-dir = \"" target_dir "\""
+        print managed_value_line("target-dir", target_dir)
         saw_target_dir = 1
       }
       if (build_dir != "" && !saw_build_dir) {
-        print "build-dir = \"" build_dir "\""
+        print managed_value_line("build-dir", build_dir)
         saw_build_dir = 1
       }
     }
@@ -131,23 +161,23 @@ write_build_config() {
         next
       }
       if (in_build && target_dir != "" && $0 ~ /^[[:space:]]*target-dir[[:space:]]*=/) {
-        print "target-dir = \"" target_dir "\""
+        print managed_value_line("target-dir", target_dir)
         saw_target_dir = 1
         next
       }
       if (in_build && drop_generated_target_dir && $0 ~ /^[[:space:]]*target-dir[[:space:]]*=/) {
-        if (is_generated_target_dir(extract_toml_string($0))) {
+        if (is_managed_line($0) || is_generated_target_dir(extract_toml_string($0))) {
           saw_target_dir = 1
           next
         }
       }
       if (in_build && build_dir != "" && $0 ~ /^[[:space:]]*build-dir[[:space:]]*=/) {
-        print "build-dir = \"" build_dir "\""
+        print managed_value_line("build-dir", build_dir)
         saw_build_dir = 1
         next
       }
       if (in_build && drop_generated_build_dir && $0 ~ /^[[:space:]]*build-dir[[:space:]]*=/) {
-        if (is_generated_build_dir(extract_toml_string($0))) {
+        if (is_managed_line($0) || is_generated_build_dir(extract_toml_string($0))) {
           saw_build_dir = 1
           next
         }
@@ -242,32 +272,23 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+case "${SETUP_PROFILE}" in
+  full | rust)
+    ;;
+  *)
+    echo "error: HARN_DEV_SETUP_PROFILE must be 'full' or 'rust' (got '${SETUP_PROFILE}')" >&2
+    exit 1
+    ;;
+esac
+
+echo "Setup profile -> ${SETUP_PROFILE}"
+HARN_DEV_SETUP_STORAGE_ROOT="$(derive_storage_root)"
+export HARN_DEV_SETUP_STORAGE_ROOT
+echo "Setup storage root -> ${HARN_DEV_SETUP_STORAGE_ROOT}"
+
 git config core.hooksPath .githooks
 echo "Configured git hooks path -> .githooks"
 ./scripts/configure_merge_drivers.sh
-
-# Install optional but recommended Cargo tools.
-for tool_spec in "cargo-nextest:cargo-nextest --locked" "sccache:sccache --locked"; do
-  tool="${tool_spec%%:*}"
-  read -r -a install_args <<< "${tool_spec#*:}"
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "Installing $tool..."
-    cargo install "${install_args[@]}" || echo "warning: failed to install $tool (non-fatal)"
-  else
-    echo "$tool already installed."
-  fi
-done
-
-if ! command -v actionlint >/dev/null 2>&1; then
-  if command -v go >/dev/null 2>&1; then
-    echo "Installing actionlint..."
-    go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 || echo "warning: failed to install actionlint (non-fatal)"
-  else
-    echo "warning: go not found; skipping actionlint install"
-  fi
-else
-  echo "actionlint already installed."
-fi
 
 target_dir="${HARN_DEV_TARGET_DIR:-}"
 if [[ -z "${target_dir}" ]]; then
@@ -275,7 +296,7 @@ if [[ -z "${target_dir}" ]]; then
 fi
 
 build_dir="${HARN_DEV_BUILD_DIR:-}"
-if [[ -z "${build_dir}" ]]; then
+if [[ -z "${build_dir}" && -n "${target_dir}" ]]; then
   build_dir="$(derive_build_dir)"
 fi
 
@@ -295,6 +316,37 @@ fi
 if [[ -n "${build_dir}" ]]; then
   mkdir -p "${build_dir}"
   echo "Configured shared Cargo build dir -> ${build_dir}"
+fi
+
+if [[ "${SETUP_PROFILE}" == "full" ]]; then
+  tool_target_dir="$(derive_tool_target_dir)"
+  mkdir -p "${tool_target_dir}"
+
+  # Keep optional tool compilation off quota-limited transient directories.
+  # The durable target also makes repeated setup attempts reuse intermediates.
+  for tool_spec in "cargo-nextest:cargo-nextest --locked" "sccache:sccache --locked"; do
+    tool="${tool_spec%%:*}"
+    read -r -a install_args <<< "${tool_spec#*:}"
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "Installing $tool (build artifacts: ${tool_target_dir})..."
+      if ! cargo install --target-dir "${tool_target_dir}" "${install_args[@]}"; then
+        echo "warning: failed to install $tool (non-fatal)"
+      fi
+    else
+      echo "$tool already installed."
+    fi
+  done
+
+  if ! command -v actionlint >/dev/null 2>&1; then
+    if command -v go >/dev/null 2>&1; then
+      echo "Installing actionlint..."
+      go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 || echo "warning: failed to install actionlint (non-fatal)"
+    else
+      echo "warning: go not found; skipping actionlint install"
+    fi
+  else
+    echo "actionlint already installed."
+  fi
 fi
 
 mkdir -p "${SETUP_STATE_DIR}"
@@ -321,7 +373,7 @@ if [[ -x ./scripts/prune_stale_targets.sh ]]; then
   fi
 fi
 
-if command -v npm >/dev/null 2>&1; then
+if [[ "${SETUP_PROFILE}" == "full" ]] && command -v npm >/dev/null 2>&1; then
   root_node_fp="$(hash_setup_inputs root-node package.json package-lock.json)"
   run_setup_step \
     "Installing repo-local Node tooling" \
@@ -373,7 +425,7 @@ if command -v npm >/dev/null 2>&1; then
       website/node_modules \
       -- bash -c 'cd website && npm install --no-audit --fund=false'
   fi
-else
+elif [[ "${SETUP_PROFILE}" == "full" ]]; then
   echo "warning: npm not found; skipping markdown, portal, tree-sitter, VS Code extension, and docs-site dependencies"
 fi
 
