@@ -1,9 +1,9 @@
 use super::harnpack::HarnpackRunOptions;
 use super::{
-    build_denied_builtins, default_run_workspace_root, eval_source_for_code, execute_explain_cost,
-    execute_run, execute_run_with_harnpack_and_sandbox_options, run_sandbox_attestation,
-    split_eval_header, CliLlmMockMode, RunProfileOptions, RunSandboxOptions,
-    StdoutPassthroughGuard,
+    build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
+    eval_source_for_code, execute_explain_cost, execute_run,
+    execute_run_with_harnpack_and_sandbox_options, run_sandbox_attestation, split_eval_header,
+    CliLlmMockMode, RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -182,6 +182,21 @@ fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
 }
 
 #[test]
+fn default_run_policy_only_raises_the_requested_side_effect_ceiling() {
+    let workspace = Path::new("/tmp/workspace");
+    let default = default_run_capability_policy(workspace, &[], &[], false);
+    let network = default_run_capability_policy(workspace, &[], &[], true);
+
+    assert_eq!(default.side_effect_level.as_deref(), Some("process_exec"));
+    assert_eq!(network.side_effect_level.as_deref(), Some("network"));
+    assert_eq!(network.workspace_roots, default.workspace_roots);
+    assert_eq!(network.read_only_roots, default.read_only_roots);
+    assert_eq!(network.capabilities, default.capabilities);
+    assert_eq!(network.sandbox_profile, default.sandbox_profile);
+    assert_eq!(network.process_sandbox, default.process_sandbox);
+}
+
+#[test]
 fn run_sandbox_attestation_reports_effective_policy() {
     harn_vm::reset_thread_local_state();
     let policy = harn_vm::orchestration::CapabilityPolicy {
@@ -200,6 +215,9 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["write_roots"].as_array().unwrap().len(), 0);
     assert_eq!(metadata["read_only_roots"][0], "/tmp/shared");
     assert_eq!(metadata["profile"], "os_hardened");
+    assert_eq!(metadata["process_network_requested"], false);
+    assert_eq!(metadata["process_network_enabled"], true);
+    assert_eq!(metadata["side_effect_level"], "desktop_control");
     assert_eq!(metadata["egress"], "host_policy");
     harn_vm::reset_thread_local_state();
 }
