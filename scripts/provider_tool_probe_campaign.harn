@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { CliParseResult, help_requested, parse, parser } from "std/cli/argparse"
 
 const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v8"
 
@@ -1612,29 +1612,34 @@ fn __ensure_dir(harness: Harness, path: string) {
   }
 }
 
-fn __arg_spec() -> list {
-  return [
-    {kind: "option", name: "route", flags: ["--route"], multi: true, default: []},
-    {kind: "option", name: "behavior", flags: ["--behavior"], multi: true, default: []},
-    {kind: "option", name: "mode", flags: ["--mode"], default: "both"},
-    {kind: "option", name: "repeat", flags: ["--repeat"], parse: "int", default: 1},
-    {kind: "option", name: "timeout_secs", flags: ["--timeout-secs"], parse: "int", default: 60},
-    {kind: "option", name: "shard_count", flags: ["--shard-count"], parse: "int", default: 1},
-    {kind: "option", name: "shard_index", flags: ["--shard-index"], parse: "int", default: 0},
-    {kind: "option", name: "max_probes", flags: ["--max-probes"], parse: "int", default: 0},
-    {kind: "option", name: "harn_bin", flags: ["--harn-bin"], default: "harn"},
-    {kind: "option", name: "providers_config", flags: ["--providers-config"], default: ""},
-    {kind: "option", name: "env_file", flags: ["--env-file"], default: ""},
-    {kind: "option", name: "output_dir", flags: ["--output-dir"], default: DEFAULT_OUTPUT_DIR},
-    {kind: "flag", name: "include_expensive", flags: ["--include-expensive"]},
-    {kind: "flag", name: "catalog_routes", flags: ["--catalog-routes"]},
-    {kind: "flag", name: "live", flags: ["--live"]},
-    {kind: "flag", name: "markdown", flags: ["--markdown"]},
-  ]
+fn __arg_spec() {
+  return parser(
+    {
+      name: "provider_tool_probe_campaign",
+      args: [
+        {kind: "flag", name: "route", long: "--route", multi: true, default: []},
+        {kind: "flag", name: "behavior", long: "--behavior", multi: true, default: []},
+        {kind: "flag", name: "mode", long: "--mode", default: "both"},
+        {kind: "flag", name: "repeat", long: "--repeat", parse: "int", default: 1},
+        {kind: "flag", name: "timeout_secs", long: "--timeout-secs", parse: "int", default: 60},
+        {kind: "flag", name: "shard_count", long: "--shard-count", parse: "int", default: 1},
+        {kind: "flag", name: "shard_index", long: "--shard-index", parse: "int", default: 0},
+        {kind: "flag", name: "max_probes", long: "--max-probes", parse: "int", default: 0},
+        {kind: "flag", name: "harn_bin", long: "--harn-bin", default: "harn"},
+        {kind: "flag", name: "providers_config", long: "--providers-config", default: ""},
+        {kind: "flag", name: "env_file", long: "--env-file", default: ""},
+        {kind: "flag", name: "output_dir", long: "--output-dir", default: DEFAULT_OUTPUT_DIR},
+        {kind: "switch", name: "include_expensive", long: "--include-expensive"},
+        {kind: "switch", name: "catalog_routes", long: "--catalog-routes"},
+        {kind: "switch", name: "live", long: "--live"},
+        {kind: "switch", name: "markdown", long: "--markdown"},
+      ],
+    },
+  )
 }
 
-pub fn provider_tool_probe_campaign_parse_args(args: list<string>) -> dict {
-  return parse_args(args, __arg_spec())
+pub fn provider_tool_probe_campaign_parse_args(args: list<string>) -> CliParseResult<dict> {
+  return parse(__arg_spec(), args)
 }
 
 fn __target_runtime_context(harness: Harness, parsed: dict, live: bool, catalog_routes: bool) -> dict {
@@ -1677,18 +1682,19 @@ fn __target_runtime_context(harness: Harness, parsed: dict, live: bool, catalog_
 }
 
 fn main(harness: Harness) {
-  const parsed = provider_tool_probe_campaign_parse_args(argv)
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio
       .println(
       "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
     )
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    harness.stdio.eprintln(join((parsed?._errors ?? []) + (parsed?._extras ?? []), "\n"))
+  const parsed_result = provider_tool_probe_campaign_parse_args(argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const include_expensive = parsed?.include_expensive ?? false
   const catalog_routes = parsed?.catalog_routes ?? false
   const route_specs = __as_string_list(parsed?.route)

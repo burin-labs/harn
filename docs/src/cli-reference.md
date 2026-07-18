@@ -435,6 +435,73 @@ in the current folder. Conformance targets must resolve to a file or directory
 inside `conformance/`; the CLI now errors instead of silently falling back to
 the full suite when a requested target is missing.
 
+## harn test-bench
+
+Run a `.harn` script under a hermetic testbench: a paused mock clock, optional
+LLM fixtures, an optional copy-on-write filesystem overlay, optional subprocess
+tapes, and a deny-by-default network policy. The determinism controls make runs
+byte-reproducible so tapes can be recorded once and replayed as regression
+fixtures.
+
+```bash
+harn test-bench run script.harn                          # paused clock, deny-all network
+harn test-bench run script.harn --llm-record fixture.jsonl
+harn test-bench run script.harn --process-record tape.bin --emit-tape run.tape
+harn test-bench run script.harn --fs-overlay . --emit-diff writes.diff
+harn test-bench replay script.harn --process-tape tape.bin
+harn test-bench fidelity recorded.tape replay.tape --mode byte-identical
+harn test-bench fidelity script.harn --against recorded.tape
+harn test-bench validate-annotations --tape run.tape run.tape.annotations.jsonl
+harn test-bench export-annotations run.tape.annotations.jsonl --kind friction
+```
+
+### harn test-bench run
+
+Execute a script under the testbench. Selected flags:
+
+| Flag | Description |
+|---|---|
+| `--clock <paused\|real>` | Pin the mock clock (default `paused`) or use the real clock |
+| `--start-at <UNIX_MS>` | Pin the paused clock to a specific UNIX-epoch millisecond value |
+| `--llm-fixture <path>` / `--llm-record <path>` | Replay LLM responses from, or record them to, a JSONL fixture (mutually exclusive) |
+| `--fs-overlay <dir>` | Mount a copy-on-write overlay rooted at a worktree; writes stay in memory until the run ends |
+| `--process-record <path>` / `--process-replay <path>` | Record subprocess invocations to a tape, or replay them from one (mutually exclusive) |
+| `--process-wasi <dir>` | Resolve subprocess programs to `<dir>/<program>.wasm` under wasmtime (requires the `testbench-wasi` build feature) |
+| `--network <deny\|real>` | Outbound policy (default `deny`); `--allow-host <host_or_cidr>` (repeatable) opens specific destinations |
+| `--emit-diff <path>` | Write a unified diff of overlay filesystem writes (requires `--fs-overlay`) |
+| `--emit-tape <path>` | Write a unified event tape (clock reads, sleeps, LLM calls, FS writes, subprocess spawns) |
+| `--runtime <paused-tokio\|des>` | Runtime mode; `des` coalesces all work onto one thread for bit-exact tape replays |
+
+Pass positional script arguments after `--`:
+`harn test-bench run script.harn -- a b c`.
+
+### harn test-bench replay
+
+Replay a previously recorded subprocess tape against a script and assert the run
+requests the same `(program, args, cwd)` tuples in the same order. Accepts
+`--process-tape`, plus the run-side `--llm-fixture`, `--fs-overlay`,
+`--emit-tape`, and `--annotations` flags.
+
+### harn test-bench fidelity
+
+Score replay fidelity. Pass two recorded tapes to diff them, or pass
+`--against <tape> <script>` to re-run the script and compare the fresh tape
+against the recorded one. `--mode` selects `byte-identical` (default),
+`semantic`, `outcome`, or `phase-aware` comparison.
+
+### harn test-bench validate-annotations
+
+Validate an annotation sidecar (`<tape>.annotations.jsonl`) against its target
+tape. Surfaces schema errors, unknown `event_id` references, and digest drift;
+exits non-zero (status `2`) when any problems are found.
+
+### harn test-bench export-annotations
+
+Export annotations filtered by `--kind` (e.g. `friction`, `crystallize_here`,
+`note`; repeatable). `--format jsonl` (default) emits one annotation per line;
+`--format friction` re-emits matching annotations as `FrictionEvent` JSON for
+the friction roll-up consumer.
+
 ## harn repl
 
 Start an interactive REPL with syntax highlighting, multiline editing, live
@@ -963,6 +1030,39 @@ pipelines = ["pipelines", "scripts"]
 Preflight diagnostics are reported under the `preflight` category so they
 can be distinguished from type-checker errors in IDE output streams and
 CI log filters.
+
+## harn canon
+
+Evaluate harn-canon invariant packs against changed files. Packs are declared in
+a `canon-packs.json` manifest (resolved from `--canon-root`, `HARN_CANON_ROOT`,
+or the workspace `.harn/canon` directory) and route to the given paths by
+manifest path rules unless `--pack` pins them explicitly.
+
+```bash
+harn canon check src/foo.harn src/bar.harn
+harn canon check src/ --include-semantic          # run semantic predicates too
+harn canon check src/ --pack style --pack safety   # bypass manifest routing
+harn canon check src/foo.harn --advisory --json    # never fail; emit JSON envelope
+```
+
+### harn canon check
+
+Run a pack's deterministic predicates (and, with `--include-semantic`, its
+semantic predicates) over the evaluated slice and report blocking findings.
+Exits non-zero when harn-canon reports blocking findings unless `--advisory` is
+set.
+
+| Flag | Description |
+|---|---|
+| `--canon-root <path>` | Directory containing `canon-packs.json` (default: `HARN_CANON_ROOT` or `<workspace>/.harn/canon`) |
+| `--workspace-root <path>` / `--root <path>` | Root used to resolve relative `PATH` arguments (default: `.`) |
+| `--pack <id>` / `--pack-id <id>` | Explicit pack id; repeat to bypass manifest path routing |
+| `--include-missing` | Include missing paths in the evaluated slice with empty text |
+| `--include-semantic` | Run semantic predicates in addition to deterministic ones |
+| `--budget-ms <ms>` | Per-pack predicate budget in milliseconds (default: 50) |
+| `--advisory` | Print findings but exit zero even when harn-canon reports blocking findings |
+| `--feedback-header <text>` | Header used for the human feedback text (default: `harn-canon feedback`) |
+| `--json` | Emit a stable JSON envelope |
 
 ## harn explain
 

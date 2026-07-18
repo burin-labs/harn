@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 import { percentile } from "std/math"
 import { render_table } from "std/table"
 
@@ -36,20 +36,19 @@ fn usage() -> string {
   ].join("\n")
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "repo", flags: ["--repo"], parse: "string", default: DEFAULT_REPOSITORY},
+fn arg_spec() {
+  return parser(
     {
-      kind: "option",
-      name: "workflow",
-      flags: ["--workflow"],
-      parse: "string",
-      default: DEFAULT_WORKFLOW,
+      name: "ci_walltime_report",
+      args: [
+        {kind: "flag", name: "repo", long: "--repo", parse: "string", default: DEFAULT_REPOSITORY},
+        {kind: "flag", name: "workflow", long: "--workflow", parse: "string", default: DEFAULT_WORKFLOW},
+        {kind: "flag", name: "event", long: "--event", parse: "string", default: DEFAULT_EVENT},
+        {kind: "flag", name: "limit", long: "--limit", parse: "int", default: DEFAULT_LIMIT},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
     },
-    {kind: "option", name: "event", flags: ["--event"], parse: "string", default: DEFAULT_EVENT},
-    {kind: "option", name: "limit", flags: ["--limit"], parse: "int", default: DEFAULT_LIMIT},
-    {kind: "flag", name: "json", flags: ["--json"], default: false},
-  ]
+  )
 }
 
 fn timestamp_ms(raw) -> int? {
@@ -203,16 +202,17 @@ fn render_report(report: CiWalltimeReport) -> string {
 }
 
 pipeline main(task) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio.println(usage())
     return 0
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    harness.stdio.eprintln(((parsed?._errors ?? []) + (parsed?._extras ?? [])).join("\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     harness.stdio.eprintln("\n" + usage())
     return 2
   }
+  const parsed = unwrap(parsed_result).options
   const repository = to_string(parsed.repo)
   const workflow = to_string(parsed.workflow)
   const event = to_string(parsed.event)

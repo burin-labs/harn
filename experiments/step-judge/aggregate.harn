@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { parse, parser } from "std/cli/argparse"
 
 fn __load_cell_summaries(harness: Harness, results_dir: string) {
   const entries = harness.fs.list_dir(results_dir)
@@ -154,16 +154,22 @@ fn __format_md(groups, results_dir: string) {
 }
 
 fn main(harness: Harness) {
-  const args = parse_args(
+  const parsed = parse(
+    parser(
+      {
+        name: "step_judge_aggregate",
+        args: [
+          {kind: "flag", name: "results_dir", long: "--results-dir", required: true},
+          {kind: "flag", name: "output", long: "--output", required: true},
+        ],
+      },
+    ),
     argv,
-    [
-      {kind: "option", name: "results_dir", flags: ["--results-dir"], required: true},
-      {kind: "option", name: "output", flags: ["--output"], required: true},
-    ],
   )
-  if len(args._errors) > 0 {
-    throw join(args._errors, "\n")
+  if is_err(parsed) {
+    throw unwrap_err(parsed).message
   }
+  const args = unwrap(parsed).options
   const summaries = __load_cell_summaries(harness, args.results_dir)
   if len(summaries) == 0 {
     throw "no summary.json files found under " + args.results_dir
