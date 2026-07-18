@@ -304,18 +304,40 @@ impl SchemaSanitizer<'_> {
     }
 
     fn rewrite_openai_strict_const(&mut self, object: &mut Map<String, Value>, path: &str) {
-        if self.profile != SchemaCompatProfile::OpenAiStrict || object.contains_key("enum") {
+        if self.profile != SchemaCompatProfile::OpenAiStrict {
             return;
         }
         let Some(value) = object.remove("const") else {
             return;
         };
-        object.insert("enum".to_string(), Value::Array(vec![value]));
+        let (values, action, detail) = match object.remove("enum") {
+            None => (
+                vec![value],
+                "rewritten_to_single_value_enum",
+                "single-value enum preserves const semantics in openai_strict schemas",
+            ),
+            Some(Value::Array(values))
+                if value.as_str().is_some_and(|constant| {
+                    values
+                        .iter()
+                        .any(|candidate| candidate.as_str() == Some(constant))
+                }) => (
+                vec![value],
+                "intersected_with_const",
+                "single-value enum preserves the string const and enum intersection in openai_strict schemas",
+            ),
+            Some(_) => (
+                Vec::new(),
+                "rewritten_to_empty_enum",
+                "empty enum fails closed when const and enum have no safely supported intersection in openai_strict schemas",
+            ),
+        };
+        object.insert("enum".to_string(), Value::Array(values));
         self.record(
             &child_path(path, "const"),
             "const",
-            "rewritten_to_single_value_enum",
-            "single-value enum preserves const semantics in openai_strict schemas".to_string(),
+            action,
+            detail.to_string(),
         );
     }
 
@@ -522,10 +544,7 @@ fn closed_union_discriminator(branches: &[Value]) -> Option<String> {
         else {
             continue;
         };
-        let distinct = values
-            .iter()
-            .map(|value| value.to_string())
-            .collect::<BTreeSet<_>>();
+        let distinct = values.iter().copied().collect::<BTreeSet<_>>();
         if distinct.len() == branches.len() {
             return Some(name.clone());
         }
@@ -533,7 +552,7 @@ fn closed_union_discriminator(branches: &[Value]) -> Option<String> {
     None
 }
 
-fn closed_object_discriminator_value<'a>(branch: &'a Value, name: &str) -> Option<&'a Value> {
+fn closed_object_discriminator_value<'a>(branch: &'a Value, name: &str) -> Option<&'a str> {
     let object = branch.as_object()?;
     if object.get("type").and_then(Value::as_str) != Some("object")
         || object.get("additionalProperties").and_then(Value::as_bool) != Some(false)
@@ -545,13 +564,13 @@ fn closed_object_discriminator_value<'a>(branch: &'a Value, name: &str) -> Optio
     {
         return None;
     }
-    let value = object
+    object
         .get("properties")?
         .as_object()?
         .get(name)?
         .as_object()?
-        .get("const")?;
-    (!value.is_array() && !value.is_object()).then_some(value)
+        .get("const")?
+        .as_str()
 }
 
 fn required_property_set(value: Option<&Value>) -> BTreeSet<String> {
@@ -673,6 +692,27 @@ pub(crate) mod tests {
             "action": action,
             "detail": detail
         })
+    }
+
+    fn sanitize_openai_with_changes(schema: &Value) -> (Value, Value) {
+        let mut sanitizer = SchemaSanitizer {
+            provider: "openai",
+            model: "gpt-5.4",
+            profile: SchemaCompatProfile::OpenAiStrict,
+            surface: SchemaSurface::StructuredOutput,
+            receipts: Vec::new(),
+        };
+        let mut sanitized = schema.clone();
+        sanitizer.sanitize_node(&mut sanitized, "#");
+        let changes = serde_json::to_value(sanitizer.receipts).expect("serialize schema changes");
+        (sanitized, changes)
+    }
+
+    fn omitted_one_of_note(branches: &Value) -> String {
+        format!(
+            "Original JSON Schema `oneOf` constraint omitted for openai_strict provider compatibility: {}.",
+            value_summary(branches)
+        )
     }
 
     #[test]
@@ -892,42 +932,124 @@ pub(crate) mod tests {
         let mut schema = closed_discriminated_union_schema("oneOf", "const");
         schema["properties"]["source"]["oneOf"][1]["properties"]["kind"]["const"] =
             Value::String("cron".to_string());
+        let note = omitted_one_of_note(&schema["properties"]["source"]["oneOf"]);
 
-        let sanitized = sanitize_schema_for_provider(
-            "openai",
-            "gpt-5.4",
-            SchemaCompatProfile::OpenAiStrict,
-            SchemaSurface::StructuredOutput,
-            &schema,
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+        let mut expected = schema;
+        expected["properties"]["schema_version"] = serde_json::json!({"enum": ["1"]});
+        expected["properties"]["source"] = serde_json::json!({"description": note});
+
+        assert_eq!(sanitized, expected);
+        assert_eq!(
+            changes,
+            Value::Array(vec![
+                openai_receipt_change(
+                    "#/properties/schema_version/const",
+                    "const",
+                    "rewritten_to_single_value_enum",
+                    "single-value enum preserves const semantics in openai_strict schemas",
+                ),
+                openai_receipt_change(
+                    "#/properties/source/oneOf",
+                    "oneOf",
+                    "removed",
+                    "keyword is not accepted by openai_strict schemas",
+                ),
+            ])
         );
+    }
 
-        assert!(sanitized["properties"]["source"].get("anyOf").is_none());
-        assert!(sanitized["properties"]["source"].get("oneOf").is_none());
-        assert!(sanitized["properties"]["source"]["description"]
-            .as_str()
-            .expect("oneOf compatibility note")
-            .contains("Original JSON Schema `oneOf` constraint omitted"));
+    #[test]
+    fn openai_strict_does_not_rewrite_json_schema_equal_numeric_discriminators() {
+        let mut schema = closed_discriminated_union_schema("oneOf", "const");
+        schema["properties"]["source"]["oneOf"][0]["properties"]["kind"]["const"] =
+            serde_json::json!(1);
+        schema["properties"]["source"]["oneOf"][1]["properties"]["kind"]["const"] =
+            serde_json::json!(1.0);
+        let note = omitted_one_of_note(&schema["properties"]["source"]["oneOf"]);
+
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+        let mut expected = schema;
+        expected["properties"]["schema_version"] = serde_json::json!({"enum": ["1"]});
+        expected["properties"]["source"] = serde_json::json!({"description": note});
+
+        assert_eq!(sanitized, expected);
+        assert_eq!(
+            changes,
+            Value::Array(vec![
+                openai_receipt_change(
+                    "#/properties/schema_version/const",
+                    "const",
+                    "rewritten_to_single_value_enum",
+                    "single-value enum preserves const semantics in openai_strict schemas",
+                ),
+                openai_receipt_change(
+                    "#/properties/source/oneOf",
+                    "oneOf",
+                    "removed",
+                    "keyword is not accepted by openai_strict schemas",
+                ),
+            ])
+        );
     }
 
     #[test]
     fn openai_strict_does_not_rewrite_root_discriminated_union() {
         let schema =
             closed_discriminated_union_schema("oneOf", "const")["properties"]["source"].clone();
+        let note = omitted_one_of_note(&schema["oneOf"]);
 
-        let sanitized = sanitize_schema_for_provider(
-            "openai",
-            "gpt-5.4",
-            SchemaCompatProfile::OpenAiStrict,
-            SchemaSurface::StructuredOutput,
-            &schema,
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+
+        assert_eq!(sanitized, serde_json::json!({"description": note}));
+        assert_eq!(
+            changes,
+            Value::Array(vec![openai_receipt_change(
+                "#/oneOf",
+                "oneOf",
+                "removed",
+                "keyword is not accepted by openai_strict schemas",
+            )])
         );
+    }
 
-        assert!(sanitized.get("anyOf").is_none());
-        assert!(sanitized.get("oneOf").is_none());
-        assert!(sanitized["description"]
-            .as_str()
-            .expect("root oneOf compatibility note")
-            .contains("Original JSON Schema `oneOf` constraint omitted"));
+    #[test]
+    fn openai_strict_intersects_string_const_with_enum() {
+        let schema = serde_json::json!({"type": "string", "const": "a", "enum": ["a", "b"]});
+
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+
+        assert_eq!(
+            sanitized,
+            serde_json::json!({"type": "string", "enum": ["a"]})
+        );
+        assert_eq!(
+            changes,
+            Value::Array(vec![openai_receipt_change(
+                "#/const",
+                "const",
+                "intersected_with_const",
+                "single-value enum preserves the string const and enum intersection in openai_strict schemas",
+            )])
+        );
+    }
+
+    #[test]
+    fn openai_strict_fails_closed_for_empty_const_enum_intersection() {
+        let schema = serde_json::json!({"type": "string", "const": "a", "enum": ["b"]});
+
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+
+        assert_eq!(sanitized, serde_json::json!({"type": "string", "enum": []}));
+        assert_eq!(
+            changes,
+            Value::Array(vec![openai_receipt_change(
+                "#/const",
+                "const",
+                "rewritten_to_empty_enum",
+                "empty enum fails closed when const and enum have no safely supported intersection in openai_strict schemas",
+            )])
+        );
     }
 
     #[test]
