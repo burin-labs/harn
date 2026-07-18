@@ -183,7 +183,7 @@ pipeline test_release_workflow_generates_aot_once_and_shares_it_with_all_release
   assert_eq(generator.if, "needs.setup.outputs.is_release == 'true'")
   assert_eq(generator.run, "make gen-cli-aot && make check-cli-aot")
   assert_eq(restore.if, "needs.setup.outputs.is_release == 'true'")
-  assert_eq(restore.uses, "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093")
+  assert_eq(restore.uses, "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
   assert_eq(workflow.jobs.build.needs.contains("prepare_cli_aot"), true)
   assert_eq(workflow.jobs.release.needs.contains("prepare_cli_aot"), true)
   assert_eq(workflow.jobs.release.if.contains("needs.prepare_cli_aot.result"), true)
