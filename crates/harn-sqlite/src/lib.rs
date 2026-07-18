@@ -88,6 +88,9 @@ pub enum InitializationError<E> {
     Synchronous(rusqlite::Error),
     /// The schema marker could not be inspected.
     SchemaReadiness(rusqlite::Error),
+    /// No initializer committed the exact schema version before the readiness
+    /// lease became available.
+    SchemaNotInitialized { name: &'static str, version: i64 },
     /// The database was initialized by a newer incompatible schema owner.
     NewerSchemaVersion {
         name: &'static str,
@@ -164,6 +167,9 @@ impl<E: fmt::Display> fmt::Display for InitializationError<E> {
             ),
             Self::Synchronous(error) => write!(f, "synchronous pragma failed: {error}"),
             Self::SchemaReadiness(error) => write!(f, "schema readiness query failed: {error}"),
+            Self::SchemaNotInitialized { name, version } => {
+                write!(f, "SQLite schema {name} version {version} is not initialized")
+            }
             Self::NewerSchemaVersion {
                 name,
                 stored,
@@ -199,6 +205,7 @@ impl<E: std::error::Error + 'static> std::error::Error for InitializationError<E
             Self::BusyTimeoutTooLarge { .. }
             | Self::DatabasePathUnavailable
             | Self::FileBackedTransient { .. }
+            | Self::SchemaNotInitialized { .. }
             | Self::WalNotEnabled { .. }
             | Self::WalBusyNotWal { .. }
             | Self::NewerSchemaVersion { .. } => None,
@@ -274,10 +281,39 @@ fn initialization_stage_is_busy_or_locked<E>(error: &InitializationError<E>) -> 
         | InitializationError::FileBackedTransient { .. }
         | InitializationError::InitializationLockOpen { .. }
         | InitializationError::InitializationLockAcquire { .. }
+        | InitializationError::SchemaNotInitialized { .. }
         | InitializationError::NewerSchemaVersion { .. }
         | InitializationError::WalNotEnabled { .. }
         | InitializationError::Initialize(_) => false,
     }
+}
+
+/// Require an exact schema version on a file-backed connection without
+/// initializing it.
+///
+/// Ready databases avoid the sidecar lock. When initialization is in flight,
+/// this waits for its persistent lease and validates the marker after the
+/// writer releases it. If no initializer owns the lease, an absent marker is
+/// reported here instead of allowing a read-only consumer to fail later on a
+/// missing application table.
+pub fn require_file_initialized<E>(
+    connection: &Connection,
+    busy_timeout: Duration,
+    schema: SchemaVersion,
+) -> Result<(), InitializationError<E>> {
+    configure_busy_timeout(connection, busy_timeout)?;
+    if fast_path_is_ready(connection, schema)? {
+        return Ok(());
+    }
+
+    let _readiness_lock = acquire_readiness_lock(connection, schema)?;
+    if is_wal_journal_mode(connection)? && schema_is_ready(connection, schema)? {
+        return Ok(());
+    }
+    Err(InitializationError::SchemaNotInitialized {
+        name: schema.name,
+        version: schema.version,
+    })
 }
 
 /// Initialize a transient database with the same atomic schema-marker contract.
@@ -377,6 +413,31 @@ fn acquire_initialization_lock<E>(
             source,
         })?;
     file.lock_exclusive()
+        .map_err(|source| InitializationError::InitializationLockAcquire {
+            path: path.clone(),
+            source,
+        })?;
+    Ok(SqliteInitializationLock { file })
+}
+
+fn acquire_readiness_lock<E>(
+    connection: &Connection,
+    schema: SchemaVersion,
+) -> Result<SqliteInitializationLock, InitializationError<E>> {
+    let path = initialization_lock_path(connection)?;
+    let file = match OpenOptions::new().read(true).open(&path) {
+        Ok(file) => file,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            return Err(InitializationError::SchemaNotInitialized {
+                name: schema.name,
+                version: schema.version,
+            });
+        }
+        Err(source) => {
+            return Err(InitializationError::InitializationLockOpen { path, source });
+        }
+    };
+    file.lock_shared()
         .map_err(|source| InitializationError::InitializationLockAcquire {
             path: path.clone(),
             source,

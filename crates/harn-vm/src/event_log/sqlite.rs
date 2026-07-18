@@ -6,7 +6,10 @@ use bytes::Bytes;
 use futures::stream::BoxStream;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
-use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteSchema, DEFAULT_BUSY_TIMEOUT};
+use crate::runtime_sqlite::{
+    initialize_runtime_sqlite, require_runtime_sqlite_initialized, RuntimeSqliteSchema,
+    DEFAULT_BUSY_TIMEOUT,
+};
 
 use super::util::{
     event_id_to_sqlite_i64, now_ms, prepare_event_after, sqlite_i64_to_event_id,
@@ -98,9 +101,10 @@ impl SqliteEventLog {
             .map_err(|error| {
                 LogError::Sqlite(format!("event log read-only open error: {error}"))
             })?;
-        connection
-            .busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|error| LogError::Sqlite(format!("event log busy-timeout error: {error}")))?;
+        require_runtime_sqlite_initialized(&connection, DEFAULT_BUSY_TIMEOUT, &SQLITE_SCHEMA)
+            .map_err(|error| {
+                LogError::Sqlite(format!("event log read-only setup error: {error}"))
+            })?;
         Ok(Self {
             path,
             connection: Mutex::new(connection),

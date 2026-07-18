@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Barrier};
+use std::sync::{mpsc, Arc, Barrier};
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OpenFlags};
@@ -10,7 +10,7 @@ use wait_timeout::ChildExt;
 
 use super::{
     current_journal_mode, initialization_lock_path, initialize_file, initialize_transient,
-    InitializationError, SchemaVersion,
+    require_file_initialized, InitializationError, SchemaVersion,
 };
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -126,6 +126,99 @@ fn already_ready_wal_fast_path_does_not_open_initialization_lock() {
         .collect::<Result<Vec<_>, _>>()
         .expect("collect rows");
     assert_eq!(rows, vec![1, 2]);
+}
+
+#[test]
+fn read_only_ready_check_waits_for_schema_commit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = dir.path().join("runtime.sqlite");
+    let writer_database = database.clone();
+    let reader_database = database.clone();
+    let (writer_ready_tx, writer_ready_rx) = mpsc::channel();
+    let (writer_release_tx, writer_release_rx) = mpsc::channel();
+    let (reader_done_tx, reader_done_rx) = mpsc::channel();
+    let reader_start = Arc::new(Barrier::new(2));
+
+    let writer = std::thread::spawn(move || {
+        let connection = Connection::open(writer_database).expect("writer open");
+        initialize_file(&connection, BUSY_TIMEOUT, TEST_SCHEMA, |transaction| {
+            transaction.execute_batch(TEST_SCHEMA_SQL)?;
+            writer_ready_tx.send(()).expect("signal writer transaction");
+            writer_release_rx
+                .recv()
+                .expect("release writer transaction");
+            Ok::<(), rusqlite::Error>(())
+        })
+        .expect("writer initialization");
+    });
+    writer_ready_rx
+        .recv_timeout(CHILD_TIMEOUT)
+        .expect("writer entered schema transaction");
+
+    let reader_thread_start = Arc::clone(&reader_start);
+    let reader = std::thread::spawn(move || {
+        let connection =
+            Connection::open_with_flags(reader_database, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .expect("reader open");
+        reader_thread_start.wait();
+        let outcome =
+            require_file_initialized::<rusqlite::Error>(&connection, BUSY_TIMEOUT, TEST_SCHEMA)
+                .map_err(|error| error.to_string());
+        reader_done_tx.send(outcome).expect("signal reader result");
+    });
+
+    reader_start.wait();
+    assert_eq!(
+        reader_done_rx.recv_timeout(Duration::from_millis(500)),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "reader must wait for the initialization lease"
+    );
+    writer_release_tx
+        .send(())
+        .expect("release writer transaction");
+    assert_eq!(
+        reader_done_rx
+            .recv_timeout(CHILD_TIMEOUT)
+            .expect("reader completed after commit"),
+        Ok(())
+    );
+    writer.join().expect("writer thread");
+    reader.join().expect("reader thread");
+}
+
+#[test]
+fn read_only_ready_check_fails_before_returning_an_uninitialized_handle() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = dir.path().join("runtime.sqlite");
+    drop(Connection::open(&database).expect("create database"));
+    let connection = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .expect("open reader");
+
+    let error = require_file_initialized::<rusqlite::Error>(&connection, BUSY_TIMEOUT, TEST_SCHEMA)
+        .expect_err("read-only consumers require an initialized schema");
+    match error {
+        InitializationError::SchemaNotInitialized { name, version } => {
+            assert_eq!((name, version), ("process_rows", 1));
+        }
+        other => panic!("expected not-initialized error, got {other:?}"),
+    }
+}
+
+#[test]
+fn initialized_read_only_fast_path_does_not_open_initialization_lock() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = dir.path().join("runtime.sqlite");
+    let writer = Connection::open(&database).expect("open writer");
+    initialize_test_database(&writer).expect("initialize database");
+    let lock_path = initialization_lock_path::<rusqlite::Error>(&writer).expect("lock path");
+    drop(writer);
+    std::fs::remove_file(&lock_path).expect("remove initial lock file");
+    std::fs::create_dir(&lock_path).expect("install inaccessible lock sentinel");
+
+    let reader = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .expect("open reader");
+    require_file_initialized::<rusqlite::Error>(&reader, BUSY_TIMEOUT, TEST_SCHEMA)
+        .expect("ready reader must stay lock-free");
 }
 
 #[test]
