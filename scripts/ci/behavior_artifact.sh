@@ -32,12 +32,23 @@ validate_commit() {
   fi
 }
 
+require_source_commit() {
+  local expected=$1
+  local actual
+  actual="$(git rev-parse --verify HEAD)"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "error: behavior artifact commit ${expected} does not match checkout HEAD ${actual}" >&2
+    exit 1
+  fi
+}
+
 build_bundle() {
   local output=$1
   local commit=$2
   local output_dir target_dir staging
 
   validate_commit "$commit"
+  require_source_commit "$commit"
   require_nextest_version
   mkdir -p "$(dirname "$output")"
   output_dir="$(cd "$(dirname "$output")" && pwd -P)"

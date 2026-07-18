@@ -44,12 +44,23 @@ VERSION
 esac
 SH
 chmod +x "$tmpdir/bin/cargo"
+cat > "$tmpdir/bin/git" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == "rev-parse --verify HEAD" ]]; then
+  printf '%s\n' "${FAKE_COMMIT:?}"
+  exit 0
+fi
+echo "unexpected git invocation: $*" >&2
+exit 2
+SH
+chmod +x "$tmpdir/bin/git"
 printf '#!/usr/bin/env bash\necho harn\n' > "$tmpdir/target/debug/harn"
 chmod +x "$tmpdir/target/debug/harn"
 
 commit=0123456789abcdef0123456789abcdef01234567
 bundle="$tmpdir/out/behavior.tar.zst"
-PATH="$tmpdir/bin:$PATH" CARGO_RECORD="$record" FAKE_TARGET="$tmpdir/target" \
+PATH="$tmpdir/bin:$PATH" CARGO_RECORD="$record" FAKE_TARGET="$tmpdir/target" FAKE_COMMIT="$commit" \
   "$script" build "$bundle" "$commit"
 grep -Fq \
   'build --locked --bin harn' \
@@ -59,20 +70,31 @@ grep -Fq \
   "$record"
 
 github_env="$tmpdir/github-env"
-PATH="$tmpdir/bin:$PATH" CARGO_RECORD="$record" FAKE_TARGET="$tmpdir/target" \
+PATH="$tmpdir/bin:$PATH" CARGO_RECORD="$record" FAKE_TARGET="$tmpdir/target" FAKE_COMMIT="$commit" \
   "$script" restore "$bundle" "$tmpdir/restored" "$commit" "$github_env"
 "$tmpdir/restored/harn" | grep -Fxq harn
 restored="$(cd "$tmpdir/restored" && pwd -P)"
 grep -Fxq "HARN_BIN=$restored/harn" "$github_env"
 
 set +e
-PATH="$tmpdir/bin:$PATH" CARGO_RECORD="$record" FAKE_TARGET="$tmpdir/target" \
+PATH="$tmpdir/bin:$PATH" CARGO_RECORD="$record" FAKE_TARGET="$tmpdir/target" FAKE_COMMIT="$commit" \
   "$script" restore "$bundle" "$tmpdir/wrong-commit" \
   fedcba9876543210fedcba9876543210fedcba98 >/dev/null 2>&1
 status=$?
 set -e
 if [[ "$status" -eq 0 ]]; then
   echo "restore accepted a bundle for the wrong commit" >&2
+  exit 1
+fi
+
+set +e
+PATH="$tmpdir/bin:$PATH" CARGO_RECORD="$record" FAKE_TARGET="$tmpdir/target" \
+  FAKE_COMMIT=fedcba9876543210fedcba9876543210fedcba98 \
+  "$script" build "$tmpdir/out/wrong-source.tar.zst" "$commit" >/dev/null 2>&1
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  echo "build accepted a commit that did not match checkout HEAD" >&2
   exit 1
 fi
 
