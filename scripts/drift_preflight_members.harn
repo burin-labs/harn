@@ -5,10 +5,9 @@
 //
 //   source   -> reads committed files at interpret time; trustworthy the
 //               instant you save a file (no rebuild). Members of `check-drift`.
-//   binary   -> compares a committed doc/artifact against what the harn BINARY
-//               emits (dump-*/--check/explain --catalog/provider catalog
-//               generate/llm_provider_catalog()/harn --help); FALSE-PASSES on a
-//               stale warm binary, so only trustworthy with a freshly built
+//   binary   -> verdict depends on current harn binary semantics (generated
+//               output, parser, checker, or linter); FALSE-PASSES on stale
+//               executable bytes, so only trustworthy with a freshly built
 //               HARN_BIN. Members of `check-drift-binary`.
 //   excluded -> needs cargo build/test, an external toolchain, a sibling repo
 //               checkout, or executes runtime fixtures; not a fast file-drift

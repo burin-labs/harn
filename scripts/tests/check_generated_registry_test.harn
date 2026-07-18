@@ -249,9 +249,12 @@ pipeline test_hygiene_no_overlap(task) {
 @test
 pipeline test_preflight_unclassified_check(task) {
   // A check-* target absent from the dispatch table is flagged.
-  const errs = preflight_dispatch_errors(["check-foo"], {})
-  assert_eq(errs.count, 1)
-  assert_eq(errs[0].contains("`check-foo` is not classified in [preflight.dispatch]"), true)
+  assert_eq(
+    preflight_dispatch_errors(["check-foo"], {}),
+    [
+      "Makefile target `check-foo` is not classified in [preflight.dispatch] in scripts/generated_artifacts.toml (add it with tier source|binary|excluded).",
+    ],
+  )
 }
 
 @test
@@ -270,16 +273,20 @@ pipeline test_preflight_classified_ok(task) {
 @test
 pipeline test_preflight_dead_target_flagged(task) {
   // A dispatch entry naming a target that does not exist is flagged.
-  const errs = preflight_dispatch_errors([], {"check-gone": "source"})
-  assert_eq(errs.count, 1)
-  assert_eq(errs[0].contains("classifies `check-gone` but no such Makefile target exists"), true)
+  assert_eq(
+    preflight_dispatch_errors([], {"check-gone": "source"}),
+    [
+      "[preflight.dispatch] classifies `check-gone` but no such Makefile target exists — remove it or fix the name.",
+    ],
+  )
 }
 
 @test
 pipeline test_preflight_invalid_tier_flagged(task) {
-  const errs = preflight_dispatch_errors(["check-a"], {"check-a": "sourced"})
-  assert_eq(errs.count, 1)
-  assert_eq(errs[0].contains("invalid tier `sourced`"), true)
+  assert_eq(
+    preflight_dispatch_errors(["check-a"], {"check-a": "sourced"}),
+    ["[preflight.dispatch] `check-a` has invalid tier `sourced` (expected source|binary|excluded)."],
+  )
 }
 
 @test

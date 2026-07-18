@@ -377,6 +377,7 @@ test-pr-gate-post-warm-integrations:
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/embedded_asset_rebuild_test.sh
 
@@ -780,21 +781,23 @@ check-ci-cache-policy:
 # rebuild needed. `make check-generated-registry` guarantees every check-*
 # target is classified there, so this set can never silently omit a guard.
 # `make all` remains the full slow gate; this is the seconds-scale local gate.
-# For the binary-emit tier (dump-*/--check/provider catalog/explain --catalog),
-# which false-passes on a stale binary, run `check-drift-binary` after a
-# Rust-registry edit + rebuild (or with a fresh HARN_BIN).
+# For guards whose verdict depends on current binary semantics (generated
+# output, parser, checker, or linter), run `check-drift-binary` after a rebuild
+# or with a fresh HARN_BIN; stale executable bytes can false-pass those guards.
 check-drift:
 	@echo "=== Fast drift preflight (source-reading tier) ==="
-	@members=$$($(HARN_CMD) run scripts/drift_preflight_members.harn -- --tier source) || exit 1; \
-	$(MAKE) --no-print-directory $$members
+	@harn_bin="$$(HARN_BIN_NO_BUILD=1 $(HARN_BIN_PRINT_CMD))" || exit 1; \
+	members="$$($$harn_bin run scripts/drift_preflight_members.harn -- --tier source)" || exit 1; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" $$members
 	@echo "    Drift preflight (source) OK."
 
-# Binary-emit drift tier: each member compares a committed artifact against what
-# the harn BINARY emits, so a STALE binary false-passes. Run this only with a
+# Binary-semantics drift tier: each member's verdict depends on current
+# executable behavior, so a stale binary can false-pass. Run this only with a
 # binary built from current source (after `make build` / with a fresh HARN_BIN);
 # CI is safe because CI's HARN_BIN is freshly built.
 check-drift-binary:
-	@echo "=== Drift preflight (binary-emit tier; needs a fresh HARN_BIN) ==="
-	@members=$$($(HARN_CMD) run scripts/drift_preflight_members.harn -- --tier binary) || exit 1; \
-	$(MAKE) --no-print-directory $$members
+	@echo "=== Drift preflight (binary-semantics tier; needs a fresh HARN_BIN) ==="
+	@harn_bin="$$(HARN_BIN_NO_BUILD=1 $(HARN_BIN_PRINT_CMD))" || exit 1; \
+	members="$$($$harn_bin run scripts/drift_preflight_members.harn -- --tier binary)" || exit 1; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" $$members
 	@echo "    Drift preflight (binary) OK."

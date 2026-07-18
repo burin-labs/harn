@@ -31,3 +31,25 @@ pipeline test_members_unknown_tier(task) {
   const dispatch = {"check-a": "source"}
   assert_eq(members_for_tier(dispatch, "nope"), [])
 }
+
+@test
+pipeline test_real_registry_pins_binary_semantics_boundaries(task) {
+  const registry = toml_parse(harness.fs.read_text("../generated_artifacts.toml"))
+  const dispatch = registry?.preflight?.dispatch ?? {}
+  assert_eq(
+    {
+      "check-trigger-examples": dispatch?.["check-trigger-examples"],
+      "check-docs-snippets": dispatch?.["check-docs-snippets"],
+      "check-site-snippets": dispatch?.["check-site-snippets"],
+      "check-stdlib-strict-types": dispatch?.["check-stdlib-strict-types"],
+      "check-stdlib-public-return-types": dispatch?.["check-stdlib-public-return-types"],
+    },
+    {
+      "check-trigger-examples": "binary",
+      "check-docs-snippets": "binary",
+      "check-site-snippets": "binary",
+      "check-stdlib-strict-types": "binary",
+      "check-stdlib-public-return-types": "binary",
+    },
+  )
+}
