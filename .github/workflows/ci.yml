@@ -659,27 +659,25 @@ jobs:
         run: ./scripts/tests/pr_gate_pre_warm_boundary_test.sh
       # These targets invoke the verified artifact HARN_BIN directly.
       - run: make test-pr-gate-post-warm-integrations
-      - name: Check OpenAPI contract
-        run: make spec-lint
-      - run: make lint-test-patterns
-      # check-bindings also runs the published Python and Go protocol bindings
-      # against the committed JSON fixture.
-      - run: make check-bindings
-      - run: make lint-diagnostic-codes
-      # Strict-types ratchet: no unvalidated boundary access (HARN-OWN-004) in
-      # the gated stdlib. Runs the in-repo checker through the warm HARN_BIN.
-      - run: make check-stdlib-strict-types
-      # Public stdlib return-type ratchet: no new unannotated public exports
-      # (HARN-STD-102) beyond the checked-in AST-derived baseline.
-      - run: make check-stdlib-public-return-types
-      # Sync guards. check-generated-registry is the meta-guard
-      # that keeps scripts/generated_artifacts.toml in agreement with the
-      # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the
-      # warm HARN_BIN; pure shell/Python guards stay cheap either way.
-      - run: make check-receipt-structs
-      - run: make check-docs-links
-      - run: make check-tree-sitter-keywords
-      - run: make check-generated-registry
+      # These independent read-only guards all consume the same verified Harn
+      # binary. Let Make bound them to this runner's four CPUs instead of
+      # paying their wall time serially.
+      # check-bindings also executes the published Python and Go bindings;
+      # check-generated-registry keeps this target set tied to the repository's
+      # declared generated-artifact contract.
+      - name: Run independent post-warm audit gates
+        run: >-
+          make --jobs=4
+          spec-lint
+          lint-test-patterns
+          check-bindings
+          lint-diagnostic-codes
+          check-stdlib-strict-types
+          check-stdlib-public-return-types
+          check-receipt-structs
+          check-docs-links
+          check-tree-sitter-keywords
+          check-generated-registry
       - run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/verify_release_metadata.harn'
       - name: Check no retroactive CHANGELOG edits
         # GitHub checks out PRs and merge groups as synthetic merge commits.
