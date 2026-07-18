@@ -57,9 +57,14 @@ mod value_args;
 
 pub use error::HostlibError;
 pub use host_lease::{
-    HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseDeferReason, HostLeaseDeferReceipt,
-    HostLeaseError, HostLeaseHandle, HostLeasePriorityClass, HostLeaseReleaseReceipt,
-    HostLeaseRenewReceipt, HostLeaseRequest, HostLeaseState, HostLeaseStore, HOST_LEASE_ROOT_ENV,
+    HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseCargoExecutionContext,
+    HostLeaseDeferReason, HostLeaseDeferReceipt, HostLeaseError, HostLeaseExecutionContext,
+    HostLeaseHandle, HostLeaseOperationKind, HostLeasePathIdentity, HostLeasePriorityClass,
+    HostLeaseProcessExit, HostLeaseReleaseReceipt, HostLeaseRenewReceipt, HostLeaseRequest,
+    HostLeaseResourceClass, HostLeaseResourceDefinition, HostLeaseResourceKey,
+    HostLeaseRunLaunchFailure, HostLeaseRunReceipt, HostLeaseRunReleaseOutcome,
+    HostLeaseRunStartFailure, HostLeaseRunState, HostLeaseState, HostLeaseStore,
+    HOST_LEASE_ROOT_ENV,
 };
 pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, RegisteredBuiltin};
 

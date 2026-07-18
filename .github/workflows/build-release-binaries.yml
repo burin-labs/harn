@@ -117,7 +117,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   # Keep a narrow release-size ratchet while allowing the current stripped
-  # Linux x86_64 binary, which is 202.06 MiB at v0.10.21.
+  # Linux x86_64 binary (203.25 MiB after the grammar-table and K3 additions).
   BINARY_SIZE_BUDGET_MB: "204.00"
 
 jobs:
@@ -581,11 +581,48 @@ jobs:
             echo "::notice::Created prerelease placeholder $REF for incremental per-arch uploads."
           fi
 
+  # Generate the target-independent CLI AOT payload exactly once before the
+  # release matrix. The generator needs the complete Rust workspace; each
+  # target build needs only the resulting package-local manifest and bytecode.
+  # Warm-cache builds intentionally stay source-fallback-only, so they do not
+  # pay a generator compile solely to warm artifacts that are not shipped.
+  prepare_cli_aot:
+    name: Prepare CLI AOT payload
+    needs: setup
+    # Match build's top-level condition so a warm-cache build is never skipped
+    # merely because this release-only payload job had no work to do.
+    if: needs.setup.outputs.should_build_binaries == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: needs.setup.outputs.is_release == 'true'
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+
+      - uses: ./.github/actions/rust-toolchain
+        if: needs.setup.outputs.is_release == 'true'
+
+      - name: Generate and verify target-independent CLI AOT payload
+        if: needs.setup.outputs.is_release == 'true'
+        run: make gen-cli-aot && make check-cli-aot
+
+      - name: Upload CLI AOT payload for release targets
+        if: needs.setup.outputs.is_release == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-cli-aot-payload
+          path: |
+            crates/harn-cli/generated/cli-bytecode-manifest.json
+            crates/harn-cli/generated/cli-bytecode/
+          if-no-files-found: error
+          compression-level: 0
+
   build:
     name: Build ${{ matrix.target }}
     # prepare_release is skipped on warm-cache-only events (is_release=false);
     # `needs` on a skipped job is satisfied, so warm-cache runs still build.
-    needs: [setup, prepare_release]
+    needs: [setup, prepare_release, prepare_cli_aot]
     if: needs.setup.outputs.should_build_binaries == 'true'
     # contents: write so each leg can upload its own archive to the release
     # as soon as it finishes (incremental per-arch publish).
@@ -619,6 +656,13 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.setup.outputs.ref }}
+
+      - name: Restore target-independent CLI AOT payload
+        if: needs.setup.outputs.is_release == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: harn-cli-aot-payload
+          path: crates/harn-cli/generated
 
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
         if: matrix.use_sccache == 'true'
@@ -734,6 +778,10 @@ jobs:
           HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
+          # Published binaries must contain the payload prepared once above.
+          # A missing/malformed payload fails the harn-cli build script instead
+          # of silently releasing a slower source-fallback binary.
+          HARN_REQUIRE_CLI_AOT: ${{ needs.setup.outputs.is_release == 'true' && '1' || '0' }}
         run: |
           set -euo pipefail
           start=$SECONDS
@@ -1257,7 +1305,7 @@ jobs:
 
   release:
     name: Create GitHub release
-    needs: [setup, prepare_release, build]
+    needs: [setup, prepare_release, prepare_cli_aot, build]
     # is_release gates out warm-cache-only events (push to main, schedule):
     # they run the build matrix to populate the cache but must not author a
     # GitHub release. should_finalize_release lets metadata-only recovery
@@ -1268,6 +1316,7 @@ jobs:
       needs.setup.outputs.is_release == 'true' &&
       needs.setup.outputs.should_finalize_release == 'true' &&
       (needs.prepare_release.result == 'success' || needs.prepare_release.result == 'skipped') &&
+      (needs.prepare_cli_aot.result == 'success' || needs.prepare_cli_aot.result == 'skipped') &&
       (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:

@@ -1,0 +1,43 @@
+import { default_llm_caller, with_retry } from "std/llm/handlers"
+import { llm_arm_one_shot_prefill } from "std/llm/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn call(options) {
+  return {
+    prompt: "continue",
+    system: "",
+    opts: options,
+    turn: {iteration: 0, session_id: "one-shot-prefill", attempt: 1},
+  }
+}
+
+fn retry_caller() {
+  return with_retry(default_llm_caller(), {max_attempts: 2, base_ms: 0, max_ms: 0})
+}
+
+pipeline default() {
+  with_llm_script(
+    [{error: {category: "rate_limit", message: "mock 429 transient"}}, llm_text("recovered")],
+    { ->
+      const caller = retry_caller()
+      const result = caller(call(llm_arm_one_shot_prefill("one physical request", {provider: "mock"})))
+      const calls = llm_mock_calls()
+      __io_println(result.ok)
+      __io_println(calls[0].prefill)
+      __io_println(calls[1].prefill == nil)
+    },
+  )
+  // Direct LLM callers can still request a prefill on every retry. Only the
+  // private Harn marker opts into one-shot clearing.
+  with_llm_script(
+    [{error: {category: "rate_limit", message: "mock 429 transient"}}, llm_text("recovered")],
+    { ->
+      const caller = retry_caller()
+      const result = caller(call({provider: "mock", prefill: "ordinary prefill"}))
+      const calls = llm_mock_calls()
+      __io_println(result.ok)
+      __io_println(calls[0].prefill)
+      __io_println(calls[1].prefill)
+    },
+  )
+}

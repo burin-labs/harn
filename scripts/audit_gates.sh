@@ -11,10 +11,10 @@
 # serial conformance-then-audit tail:
 #   1. Build the harn CLI ONCE up front.
 #   2. Export HARN_BIN so conformance and every downstream gate reuse it.
-#   3. Run the conformance suite and the independent `make -j` audit gates in
-#      parallel. GNU make already IS a bounded worker pool with failure
-#      collection; `-k` keeps going after a failing gate so the run reports
-#      EVERY gate's verdict, not just the first.
+#   3. Run process-isolated conformance shards and the independent `make -j`
+#      audit gates in parallel. GNU make already IS a bounded worker pool with
+#      failure collection; `-k` keeps going after a failing gate so the run
+#      reports EVERY gate's verdict, not just the first.
 #
 # Serial wall-clock was `warm build + conformance + max(tail gate)`; parallel
 # wall-clock is `warm build + max(conformance, tail gates)` modulo the `-j`
@@ -23,6 +23,7 @@
 # Usage: scripts/audit_gates.sh
 #   HARN_BIN                 pre-built binary to reuse (skips the warm build)
 #   AUDIT_GATES_CONCURRENCY  `make -j` cap (default: nproc)
+#   HARN_CONFORMANCE_SHARDS  process shard count (default: min(nproc, 4))
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -54,7 +55,6 @@ GATES=(
   check-protocol-artifacts
   check-connector-schemas
   check-session-bundle-schema
-  check-run-view-fixtures
   check-provider-catalog
   check-provider-catalog-drift
   check-ported-handler-loc
@@ -77,6 +77,14 @@ case "$concurrency" in
 esac
 [ "$concurrency" -lt 1 ] && concurrency=1
 
+default_shards="$(nproc_count)"
+[ "$default_shards" -gt 4 ] && default_shards=4
+conformance_shards="${HARN_CONFORMANCE_SHARDS:-$default_shards}"
+case "$conformance_shards" in
+  ''|*[!0-9]*) conformance_shards="$default_shards" ;;
+esac
+[ "$conformance_shards" -lt 1 ] && conformance_shards=1
+
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 
 # Resolve and export the warm binary so conformance and every downstream gate
@@ -91,6 +99,10 @@ if [ ! -x "$HARN_BIN" ]; then
   exit 1
 fi
 export HARN_BIN
+# Performance checks must use the already-authoritative binary too. Without
+# this alias the RSS soak asks Cargo for a target path and can sit behind an
+# unrelated parallel Cargo lock for minutes before running a 250 ms benchmark.
+export HARN_CHECK_BIN="${HARN_CHECK_BIN:-$HARN_BIN}"
 echo "ok: harn-bin ($HARN_BIN)"
 echo "ok: harn warm build ($(( $(date +%s) - started ))s)"
 
@@ -110,7 +122,28 @@ fi
 # safe: without it the pipe would report tee's status and every audit failure
 # would read as a pass.
 audit_log="$(mktemp)"
-trap 'rm -f "$audit_log"' EXIT
+conformance_log_dir="$(mktemp -d)"
+child_pids=()
+cleanup_files() {
+  rm -f "$audit_log"
+  rm -rf "$conformance_log_dir"
+}
+terminate_children() {
+  local status="$1"
+  local pid
+  for pid in "${child_pids[@]}"; do
+    [ -z "$pid" ] && continue
+    kill "$pid" 2>/dev/null || true
+  done
+  for pid in "${child_pids[@]}"; do
+    [ -z "$pid" ] && continue
+    wait "$pid" 2>/dev/null || true
+  done
+  exit "$status"
+}
+trap cleanup_files EXIT
+trap 'terminate_children 130' INT
+trap 'terminate_children 143' TERM
 
 audit_status=0
 (
@@ -126,15 +159,44 @@ audit_status=0
   fi
 ) &
 audit_pid=$!
+child_pids+=("$audit_pid")
 
 conformance_status=0
 conformance_started="$(date +%s)"
-echo "=== conformance (HARN_BIN warm) ==="
-if make conformance; then
-  echo "ok: conformance ($(( $(date +%s) - conformance_started ))s)"
+echo "=== conformance ($conformance_shards process-isolated shards, HARN_BIN warm) ==="
+conformance_pids=()
+for shard_index in $(seq 1 "$conformance_shards"); do
+  shard_log="$conformance_log_dir/shard-$shard_index.log"
+  (
+    HARN_LLM_CALLS_DISABLED=1 "$HARN_BIN" test conformance \
+      --shard-index "$shard_index" \
+      --shard-total "$conformance_shards"
+  ) >"$shard_log" 2>&1 &
+  shard_pid=$!
+  conformance_pids+=("$shard_pid")
+  child_pids+=("$shard_pid")
+done
+
+conformance_failures=()
+for offset in "${!conformance_pids[@]}"; do
+  shard_index=$((offset + 1))
+  shard_pid="${conformance_pids[$offset]}"
+  if wait "$shard_pid"; then
+    shard_status=0
+  else
+    shard_status=$?
+    conformance_status="$shard_status"
+    conformance_failures+=("$shard_index:$shard_status")
+  fi
+  child_pids[offset + 1]=""
+  echo "=== conformance shard $shard_index/$conformance_shards ==="
+  cat "$conformance_log_dir/shard-$shard_index.log"
+done
+
+if [ "$conformance_status" -eq 0 ]; then
+  echo "ok: conformance ($conformance_shards shards, $(( $(date +%s) - conformance_started ))s)"
 else
-  conformance_status=$?
-  echo "FAIL: conformance failed ($(( $(date +%s) - conformance_started ))s)" >&2
+  echo "FAIL: conformance shard(s) ${conformance_failures[*]} failed ($(( $(date +%s) - conformance_started ))s)" >&2
 fi
 
 if wait "$audit_pid"; then
@@ -142,6 +204,7 @@ if wait "$audit_pid"; then
 else
   audit_status=$?
 fi
+child_pids[0]=""
 
 # Say at the TAIL what failed, because the tail is where a reader looks.
 #

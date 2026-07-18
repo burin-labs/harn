@@ -50,20 +50,34 @@
       "steps": [
         {
           "id": "release-audit-rust-test",
-          "condition": "matrix.kind == 'test' && github.event_name != 'pull_request'",
-          "run": "scripts/ci/run_rust_test_lane.sh make test"
+          "condition": "matrix.kind == 'test'",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'"
+        }
+      ]
+    },
+    {
+      "name": "Rust security proof",
+      "job_id": "rust-security",
+      "matrix_kind": "",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-security",
+          "condition": "",
+          "run": "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-security.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'"
         }
       ]
     },
     {
       "name": "Harn conformance + audit",
-      "job_id": "rust-builds",
-      "matrix_kind": "audit",
+      "job_id": "harn-audit",
+      "matrix_kind": "",
       "proofs": ["harn-audit"],
       "steps": [
         {
           "id": "release-audit-harn",
-          "condition": "matrix.kind == 'audit'",
+          "condition": "",
           "run": "./scripts/audit_gates.sh"
         }
       ]

@@ -1,0 +1,90 @@
+import {
+  build_report,
+  duration_stats,
+  group_job_samples,
+  job_samples_from_api,
+  run_samples_from_api,
+} from "../ci_walltime_report.harn"
+
+pipeline test_duration_stats_use_shared_percentile_contract(task) {
+  assert_eq(
+    duration_stats([10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000]),
+    {count: 10, mean_ms: 55000, p50_ms: 55000, p90_ms: 91000, max_ms: 100000},
+  )
+  assert_eq(duration_stats([]), {count: 0, mean_ms: 0, p50_ms: 0, p90_ms: 0, max_ms: 0})
+}
+
+pipeline test_run_boundary_normalizes_once_and_rejects_invalid_intervals(task) {
+  const samples = run_samples_from_api(
+    {
+      workflow_runs: [
+        {
+          id: 12,
+          created_at: "2026-07-18T00:00:00Z",
+          updated_at: "2026-07-18T00:12:30Z",
+          html_url: "https://example.test/run/12",
+        },
+        {id: 13, created_at: "2026-07-18T00:01:00Z", updated_at: "2026-07-18T00:00:00Z"},
+        {id: 14, created_at: "bad", updated_at: "also-bad"},
+      ],
+    },
+  )
+  assert_eq(samples, [{id: 12, duration_ms: 750000, url: "https://example.test/run/12"}])
+}
+
+pipeline test_job_groups_are_typed_and_ordered_by_p90(task) {
+  const first = job_samples_from_api(
+    12,
+    {
+      jobs: [
+        {name: "Rust test", started_at: "2026-07-18T00:00:00Z", completed_at: "2026-07-18T00:10:00Z"},
+        {name: "Audit scripts", started_at: "2026-07-18T00:00:00Z", completed_at: "2026-07-18T00:04:00Z"},
+        {name: "", started_at: "2026-07-18T00:00:00Z", completed_at: "2026-07-18T00:01:00Z"},
+      ],
+    },
+  )
+  const second = job_samples_from_api(
+    13,
+    {
+      jobs: [
+        {name: "Rust test", started_at: "2026-07-18T01:00:00Z", completed_at: "2026-07-18T01:12:00Z"},
+        {name: "Audit scripts", started_at: "2026-07-18T01:00:00Z", completed_at: "2026-07-18T01:05:00Z"},
+      ],
+    },
+  )
+  assert_eq(
+    group_job_samples(first + second),
+    [
+      {
+        name: "Rust test",
+        stats: {count: 2, mean_ms: 660000, p50_ms: 660000, p90_ms: 708000, max_ms: 720000},
+      },
+      {
+        name: "Audit scripts",
+        stats: {count: 2, mean_ms: 270000, p50_ms: 270000, p90_ms: 294000, max_ms: 300000},
+      },
+    ],
+  )
+}
+
+pipeline test_report_keeps_source_runs_and_job_summary(task) {
+  const runs = [{id: 1, duration_ms: 720000, url: "https://example.test/run/1"}]
+  const jobs = [{run_id: 1, name: "Rust test", duration_ms: 600000}]
+  assert_eq(
+    build_report("burin-labs/harn", "ci.yml", "merge_group", runs, jobs),
+    {
+      schema_version: 1,
+      repository: "burin-labs/harn",
+      workflow: "ci.yml",
+      event: "merge_group",
+      runs: runs,
+      wall: {count: 1, mean_ms: 720000, p50_ms: 720000, p90_ms: 720000, max_ms: 720000},
+      jobs: [
+        {
+          name: "Rust test",
+          stats: {count: 1, mean_ms: 600000, p50_ms: 600000, p90_ms: 600000, max_ms: 600000},
+        },
+      ],
+    },
+  )
+}

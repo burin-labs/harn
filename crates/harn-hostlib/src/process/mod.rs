@@ -9,6 +9,8 @@
 pub mod handle;
 pub mod mock;
 pub mod real;
+#[cfg(target_os = "windows")]
+mod windows;
 
 pub use handle::{
     current_spawner, install_spawner, spawn_process, EnvMode, ExitStatus, OutputCapture,
@@ -17,3 +19,7 @@ pub use handle::{
 };
 pub use mock::{MockHandleController, MockProcess, MockProcessConfig, MockSpawner};
 pub use real::default_spawner;
+#[cfg(unix)]
+pub use real::replace_current_process;
+#[cfg(target_os = "windows")]
+pub use windows::KillOnCloseJob;
