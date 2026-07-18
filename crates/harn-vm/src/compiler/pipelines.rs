@@ -55,7 +55,7 @@ impl Compiler {
         // Each pipeline is typechecked in a fresh child of the final module
         // catalog. Inheritance sequences runtime statements, but a parent's
         // source-order enum shadowing must not change how its child is lowered.
-        let saved_catalog = (self.enum_names.clone(), self.enum_variant_owners.clone());
+        let saved_catalog = self.enum_catalog_snapshot();
         let result: Result<(), CompileError> = (|| {
             if let Some(grandparent) = extends {
                 self.compile_parent_pipeline(program, grandparent)?;
@@ -65,7 +65,7 @@ impl Compiler {
             }
             Ok(())
         })();
-        (self.enum_names, self.enum_variant_owners) = saved_catalog;
+        self.restore_enum_catalog(saved_catalog);
         result
     }
 

@@ -1,8 +1,20 @@
 use harn_parser::{Node, SNode};
 
-use super::Compiler;
+use super::{Compiler, EnumCatalogSnapshot};
 
 impl Compiler {
+    pub(super) fn enum_catalog_snapshot(&self) -> EnumCatalogSnapshot {
+        EnumCatalogSnapshot {
+            names: self.enum_names.clone(),
+            variant_owners: self.enum_variant_owners.clone(),
+        }
+    }
+
+    pub(super) fn restore_enum_catalog(&mut self, snapshot: EnumCatalogSnapshot) {
+        self.enum_names = snapshot.names;
+        self.enum_variant_owners = snapshot.variant_owners;
+    }
+
     /// Register one enum in the active lexical catalog. A same-named inner
     /// declaration shadows the outer enum, so remove the old owner's variants
     /// before inserting the replacement. Scope snapshots restore them later.

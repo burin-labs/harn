@@ -146,6 +146,11 @@ struct LocalBinding {
     mutable: bool,
 }
 
+struct EnumCatalogSnapshot {
+    names: std::collections::HashSet<String>,
+    variant_owners: std::collections::HashMap<String, Vec<String>>,
+}
+
 /// Compiles an AST into bytecode.
 pub struct Compiler {
     options: CompilerOptions,
@@ -166,10 +171,7 @@ pub struct Compiler {
     /// declarations update the active catalog in source order; restoring the
     /// snapshot on scope exit prevents a block-local enum from leaking into
     /// later outer match patterns.
-    enum_catalog_scopes: Vec<(
-        std::collections::HashSet<String>,
-        std::collections::HashMap<String, Vec<String>>,
-    )>,
+    enum_catalog_scopes: Vec<EnumCatalogSnapshot>,
     /// Track struct type names to declared field order for indexed instances.
     struct_layouts: std::collections::HashMap<String, Vec<String>>,
     /// Track interface names → method names for runtime enforcement.

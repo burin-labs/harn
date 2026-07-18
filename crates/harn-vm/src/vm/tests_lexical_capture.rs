@@ -103,12 +103,12 @@ log(items.join("") + "|" + record.value + "|" + record.extra)
 #[test]
 fn pipeline_before_later_module_binding_captures_shared_cell() {
     let (output, _) = run_harn(
-        r#"pipeline default(task) {
+        r"pipeline default(task) {
 const increment = { -> counter = counter + 1 }
 increment()
 log(counter)
 }
-let counter = 0"#,
+let counter = 0",
     );
 
     assert_eq!(output.trim_end(), "[harn] 1");
@@ -173,7 +173,7 @@ log(read())
 #[test]
 fn ambiguous_bare_enum_variant_pattern_is_rejected() {
     let error = crate::compile_source(
-        r#"enum First {
+        r"enum First {
     Shared(value)
 }
 enum Second {
@@ -183,14 +183,12 @@ pipeline default(task) {
     match First.Shared(1) {
         Shared(value) -> { log(value) }
     }
-}"#,
+}",
     )
     .expect_err("a bare variant shared by two enums must require qualification");
 
     assert!(
-        error
-            .to_string()
-            .contains("variant `Shared` is declared by enums First, Second"),
+        error.contains("variant `Shared` is declared by enums First, Second"),
         "unexpected ambiguity error: {error}"
     );
 }
@@ -279,7 +277,7 @@ pipeline default(task) {
 #[test]
 fn nested_enum_does_not_make_outer_bare_pattern_ambiguous() {
     let (output, _) = run_harn(
-        r#"enum Outer {
+        r"enum Outer {
     Shared(value)
 }
 fn nested_declaration() {
@@ -292,7 +290,7 @@ pipeline default(task) {
     match Outer.Shared(1) {
         Shared(value) -> { log(value) }
     }
-}"#,
+}",
     );
 
     assert_eq!(output.trim_end(), "[harn] 1");
@@ -301,13 +299,13 @@ pipeline default(task) {
 #[test]
 fn duplicate_pipeline_enums_shadow_in_source_order() {
     let (output, _) = run_harn(
-        r#"pipeline default(task) {
+        r"pipeline default(task) {
     enum Event { First(value) }
     match Event.First(1) {
         First(value) -> { log(value) }
     }
     enum Event { Second(value) }
-}"#,
+}",
     );
 
     assert_eq!(output.trim_end(), "[harn] 1");
@@ -316,7 +314,7 @@ fn duplicate_pipeline_enums_shadow_in_source_order() {
 #[test]
 fn inherited_pipeline_enum_does_not_change_child_catalog() {
     let (output, _) = run_harn(
-        r#"pipeline base(task) {
+        r"pipeline base(task) {
     enum Event { Base(value) }
 }
 pipeline default(task) extends base {
@@ -324,7 +322,7 @@ pipeline default(task) extends base {
         Child(value) -> { log(value) }
     }
     enum Event { Child(value) }
-}"#,
+}",
     );
 
     assert_eq!(output.trim_end(), "[harn] 1");
@@ -333,7 +331,7 @@ pipeline default(task) extends base {
 #[test]
 fn inherited_pipeline_enum_does_not_change_child_capture_analysis() {
     let (output, _) = run_harn(
-        r#"fn Candidate(value) { return value }
+        r"fn Candidate(value) { return value }
 pipeline base(task) {
     enum Event { Candidate(value) }
 }
@@ -347,7 +345,7 @@ pipeline default(task) extends base {
         }
     }
     enum Event { Other(value) }
-}"#,
+}",
     );
 
     assert_eq!(output.trim_end(), "[harn] 2");

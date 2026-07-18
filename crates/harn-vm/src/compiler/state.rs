@@ -946,8 +946,8 @@ impl Compiler {
     pub(super) fn begin_scope(&mut self) {
         self.chunk.emit(Op::PushScope, self.line);
         self.scope_depth += 1;
-        self.enum_catalog_scopes
-            .push((self.enum_names.clone(), self.enum_variant_owners.clone()));
+        let enum_catalog = self.enum_catalog_snapshot();
+        self.enum_catalog_scopes.push(enum_catalog);
         self.type_scopes.push(std::collections::HashMap::new());
         self.local_scopes.push(std::collections::HashMap::new());
     }
@@ -956,9 +956,8 @@ impl Compiler {
         if self.scope_depth > 0 {
             self.chunk.emit(Op::PopScope, self.line);
             self.scope_depth -= 1;
-            if let Some((names, owners)) = self.enum_catalog_scopes.pop() {
-                self.enum_names = names;
-                self.enum_variant_owners = owners;
+            if let Some(snapshot) = self.enum_catalog_scopes.pop() {
+                self.restore_enum_catalog(snapshot);
             }
             self.type_scopes.pop();
             self.local_scopes.pop();
