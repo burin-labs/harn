@@ -53,6 +53,26 @@ fn json_call(path) {
   return "```tool\n{ \"name\": \"edit\", \"args\": { \"path\": \"" + path + "\" } }\n```"
 }
 
+fn read_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "Inspect a value.",
+    {
+      handler: { args -> "observed " + (args?.path ?? "") },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  return tools
+}
+
+fn json_read_call(path) {
+  return "```tool\n{ \"name\": \"inspect\", \"args\": { \"path\": \"" + path + "\" } }\n```"
+}
+
 pipeline default() {
   // 1. Fenced ```python attempt on a json lane → fenced_call_attempt nudge,
   //    rendered in fenced-JSON vocabulary.
@@ -136,6 +156,94 @@ pipeline default() {
       __io_println("realcall.successful=" + json_stringify(r.tools.successful))
       __io_println("realcall.no_fenced=" + to_string(!injected_in(calls, 1, "fenced_call_attempt")))
       __io_println("realcall.no_missing=" + to_string(!injected_in(calls, 1, "missing_tool_call")))
+    },
+  )
+  // 4. A valid call and sentinel in one turn must dispatch and continue so
+  //    the model can consume the tool observation before completing.
+  with_llm_script(
+    [
+      llm_text(json_call("d.txt") + "\n<done>##DONE##</done>"),
+      llm_text("<user_response>Done after observation.</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const r = agent_loop(
+        "Edit d.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "json",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          max_nudges: 1,
+          tools: edit_tools(),
+        },
+      )
+      __io_println("same_turn.status=" + r.status)
+      __io_println("same_turn.successful=" + json_stringify(r.tools.successful))
+      __io_println("same_turn.iterations=" + to_string(r.llm.iterations))
+      __io_println("same_turn.final=" + r.visible_text)
+    },
+  )
+  // 5. Exact duplicate read-only calls in one text-channel turn collapse to
+  //    one dispatch; mutating/native calls retain their original semantics.
+  with_llm_script(
+    [
+      llm_text(json_read_call("settings") + "\n" + json_read_call("settings")),
+      llm_text("<user_response>Observed once.</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const r = agent_loop(
+        "Inspect settings.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "json",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          max_nudges: 1,
+          tools: read_tools(),
+        },
+      )
+      __io_println("duplicate.status=" + r.status)
+      __io_println("duplicate.successful=" + json_stringify(r.tools.successful))
+      __io_println("duplicate.calls=" + to_string(len(r.tools.calls)))
+      __io_println("duplicate.iterations=" + to_string(r.llm.iterations))
+      __io_println("duplicate.final=" + r.visible_text)
+    },
+  )
+  // 6. Native calls retain both provider call IDs and both dispatches. The
+  //    duplicate-read collapse is only a text-channel recovery policy.
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "inspect-1", name: "inspect", arguments: {path: "settings"}},
+          {id: "inspect-2", name: "inspect", arguments: {path: "settings"}},
+        ],
+      },
+      llm_text("<user_response>Observed twice.</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const r = agent_loop(
+        "Inspect settings twice.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          max_nudges: 1,
+          tools: read_tools(),
+        },
+      )
+      __io_println("native_duplicate.status=" + r.status)
+      __io_println("native_duplicate.successful=" + json_stringify(r.tools.successful))
+      __io_println("native_duplicate.calls=" + to_string(len(r.tools.calls)))
+      __io_println("native_duplicate.iterations=" + to_string(r.llm.iterations))
+      __io_println("native_duplicate.final=" + r.visible_text)
     },
   )
 }

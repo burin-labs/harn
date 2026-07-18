@@ -245,7 +245,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `together` | `google/gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `together/nvidia/nemotron-3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `moonshotai/*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
-| `vercel_ai_gateway` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `vercel_ai_gateway` | `google/gemini-3.1*` | `any; extends` | `enabled,adaptive` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `*` | `any; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `vertex` | `gemini-*` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `volcengine_ark` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `xai` | `grok-*` | `any` | `adaptive` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
@@ -489,6 +490,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `together` | `zai-org/GLM-5` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. |
 | `together` | `zai-org/GLM-5.1` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. |
 | `together` | `zai-org/GLM-5.2` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. |
+| `vercel_ai_gateway` | `vercel/anthropic/claude-haiku-4.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/google/gemini-3.1-flash-lite-preview` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/openai/gpt-5.4-nano` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-build-0.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

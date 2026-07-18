@@ -89,6 +89,7 @@ import {
 } from "std/agent/state"
 import { agent_step_judge } from "std/agent/step_judge"
 import {
+  agent_collapse_duplicate_read_calls,
   agent_tool_annotations,
   agent_tool_calls_are_read_only,
   agent_tool_entry_annotations,
@@ -111,10 +112,7 @@ import {
   llm_enable_equivalent_failover,
 } from "std/llm/options"
 
-/**
- * Agent-loop budget timing must route through the VM-level harness clock so
- * paused-clock tests, replay, and capability analysis see the same clock source.
- */
+/** Route agent-loop budget timing through the harness clock for deterministic replay and tests. */
 fn __agent_loop_clock_now_ms() {
   return harness.clock.now_ms()
 }
@@ -4440,11 +4438,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           __resolve_tool_calls(llm_result, parsed)
         }
         const recovered_batch_drop = __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts)
-        tool_calls = recovered_batch_drop.tool_calls
+        tool_calls = agent_collapse_duplicate_read_calls(recovered_batch_drop.tool_calls, turn_opts?.tools, turn_opts)
         const recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
           normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
         } else {
-          normalized
+          normalized + {tool_calls: tool_calls}
         }
         agent_session_record_assistant(session.session_id, recorded_assistant)
         const had_parse_errors_base = __maybe_inject_parse_error_feedback(

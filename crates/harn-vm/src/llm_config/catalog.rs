@@ -485,6 +485,36 @@ pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
         })
 }
 
+/// Return the collision-free catalog id for one concrete provider route.
+///
+/// Runtime transports use `wire_model`, while pricing and other catalog
+/// metadata are keyed by the authored catalog id. Resolve either identity
+/// without allowing an identically named model from another provider to win.
+pub fn model_catalog_id_for_route(provider: &str, model_id: &str) -> Option<String> {
+    let config = effective_config();
+    let normalized_id = normalize_model_id(model_id);
+    config
+        .models
+        .get_key_value(model_id)
+        .filter(|(_, model)| model.provider == provider)
+        .or_else(|| {
+            config
+                .models
+                .get_key_value(&normalized_id)
+                .filter(|(_, model)| model.provider == provider)
+        })
+        .or_else(|| {
+            config.models.iter().find(|(_, model)| {
+                model.provider == provider
+                    && model
+                        .wire_model
+                        .as_deref()
+                        .is_some_and(|wire| wire == model_id || wire == normalized_id.as_str())
+            })
+        })
+        .map(|(id, _)| id.clone())
+}
+
 pub fn model_rate_limits(model_id: &str) -> Option<RateLimitsDef> {
     model_catalog_entry(model_id).and_then(|model| model.rate_limits)
 }
@@ -505,6 +535,22 @@ pub fn model_ladder_names() -> Vec<String> {
 pub fn wire_model_id(model_id: &str) -> String {
     model_catalog_entry(model_id)
         .and_then(|model| model.wire_model)
+        .unwrap_or_else(|| model_id.to_string())
+}
+
+/// Resolve the model identity used by the capability matrix for one concrete
+/// provider route without deriving capability tags (which would recurse back
+/// into capability lookup). Collision-free catalog ids may differ from the
+/// upstream creator/model slug that provider-family rules match.
+pub(crate) fn capability_model_id(provider: &str, model_id: &str) -> String {
+    if !provider_has_feature(provider, "wire_model_capabilities") {
+        return model_id.to_string();
+    }
+    effective_config()
+        .models
+        .get(model_id)
+        .filter(|model| model.provider == provider)
+        .and_then(|model| model.wire_model.clone())
         .unwrap_or_else(|| model_id.to_string())
 }
 
@@ -744,10 +790,24 @@ pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
         .and_then(|model| model.pricing.clone())
 }
 
+pub fn model_pricing_per_mtok_for_route(provider: &str, model_id: &str) -> Option<ModelPricing> {
+    let catalog_id = model_catalog_id_for_route(provider, model_id)?;
+    model_pricing_per_mtok(&catalog_id)
+}
+
 /// Per-MTok whole-request pricing selected for the provider-reported input
 /// usage. Models without input-token bands retain their base rates.
 pub fn model_pricing_for_input_tokens(model_id: &str, input_tokens: i64) -> Option<ModelPricing> {
     model_pricing_per_mtok(model_id).map(|pricing| pricing.for_input_tokens(input_tokens))
+}
+
+pub fn model_pricing_for_route_input_tokens(
+    provider: &str,
+    model_id: &str,
+    input_tokens: i64,
+) -> Option<ModelPricing> {
+    model_pricing_per_mtok_for_route(provider, model_id)
+        .map(|pricing| pricing.for_input_tokens(input_tokens))
 }
 
 /// Per-MTok pricing for a named serving tier, when the catalog declares one.
@@ -761,8 +821,17 @@ pub fn model_serving_tier_pricing_per_mtok(model_id: &str, tier_id: &str) -> Opt
         .and_then(|tier| tier.pricing.clone())
 }
 
+pub fn model_serving_tier_pricing_per_mtok_for_route(
+    provider: &str,
+    model_id: &str,
+    tier_id: &str,
+) -> Option<ModelPricing> {
+    let catalog_id = model_catalog_id_for_route(provider, model_id)?;
+    model_serving_tier_pricing_per_mtok(&catalog_id, tier_id)
+}
+
 pub fn pricing_per_1k_for(provider: &str, model_id: &str) -> Option<(f64, f64)> {
-    model_pricing_per_mtok(model_id)
+    model_pricing_per_mtok_for_route(provider, model_id)
         .map(|pricing| {
             (
                 pricing.input_per_mtok / 1000.0,

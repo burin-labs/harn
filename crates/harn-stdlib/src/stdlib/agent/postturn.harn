@@ -1145,7 +1145,9 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   } else {
     __tool_surface_narrowing_post_turn(session, llm_result, dispatch_results, opts)
   }
-  if __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
+  // Tool attempts take precedence over a completion marker from the same
+  // turn: the next model turn must see the dispatch result before completion.
+  if !has_tool_calls && __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "sentinel"), narrowing)
   }
   if __stop_after_successful_tools(opts, dispatch) {

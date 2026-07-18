@@ -166,7 +166,9 @@ where
             continue;
         }
         audited_models += 1;
-        let matched = first_matching_rule(user, builtin, &model.provider, &model_id);
+        let capability_model_id =
+            crate::llm_config::capability_model_id(&model.provider, &model_id);
+        let matched = first_matching_rule(user, builtin, &model.provider, &capability_model_id);
         let mut missing_fields = Vec::new();
         match matched.as_ref().map(|matched| &matched.rule) {
             Some(rule) => {
@@ -189,7 +191,7 @@ where
         let (suggested_native_tools, suggested_preferred_tool_format) =
             suggested_tool_capability_defaults(
                 &model.provider,
-                &model_id,
+                &capability_model_id,
                 &model,
                 matched.as_ref(),
             );
@@ -371,7 +373,9 @@ mod tests {
         let builtin = builtin();
         let mut gaps = Vec::new();
         for (alias, def) in &catalog.aliases {
-            let matched = first_matching_rule(None, builtin, &def.provider, &def.id);
+            let capability_model_id =
+                crate::llm_config::capability_model_id(&def.provider, &def.id);
+            let matched = first_matching_rule(None, builtin, &def.provider, &capability_model_id);
             let explicit = matched
                 .as_ref()
                 .map(|matched| {

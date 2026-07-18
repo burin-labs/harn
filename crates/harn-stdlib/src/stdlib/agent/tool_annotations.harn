@@ -81,9 +81,15 @@ pub fn agent_tool_is_read_only(entry, policy = nil, tool_name = "") -> bool {
   if annotations?.destructiveHint == true {
     return false
   }
-  const kind = lowercase(to_string(annotations?.kind ?? ""))
-  const level = lowercase(to_string(annotations?.side_effect_level ?? ""))
-  const read_only_hint = annotations?.readOnlyHint
+  const kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
+  const level = lowercase(
+    to_string(
+      annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
+        ?? annotations?.sideEffect
+        ?? "",
+    ),
+  )
+  const read_only_hint = annotations?.readOnlyHint ?? annotations?.read_only_hint
   if kind != "" && !contains(__AGENT_READ_ONLY_TOOL_KINDS, kind) {
     return false
   }
@@ -159,6 +165,46 @@ pub fn agent_tool_calls_are_read_only(calls, registry, policy = nil) -> bool {
     }
   }
   return true
+}
+
+/**
+ * Collapse byte-identical read-only calls when text/JSON parsing repeats a
+ * block. Native calls retain provider identities and are never collapsed;
+ * unknown or mutating tools fail closed and remain in source order.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_collapse_duplicate_read_calls(calls, registry, options = nil) -> list {
+  const format = lowercase(to_string(options?.tool_format ?? ""))
+  if type_of(calls) != "list" {
+    return []
+  }
+  if format != "text" && format != "json" {
+    return calls
+  }
+  let kept = []
+  let seen = []
+  for call in calls {
+    const name = __agent_tool_call_name(call)
+    const entry = __agent_tool_find_entry(registry, name)
+    const read_only = entry != nil && agent_tool_is_read_only(entry, options?.policy, name)
+    const args = call?.arguments ?? call?.tool_args ?? {}
+    const signature = if type_of(call) == "dict" {
+      sha256(json_stringify({name: name, args: args}))
+    } else {
+      nil
+    }
+    if read_only && signature != nil && contains(seen, signature) {
+      continue
+    }
+    kept = kept.push(call)
+    if read_only && signature != nil {
+      seen = seen.push(signature)
+    }
+  }
+  return kept
 }
 
 /**
