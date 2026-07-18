@@ -6,7 +6,7 @@
 
 <!-- markdownlint-disable MD013 -->
 
-This table is generated from Harn's live provider capability rules. `Model pattern` is the `model_match` rule used by the runtime; first match wins within each provider. `Version min` is the optional inclusive lower bound for provider-specific model versions.
+This table is generated from Harn's live provider capability rules. `Model pattern` is the `model_match` rule used by the runtime; first match wins within each provider. `Version min` is the optional inclusive lower bound for provider-specific model versions; `extends` marks an overlay whose unset fields resolve from later matching rows.
 
 Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.
 
@@ -17,6 +17,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `anthropic` | `anthropic/claude-fable-*` | `any` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-mythos-*` | `any` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-haiku-*` | `>=4.7` | `adaptive` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-opus-*` | `>=4.8; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `claude-opus-*` | `>=4.7` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-sonnet-5*` | `any` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-sonnet-*` | `>=4.7` | `adaptive` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
@@ -26,6 +27,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `anthropic` | `claude-sonnet-*` | `>=4.6` | `enabled` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-sonnet-*` | `>=4.0` | `enabled` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-haiku-*` | `>=4.7` | `adaptive` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-opus-*` | `>=4.8; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `anthropic/claude-opus-*` | `>=4.7` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-sonnet-5*` | `any` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-sonnet-*` | `>=4.7` | `adaptive` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |

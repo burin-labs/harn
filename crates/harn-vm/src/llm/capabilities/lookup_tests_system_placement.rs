@@ -2,9 +2,8 @@ use super::{
     clear_user_overrides, lookup, resolve_system_message_placement, SystemMessagePlacement,
 };
 
-/// Opus 4.8 is the only Claude that accepts a native mid-conversation system
-/// directive. The `extends` capability row must layer the placement onto the
-/// 4.7 row without wiping the rest of its capabilities.
+/// Native mid-conversation sections are gated to the documented Claude models.
+/// The Opus `extends` row must layer placement onto the 4.7 capabilities.
 #[test]
 fn native_directive_gated_to_opus_4_8_and_layers_via_extends() {
     clear_user_overrides();
@@ -23,6 +22,18 @@ fn native_directive_gated_to_opus_4_8_and_layers_via_extends() {
         resolve_system_message_placement(&opus_48),
         SystemMessagePlacement::NativeDirective
     );
+    for model in [
+        "claude-fable-5",
+        "claude-mythos-5",
+        "anthropic/claude-fable-5",
+        "anthropic/claude-mythos-5",
+    ] {
+        assert_eq!(
+            resolve_system_message_placement(&lookup("anthropic", model)),
+            SystemMessagePlacement::NativeDirective,
+            "{model}"
+        );
+    }
 
     // 4.7 and older Claude have no native mid-conversation channel: unset, so
     // the anthropic wire dialect derives `Fold`.

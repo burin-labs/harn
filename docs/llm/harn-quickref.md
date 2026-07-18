@@ -1262,7 +1262,7 @@ Per-route behavior (capability-driven, not hardcoded):
 | Placement | Routes | Interleaved directive becomes |
 |---|---|---|
 | `inline` | OpenAI Chat/Responses, Ollama | Carried verbatim at its position (these APIs accept `system`/`developer` anywhere). |
-| `native_directive` | Claude Opus 4.8+ | A validly-placed directive rides natively as `role: "system"`; anything the Messages API would reject (wrong neighbor, non-text) folds instead. `developer` collapses to `system`. |
+| `native_directive` | Claude Fable 5, Mythos 5, Opus 4.8 | A validly-placed section rides natively as `role: "system"`, including content blocks and consecutive directives; anything with an invalid neighbor folds instead. `developer` collapses to `system`. |
 | `fold` | Gemini, Bedrock, older/other Claude | No positional system channel, so the directive folds into the adjacent user turn as a `<system-reminder>` block — its position and operator intent survive instead of being hoisted into the global system prompt or 400ing. |
 
 A **leading** run of `system`/`developer` messages is always the system prompt
