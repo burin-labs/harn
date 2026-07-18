@@ -184,7 +184,18 @@ pub fn read_module_source(path: &Path) -> Option<String> {
 /// graph contains every module reachable from the seed set. Cycles and
 /// already-loaded files are skipped via a visited set.
 pub fn build(files: &[PathBuf]) -> ModuleGraph {
-    build_inner(files, None).graph
+    build_inner(files, None, None).graph
+}
+
+/// Build a module graph using caller-owned source for one root file.
+///
+/// Imported modules still resolve from their normal filesystem or embedded
+/// stdlib locations. This keeps editor diagnostics aligned with unsaved root
+/// buffers without creating a second module resolver.
+pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
+    let file = normalize_path(file);
+    let source_overrides = HashMap::from([(file.clone(), source.to_string())]);
+    build_inner(&[file], None, Some(&source_overrides)).graph
 }
 
 /// Build a module graph while retaining parsed sources for the seed files.
@@ -194,12 +205,13 @@ pub fn build(files: &[PathBuf]) -> ModuleGraph {
 /// parsed sources they will not reuse.
 pub fn build_with_parsed_sources(files: &[PathBuf]) -> ModuleGraphBuild {
     let parsed_source_targets = files.iter().map(|file| normalize_path(file)).collect();
-    build_inner(files, Some(&parsed_source_targets))
+    build_inner(files, Some(&parsed_source_targets), None)
 }
 
 fn build_inner(
     files: &[PathBuf],
     parsed_source_targets: Option<&HashSet<PathBuf>>,
+    source_overrides: Option<&HashMap<PathBuf, String>>,
 ) -> ModuleGraphBuild {
     let package_snapshots = acquire_package_snapshots(files);
     let mut modules: HashMap<PathBuf, ModuleInfo> = HashMap::new();
@@ -220,7 +232,7 @@ fn build_inner(
     // nearly all the parse work is, so the serial-BFS tail on deep import
     // chains does not matter in practice.
     while !wave.is_empty() {
-        let loaded = load_wave(&wave, &package_snapshots);
+        let loaded = load_wave(&wave, &package_snapshots, source_overrides);
         let mut next_wave: Vec<PathBuf> = Vec::new();
         for (path, (module, parsed)) in wave.drain(..).zip(loaded) {
             let retain_parsed_source =
@@ -277,6 +289,7 @@ pub const MODULE_GRAPH_JOBS_ENV: &str = "HARN_MODULE_GRAPH_JOBS";
 fn load_wave(
     paths: &[PathBuf],
     package_snapshots: &[PackageSnapshot],
+    source_overrides: Option<&HashMap<PathBuf, String>>,
 ) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)> {
     const MIN_PARALLEL_WAVE: usize = 8;
     let configured = std::env::var(MODULE_GRAPH_JOBS_ENV)
@@ -293,7 +306,7 @@ fn load_wave(
     if workers <= 1 || paths.len() < MIN_PARALLEL_WAVE {
         return paths
             .iter()
-            .map(|path| load_module(path, package_snapshots))
+            .map(|path| load_module(path, package_snapshots, source_overrides))
             .collect();
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -308,7 +321,10 @@ fn load_wave(
                             let Some(path) = paths.get(index) else {
                                 break;
                             };
-                            local.push((index, load_module(path, package_snapshots)));
+                            local.push((
+                                index,
+                                load_module(path, package_snapshots, source_overrides),
+                            ));
                         }
                         local
                     })
@@ -631,7 +647,7 @@ impl ModuleGraph {
             // ("options: PickKeysOptions"), and without its definition the
             // caller sees only a phantom `Named(...)` and skips contract
             // checks. This visibility is typing-only — name-level import
-            // privacy is still enforced by `non_exported_selective_imports`
+            // privacy is still enforced by `selective_import_issues`
             // and the runtime loader, which reject importing a non-`pub`
             // type by name.
             for ty_decl in &imported.type_declarations {
@@ -911,18 +927,12 @@ impl ModuleGraph {
         conflicts
     }
 
-    /// Selective imports in `file` that name a symbol the target module
-    /// declares but does not export — a non-`pub` function in a module that
-    /// has opted into explicit exports by marking at least one function `pub`.
+    /// Invalid selective imports in `file`, classified as missing or private.
     ///
-    /// Such names are private: importing them by name is no more valid than a
-    /// wildcard import reaching them, and matches the strict visibility of
-    /// TypeScript, Rust, and Go. This is the single source of truth for that
-    /// determination — the CLI maps the result onto import spans and emits
-    /// `HARN-IMP-002`, and the runtime loader enforces the same rule. A module
-    /// that marks nothing `pub` exports nothing, so selectively importing any
-    /// name it declares is flagged.
-    pub fn non_exported_selective_imports(&self, file: &Path) -> Vec<NonExportedImport> {
+    /// This is the static single source of truth for the runtime's export
+    /// boundary. Consumers project the typed issue into CLI or editor
+    /// diagnostics without independently re-resolving names or spans.
+    pub fn selective_import_issues(&self, file: &Path) -> Vec<SelectiveImportIssue> {
         let file = normalize_path(file);
         let Some(module) = self.modules.get(&file) else {
             return Vec::new();
@@ -943,19 +953,26 @@ impl ModuleGraph {
             else {
                 continue;
             };
+            if target.load_error.is_some() {
+                continue;
+            }
             for name in selective {
-                // Declared in the target but absent from its export surface
-                // (and not a re-export, which lives in `exports`, not
-                // `declarations`).
-                if target.declarations.contains_key(name) && !target.exports.contains(name) {
-                    out.push(NonExportedImport {
-                        name: name.clone(),
-                        module: import.raw_path.clone(),
-                    });
-                }
+                let kind = if target.exports.contains(name) {
+                    continue;
+                } else if target.declarations.contains_key(name) {
+                    SelectiveImportIssueKind::Private
+                } else {
+                    SelectiveImportIssueKind::Missing
+                };
+                out.push(SelectiveImportIssue {
+                    name: name.clone(),
+                    module: import.raw_path.clone(),
+                    span: import.import_span,
+                    kind,
+                });
             }
         }
-        out.sort_by(|a, b| (&a.name, &a.module).cmp(&(&b.name, &b.module)));
+        out.sort_by(|a, b| (&a.name, &a.module, a.kind).cmp(&(&b.name, &b.module, b.kind)));
         out.dedup();
         out
     }
@@ -969,21 +986,71 @@ pub struct ReExportConflict {
     pub sources: Vec<PathBuf>,
 }
 
-/// A selective import of a name the target module declares but does not
-/// export. Reported by [`ModuleGraph::non_exported_selective_imports`].
+/// Why a selective import cannot cross the target module's export boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SelectiveImportIssueKind {
+    /// No declaration or transitive export has the requested name.
+    Missing,
+    /// The target declares the requested name without exporting it.
+    Private,
+}
+
+/// A selective import rejected by the target module's public surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NonExportedImport {
-    /// The non-exported name the import requested.
+pub struct SelectiveImportIssue {
+    /// The requested name.
     pub name: String,
     /// The module path exactly as written in the import statement.
     pub module: String,
+    /// Span anchored to the selective import statement.
+    pub span: Span,
+    /// Whether the requested name is absent or private.
+    pub kind: SelectiveImportIssueKind,
+}
+
+impl SelectiveImportIssue {
+    /// Stable user-facing explanation shared by CLI and editor projections.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self.kind {
+            SelectiveImportIssueKind::Missing => format!(
+                "imported symbol `{}` does not exist in `{}`",
+                self.name, self.module
+            ),
+            SelectiveImportIssueKind::Private => format!(
+                "imported symbol `{}` is not exported by `{}` — it is defined there but not `pub`",
+                self.name, self.module
+            ),
+        }
+    }
+
+    /// Stable repair guidance shared by CLI and editor projections.
+    #[must_use]
+    pub fn help(&self) -> String {
+        match self.kind {
+            SelectiveImportIssueKind::Missing => format!(
+                "update the import to a symbol exported by `{}`",
+                self.module
+            ),
+            SelectiveImportIssueKind::Private => {
+                format!(
+                    "mark `{}` as `pub` in `{}` to export it",
+                    self.name, self.module
+                )
+            }
+        }
+    }
 }
 
 fn load_module(
     path: &Path,
     package_snapshots: &[PackageSnapshot],
+    source_overrides: Option<&HashMap<PathBuf, String>>,
 ) -> (ModuleInfo, Option<ParsedModuleSource>) {
-    let Some(source) = read_module_source(path) else {
+    let source = source_overrides
+        .and_then(|overrides| overrides.get(&normalize_path(path)).cloned())
+        .or_else(|| read_module_source(path));
+    let Some(source) = source else {
         return (ModuleInfo::default(), None);
     };
     let mut lexer = harn_lexer::Lexer::new(&source);

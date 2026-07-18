@@ -1,7 +1,7 @@
 use harn_parser::analysis::{
     AnalysisDatabase, AnalysisError, SourceId, SourceVersion, TypeCheckConfig,
 };
-use harn_parser::SNode;
+use harn_parser::{Node, SNode};
 use tower_lsp::lsp_types::*;
 
 use crate::helpers::{
@@ -171,6 +171,27 @@ impl DocumentState {
         self.invariant_diagnostics = invariant_report.diagnostics;
 
         let file_path = uri.and_then(|uri| uri.to_file_path().ok());
+        let has_selective_import = program
+            .iter()
+            .any(|node| matches!(&node.node, Node::SelectiveImport { .. }));
+        if let Some(file_path) = file_path.as_deref().filter(|_| has_selective_import) {
+            let module_graph = harn_modules::build_with_source(file_path, &self.source);
+            for issue in module_graph.selective_import_issues(file_path) {
+                let code = harn_parser::DiagnosticCode::ImportSymbolMissing.to_string();
+                self.diagnostics.push(Diagnostic {
+                    range: span_to_range(&issue.span),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("harn-preflight".to_string()),
+                    code: Some(NumberOrString::String(code.clone())),
+                    message: issue.message(),
+                    data: Some(serde_json::json!({
+                        "code": code,
+                        "help": issue.help(),
+                    })),
+                    ..Default::default()
+                });
+            }
+        }
         let is_stdlib_source = file_path
             .as_deref()
             .is_some_and(harn_lint::path_is_stdlib_source);
@@ -414,6 +435,62 @@ fn handler() {
                     ),
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn absent_selective_import_surfaces_from_unsaved_lsp_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.harn");
+        write(
+            &temp.path().join("types.harn"),
+            "pub type Receipt = {ok: bool}\n",
+        );
+        write(&path, "import { Receipt } from \"./types\"\n");
+        let source = "import { StaleReceipt } from \"./types\"\n";
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+        let diagnostics = state
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code
+                    == Some(tower_lsp::lsp_types::NumberOrString::String(
+                        "HARN-IMP-002".to_string(),
+                    ))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = diagnostics[0];
+        assert_eq!(diagnostic.source.as_deref(), Some("harn-preflight"));
+        assert_eq!(
+            diagnostic.severity,
+            Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR)
+        );
+        assert_eq!(
+            diagnostic.message,
+            "imported symbol `StaleReceipt` does not exist in `./types`"
+        );
+        assert_eq!(
+            diagnostic.range,
+            tower_lsp::lsp_types::Range::new(
+                tower_lsp::lsp_types::Position::new(0, 0),
+                tower_lsp::lsp_types::Position::new(0, 1),
+            )
+        );
+        assert_eq!(
+            diagnostic.data,
+            Some(serde_json::json!({
+                "code": "HARN-IMP-002",
+                "help": "update the import to a symbol exported by `./types`",
+            }))
         );
     }
 

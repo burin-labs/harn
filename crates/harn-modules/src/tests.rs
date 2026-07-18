@@ -134,6 +134,7 @@ fn import_compile_failures_point_at_broken_module() {
         graph.imported_names_for_file(&consumer).is_none(),
         "a broken import target should suppress the call-site undefined check"
     );
+    assert_eq!(graph.selective_import_issues(&consumer), Vec::new());
 }
 
 #[test]
@@ -208,24 +209,31 @@ fn selective_imports_contribute_only_requested_names() {
 }
 
 #[test]
-fn non_exported_selective_import_is_flagged_when_module_has_pub() {
+fn private_selective_import_is_classified_when_module_has_pub() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     write_file(root, "lib.harn", "pub fn api() { 1 }\nfn helper() { 2 }\n");
     let entry = write_file(root, "entry.harn", "import { helper } from \"./lib\"\n");
 
     let graph = build(std::slice::from_ref(&entry));
-    let offenders = graph.non_exported_selective_imports(&entry);
-    assert_eq!(offenders.len(), 1);
-    assert_eq!(offenders[0].name, "helper");
-    assert_eq!(offenders[0].module, "./lib");
+    let issues = graph.selective_import_issues(&entry);
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].name, "helper");
+    assert_eq!(issues[0].module, "./lib");
+    assert_eq!(issues[0].kind, SelectiveImportIssueKind::Private);
+    assert_eq!(
+        issues[0].message(),
+        "imported symbol `helper` is not exported by `./lib` — it is defined there but not `pub`"
+    );
+    assert_eq!(
+        issues[0].help(),
+        "mark `helper` as `pub` in `./lib` to export it"
+    );
 
     // Importing the `pub` name is fine.
     let entry_ok = write_file(root, "entry_ok.harn", "import { api } from \"./lib\"\n");
     let graph_ok = build(std::slice::from_ref(&entry_ok));
-    assert!(graph_ok
-        .non_exported_selective_imports(&entry_ok)
-        .is_empty());
+    assert_eq!(graph_ok.selective_import_issues(&entry_ok), Vec::new());
 }
 
 #[test]
@@ -239,10 +247,52 @@ fn selective_import_from_zero_pub_module_is_flagged() {
     let entry = write_file(root, "entry.harn", "import { a } from \"./util\"\n");
 
     let graph = build(std::slice::from_ref(&entry));
-    let offenders = graph.non_exported_selective_imports(&entry);
-    assert_eq!(offenders.len(), 1);
-    assert_eq!(offenders[0].name, "a");
-    assert_eq!(offenders[0].module, "./util");
+    let issues = graph.selective_import_issues(&entry);
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].name, "a");
+    assert_eq!(issues[0].module, "./util");
+    assert_eq!(issues[0].kind, SelectiveImportIssueKind::Private);
+}
+
+#[test]
+fn absent_selective_type_import_is_classified_before_runtime() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(root, "types.harn", "pub type CurrentReceipt = {ok: bool}\n");
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import { StaleReceipt } from \"./types\"\npub fn grade(value: StaleReceipt) -> bool { true }\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let issues = graph.selective_import_issues(&entry);
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].name, "StaleReceipt");
+    assert_eq!(issues[0].module, "./types");
+    assert_eq!(issues[0].kind, SelectiveImportIssueKind::Missing);
+    assert_eq!(
+        issues[0].message(),
+        "imported symbol `StaleReceipt` does not exist in `./types`"
+    );
+    assert_eq!(
+        issues[0].help(),
+        "update the import to a symbol exported by `./types`"
+    );
+}
+
+#[test]
+fn source_override_drives_root_import_analysis() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(root, "types.harn", "pub type Receipt = {ok: bool}\n");
+    let entry = write_file(root, "entry.harn", "import { Receipt } from \"./types\"\n");
+
+    let graph = build_with_source(&entry, "import { StaleReceipt } from \"./types\"\n");
+    let issues = graph.selective_import_issues(&entry);
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].name, "StaleReceipt");
+    assert_eq!(issues[0].kind, SelectiveImportIssueKind::Missing);
 }
 
 #[test]
