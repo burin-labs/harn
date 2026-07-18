@@ -50,11 +50,14 @@ pub(crate) mod package_scaffold;
 pub(crate) mod parse_tokens;
 pub mod persona;
 pub mod persona_activation;
+pub mod persona_apply;
 pub mod persona_dispatch;
 pub mod persona_doctor;
 pub mod persona_prompt;
 pub mod persona_scaffold;
 pub mod persona_supervision;
+#[cfg(test)]
+pub(crate) mod persona_test_support;
 pub(crate) mod pg_codegen;
 pub mod playground;
 pub(crate) mod portal;

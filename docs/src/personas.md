@@ -137,6 +137,8 @@ harn persona new --from-prompt \
   "Every four hours, digest what I need to reply to." --name reply_digest
 harn persona materialize --blueprint incident_triager.blueprint.json
 harn persona materialize --compile-receipt reviewed-prompt-receipt.json
+harn persona --manifest /project/harn.toml materialize \
+  --compile-receipt reviewed-prompt-receipt.json --activate --json
 harn persona list
 harn persona list --json
 harn persona check personas/ship_captain/harn.toml
@@ -185,6 +187,17 @@ catalog and requires the freshly derived lowering to exactly match the reviewed
 lowering before entering that same transaction. Replay makes no model call;
 stale, failed, incomplete, or edited receipts publish nothing. The two input
 flags are mutually exclusive.
+
+Adding `--activate` composes that reviewed-receipt transaction with Harn's local
+package installer and project activation ledger. It requires an explicit
+`--manifest`, resolves a relative output root from that project rather than the
+caller's working directory, chooses a deterministic collision-safe dependency
+alias, and activates only the generated `suggest` policy. Its versioned JSON
+receipt distinguishes materialization, installation, package doctor,
+activation, and runtime verification failures. Repeating the same accepted
+receipt reuses identical package bytes, package generation, dependency alias,
+and activation record. Burin and other hosts own review and approval UX; Harn
+owns this apply/install/activation transaction and its receipts.
 
 `--manifest` accepts a `harn.toml` path or a directory containing one. Without
 it, Harn walks up from the current directory to the nearest `harn.toml`, stopping

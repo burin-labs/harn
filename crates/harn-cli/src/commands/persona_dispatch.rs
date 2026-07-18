@@ -12,6 +12,9 @@ pub(crate) async fn run(args: PersonaArgs) -> Result<(), String> {
         PersonaCommand::CompilePrompt(args) => {
             super::persona_prompt::run_compile_prompt(&args).await
         }
+        PersonaCommand::Materialize(args) if args.activate => {
+            super::persona_apply::run(manifest, &args).await
+        }
         PersonaCommand::Materialize(args) => super::persona_scaffold::run_materialize(&args).await,
         PersonaCommand::Doctor(args) => super::persona_doctor::run_doctor(manifest, &args).await,
         PersonaCommand::Check(args) => {

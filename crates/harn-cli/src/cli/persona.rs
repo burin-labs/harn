@@ -154,6 +154,12 @@ pub(crate) struct PersonaMaterializeArgs {
     /// Replace an existing generated package after strict validation succeeds.
     #[arg(long)]
     pub force: bool,
+    /// Install and activate an accepted compile receipt in the selected project.
+    #[arg(long, requires = "compile_receipt", conflicts_with = "blueprint")]
+    pub activate: bool,
+    /// Emit the typed apply receipt as JSON.
+    #[arg(long, requires = "activate")]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

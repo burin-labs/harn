@@ -40,7 +40,7 @@ pub(crate) fn doctor_packages_impl() -> Result<PackageDoctorReport, PackageError
     doctor_packages_in(&workspace)
 }
 
-pub(super) fn doctor_packages_in(
+pub(crate) fn doctor_packages_in(
     workspace: &PackageWorkspace,
 ) -> Result<PackageDoctorReport, PackageError> {
     let ctx = workspace.load_manifest_context()?;
