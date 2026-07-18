@@ -17,6 +17,10 @@ use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::package;
 
+mod next_step;
+
+use next_step::next_step_suggestion;
+
 /// Env var the embedded `cli/doctor` script reads to pick up the raw
 /// `DoctorReport` payload (renderable shape — no envelope wrapper).
 /// Kept separate from [`DOCTOR_REPORT_ENVELOPE_ENV`] so the script can
@@ -943,42 +947,6 @@ fn detect_free_disk_gb() -> Option<u64> {
     Some(avail_kb / (1024 * 1024))
 }
 
-fn next_step_suggestion(checks: &[DoctorCheck]) -> String {
-    let creds_ok = checks
-        .iter()
-        .any(|c| c.id == "creds:any" && c.status == DoctorStatus::Ok);
-    let ollama = checks.iter().find(|c| c.id == "ollama");
-    let manifest_present = checks
-        .iter()
-        .any(|c| c.label == "manifest" && c.status == DoctorStatus::Ok);
-    let any_fail = checks.iter().any(|c| c.status == DoctorStatus::Fail);
-
-    let no_ollama_models = matches!(
-        ollama.map(|c| c.status),
-        Some(DoctorStatus::Skip) | Some(DoctorStatus::Warn) | None
-    );
-
-    if !creds_ok && no_ollama_models {
-        return "Run `harn models recommend` to pick a starter model for your machine.".to_string();
-    }
-    if let Some(c) = ollama {
-        if c.status == DoctorStatus::Warn {
-            return "Run `harn models recommend` to pick a starter model for your machine."
-                .to_string();
-        }
-    }
-    if creds_ok && !manifest_present {
-        return "Run `harn new my-agent --template agent` to scaffold a project.".to_string();
-    }
-    if !any_fail {
-        // Suggest only commands that resolve from any directory: `examples/` ships
-        // in the Harn source tree, not in a user's project.
-        return "You're ready. Try `harn try \"summarize this README\"` or `harn demo` for a bundled scenario."
-            .to_string();
-    }
-    "Address the failing checks above, then re-run `harn doctor`.".to_string()
-}
-
 /// Definition for a CLI tool we want `harn doctor` to inspect.
 struct ToolCheck {
     id: &'static str,
@@ -1859,9 +1827,9 @@ mod tests {
     use super::{
         build_host_info, build_summary, check_event_log, check_hardware, check_manifest,
         check_ollama, check_platform_capabilities, check_protocol_artifacts, find_harn_repo_root,
-        find_nearest_manifest, format_trigger_metrics, next_step_suggestion, read_manifest,
-        stdlib_capability_matrix, target_doctor_checks, DoctorCheck, DoctorReport, DoctorStatus,
-        HardwareSnapshot, TargetInfo, DOCTOR_SCHEMA_VERSION,
+        find_nearest_manifest, format_trigger_metrics, read_manifest, stdlib_capability_matrix,
+        target_doctor_checks, DoctorCheck, DoctorReport, DoctorStatus, HardwareSnapshot,
+        TargetInfo, DOCTOR_SCHEMA_VERSION,
     };
     use crate::json_envelope::JsonOutput;
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
@@ -2054,50 +2022,6 @@ pub fn on_new_issue(event: TriggerEvent) {
             detail: String::new(),
             ..Default::default()
         }
-    }
-
-    #[test]
-    fn next_step_no_creds_no_ollama_recommends_models() {
-        let checks = vec![
-            check("creds:any", DoctorStatus::Fail),
-            check("ollama", DoctorStatus::Skip),
-        ];
-        let next = next_step_suggestion(&checks);
-        assert!(
-            next.contains("harn models recommend"),
-            "unexpected next step: {next}"
-        );
-    }
-
-    #[test]
-    fn next_step_creds_present_no_manifest_recommends_new() {
-        let checks = vec![
-            check("creds:any", DoctorStatus::Ok),
-            check("ollama", DoctorStatus::Ok),
-        ];
-        let next = next_step_suggestion(&checks);
-        assert!(next.contains("harn new"), "unexpected next step: {next}");
-    }
-
-    #[test]
-    fn next_step_ready_suggests_only_directory_independent_commands() {
-        let checks = vec![
-            check("creds:any", DoctorStatus::Ok),
-            check("ollama", DoctorStatus::Ok),
-            DoctorCheck {
-                label: "manifest".to_string(),
-                ..check("manifest", DoctorStatus::Ok)
-            },
-        ];
-        let next = next_step_suggestion(&checks);
-        assert!(
-            next.contains("You're ready"),
-            "unexpected next step: {next}"
-        );
-        assert!(
-            !next.contains("examples/"),
-            "next step must not point at the Harn source tree's `examples/`: {next}"
-        );
     }
 
     #[test]

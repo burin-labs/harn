@@ -782,32 +782,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bare_demo_prompts_only_on_a_full_terminal() {
-        assert_eq!(
-            no_scenario_action(false, true, true),
-            NoScenarioAction::Prompt
-        );
-    }
-
-    #[test]
-    fn bare_demo_lists_instead_of_running_a_scenario_when_not_interactive() {
-        // A pipe, a redirect, or CI must get the menu `--help` promises — never a
-        // scenario the caller never named (which would also write a run record).
-        for (stdout_tty, stdin_tty) in [(false, false), (true, false), (false, true)] {
+    fn bare_demo_action_covers_every_stdio_shape() {
+        let cases = [
+            (false, true, true, NoScenarioAction::Prompt),
+            (false, true, false, NoScenarioAction::ListTable),
+            (false, false, true, NoScenarioAction::ListTable),
+            (false, false, false, NoScenarioAction::ListTable),
+            (true, true, true, NoScenarioAction::ListJson),
+            (true, true, false, NoScenarioAction::ListJson),
+            (true, false, true, NoScenarioAction::ListJson),
+            (true, false, false, NoScenarioAction::ListJson),
+        ];
+        for (json, stdout_tty, stdin_tty, expected) in cases {
             assert_eq!(
-                no_scenario_action(false, stdout_tty, stdin_tty),
-                NoScenarioAction::ListTable,
-                "stdout_tty={stdout_tty} stdin_tty={stdin_tty}"
-            );
-        }
-    }
-
-    #[test]
-    fn bare_demo_with_json_always_lists() {
-        for (stdout_tty, stdin_tty) in [(true, true), (false, false)] {
-            assert_eq!(
-                no_scenario_action(true, stdout_tty, stdin_tty),
-                NoScenarioAction::ListJson
+                no_scenario_action(json, stdout_tty, stdin_tty),
+                expected,
+                "json={json} stdout_tty={stdout_tty} stdin_tty={stdin_tty}"
             );
         }
     }
