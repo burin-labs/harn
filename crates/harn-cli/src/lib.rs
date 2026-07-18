@@ -385,146 +385,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 ),
             }
         }
-        Command::Check(args) => {
-            let json_format_alias =
-                !args.json && matches!(args.format, cli::CheckOutputFormat::Json);
-            let matrix_format = if args.json {
-                if !matches!(args.format, cli::CheckOutputFormat::Text) {
-                    command_error("`harn check` accepts either `--json` or `--format`, not both");
-                }
-                cli::CheckOutputFormat::Json
-            } else {
-                args.format
-            };
-            if args.provider_matrix {
-                let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                let extensions = package::load_runtime_extensions(&cwd);
-                package::install_runtime_extensions(&extensions);
-                commands::check::provider_matrix::run(
-                    matrix_format,
-                    args.filter.as_deref(),
-                    json_format_alias,
-                );
-                return;
-            }
-            if args.connector_matrix {
-                commands::check::connector_matrix::run(
-                    matrix_format,
-                    args.filter.as_deref(),
-                    &args.targets,
-                    json_format_alias,
-                );
-                return;
-            }
-            let mut target_strings: Vec<String> = args.targets.clone();
-            if args.workspace {
-                let anchor = target_strings.first().map(Path::new);
-                match package::load_workspace_config(anchor) {
-                    Some((workspace, manifest_dir)) if !workspace.pipelines.is_empty() => {
-                        for pipeline in &workspace.pipelines {
-                            let candidate = Path::new(pipeline);
-                            let resolved = if candidate.is_absolute() {
-                                candidate.to_path_buf()
-                            } else {
-                                manifest_dir.join(candidate)
-                            };
-                            target_strings.push(resolved.to_string_lossy().into_owned());
-                        }
-                    }
-                    Some(_) => command_error(
-                        "--workspace requires `[workspace].pipelines` in the nearest harn.toml",
-                    ),
-                    None => command_error(
-                        "--workspace could not find a harn.toml walking up from the target(s)",
-                    ),
-                }
-            }
-            if target_strings.is_empty() {
-                if args.json {
-                    print_check_error(
-                        "missing_targets",
-                        "`harn check` requires at least one target path, or `--workspace` with `[workspace].pipelines`",
-                    );
-                }
-                command_error(
-                    "`harn check` requires at least one target path, or `--workspace` with `[workspace].pipelines`",
-                );
-            }
-            for target in &target_strings {
-                if let Err(error) = package::validate_runtime_manifest_extensions(Path::new(target))
-                {
-                    if args.json {
-                        print_check_error(
-                            "manifest_extension_error",
-                            &format!("manifest extension validation failed: {error}"),
-                        );
-                    }
-                    command_error(&format!("manifest extension validation failed: {error}"));
-                }
-            }
-            let targets: Vec<&str> = target_strings.iter().map(String::as_str).collect();
-            let files = commands::check::collect_harn_targets(&targets);
-            if files.is_empty() {
-                if args.json {
-                    print_check_error(
-                        "no_harn_files",
-                        "no .harn or .harn.txt files found under the given target(s)",
-                    );
-                }
-                command_error("no .harn or .harn.txt files found under the given target(s)");
-            }
-            let (module_graph, parsed_sources) =
-                commands::check::build_module_graph_with_parsed_sources(&files);
-            let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
-            let overrides = commands::check::CheckCliOverrides::from(&args);
-            let checked = commands::check::check_files(
-                &files,
-                &module_graph,
-                parsed_sources,
-                &cross_file_imports,
-                &overrides,
-                !args.json,
-            );
-            let mut should_fail = false;
-            let mut json_files = Vec::new();
-            for checked_file in checked {
-                should_fail |= checked_file
-                    .report
-                    .outcome()
-                    .should_fail(checked_file.strict);
-                if args.json {
-                    json_files.push(checked_file.report);
-                } else {
-                    checked_file.text.print();
-                }
-            }
-            if args.json {
-                let report = commands::check::CheckReport::from_files(json_files);
-                let envelope = if should_fail {
-                    json_envelope::JsonEnvelope {
-                        schema_version: commands::check::CHECK_SCHEMA_VERSION,
-                        ok: false,
-                        data: Some(report),
-                        error: Some(json_envelope::JsonError {
-                            code: "check_failed".to_string(),
-                            message: "one or more files failed `harn check`".to_string(),
-                            details: serde_json::Value::Null,
-                        }),
-                        warnings: Vec::new(),
-                    }
-                } else {
-                    json_envelope::JsonEnvelope::ok(commands::check::CHECK_SCHEMA_VERSION, report)
-                };
-                println!("{}", json_envelope::to_string_pretty(&envelope));
-                if should_fail {
-                    process::exit(1);
-                }
-                return;
-            }
-            if should_fail {
-                process::exit(1);
-            }
-        }
+        Command::Check(args) => commands::check::run_check_command(args),
         Command::Parse(args) => {
             if let Err(error) = commands::parse_tokens::run_parse(&args) {
                 command_error(&error);
@@ -1420,7 +1281,7 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
     let should_verify = args.verify || args.warm;
     let mut ok = true;
     if should_verify {
-        if resolved.provider == "ollama" {
+        if commands::local::runtime::uses_ollama_wire_protocol(&resolved.provider) {
             let mut readiness = harn_vm::llm::OllamaReadinessOptions::new(resolved.id.clone());
             readiness.warm = args.warm;
             readiness.observe_loaded = true;
@@ -1443,7 +1304,7 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
                 "valid": false,
                 "status": "unsupported_provider",
                 "message": format!(
-                    "models info --verify is only supported for Ollama models; resolved provider is '{}'",
+                    "models info --verify is only supported for models whose local runtime declares the Ollama API protocol; resolved provider is '{}'",
                     resolved.provider
                 ),
                 "provider": resolved.provider,

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_by": "harn provider catalog support",
   "sources": {
-    "provider_catalog_schema_version": 5,
+    "provider_catalog_schema_version": 6,
     "capability_matrix": "crates/harn-vm/src/llm/capabilities.toml",
     "notes": "crates/harn-cli/data/provider_support_notes.toml",
     "empirical": []
