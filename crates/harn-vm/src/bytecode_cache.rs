@@ -143,13 +143,13 @@ impl CacheKey {
     /// A [`ModuleArtifact`] stores unresolved import specs and never compiles
     /// dependency contents into the parent artifact. Walking the transitive
     /// graph here therefore adds cold-start I/O without protecting correctness:
-    /// the runtime loads every dependency under its own source-local key. Keep
-    /// the source, exact diagnostic path, and compiler context while excluding
-    /// only the dependency graph.
-    pub fn from_module_source(source_path: &Path, source: &str) -> Self {
+    /// the runtime loads every dependency under its own source-local key.
+    /// Diagnostic paths are rebound when the artifact is loaded, so adjacent
+    /// and packaged artifacts remain relocatable without aliasing attribution.
+    pub fn from_module_source(source: &str) -> Self {
         Self {
             source_hash: sha256(source.as_bytes()),
-            context_hash: module_compilation_context_hash(source_path),
+            context_hash: module_compilation_context_hash(),
             harn_version: HARN_VERSION,
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         }
@@ -163,9 +163,9 @@ impl CacheKey {
         format!("{}.{}", hex(&self.source_hash), CACHE_EXTENSION)
     }
 
-    /// Module-artifact filename for this complete key. Unlike entry chunks,
-    /// module artifacts serialize their source path, so same-source modules at
-    /// different paths must coexist instead of replacing one shared file.
+    /// Module-artifact filename for this complete compilation key. Diagnostic
+    /// source paths are rebound at load time, so identical source and compiler
+    /// inputs share one relocatable artifact across paths.
     pub fn module_filename(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.source_hash);
@@ -283,7 +283,7 @@ pub fn store_at(path: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
 /// Look up the [`ModuleArtifact`] for `source_path` (whose contents are
 /// `source`). Mirrors [`load`] but for the `.harnmod` family.
 pub fn load_module(source_path: &Path, source: &str) -> ModuleLookupOutcome {
-    let key = CacheKey::from_module_source(source_path, source);
+    let key = CacheKey::from_module_source(source);
     if !cache_enabled() {
         return ModuleLookupOutcome {
             key,
@@ -296,7 +296,7 @@ pub fn load_module(source_path: &Path, source: &str) -> ModuleLookupOutcome {
     }
     candidates.push(cache_dir().join(key.module_filename()));
     for path in candidates {
-        match read_module_if_matches(&path, &key) {
+        match read_module_if_matches(&path, &key, source_path) {
             Ok(Some(artifact)) => {
                 return ModuleLookupOutcome {
                     key,
@@ -517,7 +517,11 @@ fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk
     Ok(Some(Chunk::from_cached(cached)))
 }
 
-fn read_module_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<ModuleArtifact>> {
+fn read_module_if_matches(
+    path: &Path,
+    key: &CacheKey,
+    source_path: &Path,
+) -> io::Result<Option<ModuleArtifact>> {
     let Some(header) = read_header_if_matches(path, key)? else {
         return Ok(None);
     };
@@ -528,7 +532,10 @@ fn read_module_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Modu
         &header.payload,
         bincode::config::standard(),
     ) {
-        Ok((artifact, _)) => Ok(Some(artifact)),
+        Ok((mut artifact, _)) => {
+            artifact.bind_source_file(source_path);
+            Ok(Some(artifact))
+        }
         Err(_) => Ok(None),
     }
 }
@@ -752,23 +759,17 @@ fn embedded_stdlib_digest() -> &'static [u8; 32] {
 
 /// Stable compilation context for a source-local module artifact.
 ///
-/// Module compilation does not inspect user dependencies, but it stamps the
-/// exact input path into function chunks for diagnostics, coverage, debugging,
-/// and durable-step attribution. The key therefore folds that path alongside
-/// the embedded stdlib and compiler identity without walking the import graph.
-fn module_compilation_context_hash(source_path: &Path) -> [u8; 32] {
-    module_compilation_context_hash_fingerprinted(source_path, CODEGEN_FINGERPRINT)
+/// Module compilation does not inspect user dependencies. Artifact-local
+/// compiler and stdlib identity belongs in the key; the source path does not,
+/// because it is load context and is rebound after deserialization.
+fn module_compilation_context_hash() -> [u8; 32] {
+    module_compilation_context_hash_fingerprinted(CODEGEN_FINGERPRINT)
 }
 
-fn module_compilation_context_hash_fingerprinted(
-    source_path: &Path,
-    codegen_fingerprint: &str,
-) -> [u8; 32] {
+fn module_compilation_context_hash_fingerprinted(codegen_fingerprint: &str) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(b"module-artifact-source-local-v2\0");
-    hasher.update(b"source-file\0");
-    hasher.update(source_path.display().to_string().as_bytes());
-    hasher.update(b"\0stdlib-digest\0");
+    hasher.update(b"module-artifact-source-local-v3\0");
+    hasher.update(b"stdlib-digest\0");
     hasher.update(embedded_stdlib_digest());
     hasher.update(b"\0codegen-fingerprint\0");
     hasher.update(codegen_fingerprint.as_bytes());
@@ -1099,16 +1100,15 @@ mod tests {
 
     #[test]
     fn module_context_hash_tracks_codegen_fingerprint() {
-        let path = Path::new("/workspace/module.harn");
-        let first = module_compilation_context_hash_fingerprinted(path, "compiler-A");
-        let second = module_compilation_context_hash_fingerprinted(path, "compiler-B");
+        let first = module_compilation_context_hash_fingerprinted("compiler-A");
+        let second = module_compilation_context_hash_fingerprinted("compiler-B");
         assert_ne!(
             first, second,
             "module artifacts must miss when compiler code generation changes"
         );
         assert_eq!(
             first,
-            module_compilation_context_hash_fingerprinted(path, "compiler-A"),
+            module_compilation_context_hash_fingerprinted("compiler-A"),
             "an unchanged module compilation context must be stable"
         );
     }
@@ -1124,11 +1124,9 @@ mod tests {
         std::fs::write(&importer, importer_source).unwrap();
 
         let entry_before = CacheKey::from_source(&importer, importer_source);
-        let module_before = CacheKey::from_module_source(&importer, importer_source);
-        let dependency_before = CacheKey::from_module_source(
-            &dependency,
-            &std::fs::read_to_string(&dependency).unwrap(),
-        );
+        let module_before = CacheKey::from_module_source(importer_source);
+        let dependency_before =
+            CacheKey::from_module_source(&std::fs::read_to_string(&dependency).unwrap());
 
         std::fs::write(&dependency, "pub fn value() { return 2 }\n").unwrap();
         let future = std::fs::metadata(&dependency).unwrap().modified().unwrap()
@@ -1141,11 +1139,9 @@ mod tests {
             .unwrap();
 
         let entry_after = CacheKey::from_source(&importer, importer_source);
-        let module_after = CacheKey::from_module_source(&importer, importer_source);
-        let dependency_after = CacheKey::from_module_source(
-            &dependency,
-            &std::fs::read_to_string(&dependency).unwrap(),
-        );
+        let module_after = CacheKey::from_module_source(importer_source);
+        let dependency_after =
+            CacheKey::from_module_source(&std::fs::read_to_string(&dependency).unwrap());
 
         assert_ne!(
             entry_before, entry_after,
@@ -1162,51 +1158,29 @@ mod tests {
     }
 
     #[test]
-    fn module_key_and_artifact_track_exact_source_path() {
-        let source = "pub fn answer() { return 42 }\n";
+    fn module_artifact_is_relocatable_and_rebinds_exact_source_path() {
+        let source = "pub fn answer() { fn inner() { return 42 } return inner() }\n";
         let first_path = Path::new("/workspace/first/module.harn");
         let second_path = Path::new("/workspace/second/module.harn");
-        let first_key = CacheKey::from_module_source(first_path, source);
-        let second_key = CacheKey::from_module_source(second_path, source);
+        let key = CacheKey::from_module_source(source);
 
-        assert_eq!(first_key.source_hash, second_key.source_hash);
-        assert_ne!(first_key.context_hash, second_key.context_hash);
-        assert_ne!(first_key.module_filename(), second_key.module_filename());
-
-        let first_artifact =
+        let artifact =
             crate::module_artifact::compile_module_artifact_from_source(first_path, source)
-                .expect("compile first module");
-        let second_artifact =
-            crate::module_artifact::compile_module_artifact_from_source(second_path, source)
-                .expect("compile second module");
+                .expect("compile module");
         let first_source_file = first_path.display().to_string();
         let second_source_file = second_path.display().to_string();
         assert_eq!(
-            first_artifact.functions["answer"]
-                .chunk
-                .source_file
-                .as_deref(),
+            artifact.functions["answer"].chunk.source_file.as_deref(),
             Some(first_source_file.as_str())
-        );
-        assert_eq!(
-            second_artifact.functions["answer"]
-                .chunk
-                .source_file
-                .as_deref(),
-            Some(second_source_file.as_str())
         );
 
         let tmp = tempfile::tempdir().unwrap();
-        let first_cache_path = tmp.path().join(first_key.module_filename());
-        let second_cache_path = tmp.path().join(second_key.module_filename());
-        store_module_at(&first_cache_path, &first_key, &first_artifact)
-            .expect("store first module");
-        store_module_at(&second_cache_path, &second_key, &second_artifact)
-            .expect("store second module");
-        let first_loaded = read_module_if_matches(&first_cache_path, &first_key)
+        let cache_path = tmp.path().join(key.module_filename());
+        store_module_at(&cache_path, &key, &artifact).expect("store module");
+        let first_loaded = read_module_if_matches(&cache_path, &key, first_path)
             .expect("read first module")
             .expect("first module key matches");
-        let second_loaded = read_module_if_matches(&second_cache_path, &second_key)
+        let second_loaded = read_module_if_matches(&cache_path, &key, second_path)
             .expect("read second module")
             .expect("second module key matches");
         assert_eq!(
@@ -1223,6 +1197,16 @@ mod tests {
                 .as_deref(),
             Some(second_source_file.as_str())
         );
+        let nested = second_loaded.functions["answer"]
+            .chunk
+            .functions
+            .first()
+            .expect("nested function survives artifact roundtrip");
+        assert_eq!(
+            nested.chunk.source_file.as_deref(),
+            Some(second_source_file.as_str()),
+            "rebinding must reach nested compiled functions"
+        );
     }
 
     #[test]
@@ -1232,12 +1216,12 @@ mod tests {
         let artifact =
             crate::module_artifact::compile_module_artifact_from_source(source_path, source)
                 .expect("compile module");
-        let key = CacheKey::from_module_source(source_path, source);
+        let key = CacheKey::from_module_source(source);
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("source-local-module.harnmod");
 
         store_module_at(&path, &key, &artifact).expect("write module artifact");
-        let loaded = read_module_if_matches(&path, &key)
+        let loaded = read_module_if_matches(&path, &key, source_path)
             .expect("read module artifact")
             .expect("matching artifact");
 

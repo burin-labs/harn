@@ -465,8 +465,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         let module_artifact_bytes = module_artifact_opt
             .as_ref()
             .map(|artifact| {
-                let module_cache_key =
-                    bytecode_cache::CacheKey::from_module_source(module_path, &source);
+                let module_cache_key = bytecode_cache::CacheKey::from_module_source(&source);
                 bytecode_cache::serialize_module_artifact(&module_cache_key, artifact).map_err(
                     |err| {
                         PackError::new(

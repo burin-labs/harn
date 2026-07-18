@@ -200,8 +200,7 @@ fn precompile_one(
         .map_err(|e| format!("write {}: {e}", entry_dest.display()))?;
 
     if let Some(module_artifact) = &artifacts.module_artifact {
-        let module_key =
-            harn_vm::bytecode_cache::CacheKey::from_module_source(source_path, &source);
+        let module_key = harn_vm::bytecode_cache::CacheKey::from_module_source(&source);
         let module_dest = output_path(
             source_path,
             source_root,

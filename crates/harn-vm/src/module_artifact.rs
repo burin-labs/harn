@@ -57,6 +57,31 @@ pub struct ModuleArtifact {
     pub public_type_schemas: BTreeMap<String, String>,
 }
 
+impl ModuleArtifact {
+    /// Bind relocatable cached bytecode to the source path used by this load.
+    ///
+    /// Module artifacts may move beside their source (`harn precompile`) or
+    /// inside a package. Source paths are diagnostic/debug context, not a
+    /// compilation input, so deserialize once and stamp every nested chunk at
+    /// the load boundary instead of duplicating otherwise-identical artifacts.
+    pub(crate) fn bind_source_file(&mut self, source_path: &Path) {
+        let source_file = source_path.display().to_string();
+        if let Some(chunk) = &mut self.init_chunk {
+            bind_chunk_source_file(chunk, &source_file);
+        }
+        for function in self.functions.values_mut() {
+            bind_chunk_source_file(&mut function.chunk, &source_file);
+        }
+    }
+}
+
+fn bind_chunk_source_file(chunk: &mut CachedChunk, source_file: &str) {
+    chunk.source_file = Some(source_file.to_string());
+    for function in &mut chunk.functions {
+        bind_chunk_source_file(&mut function.chunk, source_file);
+    }
+}
+
 /// Compile a parsed `.harn` module into the serializable artifact shape.
 /// Pure compilation — no I/O, no execution. Used by both the runtime
 /// import path (`crates/harn-vm/src/vm/modules.rs`) and the
