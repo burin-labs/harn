@@ -1,6 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { default_llm_caller } from "std/llm/handlers"
-import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+import { assert_eq, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn lookup_tools(fail_reads = false) {
   let tools = tool_registry()
@@ -108,6 +108,10 @@ fn run_case(script, session, actuation = nil, tool_format = "text", extra = nil)
     )
       + {calls: llm_mock_calls()} },
   )
+}
+
+fn prefill_capable_caller_options() {
+  return {llm_caller: default_llm_caller(), llm_caller_transport: {forwards_assistant_prefill: true}}
 }
 
 pipeline default() {
@@ -268,6 +272,40 @@ pipeline default() {
   __io_println(parse_error.result.status)
   __io_println(parse_error.calls[2].prefill == nil)
   __io_println(len(actuation_receipts(parse_error.events)))
+  const compatible_text = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call(),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-compatible-text-" + uuid(),
+    {enabled: true},
+    "text",
+    prefill_capable_caller_options(),
+  )
+  const compatible_text_receipts = actuation_receipts(compatible_text.events)
+  assert_eq(compatible_text.result.status, "done")
+  assert_eq(compatible_text.calls[2].prefill, "<tool_call>")
+  assert_eq(len(compatible_text_receipts), 1)
+  assert_eq(compatible_text_receipts[0].checkpoint.outcome, "applied")
+  const compatible_json = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call("json"),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-compatible-json-" + uuid(),
+    {enabled: true},
+    "json",
+    prefill_capable_caller_options(),
+  )
+  const compatible_json_receipts = actuation_receipts(compatible_json.events)
+  assert_eq(compatible_json.result.status, "done")
+  assert_eq(compatible_json.calls[2].prefill, "```tool\n")
+  assert_eq(len(compatible_json_receipts), 1)
+  assert_eq(compatible_json_receipts[0].checkpoint.outcome, "applied")
   const external_caller = run_case(
     [
       llm_text("I should inspect app.txt before editing."),
@@ -280,9 +318,12 @@ pipeline default() {
     "text",
     {llm_caller: default_llm_caller()},
   )
-  __io_println(external_caller.result.status)
-  __io_println(external_caller.calls[2].prefill == nil)
-  __io_println(actuation_receipts(external_caller.events)[0].checkpoint.reason)
+  const external_caller_receipts = actuation_receipts(external_caller.events)
+  assert_eq(external_caller.result.status, "done")
+  assert_eq(external_caller.calls[2].prefill, nil)
+  assert_eq(len(external_caller_receipts), 1)
+  assert_eq(external_caller_receipts[0].checkpoint.outcome, "suppressed")
+  assert_eq(external_caller_receipts[0].checkpoint.reason, "external_llm_caller_unsupported")
   const explicit_failover = run_case(
     [
       llm_text("I should inspect app.txt before editing."),
