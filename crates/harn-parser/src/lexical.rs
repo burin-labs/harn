@@ -172,6 +172,45 @@ pub fn captured_bindings_in_nested_callables(
     analysis.captured
 }
 
+/// Bindings captured across one pipeline inheritance chain.
+///
+/// Parent and child bodies share runtime value bindings, so their lexical value
+/// scope is cumulative. Each body is typechecked and compiled from the final
+/// module enum catalog, however, so source-order enum shadowing must reset at a
+/// pipeline boundary instead of leaking from a parent into its child.
+pub fn captured_bindings_in_pipeline_lineage(
+    bodies: &[&[SNode]],
+    match_patterns: &MatchPatternCatalog,
+) -> HashSet<BindingId> {
+    let mut analysis = LexicalAnalysis::new(match_patterns);
+    let mut value_scope = Scope::new();
+    for body in bodies {
+        value_scope.extend(hoisted_callable_scope(body));
+    }
+
+    for body in bodies {
+        analysis.match_patterns = match_patterns.clone();
+        for node in *body {
+            analysis.walk_node(
+                node,
+                std::slice::from_ref(&value_scope),
+                false,
+                &BindingOwner::Current,
+            );
+            let declaration = match &node.node {
+                Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => node,
+            };
+            if let Node::EnumDecl { name, variants, .. } = &declaration.node {
+                analysis.match_patterns.register_enum(name, variants);
+            }
+            extend_scope_with_value_declaration(&mut value_scope, node, &BindingOwner::Current);
+        }
+    }
+
+    analysis.captured
+}
+
 /// Bindings captured under module execution order.
 ///
 /// Module statements execute in source order first; callable declarations and

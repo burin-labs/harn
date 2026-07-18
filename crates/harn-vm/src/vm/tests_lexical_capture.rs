@@ -329,3 +329,26 @@ pipeline default(task) extends base {
 
     assert_eq!(output.trim_end(), "[harn] 1");
 }
+
+#[test]
+fn inherited_pipeline_enum_does_not_change_child_capture_analysis() {
+    let (output, _) = run_harn(
+        r#"fn Candidate(value) { return value }
+pipeline base(task) {
+    enum Event { Candidate(value) }
+}
+pipeline default(task) extends base {
+    let seed = 1
+    match 1 {
+        Candidate(seed) -> {
+            const read = { -> seed }
+            seed = 2
+            log(read())
+        }
+    }
+    enum Event { Other(value) }
+}"#,
+    );
+
+    assert_eq!(output.trim_end(), "[harn] 2");
+}

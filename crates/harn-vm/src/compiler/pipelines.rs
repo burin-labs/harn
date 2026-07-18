@@ -13,22 +13,23 @@ impl Compiler {
     /// Compile one pipeline inheritance chain with its exact capture set.
     ///
     /// A child closure can capture a mutable binding declared by an inherited
-    /// parent pipeline. Analyze the complete lineage as one lexical body rather
-    /// than losing that cross-body capture. Restoring the prior set preserves
-    /// the enclosing compilation context.
-    pub(super) fn compile_with_pipeline_captures<T>(
+    /// parent pipeline. Analyze the complete lineage as one cumulative value
+    /// scope while resetting source-order enum shadowing at each pipeline
+    /// boundary. Restoring the prior set preserves the enclosing compilation
+    /// context.
+    pub(super) fn compile_with_pipeline_captures<'a, T>(
         &mut self,
-        program: &[SNode],
-        body: &[SNode],
+        program: &'a [SNode],
+        body: &'a [SNode],
         extends: Option<&str>,
         compile: impl FnOnce(&mut Self) -> Result<T, CompileError>,
     ) -> Result<T, CompileError> {
         let mut lineage = Vec::new();
-        Self::append_parent_pipeline_nodes(program, extends, &mut lineage);
-        lineage.extend(body.iter().cloned());
+        Self::append_parent_pipeline_bodies(program, extends, &mut lineage);
+        lineage.push(body);
         let match_patterns = self.lexical_match_pattern_catalog();
         let captured =
-            harn_parser::lexical::captured_bindings_in_nested_callables(&lineage, &match_patterns);
+            harn_parser::lexical::captured_bindings_in_pipeline_lineage(&lineage, &match_patterns);
         let saved = std::mem::replace(&mut self.captured_bindings, captured);
         let result = compile(self);
         self.captured_bindings = saved;
@@ -68,10 +69,10 @@ impl Compiler {
         result
     }
 
-    fn append_parent_pipeline_nodes(
-        program: &[SNode],
+    fn append_parent_pipeline_bodies<'a>(
+        program: &'a [SNode],
         parent_name: Option<&str>,
-        lineage: &mut Vec<SNode>,
+        lineage: &mut Vec<&'a [SNode]>,
     ) {
         let Some(parent_name) = parent_name else {
             return;
@@ -84,7 +85,7 @@ impl Compiler {
         let Node::Pipeline { body, extends, .. } = peel_node(parent) else {
             return;
         };
-        Self::append_parent_pipeline_nodes(program, extends.as_deref(), lineage);
-        lineage.extend(body.iter().cloned());
+        Self::append_parent_pipeline_bodies(program, extends.as_deref(), lineage);
+        lineage.push(body);
     }
 }
