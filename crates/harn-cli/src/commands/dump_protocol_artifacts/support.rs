@@ -42,12 +42,28 @@ pub(super) fn schema_provenance(relative_path: &str) -> Result<serde_json::Value
 }
 
 pub(super) fn read_repo_text(relative_path: &str) -> Result<String, String> {
-    let path = repo_root().join(relative_path);
+    let path = repo_root()?.join(relative_path);
     fs::read_to_string(&path).map_err(|error| format!("failed to read {}: {error}", path.display()))
 }
 
-pub(super) fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+pub(super) fn repo_root() -> Result<PathBuf, String> {
+    let cwd = std::env::current_dir()
+        .map_err(|error| format!("failed to inspect the current directory: {error}"))?;
+    repo_root_from(&cwd).ok_or_else(|| {
+        format!(
+            "could not find the Harn workspace above {}; run this command from a Harn checkout",
+            cwd.display()
+        )
+    })
+}
+
+pub(super) fn repo_root_from(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|dir| {
+            dir.join("Cargo.toml").is_file() && dir.join("conformance/protocols/schemas").is_dir()
+        })
+        .map(Path::to_path_buf)
 }
 
 /// Output is also valid TypeScript/Swift/Python/Go because all four share

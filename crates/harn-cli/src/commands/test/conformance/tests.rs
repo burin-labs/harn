@@ -1,6 +1,7 @@
 use super::{
     collect_harn_files_sorted, evaluate_conformance_case, lint_expectation_error, logical_path,
-    parse_xfail_marker, resolve_conformance_selection, ConformanceRunOptions,
+    parse_xfail_marker, resolve_conformance_selection, select_conformance_shard,
+    ConformanceRunOptions,
 };
 use std::fs;
 use std::path::Path;
@@ -64,6 +65,24 @@ fn logical_path_uses_slashes_for_native_test_paths() {
     let path = Path::new("suite").join("nested").join("beta.harn");
 
     assert_eq!(logical_path(&path), "suite/nested/beta.harn");
+}
+
+#[test]
+fn conformance_shards_are_disjoint_and_cover_the_sorted_suite() {
+    let suite = (0..10).collect::<Vec<_>>();
+    let shards = (1..=3)
+        .map(|index| {
+            select_conformance_shard(
+                suite.clone(),
+                Some(crate::test_runner::TestShard::new(index, 3).unwrap()),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(shards, [vec![0, 3, 6, 9], vec![1, 4, 7], vec![2, 5, 8]]);
+    let mut covered = shards.into_iter().flatten().collect::<Vec<_>>();
+    covered.sort_unstable();
+    assert_eq!(covered, suite);
 }
 
 #[test]
@@ -183,6 +202,7 @@ fn conformance_options() -> ConformanceRunOptions<'static> {
         timing: false,
         differential_optimizations: false,
         json: false,
+        shard: None,
         cli_skill_dirs: &[],
     }
 }
@@ -347,6 +367,7 @@ async fn conformance_harness_sidecar_error_fails_expected_error_fixture() {
         timing: false,
         differential_optimizations: false,
         json: false,
+        shard: None,
         cli_skill_dirs: &[],
     };
 

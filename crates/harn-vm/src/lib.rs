@@ -648,6 +648,7 @@ pub fn reset_thread_local_state() {
     stdlib::reset_stdlib_state();
     connectors::clear_active_connector_clients();
     orchestration::clear_runtime_hooks();
+    orchestration::clear_file_edit_queue();
     orchestration::clear_execution_policy_stacks();
     orchestration::clear_command_policies();
     orchestration::clear_pipeline_on_finish();
@@ -679,6 +680,18 @@ mod reset_leak_tests {
     //! the registry is empty again.
     use super::*;
     use crate::value::VmValue;
+
+    #[test]
+    fn reset_drains_pending_file_edit_notifications() {
+        orchestration::queue_file_edited("stale.harn", serde_json::json!({"operation": "write"}));
+
+        reset_thread_local_state();
+
+        assert!(
+            orchestration::drain_file_edits().is_empty(),
+            "a later VM run must not receive file edits queued by the previous run"
+        );
+    }
 
     /// The recorder is enabled per RUN but lives for the PROCESS, so an
     /// embedder that runs one script with `--profile` and the next without it

@@ -74,6 +74,20 @@ if [[ "$output" != "--workspace" ]]; then
 fi
 grep -q "global/workspace-level change detected" "$tmpdir/global.err"
 
+run_view_changes="$tmpdir/run-view-fixtures.txt"
+printf '%s\n' \
+  'spec/run-view-fixtures/cases/root-transcript/expected/session_view.json' \
+  > "$run_view_changes"
+if ! output=$(HARN_BIN="$tmpdir/missing-harn" "$script" --changed-files-file "$run_view_changes" 2>"$tmpdir/run-view.err"); then
+  cat "$tmpdir/run-view.err" >&2
+  exit 1
+fi
+if [[ "$output" != "--workspace" ]]; then
+  echo "expected run-view fixture changes to select --workspace, got: $output" >&2
+  exit 1
+fi
+grep -q "global/workspace-level change detected" "$tmpdir/run-view.err"
+
 no_changes="$tmpdir/empty.txt"
 : > "$no_changes"
 if ! output=$(HARN_BIN="$tmpdir/missing-harn" "$script" --changed-files-file "$no_changes" 2>"$tmpdir/empty.err"); then

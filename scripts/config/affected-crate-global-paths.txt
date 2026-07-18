@@ -7,4 +7,5 @@ rust-toolchain.toml
 Makefile
 scripts/affected-crates.harn
 .config/nextest.toml
+spec/run-view-fixtures/
 .github/workflows/ci.yml
