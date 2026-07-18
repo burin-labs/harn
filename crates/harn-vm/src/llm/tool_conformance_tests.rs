@@ -379,6 +379,17 @@ fn probe_request_body_uses_llamacpp_scalar_required_tool_choice() {
         body["tool_choice"], "required",
         "llama.cpp rejects OpenAI named-tool objects but the probe exposes exactly one tool"
     );
+    let validation = validate_probe_request_body(
+        "llamacpp",
+        "qwen3.6-35b-a3b-ud-q4-k-xl",
+        ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
+        &body,
+    );
+    assert_eq!(
+        validation.status,
+        ToolConformanceRequestValidationStatus::Pass
+    );
 }
 
 #[test]
@@ -1145,6 +1156,7 @@ fn aggregates_openai_streaming_tool_call_deltas() {
                    data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"harn_tool_probe_marker\\\"}\"}}]}}]}\n\
                    data: [DONE]\n";
     let response = aggregate_stream_text(raw, "local");
+    assert_eq!(response["frames"].as_array().map(Vec::len), Some(2));
     let case = classify_tool_probe_response(
         ToolProbeMode::Streaming,
         &response,

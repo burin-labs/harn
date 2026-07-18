@@ -1201,6 +1201,8 @@ struct NativeToolCall {
 }
 
 fn extract_native_tool_calls(response: &Value) -> Vec<NativeToolCall> {
+    // Streaming aggregation owns this top-level list. Its raw `frames` remain
+    // diagnostic evidence and must not become a second semantic call source.
     if let Some(tool_calls) = response.get("tool_calls").and_then(Value::as_array) {
         return tool_calls
             .iter()
