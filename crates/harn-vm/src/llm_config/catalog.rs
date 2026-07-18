@@ -543,6 +543,9 @@ pub fn wire_model_id(model_id: &str) -> String {
 /// into capability lookup). Collision-free catalog ids may differ from the
 /// upstream creator/model slug that provider-family rules match.
 pub(crate) fn capability_model_id(provider: &str, model_id: &str) -> String {
+    if !provider_has_feature(provider, "wire_model_capabilities") {
+        return model_id.to_string();
+    }
     effective_config()
         .models
         .get(model_id)

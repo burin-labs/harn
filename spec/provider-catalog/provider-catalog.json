@@ -1263,7 +1263,8 @@
         "responses_api",
         "native_tools",
         "reasoning",
-        "prompt_caching"
+        "prompt_caching",
+        "wire_model_capabilities"
       ],
       "caveats": []
     },
@@ -21862,7 +21863,7 @@
       "aliases": [
         "vercel-gemini-3.1-flash-lite"
       ],
-      "context_window": 1048576,
+      "context_window": 1000000,
       "logical_model": "google-gemini-3.1-flash-lite-preview",
       "equivalence_group": "google-gemini-3.1-flash-lite-preview",
       "served_variant": "vercel-ai-gateway",

@@ -191,12 +191,10 @@ pub(super) async fn vm_call_llm_api(
     // codex model can never be a silent 404. This lives in the shared
     // `vm_call_llm_api` funnel (not `chat_impl`) because `openai` is a built-in
     // dialect, not a `provider_register`-ed provider, so it takes the
-    // unregistered fallback below and never reaches `chat_impl`. Pure
-    // capability lookup — the `*-codex` match lives in the OpenAI capability rows.
-    let caps = crate::llm::capabilities::lookup(provider, &opts.model);
-    if (opts.api_mode == crate::llm::api::LlmApiMode::Responses && caps.responses_api)
-        || (provider == "openai" && caps.chat_completions_unsupported)
-    {
+    // unregistered fallback below and never reaches `chat_impl`. Explicit
+    // Responses routing follows provider features; the implicit `*-codex`
+    // match remains model-capability-driven.
+    if should_use_responses_transport(provider, &opts.model, opts.api_mode) {
         return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
     }
 
@@ -222,6 +220,53 @@ pub(super) async fn vm_call_llm_api(
     };
 
     vm_call_llm_api_with_body(opts, delta_tx, body, dialect).await
+}
+
+fn should_use_responses_transport(
+    provider: &str,
+    model: &str,
+    api_mode: crate::llm::api::LlmApiMode,
+) -> bool {
+    let explicit_responses = api_mode == crate::llm::api::LlmApiMode::Responses
+        && (provider == "openai"
+            || crate::llm_config::provider_has_feature(provider, "responses_api"));
+    let responses_only_openai_model = provider == "openai"
+        && crate::llm::capabilities::lookup(provider, model).chat_completions_unsupported;
+    explicit_responses || responses_only_openai_model
+}
+
+#[cfg(test)]
+mod responses_transport_routing_tests {
+    use super::should_use_responses_transport;
+    use crate::llm::api::LlmApiMode;
+
+    #[test]
+    fn explicit_responses_routes_openai_and_gateway_unknown_models() {
+        assert!(should_use_responses_transport(
+            "openai",
+            "gpt-5.4",
+            LlmApiMode::Responses
+        ));
+        assert!(should_use_responses_transport(
+            "vercel_ai_gateway",
+            "creator/new-model",
+            LlmApiMode::Responses
+        ));
+        assert!(!should_use_responses_transport(
+            "anthropic",
+            "claude-sonnet-4.6",
+            LlmApiMode::Responses
+        ));
+    }
+
+    #[test]
+    fn responses_only_openai_models_route_without_an_explicit_mode() {
+        assert!(should_use_responses_transport(
+            "openai",
+            "gpt-5.3-codex",
+            LlmApiMode::ChatCompletions
+        ));
+    }
 }
 
 /// Dispatch to a registered provider by name.

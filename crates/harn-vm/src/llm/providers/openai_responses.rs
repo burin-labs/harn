@@ -22,7 +22,8 @@ impl OpenAiResponsesProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        if request.provider != "mock"
+        if request.provider != "openai"
+            && request.provider != "mock"
             && !crate::llm_config::provider_has_feature(&request.provider, "responses_api")
         {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(

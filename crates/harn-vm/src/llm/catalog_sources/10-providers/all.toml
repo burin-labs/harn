@@ -556,7 +556,7 @@ auth_style = "bearer"
 auth_env = ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"]
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
-features = ["responses_api", "native_tools", "reasoning", "prompt_caching"]
+features = ["responses_api", "native_tools", "reasoning", "prompt_caching", "wire_model_capabilities"]
 
 [providers.vercel_ai_gateway.healthcheck]
 method = "GET"

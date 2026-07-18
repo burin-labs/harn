@@ -2,4 +2,4 @@
 # Format: crates/path/file.rs:line # one-line justification
 crates/harn-vm/src/llm/code_mode.rs:311 # test fixture: fake connector Harn script (returns JSON text), not model-facing prose
 crates/harn-vm/src/llm/code_mode.rs:332 # test fixture: code-mode composition Harn script, not model-facing prose
-crates/harn-vm/src/llm/api.rs:962 # test fixture: empty OpenAI-compatible response wire JSON, not model-facing prose
+crates/harn-vm/src/llm/api.rs:964 # test fixture: empty OpenAI-compatible response wire JSON, not model-facing prose

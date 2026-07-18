@@ -144,7 +144,10 @@ pub fn lookup_with_base_file(provider: &str, model: &str, base: &CapabilitiesFil
 }
 
 fn finish_lookup(provider: &str, mut caps: Capabilities) -> Capabilities {
-    if provider != "mock" && !crate::llm_config::provider_has_feature(provider, "responses_api") {
+    if provider != "openai"
+        && provider != "mock"
+        && !crate::llm_config::provider_has_feature(provider, "responses_api")
+    {
         caps.responses_api = false;
         caps.chat_completions_unsupported = false;
     }

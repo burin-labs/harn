@@ -588,7 +588,7 @@ auth_style = "bearer"
 auth_env = ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"]
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
-features = ["responses_api", "native_tools", "reasoning", "prompt_caching"]
+features = ["responses_api", "native_tools", "reasoning", "prompt_caching", "wire_model_capabilities"]
 
 [providers.vercel_ai_gateway.healthcheck]
 method = "GET"
@@ -5368,7 +5368,7 @@ logical_model = "google-gemini-3.1-flash-lite-preview"
 equivalence_group = "google-gemini-3.1-flash-lite-preview"
 served_variant = "vercel-ai-gateway"
 api_dialect = "openai_chat"
-context_window = 1048576
+context_window = 1000000
 capabilities = ["tools", "vision", "files", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50 }
 tier = "small"

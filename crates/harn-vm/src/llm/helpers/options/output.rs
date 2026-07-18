@@ -61,6 +61,7 @@ pub(super) fn enforce_responses_provider_gate(
     provider: &str,
 ) -> bool {
     mode == crate::llm::api::LlmApiMode::Responses
+        && provider != "openai"
         && provider != "mock"
         && !crate::llm_config::provider_has_feature(provider, "responses_api")
 }
@@ -268,5 +269,27 @@ pub(super) fn validate_output_format_supported(
                 None => Err(unsupported_option_error("output_format", provider, model)),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod responses_provider_gate_tests {
+    use super::enforce_responses_provider_gate;
+    use crate::llm::api::LlmApiMode;
+
+    #[test]
+    fn responses_gate_preserves_openai_and_allows_feature_declared_gateways() {
+        assert!(!enforce_responses_provider_gate(
+            LlmApiMode::Responses,
+            "openai"
+        ));
+        assert!(!enforce_responses_provider_gate(
+            LlmApiMode::Responses,
+            "vercel_ai_gateway"
+        ));
+        assert!(enforce_responses_provider_gate(
+            LlmApiMode::Responses,
+            "anthropic"
+        ));
     }
 }
