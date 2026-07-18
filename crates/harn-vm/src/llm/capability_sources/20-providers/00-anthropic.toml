@@ -36,6 +36,7 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+system_message_placement = "native_directive"
 
 [[provider.anthropic]]
 model_match = "claude-mythos-*"
@@ -65,6 +66,7 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+system_message_placement = "native_directive"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-fable-*"
@@ -94,6 +96,7 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+system_message_placement = "native_directive"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-mythos-*"
@@ -123,6 +126,7 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+system_message_placement = "native_directive"
 
 # Claude 4.7+ uses adaptive thinking instead of explicit budgets.
 [[provider.anthropic]]
@@ -151,12 +155,9 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
-# Opus 4.8 is the first Claude to accept a mid-conversation `system` directive
-# (an operator instruction placed after a user turn, before the assistant
-# reply). Layer the native placement onto the 4.7 capability row below via
-# `extends` so 4.7 and older keep folding the directive to a `<system-reminder>`
-# user block. Gated to 4.8+ because the Messages API 400s the directive on every
-# earlier model.
+# Opus 4.8 accepts a mid-conversation `system` section. Layer the native
+# placement onto the 4.7 capability row below via `extends`; older Opus models
+# keep folding the section to a `<system-reminder>` user block.
 [[provider.anthropic]]
 model_match = "claude-opus-*"
 version_min = [4, 8]
@@ -409,7 +410,7 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
-# OpenRouter-prefixed mirror of the Opus 4.8 native mid-conversation directive.
+# OpenRouter-prefixed mirror of the Opus 4.8 native system section.
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
 version_min = [4, 8]

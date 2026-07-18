@@ -371,9 +371,9 @@ pub enum ScreenshotScaling {
 
 /// How a route carries a `system`/`developer`-role message that appears at a
 /// non-leading position in the conversation — the operator-instruction channel
-/// (OpenAI developer messages, Anthropic Opus 4.8 mid-conversation system
-/// messages). Leading system content is always the system prompt; this governs
-/// only the *interleaved* case. Typed so an unknown value in a capability
+/// (OpenAI developer messages, Anthropic mid-conversation system messages).
+/// Leading system content is always the system prompt; this governs only the
+/// *interleaved* case. Typed so an unknown value in a capability
 /// source fails the load loudly. `None` on [`Capabilities`] derives a safe
 /// default from the wire dialect — see
 /// [`resolve_system_message_placement`](super::resolve_system_message_placement).
@@ -384,11 +384,12 @@ pub enum SystemMessagePlacement {
     /// position (OpenAI Chat Completions & Responses, Ollama). Pass through.
     Inline,
     /// The API accepts an interleaved `system`-role directive but enforces
-    /// placement rules (Anthropic Opus 4.8: must follow a `user` turn — or an
-    /// assistant turn ending in a server-tool result — and be the last message
-    /// or be followed by an `assistant` turn; text-only; never `messages[0]`).
-    /// A valid directive is kept native; anything else folds. `developer`
-    /// collapses to `system` (Anthropic has no developer role).
+    /// placement rules (Anthropic Fable 5, Mythos 5, and Opus 4.8: a section
+    /// must follow a `user` turn — or an assistant turn ending in a server-tool
+    /// result — and be the last section or be followed by an `assistant` turn;
+    /// never `messages[0]`). A valid section is kept native; anything else
+    /// folds. `developer` collapses to `system` (Anthropic has no developer
+    /// role).
     NativeDirective,
     /// The API has no positional system channel (Anthropic pre-4.8, Gemini
     /// `systemInstruction`, Bedrock Converse `system[]`). A leading run folds
