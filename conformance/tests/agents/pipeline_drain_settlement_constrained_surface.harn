@@ -34,7 +34,7 @@ pipeline default() {
       const pre = __host_settlement_agent_active()
       const result = on_finish_drain(harness, return_value)
       const post = __host_settlement_agent_active()
-      const _ = lifecycle_audit_log_take()
+      const _audits = lifecycle_audit_log_take()
       harness.stdio.println("pre_active=" + to_string(pre))
       harness.stdio.println("post_active=" + to_string(post))
       harness.stdio.println("observed_active=" + to_string(atomic_get(observed_active)))
