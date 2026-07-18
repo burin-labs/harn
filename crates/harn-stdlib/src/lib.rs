@@ -974,6 +974,7 @@ mod tests {
             "add_v",
             "is_v_semver",
             "parse",
+            "max_canonical_tag",
             "next",
             "bump_type",
             "version_from_release_branch",

@@ -2,7 +2,7 @@ import { agent_capture_events } from "std/agent/events"
 import { default_llm_caller } from "std/llm/handlers"
 import { assert_eq, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
-fn lookup_tools(fail_reads = false) {
+fn lookup_tools(fail_reads = false, include_writers = true) {
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -20,6 +20,9 @@ fn lookup_tools(fail_reads = false) {
       annotations: {kind: "read"},
     },
   )
+  if !include_writers {
+    return tools
+  }
   tools = tool_define(
     tools,
     "mutate",
@@ -152,6 +155,18 @@ pipeline default() {
   __io_println(read_loop.calls[3].prefill == nil)
   __io_println(read_loop.calls[4].prefill == "<tool_call>mutate({ ")
   __io_println(read_loop_receipt.trigger)
+  assert_eq(read_loop_receipt.write_tool, "mutate")
+  const unavailable_writer = run_case(
+    read_loop_script(),
+    "monologue-actuation-unavailable-writer-" + uuid(),
+    {enabled: true, read_only_turns: 4, write_tool: "missing"},
+    "text",
+    {tools: lookup_tools(false, false)},
+  )
+  const unavailable_writer_receipt = actuation_receipts(unavailable_writer.events)[0].checkpoint
+  assert_eq(unavailable_writer_receipt.outcome, "suppressed")
+  assert_eq(unavailable_writer_receipt.reason, "commit_tool_unavailable")
+  assert_eq(unavailable_writer_receipt.write_tool, "")
   const json_read_loop = run_case(
     read_loop_script("json"),
     "monologue-actuation-json-read-loop-" + uuid(),
