@@ -9,12 +9,12 @@
 //!
 //! - **OpenAI Chat Completions / Responses, Ollama** accept a `system` or
 //!   `developer` message at any position.
-//! - **Anthropic Fable 5, Mythos 5, and Opus 4.8** accept an interleaved
-//!   `system` directive, but only
-//!   when it follows a `user` turn (or an assistant turn ending in a server-tool
-//!   result), is the last message or is followed by an `assistant` turn, and is
-//!   not `messages[0]`. Consecutive directives form one section. Anywhere else
-//!   — or on any older/other Claude — the Messages API rejects it with HTTP 400.
+//! - **Anthropic Opus 4.8** accepts an interleaved `system` directive, but only
+//!   when it follows a `user` turn (or an assistant turn ending in a
+//!   `server_tool_use` block), is the last message or is followed by an
+//!   `assistant` turn, and is not `messages[0]`. Consecutive directives must be
+//!   merged into one message. Anywhere else — or on any older/other Claude —
+//!   the Messages API rejects it with HTTP 400.
 //! - **Gemini / Bedrock** have no positional system channel at all; a
 //!   `systemInstruction` / `system[]` field is top-level only.
 //!
@@ -136,11 +136,9 @@ fn contains_tool_result(message: &Value) -> bool {
         })
 }
 
-/// Anthropic permits a native system section after an assistant turn whose
-/// final block is a server-tool result. Future server tools follow the same
-/// `*_tool_result` block naming convention, while client tool results are the
-/// exact `tool_result` type on a user turn.
-fn assistant_ends_with_server_tool_result(message: &Value) -> bool {
+/// Anthropic permits a native system message after an assistant turn whose
+/// final block is the provider's exact `server_tool_use` wire event.
+fn assistant_ends_with_server_tool_use(message: &Value) -> bool {
     if !is_assistant(message) {
         return false;
     }
@@ -153,7 +151,44 @@ fn assistant_ends_with_server_tool_result(message: &Value) -> bool {
     else {
         return false;
     };
-    block_type != "tool_result" && block_type.ends_with("_tool_result")
+    block_type == "server_tool_use"
+}
+
+fn has_native_content_shape(message: &Value) -> bool {
+    matches!(
+        message.get("content"),
+        Some(Value::String(_) | Value::Array(_))
+    )
+}
+
+/// Merge a native-valid consecutive directive section into the one `system`
+/// message Anthropic accepts. A single directive keeps its original content
+/// shape; a multi-message section becomes one ordered content-block array.
+/// Existing blocks are cloned byte-for-byte at the JSON value level, retaining
+/// cache-control and other provider metadata.
+fn merge_native_section(section: &[Value]) -> Value {
+    debug_assert!(!section.is_empty());
+    if section.len() == 1 {
+        let mut directive = section[0].clone();
+        directive
+            .as_object_mut()
+            .expect("directive message is a JSON object")
+            .insert("role".to_string(), Value::String("system".to_string()));
+        return directive;
+    }
+
+    let mut blocks = Vec::new();
+    for directive in section {
+        match directive.get("content") {
+            Some(Value::Array(content_blocks)) => blocks.extend(content_blocks.iter().cloned()),
+            Some(Value::String(text)) => {
+                blocks.push(serde_json::json!({"type": "text", "text": text}));
+            }
+            Some(other) => blocks.push(other.clone()),
+            None => {}
+        }
+    }
+    serde_json::json!({"role": "system", "content": blocks})
 }
 
 /// Pull a leading run of `system`/`developer` messages off the front of the
@@ -184,8 +219,9 @@ fn hoist_leading_system_run(messages: &mut Vec<Value>, system: &mut Option<Strin
 /// Anthropic's placement contract.
 fn is_valid_native_section(messages: &[Value], start: usize, end: usize) -> bool {
     start > 0
+        && messages[start..end].iter().all(has_native_content_shape)
         && (is_user(&messages[start - 1])
-            || assistant_ends_with_server_tool_result(&messages[start - 1]))
+            || assistant_ends_with_server_tool_use(&messages[start - 1]))
         && (end == messages.len() || is_assistant(&messages[end]))
 }
 
@@ -193,8 +229,8 @@ fn is_valid_native_section(messages: &[Value], start: usize, end: usize) -> bool
 /// given [`SystemMessagePlacement`]. Mutates `messages` and `system` in place.
 ///
 /// Consecutive directives are handled as one positional section. Native-valid
-/// sections preserve every message field and content block, changing only a
-/// `developer` role to Anthropic's `system` role. Folded sections attach to the
+/// sections merge into one `system` message while preserving ordered content
+/// blocks and block metadata. Folded sections attach to the
 /// immediately preceding user turn, the immediately following user turn, or a
 /// fresh user turn at the same boundary, in that order. This preserves
 /// chronology and never splits a tool-use/result pair.
@@ -232,13 +268,7 @@ pub(crate) fn normalize_conversation(
         let end = index;
 
         if native && is_valid_native_section(&input, start, end) {
-            for mut directive in input[start..end].iter().cloned() {
-                directive
-                    .as_object_mut()
-                    .expect("directive message is a JSON object")
-                    .insert("role".to_string(), Value::String("system".to_string()));
-                out.push(directive);
-            }
+            out.push(merge_native_section(&input[start..end]));
             continue;
         }
 
@@ -417,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn native_preserves_content_blocks_and_consecutive_sections() {
+    fn native_merges_consecutive_directives_and_preserves_block_metadata() {
         let mut messages = vec![
             json!({"role": "user", "content": "U1"}),
             json!({"role": "system", "content": [{
@@ -428,27 +458,40 @@ mod tests {
             json!({"role": "developer", "content": [{"type": "text", "text": "second"}]}),
             json!({"role": "assistant", "content": "A1"}),
         ];
-        let expected = vec![
-            messages[0].clone(),
-            messages[1].clone(),
-            json!({"role": "system", "content": [{"type": "text", "text": "second"}]}),
-            messages[3].clone(),
-        ];
         let mut system = None;
         normalize_conversation(
             &mut messages,
             &mut system,
             SystemMessagePlacement::NativeDirective,
         );
-        assert_eq!(messages, expected);
+        assert_eq!(
+            messages,
+            vec![
+                json!({"role": "user", "content": "U1"}),
+                json!({"role": "system", "content": [
+                    {
+                        "type": "text",
+                        "text": "first",
+                        "cache_control": {"type": "ephemeral"}
+                    },
+                    {"type": "text", "text": "second"},
+                ]}),
+                json!({"role": "assistant", "content": "A1"}),
+            ]
+        );
     }
 
     #[test]
-    fn native_accepts_section_after_assistant_server_tool_result() {
+    fn native_accepts_section_after_exact_server_tool_use() {
         let mut messages = vec![
             json!({"role": "assistant", "content": [
                 {"type": "text", "text": "searched"},
-                {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_1", "content": []}
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtoolu_1",
+                    "name": "web_search",
+                    "input": {"query": "Harn"}
+                }
             ]}),
             json!({"role": "system", "content": "fresh context"}),
             json!({"role": "assistant", "content": "A2"}),
@@ -461,6 +504,65 @@ mod tests {
             SystemMessagePlacement::NativeDirective,
         );
         assert_eq!(messages, expected);
+    }
+
+    #[test]
+    fn native_rejects_unknown_tool_result_suffix_as_a_placement_boundary() {
+        let mut messages = vec![
+            json!({"role": "assistant", "content": [{
+                "type": "invented_tool_result",
+                "tool_use_id": "srvtoolu_1",
+                "content": []
+            }]}),
+            json!({"role": "system", "content": "fresh context"}),
+            json!({"role": "assistant", "content": "A2"}),
+        ];
+        let mut system = None;
+        normalize_conversation(
+            &mut messages,
+            &mut system,
+            SystemMessagePlacement::NativeDirective,
+        );
+        assert_eq!(
+            messages,
+            vec![
+                json!({"role": "assistant", "content": [{
+                    "type": "invented_tool_result",
+                    "tool_use_id": "srvtoolu_1",
+                    "content": []
+                }]}),
+                json!({"role": "user", "content": system_reminder_block("fresh context")}),
+                json!({"role": "assistant", "content": "A2"}),
+            ]
+        );
+    }
+
+    #[test]
+    fn native_folds_an_invalid_directive_content_shape_instead_of_sending_a_400() {
+        let mut messages = vec![
+            json!({"role": "user", "content": "U1"}),
+            json!({"role": "system", "content": {"unexpected": true}}),
+            json!({"role": "assistant", "content": "A1"}),
+        ];
+        let mut system = None;
+        normalize_conversation(
+            &mut messages,
+            &mut system,
+            SystemMessagePlacement::NativeDirective,
+        );
+        assert_eq!(
+            messages,
+            vec![
+                json!({
+                    "role": "user",
+                    "content": format!(
+                        "U1\n\n{}",
+                        system_reminder_block(r#"{"unexpected":true}"#)
+                    )
+                }),
+                json!({"role": "assistant", "content": "A1"}),
+            ]
+        );
     }
 
     #[test]

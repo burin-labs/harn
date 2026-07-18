@@ -384,12 +384,12 @@ pub enum SystemMessagePlacement {
     /// position (OpenAI Chat Completions & Responses, Ollama). Pass through.
     Inline,
     /// The API accepts an interleaved `system`-role directive but enforces
-    /// placement rules (Anthropic Fable 5, Mythos 5, and Opus 4.8: a section
-    /// must follow a `user` turn — or an assistant turn ending in a server-tool
-    /// result — and be the last section or be followed by an `assistant` turn;
-    /// never `messages[0]`). A valid section is kept native; anything else
-    /// folds. `developer` collapses to `system` (Anthropic has no developer
-    /// role).
+    /// placement rules (Anthropic Opus 4.8: one message must follow a `user`
+    /// turn — or an assistant turn ending in `server_tool_use` — and be the
+    /// last message or be followed by an `assistant` turn; never
+    /// `messages[0]`). A valid consecutive section is merged and kept native;
+    /// anything else folds. `developer` collapses to `system` (Anthropic has no
+    /// developer role).
     NativeDirective,
     /// The API has no positional system channel (Anthropic pre-4.8, Gemini
     /// `systemInstruction`, Bedrock Converse `system[]`). A leading run folds
