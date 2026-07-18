@@ -182,6 +182,10 @@ name = "vm_adaptive_inline_cache"
 harness = false
 
 [[bench]]
+name = "vm_async_dispatch"
+harness = false
+
+[[bench]]
 name = "callable_vectorcall"
 harness = false
 
