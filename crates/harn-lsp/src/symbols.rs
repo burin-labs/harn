@@ -259,21 +259,27 @@ fn collect_symbols(
         Node::Pipeline {
             name,
             params,
+            return_type,
             body,
             is_pub,
             ..
         } => {
             let pub_prefix = if *is_pub { "pub " } else { "" };
-            let sig = if params.is_empty() {
-                format!("{pub_prefix}pipeline {name}")
-            } else {
-                format!("{pub_prefix}pipeline {name}({})", params.join(", "))
-            };
+            let params_text = params
+                .iter()
+                .map(format_param)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let return_suffix = return_type
+                .as_ref()
+                .map(|type_expr| format!(" -> {}", format_type(type_expr)))
+                .unwrap_or_default();
+            let sig = format!("{pub_prefix}pipeline {name}({params_text}){return_suffix}");
             symbols.push(SymbolInfo {
                 name: name.clone(),
                 kind: HarnSymbolKind::Pipeline,
                 def_span: snode.span,
-                type_info: None,
+                type_info: return_type.clone(),
                 signature: Some(sig),
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
@@ -284,13 +290,13 @@ fn collect_symbols(
                 stdlib_metadata: None,
                 derived_example: None,
             });
-            // Params are plain strings (no individual spans), register them scoped to body.
+            // Parameter spans are represented by the owning declaration today.
             for p in params {
                 symbols.push(simple_sym!(
-                    p.clone(),
+                    p.name.clone(),
                     HarnSymbolKind::Parameter,
                     snode.span,
-                    None,
+                    p.type_expr.clone(),
                     None,
                     Some(snode.span)
                 ));
@@ -1175,7 +1181,7 @@ fn format_type_params(type_params: &[TypeParam]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harn_parser::{ShapeField, TypeExpr};
+    use harn_parser::{parse_source, ShapeField, TypeExpr};
 
     fn shape(kind_value: &str, other_name: &str, other_type: &str) -> TypeExpr {
         TypeExpr::Shape(vec![
@@ -1221,5 +1227,33 @@ mod tests {
         let ty = TypeExpr::Union(vec![shape("ping", "ttl", "int")]);
         let out = format_union_shapes_expanded(&ty);
         assert!(out.is_empty(), "expected empty, got: {out}");
+    }
+
+    #[test]
+    fn typed_pipeline_symbol_exposes_parameter_and_return_contract() {
+        let source =
+            "pub pipeline deploy(config: DeployConfig, dry_run: bool) -> string { return \"ok\" }";
+        let program = parse_source(source).unwrap();
+        let symbols = build_symbol_table(&program, source);
+        let pipeline = symbols
+            .iter()
+            .find(|symbol| symbol.kind == HarnSymbolKind::Pipeline)
+            .expect("pipeline symbol");
+        assert_eq!(
+            pipeline.signature.as_deref(),
+            Some("pub pipeline deploy(config: DeployConfig, dry_run: bool) -> string")
+        );
+        assert_eq!(
+            pipeline.type_info,
+            Some(TypeExpr::Named("string".to_string()))
+        );
+        let config = symbols
+            .iter()
+            .find(|symbol| symbol.kind == HarnSymbolKind::Parameter && symbol.name == "config")
+            .expect("config parameter");
+        assert_eq!(
+            config.type_info,
+            Some(TypeExpr::Named("DeployConfig".to_string()))
+        );
     }
 }

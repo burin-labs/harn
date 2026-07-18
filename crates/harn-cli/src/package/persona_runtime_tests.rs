@@ -460,11 +460,12 @@ async fn activated_persona_guard_rechecks_content_at_invocation() {
         .execute_callable(callable, &[harn_vm::VmValue::Nil])
         .await
         .expect_err("guard must reject mutation after trigger registration");
+    let harn_vm::VmError::Runtime(message) = error else {
+        panic!("expected runtime package rejection, got {error:?}");
+    };
     assert!(
-        error
-            .to_string()
-            .contains("installed package execution rejected"),
-        "{error}"
+        message.starts_with("installed package execution rejected: "),
+        "{message}"
     );
 }
 
@@ -674,7 +675,20 @@ async fn activated_persona_rejects_module_cached_from_unverified_bytes() {
         .execute_callable(callable, &[harn_vm::VmValue::Nil])
         .await
         .expect_err("guard must reject a module cached from different bytes");
-    assert!(error.to_string().contains("cached module"), "{error}");
+    let harn_vm::VmError::Runtime(message) = error else {
+        panic!("expected runtime package rejection, got {error:?}");
+    };
+    let workflow = packages
+        .join("agents/workflow.harn")
+        .canonicalize()
+        .expect("canonical workflow path");
+    assert_eq!(
+        message,
+        format!(
+            "installed package execution rejected: cached module {} was not instantiated under the active package execution guard",
+            workflow.display()
+        )
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

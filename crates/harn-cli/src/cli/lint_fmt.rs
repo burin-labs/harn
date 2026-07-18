@@ -8,6 +8,10 @@ pub(crate) struct PathTargetsArgs {
     /// Force-enable the `require-file-header` rule (overrides harn.toml).
     #[arg(long = "require-file-header")]
     pub require_file_header: bool,
+    /// Require explicit parameter and return annotations on public functions
+    /// and pipelines.
+    #[arg(long = "require-public-api-types")]
+    pub require_public_api_types: bool,
     /// Treat warnings as failures: exit non-zero when any file emits a lint
     /// warning, not just an error. Overrides `[check] strict` in harn.toml.
     #[arg(long)]

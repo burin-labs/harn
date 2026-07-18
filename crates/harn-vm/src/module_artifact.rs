@@ -44,10 +44,10 @@ pub struct ModuleArtifact {
     /// the instantiated module env and binds it into importers. Disjoint from
     /// [`functions`](Self::functions) and [`public_type_names`](Self::public_type_names).
     pub public_value_names: HashSet<String>,
-    /// Names of `pub type` aliases. Type aliases are erased at runtime — they
-    /// carry no value of their own — but importers may still name them in a
-    /// selective `import { T } from "..."` (for annotations and
-    /// schema-as-type use), so the loader must accept these names.
+    /// Names of erased public type declarations (`type`, `enum`, and
+    /// `interface`). They carry no runtime value of their own, but importers
+    /// may still name them in selective imports. Public structs are excluded:
+    /// they export a real constructor through [`functions`](Self::functions).
     pub public_type_names: HashSet<String>,
     /// JSON-Schema lowering (serialized as canonical JSON text) for each
     /// `pub type` alias whose body can be expressed as a schema. The loader
@@ -147,12 +147,33 @@ pub fn compile_module_artifact(
             harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
             _ => node,
         };
-        if let harn_parser::Node::TypeDecl {
-            name, is_pub: true, ..
-        } = &inner.node
-        {
-            public_type_names.insert(name.clone());
-            continue;
+        match &inner.node {
+            harn_parser::Node::TypeDecl {
+                name, is_pub: true, ..
+            }
+            | harn_parser::Node::EnumDecl {
+                name, is_pub: true, ..
+            }
+            | harn_parser::Node::InterfaceDecl { name, .. } => {
+                public_type_names.insert(name.clone());
+                continue;
+            }
+            harn_parser::Node::StructDecl {
+                name,
+                fields,
+                is_pub,
+                ..
+            } => {
+                let constructor = crate::Compiler::new()
+                    .compile_struct_constructor(name, fields)
+                    .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
+                functions.insert(name.clone(), constructor.freeze_for_cache());
+                if *is_pub {
+                    public_names.insert(name.clone());
+                }
+                continue;
+            }
+            _ => {}
         }
         // `pub const` / `pub let`: record the exported value-binding names. The
         // value itself is produced when the init chunk is replayed at
@@ -169,6 +190,24 @@ pub fn compile_module_artifact(
         } = &inner.node
         {
             collect_binding_identifier_names(pattern, &mut public_value_names);
+            continue;
+        }
+        if let harn_parser::Node::Pipeline {
+            name,
+            params,
+            body,
+            extends,
+            is_pub,
+            ..
+        } = &inner.node
+        {
+            let pipeline = crate::Compiler::new()
+                .compile_pipeline_callable(program, name, params, body, extends.as_deref())
+                .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
+            functions.insert(name.clone(), pipeline.freeze_for_cache());
+            if *is_pub {
+                public_names.insert(name.clone());
+            }
             continue;
         }
         let harn_parser::Node::FnDecl {
