@@ -8,6 +8,11 @@ pub(crate) fn get_stdlib_source(module: &str) -> Option<&'static str> {
     harn_stdlib::get_stdlib_source(module)
 }
 
+/// Rust builtins exported through an embedded stdlib module's public surface.
+pub(crate) fn builtin_reexports(module: &str) -> &'static [&'static str] {
+    harn_stdlib::builtin_reexports(module)
+}
+
 /// Sentinel path used to key embedded stdlib modules in the module
 /// graph. Real files never resolve to this path, so collisions are
 /// impossible.

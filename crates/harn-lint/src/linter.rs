@@ -2057,7 +2057,7 @@ impl<'a> Linter<'a> {
                 // A name used only in type position (`import { T }` consumed
                 // by annotations of a `pub type` / struct / enum alias) is
                 // still a real use.
-                .filter(|n| !self.references.contains(*n) && !self.type_references.contains(*n))
+                .filter(|name| import.is_unused(name, &self.references, &self.type_references))
                 .collect();
             let all_unused = unused.len() == import.names.len();
             for name in &unused {
