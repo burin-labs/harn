@@ -32,6 +32,7 @@ use crate::{
 
 const TY_BOOL_OR_DICT: Ty = Ty::Union(&[TY_BOOL, TY_DICT]);
 const TY_BOOL_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_BOOL, TY_DICT, TY_NIL]);
+const TY_FLOAT_OR_NIL: Ty = Ty::Union(&[TY_FLOAT, TY_NIL]);
 const TY_INT_OR_FLOAT_OR_DICT: Ty = Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT]);
 const TY_LIST_OR_STRING: Ty = Ty::Union(&[TY_LIST, TY_STRING]);
 const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
@@ -497,6 +498,7 @@ pub const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
 pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("input_tokens", TY_INT),
     ShapeFieldDescriptor::new("output_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cost_usd", TY_FLOAT_OR_NIL),
     ShapeFieldDescriptor::new("cache_read_tokens", TY_INT),
     ShapeFieldDescriptor::new("cache_write_tokens", TY_INT),
     ShapeFieldDescriptor::new("cache_creation_input_tokens", TY_INT),
