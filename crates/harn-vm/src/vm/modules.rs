@@ -213,14 +213,31 @@ impl Vm {
             crate::value::VmCallable::Eager(closure) => Ok(Arc::clone(closure)),
             crate::value::VmCallable::Lazy(lazy) => {
                 let (cache_key, module_path) = self.lazy_callable_module_path(lazy);
+                let next_guard = lazy
+                    .package_execution_guard_handle()
+                    .or_else(|| self.package_execution_guard.clone());
+                if let Some(guard) = &next_guard {
+                    guard.verify_entry_source(&module_path).map_err(|error| {
+                        VmError::Runtime(format!("installed package execution rejected: {error}"))
+                    })?;
+                }
                 let resolution = {
                     let mut modules = self.lazy_callable_modules.lock();
-                    Arc::clone(
-                        modules
-                            .entry(cache_key)
-                            .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new())),
-                    )
+                    let slots = modules.entry(cache_key).or_default();
+                    if let Some(slot) = slots.iter().find(|slot| slot.execution_guard == next_guard)
+                    {
+                        Arc::clone(&slot.resolution)
+                    } else {
+                        let resolution = Arc::new(tokio::sync::OnceCell::new());
+                        slots.push(crate::vm::state::LazyCallableCacheSlot {
+                            execution_guard: next_guard.clone(),
+                            resolution: Arc::clone(&resolution),
+                        });
+                        resolution
+                    }
                 };
+                let previous_package_execution_guard =
+                    std::mem::replace(&mut self.package_execution_guard, next_guard);
                 let resolved = resolution
                     .get_or_try_init(|| async {
                         let exports = self.load_module_exports(&module_path).await?;
@@ -237,7 +254,9 @@ impl Vm {
                             retained_module_graph: Arc::clone(&self.module_cache),
                         }))
                     })
-                    .await?;
+                    .await;
+                self.package_execution_guard = previous_package_execution_guard;
+                let resolved = resolved?;
                 resolved
                     .exports
                     .get(&lazy.function_name)

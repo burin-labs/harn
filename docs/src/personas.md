@@ -247,10 +247,10 @@ trigger ID and persona handler with the dependency alias, so an explicit handler
 may address the same persona as `persona://agents/reviewer` without colliding
 with another package's exports. Activated personas keep that qualified identity
 in trigger bindings and lifecycle state.
-The runtime compiles the entry and imports from the exact bytes captured by a
-successful content-hash check. Imports may cross into content-hashed
-dependencies pinned by the activated generation lock; paths outside that
-content-pinned package graph are rejected.
+The runtime compiles workflow entries, local trigger predicates, and imports
+from the exact bytes captured by a successful content-hash check. Imports may
+cross into content-hashed dependencies pinned by the activated generation lock;
+paths outside that content-pinned package graph are rejected.
 
 ## Trigger handlers
 

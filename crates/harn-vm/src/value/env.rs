@@ -70,6 +70,7 @@ impl VmCallable {
 pub struct LazyVmCallable {
     pub(crate) module_path: PathBuf,
     pub(crate) function_name: String,
+    package_execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
 }
 
 impl LazyVmCallable {
@@ -77,7 +78,22 @@ impl LazyVmCallable {
         Self {
             module_path,
             function_name: function_name.into(),
+            package_execution_guard: None,
         }
+    }
+
+    pub fn with_package_execution_guard(
+        mut self,
+        guard: Arc<harn_modules::package_execution::PackageExecutionGuard>,
+    ) -> Self {
+        self.package_execution_guard = Some(guard);
+        self
+    }
+
+    pub fn package_execution_guard_handle(
+        &self,
+    ) -> Option<Arc<harn_modules::package_execution::PackageExecutionGuard>> {
+        self.package_execution_guard.clone()
     }
 }
 

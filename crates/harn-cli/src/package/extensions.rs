@@ -207,7 +207,7 @@ pub async fn install_manifest_hooks_with_mode(
 ) -> Result<(), PackageError> {
     harn_vm::orchestration::clear_runtime_hooks();
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
-    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, ModuleCallableSignature>> =
+    let mut module_signatures: HashMap<PathBuf, Vec<CachedModuleCallableSignatures>> =
         HashMap::new();
     for hook in &extensions.hooks {
         let Some((module_name, function_name)) = hook.handler.rsplit_once("::") else {
@@ -223,7 +223,8 @@ pub async fn install_manifest_hooks_with_mode(
             &hook.exports,
             Some(module_name),
         )?;
-        let signatures = cached_module_callable_signatures(&mut module_signatures, &module_path)?;
+        let signatures =
+            cached_module_callable_signatures(&mut module_signatures, &module_path, None)?;
         if signatures
             .get(function_name)
             .is_none_or(|signature| !signature.is_pub)
@@ -294,7 +295,7 @@ async fn collect_manifest_triggers_with_mode(
     validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
     validate_static_trigger_configs(&extensions.triggers, &provider_catalog)?;
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
-    let mut module_signatures: HashMap<PathBuf, BTreeMap<String, ModuleCallableSignature>> =
+    let mut module_signatures: HashMap<PathBuf, Vec<CachedModuleCallableSignatures>> =
         HashMap::new();
     let mut validated = Vec::with_capacity(extensions.triggers.len());
     for trigger in &extensions.triggers {
@@ -393,15 +394,24 @@ struct ValidatedTriggerCallableDeclarations {
     when: Option<(TriggerFunctionRef, PathBuf)>,
 }
 
+struct CachedModuleCallableSignatures {
+    execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+    signatures: BTreeMap<String, ModuleCallableSignature>,
+}
+
 fn validate_trigger_callable_declarations(
     trigger: &ResolvedTriggerConfig,
-    module_signatures: &mut HashMap<PathBuf, BTreeMap<String, ModuleCallableSignature>>,
+    module_signatures: &mut HashMap<PathBuf, Vec<CachedModuleCallableSignatures>>,
 ) -> Result<ValidatedTriggerCallableDeclarations, PackageError> {
     let handler = parse_trigger_handler_uri(trigger)?;
     let local_handler_path = if let TriggerHandlerUri::Local(reference) = &handler {
         let module_path = trigger_function_source_path(trigger, reference)?;
-        let signatures = cached_module_callable_signatures(module_signatures, &module_path)
-            .map_err(|error| trigger_error(trigger, error))?;
+        let signatures = cached_module_callable_signatures(
+            module_signatures,
+            &module_path,
+            trigger.execution_guard.as_ref(),
+        )
+        .map_err(|error| trigger_error(trigger, error))?;
         if signatures
             .get(&reference.function_name)
             .is_none_or(|signature| !signature.is_pub)
@@ -421,8 +431,12 @@ fn validate_trigger_callable_declarations(
     let when = if let Some(when_raw) = &trigger.when {
         let reference = parse_local_trigger_ref(when_raw, "when", trigger)?;
         let source_path = trigger_function_source_path(trigger, &reference)?;
-        let signatures = cached_module_callable_signatures(module_signatures, &source_path)
-            .map_err(|error| trigger_error(trigger, error))?;
+        let signatures = cached_module_callable_signatures(
+            module_signatures,
+            &source_path,
+            trigger.execution_guard.as_ref(),
+        )
+        .map_err(|error| trigger_error(trigger, error))?;
         let Some(signature) = signatures.get(&reference.function_name) else {
             return Err(trigger_error(
                 trigger,
@@ -500,11 +514,20 @@ async fn collect_manifest_vm_callable(
     lazy: bool,
     role: &str,
 ) -> Result<harn_vm::VmCallable, PackageError> {
+    let mut deferred =
+        harn_vm::LazyVmCallable::new(module_path.to_path_buf(), reference.function_name.clone());
+    if let Some(guard) = &trigger.execution_guard {
+        deferred = deferred.with_package_execution_guard(Arc::clone(guard));
+    }
     if lazy {
-        return Ok(harn_vm::VmCallable::Lazy(harn_vm::LazyVmCallable::new(
-            module_path.to_path_buf(),
-            reference.function_name.clone(),
-        )));
+        return Ok(harn_vm::VmCallable::Lazy(deferred));
+    }
+    if trigger.execution_guard.is_some() {
+        let closure = vm
+            .resolve_callable(&harn_vm::VmCallable::Lazy(deferred))
+            .await
+            .map_err(|error| trigger_error(trigger, error.to_string()))?;
+        return Ok(harn_vm::VmCallable::Eager(closure));
     }
 
     let cache_key = (
@@ -540,16 +563,30 @@ async fn collect_manifest_vm_callable(
 }
 
 fn cached_module_callable_signatures<'a>(
-    cache: &'a mut HashMap<PathBuf, BTreeMap<String, ModuleCallableSignature>>,
+    cache: &'a mut HashMap<PathBuf, Vec<CachedModuleCallableSignatures>>,
     source_path: &Path,
+    execution_guard: Option<&Arc<harn_modules::package_execution::PackageExecutionGuard>>,
 ) -> Result<&'a BTreeMap<String, ModuleCallableSignature>, PackageError> {
-    match cache.entry(source_path.to_path_buf()) {
-        std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            let signatures = load_module_callable_signatures(source_path)?;
-            Ok(entry.insert(signatures))
-        }
+    let entries = cache.entry(source_path.to_path_buf()).or_default();
+    if let Some(index) = entries
+        .iter()
+        .position(|entry| entry.execution_guard.as_ref() == execution_guard)
+    {
+        return Ok(&entries[index].signatures);
     }
+    let signatures = if let Some(guard) = execution_guard {
+        load_guarded_module_callable_signatures(source_path, guard)?
+    } else {
+        load_module_callable_signatures(source_path)?
+    };
+    entries.push(CachedModuleCallableSignatures {
+        execution_guard: execution_guard.cloned(),
+        signatures,
+    });
+    Ok(&entries
+        .last()
+        .expect("signature cache entry inserted")
+        .signatures)
 }
 
 pub(crate) async fn collect_trigger_flow_control(
