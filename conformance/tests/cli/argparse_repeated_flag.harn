@@ -1,12 +1,15 @@
 import { parse, parser } from "std/cli/argparse"
+import { assert_eq } from "std/testing"
 
-fn main(harness: Harness) {
+pipeline test(task) {
   const spec = parser(
     {name: "demo", args: [{name: "model", kind: "flag", short: "-m", long: "--model", multi: true}]},
   )
-  const r = parse(spec, ["-m", "a", "--model", "b", "--model=c"])
-  harness.stdio.println(len(r.ok.model))
-  for m in r.ok.model {
+  const result = parse(spec, ["-m", "a", "--model", "b", "--model=c"])
+  assert_eq(result, Ok({options: {model: ["a", "b", "c"]}, rest: []}))
+  const invocation = unwrap(result)
+  harness.stdio.println(len(invocation.options.model))
+  for m in invocation.options.model {
     harness.stdio.println(m)
   }
 }

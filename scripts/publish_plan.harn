@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 
 type PublishPlanPackage = {deps: list<string>, name: string, version: string}
 
@@ -145,21 +145,26 @@ pub fn publish_plan_rows(meta: dict) -> list<string> {
   return rows
 }
 
-fn arg_spec() -> list {
-  return [{kind: "option", name: "metadata", flags: ["--metadata"], parse: "string", default: ""}]
+fn arg_spec() {
+  return parser(
+    {
+      name: "publish_plan",
+      args: [{kind: "flag", name: "metadata", long: "--metadata", parse: "string", default: ""}],
+    },
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio.println("usage: harn run scripts/publish_plan.harn -- --metadata PATH")
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const metadata_path = to_string(parsed?.metadata ?? "")
   if metadata_path == "" {
     harness.stdio.eprintln("error: --metadata is required")
