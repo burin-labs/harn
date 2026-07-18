@@ -21,6 +21,13 @@ pipeline default() {
   __io_println(agent_tool_calls_are_read_only([{name: "read"}, {name: "mcp_read"}], tools))
   __io_println(agent_tool_calls_are_read_only([{name: "read"}, {name: "edit"}], tools))
   __io_println(agent_tool_calls_are_read_only([{name: "unknown"}], tools))
+  __io_println(
+    !agent_tool_calls_are_read_only(
+      [{name: "unknown"}],
+      tools,
+      {tool_annotations: {unknown: {kind: "read"}}},
+    ),
+  )
   __io_println(agent_tool_single_workspace_write_name(tools))
   __io_println(
     agent_tool_single_workspace_write_name(

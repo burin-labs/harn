@@ -153,7 +153,8 @@ pub fn agent_tool_calls_are_read_only(calls, registry, policy = nil) -> bool {
   }
   for call in calls {
     const name = __agent_tool_call_name(call)
-    if name == "" || !agent_tool_is_read_only(__agent_tool_find_entry(registry, name), policy, name) {
+    const entry = __agent_tool_find_entry(registry, name)
+    if name == "" || entry == nil || !agent_tool_is_read_only(entry, policy, name) {
       return false
     }
   }
