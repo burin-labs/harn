@@ -44,10 +44,10 @@ fn bench_async_dispatch(c: &mut Criterion) {
         .build()
         .expect("async-dispatch runtime");
     let result = execute(&runtime, &chunk);
-    assert!(
-        matches!(&result, VmValue::Int(value) if *value == ASYNC_CALLS as i64),
-        "async fixture returned {result:?}"
-    );
+    let VmValue::Int(actual_calls) = result else {
+        panic!("async fixture returned {result:?}");
+    };
+    assert_eq!(actual_calls, ASYNC_CALLS as i64);
     let mut group = c.benchmark_group("vm_async_dispatch");
     group.throughput(Throughput::Elements(ASYNC_CALLS));
     group.bench_function("noop_builtin", |b| {
