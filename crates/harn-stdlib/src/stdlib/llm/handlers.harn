@@ -651,10 +651,11 @@ fn __budget_check(limit_name, max_value, observed, on_exceed) {
  *
  * Tracks per-caller-instance usage across calls.
  *
- * IMPORTANT: Harn closures capture by VALUE, so we cannot persist a free-form
- * dict across calls. Counters are instead held as `atomic` handles, whose
- * underlying Arc<AtomicI64> is shared across closure invocations. This means
- * with_budget tracks INTEGER counters (tokens, calls, micro-cents) only.
+ * IMPORTANT: counters are held as `atomic` handles, whose underlying
+ * Arc<AtomicI64> is shared across closure invocations. Closures capture by
+ * reference, but a plain captured binding is still racy when the caller runs
+ * inside `parallel`/`spawn` (see HARN-LNT-064), so the atomics stay. This
+ * means with_budget tracks INTEGER counters (tokens, calls, micro-cents) only.
  *
  * Options (all optional):
  *   - max_total_tokens: int (input + output)

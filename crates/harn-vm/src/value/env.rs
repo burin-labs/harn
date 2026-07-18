@@ -27,8 +27,9 @@ pub struct VmClosure {
     /// module import point at the same shared mutable env, so a
     /// mutation inside one function is visible to every other function
     /// in that module on subsequent calls. `closure.env` still holds
-    /// the per-closure lexical snapshot (captured function args from
-    /// enclosing scopes, etc.) and is unchanged by this — `module_state`
+    /// the closure's own lexical bindings (captured function args from
+    /// enclosing scopes, etc.), with captured locals shared by reference
+    /// through [`BindingCell`], and is unchanged by this — `module_state`
     /// is a separate lookup layer consulted after the local env and
     /// before globals. Created in `import_declarations` after the
     /// module's init chunk runs, so the initial values from `let x = ...`
