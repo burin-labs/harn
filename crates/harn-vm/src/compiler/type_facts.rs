@@ -1,6 +1,6 @@
 use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypedParam};
 
-use crate::chunk::Op;
+use crate::chunk::{Op, ParamSlot};
 
 use super::Compiler;
 
@@ -14,6 +14,24 @@ enum PrimitiveType {
 }
 
 impl Compiler {
+    /// Build runtime parameter metadata from the compiler's normalized types.
+    ///
+    /// Parser annotations retain source-level alias names for diagnostics.
+    /// Runtime guards must instead carry the recursively expanded shape so an
+    /// imported or cached callable enforces `type Count = int` as `int`.
+    pub(super) fn compile_param_slots(&self, params: &[TypedParam]) -> Vec<ParamSlot> {
+        params
+            .iter()
+            .map(|param| {
+                let type_expr = param
+                    .type_expr
+                    .as_ref()
+                    .map(|type_expr| self.expand_alias(type_expr));
+                ParamSlot::from_typed_param_with_type(param, type_expr)
+            })
+            .collect()
+    }
+
     pub(super) fn record_param_types(&mut self, params: &[TypedParam]) {
         for param in params {
             if let Some(type_expr) = &param.type_expr {

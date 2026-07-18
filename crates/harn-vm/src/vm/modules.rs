@@ -250,63 +250,16 @@ impl Vm {
         let next_guard = pipeline
             .package_execution_guard_handle()
             .or_else(|| self.package_execution_guard.clone());
-        let source = if let Some(guard) = &next_guard {
-            let bytes = guard.verify_entry_source(&module_path).map_err(|error| {
-                VmError::Runtime(format!("installed package execution rejected: {error}"))
-            })?;
-            verified_package_source(bytes, &module_path)?
-        } else {
-            std::fs::read_to_string(&module_path).map_err(|error| {
-                VmError::Runtime(format!("failed to read {}: {error}", module_path.display()))
-            })?
-        };
-        let program = harn_parser::check_source_strict(&source)
-            .map_err(|error| VmError::Runtime(error.to_string()))?;
-        let params = program
-            .iter()
-            .find_map(|node| {
-                let (_, inner) = harn_parser::peel_attributes(node);
-                match &inner.node {
-                    harn_parser::Node::Pipeline {
-                        name,
-                        params,
-                        is_pub: true,
-                        ..
-                    } if name == &pipeline.pipeline_name => Some(params.clone()),
-                    _ => None,
-                }
-            })
-            .ok_or_else(|| {
-                VmError::Runtime(format!(
-                    "pipeline '{}' is not exported by module '{}'",
-                    pipeline.pipeline_name,
-                    module_path.display()
-                ))
-            })?;
-        if params.len() != args.len() {
-            return Err(VmError::Runtime(format!(
-                "pipeline '{}' expects {} argument(s), got {}",
-                pipeline.pipeline_name,
-                params.len(),
-                args.len()
-            )));
-        }
-        let chunk = crate::Compiler::new()
-            .compile_named_with_param_globals(&program, &pipeline.pipeline_name)
-            .map_err(|error| VmError::Runtime(error.to_string()))?;
-        let previous_source_dir = self.source_dir.clone();
-        if let Some(parent) = module_path.parent() {
-            self.set_source_dir(parent);
-        }
-        for (param, value) in params.iter().zip(args) {
-            self.set_global(&param.name, value.clone());
-        }
         let previous_package_execution_guard =
             std::mem::replace(&mut self.package_execution_guard, next_guard);
-        let result = self.execute(&chunk).await;
+        let result = async {
+            let closure = self
+                .load_public_module_callable(&module_path, &pipeline.pipeline_name)
+                .await?;
+            self.call_closure_pub(&closure, args).await
+        }
+        .await;
         self.package_execution_guard = previous_package_execution_guard;
-        self.source_dir = previous_source_dir;
-        crate::stdlib::set_thread_source_dir_option(self.source_dir.as_deref());
         result
     }
 
@@ -955,12 +908,10 @@ impl Vm {
         Ok(file_path.canonicalize().unwrap_or(file_path))
     }
 
-    /// Load a module file and return the exported function closures that
-    /// would be visible to a wildcard import.
-    pub async fn load_module_exports(
+    async fn loaded_module_for_path(
         &mut self,
         path: &Path,
-    ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
+    ) -> Result<(PathBuf, Arc<LoadedModule>), VmError> {
         self.ensure_execution_available()?;
         let path_str = path.to_string_lossy().into_owned();
         self.execute_import(&path_str, None).await?;
@@ -986,6 +937,42 @@ impl Vm {
                 canonical.display()
             ))
         })?;
+        Ok((canonical, loaded))
+    }
+
+    /// Load one explicitly public callable from a module.
+    pub async fn load_public_module_callable(
+        &mut self,
+        path: &Path,
+        name: &str,
+    ) -> Result<Arc<VmClosure>, VmError> {
+        let (canonical, loaded) = self.loaded_module_for_path(path).await?;
+        if !loaded.public_names.contains(name) {
+            let hint = if loaded.functions.contains_key(name) {
+                "; it is defined there but not `pub`"
+            } else {
+                ""
+            };
+            return Err(VmError::Runtime(format!(
+                "callable '{name}' is not exported by module '{}'{hint}",
+                canonical.display()
+            )));
+        }
+        loaded.functions.get(name).cloned().ok_or_else(|| {
+            VmError::Runtime(format!(
+                "Import error: exported callable '{name}' is missing from {}",
+                canonical.display()
+            ))
+        })
+    }
+
+    /// Load a module file and return the exported function closures that
+    /// would be visible to a wildcard import.
+    pub async fn load_module_exports(
+        &mut self,
+        path: &Path,
+    ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
+        let (canonical, loaded) = self.loaded_module_for_path(path).await?;
 
         let export_names: Vec<String> = if loaded.public_names.is_empty() {
             loaded.functions.keys().cloned().collect()

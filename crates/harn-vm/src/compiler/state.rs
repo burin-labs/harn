@@ -442,42 +442,58 @@ impl Compiler {
             |sn| matches!(peel_node(sn), Node::Pipeline { name, .. } if name == pipeline_name),
         );
 
+        let mut pipeline_emits_value = false;
         if let Some(sn) = target {
             self.compile_top_level_declarations(program)?;
             if let Node::Pipeline {
+                name,
                 body,
                 extends,
                 params,
                 ..
             } = peel_node(sn)
             {
-                self.compile_with_pipeline_captures(
-                    program,
-                    body,
-                    extends.as_deref(),
-                    |compiler| {
-                        if let Some(parent_name) = extends {
-                            compiler.compile_parent_pipeline(program, parent_name)?;
-                        }
-                        let saved = std::mem::replace(&mut compiler.module_level, false);
-                        if bind_params_from_globals {
-                            for param in params {
-                                compiler.define_local_slot(&param.name, false);
-                                let idx = compiler.string_constant(&param.name);
-                                compiler.chunk.emit_u16(Op::GetVar, idx, compiler.line);
-                                compiler.emit_init_or_define_binding(&param.name, false);
+                if bind_params_from_globals {
+                    let callable = self.compile_pipeline_callable(
+                        program,
+                        name,
+                        params,
+                        body,
+                        extends.as_deref(),
+                    )?;
+                    let function_index = self.chunk.functions.len();
+                    self.chunk.functions.push(Arc::new(callable));
+                    self.chunk
+                        .emit_u16(Op::Closure, function_index as u16, self.line);
+                    for param in params {
+                        let index = self.string_constant(&param.name);
+                        self.chunk.emit_u16(Op::GetVar, index, self.line);
+                    }
+                    self.chunk.emit_u8(Op::Call, params.len() as u8, self.line);
+                    pipeline_emits_value = true;
+                } else {
+                    self.compile_with_pipeline_captures(
+                        program,
+                        body,
+                        extends.as_deref(),
+                        |compiler| {
+                            if let Some(parent_name) = extends {
+                                compiler.compile_parent_pipeline(program, parent_name)?;
                             }
-                        }
-                        let result = compiler.compile_block(body);
-                        compiler.module_level = saved;
-                        result
-                    },
-                )?;
+                            let saved = std::mem::replace(&mut compiler.module_level, false);
+                            let result = compiler.compile_block(body);
+                            compiler.module_level = saved;
+                            result
+                        },
+                    )?;
+                }
             }
         }
 
         self.drain_finallys_to_floor(0)?;
-        self.chunk.emit(Op::Nil, self.line);
+        if !pipeline_emits_value {
+            self.chunk.emit(Op::Nil, self.line);
+        }
         self.chunk.emit(Op::Return, self.line);
         super::ensure_chunk_addressable(&self.chunk, "the pipeline body", self.line)?;
         Ok(self.chunk)
@@ -611,7 +627,19 @@ impl Compiler {
                 let mut properties = BTreeMap::new();
                 let mut required = Vec::new();
                 for field in fields {
-                    let field_schema = Self::type_expr_to_schema_value(&field.type_expr)?;
+                    let mut field_schema = Self::type_expr_to_schema_value(&field.type_expr)?;
+                    if field.optional {
+                        field_schema = VmValue::dict(BTreeMap::from([(
+                            "union".to_string(),
+                            VmValue::List(std::sync::Arc::new(vec![
+                                field_schema,
+                                VmValue::dict(BTreeMap::from([(
+                                    "type".to_string(),
+                                    VmValue::String(arcstr::ArcStr::from("nil")),
+                                )])),
+                            ])),
+                        )]));
+                    }
                     properties.insert(field.name.clone(), field_schema);
                     if !field.optional {
                         required.push(VmValue::String(arcstr::ArcStr::from(field.name.as_str())));
@@ -1289,7 +1317,7 @@ impl Compiler {
         fn_compiler.chunk.emit(Op::Nil, 0);
         fn_compiler.chunk.emit(Op::Return, 0);
         fn_compiler.chunk.source_file = source_file;
-        let param_slots = crate::chunk::ParamSlot::vec_from_typed(params);
+        let param_slots = fn_compiler.compile_param_slots(params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         super::ensure_chunk_addressable(&fn_compiler.chunk, "function body", self.line)?;

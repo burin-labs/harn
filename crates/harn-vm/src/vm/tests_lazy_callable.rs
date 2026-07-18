@@ -115,3 +115,55 @@ pub pipeline run(value) {
     assert!(matches!(result.get("received"), Some(VmValue::Int(42))));
     assert_eq!(vm.source_dir.as_deref(), Some(caller_dir.path()));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_pipeline_callable_rejects_wrong_typed_argument() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let module_path = dir.path().join("workflow.harn");
+    std::fs::write(
+        &module_path,
+        r"
+pub pipeline run(value: int) -> int {
+  return value
+}
+",
+    )
+    .expect("write pipeline module");
+    let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
+    let error = Vm::new()
+        .execute_callable(&callable, &[VmValue::String("wrong".into())])
+        .await
+        .expect_err("typed pipeline rejects the wrong runtime argument");
+
+    assert_eq!(
+        error.to_string(),
+        "Runtime error: TypeError: parameter 'value' expected int, got string (wrong)"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lazy_pipeline_callable_resolves_module_type_alias_guard() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let module_path = dir.path().join("workflow.harn");
+    std::fs::write(
+        &module_path,
+        r"
+type Count = int
+
+pub pipeline run(value: Count) -> int {
+  return value
+}
+",
+    )
+    .expect("write pipeline module");
+    let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
+    let error = Vm::new()
+        .execute_callable(&callable, &[VmValue::String("wrong".into())])
+        .await
+        .expect_err("module alias guards the exported pipeline argument");
+
+    assert_eq!(
+        error.to_string(),
+        "Runtime error: TypeError: parameter 'value' expected int, got string (wrong)"
+    );
+}

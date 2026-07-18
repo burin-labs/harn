@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use harn_lexer::{FixEdit, Span};
+pub use harn_modules::project_config::LintSeverity;
 use harn_parser::{DiagnosticCode as Code, Repair};
 
 /// A lint diagnostic reported by the linter.
@@ -36,14 +37,6 @@ impl LintDiagnostic {
     pub fn repair(&self) -> Option<Repair> {
         self.code.repair_template().map(Repair::from_template)
     }
-}
-
-/// Severity level for lint diagnostics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LintSeverity {
-    Info,
-    Warning,
-    Error,
 }
 
 /// Default cyclomatic-complexity threshold. Callers can override via

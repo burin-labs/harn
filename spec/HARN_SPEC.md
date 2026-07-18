@@ -1053,6 +1053,22 @@ If the pipeline parameter list includes `task`, it is bound to `context.task`.
 If it includes `project`, it is bound to `context.projectRoot`.
 A `context` dict is always injected with keys `task`, `project_root`, and `task_type`.
 
+Pipeline parameters accept the same optional `name: TypeExpr` annotations as
+function parameters. The type checker uses declared types in the pipeline body
+and at local or imported call sites:
+
+```harn
+pub pipeline deploy(config: DeployConfig, dry_run: bool) -> bool {
+  return !dry_run
+}
+```
+
+Legacy untyped parameters remain valid syntax. Packages can require complete
+annotations on public functions and pipelines with
+`[lint] require_public_api_types = true`. Pipeline default values and rest
+parameters are rejected because pipeline invocation does not define those
+runtime semantics.
+
 ### Pipeline return type
 
 Pipelines may declare a return type with the same `-> TypeExpr` syntax
@@ -1071,9 +1087,10 @@ errors.
 A declared return type is the typed contract that a host or bridge
 (ACP, A2A) can rely on when consuming the pipeline's output.
 
-Public pipelines (`pub pipeline`) without an explicit return type emit
-the `pipeline-return-type` lint warning; explicit return types on the
-Harn→ACP boundary will be required in a future release.
+Public pipelines (`pub pipeline`) without an explicit return type emit the
+`pipeline-return-type` lint warning by default. When
+`require_public_api_types` is enabled, `missing-public-api-type` owns both
+parameter and return completeness without duplicate diagnostics.
 
 ### Pipeline inheritance
 
@@ -7198,6 +7215,7 @@ guide for harn-canon rules is in
 disabled = ["unused-import"]
 require_file_header = false
 require_docstrings = false
+require_public_api_types = false
 complexity_threshold = 25
 persona_step_allowlist = ["legacy_helper"]
 ```
@@ -7211,6 +7229,11 @@ persona_step_allowlist = ["legacy_helper"]
   default — out of the box, `pub fn` needs no docs, and editor
   tooling derives a usage example from the type signature. Embedded
   stdlib sources enforce docstrings regardless of this flag.
+- `require_public_api_types` opts into `missing-public-api-type`, which
+  requires explicit parameter and return annotations on every public function
+  and pipeline. Private callables remain inferable, and explicit `unknown` or
+  `any` satisfies the declaration contract. The same policy is available for
+  a focused migration with `harn lint --require-public-api-types`.
 - `complexity_threshold` overrides the default cyclomatic-complexity
   warning threshold (default **25**, chosen to match Clippy's
   `cognitive_complexity` default). Set lower to tighten, higher to

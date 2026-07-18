@@ -1,14 +1,13 @@
 //! End-to-end CLI contract for complete public API type linting.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
+mod test_util;
+
+use test_util::process::harn_e2e_command;
 
 fn run(dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(binary_path())
+    harn_e2e_command()
         .current_dir(dir)
         .args(args)
         .output()

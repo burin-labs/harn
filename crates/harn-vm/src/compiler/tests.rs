@@ -41,6 +41,14 @@ pub type Manifest = {schema_version: 1, items: list<Item>}
         parsed["properties"]["items"]["items"]["properties"]["id"]["type"], "string",
         "{rendered}"
     );
+    assert_eq!(
+        parsed["properties"]["items"]["items"]["properties"]["enabled"]["union"][0]["type"], "bool",
+        "{rendered}"
+    );
+    assert_eq!(
+        parsed["properties"]["items"]["items"]["properties"]["enabled"]["union"][1]["type"], "nil",
+        "{rendered}"
+    );
 }
 
 #[test]

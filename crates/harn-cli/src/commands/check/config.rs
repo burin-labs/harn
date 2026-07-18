@@ -28,7 +28,7 @@ pub(crate) fn load_harn_lint_config(path: &Path) -> HarnLintConfig {
             complexity_threshold: cfg.lint.complexity_threshold,
             persona_step_allowlist: cfg.lint.persona_step_allowlist,
             template_variant_branch_threshold: cfg.lint.template_variant_branch_threshold,
-            severity_overrides: parse_severity_overrides(cfg.lint.severity),
+            severity_overrides: cfg.lint.severity,
         },
         Err(e) => {
             eprintln!("warning: {e}");
@@ -48,27 +48,6 @@ pub(crate) fn apply_loaded_harn_lint_config(lint: &HarnLintConfig, config: &mut 
             config.disable_rules.push(rule.clone());
         }
     }
-}
-
-/// Per-rule severity overrides from `[lint.severity]` (#2851), parsed to
-/// [`harn_lint::LintSeverity`]. An unrecognized severity string is dropped
-/// with a warning rather than failing the run.
-fn parse_severity_overrides(
-    raw: HashMap<String, String>,
-) -> HashMap<String, harn_lint::LintSeverity> {
-    raw.into_iter()
-        .filter_map(
-            |(rule, severity)| match severity.to_ascii_lowercase().as_str() {
-                "error" => Some((rule, harn_lint::LintSeverity::Error)),
-                "warning" | "warn" => Some((rule, harn_lint::LintSeverity::Warning)),
-                "info" => Some((rule, harn_lint::LintSeverity::Info)),
-                other => {
-                    eprintln!("warning: [lint.severity] `{rule}`: unknown severity `{other}`");
-                    None
-                }
-            },
-        )
-        .collect()
 }
 
 pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {

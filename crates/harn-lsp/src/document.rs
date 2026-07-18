@@ -174,21 +174,27 @@ impl DocumentState {
         let is_stdlib_source = file_path
             .as_deref()
             .is_some_and(harn_lint::path_is_stdlib_source);
-        let require_public_api_types = file_path
+        let project_lint = file_path
             .as_deref()
             .and_then(|path| harn_modules::project_config::load_for_path(path).ok())
-            .and_then(|config| config.lint.require_public_api_types)
-            .unwrap_or(false);
+            .map(|config| config.lint)
+            .unwrap_or_default();
+        let disabled_rules = project_lint.disabled.clone().unwrap_or_default();
         let lint_options = harn_lint::LintOptions {
             file_path: file_path.as_deref(),
+            require_file_header: project_lint.require_file_header.unwrap_or(false),
+            require_docstrings: project_lint.require_docstrings.unwrap_or(false),
             require_stdlib_metadata: is_stdlib_source,
-            require_public_api_types,
+            require_public_api_types: project_lint.require_public_api_types.unwrap_or(false),
+            complexity_threshold: project_lint.complexity_threshold,
+            persona_step_allowlist: &project_lint.persona_step_allowlist,
+            severity_overrides: project_lint.severity.clone(),
             ..Default::default()
         };
         let externally_imported_names = std::collections::HashSet::new();
         let lint_diags = harn_lint::lint_with_options(
             &program,
-            &[],
+            &disabled_rules,
             Some(&self.source),
             &externally_imported_names,
             &lint_options,
@@ -353,7 +359,7 @@ fn handler() {
         let temp = tempfile::tempdir().unwrap();
         write(
             &temp.path().join("harn.toml"),
-            "[lint]\nrequire_public_api_types = true\n",
+            "[lint]\nrequire_public_api_types = true\n\n[lint.severity]\nmissing-public-api-type = \"error\"\n",
         );
         let path = temp.path().join("src/main.harn");
         let source = "pub pipeline ship(task) {\n  return task\n}\n";
@@ -367,24 +373,48 @@ fn handler() {
             &workspace,
         );
 
-        let public_api_diagnostics = state
+        let diagnostics = state
             .diagnostics
             .iter()
-            .filter(|diagnostic| {
-                matches!(
-                    diagnostic.code.as_ref(),
-                    Some(tower_lsp::lsp_types::NumberOrString::String(code))
-                        if code == "HARN-LNT-067"
+            .map(|diagnostic| {
+                (
+                    diagnostic.code.clone(),
+                    diagnostic.severity,
+                    diagnostic.source.clone(),
+                    diagnostic.message.clone(),
+                    diagnostic.range,
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(public_api_diagnostics.len(), 2);
-        assert!(public_api_diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("parameter `task`")));
-        assert!(public_api_diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("return type")));
+        assert_eq!(
+            diagnostics,
+            vec![
+                (
+                    Some(tower_lsp::lsp_types::NumberOrString::String(
+                        "HARN-LNT-067".to_string(),
+                    )),
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR),
+                    Some("harn-lint".to_string()),
+                    "[missing-public-api-type] public pipeline `ship` parameter `task` is missing an explicit type".to_string(),
+                    tower_lsp::lsp_types::Range::new(
+                        tower_lsp::lsp_types::Position::new(0, 18),
+                        tower_lsp::lsp_types::Position::new(0, 19),
+                    ),
+                ),
+                (
+                    Some(tower_lsp::lsp_types::NumberOrString::String(
+                        "HARN-LNT-067".to_string(),
+                    )),
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR),
+                    Some("harn-lint".to_string()),
+                    "[missing-public-api-type] public pipeline `ship` is missing an explicit return type".to_string(),
+                    tower_lsp::lsp_types::Range::new(
+                        tower_lsp::lsp_types::Position::new(0, 13),
+                        tower_lsp::lsp_types::Position::new(0, 14),
+                    ),
+                ),
+            ]
+        );
     }
 
     #[test]

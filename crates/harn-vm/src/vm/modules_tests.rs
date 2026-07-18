@@ -203,6 +203,52 @@ pub fn works() {
 }
 
 #[test]
+fn imported_public_struct_exports_its_runtime_constructor() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let types = temp.path().join("types.harn");
+    let consumer = temp.path().join("consumer.harn");
+    std::fs::write(&types, "pub struct Decision { allowed: bool }\n").expect("write type module");
+    std::fs::write(
+        &consumer,
+        r#"
+import { Decision } from "./types"
+
+pub fn decide() -> Decision {
+  return Decision({allowed: true})
+}
+"#,
+    )
+    .expect("write consumer module");
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let exports = vm
+            .load_module_exports(&consumer)
+            .await
+            .expect("consumer module loads");
+        let decide = exports.get("decide").expect("decide export");
+        let result = vm
+            .call_closure_pub(decide, &[])
+            .await
+            .expect("imported constructor executes");
+
+        assert_eq!(result.struct_name(), Some("Decision"));
+        assert!(matches!(
+            result
+                .struct_fields_map()
+                .expect("struct fields")
+                .get("allowed"),
+            Some(VmValue::Bool(true))
+        ));
+    });
+}
+
+#[test]
 fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
     let _guard = cache_test_guard();
     reset_stdlib_module_artifact_cache();
