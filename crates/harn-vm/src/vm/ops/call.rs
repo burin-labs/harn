@@ -5,48 +5,13 @@ use std::sync::Arc;
 
 use crate::chunk::{DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget};
 use crate::orchestration::HookEvent;
-use crate::value::{
-    string_char_count, values_equal, DeadlockError, VmClosure, VmError, VmJoinHandle, VmTaskHandle,
-    VmValue,
-};
+use crate::value::{string_char_count, values_equal, DeadlockError, VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
 use super::super::{CallArgs, CallFrame};
+use super::call_support::{AwaitingTask, StepPreHookAction};
 
 const DIRECT_CALL_QUICKEN_THRESHOLD: u8 = 3;
-
-struct AwaitingTask {
-    task: Option<VmTaskHandle>,
-}
-
-impl AwaitingTask {
-    fn new(task: VmTaskHandle) -> Self {
-        Self { task: Some(task) }
-    }
-
-    fn handle_mut(&mut self) -> &mut VmJoinHandle {
-        &mut self.task.as_mut().expect("awaiting task present").handle
-    }
-
-    fn disarm(mut self) {
-        self.task = None;
-    }
-}
-
-impl Drop for AwaitingTask {
-    fn drop(&mut self) {
-        if let Some(task) = self.task.take() {
-            task.cancel_token
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            task.handle.abort();
-        }
-    }
-}
-
-enum StepPreHookAction {
-    Allow(Vec<VmValue>),
-    Deny(String),
-}
 
 impl super::super::Vm {
     fn step_hook_payload(

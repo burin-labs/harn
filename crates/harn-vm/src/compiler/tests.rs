@@ -728,7 +728,7 @@ pipeline default() {}
         "active try/catch handlers must keep their owning frame alive",
     );
     assert!(
-        guarded_disasm.contains("CALL_BUILTIN"),
+        disasm_opcodes(&guarded_disasm).contains(&"CALL"),
         "the guarded return expression should still call the callee normally",
     );
 

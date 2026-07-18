@@ -1383,18 +1383,7 @@ impl TypeChecker {
                 ..
             } => {
                 let mut closure_scope = scope.child();
-                for p in params {
-                    let annotated = p
-                        .type_expr
-                        .as_ref()
-                        .is_some_and(|ty| !Self::contains_wildcard_type(ty));
-                    self.check_and_define_parameter(
-                        p,
-                        p.type_expr.clone(),
-                        annotated,
-                        &mut closure_scope,
-                    );
-                }
+                self.check_and_define_declared_parameters(params, &mut closure_scope);
                 self.fn_depth += 1;
                 let saved_stream_depth = self.stream_fn_depth;
                 let saved_stream_emit_types = self.stream_emit_types.clone();

@@ -61,7 +61,7 @@ fn reassigned_callable_is_observed_by_reference() {
     let (output, _) = run_harn(
         r#"pipeline default(task) {
 let callable = { -> "outer" }
-{
+if true {
 let callable = { -> "before" }
 const invoke = { -> callable() }
 callable = { -> "after" }
@@ -81,7 +81,7 @@ fn environment_backed_captures_preserve_collection_write_paths() {
         r#"pipeline default(task) {
 let items = ["outer"]
 let record = {value: "outer", extra: "outer"}
-{
+if true {
 let items = ["a"]
 let record = {value: "before"}
 const read = { -> items.join("") + "|" + record.value + "|" + record.extra }

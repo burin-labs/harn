@@ -43,6 +43,20 @@ impl TypeChecker {
         scope.clear_nil_widenable(&param.name);
     }
 
+    pub(super) fn check_and_define_declared_parameters(
+        &mut self,
+        params: &[TypedParam],
+        scope: &mut TypeScope,
+    ) {
+        for param in params {
+            let annotated = param
+                .type_expr
+                .as_ref()
+                .is_some_and(|ty| !Self::contains_wildcard_type(ty));
+            self.check_and_define_parameter(param, param.type_expr.clone(), annotated, scope);
+        }
+    }
+
     pub(in crate::typechecker) fn fn_signature_from_parts(
         params: &[TypedParam],
         return_type: InferredType,
