@@ -21,9 +21,9 @@ pub const AUTO_SEPARATOR_WIDTH: usize = 0;
 
 /// Maximum line width the formatter targets.
 ///
-/// This is the single budget every wrap decision spends from: calls, method
-/// chains, signatures, and struct literals all break against it, and none of
-/// them may emit a line past it.
+/// Layout decisions use this shared budget, although unbreakable content and
+/// expression contexts that do not yet track their starting column can still
+/// produce longer lines.
 pub const LINE_WIDTH_DEFAULT: usize = 100;
 
 /// Error returned when formatting cannot proceed.
