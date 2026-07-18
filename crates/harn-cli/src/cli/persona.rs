@@ -155,7 +155,11 @@ pub(crate) struct PersonaMaterializeArgs {
     #[arg(long)]
     pub force: bool,
     /// Install and activate an accepted compile receipt in the selected project.
-    #[arg(long, requires = "compile_receipt", conflicts_with = "blueprint")]
+    #[arg(
+        long,
+        requires_all = ["compile_receipt", "manifest", "json"],
+        conflicts_with = "blueprint"
+    )]
     pub activate: bool,
     /// Emit the typed apply receipt as JSON.
     #[arg(long, requires = "activate")]

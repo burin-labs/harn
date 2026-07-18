@@ -39,6 +39,8 @@ pub enum PersonaActivationError {
     },
     #[error("activated persona '{persona_id}' is stale: {reason}; reactivate it before use")]
     StaleActivation { persona_id: String, reason: String },
+    #[error("activation '{persona_id}' changed while a failed apply was rolling back")]
+    RollbackConflict { persona_id: String },
     #[error("invalid persona attenuation: {0}")]
     InvalidAttenuation(String),
     #[error(
@@ -255,6 +257,46 @@ pub fn deactivate_persona(
         ledger_path: ledger_path.display().to_string(),
         activation,
     })
+}
+
+pub(crate) fn restore_persona_activation(
+    manifest: Option<&Path>,
+    expected: &PersonaActivationRecord,
+    previous: Option<PersonaActivationRecord>,
+) -> Result<(), PersonaActivationError> {
+    let root = load_root_persona_catalog(manifest).map_err(PersonaActivationError::Catalog)?;
+    let persona_id = expected.persona_id.clone();
+    if previous
+        .as_ref()
+        .is_some_and(|activation| activation.persona_id != persona_id)
+    {
+        return Err(PersonaActivationError::InvalidLedger {
+            path: activation_ledger_path(&root.manifest_dir)
+                .display()
+                .to_string(),
+            message: format!("rollback record does not match activation '{persona_id}'"),
+        });
+    }
+    let (_, restored) = mutate_activation_ledger(&root.manifest_dir, |ledger| {
+        if ledger.activations.get(&persona_id) != Some(expected) {
+            return (
+                false,
+                Err(PersonaActivationError::RollbackConflict {
+                    persona_id: persona_id.clone(),
+                }),
+            );
+        }
+        match previous {
+            Some(previous) => {
+                ledger.activations.insert(persona_id, previous);
+            }
+            None => {
+                ledger.activations.remove(&persona_id);
+            }
+        }
+        (true, Ok(()))
+    })?;
+    restored
 }
 
 pub fn list_persona_activations(

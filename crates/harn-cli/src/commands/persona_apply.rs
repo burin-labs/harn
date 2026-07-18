@@ -112,6 +112,14 @@ pub(crate) async fn apply_reviewed_persona(
     manifest: Option<&Path>,
     args: &PersonaMaterializeArgs,
 ) -> PersonaApplyReceipt {
+    apply_reviewed_persona_with_verifier(manifest, args, verify_apply).await
+}
+
+async fn apply_reviewed_persona_with_verifier(
+    manifest: Option<&Path>,
+    args: &PersonaMaterializeArgs,
+    verifier: impl FnOnce(&Path, &str, &PersonaApplyReceipt) -> Result<PersonaApplyVerification, String>,
+) -> PersonaApplyReceipt {
     let mut receipt = PersonaApplyReceipt::default();
     let Some(manifest) = manifest else {
         return failed(
@@ -235,6 +243,22 @@ pub(crate) async fn apply_reviewed_persona(
         }
     }
 
+    let previous_activation =
+        match package::list_persona_activations(Some(&project.manifest_path())) {
+            Ok(activations) => activations
+                .into_iter()
+                .find(|activation| activation.persona_id == persona_id),
+            Err(error) => {
+                return failed_with_install_rollback(
+                    receipt,
+                    install_transaction,
+                    PersonaApplyStage::Activate,
+                    "activation_preflight_failed",
+                    error.to_string(),
+                    true,
+                );
+            }
+        };
     let activation = match package::activate_persona(
         Some(&project.manifest_path()),
         &persona_id,
@@ -259,7 +283,7 @@ pub(crate) async fn apply_reviewed_persona(
     receipt.stage = PersonaApplyStage::Activate;
     receipt.activation = Some(activation);
 
-    match verify_apply(&project.manifest_path(), &persona_id, &receipt) {
+    match verifier(&project.manifest_path(), &persona_id, &receipt) {
         Ok(verification) => {
             let committed = install_transaction.commit();
             receipt.install = Some(committed);
@@ -274,22 +298,29 @@ pub(crate) async fn apply_reviewed_persona(
                 .as_ref()
                 .is_some_and(|activation| activation.changed)
             {
-                if let Err(deactivation_error) = package::deactivate_persona(
+                let expected = receipt
+                    .activation
+                    .as_ref()
+                    .and_then(|activation| activation.activation.as_ref())
+                    .expect("changed activation receipt must contain its record");
+                if let Err(activation_rollback_error) = package::restore_persona_activation(
                     Some(&project.manifest_path()),
-                    &persona_id,
-                    harn_vm::persona_now_ms(),
+                    expected,
+                    previous_activation.clone(),
                 ) {
                     return failed(
                         receipt,
                         PersonaApplyStage::Verify,
                         "verification_rollback_failed",
                         format!(
-                            "persona verification failed: {error}; activation rollback failed: {deactivation_error}"
+                            "persona verification failed: {error}; activation rollback failed: {activation_rollback_error}"
                         ),
                         false,
                     );
                 }
-                receipt.activation = None;
+                if previous_activation.is_none() {
+                    receipt.activation = None;
+                }
             }
             failed_with_install_rollback(
                 receipt,
@@ -325,33 +356,68 @@ fn verify_apply(
     }
     let extensions =
         package::try_load_runtime_extensions(manifest_path).map_err(|error| error.to_string())?;
-    if !extensions
+    let resolved_persona = extensions
         .runtime_personas
         .iter()
-        .any(|persona| persona.id == discovered.id)
+        .find(|persona| persona.id == discovered.id)
+        .ok_or_else(|| format!("runtime did not load activated persona {persona_id}"))?;
+    if resolved_persona.execution_guard.is_none()
+        || resolved_persona.manifest_path != discovered.manifest_path
     {
         return Err(format!(
-            "runtime did not load activated persona {persona_id}"
+            "runtime persona {persona_id} lacks installed-package execution provenance"
         ));
     }
     let handler = format!("persona://{persona_id}");
-    let mut trigger_ids = extensions
-        .triggers
-        .iter()
-        .filter(|trigger| trigger.handler == handler)
-        .map(|trigger| trigger.id.clone())
-        .collect::<Vec<_>>();
-    trigger_ids.sort();
-    if trigger_ids.is_empty() {
+    let mut expected_trigger_ids =
+        package::installed_persona_trigger_configs(std::slice::from_ref(resolved_persona))
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|trigger| trigger.id)
+            .collect::<Vec<_>>();
+    expected_trigger_ids.sort();
+    expected_trigger_ids.dedup();
+    if expected_trigger_ids.is_empty() {
         return Err(format!(
-            "runtime found no trigger for activated persona {persona_id}"
+            "installed persona package defines no trigger for {persona_id}"
         ));
     }
+    let trigger_ids = verified_projected_trigger_ids(
+        &extensions.triggers,
+        &handler,
+        &discovered.manifest_path,
+        &expected_trigger_ids,
+    )?;
     Ok(PersonaApplyVerification {
         persona_id: persona_id.to_string(),
         content_hash: activation.package.content_hash.clone(),
         trigger_ids,
     })
+}
+
+fn verified_projected_trigger_ids(
+    triggers: &[package::ResolvedTriggerConfig],
+    handler: &str,
+    manifest_path: &Path,
+    expected_trigger_ids: &[String],
+) -> Result<Vec<String>, String> {
+    let mut actual = triggers
+        .iter()
+        .filter(|trigger| {
+            trigger.handler == handler
+                && trigger.execution_guard.is_some()
+                && trigger.manifest_path == manifest_path
+        })
+        .map(|trigger| trigger.id.clone())
+        .collect::<Vec<_>>();
+    actual.sort();
+    actual.dedup();
+    if actual != expected_trigger_ids {
+        return Err(format!(
+            "runtime trigger projection for {handler} is incomplete: expected {expected_trigger_ids:?}, found {actual:?}"
+        ));
+    }
+    Ok(actual)
 }
 
 fn failed(
@@ -630,7 +696,7 @@ mod tests {
         assert!(receipt.install.is_some());
         assert!(receipt.activation.is_none());
         let error = receipt.error.unwrap();
-        assert_eq!(error.code, "activation_failed");
+        assert_eq!(error.code, "activation_preflight_failed");
         assert!(error.retryable);
         assert!(!error.installed_inert);
         assert!(!error.activation_present);
@@ -640,6 +706,124 @@ mod tests {
         let ledger_value: serde_json::Value =
             serde_json::from_slice(&fs::read(&ledger).unwrap()).unwrap();
         assert_eq!(ledger_value["activations"], serde_json::json!({}));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn verification_failure_restores_the_exact_prior_activation() {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, args) = apply_fixture(temp.path());
+        let first = apply_reviewed_persona(Some(&manifest), &args).await;
+        assert!(first.ok, "{:#?}", first.error);
+        let persona_id = first.verification.unwrap().persona_id;
+
+        package::activate_persona(
+            Some(&manifest),
+            &persona_id,
+            &PersonaAttenuation {
+                autonomy_tier: Some(PersonaAutonomyTier::Shadow),
+                ..PersonaAttenuation::default()
+            },
+            123_456,
+        )
+        .unwrap();
+        let ledger = package::activation_ledger_path(temp.path());
+        let ledger_before = fs::read(&ledger).unwrap();
+        let activation_before = package::list_persona_activations(Some(&manifest)).unwrap();
+
+        let failed = apply_reviewed_persona_with_verifier(Some(&manifest), &args, |_, _, _| {
+            Err("forced verification failure".to_string())
+        })
+        .await;
+
+        assert!(!failed.ok);
+        assert_eq!(failed.stage, PersonaApplyStage::Verify);
+        assert_eq!(failed.error.unwrap().code, "verification_failed");
+        assert_eq!(fs::read(&ledger).unwrap(), ledger_before);
+        assert_eq!(
+            package::list_persona_activations(Some(&manifest)).unwrap(),
+            activation_before
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn activation_rollback_refuses_to_clobber_a_newer_record() {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, args) = apply_fixture(temp.path());
+        let applied = apply_reviewed_persona(Some(&manifest), &args).await;
+        assert!(applied.ok, "{:#?}", applied.error);
+        let expected = applied
+            .activation
+            .unwrap()
+            .activation
+            .expect("successful apply activation record");
+
+        package::activate_persona(
+            Some(&manifest),
+            &expected.persona_id,
+            &PersonaAttenuation {
+                autonomy_tier: Some(PersonaAutonomyTier::Shadow),
+                ..PersonaAttenuation::default()
+            },
+            234_567,
+        )
+        .unwrap();
+        let newer = package::list_persona_activations(Some(&manifest)).unwrap();
+
+        let error = package::restore_persona_activation(Some(&manifest), &expected, None)
+            .expect_err("rollback must compare-and-swap the expected activation");
+
+        assert!(matches!(
+            error,
+            package::PersonaActivationError::RollbackConflict { .. }
+        ));
+        assert_eq!(
+            package::list_persona_activations(Some(&manifest)).unwrap(),
+            newer
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn trigger_verification_requires_guarded_complete_package_projection() {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, args) = apply_fixture(temp.path());
+        let applied = apply_reviewed_persona(Some(&manifest), &args).await;
+        assert!(applied.ok, "{:#?}", applied.error);
+        let verification = applied.verification.unwrap();
+        let extensions = package::try_load_runtime_extensions(&manifest).unwrap();
+        let installed = extensions
+            .triggers
+            .iter()
+            .find(|trigger| verification.trigger_ids.contains(&trigger.id))
+            .unwrap()
+            .clone();
+        let handler = format!("persona://{}", verification.persona_id);
+
+        let mut root_trigger = installed.clone();
+        root_trigger.execution_guard = None;
+        root_trigger.manifest_path.clone_from(&manifest);
+        assert!(verified_projected_trigger_ids(
+            &[root_trigger],
+            &handler,
+            &installed.manifest_path,
+            &verification.trigger_ids,
+        )
+        .is_err());
+
+        let mut two_expected = verification.trigger_ids.clone();
+        two_expected.push("missing/second-trigger".to_string());
+        two_expected.sort();
+        assert!(verified_projected_trigger_ids(
+            &[installed],
+            &handler,
+            &extensions
+                .runtime_personas
+                .iter()
+                .find(|persona| persona.id == verification.persona_id)
+                .unwrap()
+                .manifest_path,
+            &two_expected,
+        )
+        .is_err());
     }
 
     #[test]

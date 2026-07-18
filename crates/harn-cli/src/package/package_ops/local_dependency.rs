@@ -29,13 +29,17 @@ impl LocalDependencyInstall {
 
     pub(crate) fn rollback(mut self) -> Result<LocalDependencyInstallReceipt, PackageError> {
         if let Some(rollback) = self.rollback.take() {
-            rollback.restore()?;
+            rollback.restore_owned_dependency()?;
         }
         Ok(self.receipt)
     }
 }
 
 struct LocalDependencyRollback {
+    workspace: PackageWorkspace,
+    package_root: PathBuf,
+    alias: String,
+    owned_edge_added: bool,
     manifest: FileSnapshot,
     lock: FileSnapshot,
     generation_pointer: FileSnapshot,
@@ -43,10 +47,19 @@ struct LocalDependencyRollback {
 }
 
 impl LocalDependencyRollback {
-    fn capture(ctx: &ManifestContext) -> Result<Self, PackageError> {
+    fn capture(
+        workspace: &PackageWorkspace,
+        ctx: &ManifestContext,
+        package_root: &Path,
+        alias: &str,
+    ) -> Result<Self, PackageError> {
         let prior_generation = PackageSnapshot::acquire(&ctx.dir)
             .map_err(|error| PackageError::Lockfile(error.to_string()))?;
         Ok(Self {
+            workspace: workspace.clone(),
+            package_root: package_root.to_path_buf(),
+            alias: alias.to_string(),
+            owned_edge_added: !ctx.manifest.dependencies.contains_key(alias),
             manifest: FileSnapshot::capture(ctx.manifest_path())?,
             lock: FileSnapshot::capture(ctx.lock_path())?,
             generation_pointer: FileSnapshot::capture(package_current_path(&ctx.dir))?,
@@ -54,29 +67,83 @@ impl LocalDependencyRollback {
         })
     }
 
-    fn record_installed_state(&mut self) -> Result<(), PackageError> {
-        self.manifest.record_current()?;
-        self.lock.record_current()?;
-        self.generation_pointer.record_current()?;
-        Ok(())
-    }
-
-    fn restore(self) -> Result<(), PackageError> {
-        // Restore the pointer last so readers see either complete generation.
-        collect_restore_errors([
-            self.manifest.restore(),
-            self.lock.restore(),
-            self.generation_pointer.restore(),
-        ])
-    }
-
     fn restore_after_failed_install(self) -> Result<(), PackageError> {
-        collect_restore_errors([
-            self.manifest.restore_unconditionally(),
-            self.lock.restore_unconditionally(),
-            self.generation_pointer.restore_unconditionally(),
-        ])
+        self.restore_owned_dependency_from_manifest()
     }
+
+    fn restore_owned_dependency(self) -> Result<(), PackageError> {
+        self.restore_owned_dependency_from_manifest()
+    }
+
+    fn restore_owned_dependency_from_manifest(self) -> Result<(), PackageError> {
+        let ctx = self.workspace.load_manifest_context()?;
+        match (
+            self.owned_edge_added,
+            ctx.manifest.dependencies.get(&self.alias),
+        ) {
+            (true, Some(dependency))
+                if dependency_targets(&ctx.dir, dependency, &self.package_root) =>
+            {
+                remove_dependency_from_manifest(&ctx.manifest_path(), &self.alias)?;
+            }
+            (true, Some(_)) => {
+                return Err(PackageError::Ops(format!(
+                    "refusing to roll back local dependency '{}' because its target changed",
+                    self.alias
+                )))
+            }
+            _ => {}
+        }
+
+        let manifest_now = fs::read(ctx.manifest_path()).map_err(|error| {
+            PackageError::Ops(format!(
+                "failed to read {} during rollback: {error}",
+                ctx.manifest_path().display()
+            ))
+        })?;
+        if same_toml_document(self.manifest.before.as_deref(), Some(&manifest_now))? {
+            return collect_restore_errors([
+                self.manifest.restore_unconditionally(),
+                self.lock.restore_unconditionally(),
+                self.generation_pointer.restore_unconditionally(),
+            ]);
+        }
+
+        // Another operation added unrelated manifest state. Preserve it and
+        // republish a generation from the current manifest after removing only
+        // the dependency edge owned by this transaction.
+        install_packages_in(&self.workspace, false, None, false).map(|_| ())
+    }
+}
+
+fn same_toml_document(left: Option<&[u8]>, right: Option<&[u8]>) -> Result<bool, PackageError> {
+    fn parse(bytes: Option<&[u8]>) -> Result<Option<toml::Value>, PackageError> {
+        bytes
+            .map(|bytes| {
+                std::str::from_utf8(bytes)
+                    .map_err(|error| PackageError::Manifest(error.to_string()))
+                    .and_then(|source| {
+                        let mut document: toml::Value =
+                            toml::from_str(source).map_err(|error| {
+                                PackageError::Manifest(format!(
+                                    "failed to compare manifest during rollback: {error}"
+                                ))
+                            })?;
+                        if let Some(table) = document.as_table_mut() {
+                            if table
+                                .get("dependencies")
+                                .and_then(toml::Value::as_table)
+                                .is_some_and(toml::map::Map::is_empty)
+                            {
+                                table.remove("dependencies");
+                            }
+                        }
+                        Ok(document)
+                    })
+            })
+            .transpose()
+    }
+    Ok(parse(left)? == parse(right)?)
 }
 
 fn collect_restore_errors<const N: usize>(
@@ -109,42 +176,12 @@ fn failed_install_with_rollback(
 struct FileSnapshot {
     path: PathBuf,
     before: Option<Vec<u8>>,
-    installed: Option<Vec<u8>>,
-    installed_recorded: bool,
 }
 
 impl FileSnapshot {
     fn capture(path: PathBuf) -> Result<Self, PackageError> {
         let before = read_optional_file(&path)?;
-        Ok(Self {
-            path,
-            before,
-            installed: None,
-            installed_recorded: false,
-        })
-    }
-
-    fn record_current(&mut self) -> Result<(), PackageError> {
-        self.installed = read_optional_file(&self.path)?;
-        self.installed_recorded = true;
-        Ok(())
-    }
-
-    fn restore(self) -> Result<(), PackageError> {
-        if !self.installed_recorded {
-            return Err(PackageError::Ops(format!(
-                "local dependency rollback for {} has no installed-state snapshot",
-                self.path.display()
-            )));
-        }
-        let current = read_optional_file(&self.path)?;
-        if current != self.installed {
-            return Err(PackageError::Ops(format!(
-                "refusing to roll back local dependency install because {} changed afterward",
-                self.path.display()
-            )));
-        }
-        restore_file(&self.path, self.before.as_deref())
+        Ok(Self { path, before })
     }
 
     fn restore_unconditionally(self) -> Result<(), PackageError> {
@@ -201,7 +238,7 @@ pub(crate) fn install_local_package(
     let preferred = derive_package_alias_from_path(&package_root)?;
     let alias = local_dependency_alias(&ctx, &package_root, &preferred, &dependency_path)?;
     let manifest_path = ctx.manifest_path();
-    let mut rollback = LocalDependencyRollback::capture(&ctx)?;
+    let rollback = LocalDependencyRollback::capture(workspace, &ctx, &package_root, &alias)?;
     let manifest_before =
         rollback.manifest.before.clone().ok_or_else(|| {
             PackageError::Manifest(format!("{} is missing", manifest_path.display()))
@@ -250,10 +287,6 @@ pub(crate) fn install_local_package(
         }
         Err(error) => return failed_install_with_rollback(rollback, error),
     };
-
-    if let Err(error) = rollback.record_installed_state() {
-        return failed_install_with_rollback(rollback, error);
-    }
 
     Ok(LocalDependencyInstall {
         receipt: LocalDependencyInstallReceipt {
@@ -419,5 +452,79 @@ mod tests {
             current_generation(root).unwrap().unwrap(),
             generation_before
         );
+    }
+
+    #[test]
+    fn rollback_preserves_an_interleaved_dependency_install() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join(MANIFEST),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let workspace = PackageWorkspace::from_manifest_dir(root);
+        let first_package = root.join("first-package");
+        let second_package = root.join("second-package");
+        for (path, name) in [
+            (&first_package, "first-package"),
+            (&second_package, "second-package"),
+        ] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(
+                path.join(MANIFEST),
+                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+            )
+            .unwrap();
+        }
+
+        let first = install_local_package(&workspace, &first_package).unwrap();
+        install_local_package(&workspace, &second_package)
+            .unwrap()
+            .commit();
+        first.rollback().unwrap();
+
+        let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        assert!(!manifest.contains("first-package ="));
+        assert!(manifest.contains("second-package = { path = \"second-package\" }"));
+        let snapshot = PackageSnapshot::acquire(root).unwrap().unwrap();
+        assert!(!snapshot
+            .package_names()
+            .iter()
+            .any(|name| name == "first-package"));
+        assert!(snapshot
+            .package_names()
+            .iter()
+            .any(|name| name == "second-package"));
+    }
+
+    #[test]
+    fn idempotent_rollback_keeps_the_preexisting_dependency_edge() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join(MANIFEST),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let package = root.join("existing-package");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join(MANIFEST),
+            "[package]\nname = \"existing-package\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let workspace = PackageWorkspace::from_manifest_dir(root);
+        install_local_package(&workspace, &package)
+            .unwrap()
+            .commit();
+        let manifest_before = fs::read(root.join(MANIFEST)).unwrap();
+
+        install_local_package(&workspace, &package)
+            .unwrap()
+            .rollback()
+            .unwrap();
+
+        assert_eq!(fs::read(root.join(MANIFEST)).unwrap(), manifest_before);
     }
 }

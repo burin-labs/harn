@@ -137,7 +137,7 @@ harn persona new --from-prompt \
   "Every four hours, digest what I need to reply to." --name reply_digest
 harn persona materialize --blueprint incident_triager.blueprint.json
 harn persona materialize --compile-receipt reviewed-prompt-receipt.json
-harn persona --manifest /project/harn.toml materialize \
+harn persona materialize --manifest /project/harn.toml \
   --compile-receipt reviewed-prompt-receipt.json --activate --json
 harn persona list
 harn persona list --json

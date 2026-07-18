@@ -183,11 +183,11 @@ fn reviewed_receipt_apply_is_discoverable_activated_and_triggerable_through_cli(
         root,
         &[
             "persona",
-            "--manifest",
-            &manifest,
             "materialize",
             "--compile-receipt",
             &receipt,
+            "--manifest",
+            &manifest,
             "--activate",
             "--json",
         ],
@@ -261,11 +261,11 @@ fn activation_failure_rolls_back_install_without_ledger_mutation() {
         root,
         &[
             "persona",
-            "--manifest",
-            &manifest,
             "materialize",
             "--compile-receipt",
             &receipt,
+            "--manifest",
+            &manifest,
             "--activate",
             "--json",
         ],
@@ -273,7 +273,7 @@ fn activation_failure_rolls_back_install_without_ledger_mutation() {
     assert!(!output.status.success());
     let failure: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(failure["stage"], "activate");
-    assert_eq!(failure["error"]["code"], "activation_failed");
+    assert_eq!(failure["error"]["code"], "activation_preflight_failed");
     assert_eq!(failure["error"]["installed_inert"], false);
     assert_eq!(failure["error"]["activation_present"], false);
     assert_eq!(fs::read(&ledger).unwrap(), invalid_ledger);

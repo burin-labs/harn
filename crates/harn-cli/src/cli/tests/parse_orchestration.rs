@@ -816,11 +816,11 @@ fn test_parses_persona_materialize_apply() {
     let cli = Cli::parse_from([
         "harn",
         "persona",
-        "--manifest",
-        "project/harn.toml",
         "materialize",
         "--compile-receipt",
         "reviewed-receipt.json",
+        "--manifest",
+        "project/harn.toml",
         "--activate",
         "--json",
     ]);
@@ -834,6 +834,45 @@ fn test_parses_persona_materialize_apply() {
     };
     assert!(materialize.activate);
     assert!(materialize.json);
+}
+
+#[test]
+fn test_persona_materialize_apply_requires_manifest_and_json() {
+    for (missing, args) in [
+        (
+            "--manifest",
+            vec![
+                "harn",
+                "persona",
+                "materialize",
+                "--compile-receipt",
+                "reviewed-receipt.json",
+                "--activate",
+                "--json",
+            ],
+        ),
+        (
+            "--json",
+            vec![
+                "harn",
+                "persona",
+                "materialize",
+                "--compile-receipt",
+                "reviewed-receipt.json",
+                "--manifest",
+                "project/harn.toml",
+                "--activate",
+            ],
+        ),
+    ] {
+        let error = Cli::try_parse_from(args).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument,
+            "missing {missing} must fail during argument parsing"
+        );
+        assert!(error.to_string().contains(missing));
+    }
 }
 
 #[test]
