@@ -203,7 +203,7 @@ fn status(store: &harn_hostlib::HostLeaseStore, args: HostLeaseStatusArgs) -> i3
     }
 }
 
-fn priority(value: HostLeasePriorityArg) -> harn_hostlib::HostLeasePriorityClass {
+pub(super) fn priority(value: HostLeasePriorityArg) -> harn_hostlib::HostLeasePriorityClass {
     match value {
         HostLeasePriorityArg::Interactive => harn_hostlib::HostLeasePriorityClass::Interactive,
         HostLeasePriorityArg::Measurement => harn_hostlib::HostLeasePriorityClass::Measurement,

@@ -142,6 +142,9 @@ pub(crate) struct HostLeaseRunCargoArgs {
     /// Host resource name. Defaults to the current machine's hostname.
     #[arg(long)]
     pub host: Option<String>,
+    /// Scheduling class persisted with the supervised run.
+    #[arg(long, value_enum, default_value = "ci-verify")]
+    pub priority_class: HostLeasePriorityArg,
     /// Maximum event-driven wait for the rust-heavy resource.
     #[arg(long, default_value_t = 0)]
     pub wait_ms: u64,

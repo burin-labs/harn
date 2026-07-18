@@ -36,7 +36,7 @@ const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
 const REGISTRY_BUSY_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 const PROCESS_LIVENESS_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
 const SCHEMA_VERSION: u32 = 2;
-const RUN_RECEIPT_SCHEMA_VERSION: u32 = 1;
+const RUN_RECEIPT_SCHEMA_VERSION: u32 = 2;
 const WHOLE_MACHINE_RESOURCE_CLASS: &str = "whole-machine";
 
 /// Failures produced while validating or mutating host lease state.
@@ -477,6 +477,7 @@ impl HostLeaseStore {
     pub fn begin_run(
         &self,
         owner: &str,
+        priority_class: HostLeasePriorityClass,
         resource: HostLeaseResourceKey,
         execution_context: HostLeaseExecutionContext,
         wait_limit_ms: u64,
@@ -486,6 +487,7 @@ impl HostLeaseStore {
             schema_version: RUN_RECEIPT_SCHEMA_VERSION,
             run_id: Uuid::now_v7().to_string(),
             owner: normalize_component("owner", owner)?,
+            priority_class,
             wait_limit_ms,
             resource,
             execution_context,

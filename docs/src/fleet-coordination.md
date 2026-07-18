@@ -191,6 +191,7 @@ lease around a launcher process:
 harn host lease run cargo \
     --host build-01 \
     --owner ci-verify \
+    --priority-class ci-verify \
     --workspace "$workspace" \
     --target-dir "$CARGO_TARGET_DIR" \
     --build-dir "$CARGO_BUILD_BUILD_DIR" \
@@ -211,11 +212,15 @@ boundary without changing its artifact-isolation policy:
 ```bash
 HARN_CARGO_LEASE_RUNNER=/path/to/prebuilt/harn \
 HARN_CARGO_LEASE_OWNER=ci-verify \
+HARN_CARGO_LEASE_PRIORITY_CLASS=ci-verify \
 HARN_CARGO_LEASE_WAIT_MS=600000 \
 ./scripts/cargo_with_worktree_build_dir.sh test -p harn-vm
 ```
 
 The runner must already exist; the wrapper never builds Harn recursively.
+The wrapper consumes its `HARN_CARGO_LEASE_*` controls before launching Harn,
+so Cargo, build scripts, tests, and nested wrapper invocations cannot inherit
+the opt-in and wait behind their own capacity-one lease.
 Leave the variable unset for formatting, metadata reads, and other static
 commands that do not need the `rust-heavy` resource.
 

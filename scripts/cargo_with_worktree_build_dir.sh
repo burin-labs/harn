@@ -28,10 +28,18 @@ else
 fi
 
 if [[ -n "${HARN_CARGO_LEASE_RUNNER:-}" ]]; then
-  if [[ "$HARN_CARGO_LEASE_RUNNER" == */* ]]; then
-    lease_runner="$HARN_CARGO_LEASE_RUNNER"
+  lease_runner_request="$HARN_CARGO_LEASE_RUNNER"
+  lease_owner="${HARN_CARGO_LEASE_OWNER:-cargo-wrapper}"
+  lease_host="${HARN_CARGO_LEASE_HOST:-}"
+  lease_wait_ms="${HARN_CARGO_LEASE_WAIT_MS:-}"
+  lease_priority_class="${HARN_CARGO_LEASE_PRIORITY_CLASS:-}"
+  unset HARN_CARGO_LEASE_RUNNER HARN_CARGO_LEASE_OWNER HARN_CARGO_LEASE_HOST \
+    HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_PRIORITY_CLASS
+
+  if [[ "$lease_runner_request" == */* ]]; then
+    lease_runner="$lease_runner_request"
   else
-    lease_runner="$(command -v "$HARN_CARGO_LEASE_RUNNER" || true)"
+    lease_runner="$(command -v "$lease_runner_request" || true)"
   fi
   if [[ -z "$lease_runner" || ! -x "$lease_runner" ]]; then
     echo "error: HARN_CARGO_LEASE_RUNNER must resolve to an executable Harn binary" >&2
@@ -41,18 +49,21 @@ if [[ -n "${HARN_CARGO_LEASE_RUNNER:-}" ]]; then
   workspace="$(cd "$script_dir/.." && pwd -P)"
   lease_args=(
     host lease run cargo
-    --owner "${HARN_CARGO_LEASE_OWNER:-cargo-wrapper}"
+    --owner "$lease_owner"
     --workspace "$workspace"
     --target-dir "$CARGO_TARGET_DIR"
   )
   if [[ -n "${CARGO_BUILD_BUILD_DIR:-}" ]]; then
     lease_args+=(--build-dir "$CARGO_BUILD_BUILD_DIR")
   fi
-  if [[ -n "${HARN_CARGO_LEASE_HOST:-}" ]]; then
-    lease_args+=(--host "$HARN_CARGO_LEASE_HOST")
+  if [[ -n "$lease_host" ]]; then
+    lease_args+=(--host "$lease_host")
   fi
-  if [[ -n "${HARN_CARGO_LEASE_WAIT_MS:-}" ]]; then
-    lease_args+=(--wait-ms "$HARN_CARGO_LEASE_WAIT_MS")
+  if [[ -n "$lease_wait_ms" ]]; then
+    lease_args+=(--wait-ms "$lease_wait_ms")
+  fi
+  if [[ -n "$lease_priority_class" ]]; then
+    lease_args+=(--priority-class "$lease_priority_class")
   fi
   exec "$lease_runner" "${lease_args[@]}" -- "$@"
 fi

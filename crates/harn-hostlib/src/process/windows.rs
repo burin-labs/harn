@@ -73,3 +73,80 @@ impl Drop for KillOnCloseJob {
         self.close();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufRead, Write};
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    use crate::process_liveness::{process_liveness, ProcessLiveness};
+
+    use super::KillOnCloseJob;
+
+    const WORKER_ENV: &str = "HARN_TEST_KILL_ON_CLOSE_WORKER";
+    const WORKER_TEST: &str = "process::windows::tests::kill_on_close_job_worker_fixture";
+
+    #[test]
+    fn kill_on_close_job_worker_fixture() {
+        if std::env::var_os(WORKER_ENV).is_none() {
+            return;
+        }
+
+        let _job = KillOnCloseJob::enroll_current_process().expect("enroll worker in Job Object");
+        let mut descendant = Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Write-Output $PID; Start-Sleep -Seconds 30",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn Job Object descendant");
+        let stdout = descendant.stdout.take().expect("capture descendant PID");
+        let mut lines = std::io::BufReader::new(stdout).lines();
+        let pid = lines
+            .next()
+            .expect("descendant reports its PID")
+            .expect("read descendant PID");
+        println!("HARN_JOB_CHILD_PID={pid}");
+        std::io::stdout().flush().expect("flush descendant PID");
+        let _ = descendant.wait();
+    }
+
+    #[test]
+    fn abruptly_losing_worker_kills_its_job_descendant() {
+        let mut worker = Command::new(std::env::current_exe().expect("resolve test binary"))
+            .args(["--exact", WORKER_TEST, "--nocapture"])
+            .env(WORKER_ENV, "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn Job Object worker fixture");
+        let stdout = worker.stdout.take().expect("capture worker handshake");
+        let mut child_pid = None;
+        for line in std::io::BufReader::new(stdout).lines() {
+            let line = line.expect("read worker handshake");
+            if let Some(raw) = line.strip_prefix("HARN_JOB_CHILD_PID=") {
+                child_pid = Some(raw.parse::<u32>().expect("parse descendant PID"));
+                break;
+            }
+        }
+        let child_pid = child_pid.expect("worker reports its descendant PID");
+
+        worker.kill().expect("abruptly terminate worker");
+        worker.wait().expect("reap terminated worker");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while process_liveness(child_pid) != ProcessLiveness::Dead && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        if process_liveness(child_pid) != ProcessLiveness::Dead {
+            let _ = Command::new("taskkill")
+                .args(["/PID", &child_pid.to_string(), "/T", "/F"])
+                .status();
+            panic!("Job Object descendant {child_pid} survived abrupt worker loss");
+        }
+    }
+}

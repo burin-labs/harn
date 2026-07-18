@@ -41,6 +41,13 @@ chmod +x "$fake_bin/cargo"
 cat > "$fake_bin/harn-lease" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+for name in HARN_CARGO_LEASE_RUNNER HARN_CARGO_LEASE_OWNER HARN_CARGO_LEASE_HOST \
+  HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_PRIORITY_CLASS; do
+  if [[ -v "$name" ]]; then
+    echo "wrapper leaked $name into the lease runner" >&2
+    exit 91
+  fi
+done
 printf '%s\n' "$@" > "$FAKE_HARN_LEASE_RECORD"
 SH
 chmod +x "$fake_bin/harn-lease"
@@ -98,6 +105,7 @@ PATH="$fake_bin:$PATH" \
   HARN_CARGO_LEASE_OWNER=lease-test \
   HARN_CARGO_LEASE_HOST=mac-local \
   HARN_CARGO_LEASE_WAIT_MS=123 \
+  HARN_CARGO_LEASE_PRIORITY_CLASS=interactive \
   FAKE_HARN_LEASE_RECORD="$lease_record" \
   "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
 
@@ -118,6 +126,8 @@ $custom_build_dir
 mac-local
 --wait-ms
 123
+--priority-class
+interactive
 --
 test
 -p

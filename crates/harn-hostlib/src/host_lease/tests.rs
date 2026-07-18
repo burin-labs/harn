@@ -196,6 +196,7 @@ fn run_receipts_persist_redacted_context_and_validate_state_edges() {
     let receipt = store
         .begin_run(
             "cargo-runner",
+            HostLeasePriorityClass::Interactive,
             HostLeaseResourceKey {
                 machine: "mac-local".to_string(),
                 resource_class: HostLeaseResourceClass::RustHeavy,
@@ -207,6 +208,7 @@ fn run_receipts_persist_redacted_context_and_validate_state_edges() {
 
     assert_eq!(receipt.schema_version, RUN_RECEIPT_SCHEMA_VERSION);
     assert_eq!(receipt.owner, "cargo-runner");
+    assert_eq!(receipt.priority_class, HostLeasePriorityClass::Interactive);
     assert_eq!(receipt.wait_limit_ms, 30_000);
     assert_eq!(store.load_run(&receipt.run_id).unwrap(), receipt);
     let persisted =

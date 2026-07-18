@@ -82,6 +82,10 @@ fn test_parses_supervised_cargo_lease_contract() {
     let HostLeaseRunCommand::Cargo(cargo) = run.command;
     assert_eq!(cargo.owner, "codex-0");
     assert_eq!(cargo.host.as_deref(), Some("build-01"));
+    assert!(matches!(
+        cargo.priority_class,
+        HostLeasePriorityArg::CiVerify
+    ));
     assert_eq!(cargo.wait_ms, 30_000);
     assert_eq!(cargo.workspace, PathBuf::from("/workspace"));
     assert_eq!(cargo.target_dir, PathBuf::from("/target"));

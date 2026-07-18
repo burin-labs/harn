@@ -15,6 +15,13 @@ use crate::cli::{
 use super::{print_error, EX_TEMPFAIL};
 
 const EX_CANCELLED: i32 = 130;
+const CARGO_LEASE_CONTROL_ENV: [&str; 5] = [
+    "HARN_CARGO_LEASE_RUNNER",
+    "HARN_CARGO_LEASE_OWNER",
+    "HARN_CARGO_LEASE_HOST",
+    "HARN_CARGO_LEASE_WAIT_MS",
+    "HARN_CARGO_LEASE_PRIORITY_CLASS",
+];
 
 pub(super) async fn run_supervised(
     store: &harn_hostlib::HostLeaseStore,
@@ -49,6 +56,7 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     );
     let run = match store.begin_run(
         &args.owner,
+        super::priority(args.priority_class),
         harn_hostlib::HostLeaseResourceKey {
             machine: host,
             resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
@@ -78,7 +86,7 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
         args: worker_args,
         cwd: Some(cargo.workspace.clone()),
         env: BTreeMap::new(),
-        env_remove: Vec::new(),
+        env_remove: cargo_lease_control_env(),
         env_mode: harn_hostlib::process::EnvMode::InheritClean,
         use_stdin: true,
         configure_process_group: true,
@@ -316,7 +324,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
         resource_class: resource.resource_class,
         execution_context: Some(context),
         owner: pending.owner,
-        priority_class: harn_hostlib::HostLeasePriorityClass::CiVerify,
+        priority_class: pending.priority_class,
         ttl_ms: None,
         owner_pid: Some(std::process::id()),
         reason: Some("supervised cargo workload".to_string()),
@@ -643,12 +651,19 @@ fn cargo_spawn_spec(
         args: args.to_vec(),
         cwd: Some(cargo.workspace.clone()),
         env,
-        env_remove: Vec::new(),
+        env_remove: cargo_lease_control_env(),
         env_mode: harn_hostlib::process::EnvMode::InheritClean,
         use_stdin: true,
         configure_process_group: false,
         output_capture: harn_hostlib::process::OutputCapture::Inherit,
     })
+}
+
+fn cargo_lease_control_env() -> Vec<String> {
+    CARGO_LEASE_CONTROL_ENV
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect()
 }
 
 fn fail_cargo_launch(

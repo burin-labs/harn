@@ -5,7 +5,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::HostLeaseResourceKey;
+use super::{HostLeasePriorityClass, HostLeaseResourceKey};
 
 const EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 1;
 
@@ -290,6 +290,8 @@ pub struct HostLeaseRunReceipt {
     pub run_id: String,
     /// Validated operator or automation identity that requested the run.
     pub owner: String,
+    /// Scheduling class requested for this run and used by its worker.
+    pub priority_class: HostLeasePriorityClass,
     /// Maximum resource wait requested by the public supervisor.
     pub wait_limit_ms: u64,
     /// Capacity-one machine resource used by the workload.

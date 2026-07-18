@@ -57,6 +57,8 @@ fn supervised_cargo_run_releases_the_worker_owned_rust_heavy_lease() {
             "host-lease-cli-test",
             "--host",
             "lease-cli-fixture",
+            "--priority-class",
+            "interactive",
             "--workspace",
             workspace.as_ref(),
             "--target-dir",
@@ -88,6 +90,10 @@ fn supervised_cargo_run_releases_the_worker_owned_rust_heavy_lease() {
         harn_hostlib::HostLeaseResourceClass::RustHeavy
     );
     assert_eq!(receipt.owner, "host-lease-cli-test");
+    assert_eq!(
+        receipt.priority_class,
+        harn_hostlib::HostLeasePriorityClass::Interactive
+    );
     assert!(matches!(
         receipt.status,
         harn_hostlib::HostLeaseRunState::Completed {
@@ -276,7 +282,7 @@ fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
     let fake_cargo = fake_bin.join("cargo");
     fs::write(
         &fake_cargo,
-        "#!/bin/sh\nset -eu\nprintf 'HARN_HOST_LEASE_CARGO_STARTED=%s\\n' \"$$\"\nexec sleep 300\n",
+        "#!/bin/sh\nset -eu\nif env | grep -Eq '^HARN_CARGO_LEASE_(RUNNER|OWNER|HOST|WAIT_MS|PRIORITY_CLASS)='; then\n  echo 'lease control environment reached Cargo' >&2\n  exit 91\nfi\nprintf 'HARN_HOST_LEASE_CARGO_STARTED=%s\\n' \"$$\"\nexec sleep 300\n",
     )
     .expect("write fake Cargo executable");
     fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
@@ -306,6 +312,11 @@ fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
         .args(["--", "test"])
         .env(harn_hostlib::HOST_LEASE_ROOT_ENV, &lease_root)
         .env("CARGO_TARGET_DIR", &target_dir)
+        .env("HARN_CARGO_LEASE_RUNNER", "must-not-reach-cargo")
+        .env("HARN_CARGO_LEASE_OWNER", "must-not-reach-cargo")
+        .env("HARN_CARGO_LEASE_HOST", "must-not-reach-cargo")
+        .env("HARN_CARGO_LEASE_WAIT_MS", "999")
+        .env("HARN_CARGO_LEASE_PRIORITY_CLASS", "measurement")
         .env("PATH", path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
