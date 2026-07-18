@@ -189,4 +189,18 @@ pipeline test_rejects_consumers_that_cannot_reuse_the_completed_producer(task) {
     package_errors
       .contains("ci.yml:package-audit must preserve package-only proof when rust-builds skips"),
   )
+  const invalid_compiler_inputs = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "package-audit": {...package, env: {...package.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"}},
+    },
+  }
+  const compiler_input_errors = ci_sccache_policy_errors(sccache_action(), invalid_compiler_inputs)
+  assert(
+    compiler_input_errors
+      .contains(
+      "ci.yml:package-audit must match rust-builds RUSTFLAGS when reusing its persistent cache",
+    ),
+  )
 }

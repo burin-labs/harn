@@ -457,6 +457,8 @@ fn sccache_producer_errors(workflow) -> list<string> {
 
 fn sccache_consumer_errors(workflow) -> list<string> {
   let errors: list<string> = []
+  const producer = workflow?.jobs?.["rust-builds"]
+  const producer_rustflags = trim(producer?.env?.RUSTFLAGS ?? "")
   const test_job = workflow?.jobs?.["rust-test"]
   for consumer in ["package-audit", "rust-test"] {
     const job = workflow?.jobs?.[consumer]
@@ -468,6 +470,10 @@ fn sccache_consumer_errors(workflow) -> list<string> {
     if !needs.contains("rust-builds") {
       errors = errors
         + ["ci.yml:${consumer} must wait for rust-builds before reusing its persistent cache"]
+    }
+    if trim(job?.env?.RUSTFLAGS ?? "") != producer_rustflags {
+      errors = errors
+        + ["ci.yml:${consumer} must match rust-builds RUSTFLAGS when reusing its persistent cache"]
     }
   }
   const package_condition = trim(workflow?.jobs?.["package-audit"]?.if ?? "")

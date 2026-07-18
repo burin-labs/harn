@@ -321,8 +321,18 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       SCCACHE_BASEDIRS: ${{ github.workspace }}
       SCCACHE_CACHE_SIZE: 15G
+      # This job deliberately consumes the behavior producer's sccache. Keep
+      # every rustc codegen input identical or the shared key is only nominal:
+      # the hosted treatment before this setting got 1/1,312 Rust cache hits.
+      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install mold linker
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: mold
+          check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/sccache
         with:
