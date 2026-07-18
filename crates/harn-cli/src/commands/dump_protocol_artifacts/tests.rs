@@ -662,7 +662,9 @@ fn explicit_artifact_version_is_validated_and_stamped_everywhere() {
 #[test]
 fn committed_protocol_artifacts_match_generator() {
     let artifacts = generate_artifacts(env!("CARGO_PKG_VERSION")).expect("artifacts");
-    let output_root = repo_root().join("spec/protocol-artifacts");
+    let output_root = repo_root()
+        .expect("test must run from the Harn workspace")
+        .join("spec/protocol-artifacts");
     for artifact in artifacts {
         let path = output_root.join(&artifact.relative_path);
         let on_disk = fs::read_to_string(&path).unwrap_or_else(|error| {
@@ -679,4 +681,16 @@ fn committed_protocol_artifacts_match_generator() {
             path.display()
         );
     }
+}
+
+#[test]
+fn repo_root_is_discovered_at_runtime_for_relocated_cli() {
+    let checkout = tempfile::tempdir().expect("checkout");
+    fs::write(checkout.path().join("Cargo.toml"), "[workspace]\n").expect("workspace manifest");
+    let schemas = checkout.path().join("conformance/protocols/schemas");
+    fs::create_dir_all(&schemas).expect("protocol schemas");
+    let nested = checkout.path().join("crates/harn-cli");
+    fs::create_dir_all(&nested).expect("nested command directory");
+
+    assert_eq!(repo_root_from(&nested), Some(checkout.path().to_path_buf()));
 }

@@ -1,3 +1,4 @@
+import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
 import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
@@ -5,19 +6,13 @@ import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
-// -------------------------------------------------------------------------------------------------
-
 // Typed option aliases (the documented way to build agent_loop options).
-//
 // Co-located with the `agent_loop_options` normalizer below so the alias and
 // the normalization/validation logic stay in one file. Rust twins for the
 // workflow-facing policies live in
 // `crates/harn-vm/src/orchestration/policy/types.rs` (`TurnPolicy`) and
 // `crates/harn-vm/src/orchestration/compaction.rs` (`CompactionPolicy`); key
 // parity is pinned by `crates/harn-vm/tests/typed_options_parity.rs`.
-
-// -------------------------------------------------------------------------------------------------
-
 /**
  * Iteration budget accepted by `agent_loop`'s `iteration_budget:` option.
  * Normalized by `__normalize_iteration_budget` below.
@@ -99,6 +94,7 @@ pub type StallDiagnostics = {
   reserved_terminal_verify?: bool,
   reserved_terminal_verify_iterations?: int,
   zero_write_terminal_verify?: bool,
+  monologue_actuation?: bool | MonologueActuationOptions,
 }
 
 /**
@@ -233,6 +229,7 @@ pub type AgentLoopOptions = {
   timeout?: int,
   timeout_ms?: int,
   messages?: list,
+  prefill?: string,
   history?: list,
   transcript?: dict,
   session_id?: string,

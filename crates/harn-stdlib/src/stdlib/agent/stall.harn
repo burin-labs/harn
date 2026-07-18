@@ -1,4 +1,15 @@
 import {
+  agent_monologue_actuation_config,
+  agent_monologue_actuation_initial_state,
+  agent_monologue_actuation_observe,
+} from "std/agent/monologue_actuation"
+import {
+  AgentStallConfig,
+  AgentStallObservation,
+  AgentStallState,
+  AgentStallWarning,
+} from "std/agent/stall_types"
+import {
   agent_emit_event,
   agent_session_inject_feedback,
   agent_session_totals,
@@ -181,141 +192,6 @@ const SOFT_PROGRESS_TOOLS = ["agent_progress"]
  *     last_diagnostic_snippet / last_diagnostic_delta_current / write_epoch /
  *     same_diagnostic_streak / edit_since_failure / reverify_owed.
  */
-type AgentStallConfig = {
-  enabled: bool,
-  threshold: int,
-  inject_feedback: bool,
-  max_feedback: int,
-  exempt_tools: list,
-  include_arguments: bool,
-  repeat_same_observation: int,
-  repeat_same_error: int,
-  no_progress_messages: int,
-  ping_pong_cycles: int,
-  repeat_context_window_error: int,
-  hard_stop_after_trips: int,
-  repair_aware: bool,
-  stuck_same_diagnostic_after: int,
-  post_edit_reverify: bool,
-  no_net_progress_extend_guard: bool,
-  no_net_progress_extend_after: int,
-  no_net_progress_hard_cap_after: int,
-  reserved_terminal_verify: bool,
-  reserved_terminal_verify_iterations: int,
-  zero_write_terminal_verify: bool,
-  verify_state_streak: int,
-  verify_state_stall_turns: int,
-  verify_state_recurrence_hard: int,
-  no_verifier_progress_limit: int,
-  progress_signal?: any,
-  remediation_delivered?: any,
-  action_signal?: any,
-  turns_since_clean_verify?: int,
-  no_net_progress_predicates: dict,
-}
-
-type AgentStallWarning = {
-  iteration: int,
-  tool_name: string,
-  repeat_count: int,
-  threshold: int,
-  arguments_digest: string,
-  signature_digest: string,
-  pattern: string,
-  signature: string,
-  count: int,
-  consecutive_trips: int,
-  hard_stop: bool,
-  arguments?: dict,
-  diagnostic_class?: string,
-  diagnostic_signature?: string,
-  diagnostic_snippet?: string,
-  remediation_delivered?: bool,
-}
-
-/**
- * Verify-state progress axis (#burin-cutover seam 1). When the host supplies a
- * `progress_signal` callback, these track the monotone "best verification
- * state" it reports so the no-net-progress decision can key on "verification
- * advanced" instead of edit/tool signature deltas ("writes are not progress").
- * Inert (all default) when no progress_signal is configured.
- *   - verify_state_seen: has any scalar been observed yet.
- *   - verify_state_high: high-water mark of the reported scalar.
- *   - verify_turns_since_advance: consecutive turns whose scalar did NOT exceed
- *     the high-water mark (i.e. the verifier has not moved).
- *   - verify_wrote_since_advance: a workspace write landed since the verifier
- *     last advanced — the "edit lands every turn but the verifier never moves"
- *     signal that drives the short write-axis cut.
- *   - verify_signature_counts: per-signature TOTAL (non-consecutive) failure
- *     recurrence across the run — the interleaved-churn axis that the consecutive
- *     `same_diagnostic_streak` misses; drives the hard-recurrence cut.
- *   - turns_since_clean_verify: total folded turns since the last CLEAN passing
- *     verification (edit/read turns included, unlike `failing_verify_turns`).
- *     Resets to 0 only on a clean non-edit pass; drives the elapsed-turns hard floor
- *     (#burin-cutover seam 5). Always maintained; consulted only when the
- *     `turns_since_clean_verify` knob is set.
- *   - remediation_delivered_signature / remediation_delivered_count: baseline for
- *     the cumulative-count `remediation_delivered` intake (#burin-cutover seam 3).
- *     When the host callback returns an int cumulative count (rather than a bool),
- *     harn diffs it against the last count SEEN for the active failure signature to
- *     derive the per-turn delivered event, resetting the baseline on a signature
- *     change. Internal-only tracking; never entered into any output projection.
- */
-type AgentStallState = {
-  last_signature: string,
-  streak: int,
-  warnings: list<AgentStallWarning>,
-  repeated_tool_calls: int,
-  feedback_count: int,
-  last_observation_signature: string,
-  last_outcome_kind: string,
-  same_observation_streak: int,
-  same_error_streak: int,
-  context_window_error_streak: int,
-  no_progress_streak: int,
-  ping_pong_a: string,
-  ping_pong_b: string,
-  ping_pong_alternations: int,
-  consecutive_trips: int,
-  action_flail_trips: int,
-  hard_stop: bool,
-  last_diagnostic_class: string,
-  last_diagnostic_signature: string,
-  last_diagnostic_snippet: string,
-  last_diagnostic_delta_current: dict,
-  last_diagnostic_delta_status: string,
-  last_diagnostic_delta_reason: string,
-  write_epoch: int,
-  same_diagnostic_streak: int,
-  failing_verify_turns: int,
-  turns_since_clean_verify: int,
-  edit_since_failure: bool,
-  reverify_owed: bool,
-  verified_write_epoch: int,
-  verify_state_seen: bool,
-  verify_state_high: float,
-  verify_turns_since_advance: int,
-  verify_wrote_since_advance: bool,
-  verify_signature_counts: dict,
-  remediation_delivered_signature: string,
-  remediation_delivered_count: int,
-}
-
-/**
- * The result of folding one turn into the stall detectors: the updated
- * `state`, whether detection is `enabled`, the `warning` (if any) this turn
- * tripped, whether its feedback was deferred, the resolved `config`, and
- * whether the run should `hard_stop`.
- */
-type AgentStallObservation = {
-  state: AgentStallState,
-  enabled: bool,
-  warning: AgentStallWarning?,
-  feedback_deferred: bool,
-  config: AgentStallConfig,
-  hard_stop: bool,
-}
-
 fn __agent_stall_bool(value, fallback: bool, field: string) -> bool {
   if value == nil {
     return fallback
@@ -445,6 +321,7 @@ fn __agent_stall_default_config() -> AgentStallConfig {
     verify_state_stall_turns: STALL_VERIFY_STATE_STALL_TURNS,
     verify_state_recurrence_hard: STALL_VERIFY_STATE_RECURRENCE_HARD,
     no_verifier_progress_limit: STALL_NO_VERIFIER_PROGRESS_LIMIT,
+    monologue_actuation: agent_monologue_actuation_config(),
     progress_signal: nil,
     remediation_delivered: nil,
     action_signal: nil,
@@ -571,6 +448,7 @@ fn __agent_stall_config(value) -> AgentStallConfig {
       STALL_NO_VERIFIER_PROGRESS_LIMIT,
       1,
     ),
+    monologue_actuation: agent_monologue_actuation_config(value?.monologue_actuation),
     progress_signal: __agent_stall_closure(
       __agent_stall_repair_value(value, repair_diagnostics, "progress_signal"),
       "progress_signal",
@@ -640,6 +518,7 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     verify_signature_counts: {},
     remediation_delivered_signature: "",
     remediation_delivered_count: 0,
+    monologue_actuation: agent_monologue_actuation_initial_state(),
   }
 }
 
@@ -1909,19 +1788,25 @@ fn __agent_stall_apply_action_signal(
   )
 }
 
+fn __agent_stall_observe_monologue_actuation(observation: AgentStallObservation) -> AgentStallObservation {
+  return observation
+    + {
+    state: observation.state
+      + {
+      monologue_actuation: agent_monologue_actuation_observe(
+        observation.state.monologue_actuation,
+        observation.config.monologue_actuation,
+        to_string(observation.warning?.pattern ?? ""),
+      ),
+    },
+  }
+}
+
 /**
- * agent_stall_observe_tool_calls detects degenerate agent loops, folds the
- * current-failure model when post-edit verification is enabled, and when the
- * evidence-aware repair nudge is enabled (`stall_diagnostics.repair_aware`)
- * nudges a strategy shift on a stuck diagnostic. `turn_made_edit` reports
- * whether the PRIOR turn (the one `prev_dispatch` describes) made a successful
- * workspace-mutating edit; it is inert unless `post_edit_reverify` or
- * `repair_aware` is set.
- *
- * `payload` is the full post-turn payload; it is passed to the host's
- * `progress_signal` verify-state callback (#burin-cutover seam 1) and is
- * otherwise unused. Absent a `progress_signal` callback it is ignored, so the
- * default (payload nil / callback unset) is byte-identical to today.
+ * Fold one turn through stall, repair, action, verification, and optional
+ * actuation detectors. `turn_made_edit` describes the prior dispatch;
+ * `payload` reaches configured host fact callbacks only. Completed-dispatch
+ * actuation credit is owned by the loop after tool results exist.
  *
  * @effects: [agent]
  * @errors: [agent_loop]
@@ -1977,13 +1862,14 @@ pub fn agent_stall_observe_tool_calls(
     payload,
     defer_feedback,
   )
-  if observation.config.progress_signal == nil {
-    return signaled
+  let resolved = signaled
+  if observation.config.progress_signal != nil {
+    resolved = resolved
+      + {
+      state: __agent_stall_fold_verify_state(resolved.state, observation.config, payload, turn_made_edit),
+    }
   }
-  return signaled
-    + {
-    state: __agent_stall_fold_verify_state(signaled.state, observation.config, payload, turn_made_edit),
-  }
+  return __agent_stall_observe_monologue_actuation(resolved)
 }
 
 /**

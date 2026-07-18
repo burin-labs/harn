@@ -1,0 +1,336 @@
+import {
+  MonologueActuationConfig,
+  MonologueActuationDecision,
+  MonologueActuationState,
+} from "std/agent/monologue_actuation_types"
+import { agent_has_tools, agent_render_tool_call_prefix } from "std/agent/preflight"
+import { agent_emit_event } from "std/agent/state"
+import { agent_tool_resolve_workspace_write_name } from "std/agent/tool_annotations"
+import { llm_has_explicit_routing_owner } from "std/llm/options"
+
+/**
+ * Bounded, opt-in recovery for tool-less action narration or a repeated
+ * read-only loop that never commits to an available workspace-write tool. This
+ * module owns the small state machine and transport-independent receipt; the
+ * agent loop attaches the returned prefill to its next main request only.
+ */
+/**
+ * Normalize the nested `stall_diagnostics.monologue_actuation` input. It is
+ * intentionally default-off, and a bool is shorthand for `{enabled: bool}`.
+ *
+ * @effects: []
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_monologue_actuation_config(value = nil) -> MonologueActuationConfig {
+  const defaults: MonologueActuationConfig = {enabled: false, max_firings: 1, read_only_turns: 4, write_tool: ""}
+  if value == nil {
+    return defaults
+  }
+  if type_of(value) == "bool" {
+    return defaults + {enabled: value}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: stall_diagnostics.monologue_actuation must be a bool, dict, or nil; got "
+      + type_of(value)
+  }
+  const enabled = value?.enabled
+  if enabled != nil && type_of(enabled) != "bool" {
+    throw "agent_loop: stall_diagnostics.monologue_actuation.enabled must be a bool; got "
+      + type_of(enabled)
+  }
+  const max_firings = value?.max_firings
+  if max_firings != nil && (type_of(max_firings) != "int" || max_firings < 1) {
+    throw "agent_loop: stall_diagnostics.monologue_actuation.max_firings must be a positive int; got "
+      + type_of(max_firings)
+  }
+  const read_only_turns = value?.read_only_turns
+  if read_only_turns != nil && (type_of(read_only_turns) != "int" || read_only_turns < 1) {
+    throw "agent_loop: stall_diagnostics.monologue_actuation.read_only_turns must be a positive int; got "
+      + type_of(read_only_turns)
+  }
+  const write_tool = value?.write_tool
+  if write_tool != nil && type_of(write_tool) != "string" {
+    throw "agent_loop: stall_diagnostics.monologue_actuation.write_tool must be a string; got "
+      + type_of(write_tool)
+  }
+  return {
+    enabled: enabled ?? true,
+    max_firings: max_firings ?? defaults.max_firings,
+    read_only_turns: read_only_turns ?? defaults.read_only_turns,
+    write_tool: trim(write_tool ?? ""),
+  }
+}
+
+/**
+ * Return fresh state for one agent run.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_monologue_actuation_initial_state() -> MonologueActuationState {
+  return {pending: false, pending_trigger: "", firing_count: 0, read_only_streak: 0}
+}
+
+/**
+ * Fold a pre-dispatch stall warning into the actuation trigger. Completed tool
+ * dispatches advance their own streak through
+ * `agent_monologue_actuation_observe_completed_dispatch`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_monologue_actuation_observe(
+  state: MonologueActuationState,
+  config: MonologueActuationConfig,
+  warning_pattern: string,
+) -> MonologueActuationState {
+  if !config.enabled {
+    return state
+  }
+  if warning_pattern == "no_progress_monologue" {
+    return state + {pending: true, pending_trigger: warning_pattern}
+  }
+  return state
+}
+
+/**
+ * Advance the read-only streak from one completed dispatch. The loop supplies
+ * a product-error-aware all-success predicate and the streak captured before
+ * the current turn was reset to a non-success default. Failed, mixed, empty,
+ * and undispatched turns therefore cannot receive grounding credit.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_monologue_actuation_observe_completed_dispatch(
+  state: MonologueActuationState,
+  config: MonologueActuationConfig,
+  prior_read_only_streak: int,
+  successful_read_only: bool,
+) -> MonologueActuationState {
+  if !config.enabled {
+    return state
+  }
+  if !successful_read_only {
+    return state + {read_only_streak: 0}
+  }
+  const next = state + {read_only_streak: prior_read_only_streak + 1}
+  if next.read_only_streak < config.read_only_turns {
+    return next
+  }
+  return next + {pending: true, pending_trigger: "read_only_streak"}
+}
+
+fn __agent_monologue_actuation_route_suppression(options) -> string {
+  if options?._llm_caller != nil {
+    return "external_llm_caller_unsupported"
+  }
+  if llm_has_explicit_routing_owner(options) || options?.equivalent_failover != nil {
+    return "multi_route_prefill_unsupported"
+  }
+  const capabilities = try {
+    provider_capabilities(options?.provider ?? "auto", options?.model ?? "")
+  }
+  if is_err(capabilities) || type_of(unwrap(capabilities)) != "dict" {
+    return "assistant_prefill_unsupported"
+  }
+  if !(unwrap(capabilities)?.supports_assistant_prefill ?? false) {
+    return "assistant_prefill_unsupported"
+  }
+  return ""
+}
+
+fn __agent_monologue_actuation_receipt(
+  session_id: string,
+  iteration: int,
+  decision: MonologueActuationDecision,
+  tool_format: string,
+) {
+  agent_emit_event(
+    session_id,
+    "typed_checkpoint",
+    {
+      schema: "harn.agent_loop_monologue_actuation.v1",
+      kind: "monologue_actuation",
+      iteration: iteration,
+      outcome: if decision.applied {
+        "applied"
+      } else {
+        "suppressed"
+      },
+      reason: decision.reason,
+      firing_count: decision.firing_count,
+      max_firings: decision.max_firings,
+      tool_format: tool_format,
+      trigger: decision.trigger,
+    },
+  )
+}
+
+/**
+ * Consume a pending recovery before auxiliary work runs. Only the current
+ * main route may receive the returned prefill; native formats, missing tools,
+ * unsupported providers, and exhausted budgets produce typed suppression
+ * receipts instead.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_monologue_actuation_take(
+  session_id: string,
+  iteration: int,
+  state: MonologueActuationState,
+  config: MonologueActuationConfig,
+  has_tools: bool,
+  llm_options,
+  prefill_available: bool,
+  paradigm = nil,
+  commit_tool_name = "",
+) -> MonologueActuationDecision {
+  if !state.pending {
+    return {
+      state: state,
+      applied: false,
+      reason: "not_pending",
+      prefill: "",
+      trigger: "",
+      firing_count: state.firing_count,
+      max_firings: config.max_firings,
+    }
+  }
+  const trigger = state.pending_trigger
+  const cleared = state + {pending: false, pending_trigger: "", read_only_streak: 0}
+  const tool_format = to_string(paradigm?.kind ?? "")
+  const call_open = to_string(paradigm?.call_open ?? "")
+  const actuation_prefill = if trigger == "read_only_streak" {
+    agent_render_tool_call_prefix(commit_tool_name, llm_options)
+  } else {
+    call_open
+  }
+  const route_suppression = __agent_monologue_actuation_route_suppression(llm_options)
+  const decision = if !config.enabled {
+    {
+      state: cleared,
+      applied: false,
+      reason: "disabled",
+      prefill: "",
+      trigger: trigger,
+      firing_count: cleared.firing_count,
+      max_firings: config.max_firings,
+    }
+  } else if cleared.firing_count >= config.max_firings {
+    {
+      state: cleared,
+      applied: false,
+      reason: "max_firings_exhausted",
+      prefill: "",
+      trigger: trigger,
+      firing_count: cleared.firing_count,
+      max_firings: config.max_firings,
+    }
+  } else if !has_tools {
+    {
+      state: cleared,
+      applied: false,
+      reason: "no_tools",
+      prefill: "",
+      trigger: trigger,
+      firing_count: cleared.firing_count,
+      max_firings: config.max_firings,
+    }
+  } else if !prefill_available {
+    {
+      state: cleared,
+      applied: false,
+      reason: "prefill_already_present",
+      prefill: "",
+      trigger: trigger,
+      firing_count: cleared.firing_count,
+      max_firings: config.max_firings,
+    }
+  } else if trigger == "read_only_streak" && commit_tool_name == "" {
+    {
+      state: cleared,
+      applied: false,
+      reason: "commit_tool_unavailable",
+      prefill: "",
+      trigger: trigger,
+      firing_count: cleared.firing_count,
+      max_firings: config.max_firings,
+    }
+  } else if call_open == "" {
+    {
+      state: cleared,
+      applied: false,
+      reason: "tool_call_opener_unavailable",
+      prefill: "",
+      trigger: trigger,
+      firing_count: cleared.firing_count,
+      max_firings: config.max_firings,
+    }
+  } else if route_suppression != "" {
+    {
+      state: cleared,
+      applied: false,
+      reason: route_suppression,
+      prefill: "",
+      trigger: trigger,
+      firing_count: cleared.firing_count,
+      max_firings: config.max_firings,
+    }
+  } else {
+    const applied_state = cleared + {firing_count: cleared.firing_count + 1}
+    {
+      state: applied_state,
+      applied: true,
+      reason: "eligible_text_tool_paradigm",
+      prefill: actuation_prefill,
+      trigger: trigger,
+      firing_count: applied_state.firing_count,
+      max_firings: config.max_firings,
+    }
+  }
+  __agent_monologue_actuation_receipt(session_id, iteration, decision, tool_format)
+  return decision
+}
+
+/**
+ * Resolve host policy and consume a pending recovery for one main agent turn.
+ * Keeping this projection here prevents the oversized loop from duplicating
+ * config normalization and write-tool validation.
+ *
+ * @effects: [agent]
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_monologue_actuation_take_for_turn(
+  session_id: string,
+  iteration: int,
+  state: MonologueActuationState,
+  turn_options,
+  llm_options,
+  prefill_available: bool,
+  paradigm = nil,
+) -> MonologueActuationDecision {
+  const config = agent_monologue_actuation_config(turn_options?.stall_diagnostics?.monologue_actuation)
+  return agent_monologue_actuation_take(
+    session_id,
+    iteration,
+    state,
+    config,
+    agent_has_tools(turn_options),
+    llm_options,
+    prefill_available,
+    paradigm,
+    agent_tool_resolve_workspace_write_name(
+      turn_options?.tools,
+      turn_options?.policy,
+      config.write_tool,
+    ),
+  )
+}

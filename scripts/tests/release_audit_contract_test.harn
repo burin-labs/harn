@@ -10,6 +10,15 @@ const SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 const BINARY_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
+fn proof_step(
+  id: string,
+  condition: string,
+  run: string,
+  required_env: ReleaseAuditCiEnvironment = {},
+) -> ReleaseAuditCiStep {
+  return {id: id, condition: condition, run: run, required_env: required_env}
+}
+
 fn contract() -> ReleaseAuditContract {
   return {
     schema_version: "harn.release_audit_contract.v1",
@@ -25,14 +34,14 @@ fn contract() -> ReleaseAuditContract {
         job_id: "fmt",
         matrix_kind: "",
         proofs: ["rust-audit"],
-        steps: [{id: "release-audit-format", condition: "", run: "make fmt-check"}],
+        steps: [proof_step("release-audit-format", "", "make fmt-check")],
       },
       {
         name: "Package audit",
         job_id: "package-audit",
         matrix_kind: "",
         proofs: ["package-audit"],
-        steps: [{id: "release-audit-package", condition: "", run: "./scripts/verify_crate_packages.sh"}],
+        steps: [proof_step("release-audit-package", "", "./scripts/verify_crate_packages.sh")],
       },
       {
         name: "Rust lint",
@@ -40,11 +49,7 @@ fn contract() -> ReleaseAuditContract {
         matrix_kind: "lint",
         proofs: ["rust-audit"],
         steps: [
-          {
-            id: "release-audit-rust-lint",
-            condition: "matrix.kind == 'lint'",
-            run: "./scripts/ci/run_rust_lint_lane.sh",
-          },
+          proof_step("release-audit-rust-lint", "matrix.kind == 'lint'", "./scripts/ci/run_rust_lint_lane.sh"),
         ],
       },
       {
@@ -53,19 +58,33 @@ fn contract() -> ReleaseAuditContract {
         matrix_kind: "test",
         proofs: ["rust-audit"],
         steps: [
-          {
-            id: "release-audit-rust-test",
-            condition: "matrix.kind == 'test' && github.event_name != 'pull_request'",
-            run: "scripts/ci/run_rust_test_lane.sh make test",
-          },
+          proof_step(
+            "release-audit-rust-test",
+            "matrix.kind == 'test'",
+            "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
+            {HARN_LLM_CALLS_DISABLED: "1"},
+          ),
+        ],
+      },
+      {
+        name: "Rust security proof",
+        job_id: "rust-security",
+        matrix_kind: "",
+        proofs: ["rust-audit"],
+        steps: [
+          proof_step(
+            "release-audit-rust-security",
+            "",
+            "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-security.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'",
+          ),
         ],
       },
       {
         name: "Harn conformance + audit",
-        job_id: "rust-builds",
-        matrix_kind: "audit",
+        job_id: "harn-audit",
+        matrix_kind: "",
         proofs: ["harn-audit"],
-        steps: [{id: "release-audit-harn", condition: "matrix.kind == 'audit'", run: "./scripts/audit_gates.sh"}],
+        steps: [proof_step("release-audit-harn", "", "./scripts/audit_gates.sh")],
       },
     ],
   }
@@ -105,6 +124,13 @@ fn jobs() {
       id: 3,
       name: "Harn conformance + audit",
       url: "https://github.com/burin-labs/harn/actions/runs/123/job/3",
+      status: "completed",
+      conclusion: "success",
+    },
+    {
+      id: 6,
+      name: "Rust security proof",
+      url: "https://github.com/burin-labs/harn/actions/runs/123/job/6",
       status: "completed",
       conclusion: "success",
     },
@@ -236,7 +262,14 @@ pipeline test_release_audit_contract_reads_typed_result_from_disk(task) {
       assert_eq(loaded.schema_version, "harn.release_audit_contract.v1")
       assert_eq(
         loaded.merge_group_jobs.map({ job -> job.name }).to_list(),
-        ["Format check", "Package audit", "Rust lint", "Rust test", "Harn conformance + audit"],
+        [
+          "Format check",
+          "Package audit",
+          "Rust lint",
+          "Rust test",
+          "Rust security proof",
+          "Harn conformance + audit",
+        ],
       )
       harness.fs.write_text(path, "{invalid")
       assert_eq(release_audit_contract_read(path), nil)
@@ -254,15 +287,7 @@ pipeline test_release_audit_ci_contract_drift(task) {
         steps: [{id: "release-audit-package", run: "./scripts/verify_crate_packages.sh"}],
       },
       "rust-builds": {
-        strategy: {
-          matrix: {
-            include: [
-              {kind: "lint", name: "Rust lint"},
-              {kind: "test", name: "Rust test"},
-              {kind: "audit", name: "Harn conformance + audit"},
-            ],
-          },
-        },
+        strategy: {matrix: {include: [{kind: "lint", name: "Rust lint"}, {kind: "test", name: "Rust test"}]}},
         steps: [
           {
             id: "release-audit-rust-lint",
@@ -271,11 +296,24 @@ pipeline test_release_audit_ci_contract_drift(task) {
           },
           {
             id: "release-audit-rust-test",
-            if: "matrix.kind == 'test' && github.event_name != 'pull_request'",
-            run: "scripts/ci/run_rust_test_lane.sh make test",
+            if: "matrix.kind == 'test'",
+            env: {HARN_LLM_CALLS_DISABLED: "1"},
+            run: "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
           },
-          {id: "release-audit-harn", if: "matrix.kind == 'audit'", run: "./scripts/audit_gates.sh"},
         ],
+      },
+      "rust-security": {
+        name: "Rust security proof",
+        steps: [
+          {
+            id: "release-audit-rust-security",
+            run: "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-security.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'",
+          },
+        ],
+      },
+      "harn-audit": {
+        name: "Harn conformance + audit",
+        steps: [{id: "release-audit-harn", run: "./scripts/audit_gates.sh"}],
       },
     },
   }
@@ -304,6 +342,31 @@ pipeline test_release_audit_ci_contract_drift(task) {
       },
     ).errors,
     ["proof command drift: release-audit-rust-test"],
+  )
+  assert_eq(
+    release_audit_ci_contract_report(
+      cfg,
+      {
+        ...ci,
+        jobs: {
+          ...ci.jobs,
+          "rust-builds": {
+            ...ci.jobs["rust-builds"],
+            steps: ci.jobs["rust-builds"].steps
+              .map(
+              { step ->
+                if step.id == "release-audit-rust-test" {
+                  {...step, env: {}}
+                } else {
+                  step
+                }
+              },
+            ).to_list(),
+          },
+        },
+      },
+    ).errors,
+    ["proof environment drift: release-audit-rust-test:HARN_LLM_CALLS_DISABLED"],
   )
   assert_eq(
     release_audit_ci_contract_report(
