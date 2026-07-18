@@ -58,9 +58,9 @@ impl AcpServer {
         let runtime_provider_endpoint_overrides = self.runtime_provider_endpoint_overrides.clone();
         let capability_overrides = self.llm_capability_overrides.clone();
         // Erase the large method-router state machine before it enters the
-        // generic ambient wrapper. The scope still swaps on every poll, while
-        // its generated future carries one pointer instead of duplicating the
-        // complete dispatch state and drop glue.
+        // generic ambient wrapper. This intentionally pays one heap allocation
+        // per message and virtual dispatch per poll so the wrapper's generated
+        // code stays independent of the router state and drop glue.
         let dispatch: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>> =
             Box::pin(self.handle_incoming_message_scoped(msg));
         harn_vm::orchestration::scope_llm_runtime_overrides_with_provider_endpoints(
