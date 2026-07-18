@@ -449,13 +449,23 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     errors = errors + ["ci.yml:rust-builds behavior build must be owned by the behavior matrix row"]
   }
   const test_job = workflow?.jobs?.["rust-test"]
-  const test_caches = matching_steps(test_job, SCCACHE_ACTION)
-  if len(test_caches) == 1 && trim(test_caches[0]?.with?.["cache-key"] ?? "") != "workspace-behavior" {
-    errors = errors + ["ci.yml:rust-test must reuse the producer's workspace-behavior cache"]
+  for consumer in ["package-audit", "rust-test"] {
+    const job = workflow?.jobs?.[consumer]
+    const caches = matching_steps(job, SCCACHE_ACTION)
+    if len(caches) == 1 && trim(caches[0]?.with?.["cache-key"] ?? "") != "workspace-behavior" {
+      errors = errors + ["ci.yml:${consumer} must reuse the producer's workspace-behavior cache"]
+    }
+    const needs = job?.needs ?? []
+    if !needs.contains("rust-builds") {
+      errors = errors
+        + ["ci.yml:${consumer} must wait for rust-builds before reusing its persistent cache"]
+    }
   }
-  const test_needs = test_job?.needs ?? []
-  if !test_needs.contains("rust-builds") {
-    errors = errors + ["ci.yml:rust-test must wait for rust-builds before reusing its persistent cache"]
+  const package_condition = trim(workflow?.jobs?.["package-audit"]?.if ?? "")
+  if !contains(package_condition, "always()")
+    || !contains(package_condition, "needs.rust-builds.result == 'skipped'") {
+    errors = errors
+      + ["ci.yml:package-audit must preserve package-only proof when rust-builds skips"]
   }
   const test_jobs = trim(
     step_by_name(test_job?.steps ?? [], "Run full environment-neutral test suite")?.env?.CARGO_BUILD_JOBS

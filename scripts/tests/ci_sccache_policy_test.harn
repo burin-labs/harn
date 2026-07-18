@@ -58,12 +58,12 @@ fn workflow() {
   )
   return {
     jobs: {
-      "package-audit": persistent_job(
-        gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'"),
-        "package-audit",
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
-      ),
+      "package-audit": {
+        ...test,
+        "runs-on": gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'"),
+        needs: ["changes", "rust-builds"],
+        if: "always() && needs.rust-builds.result == 'skipped'",
+      },
       "rust-builds": {
         ...rust,
         strategy: {
@@ -121,7 +121,7 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
 }
 
 @test
-pipeline test_rejects_test_consumer_that_cannot_reuse_the_completed_producer(task) {
+pipeline test_rejects_consumers_that_cannot_reuse_the_completed_producer(task) {
   const valid = workflow()
   const test = valid.jobs["rust-test"]
   const invalid_cache = {
@@ -151,5 +151,42 @@ pipeline test_rejects_test_consumer_that_cannot_reuse_the_completed_producer(tas
   assert(
     order_errors
       .contains("ci.yml:rust-test must wait for rust-builds before reusing its persistent cache"),
+  )
+  const package = valid.jobs["package-audit"]
+  const invalid_package = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "package-audit": {
+        ...package,
+        needs: ["changes"],
+        if: "needs.rust-builds.result == 'success'",
+        steps: package.steps
+          .map(
+          { step ->
+            if step.uses == "./.github/actions/sccache" {
+              {...step, with: {...step.with, "cache-key": "cold-package-cache"}}
+            } else {
+              step
+            }
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const package_errors = ci_sccache_policy_errors(sccache_action(), invalid_package)
+  assert(
+    package_errors.contains("ci.yml:package-audit must reuse the producer's workspace-behavior cache"),
+  )
+  assert(
+    package_errors
+      .contains(
+      "ci.yml:package-audit must wait for rust-builds before reusing its persistent cache",
+    ),
+  )
+  assert(
+    package_errors
+      .contains("ci.yml:package-audit must preserve package-only proof when rust-builds skips"),
   )
 }

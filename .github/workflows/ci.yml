@@ -301,13 +301,20 @@ jobs:
 
   package-audit:
     name: Package audit
-    needs: changes
+    needs: [changes, rust-builds]
     # Cargo package verification is a release/package correctness proof, not a
     # formatting proof. Keep it out of the always-on fmt lane so workflow,
     # docs, and prompt-only PRs do not pay a 9-minute cargo package/check tail.
     # It still runs for package-relevant PRs and unconditionally on merge_group
     # unless the speculative merge diff is a proven docs-only tail.
-    if: needs.changes.outputs.package_audit == 'true'
+    # Wait for the behavior producer so this crate/AOT consumer starts from
+    # the completed exact-SHA compiler cache. `always()` preserves package
+    # proof for package-only surfaces (for example a packaged README) where
+    # the broader Rust graph intentionally skips.
+    if: >-
+      always()
+      && needs.changes.outputs.package_audit == 'true'
+      && (needs.rust-builds.result == 'success' || needs.rust-builds.result == 'skipped')
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404' }}
     timeout-minutes: 20
     env:
@@ -319,7 +326,7 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/sccache
         with:
-          cache-key: package-audit
+          cache-key: workspace-behavior
           sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
       - uses: ./.github/actions/rust-cache
         if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
