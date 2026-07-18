@@ -16,7 +16,7 @@ impl Compiler {
         mutable && self.captured_bindings.contains(binding)
     }
 
-    fn define_local_slot(&mut self, name: &str, mutable: bool) -> Option<u16> {
+    pub(super) fn define_local_slot(&mut self, name: &str, mutable: bool) -> Option<u16> {
         if self.module_level || harn_parser::is_discard_name(name) {
             return None;
         }

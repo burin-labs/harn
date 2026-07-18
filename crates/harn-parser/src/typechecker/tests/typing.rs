@@ -2164,7 +2164,7 @@ fn read(value: int = value) -> int { return value }"#,
     );
 
     let earlier_param_errs =
-        errors(r#"fn read(first: string, second: string = first) -> string { return second }"#);
+        errors(r"fn read(first: string, second: string = first) -> string { return second }");
     assert!(
         earlier_param_errs.is_empty(),
         "earlier parameters must remain visible to later defaults: {earlier_param_errs:?}"
@@ -2182,7 +2182,7 @@ const read: fn(int) -> int = fn(value = value) -> int { value }"#,
     );
 
     let closure_earlier_errs =
-        errors(r#"const read = fn(first: string, second: string = first) -> string { second }"#);
+        errors(r"const read = fn(first: string, second: string = first) -> string { second }");
     assert!(
         closure_earlier_errs.is_empty(),
         "closure defaults must see earlier parameters: {closure_earlier_errs:?}"
@@ -2482,13 +2482,13 @@ fn area(s: Shape) -> int {
 #[test]
 fn test_ambiguous_bare_variant_pattern_requires_qualification() {
     let errs = errors(
-        r#"enum First { Shared(value: int) }
+        r"enum First { Shared(value: int) }
 enum Second { Shared(value: int) }
 fn inspect(value: First) -> int {
   match value {
     Shared(payload) -> { return payload }
   }
-}"#,
+}",
     );
 
     assert!(
@@ -2501,7 +2501,7 @@ fn inspect(value: First) -> int {
 #[test]
 fn test_nested_enum_is_absent_from_outer_bare_variant_catalog() {
     let errs = errors(
-        r#"enum Outer { Shared(value: int) }
+        r"enum Outer { Shared(value: int) }
 fn nested_declaration() {
   enum Inner { Shared(value: int) }
 }
@@ -2509,7 +2509,7 @@ pipeline default(task) {
   match Outer.Shared(1) {
     Shared(payload) -> { log(payload) }
   }
-}"#,
+}",
     );
 
     assert!(
@@ -2521,13 +2521,13 @@ pipeline default(task) {
 #[test]
 fn test_duplicate_pipeline_enums_shadow_in_source_order() {
     let errs = errors(
-        r#"pipeline default(task) {
+        r"pipeline default(task) {
   enum Event { First(value: int) }
   match Event.First(1) {
     First(payload) -> { log(payload) }
   }
   enum Event { Second(value: int) }
-}"#,
+}",
     );
 
     assert!(
@@ -2539,7 +2539,7 @@ fn test_duplicate_pipeline_enums_shadow_in_source_order() {
 #[test]
 fn test_inherited_pipeline_enum_does_not_change_child_catalog() {
     let errs = errors(
-        r#"pipeline base(task) {
+        r"pipeline base(task) {
   enum Event { Base(value: int) }
 }
 pipeline default(task) extends base {
@@ -2547,7 +2547,7 @@ pipeline default(task) extends base {
     Child(payload) -> { log(payload) }
   }
   enum Event { Child(value: int) }
-}"#,
+}",
     );
 
     assert!(
