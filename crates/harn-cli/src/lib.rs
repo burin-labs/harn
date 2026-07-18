@@ -476,13 +476,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             let (module_graph, parsed_sources) =
                 commands::check::build_module_graph_with_parsed_sources(&files);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
-            let overrides = commands::check::CheckCliOverrides {
-                host_capabilities: args.host_capabilities.clone(),
-                bundle_root: args.bundle_root.clone(),
-                strict_types: args.strict_types,
-                preflight: args.preflight.clone(),
-                invariants: args.invariants,
-            };
+            let overrides = commands::check::CheckCliOverrides::from(&args);
             let checked = commands::check::check_files(
                 &files,
                 &module_graph,
