@@ -15,9 +15,11 @@ EOF
 }
 
 require_nextest_version() {
-  local actual
+  local actual first_line program version
   actual="$(cargo nextest --version)"
-  if [[ "$actual" != "cargo-nextest ${NEXTEST_VERSION}" ]]; then
+  first_line="${actual%%$'\n'*}"
+  read -r program version _ <<< "$first_line"
+  if [[ "$program" != "cargo-nextest" || "$version" != "$NEXTEST_VERSION" ]]; then
     echo "error: expected cargo-nextest ${NEXTEST_VERSION}, got: ${actual}" >&2
     exit 1
   fi

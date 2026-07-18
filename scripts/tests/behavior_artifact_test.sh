@@ -20,7 +20,11 @@ case "$1" in
     ;;
   nextest)
     if [[ "$2" == "--version" ]]; then
-      echo "cargo-nextest 0.9.133"
+      cat <<'VERSION'
+cargo-nextest 0.9.133 (65e806bd5 2026-04-14)
+release: 0.9.133
+commit-hash: 65e806bd589d12c4341d3696a02a9788bd437c3c
+VERSION
       exit 0
     fi
     output=""

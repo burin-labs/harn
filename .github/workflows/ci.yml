@@ -16,8 +16,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Incremental fights the within-job sccache wrapper. Persistent reuse is
-  # owned by the coarse Rust cache action below.
+  # Incremental fights the within-job sccache wrapper. Cross-run reuse is
+  # owned by each lane's persistent compiler-object cache. Do not persist a
+  # shared target/: independent PR and merge-group builds overlap, and Cargo
+  # fingerprints/build-script OUT_DIR artifacts are not safe to share across
+  # those checkouts.
   CARGO_INCREMENTAL: "0"
   # Promote build warnings to errors so platform-specific warnings can't
   # silently accumulate (Windows-only deprecations, dead_code for cfg-gated
