@@ -171,12 +171,12 @@ pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
         &[ACP_PROMPT_ERROR_DATA_SCHEMA.to_string()],
     ));
     out.push_str(
-        r#"public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
+        r"public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var schema: HarnACPPromptErrorSchema
     public var terminalClass: HarnAgentTerminalClass
 }
 
-"#,
+",
     );
     out.push_str(&swift_enum(
         "HarnToolCallReceiptStatus",
