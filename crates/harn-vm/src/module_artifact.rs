@@ -20,7 +20,7 @@ use crate::value::VmError;
 /// A single `import`-style declaration inside a module. Re-resolved at
 /// instantiation time so that the cached artifact does not bake in
 /// stale resolved paths.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleImportSpec {
     pub path: String,
     pub selected_names: Option<Vec<String>>,
@@ -32,7 +32,7 @@ pub struct ModuleImportSpec {
 /// into a fresh env, minting closures for each entry in
 /// [`functions`](Self::functions), and re-issuing every nested
 /// [`imports`](Self::imports).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleArtifact {
     pub imports: Vec<ModuleImportSpec>,
     pub init_chunk: Option<CachedChunk>,

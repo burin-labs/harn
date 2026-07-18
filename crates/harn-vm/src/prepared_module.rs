@@ -29,28 +29,28 @@ pub(crate) struct PreparedModuleArtifact {
 
 impl PreparedModuleArtifact {
     pub(crate) fn from_cached(artifact: ModuleArtifact) -> Self {
-        let init_chunk = artifact
-            .init_chunk
-            .as_ref()
-            .map(|chunk| Arc::new(Chunk::from_cached(chunk)));
-        let functions = artifact
-            .functions
-            .iter()
-            .map(|(name, function)| {
-                (
-                    name.clone(),
-                    Arc::new(CompiledFunction::from_cached(function)),
-                )
-            })
-            .collect();
-        Self {
-            imports: artifact.imports,
+        let ModuleArtifact {
+            imports,
             init_chunk,
             functions,
-            public_names: artifact.public_names,
-            public_value_names: artifact.public_value_names,
-            public_type_names: artifact.public_type_names,
-            public_type_schemas: artifact.public_type_schemas,
+            public_names,
+            public_value_names,
+            public_type_names,
+            public_type_schemas,
+        } = artifact;
+        let init_chunk = init_chunk.map(|chunk| Arc::new(Chunk::from_cached(chunk)));
+        let functions = functions
+            .into_iter()
+            .map(|(name, function)| (name, Arc::new(CompiledFunction::from_cached(function))))
+            .collect();
+        Self {
+            imports,
+            init_chunk,
+            functions,
+            public_names,
+            public_value_names,
+            public_type_names,
+            public_type_schemas,
         }
     }
 }
@@ -181,6 +181,7 @@ impl PreparedModuleCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chunk::Op;
 
     fn empty_artifact() -> Arc<PreparedModuleArtifact> {
         Arc::new(PreparedModuleArtifact::from_cached(ModuleArtifact {
@@ -237,5 +238,79 @@ mod tests {
         assert!(weak.upgrade().is_some());
         drop(clone);
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn hydration_moves_module_owned_storage() {
+        let mut init_chunk = Chunk::new();
+        init_chunk.emit(Op::Return, 1);
+        let artifact = ModuleArtifact {
+            imports: vec![ModuleImportSpec {
+                path: "std/testing".to_string(),
+                selected_names: Some(vec!["assert_eq".to_string()]),
+                is_pub: false,
+            }],
+            init_chunk: Some(init_chunk.freeze_for_cache()),
+            functions: BTreeMap::new(),
+            public_names: ["answer".to_string()].into_iter().collect(),
+            public_value_names: ["value".to_string()].into_iter().collect(),
+            public_type_names: ["Result".to_string()].into_iter().collect(),
+            public_type_schemas: [("Result".to_string(), "{}".to_string())]
+                .into_iter()
+                .collect(),
+        };
+
+        let imports = artifact.imports.as_ptr();
+        let import_path = artifact.imports[0].path.as_ptr();
+        let selected_names = artifact.imports[0]
+            .selected_names
+            .as_ref()
+            .unwrap()
+            .as_ptr();
+        let selected_name = artifact.imports[0].selected_names.as_ref().unwrap()[0].as_ptr();
+        let init_code = artifact.init_chunk.as_ref().unwrap().code.as_ptr();
+        let public_name = artifact.public_names.get("answer").unwrap().as_ptr();
+        let public_value_name = artifact.public_value_names.get("value").unwrap().as_ptr();
+        let public_type_name = artifact.public_type_names.get("Result").unwrap().as_ptr();
+        let (schema_name, schema) = artifact.public_type_schemas.first_key_value().unwrap();
+        let schema_name = schema_name.as_ptr();
+        let schema = schema.as_ptr();
+
+        let hydrated = PreparedModuleArtifact::from_cached(artifact);
+
+        assert_eq!(hydrated.imports.as_ptr(), imports);
+        assert_eq!(hydrated.imports[0].path.as_ptr(), import_path);
+        assert_eq!(
+            hydrated.imports[0]
+                .selected_names
+                .as_ref()
+                .unwrap()
+                .as_ptr(),
+            selected_names
+        );
+        assert_eq!(
+            hydrated.imports[0].selected_names.as_ref().unwrap()[0].as_ptr(),
+            selected_name
+        );
+        assert_eq!(
+            hydrated.init_chunk.as_ref().unwrap().code.as_ptr(),
+            init_code
+        );
+        assert_eq!(
+            hydrated.public_names.get("answer").unwrap().as_ptr(),
+            public_name
+        );
+        assert_eq!(
+            hydrated.public_value_names.get("value").unwrap().as_ptr(),
+            public_value_name
+        );
+        assert_eq!(
+            hydrated.public_type_names.get("Result").unwrap().as_ptr(),
+            public_type_name
+        );
+        let (hydrated_schema_name, hydrated_schema) =
+            hydrated.public_type_schemas.first_key_value().unwrap();
+        assert_eq!(hydrated_schema_name.as_ptr(), schema_name);
+        assert_eq!(hydrated_schema.as_ptr(), schema);
     }
 }

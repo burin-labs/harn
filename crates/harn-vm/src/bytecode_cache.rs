@@ -487,7 +487,7 @@ fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk
             Ok((c, _)) => c,
             Err(_) => return Ok(None),
         };
-    Ok(Some(Chunk::from_cached(&cached)))
+    Ok(Some(Chunk::from_cached(cached)))
 }
 
 fn read_module_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<ModuleArtifact>> {
