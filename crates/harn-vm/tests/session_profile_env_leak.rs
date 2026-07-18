@@ -5,6 +5,12 @@
 //! that no credential crosses into a spawned child. That contract is only as
 //! strong as its weakest spawn seam, so this probes each process builtin
 //! directly with a secret-shaped variable set in the parent environment.
+//!
+//! Unix-only: every probe spawns `sh -c "printf ..."`, which the Windows
+//! runners have no shell for. The seam being tested is platform-independent
+//! (the resolver and the sandbox funnel), so gating the probe to unix loses no
+//! coverage — it matches how the `sh`-spawning tests in `process_tests.rs` gate.
+#![cfg(unix)]
 
 use harn_vm::security::session_grants::SessionProfile;
 use harn_vm::value::VmError;
