@@ -1377,19 +1377,13 @@ fn enforce_process_cwd_for_policy(path: &Path, policy: &CapabilityPolicy) -> Res
     )))
 }
 
-/// Close a freshly built command's environment when a session capability
-/// profile is active.
+/// Close a freshly built command's environment under an active session profile.
 ///
-/// This is the choke point that makes the hermetic contract structural rather
-/// than per-caller. Every spawn seam in the VM and in `harn-hostlib` reaches a
-/// child process through [`std_command_for`] / [`tokio_command_for`] /
-/// [`command_output`], so applying the resolver here means a new spawn site
-/// cannot silently opt out of it — which is exactly how the earlier leaks
-/// happened. Callers still layer their own `env` / `env_remove` on top
-/// afterward; those are explicit opt-ins and are intentionally preserved.
-///
-/// Sandbox confinement itself sets no environment variables (it is wrapper-exec
-/// / seccomp / AppContainer), so clearing here cannot weaken it.
+/// This is the choke point that makes the hermetic contract structural: every
+/// spawn seam in the VM and `harn-hostlib` reaches a child through the three
+/// funnel fns below, so a new seam cannot silently opt out. Callers still layer
+/// their own `env` / `env_remove` on top afterward. Sandbox confinement sets no
+/// env vars (wrapper-exec / seccomp / AppContainer), so clearing cannot weaken it.
 macro_rules! close_env_for_session {
     ($command:expr) => {
         if let Some(env) = crate::stdlib::process::session_closed_env(std::iter::empty())? {
@@ -1454,11 +1448,9 @@ pub fn command_output(
     let recording =
         crate::testbench::process_tape::start_recording(program, args, config.cwd.as_deref());
 
-    // Callers reach `command_output` with configs built several different ways
-    // (`process_command_config`, `ProcessCommandConfig::default()`, hand-rolled).
-    // Close the environment here rather than trusting each of them: a config
-    // that already went through the resolver carries `closed_env`, and anything
-    // else gets the profile applied now with its own `env` still winning.
+    // Callers build `config` several ways, so close it here rather than trust
+    // each: an already-resolved config carries `closed_env`; anything else gets
+    // the profile applied now, its own `env` still winning.
     let closed_config;
     let config = if config.closed_env {
         config

@@ -1306,12 +1306,9 @@ pub(crate) fn build_sandboxed_command(
             .map_err(|e| VmError::Runtime(format!("host_call {label} cwd: {e}")))?;
         cmd.current_dir(cwd);
     }
-    // NOTE: under a session capability profile the command returned by
-    // `tokio_command_for` above already carries the resolver's closed
-    // environment (allowlist + grants) with the parent env cleared, so
-    // everything below — caller `env`, `env_remove`, the TMPDIR overlay —
-    // layers onto a closed base. That is applied once at the sandbox funnel
-    // rather than here, so a new spawn seam cannot forget it.
+    // Under a session profile the command from `tokio_command_for` already
+    // carries the resolver's closed env (parent env cleared), applied once at
+    // the sandbox funnel; everything below layers onto that closed base.
     //
     // Track keys the caller set explicitly so the sandbox-local TMPDIR overlay
     // below never clobbers an intentional per-call value.
