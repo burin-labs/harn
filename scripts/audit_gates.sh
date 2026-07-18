@@ -55,7 +55,6 @@ GATES=(
   check-protocol-artifacts
   check-connector-schemas
   check-session-bundle-schema
-  check-run-view-fixtures
   check-provider-catalog
   check-provider-catalog-drift
   check-ported-handler-loc
@@ -100,6 +99,10 @@ if [ ! -x "$HARN_BIN" ]; then
   exit 1
 fi
 export HARN_BIN
+# Performance checks must use the already-authoritative binary too. Without
+# this alias the RSS soak asks Cargo for a target path and can sit behind an
+# unrelated parallel Cargo lock for minutes before running a 250 ms benchmark.
+export HARN_CHECK_BIN="${HARN_CHECK_BIN:-$HARN_BIN}"
 echo "ok: harn-bin ($HARN_BIN)"
 echo "ok: harn warm build ($(( $(date +%s) - started ))s)"
 
@@ -185,7 +188,7 @@ for offset in "${!conformance_pids[@]}"; do
     conformance_status="$shard_status"
     conformance_failures+=("$shard_index:$shard_status")
   fi
-  child_pids[$((offset + 1))]=""
+  child_pids[offset + 1]=""
   echo "=== conformance shard $shard_index/$conformance_shards ==="
   cat "$conformance_log_dir/shard-$shard_index.log"
 done

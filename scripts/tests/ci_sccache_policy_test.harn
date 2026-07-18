@@ -47,8 +47,8 @@ fn workflow() {
   const rust = persistent_job(
     gha_expression(disable + " && 'ubuntu-latest' || matrix.runner"),
     gha_expression("matrix.cache_key"),
-    "matrix.kind == 'lint' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-    "matrix.kind != 'lint' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
   )
   return {
     jobs: {
@@ -64,26 +64,16 @@ fn workflow() {
           matrix: {
             include: [
               {runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
-              {runner: "ubuntu-latest", cache_key: "workspace-test"},
-              {runner: "ubuntu-latest", cache_key: "workspace-audit"},
+              {runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-behavior"},
             ],
           },
         },
         steps: rust.steps
           + [
-          {name: "Run affected-crate tests (PR fast feedback)", env: {CARGO_BUILD_JOBS: "2"}},
-          {
-            name: "Run full test suite (merge queue + non-metadata push backstop)",
-            env: {CARGO_BUILD_JOBS: "2"},
-          },
+          {name: "Build portable behavior payload", env: {CARGO_BUILD_JOBS: "4"}},
+          {name: "Run full environment-neutral test suite", env: {CARGO_BUILD_JOBS: "4"}},
         ],
       },
-      "audit-scripts": persistent_job(
-        gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
-        "audit-scripts",
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
-      ),
     },
   }
 }
@@ -100,7 +90,6 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
     jobs: {
       "package-audit": {"runs-on": "ubuntu-latest", steps: []},
       "rust-builds": {"runs-on": "ubuntu-latest", steps: []},
-      "audit-scripts": {"runs-on": "ubuntu-latest", steps: []},
       surprise: {steps: [{uses: "./.github/actions/sccache"}]},
     },
   }

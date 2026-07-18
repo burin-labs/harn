@@ -55,17 +55,30 @@ fn contract() -> ReleaseAuditContract {
         steps: [
           {
             id: "release-audit-rust-test",
-            condition: "matrix.kind == 'test' && github.event_name != 'pull_request'",
-            run: "scripts/ci/run_rust_test_lane.sh make test",
+            condition: "matrix.kind == 'test'",
+            run: "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
+          },
+        ],
+      },
+      {
+        name: "Rust security proof",
+        job_id: "rust-security",
+        matrix_kind: "",
+        proofs: ["rust-audit"],
+        steps: [
+          {
+            id: "release-audit-rust-security",
+            condition: "",
+            run: "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-security.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'",
           },
         ],
       },
       {
         name: "Harn conformance + audit",
-        job_id: "rust-builds",
-        matrix_kind: "audit",
+        job_id: "harn-audit",
+        matrix_kind: "",
         proofs: ["harn-audit"],
-        steps: [{id: "release-audit-harn", condition: "matrix.kind == 'audit'", run: "./scripts/audit_gates.sh"}],
+        steps: [{id: "release-audit-harn", condition: "", run: "./scripts/audit_gates.sh"}],
       },
     ],
   }
@@ -105,6 +118,13 @@ fn jobs() {
       id: 3,
       name: "Harn conformance + audit",
       url: "https://github.com/burin-labs/harn/actions/runs/123/job/3",
+      status: "completed",
+      conclusion: "success",
+    },
+    {
+      id: 6,
+      name: "Rust security proof",
+      url: "https://github.com/burin-labs/harn/actions/runs/123/job/6",
       status: "completed",
       conclusion: "success",
     },
@@ -236,7 +256,14 @@ pipeline test_release_audit_contract_reads_typed_result_from_disk(task) {
       assert_eq(loaded.schema_version, "harn.release_audit_contract.v1")
       assert_eq(
         loaded.merge_group_jobs.map({ job -> job.name }).to_list(),
-        ["Format check", "Package audit", "Rust lint", "Rust test", "Harn conformance + audit"],
+        [
+          "Format check",
+          "Package audit",
+          "Rust lint",
+          "Rust test",
+          "Rust security proof",
+          "Harn conformance + audit",
+        ],
       )
       harness.fs.write_text(path, "{invalid")
       assert_eq(release_audit_contract_read(path), nil)
@@ -254,15 +281,7 @@ pipeline test_release_audit_ci_contract_drift(task) {
         steps: [{id: "release-audit-package", run: "./scripts/verify_crate_packages.sh"}],
       },
       "rust-builds": {
-        strategy: {
-          matrix: {
-            include: [
-              {kind: "lint", name: "Rust lint"},
-              {kind: "test", name: "Rust test"},
-              {kind: "audit", name: "Harn conformance + audit"},
-            ],
-          },
-        },
+        strategy: {matrix: {include: [{kind: "lint", name: "Rust lint"}, {kind: "test", name: "Rust test"}]}},
         steps: [
           {
             id: "release-audit-rust-lint",
@@ -271,11 +290,23 @@ pipeline test_release_audit_ci_contract_drift(task) {
           },
           {
             id: "release-audit-rust-test",
-            if: "matrix.kind == 'test' && github.event_name != 'pull_request'",
-            run: "scripts/ci/run_rust_test_lane.sh make test",
+            if: "matrix.kind == 'test'",
+            run: "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
           },
-          {id: "release-audit-harn", if: "matrix.kind == 'audit'", run: "./scripts/audit_gates.sh"},
         ],
+      },
+      "rust-security": {
+        name: "Rust security proof",
+        steps: [
+          {
+            id: "release-audit-rust-security",
+            run: "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-security.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'",
+          },
+        ],
+      },
+      "harn-audit": {
+        name: "Harn conformance + audit",
+        steps: [{id: "release-audit-harn", run: "./scripts/audit_gates.sh"}],
       },
     },
   }

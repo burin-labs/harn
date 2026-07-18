@@ -194,7 +194,10 @@ sources = [
   "crates/harn-vm/tests/run_view_fixtures.rs",
   "spec/run-view-fixtures/cases/",
 ]
-ci = true
+# The Rust `run_view_fixtures` integration test executes this same snapshot
+# comparison in the full CI suite. Keep the named Make target for local and
+# release-gate use without compiling harn-vm a second time in the audit lane.
+ci = false
 make_all = true
 
 [[artifact]]
