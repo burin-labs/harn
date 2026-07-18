@@ -245,6 +245,58 @@ pipeline test_hygiene_no_overlap(task) {
   assert_eq(exempt_hygiene_errors(["check-a"], ["check-b"]).count, 0)
 }
 
+// --- preflight_dispatch_errors --------------------------------------------
+@test
+pipeline test_preflight_unclassified_check(task) {
+  // A check-* target absent from the dispatch table is flagged.
+  assert_eq(
+    preflight_dispatch_errors(["check-foo"], {}),
+    [
+      "Makefile target `check-foo` is not classified in [preflight.dispatch] in scripts/generated_artifacts.toml (add it with tier source|binary|excluded).",
+    ],
+  )
+}
+
+@test
+pipeline test_preflight_umbrella_check_not_required(task) {
+  // The umbrella `check` has no hyphen, so it is not required to be classified.
+  assert_eq(preflight_dispatch_errors(["check", "all", "test"], {}).count, 0)
+}
+
+@test
+pipeline test_preflight_classified_ok(task) {
+  const dispatch = {"check-a": "source", "check-b": "binary"}
+  const errs = preflight_dispatch_errors(["check-a", "check-b"], dispatch)
+  assert_eq(errs, [])
+}
+
+@test
+pipeline test_preflight_dead_target_flagged(task) {
+  // A dispatch entry naming a target that does not exist is flagged.
+  assert_eq(
+    preflight_dispatch_errors([], {"check-gone": "source"}),
+    [
+      "[preflight.dispatch] classifies `check-gone` but no such Makefile target exists — remove it or fix the name.",
+    ],
+  )
+}
+
+@test
+pipeline test_preflight_invalid_tier_flagged(task) {
+  assert_eq(
+    preflight_dispatch_errors(["check-a"], {"check-a": "sourced"}),
+    ["[preflight.dispatch] `check-a` has invalid tier `sourced` (expected source|binary|excluded)."],
+  )
+}
+
+@test
+pipeline test_preflight_lint_target_allowed(task) {
+  // A lint-* target may be classified (it is a real target with a valid tier)
+  // without being required — only check-* targets are mandatory.
+  const dispatch = {"lint-x": "source", "check-a": "source"}
+  assert_eq(preflight_dispatch_errors(["lint-x", "check-a"], dispatch), [])
+}
+
 // --- validate (integration of the pure pieces) ----------------------------
 @test
 pipeline test_validate_clean(task) {
