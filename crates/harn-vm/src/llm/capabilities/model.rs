@@ -369,6 +369,36 @@ pub enum ScreenshotScaling {
     Original,
 }
 
+/// How a route carries a `system`/`developer`-role message that appears at a
+/// non-leading position in the conversation — the operator-instruction channel
+/// (OpenAI developer messages, Anthropic Opus 4.8 mid-conversation system
+/// messages). Leading system content is always the system prompt; this governs
+/// only the *interleaved* case. Typed so an unknown value in a capability
+/// source fails the load loudly. `None` on [`Capabilities`] derives a safe
+/// default from the wire dialect — see
+/// [`resolve_system_message_placement`](super::resolve_system_message_placement).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemMessagePlacement {
+    /// The wire API accepts a `system`/`developer` message verbatim at any
+    /// position (OpenAI Chat Completions & Responses, Ollama). Pass through.
+    Inline,
+    /// The API accepts an interleaved `system`-role directive but enforces
+    /// placement rules (Anthropic Opus 4.8: must follow a `user` turn — or an
+    /// assistant turn ending in a server-tool result — and be the last message
+    /// or be followed by an `assistant` turn; text-only; never `messages[0]`).
+    /// A valid directive is kept native; anything else folds. `developer`
+    /// collapses to `system` (Anthropic has no developer role).
+    NativeDirective,
+    /// The API has no positional system channel (Anthropic pre-4.8, Gemini
+    /// `systemInstruction`, Bedrock Converse `system[]`). A leading run folds
+    /// into the top-level system prompt; an interleaved directive folds into
+    /// the adjacent user turn as a `<system-reminder>` block so its position
+    /// and operator intent survive. Never 400s, never silently repositioned to
+    /// the global system prompt.
+    Fold,
+}
+
 /// Provider field that must carry Harn's private reasoning from an assistant
 /// turn into that provider's next request.
 ///
@@ -529,6 +559,11 @@ pub struct Capabilities {
     /// computer-use follow-up turn (OpenAI Responses `pending_safety_checks`
     /// → `acknowledged_safety_checks`). See [`ProviderRule::safety_ack_flow`].
     pub safety_ack_flow: bool,
+    /// How this route carries an interleaved `system`/`developer` message.
+    /// `None` derives a safe default from `message_wire_format` (OpenAI/Ollama
+    /// → `Inline`, everything else → `Fold`). See [`SystemMessagePlacement`]
+    /// and [`resolve_system_message_placement`](super::resolve_system_message_placement).
+    pub system_message_placement: Option<SystemMessagePlacement>,
 }
 
 impl Default for Capabilities {
@@ -626,6 +661,7 @@ impl Default for Capabilities {
             computer_use_style: None,
             screenshot_scaling: None,
             safety_ack_flow: false,
+            system_message_placement: None,
         }
     }
 }
