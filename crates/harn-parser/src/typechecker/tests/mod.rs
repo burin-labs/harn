@@ -15,6 +15,7 @@ mod coalesce;
 mod exhaustiveness;
 mod imports;
 mod interfaces;
+mod lexical_capture;
 mod main_signature;
 mod narrowing;
 mod nil_safety;

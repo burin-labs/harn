@@ -56,9 +56,9 @@ impl super::super::Vm {
             (Arc::clone(&frame.chunk), idx)
         };
         let name = Self::const_str(&chunk.constants[idx])?;
-        if let Some(val) = self.active_local_slot_value(name) {
+        if let Some(val) = self.env.get(name) {
             self.stack.push(val);
-        } else if let Some(val) = self.env.get(name) {
+        } else if let Some(val) = self.active_local_slot_value(name) {
             self.stack.push(val);
         } else if let Some(val) = self
             .frames
@@ -330,13 +330,13 @@ impl super::super::Vm {
         };
         let name = Self::const_str(&chunk.constants[idx])?;
         let val = self.pop()?;
-        // Local scope wins; otherwise route to the closure's shared
-        // module_state. Fall through to env.assign only when neither
-        // has it, so UndefinedVariable / ImmutableAssignment surface.
-        if self.assign_active_local_slot(name, val.clone(), false)? {
-            // Slot locals are the active binding for compiler-resolved names.
-        } else if self.env.get(name).is_some() {
+        // Compiler-addressed slots use SetLocalSlot. A by-name write therefore
+        // prefers the captured environment cell; the slot fallback only serves
+        // legacy/manual bytecode that did not carry an explicit slot address.
+        if self.env.get(name).is_some() {
             self.env.assign(name, val)?;
+        } else if self.assign_active_local_slot(name, val.clone(), false)? {
+            // Legacy by-name local write.
         } else if let Some(ms) = self
             .frames
             .last()
