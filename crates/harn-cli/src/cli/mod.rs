@@ -131,7 +131,9 @@ pub(crate) use guard::{
 };
 pub(crate) use host::{
     HostArgs, HostCommand, HostLeaseAcquireArgs, HostLeaseArgs, HostLeaseCommand,
-    HostLeasePriorityArg, HostLeaseReleaseArgs, HostLeaseRenewArgs, HostLeaseStatusArgs,
+    HostLeasePriorityArg, HostLeaseReleaseArgs, HostLeaseRenewArgs, HostLeaseResourceClassArg,
+    HostLeaseRunArgs, HostLeaseRunCargoArgs, HostLeaseRunCargoWorkerArgs, HostLeaseRunCommand,
+    HostLeaseStatusArgs,
 };
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};

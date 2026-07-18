@@ -12,6 +12,8 @@ fn test_parses_host_lease_acquire_contract() {
         "build-01",
         "--owner",
         "eval-runner",
+        "--resource-class",
+        "rust-heavy",
         "--priority-class",
         "measurement",
         "--no-expiry",
@@ -35,10 +37,68 @@ fn test_parses_host_lease_acquire_contract() {
         acquire.priority_class,
         HostLeasePriorityArg::Measurement
     ));
+    assert!(matches!(
+        acquire.resource_class,
+        HostLeaseResourceClassArg::RustHeavy
+    ));
     assert!(acquire.no_expiry);
     assert_eq!(acquire.owner_pid, Some(42));
     assert_eq!(acquire.wait_ms, 30_000);
     assert!(acquire.json);
+}
+
+#[test]
+fn test_parses_supervised_cargo_lease_contract() {
+    let cli = Cli::parse_from([
+        "harn",
+        "host",
+        "lease",
+        "run",
+        "cargo",
+        "--owner",
+        "codex-0",
+        "--host",
+        "build-01",
+        "--wait-ms",
+        "30000",
+        "--workspace",
+        "/workspace",
+        "--target-dir",
+        "/target",
+        "--build-dir",
+        "/build",
+        "--",
+        "check",
+        "-p",
+        "harn-cli",
+    ]);
+
+    let Command::Host(args) = cli.command.unwrap() else {
+        panic!("expected host command");
+    };
+    let HostCommand::Lease(lease) = args.command;
+    let HostLeaseCommand::Run(run) = lease.command else {
+        panic!("expected host lease run command");
+    };
+    let HostLeaseRunCommand::Cargo(cargo) = run.command;
+    assert_eq!(cargo.owner, "codex-0");
+    assert_eq!(cargo.host.as_deref(), Some("build-01"));
+    assert!(matches!(
+        cargo.priority_class,
+        HostLeasePriorityArg::CiVerify
+    ));
+    assert_eq!(cargo.wait_ms, 30_000);
+    assert_eq!(cargo.workspace, PathBuf::from("/workspace"));
+    assert_eq!(cargo.target_dir, PathBuf::from("/target"));
+    assert_eq!(cargo.build_dir, Some(PathBuf::from("/build")));
+    assert_eq!(
+        cargo.cargo_args,
+        vec![
+            "check".to_string(),
+            "-p".to_string(),
+            "harn-cli".to_string()
+        ]
+    );
 }
 
 #[test]
