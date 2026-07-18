@@ -9,7 +9,7 @@
  */
 pub type LlmCallerTransport = {forwards_assistant_prefill?: bool}
 
-pub fn __validate_llm_caller(value) {
+pub fn __validate_llm_caller(value) -> nil {
   if value == nil {
     return
   }
