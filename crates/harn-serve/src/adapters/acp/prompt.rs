@@ -17,7 +17,7 @@ impl AcpServer {
         let prompt = match normalize_acp_prompt(params) {
             Ok(prompt) => prompt,
             Err(message) => {
-                self.send_prompt_error(&session_id, id, &message);
+                self.send_prompt_protocol_error(id, &message);
                 return;
             }
         };

@@ -777,113 +777,6 @@ async fn session_cancel_is_idempotent_and_actor_attributed() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn session_prompt_compile_error_clears_active_inject_bridge() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {"cwd": "."},
-        }))
-        .await;
-    let created = recv_json(&mut rx).await;
-    let session_id = created["result"]["sessionId"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/prompt",
-            "params": {
-                "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "let x ="}],
-            },
-        }))
-        .await;
-    let mut saw_prompt_error = false;
-    for _ in 0..4 {
-        let message = recv_json(&mut rx).await;
-        if message["id"] == 2 {
-            assert_eq!(message["error"]["code"], -32000);
-            assert_eq!(
-                message["error"]["data"],
-                serde_json::json!({
-                    "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
-                    "terminalClass": "generic_throw",
-                })
-            );
-            saw_prompt_error = true;
-            break;
-        }
-    }
-    assert!(
-        saw_prompt_error,
-        "compile failure should answer session/prompt"
-    );
-
-    server
-        .handle_incoming_message(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "session/inject",
-            "params": {
-                "sessionId": session_id,
-                "mode": "queue",
-                "content": "must not target the failed prompt",
-            },
-        }))
-        .await;
-    let rejected = recv_json(&mut rx).await;
-    assert_eq!(rejected["error"]["code"], -32004);
-    assert!(rejected["error"]["message"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("no active prompt"));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn session_prompt_validation_errors_are_typed_protocol_failures() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-
-    for (id, params) in [
-        (1, serde_json::json!({"prompt": "missing session"})),
-        (
-            2,
-            serde_json::json!({
-                "sessionId": "unknown-session",
-                "prompt": [{"type": "text", "text": "unknown session"}],
-            }),
-        ),
-    ] {
-        server
-            .handle_incoming_message(serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": "session/prompt",
-                "params": params,
-            }))
-            .await;
-        let response = recv_json(&mut rx).await;
-        assert_eq!(response["id"], id);
-        assert_eq!(response["error"]["code"], -32602);
-        assert_eq!(
-            response["error"]["data"],
-            serde_json::json!({
-                "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
-                "terminalClass": "agent_loop_protocol_failure",
-            })
-        );
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn session_inject_revoke_and_replace_pending_messages() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
@@ -1985,5 +1878,6 @@ fn every_session_dispatch_arm_checks_authentication() {
 
 mod commands;
 mod modes;
+mod prompt_errors;
 mod runtime_overrides;
 mod sessions;

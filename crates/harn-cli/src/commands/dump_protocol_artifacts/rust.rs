@@ -1,7 +1,7 @@
 use harn_serve::adapters::acp::{
-    ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
-    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 
 use super::constants::*;
@@ -55,6 +55,11 @@ pub(super) fn generate_rust_for_version(artifact_version: &str) -> String {
     out.push_str(&format!(
         "pub const HARN_PROVIDER_CATALOG_METHOD: &str = {};\n\n",
         json_string_literal(HARN_PROVIDER_CATALOG_METHOD)
+    ));
+    out.push_str("/// Schema discriminator for typed `session/prompt` JSON-RPC error data.\n");
+    out.push_str(&format!(
+        "pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str = {};\n\n",
+        json_string_literal(ACP_PROMPT_ERROR_DATA_SCHEMA)
     ));
 
     out.push_str(&rust_const_group(
@@ -128,6 +133,12 @@ pub(super) fn generate_rust_for_version(artifact_version: &str) -> String {
         "HARN_AGENT_EVENT_KINDS",
         "Pipeline-loop milestone kinds emitted via `_harn/agentEvent`.",
         HARN_AGENT_EVENT_KINDS,
+    ));
+    out.push_str(&rust_const_group_owned(
+        "AGENT_TERMINAL_CLASS",
+        "AGENT_TERMINAL_CLASSES",
+        "Stable terminal classes carried by typed ACP prompt-error data.",
+        &agent_terminal_class_values(),
     ));
     out.push_str(&rust_const_group(
         "HARN_CONTENT_EXTENSION_FIELD",

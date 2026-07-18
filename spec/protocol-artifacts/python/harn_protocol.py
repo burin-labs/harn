@@ -20,6 +20,7 @@ __all__ = [
     "HARN_AGENT_EVENT_METHOD",
     "HARN_PROVIDER_CATALOG_METHOD",
     "ACP_SCHEMA_COMPATIBILITY",
+    "ACP_PROMPT_ERROR_DATA_SCHEMA",
     "A2A_PROTOCOL_VERSION",
     "MCP_PROTOCOL_VERSION",
     "MCP_STABLE_PROTOCOL_VERSION",
@@ -34,6 +35,7 @@ __all__ = [
     "ACP_CLIENT_METHODS",
     "ACP_AGENT_NOTIFICATIONS",
     "ACP_SESSION_UPDATES",
+    "AGENT_TERMINAL_CLASSES",
     "HARN_ACP_SESSION_UPDATE_EXTENSIONS",
     "HARN_AGENT_EVENT_KINDS",
     "ACP_CONTENT_BLOCK_TYPES",
@@ -62,6 +64,8 @@ __all__ = [
     "ACPClientMethod",
     "ACPAgentNotification",
     "ACPSessionUpdate",
+    "AgentTerminalClass",
+    "ACPPromptErrorSchema",
     "ACPToolKind",
     "ACPToolCallStatus",
     "HarnToolCallErrorCategory",
@@ -75,6 +79,7 @@ __all__ = [
     "MCPResultType",
     "MCPLoggingLevel",
     "ACPError",
+    "HarnACPPromptErrorData",
     "ACPRequest",
     "ACPResponse",
     "ACPNotification",
@@ -119,6 +124,7 @@ HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.23"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
+ACP_PROMPT_ERROR_DATA_SCHEMA: str = "harn.acp.prompt_error.v1"
 A2A_PROTOCOL_VERSION: str = "0.3.0"
 MCP_PROTOCOL_VERSION: str = "2025-11-25"
 MCP_STABLE_PROTOCOL_VERSION: str = "2025-11-25"
@@ -195,6 +201,17 @@ ACP_SESSION_UPDATES: tuple = (
     "transcript_compacted",
     "transcript_projected",
     "worker_update",
+)
+AGENT_TERMINAL_CLASSES: tuple = (
+    "context_overflow",
+    "provider_misconfigured",
+    "provider_unavailable",
+    "rate_limited",
+    "timeout",
+    "tool_policy_rejected",
+    "host_bridge_unimplemented",
+    "agent_loop_protocol_failure",
+    "generic_throw",
 )
 HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "artifact",
@@ -504,6 +521,22 @@ class ACPSessionUpdate(str, Enum):
     WORKER_UPDATE = "worker_update"
 
 
+class AgentTerminalClass(str, Enum):
+    CONTEXT_OVERFLOW = "context_overflow"
+    PROVIDER_MISCONFIGURED = "provider_misconfigured"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    RATE_LIMITED = "rate_limited"
+    TIMEOUT = "timeout"
+    TOOL_POLICY_REJECTED = "tool_policy_rejected"
+    HOST_BRIDGE_UNIMPLEMENTED = "host_bridge_unimplemented"
+    AGENT_LOOP_PROTOCOL_FAILURE = "agent_loop_protocol_failure"
+    GENERIC_THROW = "generic_throw"
+
+
+class ACPPromptErrorSchema(str, Enum):
+    HARN_ACP_PROMPT_ERROR_V1 = "harn.acp.prompt_error.v1"
+
+
 class ACPToolKind(str, Enum):
     READ = "read"
     EDIT = "edit"
@@ -665,6 +698,12 @@ class ACPError(_HarnDataclass):
     code: int
     message: str
     data: Optional[JsonValue] = None
+
+
+@dataclass
+class HarnACPPromptErrorData(_HarnDataclass):
+    schema: ACPPromptErrorSchema
+    terminalClass: AgentTerminalClass
 
 
 @dataclass
