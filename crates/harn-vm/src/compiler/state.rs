@@ -462,10 +462,10 @@ impl Compiler {
                         let saved = std::mem::replace(&mut compiler.module_level, false);
                         if bind_params_from_globals {
                             for param in params {
-                                compiler.define_local_slot(param, false);
-                                let idx = compiler.string_constant(param);
+                                compiler.define_local_slot(&param.name, false);
+                                let idx = compiler.string_constant(&param.name);
                                 compiler.chunk.emit_u16(Op::GetVar, idx, compiler.line);
-                                compiler.emit_init_or_define_binding(param, false);
+                                compiler.emit_init_or_define_binding(&param.name, false);
                             }
                         }
                         let result = compiler.compile_block(body);

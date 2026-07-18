@@ -1182,7 +1182,7 @@ pub(crate) fn load_module_callable_signatures(
                 signatures.insert(
                     name.clone(),
                     ModuleCallableSignature {
-                        params: vec![None; params.len()],
+                        params: params.iter().map(|param| param.type_expr.clone()).collect(),
                         return_type: return_type.clone(),
                         is_pub: *is_pub,
                     },

@@ -5,7 +5,6 @@ mod bootstrap;
 pub mod cli;
 mod cli_bytecode;
 pub mod commands;
-pub mod config;
 #[doc(hidden)]
 pub mod dispatch;
 pub mod env_guard;
@@ -38,6 +37,7 @@ use cli::{
     SkillTrustCommand, TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
+use harn_modules::project_config;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 use runtime::{build_cli_runtime, cli_runtime_mode, CliRuntimeMode};
 
@@ -599,20 +599,17 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 let mut json_files: Vec<commands::check::LintFileReport> = Vec::new();
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
-                    let lint_config = commands::check::load_harn_lint_config(file);
+                    let mut lint_config = commands::check::load_harn_lint_config(file);
+                    lint_config.require_file_header |= args.require_file_header;
+                    lint_config.require_public_api_types |= args.require_public_api_types;
                     commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
-                    let require_header =
-                        args.require_file_header || lint_config.require_file_header;
-                    let complexity_threshold = lint_config.complexity_threshold;
                     let report = commands::check::lint_file_report(
                         &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,
                         &module_graph,
-                        require_header,
-                        complexity_threshold,
-                        &lint_config.persona_step_allowlist,
+                        &lint_config,
                         script_diags_for(file.as_path()),
                     );
                     should_fail |= report.outcome().should_fail(config.strict || args.strict);
@@ -644,20 +641,17 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 let mut should_fail = false;
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
-                    let lint_config = commands::check::load_harn_lint_config(file);
+                    let mut lint_config = commands::check::load_harn_lint_config(file);
+                    lint_config.require_file_header |= args.require_file_header;
+                    lint_config.require_public_api_types |= args.require_public_api_types;
                     commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
-                    let require_header =
-                        args.require_file_header || lint_config.require_file_header;
-                    let complexity_threshold = lint_config.complexity_threshold;
                     let outcome = commands::check::lint_fix_file(
                         &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,
                         &module_graph,
-                        require_header,
-                        complexity_threshold,
-                        &lint_config.persona_step_allowlist,
+                        &lint_config,
                     );
                     should_fail |= outcome.should_fail(config.strict || args.strict);
                 }
@@ -689,20 +683,17 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 let mut total_fixable = 0usize;
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
-                    let lint_config = commands::check::load_harn_lint_config(file);
+                    let mut lint_config = commands::check::load_harn_lint_config(file);
+                    lint_config.require_file_header |= args.require_file_header;
+                    lint_config.require_public_api_types |= args.require_public_api_types;
                     commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
-                    let require_header =
-                        args.require_file_header || lint_config.require_file_header;
-                    let complexity_threshold = lint_config.complexity_threshold;
                     let outcome = commands::check::lint_file_inner(
                         &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,
                         &module_graph,
-                        require_header,
-                        complexity_threshold,
-                        &lint_config.persona_step_allowlist,
+                        &lint_config,
                         script_diags_for(file.as_path()),
                     );
                     total_findings += outcome.findings;
@@ -744,11 +735,11 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             // Anchor config resolution on the first target; CLI flags
             // always win over harn.toml values.
             let anchor = targets.first().map(Path::new).unwrap_or(Path::new("."));
-            let loaded = match config::load_for_path(anchor) {
+            let loaded = match project_config::load_for_path(anchor) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("warning: {e}");
-                    config::HarnConfig::default()
+                    project_config::HarnConfig::default()
                 }
             };
             let mut opts = harn_fmt::FmtOptions::default();

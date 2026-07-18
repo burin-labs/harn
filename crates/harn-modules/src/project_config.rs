@@ -1,12 +1,8 @@
-//! Lightweight `harn.toml` loader for `harn fmt`, `harn lint`, and
-//! `harn eval prompt --fleet-name <name>`.
+//! Typed project configuration shared by Harn's CLI and language tooling.
 //!
-//! This module is intentionally separate from `crate::package` (which owns
-//! the richer `[check]` + `[dependencies]` manifest model used by
-//! `harn check`, `harn install`, etc.). `harn.toml` can carry both sets of
-//! keys; this loader focuses on the `[fmt]`, `[lint]`, and `[eval.fleets]`
-//! sections and walks up from an input file looking for the nearest
-//! manifest.
+//! `harn.toml` can carry many sections. This loader exposes the generic
+//! `[fmt]`, `[lint]`, and `[eval.fleets]` policy used by every frontend and
+//! walks up from an input file looking for the nearest manifest.
 //!
 //! Recognized keys (snake_case, Cargo-style):
 //!
@@ -20,6 +16,7 @@
 //! disabled = ["unused-import"]
 //! require_file_header = false
 //! require_docstrings = false
+//! require_public_api_types = false
 //! complexity_threshold = 25
 //! persona_step_allowlist = ["legacy_helper"]
 //! template_variant_branch_threshold = 3
@@ -50,8 +47,7 @@ const MANIFEST: &str = "harn.toml";
 /// (e.g. a user's home directory or `/tmp`).
 const MAX_PARENT_DIRS: usize = 16;
 
-/// Combined `harn.toml` view used by `harn fmt`, `harn lint`, and
-/// `harn eval prompt`.
+/// Generic `harn.toml` view shared by the CLI, LSP, and future frontends.
 #[derive(Debug, Default, Clone)]
 pub struct HarnConfig {
     pub fmt: FmtConfig,
@@ -82,6 +78,10 @@ pub struct LintConfig {
     /// Off by default — out of the box, `pub fn` needs no docs.
     #[serde(default, alias = "require-docstrings")]
     pub require_docstrings: Option<bool>,
+    /// Require explicit parameter and return annotations on every public
+    /// function and pipeline.
+    #[serde(default, alias = "require-public-api-types")]
+    pub require_public_api_types: Option<bool>,
     /// Override the default cyclomatic-complexity warning threshold
     /// (see `harn_lint::DEFAULT_COMPLEXITY_THRESHOLD`). Accept both
     /// snake_case and kebab-case for consistency with the other keys.
@@ -248,6 +248,7 @@ mod tests {
         assert!(cfg.lint.disabled.is_none());
         assert!(cfg.lint.require_file_header.is_none());
         assert!(cfg.lint.require_docstrings.is_none());
+        assert!(cfg.lint.require_public_api_types.is_none());
     }
 
     #[test]
@@ -265,6 +266,7 @@ separator_width = 60
 disabled = ["unused-import", "missing-harndoc"]
 require_file_header = true
 require_docstrings = true
+require_public_api_types = true
 "#,
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
@@ -277,6 +279,7 @@ require_docstrings = true
         );
         assert_eq!(cfg.lint.require_file_header, Some(true));
         assert_eq!(cfg.lint.require_docstrings, Some(true));
+        assert_eq!(cfg.lint.require_public_api_types, Some(true));
     }
 
     #[test]
@@ -348,6 +351,7 @@ separator-width = 72
 [lint]
 require-file-header = true
 require-docstrings = true
+require-public-api-types = true
 ",
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
@@ -356,6 +360,7 @@ require-docstrings = true
         assert_eq!(cfg.fmt.separator_width, Some(72));
         assert_eq!(cfg.lint.require_file_header, Some(true));
         assert_eq!(cfg.lint.require_docstrings, Some(true));
+        assert_eq!(cfg.lint.require_public_api_types, Some(true));
     }
 
     #[test]

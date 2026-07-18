@@ -753,7 +753,14 @@ while trusted native dynamic libraries use `nativeRuleDirs`.
 harn lint main.harn
 harn lint src/ tests/
 harn lint prompts/system.harn.prompt
+harn lint --require-public-api-types src/
 ```
+
+`--require-public-api-types` reports every untyped public function or pipeline
+parameter and return as `HARN-LNT-067`. Set
+`[lint] require_public_api_types = true` in `harn.toml` to apply the same policy
+to CLI and LSP linting across the project. The rule has no autofix because
+choosing a public contract is an API-design decision.
 
 Pass `--fix` to automatically apply safe fixes (e.g., `var` → `let` for
 never-reassigned bindings, boolean comparison simplification, unused import

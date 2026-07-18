@@ -69,6 +69,9 @@ pub struct LintOptions<'a> {
     /// enabled via `[lint] require_docstrings = true` in `harn.toml`,
     /// and implied by `require_stdlib_metadata`.
     pub require_docstrings: bool,
+    /// When true, every public function and pipeline parameter and return
+    /// carries an explicit type annotation.
+    pub require_public_api_types: bool,
     /// Override the cyclomatic-complexity threshold. `None` uses
     /// [`DEFAULT_COMPLEXITY_THRESHOLD`].
     pub complexity_threshold: Option<usize>,

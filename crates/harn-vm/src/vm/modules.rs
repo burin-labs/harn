@@ -299,7 +299,7 @@ impl Vm {
             self.set_source_dir(parent);
         }
         for (param, value) in params.iter().zip(args) {
-            self.set_global(param, value.clone());
+            self.set_global(&param.name, value.clone());
         }
         let previous_package_execution_guard =
             std::mem::replace(&mut self.package_execution_guard, next_guard);

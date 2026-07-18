@@ -174,9 +174,15 @@ impl DocumentState {
         let is_stdlib_source = file_path
             .as_deref()
             .is_some_and(harn_lint::path_is_stdlib_source);
+        let require_public_api_types = file_path
+            .as_deref()
+            .and_then(|path| harn_modules::project_config::load_for_path(path).ok())
+            .and_then(|config| config.lint.require_public_api_types)
+            .unwrap_or(false);
         let lint_options = harn_lint::LintOptions {
             file_path: file_path.as_deref(),
             require_stdlib_metadata: is_stdlib_source,
+            require_public_api_types,
             ..Default::default()
         };
         let externally_imported_names = std::collections::HashSet::new();
@@ -340,6 +346,45 @@ fn handler() {
                 .map(|diag| (&diag.code, &diag.message))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn project_public_api_type_policy_surfaces_as_lsp_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        write(
+            &temp.path().join("harn.toml"),
+            "[lint]\nrequire_public_api_types = true\n",
+        );
+        let path = temp.path().join("src/main.harn");
+        let source = "pub pipeline ship(task) {\n  return task\n}\n";
+        write(&path, source);
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+
+        let public_api_diagnostics = state
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                matches!(
+                    diagnostic.code.as_ref(),
+                    Some(tower_lsp::lsp_types::NumberOrString::String(code))
+                        if code == "HARN-LNT-067"
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(public_api_diagnostics.len(), 2);
+        assert!(public_api_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("parameter `task`")));
+        assert!(public_api_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("return type")));
     }
 
     #[test]

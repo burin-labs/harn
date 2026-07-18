@@ -471,9 +471,9 @@ impl ExportCatalog {
                 .or_insert_with(|| ExportedFunction {
                     name: name.clone(),
                     kind: ExportedCallableKind::Pipeline,
-                    params: pipeline_exported_params(params),
+                    params: exported_params(params, &schema_resolver),
                     return_type: return_type.clone(),
-                    input_schema: pipeline_input_schema(params),
+                    input_schema: schema_resolver.json_schema_for_typed_params(params),
                     output_schema: return_type
                         .as_ref()
                         .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
@@ -527,19 +527,6 @@ fn exported_params(
                 .unwrap_or_else(|| serde_json::json!({})),
             has_default: param.default_value.is_some(),
             rest: param.rest,
-        })
-        .collect()
-}
-
-fn pipeline_exported_params(params: &[String]) -> Vec<ExportedParam> {
-    params
-        .iter()
-        .map(|name| ExportedParam {
-            name: name.clone(),
-            type_expr: None,
-            input_schema: serde_json::json!({}),
-            has_default: false,
-            rest: false,
         })
         .collect()
 }
@@ -1315,17 +1302,6 @@ fn retry_from_entries<'a>(
         max_attempts,
         backoff,
     }
-}
-
-fn pipeline_input_schema(params: &[String]) -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": params
-            .iter()
-            .map(|name| (name.clone(), serde_json::json!({})))
-            .collect::<serde_json::Map<_, _>>(),
-        "required": params,
-    })
 }
 
 #[cfg(test)]
@@ -2128,3 +2104,7 @@ pub fn both(req: dict) -> dict { return http_ok({}) }
         assert_eq!(codes, vec![WS_CONFLICTS_WITH_STREAM_OR_RAW]);
     }
 }
+
+#[cfg(test)]
+#[path = "exports/typed_pipeline_tests.rs"]
+mod typed_pipeline_tests;
