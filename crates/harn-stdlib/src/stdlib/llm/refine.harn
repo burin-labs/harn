@@ -379,8 +379,8 @@ pub fn propose_instructions(base_prompt, options = nil) {
  * refined prompt on a per-(prompt, style, target_size) basis using an
  * atomic-guarded module-local memo.
  *
- * Note: because Harn closures capture by value, the in-flight memo is held
- * in a process-level dict at the rewriter layer. For multi-session isolation
+ * Note: the in-flight memo is held in a process-level dict at the rewriter
+ * layer so it survives across caller instances. For multi-session isolation
  * pass `refine_opts.session` so refine_prompt can short-circuit via the
  * session-scoped cache.
  *

@@ -21,17 +21,18 @@ pub struct VmClosure {
     /// This lets selectively imported functions keep private sibling helpers
     /// without exporting them into the caller's environment.
     pub module_functions: Option<WeakModuleFunctionRegistry>,
-    /// Shared, mutable module-level env: holds top-level `var` / `let`
+    /// Shared, mutable module-level env: holds top-level `let` / `const`
     /// bindings declared at the module root (caches, counters, lazily
     /// initialized registries). All closures created from the same
     /// module import point at the same shared mutable env, so a
     /// mutation inside one function is visible to every other function
     /// in that module on subsequent calls. `closure.env` still holds
-    /// the per-closure lexical snapshot (captured function args from
-    /// enclosing scopes, etc.) and is unchanged by this — `module_state`
+    /// the closure's own lexical bindings (captured function args from
+    /// enclosing scopes, etc.), with captured locals shared by reference
+    /// through [`BindingCell`], and is unchanged by this — `module_state`
     /// is a separate lookup layer consulted after the local env and
     /// before globals. Created in `import_declarations` after the
-    /// module's init chunk runs, so the initial values from `var x = ...`
+    /// module's init chunk runs, so the initial values from `let x = ...`
     /// land in it.
     pub module_state: Option<WeakModuleState>,
     /// Strong owners of this closure's module scope, pinned only when the

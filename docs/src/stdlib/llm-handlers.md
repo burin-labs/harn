@@ -61,8 +61,9 @@ These bit the implementing agents and will bite users:
 
 1. **`with_retry` does not mutate `call.turn.attempt` between retries.**
    The original `call` dict is passed through unchanged. If you need
-   per-attempt counting inside a custom caller, use an `atomic`. This
-   is deliberate (Harn closures capture by value).
+   per-attempt counting inside a custom caller, use an `atomic` — it stays
+   correct even when the caller runs inside `parallel`/`spawn`, where
+   concurrent branches share one captured cell (see HARN-LNT-064).
 2. **`compose` takes a single list, not varargs.**
    `compose([with_logging({}), with_retry({})])(base)`, not
    `compose(a, b, c)(base)`.
