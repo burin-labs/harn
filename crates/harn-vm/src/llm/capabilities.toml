@@ -118,6 +118,19 @@
 #                     whether assistant-role prefill turns are accepted.
 #   prefers_role_developer:
 #                     whether durable instructions should use `developer` role.
+#   system_message_placement:
+#                     how an interleaved `system`/`developer` message (an
+#                     operator directive placed mid-conversation, not the
+#                     leading system prompt) is carried on the wire. Known
+#                     values: `inline` (OpenAI Chat/Responses, Ollama — verbatim
+#                     at any position), `native_directive` (Anthropic Opus 4.8 —
+#                     a validly-placed `system` directive rides natively, else
+#                     folds), and `fold` (Gemini, Bedrock, older/other Claude —
+#                     no positional system channel, so the directive folds into
+#                     the adjacent user turn as a `<system-reminder>` block).
+#                     Unset derives from `message_wire_format` (openai/ollama →
+#                     inline, else fold), so only the Anthropic 4.8 native rows
+#                     and Bedrock's non-`anthropic` catch-alls need it set.
 #   prefers_xml_tools:
 #                     whether text-rendered tool specs should use XML wrappers.
 #   thinking_block_style:
@@ -695,6 +708,18 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Opus 4.8 is the first Claude to accept a mid-conversation `system` directive
+# (an operator instruction placed after a user turn, before the assistant
+# reply). Layer the native placement onto the 4.7 capability row below via
+# `extends` so 4.7 and older keep folding the directive to a `<system-reminder>`
+# user block. Gated to 4.8+ because the Messages API 400s the directive on every
+# earlier model.
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [4, 8]
+extends = true
+system_message_placement = "native_directive"
+
 [[provider.anthropic]]
 model_match = "claude-opus-*"
 version_min = [4, 7]
@@ -940,6 +965,13 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# OpenRouter-prefixed mirror of the Opus 4.8 native mid-conversation directive.
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [4, 8]
+extends = true
+system_message_placement = "native_directive"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
@@ -5042,6 +5074,10 @@ preferred_tool_format = "native"
 message_wire_format = "anthropic"
 native_tool_wire_format = "anthropic"
 recommended_endpoint = "/model/{model}/converse"
+# Bedrock Converse has only a top-level `system[]` field — no positional system
+# channel — so an interleaved directive folds into the adjacent user turn rather
+# than mis-deriving to `inline` from the non-`anthropic` catch-all wire format.
+system_message_placement = "fold"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -5057,6 +5093,10 @@ native_tools = true
 batch_api = true
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
+# Bedrock Converse has only a top-level `system[]` field — no positional system
+# channel — so an interleaved directive folds into the adjacent user turn rather
+# than mis-deriving to `inline` from the non-`anthropic` catch-all wire format.
+system_message_placement = "fold"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -5072,6 +5112,10 @@ native_tools = true
 batch_api = true
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
+# Bedrock Converse has only a top-level `system[]` field — no positional system
+# channel — so an interleaved directive folds into the adjacent user turn rather
+# than mis-deriving to `inline` from the non-`anthropic` catch-all wire format.
+system_message_placement = "fold"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
