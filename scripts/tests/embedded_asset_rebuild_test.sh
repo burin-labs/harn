@@ -53,7 +53,11 @@ trap cleanup EXIT
 run_check() {
   local log_path=$1
   shift
-  local -a cargo_env=(HARN_DISABLE_AUTO_HOOK_SETUP=1 "CARGO_TARGET_DIR=$target_dir")
+  local -a cargo_env=(
+    HARN_DISABLE_AUTO_HOOK_SETUP=1
+    CARGO_TERM_COLOR=never
+    "CARGO_TARGET_DIR=$target_dir"
+  )
   if [[ -n "$build_dir" ]]; then
     cargo_env+=("CARGO_BUILD_BUILD_DIR=$build_dir")
   fi
