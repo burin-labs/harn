@@ -42,7 +42,8 @@ const PROVIDERS_WITH_ROTATED_SLACK_SECRET = PROVIDERS
   },
 )
 
-pipeline main() {
+@test
+pipeline test_persona_prompt_compile(_task) {
   with_llm_script(
     [
       llm_text(
