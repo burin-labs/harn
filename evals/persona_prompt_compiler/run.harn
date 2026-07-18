@@ -4,11 +4,12 @@ fn __env_int(harness: Harness, name: string, default_value: int) -> int {
   return to_int(harness.env.get_or(name, to_string(default_value))) ?? default_value
 }
 
-fn __shared_ledger_configured(harness: Harness) -> bool {
+fn __shared_ledger_path(harness: Harness) -> string {
   const path = harness.env.get_or("HARN_EVENT_LOG_SQLITE_PATH", "")
-  return harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite"
-    && path != ""
-    && is_absolute(path)
+  if harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite" && path != "" && is_absolute(path) {
+    return path
+  }
+  return ""
 }
 
 fn __selected_cases(manifest, split: string) -> list {
@@ -17,6 +18,19 @@ fn __selected_cases(manifest, split: string) -> list {
   }
   const ids = manifest.split?.[split] ?? []
   return manifest.cases.filter({ entry -> contains(ids, entry.id) }).to_list()
+}
+
+pub fn persona_prompt_eval_selected_split(manifest: dict, split: string) -> dict {
+  if split == "all" {
+    return manifest.split ?? {}
+  }
+  return {[split]: manifest.split?.[split] ?? []}
+}
+
+pub fn persona_prompt_eval_executor(executor: dict, ledger_path: string) -> dict {
+  const argv = executor.argv
+  return executor
+    + {argv: [...argv.slice(0, 2), "--write-root", dirname(ledger_path), ...argv.slice(2, len(argv))]}
 }
 
 fn main(harness: Harness) -> int {
@@ -34,6 +48,7 @@ fn main(harness: Harness) -> int {
   }
   const provider = harness.env.get_or("HARN_PERSONA_EVAL_PROVIDER", raw.metadata.provider ?? "mock")
   const model = harness.env.get_or("HARN_PERSONA_EVAL_MODEL", raw.metadata.model ?? "mock")
+  const shared_ledger_path = __shared_ledger_path(harness)
   const cases = __selected_cases(raw, split)
   const planned_cells = len(cases) * trials
   if len(cases) == 0 {
@@ -43,7 +58,7 @@ fn main(harness: Harness) -> int {
   if provider != "mock" {
     const confirmed = harness.env.get_or("HARN_PERSONA_EVAL_CONFIRM_SPEND", "0") == "1"
     const max_cells = __env_int(harness, "HARN_PERSONA_EVAL_MAX_CELLS", 0)
-    if !confirmed || max_cells < planned_cells || !__shared_ledger_configured(harness) {
+    if !confirmed || max_cells < planned_cells || shared_ledger_path == "" {
       harness.stdio
         .eprintln(
         "live persona prompt eval requires spend confirmation, a cell ceiling >= "
@@ -59,6 +74,12 @@ fn main(harness: Harness) -> int {
       base_dir: source_dir(),
       trials: trials,
       cases: cases,
+      split: persona_prompt_eval_selected_split(raw, split),
+      executor: if shared_ledger_path != "" {
+        persona_prompt_eval_executor(raw.executor, shared_ledger_path)
+      } else {
+        raw.executor
+      },
       metadata: raw.metadata + {provider: provider, model: model},
     },
   )
