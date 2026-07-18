@@ -57,6 +57,8 @@ exempt_checks = [
   "check-stdlib-public-return-types", # public stdlib return-type ratchet, not a mirror
   "check-release-audit-contract",  # validates typed release proof mapping against CI, not a mirror
   "check-generated-registry",       # the auditor itself
+  "check-drift",                    # fast preflight aggregator (derives members from [preflight.dispatch])
+  "check-drift-binary",             # binary-tier preflight aggregator (derives members from [preflight.dispatch])
 ]
 
 # ---------------------------------------------------------------------------
@@ -340,3 +342,82 @@ outputs = ["spec/protocol-artifacts/HarnProtocol.swift", "spec/protocol-artifact
 sources = ["spec/protocol-artifacts/"]
 ci = false  # requires BURIN_CODE_ROOT / a sibling burin-code checkout; runs in release + cross-repo jobs only
 make_all = false  # excluded from `make all` for the same reason (no sibling checkout locally)
+
+# ---------------------------------------------------------------------------
+# Drift-preflight dispatch classification — single source of truth for the
+# fast `make check-drift` / `make check-drift-binary` "before you declare
+# clean" preflights. scripts/drift_preflight_members.harn derives each
+# preflight's member list from this table; the Makefile targets just expand it.
+#
+# check-generated-registry (completeness_errors + preflight_dispatch_errors)
+# enforces that EVERY `^check-*:` Makefile target appears here with a tier, so a
+# newly-added drift guard cannot silently escape the preflight. `lint-*` guards
+# may also be classified `source` so the fast gate catches them too.
+#
+# Tiers, by DISPATCH SHAPE (the load-bearing distinction):
+#   source   -> reads committed files at interpret time (`harn run scripts/*.harn`
+#               that read files, or a plain `.sh` scan). Trustworthy the instant
+#               you save a file — a stale warm binary cannot change the verdict.
+#               These are `check-drift`, the true "before you declare clean" gate.
+#   binary   -> compares a committed doc/artifact against what the harn BINARY
+#               EMITS (dump-* --check, `explain --catalog`, `provider catalog
+#               generate/matrix/support --check`, `connector-schema-codegen
+#               --check`, the in-binary `llm_provider_catalog()`, `harn --help`).
+#               After a Rust-registry edit but before a rebuild the warm binary
+#               is stale, so these FALSE-PASS. Only trustworthy with a binary
+#               built from CURRENT source, so they are `check-drift-binary`
+#               (run after `make build` / with a fresh HARN_BIN; CI is safe
+#               because CI's HARN_BIN is freshly built).
+#   excluded -> not a fast file-drift scan: needs a cargo build/test, an external
+#               toolchain (go), a sibling repo checkout, executes runtime
+#               fixtures, or is a perf soak; in neither preflight.
+[preflight.dispatch]
+# --- source: fast, reads committed files (check-drift) ---
+"check-crate-sibling-versions" = "source"
+"check-dependabot-groups" = "source"
+"check-language-spec" = "source"
+"check-docs-model-refs" = "source"
+"check-trigger-examples" = "source"
+"check-docs-snippets" = "source"
+"check-docs-links" = "source"
+"check-site-snippets" = "source"
+"check-receipt-structs" = "source"
+"check-ported-handler-loc" = "source"
+"check-source-file-lengths" = "source"
+"check-python-boundary" = "source"
+"check-harn-syntax-sensitive-scans" = "source"
+"check-tree-sitter-keywords" = "source"
+"check-grammar-keywords" = "source"
+"check-generated-registry" = "source"
+"check-release-audit-contract" = "source"
+"check-ci-cache-policy" = "source"
+"check-stdlib-strict-types" = "source"
+"check-stdlib-public-return-types" = "source"
+"lint-test-patterns" = "source"
+"lint-diagnostic-codes" = "source"
+"lint-no-xfail-regression" = "source"
+"lint-no-rust-prompt-prose" = "source"
+"lint-agent-path-normalization" = "source"
+# --- binary: compares committed artifact against binary-emitted output (check-drift-binary) ---
+"check-highlight" = "binary"
+"check-protocol-artifacts" = "binary"
+"check-connector-schemas" = "binary"
+"check-session-bundle-schema" = "binary"
+"check-trigger-quickref" = "binary"
+"check-provider-matrix" = "binary"
+"check-provider-support" = "binary"
+"check-provider-catalog" = "binary"
+"check-connector-matrix" = "binary"
+"check-provider-catalog-drift" = "binary"
+"check-diagnostics-catalog" = "binary"
+"check-docs-cli-flags" = "binary"
+# --- excluded: build/test, external toolchain, cross-repo, runtime fixtures, or perf soak ---
+"check-cli-aot" = "excluded"                  # cargo run -p harn-cli-aot-gen (build)
+"check-run-view-fixtures" = "excluded"        # cargo test -p harn-vm (build + test)
+"check-bindings" = "excluded"                 # go vet/test round-trip (external toolchain)
+"check-burin-protocol-artifacts" = "excluded" # needs a sibling burin-code checkout (ci = false)
+"check-docs-workflow-quickstart" = "excluded" # executes workflow fixtures (behavioural runtime guard)
+"check-vm-rss-soak" = "excluded"              # RSS perf soak (build + run)
+"check-test-case-performance" = "excluded"    # per-test perf ratchet (build + run)
+"check-drift" = "excluded"                    # the source-tier aggregator itself
+"check-drift-binary" = "excluded"             # the binary-tier aggregator itself

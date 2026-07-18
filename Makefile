@@ -772,3 +772,29 @@ check-release-audit-contract:
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
 	@$(HARN_CMD) run scripts/check_ci_cache_policy.harn
+
+# Fast "before you declare clean" drift preflight. The member set is DERIVED
+# from the [preflight.dispatch] table in scripts/generated_artifacts.toml (the
+# single source of truth), tier = source: audits that read committed files at
+# interpret time, so they are trustworthy the instant you save a file — no
+# rebuild needed. `make check-generated-registry` guarantees every check-*
+# target is classified there, so this set can never silently omit a guard.
+# `make all` remains the full slow gate; this is the seconds-scale local gate.
+# For the binary-emit tier (dump-*/--check/provider catalog/explain --catalog),
+# which false-passes on a stale binary, run `check-drift-binary` after a
+# Rust-registry edit + rebuild (or with a fresh HARN_BIN).
+check-drift:
+	@echo "=== Fast drift preflight (source-reading tier) ==="
+	@members=$$($(HARN_CMD) run scripts/drift_preflight_members.harn -- --tier source) || exit 1; \
+	$(MAKE) --no-print-directory $$members
+	@echo "    Drift preflight (source) OK."
+
+# Binary-emit drift tier: each member compares a committed artifact against what
+# the harn BINARY emits, so a STALE binary false-passes. Run this only with a
+# binary built from current source (after `make build` / with a fresh HARN_BIN);
+# CI is safe because CI's HARN_BIN is freshly built.
+check-drift-binary:
+	@echo "=== Drift preflight (binary-emit tier; needs a fresh HARN_BIN) ==="
+	@members=$$($(HARN_CMD) run scripts/drift_preflight_members.harn -- --tier binary) || exit 1; \
+	$(MAKE) --no-print-directory $$members
+	@echo "    Drift preflight (binary) OK."

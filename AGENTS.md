@@ -124,6 +124,12 @@ filters, `{{# #}}`, `{{ raw }}`, `{{- -}}`) raise parse errors.
 ## Verification
 
 - Start with the narrowest check that covers the touched behavior.
+- Before declaring a change clean, run `make check-drift` (a seconds-scale
+  preflight of every source-reading drift/manifest guard, derived from
+  `scripts/generated_artifacts.toml`) and confirm `git status` is empty. After a
+  Rust-registry edit, also rebuild and run `make check-drift-binary` (the
+  binary-emit guards, which false-pass on a stale binary). These are the fast
+  local subset; `make all` is still the full gate.
 - Before merge, prefer `make all`.
 - Syntax, parser, or keyword changes need conformance coverage plus
   `make conformance`, `make lint-harn`, `make fmt-harn`, and tree-sitter tests.
@@ -157,6 +163,12 @@ polling loops, `SystemTime::now()`, or short `recv_timeout` calls to tests. Use
   check-generated-registry` fails until the registry, the `all:` recipe, and
   the CI workflows agree, so a new drift guard can't silently skip CI. See the
   registry file header for the checklist.
+- Every `check-*` target must also be classified in the registry's
+  `[preflight.dispatch]` table (`source` reads committed files; `binary`
+  compares against binary-emitted output; `excluded` needs a build/toolchain).
+  `make check-generated-registry` fails until it is, so `make check-drift` /
+  `check-drift-binary` (whose members derive from that table) can never silently
+  omit a new guard.
 
 ## Cross-surface changes
 

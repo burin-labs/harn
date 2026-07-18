@@ -1,0 +1,33 @@
+// Tests for scripts/drift_preflight_members.harn — exercise the pure
+// `members_for_tier` selector on synthetic dispatch tables (no filesystem).
+import "../drift_preflight_members.harn"
+
+@test
+pipeline test_members_source_tier_sorted(task) {
+  const dispatch = {"check-b": "source", "check-a": "source", "check-c": "binary"}
+  assert_eq(members_for_tier(dispatch, "source"), ["check-a", "check-b"])
+}
+
+@test
+pipeline test_members_binary_tier(task) {
+  const dispatch = {"check-a": "source", "check-c": "binary", "check-d": "binary"}
+  assert_eq(members_for_tier(dispatch, "binary"), ["check-c", "check-d"])
+}
+
+@test
+pipeline test_members_excluded_never_selected(task) {
+  const dispatch = {"check-a": "excluded", "check-b": "source"}
+  assert_eq(members_for_tier(dispatch, "source"), ["check-b"])
+  assert_eq(members_for_tier(dispatch, "binary"), [])
+}
+
+@test
+pipeline test_members_empty_dispatch(task) {
+  assert_eq(members_for_tier({}, "source"), [])
+}
+
+@test
+pipeline test_members_unknown_tier(task) {
+  const dispatch = {"check-a": "source"}
+  assert_eq(members_for_tier(dispatch, "nope"), [])
+}
