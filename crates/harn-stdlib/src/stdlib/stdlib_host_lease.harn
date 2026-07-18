@@ -1,13 +1,12 @@
-// std/host_lease — typed read-only authority for local machine lease state.
-//
-// Lifecycle policy intentionally remains out of this first surface. The
-// hostlib capability owns the authoritative registry read and stale recovery;
-// callers receive the versioned contract directly without parsing CLI output.
+/** Cancellation-safe scopes for scarce local host resources. */
 pub type HostLeasePriorityClass = "interactive" | "measurement" | "ci-verify" | "deferrable"
+
+pub type HostLeaseResourceClass = "whole-machine" | "rust-heavy"
 
 pub type HostLeaseHandle = {
   schema_version: int,
   host: string,
+  resource_class: HostLeaseResourceClass,
   lease_id: string,
   owner: string,
   priority_class: HostLeasePriorityClass,
@@ -23,9 +22,59 @@ pub type HostLeaseHandle = {
 pub type HostLeaseStatus = {
   schema_version: int,
   host: string,
+  resource_class: HostLeaseResourceClass,
   observed_at_ms: int,
   active?: HostLeaseHandle,
   recovered_stale_lease: bool,
+}
+
+pub type HostLeaseOptions = {
+  host?: string,
+  owner: string,
+  resource_class?: HostLeaseResourceClass,
+  priority_class?: HostLeasePriorityClass,
+  ttl_ms?: int,
+  wait_timeout_ms?: int,
+  wait_slice_ms?: int,
+  reason?: string,
+  metadata?: dict<string, string>,
+}
+
+pub type HostLeaseDeferReceipt = {
+  host: string,
+  resource_class: HostLeaseResourceClass,
+  deferred_reason: string,
+  observed_at_ms: int,
+  next_wake_at_ms?: int,
+  deadline_at_ms?: int,
+  active?: HostLeaseHandle,
+}
+
+pub type HostLeaseAcquireReceipt = {
+  schema_version: int,
+  status: "acquired" | "deferred",
+  observed_at_ms: int,
+  waited_ms: int,
+  handle?: HostLeaseHandle,
+  defer?: HostLeaseDeferReceipt,
+  guard?: unknown,
+  recovered_stale_lease: bool,
+}
+
+pub type HostLeaseReleaseReceipt = {
+  schema_version: int,
+  released: bool,
+  host: string,
+  resource_class: HostLeaseResourceClass,
+  lease_id: string,
+  observed_at_ms: int,
+}
+
+pub type HostLeaseScopeResult<T> = {
+  status: "completed" | "deferred",
+  value?: T,
+  acquire: HostLeaseAcquireReceipt,
+  release?: HostLeaseReleaseReceipt,
 }
 
 /**
@@ -34,9 +83,107 @@ pub type HostLeaseStatus = {
  * This is inspection only. It never acquires, renews, releases, or claims to
  * observe a resource on another machine.
  *
- * @effects: []
+ * @effects: [host]
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
-pub fn host_lease_status(host: string) -> HostLeaseStatus {
-  return hostlib_host_lease_status({host: host})
+pub fn host_lease_status(host: string, resource_class: HostLeaseResourceClass = "whole-machine") -> HostLeaseStatus {
+  return hostlib_host_lease_status({host: host, resource_class: resource_class})
+}
+
+fn __host_lease_is_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __host_lease_request(options: HostLeaseOptions, wait_slice_ms: int) -> dict {
+  return {
+    host: options.host,
+    owner: options.owner,
+    resource_class: options.resource_class ?? "whole-machine",
+    priority_class: options.priority_class ?? "deferrable",
+    ttl_ms: options.ttl_ms,
+    wait_slice_ms: wait_slice_ms,
+    reason: options.reason,
+    metadata: options.metadata ?? {},
+  }
+}
+
+/**
+ * Attempt to acquire a host resource, waiting at most one bounded,
+ * event-driven slice. Acquired receipts carry an opaque guard whose lifetime
+ * releases the lease if explicit cleanup is skipped.
+ *
+ * @effects: [host]
+ * @errors: [backend_error, invalid_parameter, missing_parameter]
+ */
+pub fn host_lease_acquire(options: HostLeaseOptions, wait_slice_ms: int = 0) -> HostLeaseAcquireReceipt {
+  return hostlib_host_lease_acquire(__host_lease_request(options, wait_slice_ms))
+}
+
+/**
+ * Release an acquired lease and return its terminal receipt. Idempotent.
+ *
+ * @effects: [host]
+ * @errors: [backend_error, invalid_parameter, missing_parameter]
+ */
+pub fn host_lease_release(acquire: HostLeaseAcquireReceipt) -> HostLeaseReleaseReceipt {
+  if acquire.guard == nil {
+    throw "std/host_lease: acquire receipt has no live resource guard"
+  }
+  return hostlib_host_lease_release({guard: acquire.guard})
+}
+
+/**
+ * Run `body(handle)` while holding one machine-global resource lease.
+ * Contention returns `{status: "deferred"}` after `wait_timeout_ms`; normal
+ * return and exceptions release explicitly, while VM-owned guard teardown
+ * covers forced cancellation and abandoned frames.
+ *
+ * @effects: [host]
+ * @errors: [backend_error, invalid_parameter, missing_parameter]
+ * @example: with_host_lease({owner: "release", resource_class: "rust-heavy"}, { _ -> build() })
+ */
+pub fn with_host_lease<T>(options: HostLeaseOptions, body) -> HostLeaseScopeResult<T> {
+  if !__host_lease_is_callable(body) {
+    throw "std/host_lease: body must be callable; got " + type_of(body)
+  }
+  const timeout_ms = options.wait_timeout_ms ?? 0
+  const configured_slice_ms = options.wait_slice_ms ?? 1000
+  if timeout_ms < 0 {
+    throw "std/host_lease: wait_timeout_ms must be non-negative"
+  }
+  if configured_slice_ms <= 0 || configured_slice_ms > 5000 {
+    throw "std/host_lease: wait_slice_ms must be between 1 and 5000"
+  }
+  const started_ms = __timing_now_monotonic_ms()
+  let acquire = host_lease_acquire(options, 0)
+  while acquire.status == "deferred" {
+    const elapsed_ms = __timing_now_monotonic_ms() - started_ms
+    const remaining_ms = timeout_ms - elapsed_ms
+    if remaining_ms <= 0 {
+      return {status: "deferred", acquire: acquire}
+    }
+    const slice_ms = if remaining_ms < configured_slice_ms {
+      remaining_ms
+    } else {
+      configured_slice_ms
+    }
+    acquire = host_lease_acquire(options, slice_ms)
+  }
+  const handle = acquire.handle
+  if handle == nil || acquire.guard == nil {
+    throw "std/host_lease: acquired receipt omitted its handle or resource guard"
+  }
+  try {
+    const value = body(handle)
+    const release = host_lease_release(acquire)
+    return {status: "completed", value: value, acquire: acquire, release: release}
+  } catch (error) {
+    const _ = try {
+      host_lease_release(acquire)
+    } catch (_release_error) {
+      nil
+    }
+    throw error
+  }
 }

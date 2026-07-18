@@ -8,6 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 description = "Opt-in code-intelligence and deterministic-tool host builtins for the Harn VM"
 include = [
+    "build.rs",
     "src/**/*",
     "schemas/**/*",
     "data/**/*",

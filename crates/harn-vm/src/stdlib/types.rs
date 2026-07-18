@@ -261,6 +261,9 @@ fn drop_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
         VmValue::SyncPermit(permit) => {
             permit.release();
         }
+        VmValue::ResourceGuard(guard) => {
+            guard.release()?;
+        }
         _ => {}
     }
     Ok(VmValue::Nil)
