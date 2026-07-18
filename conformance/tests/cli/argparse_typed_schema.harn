@@ -108,6 +108,34 @@ fn main(harness: Harness) {
   harness.stdio.println(is_ok(open))
   const missing = unwrap_err(parse(spec, []))
   harness.stdio.println(missing.stage + ":" + missing.code)
+  const missing_switch = unwrap_err(
+    parse(
+      parser(
+        {
+          name: "required-switch",
+          args: [{name: "confirm", kind: "switch", long: "--confirm", required: true}],
+        },
+      ),
+      [],
+    ),
+  )
+  harness.stdio
+    .println(missing_switch.stage + ":" + missing_switch.code + ":" + missing_switch.issues[0].arg)
+  const missing_defaulted = unwrap_err(
+    parse(
+      parser(
+        {
+          name: "required-default",
+          args: [{name: "count", kind: "flag", long: "--count", required: true, parse: "int", default: 1}],
+        },
+      ),
+      [],
+    ),
+  )
+  harness.stdio
+    .println(
+    missing_defaulted.stage + ":" + missing_defaulted.code + ":" + missing_defaulted.issues[0].arg,
+  )
   const invalid_spec = try {
     parser(
       {

@@ -388,11 +388,11 @@ fn __finish_parse(collected: dict, rest: list<string>, args: list<ArgSpec>, pend
     const label = pending.long ?? pending.short ?? pending.name
     return Err(__argv_failure("value_required", label, "flag requires a value"))
   }
-  const options = __apply_defaults(collected, args)
-  const missing = __first_missing_required(args, options)
+  const missing = __first_missing_required(args, collected)
   if missing != "" {
     return Err(__argv_failure("missing_required", missing, "required argument '${missing}' was not provided"))
   }
+  const options = __apply_defaults(collected, args)
   return Ok({options: options, rest: rest})
 }
 

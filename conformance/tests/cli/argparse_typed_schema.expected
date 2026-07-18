@@ -14,4 +14,6 @@ true
 schema:schema_mismatch:root
 true
 argv:missing_required
+argv:missing_required:confirm
+argv:missing_required:count
 true
