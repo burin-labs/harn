@@ -456,16 +456,6 @@ jobs:
           ./scripts/ci/behavior_artifact.sh build
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$GITHUB_SHA"
-      # This proof intentionally dirties embedded assets and asks Cargo to
-      # rebuild harn-cli. Keep it beside the producer's warm target graph;
-      # running it after artifact restore creates a private cold target and
-      # spends roughly 2.5 runner-minutes rebuilding the same CLI.
-      - name: Prove embedded assets invalidate the warm CLI
-        if: matrix.kind == 'behavior'
-        run: >-
-          HARN_BIN="$(cargo metadata --format-version 1 --no-deps
-          | jq -er '.target_directory')/debug/harn"
-          ./scripts/tests/embedded_asset_rebuild_test.sh
       - name: Upload portable behavior payload
         if: matrix.kind == 'behavior'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

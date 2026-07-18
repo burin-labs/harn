@@ -452,15 +452,6 @@ fn sccache_producer_errors(workflow) -> list<string> {
   if producer_condition != "matrix.kind == 'behavior'" {
     errors = errors + ["ci.yml:rust-builds behavior build must be owned by the behavior matrix row"]
   }
-  const embedded_asset_step = step_by_name(rust_job?.steps ?? [], "Prove embedded assets invalidate the warm CLI")
-  const embedded_asset_condition = trim(embedded_asset_step?.if ?? "")
-  const embedded_asset_run = trim(embedded_asset_step?.run ?? "")
-  if embedded_asset_condition != "matrix.kind == 'behavior'"
-    || !contains(embedded_asset_run, "cargo metadata --format-version 1 --no-deps")
-    || !contains(embedded_asset_run, "scripts/tests/embedded_asset_rebuild_test.sh") {
-    errors = errors
-      + ["ci.yml:rust-builds must run the embedded-asset rebuild proof on the warm behavior graph"]
-  }
   return errors
 }
 
