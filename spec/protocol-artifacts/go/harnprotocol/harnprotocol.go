@@ -21,6 +21,9 @@ const HarnProviderCatalogMethod = "_harn/providerCatalog"
 // ACPSchemaCompatibility is the upstream ACP schema version Harn tracks.
 const ACPSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
 
+// ACPPromptErrorDataSchema identifies typed session/prompt JSON-RPC error data.
+const ACPPromptErrorDataSchema = "harn.acp.prompt_error.v1"
+
 // A2AProtocolVersion is the A2A protocol version Harn implements.
 const A2AProtocolVersion = "0.3.0"
 
@@ -297,6 +300,22 @@ var HarnWorkerStatuses = []HarnWorkerStatus{
 	"cancelled",
 }
 
+// AgentTerminalClass is the typed alias for the AgentTerminalClasses wire vocabulary.
+type AgentTerminalClass = string
+
+// AgentTerminalClasses enumerates every wire value Harn currently emits for AgentTerminalClass.
+var AgentTerminalClasses = []AgentTerminalClass{
+	"context_overflow",
+	"provider_misconfigured",
+	"provider_unavailable",
+	"rate_limited",
+	"timeout",
+	"tool_policy_rejected",
+	"host_bridge_unimplemented",
+	"agent_loop_protocol_failure",
+	"generic_throw",
+}
+
 // ToolCallReceiptStatus is the typed alias for the ToolCallReceiptStatuses wire vocabulary.
 type ToolCallReceiptStatus = string
 
@@ -544,6 +563,12 @@ type ACPError struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+// HarnACPPromptErrorData is the typed data payload for failed session/prompt calls.
+type HarnACPPromptErrorData struct {
+	Schema        string             `json:"schema"`
+	TerminalClass AgentTerminalClass `json:"terminalClass"`
 }
 
 // ACPResponse is a JSON-RPC response envelope.

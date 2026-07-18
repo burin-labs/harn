@@ -88,6 +88,12 @@ write_paths package_paths \
 assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/package_paths"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/package_paths"
 
+write_paths swift_protocol_paths \
+  crates/harn-cli/src/commands/dump_protocol_artifacts/swift.rs \
+  spec/protocol-artifacts/HarnProtocol.swift
+assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/swift_protocol_paths"
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/swift_protocol_paths"
+
 write_paths release_meta Cargo.lock changelog.d/123.fixed.md
 assert_plan false --platform windows --event push --changed-files "$tmp_dir/release_meta"
 assert_plan false --platform macos --event push --changed-files "$tmp_dir/release_meta"

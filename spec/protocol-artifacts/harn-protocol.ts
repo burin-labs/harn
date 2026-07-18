@@ -132,6 +132,20 @@ export type HarnACPSessionUpdateExtension = (typeof HARN_ACP_SESSION_UPDATE_EXTE
 
 export const HARN_AGENT_EVENT_METHOD = "_harn/agentEvent"
 export const HARN_PROVIDER_CATALOG_METHOD = "_harn/providerCatalog"
+export const ACP_PROMPT_ERROR_DATA_SCHEMA = "harn.acp.prompt_error.v1" as const
+export const AGENT_TERMINAL_CLASSES = [
+  "context_overflow",
+  "provider_misconfigured",
+  "provider_unavailable",
+  "rate_limited",
+  "timeout",
+  "tool_policy_rejected",
+  "host_bridge_unimplemented",
+  "agent_loop_protocol_failure",
+  "generic_throw",
+] as const
+export type AgentTerminalClass = (typeof AGENT_TERMINAL_CLASSES)[number]
+
 export const HARN_AGENT_EVENT_KINDS = [
   "budget_circuit_breaker",
   "budget_exhausted",
@@ -406,6 +420,11 @@ export interface ACPError {
   code: number
   message: string
   data?: ACPValue
+}
+
+export interface HarnACPPromptErrorData {
+  schema: typeof ACP_PROMPT_ERROR_DATA_SCHEMA
+  terminalClass: AgentTerminalClass
 }
 
 export interface ACPNotification {

@@ -14,6 +14,18 @@
           "method": "session/set_mode"
         }
       }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "error": {
+        "code": -32000,
+        "message": "Provider-looking prose is not the authority",
+        "data": {
+          "schema": "harn.acp.prompt_error.v1",
+          "terminalClass": "tool_policy_rejected"
+        }
+      }
     }
   ],
   "matrix": {

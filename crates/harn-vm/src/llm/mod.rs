@@ -16,6 +16,7 @@ mod agent_runtime;
 pub(crate) mod agent_session_host;
 mod agent_session_transcript;
 mod agent_terminal_class;
+pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
 mod agent_tools;
 pub mod api;
 #[cfg(test)]
