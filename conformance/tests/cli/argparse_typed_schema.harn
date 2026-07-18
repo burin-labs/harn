@@ -1,0 +1,276 @@
+import { help_requested, parse, parse_typed, parser } from "std/cli/argparse"
+import {
+  schema_bool,
+  schema_closed_object,
+  schema_default,
+  schema_float,
+  schema_int,
+  schema_list,
+  schema_object,
+  schema_string,
+} from "std/schema"
+import { assert_eq, assert_throws } from "std/testing"
+
+type Options = {
+  input: string,
+  count: int,
+  ratio: float,
+  enabled: bool,
+  tag: list<string>,
+  label: list<string>,
+  json: bool,
+  mode: string,
+}
+
+fn options_schema() -> Schema<Options> {
+  return schema_closed_object(
+    {
+      input: schema_string(),
+      count: schema_int(),
+      ratio: schema_float(),
+      enabled: schema_bool(),
+      tag: schema_list(schema_string()),
+      label: schema_list(schema_string()),
+      json: schema_bool(),
+      mode: schema_default(schema_string(), "safe"),
+    },
+  )
+}
+
+fn argv_failure(code: string, arg: string, message: string) {
+  return Err(
+    {
+      kind: "cli_parse_failure",
+      stage: "argv",
+      code: code,
+      message: message,
+      issues: [{stage: "argv", code: code, message: message, arg: arg}],
+    },
+  )
+}
+
+pipeline test(task) {
+  assert_eq(help_requested(["--help"]), true)
+  assert_eq(help_requested(["-h"]), true)
+  assert_eq(help_requested(["--", "--help"]), false)
+  const spec = parser(
+    {
+      name: "demo",
+      args: [
+        {name: "input", kind: "positional"},
+        {name: "count", kind: "flag", long: "--count", parse: "int", required: true},
+        {name: "ratio", kind: "flag", long: "--ratio", parse: "float", default: 1.5},
+        {name: "enabled", kind: "flag", long: "--enabled", parse: "bool", required: true},
+        {name: "tag", kind: "flag", long: "--tag", multi: true},
+        {name: "label", kind: "flag", long: "--label", parse: "list", separator: ":", multi: true},
+        {name: "json", kind: "switch", long: "--json"},
+        {name: "mode", kind: "flag", long: "--mode"},
+      ],
+    },
+  )
+  assert_eq(
+    parse_typed<Options>(
+      spec,
+      [
+        "input.harn",
+        "--count",
+        "3",
+        "--enabled=yes",
+        "--tag",
+        "a",
+        "--tag=b",
+        "--label",
+        " x::y ",
+        "--label=z:w",
+        "--",
+        "tail",
+      ],
+      options_schema(),
+      true,
+    ),
+    Ok(
+      {
+        options: {
+          input: "input.harn",
+          count: 3,
+          ratio: 1.5,
+          enabled: true,
+          tag: ["a", "b"],
+          label: ["x", "y", "z", "w"],
+          json: false,
+          mode: "safe",
+        },
+        rest: ["tail"],
+      },
+    ),
+  )
+  const invalid_message = "argument 'count' expected int, got 'three'"
+  const invalid = parse(spec, ["input.harn", "--count", "three"])
+  assert_eq(invalid, argv_failure("invalid_value", "count", invalid_message))
+  assert_eq(json_parse(json_stringify(unwrap_err(invalid))), unwrap_err(invalid))
+  const int_overflow = "999999999999999999999999999999999999999"
+  assert_eq(
+    parse(spec, ["input.harn", "--count", int_overflow]),
+    argv_failure("invalid_value", "count", "argument 'count' expected int, got '" + int_overflow + "'"),
+  )
+  assert_eq(
+    parse(spec, ["input.harn", "--count", "1", "--ratio", "1e999999", "--enabled", "true"]),
+    argv_failure("invalid_value", "ratio", "argument 'ratio' expected float, got '1e999999'"),
+  )
+  const extra_spec = parser(
+    {
+      name: "extra",
+      args: [{name: "input", kind: "positional"}, {name: "extra", kind: "switch", long: "--extra"}],
+    },
+  )
+  assert_eq(
+    parse_typed(extra_spec, ["input.harn", "--extra"], schema_closed_object({input: schema_string()})),
+    Err(
+      {
+        kind: "cli_parse_failure",
+        stage: "schema",
+        code: "schema_mismatch",
+        message: "at root: unexpected key 'extra'",
+        issues: [{stage: "schema", code: "schema.validation", message: "unexpected key 'extra'", path: "root"}],
+      },
+    ),
+  )
+  assert_eq(
+    parse_typed(extra_spec, ["input.harn", "--extra"], schema_object({input: schema_string()})),
+    Ok({options: {input: "input.harn", extra: true}, rest: []}),
+  )
+  assert_eq(
+    parse(spec, []),
+    argv_failure("missing_required", "input", "required argument 'input' was not provided"),
+  )
+  assert_eq(
+    parse(
+      parser(
+        {
+          name: "required-switch",
+          args: [{name: "confirm", kind: "switch", long: "--confirm", required: true}],
+        },
+      ),
+      [],
+    ),
+    argv_failure("missing_required", "confirm", "required argument 'confirm' was not provided"),
+  )
+  assert_eq(
+    parse(
+      parser(
+        {
+          name: "required-default",
+          args: [{name: "count", kind: "flag", long: "--count", required: true, parse: "int", default: 1}],
+        },
+      ),
+      [],
+    ),
+    argv_failure("missing_required", "count", "required argument 'count' was not provided"),
+  )
+  const signed_spec = parser(
+    {
+      name: "signed",
+      args: [
+        {name: "count", kind: "positional", parse: "int"},
+        {name: "ratio", kind: "positional", parse: "float"},
+      ],
+    },
+  )
+  assert_eq(parse(signed_spec, ["-7", "-0.25"]), Ok({options: {count: -7, ratio: -0.25}, rest: []}))
+  assert_eq(
+    parse(signed_spec, ["--bogus"]),
+    argv_failure("unknown_flag", "--bogus", "no flag named --bogus"),
+  )
+  const alias_precedence = parser(
+    {
+      name: "alias-precedence",
+      args: [{name: "count", kind: "positional", parse: "int"}, {name: "lucky", kind: "switch", short: "-7"}],
+    },
+  )
+  assert_eq(parse(alias_precedence, ["-7", "-2"]), Ok({options: {lucky: true, count: -2}, rest: []}))
+  const split_alias_spec = parser(
+    {
+      name: "split-alias",
+      args: [{name: "output", kind: "flag", long: "--output"}, {name: "json", kind: "switch", long: "--json"}],
+    },
+  )
+  assert_eq(
+    parse(split_alias_spec, ["--output", "--json"]),
+    argv_failure("value_required", "--output", "flag requires a value"),
+  )
+  assert_eq(
+    parse(split_alias_spec, ["--output=--json"]),
+    Ok({options: {output: "--json", json: false}, rest: []}),
+  )
+  assert_eq(
+    assert_throws(
+      { -> parser(
+        {
+          name: "bad-alias",
+          args: [{name: "first", kind: "switch", long: "--same"}, {name: "second", kind: "switch", long: "--same"}],
+        },
+      ) },
+    ),
+    "std/cli/argparse: duplicate flag alias '--same'",
+  )
+  const invalid_specs = [
+    {
+      spec: {name: "bad", args: [{name: "count", kind: "flag", long: "--count", parse: "int", default: "1"}]},
+      message: "std/cli/argparse: default for arg 'count' must be int",
+    },
+    {
+      spec: {name: "bad", args: [{name: "verbose", kind: "switch", long: "--verbose", default: "yes"}]},
+      message: "std/cli/argparse: default for arg 'verbose' must be bool",
+    },
+    {
+      spec: {
+        name: "bad",
+        args: [{name: "count", kind: "flag", long: "--count", parse: "int", multi: true, default: 1}],
+      },
+      message: "std/cli/argparse: default for arg 'count' must be list<int>",
+    },
+    {
+      spec: {
+        name: "bad",
+        args: [{name: "label", kind: "flag", long: "--label", parse: "list", default: ["a", 1]}],
+      },
+      message: "std/cli/argparse: default for arg 'label' must be list<string>",
+    },
+    {
+      spec: {
+        name: "bad",
+        args: [{name: "maybe", kind: "positional", required: false}, {name: "required", kind: "positional"}],
+      },
+      message: "std/cli/argparse: required positional arg 'required' cannot follow an optional positional",
+    },
+  ]
+  for invalid_spec in invalid_specs {
+    assert_eq(assert_throws({ -> parser(invalid_spec.spec) }), invalid_spec.message)
+  }
+  const raw_invalid_spec = {
+    name: "raw-invalid",
+    args: [{name: "count", kind: "flag", long: "--count", parse: "int", default: "1"}],
+  }
+  assert_eq(
+    assert_throws({ -> parse(raw_invalid_spec, []) }),
+    "std/cli/argparse: default for arg 'count' must be int",
+  )
+  const invalid_aliases = [
+    {
+      spec: {name: "bad-short", args: [{name: "output", kind: "flag", short: "--output"}]},
+      message: "std/cli/argparse: short alias for arg 'output' must have form '-x'",
+    },
+    {
+      spec: {name: "bad-long", args: [{name: "output", kind: "flag", long: "-o"}]},
+      message: "std/cli/argparse: long alias for arg 'output' must have form '--name'",
+    },
+    {
+      spec: {name: "empty-long", args: [{name: "output", kind: "flag", long: "--"}]},
+      message: "std/cli/argparse: long alias for arg 'output' must have form '--name'",
+    },
+  ]
+  for invalid_alias in invalid_aliases {
+    assert_eq(assert_throws({ -> parser(invalid_alias.spec) }), invalid_alias.message)
+  }
+  harness.stdio.println("ok")
+}

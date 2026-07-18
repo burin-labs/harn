@@ -328,13 +328,13 @@ pipeline t(task) {
 #[test]
 fn test_cross_module_ambient_runtime_values_are_allowed() {
     let diags = check_source_with_imports(
-        r#"import { parse_args } from "std/cli"
+        r#"import { parse, parser } from "std/cli/argparse"
 pipeline t(task) {
-  const args = parse_args(argv, {})
+  const args = parse(parser({name: "test", args: []}), argv)
   const exists = harness.fs.exists(".")
   log({args: args, exists: exists, pi: pi, git: git})
 }"#,
-        &["parse_args"],
+        &["parse", "parser"],
     );
     let errs: Vec<&String> = diags
         .iter()

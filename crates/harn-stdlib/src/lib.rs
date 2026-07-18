@@ -105,7 +105,6 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "poll" => "stdlib/stdlib_poll.harn",
     "coerce" => "stdlib/stdlib_coerce.harn",
     "settled" => "stdlib/stdlib_settled.harn",
-    "cli" => "stdlib/stdlib_cli.harn",
     "cli/argparse" => "stdlib/cli/argparse.harn",
     "cli/render" => "stdlib/cli/render.harn",
     "cli/models/batch_artifacts" => "stdlib/cli/models/batch_artifacts.harn",
