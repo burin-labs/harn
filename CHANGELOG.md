@@ -9,6 +9,138 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.24
+
+### Added
+
+- **Prompt-to-persona compiler and CLI front door (#4430).**
+  `harn persona compile-prompt` now turns one natural-language request into a
+  closed, cost-receipted persona blueprint with no hidden retries or repair,
+  while `harn persona new --from-prompt` publishes the accepted lowering only
+  through the existing strict staged scaffold transaction.
+- `harn run --profile` now reports per-builtin wall time, so a slow run names
+  the builtin it is waiting on instead of folding every project scan,
+  subprocess, and file walk into `vm/residual`. Time is inclusive of nested
+  calls, and the table is for finding expensive builtins rather than
+  microbenchmarking cheap ones. Off by default; disabled it costs one atomic
+  load per builtin call.
+- **Added `make setup-rust` for focused Rust verification.** It configures
+  worktree-local Cargo paths and runs the workspace check without installing
+  optional tooling or frontend dependencies (#4950).
+- Add session-scoped capability grants with hermetic and lane profiles. A session launches under
+  a named profile: a hermetic run gets a closed-by-construction, allowlisted child-process
+  environment (no credential can cross the sandbox boundary), while a lane run additionally
+  receives only the capabilities it was explicitly granted. Both profiles flow through one env
+  resolver — hermetic is the empty-grants case — and grant receipts are recorded without ever
+  persisting a credential value.
+- Add opt-in, capability-aware actuation that steers bounded read-only loops
+  toward a validated host-selected workspace-write tool through a reusable
+  one-shot prefill transport, reusing the completion judge's specific next step.
+- Add supervised `harn host lease run cargo` execution with typed resource and workload receipts,
+  crash-aware process ownership, and optional worktree Cargo-wrapper integration.
+- **Verbatim (count-anchored heredoc) content lane for fenced-JSON tool calls.**
+  An `edit`/`write` argument dense with backslashes, quotes, or newlines
+  (Zig/Go multiline, raw strings, regex, LaTeX, Windows paths) can now be
+  delivered byte-for-byte instead of through JSON-string escaping: set the
+  argument's JSON value to a heredoc opener `<<TAG:N` and trail the JSON header
+  with the matching `<<TAG:N ... TAG` body. The body is decoded by the shared
+  `scan_heredoc` authority (one scanner, no parallel dialect), extended here with
+  an opt-in count-anchored close: the declared `:N` line count makes the close
+  collision-proof, so a bare `TAG` line, a ``` fence, or a `<<EOF` inside the
+  body is content — the guarantee an author-chosen `<<EOF` tag can never give.
+  A block whose arguments are all ordinary strings is byte-identical to before
+  (#5033).
+- **Portable mid-conversation `system` / `developer` messages.** A conversation
+  may now carry a `system`- or `developer`-role message at any position — an
+  operator instruction delivered mid-conversation (a mode switch, a
+  runtime-fetched constraint, injected state) — and Harn rewrites it at the wire
+  boundary to the exact form the target route accepts, driven by the new
+  `system_message_placement` provider capability. Claude Opus 4.8 carries a
+  validly-placed message natively as `role: "system"`; OpenAI
+  and Ollama carry it inline; Gemini, Bedrock, and older/other Claude fold it
+  into the adjacent user turn as a `<system-reminder>` block so its position and
+  operator intent survive. The same script now runs on every provider without
+  hitting a provider-specific placement `400` or a silently-repositioned
+  directive — where before, an interleaved system message worked on OpenAI, was
+  hoisted into the global system prompt on Gemini/Bedrock, and was rejected
+  outright by Anthropic.
+- Add first-class Vercel AI Gateway catalog routes, aliases, Responses API support, creator/model capability
+  inheritance, generic routing metadata telemetry, and documented provider routing controls.
+- Preserve gateway `provider_metadata` from both regular responses and final streaming frames so receipts can audit
+  resolved upstreams, fallback attempts, and exact billed cost.
+- Resolve provider wire ids back to collision-free catalog routes for pricing, and let the coding-agent evaluator
+  exercise the runtime's fenced-JSON tool grammar alongside native and tagged-text formats.
+- Normalize fenced-JSON calls into the same recorded tool results as native and tagged-text calls, prefer dispatched
+  tools over premature same-turn completion markers, and collapse only exact duplicate read-only text-channel calls.
+
+### Changed
+
+- ACP request dispatch now type-erases its large method-routing future before
+  applying ambient runtime overrides, reducing generated binary code while
+  preserving per-poll isolation.
+- Allow conformance suites to use process-isolated test shards and add a typed CI wall-time report.
+- **CLI releases now package AOT command bytecode as a validated,
+  target-independent payload (#5036).** Source checkouts no longer carry or
+  merge generated bytecode, while release builds retain the AOT startup path.
+- Let source-only spec and ratchet gates refuse implicit Harn CLI builds, with a reusable
+  `HARN_BIN_NO_BUILD=1` guard for machine-quiet workflows.
+- Reduce cached pipeline and module startup allocations by moving decoded bytecode into the VM
+  instead of cloning it during hydration, and keep chunk tests out of the CLI AOT compiler
+  fingerprint so test-only edits no longer invalidate generated bytecode.
+
+### Fixed
+
+- **The scaffolded agent template no longer fails silently (#4868).**
+  `agent_loop` reports failure through `status`/`error` rather than throwing, so
+  `harn new --template agent` followed by `harn run main.harn` printed an empty
+  line and exited 0 when no provider was configured. The template now surfaces a
+  non-`done` terminal status and its `error.message` on stderr, and exits
+  non-zero.
+- **`harn demo` with no scenario prints the menu instead of running one (#4868).**
+  When stdout was not a TTY — piped, redirected, or in CI — a bare `harn demo`
+  executed the first scenario and wrote a run record. Prompting now requires a
+  terminal on both stdin and stdout; every other context prints the list.
+- **`harn doctor` no longer suggests `examples/hello.harn` (#4868).**
+  That path ships in the Harn source tree and does not exist in a user's
+  project; `doctor` now suggests `harn demo`, which resolves from any directory.
+- Make the supervisor graceful-stop conformance proof scheduler-independent.
+- **Closure capture, callable dispatch, and `let`-to-`const` lint fixes now
+  respect lexical shadowing (#5024).** Parameters, inner locals, builtins, and
+  nested declarations no longer redirect an unrelated outer binding by name;
+  parameter defaults, spread returns, and bare enum patterns now use the same
+  lexical scope model across typechecking, compilation, and runtime dispatch.
+- Rebuild the Harn CLI when embedded persona templates or portal assets change.
+- **VM startup now initializes the shared secret-pattern catalog before
+  execution (#5038).** Redaction and secret scanning reuse one compiled catalog,
+  avoiding duplicate regex compilation and deep-stack startup failures in
+  trigger and persistence paths.
+- **MCP/JSON-RPC clients that emit a single-object-parameter tool's arguments
+  flat at the top level now bind instead of silently dropping every key
+  (harn#5039).** Harn projects `pub fn tool(params: { .. })` into an
+  `inputSchema` that nests each field under `params`; a client that emits the
+  inner fields flat (e.g. `{ "events_dir": ".." }` rather than
+  `{ "params": { "events_dir": ".." } }`) previously matched no parameter, so
+  the tool ran on its default and reported the field as required. When a
+  function declares exactly one object-typed parameter and the incoming named
+  map omits that parameter's name, the flat map is lifted into that parameter
+  at the dispatch boundary. The lift is idempotent (a correctly-nested call
+  already carries the parameter name and is passed through untouched) and
+  strictly additive (it only rewrites calls whose keys would otherwise all be
+  dropped), unblocking local/open-weight models calling the first-party
+  `burin-harness-debugger` tools.
+- Prevent MCP servers from replaying stale tool results when callers did not supply an explicit retry key.
+- **ACP prompt errors now carry Harn's typed terminal class.** Failed
+  `session/prompt` responses preserve structured VM error categories in a
+  versioned `error.data` contract, so hosts no longer need to classify rendered
+  provider or runtime prose (burin-code#5263).
+- **Git hooks no longer validate generated artifacts with a stale binary.**
+  The hooks decided whether to rebuild by looking for `.rs`/`Cargo` changes, but
+  crates compile non-Rust assets in via `include_str!` — capability tables,
+  diagnostic explanations, stdlib sources. Editing one changed what the binary
+  emits without matching that pattern, so drift checks compared generated output
+  against the old inputs and passed. The rebuild decision now covers every path
+  under `crates/`.
+
 ## v0.10.23
 
 ### Breaking
