@@ -301,12 +301,21 @@ pub fn require_file_initialized<E>(
     busy_timeout: Duration,
     schema: SchemaVersion,
 ) -> Result<(), InitializationError<E>> {
+    require_file_initialized_impl(connection, busy_timeout, schema, || {})
+}
+
+fn require_file_initialized_impl<E>(
+    connection: &Connection,
+    busy_timeout: Duration,
+    schema: SchemaVersion,
+    on_readiness_contention: impl FnOnce(),
+) -> Result<(), InitializationError<E>> {
     configure_busy_timeout(connection, busy_timeout)?;
     if fast_path_is_ready(connection, schema)? {
         return Ok(());
     }
 
-    let _readiness_lock = acquire_readiness_lock(connection, schema)?;
+    let _readiness_lock = acquire_readiness_lock(connection, schema, on_readiness_contention)?;
     if is_wal_journal_mode(connection)? && schema_is_ready(connection, schema)? {
         return Ok(());
     }
@@ -423,6 +432,7 @@ fn acquire_initialization_lock<E>(
 fn acquire_readiness_lock<E>(
     connection: &Connection,
     schema: SchemaVersion,
+    on_contention: impl FnOnce(),
 ) -> Result<SqliteInitializationLock, InitializationError<E>> {
     let path = initialization_lock_path(connection)?;
     let file = match OpenOptions::new().read(true).open(&path) {
@@ -437,11 +447,21 @@ fn acquire_readiness_lock<E>(
             return Err(InitializationError::InitializationLockOpen { path, source });
         }
     };
-    file.lock_shared()
-        .map_err(|source| InitializationError::InitializationLockAcquire {
-            path: path.clone(),
-            source,
-        })?;
+    match file.try_lock_shared() {
+        Ok(()) => {}
+        Err(source) if source.kind() == std::io::ErrorKind::WouldBlock => {
+            on_contention();
+            file.lock_shared().map_err(|source| {
+                InitializationError::InitializationLockAcquire {
+                    path: path.clone(),
+                    source,
+                }
+            })?;
+        }
+        Err(source) => {
+            return Err(InitializationError::InitializationLockAcquire { path, source });
+        }
+    }
     Ok(SqliteInitializationLock { file })
 }
 

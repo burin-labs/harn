@@ -10,7 +10,7 @@ use wait_timeout::ChildExt;
 
 use super::{
     current_journal_mode, initialization_lock_path, initialize_file, initialize_transient,
-    require_file_initialized, InitializationError, SchemaVersion,
+    require_file_initialized, require_file_initialized_impl, InitializationError, SchemaVersion,
 };
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -136,8 +136,8 @@ fn read_only_ready_check_waits_for_schema_commit() {
     let reader_database = database;
     let (writer_ready_tx, writer_ready_rx) = mpsc::channel();
     let (writer_release_tx, writer_release_rx) = mpsc::channel();
+    let (reader_waiting_tx, reader_waiting_rx) = mpsc::channel();
     let (reader_done_tx, reader_done_rx) = mpsc::channel();
-    let reader_start = Arc::new(Barrier::new(2));
 
     let writer = std::thread::spawn(move || {
         let connection = Connection::open(writer_database).expect("writer open");
@@ -155,24 +155,27 @@ fn read_only_ready_check_waits_for_schema_commit() {
         .recv_timeout(CHILD_TIMEOUT)
         .expect("writer entered schema transaction");
 
-    let reader_thread_start = Arc::clone(&reader_start);
     let reader = std::thread::spawn(move || {
         let connection =
             Connection::open_with_flags(reader_database, OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .expect("reader open");
-        reader_thread_start.wait();
-        let outcome =
-            require_file_initialized::<rusqlite::Error>(&connection, BUSY_TIMEOUT, TEST_SCHEMA)
-                .map_err(|error| error.to_string());
+        let outcome = require_file_initialized_impl::<rusqlite::Error>(
+            &connection,
+            BUSY_TIMEOUT,
+            TEST_SCHEMA,
+            || {
+                reader_waiting_tx
+                    .send(())
+                    .expect("signal readiness-lock contention");
+            },
+        )
+        .map_err(|error| error.to_string());
         reader_done_tx.send(outcome).expect("signal reader result");
     });
 
-    reader_start.wait();
-    assert_eq!(
-        reader_done_rx.recv_timeout(Duration::from_millis(500)),
-        Err(mpsc::RecvTimeoutError::Timeout),
-        "reader must wait for the initialization lease"
-    );
+    reader_waiting_rx
+        .recv_timeout(CHILD_TIMEOUT)
+        .expect("reader observed the writer's initialization lease");
     writer_release_tx
         .send(())
         .expect("release writer transaction");
