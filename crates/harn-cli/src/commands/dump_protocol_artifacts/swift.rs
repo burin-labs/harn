@@ -1,7 +1,7 @@
 use harn_serve::adapters::acp::{
-    ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
-    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
@@ -34,6 +34,10 @@ pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
     out.push_str(&format!(
         "    public static let harnProviderCatalogMethod = {}\n",
         json_string_literal(HARN_PROVIDER_CATALOG_METHOD)
+    ));
+    out.push_str(&format!(
+        "    public static let acpPromptErrorDataSchema = {}\n",
+        json_string_literal(ACP_PROMPT_ERROR_DATA_SCHEMA)
     ));
     for (name, value) in [
         ("mcpProtocolVersion", MCP_PROTOCOL_VERSION),
@@ -158,6 +162,22 @@ pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
         &side_effect_level_values(),
     ));
     out.push_str(&swift_enum("HarnWorkerStatus", &worker_status_values()));
+    out.push_str(&swift_enum(
+        "HarnAgentTerminalClass",
+        &agent_terminal_class_values(),
+    ));
+    out.push_str(&swift_enum(
+        "HarnACPPromptErrorSchema",
+        &[ACP_PROMPT_ERROR_DATA_SCHEMA.to_string()],
+    ));
+    out.push_str(
+        r"public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
+    public var schema: HarnACPPromptErrorSchema
+    public var terminalClass: HarnAgentTerminalClass
+}
+
+",
+    );
     out.push_str(&swift_enum(
         "HarnToolCallReceiptStatus",
         &strs_to_strings(TOOL_CALL_RECEIPT_STATUSES),
@@ -1113,7 +1133,7 @@ pub(super) fn swift_string_array(name: &str, values: &[&str]) -> String {
 pub(super) fn swift_case_name(value: &str) -> String {
     let mut out = String::new();
     for (index, part) in value
-        .split(['_', '-', '/'])
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
         .filter(|part| !part.is_empty())
         .enumerate()
     {

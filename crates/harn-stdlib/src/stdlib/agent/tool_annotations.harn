@@ -63,3 +63,191 @@ pub fn agent_tool_policy_annotations(policy, tool_name) {
 pub fn agent_tool_annotations(entry, policy, tool_name) {
   return agent_tool_policy_annotations(policy, tool_name) + agent_tool_entry_annotations(entry)
 }
+
+const __AGENT_READ_ONLY_TOOL_KINDS = ["read", "search", "think", "fetch"]
+
+const __AGENT_READ_ONLY_SIDE_EFFECTS = ["none", "read_only"]
+
+/**
+ * Classify one registry entry through the ACP-aligned annotation vocabulary.
+ * Missing or unknown annotations fail closed as mutating.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_is_read_only(entry, policy = nil, tool_name = "") -> bool {
+  const annotations = agent_tool_annotations(entry, policy, tool_name)
+  if annotations?.destructiveHint == true {
+    return false
+  }
+  const kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
+  const level = lowercase(
+    to_string(
+      annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
+        ?? annotations?.sideEffect
+        ?? "",
+    ),
+  )
+  const read_only_hint = annotations?.readOnlyHint ?? annotations?.read_only_hint
+  if kind != "" && !contains(__AGENT_READ_ONLY_TOOL_KINDS, kind) {
+    return false
+  }
+  if level != "" && !contains(__AGENT_READ_ONLY_SIDE_EFFECTS, level) {
+    return false
+  }
+  if read_only_hint != nil && !(type_of(read_only_hint) == "bool" && read_only_hint) {
+    return false
+  }
+  return kind != "" || level != "" || (type_of(read_only_hint) == "bool" && read_only_hint)
+}
+
+fn __agent_tool_registry_entries(registry) {
+  if type_of(registry) == "dict" {
+    return registry?.tools ?? []
+  }
+  if type_of(registry) == "list" {
+    return registry
+  }
+  return []
+}
+
+fn __agent_tool_entry_name(entry) {
+  return to_string(entry?.function?.name ?? entry?.name ?? "")
+}
+
+fn __agent_tool_call_name(call) {
+  return to_string(call?.name ?? call?.tool_name ?? call?.function?.name ?? "")
+}
+
+fn __agent_tool_find_entry(registry, name) {
+  for entry in __agent_tool_registry_entries(registry) {
+    if __agent_tool_entry_name(entry) == name {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn __agent_tool_is_workspace_write(entry, policy, name) -> bool {
+  const annotations = agent_tool_annotations(entry, policy, name)
+  if annotations?.destructiveHint == true || annotations?.readOnlyHint == true {
+    return false
+  }
+  const kind = lowercase(to_string(annotations?.kind ?? ""))
+  const level = lowercase(to_string(annotations?.side_effect_level ?? ""))
+  if kind != "" && kind != "edit" {
+    return false
+  }
+  if level != "" && level != "workspace_write" {
+    return false
+  }
+  return kind == "edit" || level == "workspace_write"
+}
+
+/**
+ * True only when a non-empty turn consists entirely of explicitly read-only
+ * calls. Unknown tools fail closed, matching `agent_tool_is_read_only`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_calls_are_read_only(calls, registry, policy = nil) -> bool {
+  if type_of(calls) != "list" || len(calls) == 0 {
+    return false
+  }
+  for call in calls {
+    const name = __agent_tool_call_name(call)
+    const entry = __agent_tool_find_entry(registry, name)
+    if name == "" || entry == nil || !agent_tool_is_read_only(entry, policy, name) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Collapse byte-identical read-only calls when text/JSON parsing repeats a
+ * block. Native calls retain provider identities and are never collapsed;
+ * unknown or mutating tools fail closed and remain in source order.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_collapse_duplicate_read_calls(calls, registry, options = nil) -> list {
+  const format = lowercase(to_string(options?.tool_format ?? ""))
+  if type_of(calls) != "list" {
+    return []
+  }
+  if format != "text" && format != "json" {
+    return calls
+  }
+  let kept = []
+  let seen = []
+  for call in calls {
+    const name = __agent_tool_call_name(call)
+    const entry = __agent_tool_find_entry(registry, name)
+    const read_only = entry != nil && agent_tool_is_read_only(entry, options?.policy, name)
+    const args = call?.arguments ?? call?.tool_args ?? {}
+    const signature = if type_of(call) == "dict" {
+      sha256(json_stringify({name: name, args: args}))
+    } else {
+      nil
+    }
+    if read_only && signature != nil && contains(seen, signature) {
+      continue
+    }
+    kept = kept.push(call)
+    if read_only && signature != nil {
+      seen = seen.push(signature)
+    }
+  }
+  return kept
+}
+
+/**
+ * Return the sole non-destructive workspace-write tool, or an empty string
+ * when the annotated surface has none or more than one. This lets generic
+ * policy request a write without guessing among product-specific tool names.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_single_workspace_write_name(registry, policy = nil) -> string {
+  let found = ""
+  for entry in __agent_tool_registry_entries(registry) {
+    const name = __agent_tool_entry_name(entry)
+    if name != "" && __agent_tool_is_workspace_write(entry, policy, name) {
+      if found != "" {
+        return ""
+      }
+      found = name
+    }
+  }
+  return found
+}
+
+/**
+ * Resolve a non-destructive workspace-write tool from the active registry. A
+ * host may name its product-specific primary writer; Harn validates that entry
+ * against the same annotation contract. Without a preference, the surface must
+ * expose exactly one eligible writer.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_resolve_workspace_write_name(registry, policy = nil, preferred = "") -> string {
+  const name = trim(preferred)
+  if name == "" {
+    return agent_tool_single_workspace_write_name(registry, policy)
+  }
+  const entry = __agent_tool_find_entry(registry, name)
+  if entry == nil || !__agent_tool_is_workspace_write(entry, policy, name) {
+    return ""
+  }
+  return name
+}

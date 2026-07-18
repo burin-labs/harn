@@ -1,7 +1,7 @@
 use harn_serve::adapters::acp::{
-    ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
-    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
@@ -46,6 +46,7 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
         ("HARN_AGENT_EVENT_METHOD", HARN_AGENT_EVENT_METHOD),
         ("HARN_PROVIDER_CATALOG_METHOD", HARN_PROVIDER_CATALOG_METHOD),
         ("ACP_SCHEMA_COMPATIBILITY", ACP_SCHEMA_COMPATIBILITY),
+        ("ACP_PROMPT_ERROR_DATA_SCHEMA", ACP_PROMPT_ERROR_DATA_SCHEMA),
         ("A2A_PROTOCOL_VERSION", A2A_PROTOCOL_VERSION),
         ("MCP_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
         ("MCP_STABLE_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
@@ -88,6 +89,10 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
     out.push_str(&py_const_tuple_owned(
         "ACP_SESSION_UPDATES",
         &session_updates,
+    ));
+    out.push_str(&py_const_tuple_owned(
+        "AGENT_TERMINAL_CLASSES",
+        &agent_terminal_class_values(),
     ));
     out.push_str(&py_const_tuple(
         "HARN_ACP_SESSION_UPDATE_EXTENSIONS",
@@ -173,6 +178,14 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
         ACP_AGENT_NOTIFICATIONS,
     ));
     out.push_str(&py_str_enum_owned("ACPSessionUpdate", &session_updates));
+    out.push_str(&py_str_enum_owned(
+        "AgentTerminalClass",
+        &agent_terminal_class_values(),
+    ));
+    out.push_str(&py_str_enum_owned(
+        "ACPPromptErrorSchema",
+        &[ACP_PROMPT_ERROR_DATA_SCHEMA.to_string()],
+    ));
     out.push_str(&py_str_enum_owned("ACPToolKind", &tool_kind_values()));
     out.push_str(&py_str_enum_owned(
         "ACPToolCallStatus",
@@ -261,6 +274,12 @@ class ACPError(_HarnDataclass):
     code: int
     message: str
     data: Optional[JsonValue] = None
+
+
+@dataclass
+class HarnACPPromptErrorData(_HarnDataclass):
+    schema: ACPPromptErrorSchema
+    terminalClass: AgentTerminalClass
 
 
 @dataclass
@@ -580,6 +599,7 @@ pub(super) fn python_public_names() -> Vec<String> {
         "HARN_AGENT_EVENT_METHOD",
         "HARN_PROVIDER_CATALOG_METHOD",
         "ACP_SCHEMA_COMPATIBILITY",
+        "ACP_PROMPT_ERROR_DATA_SCHEMA",
         "A2A_PROTOCOL_VERSION",
         "MCP_PROTOCOL_VERSION",
         "MCP_STABLE_PROTOCOL_VERSION",
@@ -594,6 +614,7 @@ pub(super) fn python_public_names() -> Vec<String> {
         "ACP_CLIENT_METHODS",
         "ACP_AGENT_NOTIFICATIONS",
         "ACP_SESSION_UPDATES",
+        "AGENT_TERMINAL_CLASSES",
         "HARN_ACP_SESSION_UPDATE_EXTENSIONS",
         "HARN_AGENT_EVENT_KINDS",
         "ACP_CONTENT_BLOCK_TYPES",
@@ -622,6 +643,8 @@ pub(super) fn python_public_names() -> Vec<String> {
         "ACPClientMethod",
         "ACPAgentNotification",
         "ACPSessionUpdate",
+        "AgentTerminalClass",
+        "ACPPromptErrorSchema",
         "ACPToolKind",
         "ACPToolCallStatus",
         "HarnToolCallErrorCategory",
@@ -635,6 +658,7 @@ pub(super) fn python_public_names() -> Vec<String> {
         "MCPResultType",
         "MCPLoggingLevel",
         "ACPError",
+        "HarnACPPromptErrorData",
         "ACPRequest",
         "ACPResponse",
         "ACPNotification",

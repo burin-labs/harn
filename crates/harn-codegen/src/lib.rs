@@ -31,7 +31,7 @@
 //!
 //! `int` (`i64`), `float` (`f64`), and `bool`; arithmetic (`+ - * / %`, integer
 //! `%` and `/` trap-checked, no float `%`), comparisons, logical `!`, `if`/
-//! `else`, `while` loops, ternaries, short-circuit `&&`/`||`, and `let`/`var`
+//! `else`, `while` loops, ternaries, short-circuit `&&`/`||`, and `let`/`const`
 //! locals. Anything else — strings, lists, dicts, `nil`, closures,
 //! host/`harness` calls, `await`, `**` — is reported as
 //! [`CodegenError::Unsupported`], which callers treat as "stay on the

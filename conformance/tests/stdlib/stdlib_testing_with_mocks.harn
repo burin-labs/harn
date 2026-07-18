@@ -53,7 +53,7 @@ fn body_call_assertions() {
   // they read against the fresh, scoped call log rather than any
   // outer state that the caller may have accumulated.
   assert_host_called("ws", "read", {path: "x"}, nil)
-  assert_host_call_count(1, "ws", "write", nil)
+  assert_host_call_count("ws", "write", 1, nil)
   return {read: read, write_err: write_err, total_calls: len(host_calls())}
 }
 

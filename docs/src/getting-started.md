@@ -54,6 +54,12 @@ cd harn
 cargo install --path crates/harn-cli
 ```
 
+For a constrained or remote machine that only needs a Rust verification loop,
+run `make setup-rust`. It configures the local Cargo paths and runs the
+workspace check without installing optional tools or frontend dependencies.
+Its build artifacts default to `$XDG_CACHE_HOME/harn/dev-setup`; set
+`HARN_DEV_SETUP_STORAGE_ROOT` to choose another durable volume.
+
 Verify the installation:
 
 ```bash

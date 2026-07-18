@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use harn_lexer::{FixEdit, Span};
+pub use harn_modules::project_config::LintSeverity;
 use harn_parser::{DiagnosticCode as Code, Repair};
 
 /// A lint diagnostic reported by the linter.
@@ -38,14 +39,6 @@ impl LintDiagnostic {
     }
 }
 
-/// Severity level for lint diagnostics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LintSeverity {
-    Info,
-    Warning,
-    Error,
-}
-
 /// Default cyclomatic-complexity threshold. Callers can override via
 /// [`LintOptions::complexity_threshold`] (wired to
 /// `[lint].complexity_threshold` in `harn.toml`). Chosen to match
@@ -69,6 +62,9 @@ pub struct LintOptions<'a> {
     /// enabled via `[lint] require_docstrings = true` in `harn.toml`,
     /// and implied by `require_stdlib_metadata`.
     pub require_docstrings: bool,
+    /// When true, every public function and pipeline parameter and return
+    /// carries an explicit type annotation.
+    pub require_public_api_types: bool,
     /// Override the cyclomatic-complexity threshold. `None` uses
     /// [`DEFAULT_COMPLEXITY_THRESHOLD`].
     pub complexity_threshold: Option<usize>,

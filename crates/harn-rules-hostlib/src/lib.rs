@@ -39,10 +39,9 @@
 //! its [`AsyncBuiltinCtx`] and call back per match.
 //!
 //! The visitor **returns** its reports instead of calling a mutating
-//! `ctx.report(...)`: Harn closures capture by value, so a Harn-side
-//! accumulator could not collect across calls, and `VmValue` has no callable
-//! variant that carries captured Rust state to embed a stateful `report`
-//! method in `ctx`. Returning is both the sound option and the simpler one.
+//! `ctx.report(...)`: `VmValue` has no callable variant that carries captured
+//! Rust state, so a stateful `report` method cannot be embedded in `ctx`.
+//! Returning is both the sound option and the simpler one.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

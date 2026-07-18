@@ -36,7 +36,7 @@ pipeline test(task) {
     },
   )
   const cfg2 = agent_config(a2, "test")
-  assert(cfg2.options.provider == "mock")
-  assert(cfg2.options.tool_format == "native")
+  assert_eq(cfg2.options.provider, "mock")
+  assert_eq(cfg2.options.tool_format, "native")
   log("agent edge case tests passed")
 }

@@ -2,8 +2,9 @@
 //!
 //! Single-file durable backend suitable for self-hosted deployments and
 //! the TUI's persistent session DB. Schema versioning is intentionally
-//! minimal — one `schema_version` table; future migrations bump the
-//! version and run guarded ALTERs. The Postgres backend (issue #2500)
+//! minimal. File-backed databases use the shared Harn SQLite schema marker;
+//! pre-marker databases are upgraded from the original `schema_version` table
+//! in the same initialization transaction. The Postgres backend (issue #2500)
 //! follows the same shape so consumers can swap by config.
 
 use std::path::{Path, PathBuf};
@@ -11,7 +12,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use harn_sqlite::{
+    initialize_file, initialize_transient, sqlite_contention, SchemaVersion, SqliteContention,
+};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use uuid::Uuid;
 
 use super::event::{
@@ -27,11 +31,13 @@ use super::signing::{
 use super::store::{
     CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
     SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, Snapshot, SnapshotId,
-    StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport, MAX_READ_BATCH,
+    StoreContention, StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport,
+    MAX_READ_BATCH,
 };
 
 const SCHEMA_VERSION: i64 = 2;
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+const SQLITE_SCHEMA: SchemaVersion = SchemaVersion::new("session_store", SCHEMA_VERSION);
 
 #[derive(Clone)]
 pub struct SqliteSessionStore {
@@ -65,20 +71,69 @@ impl SqliteSessionStore {
     }
 
     fn initialize(conn: Connection, path: PathBuf, hooks: StoreHooks) -> StoreResult<Self> {
-        conn.busy_timeout(DEFAULT_BUSY_TIMEOUT)
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|error| StoreError::Backend(error.to_string()))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS schema_version (
-                version INTEGER NOT NULL PRIMARY KEY
-            );
-            CREATE TABLE IF NOT EXISTS sessions (
+        let initialization = if path == Path::new(":memory:") {
+            initialize_transient(
+                &conn,
+                DEFAULT_BUSY_TIMEOUT,
+                SQLITE_SCHEMA,
+                initialize_session_schema,
+            )
+        } else {
+            initialize_file(
+                &conn,
+                DEFAULT_BUSY_TIMEOUT,
+                SQLITE_SCHEMA,
+                initialize_session_schema,
+            )
+        };
+        initialization.map_err(|error| StoreError::Backend(error.to_string()))?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+            hooks: Arc::new(hooks),
+            path,
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
+    let has_legacy_schema_version = transaction
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'schema_version'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(map_sql)?;
+    let previous_schema_version = if has_legacy_schema_version {
+        transaction
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get::<_, Option<i64>>(0)
+            })
+            .map_err(map_sql)?
+            .unwrap_or_default()
+    } else {
+        0
+    };
+    if previous_schema_version > SCHEMA_VERSION {
+        return Err(StoreError::Backend(format!(
+            "session store schema version {previous_schema_version} is newer than supported version {SCHEMA_VERSION}"
+        )));
+    }
+
+    transaction
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS sessions (
                 id                  TEXT PRIMARY KEY,
                 tenant_id           TEXT,
                 persona             TEXT,
@@ -145,26 +200,15 @@ impl SqliteSessionStore {
                 captured_at     TEXT NOT NULL,
                 body_json       TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            );
-            ",
+            );",
         )
-        .map_err(|error| StoreError::Backend(error.to_string()))?;
-        let previous_schema_version = conn
-            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-                row.get::<_, Option<i64>>(0)
-            })
-            .map_err(map_sql)?
-            .unwrap_or_default();
-        if previous_schema_version > SCHEMA_VERSION {
-            return Err(StoreError::Backend(format!(
-                "session store schema version {previous_schema_version} is newer than supported version {SCHEMA_VERSION}"
-            )));
-        }
-        if previous_schema_version < SCHEMA_VERSION {
-            // Foreign-key enforcement is connection-local and does not repair
-            // child rows orphaned by v1. This guarded cleanup runs once while
-            // upgrading to v2.
-            conn.execute_batch(
+        .map_err(map_sql)?;
+    if previous_schema_version < SCHEMA_VERSION {
+        // Foreign-key enforcement is connection-local and does not repair
+        // child rows orphaned by v1. This guarded cleanup runs once while
+        // upgrading to v2.
+        transaction
+            .execute_batch(
                 "DELETE FROM session_events
                    WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.id = session_events.session_id);
                  DELETE FROM session_tags
@@ -172,31 +216,39 @@ impl SqliteSessionStore {
                  DELETE FROM session_snapshots
                    WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.id = session_snapshots.session_id);",
             )
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        }
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_version(version) VALUES (?1)",
-            params![SCHEMA_VERSION],
-        )
-        .map_err(|error| StoreError::Backend(error.to_string()))?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            hooks: Arc::new(hooks),
-            path,
-        })
+            .map_err(map_sql)?;
     }
-
-    pub fn path(&self) -> &Path {
-        &self.path
+    if has_legacy_schema_version {
+        transaction
+            .execute_batch("DROP TABLE schema_version;")
+            .map_err(map_sql)?;
     }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|e| e.into_inner())
-    }
+    Ok(())
 }
 
 fn map_sql(error: rusqlite::Error) -> StoreError {
-    StoreError::Backend(error.to_string())
+    let message = error.to_string();
+    match sqlite_contention(&error) {
+        Some(SqliteContention::Busy) => StoreError::Contention {
+            kind: StoreContention::DatabaseBusy,
+            message,
+        },
+        Some(SqliteContention::Locked) => StoreError::Contention {
+            kind: StoreContention::DatabaseLocked,
+            message,
+        },
+        None => StoreError::Backend(message),
+    }
+}
+
+fn write_transaction(conn: &mut Connection) -> StoreResult<Transaction<'_>> {
+    // These operations read before they write. With SQLite's default DEFERRED
+    // transaction, two writers can both acquire read locks and then form an
+    // upgrade deadlock; SQLite intentionally skips the busy handler in that
+    // case and returns SQLITE_BUSY immediately. Acquire writer ownership at
+    // the boundary so the configured busy policy can serialize contenders.
+    conn.transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(map_sql)
 }
 
 fn map_create_sql(error: rusqlite::Error, session_id: &str) -> StoreError {
@@ -620,9 +672,7 @@ impl SessionImporter for SqliteSessionStore {
     async fn import(&self, request: ImportSession) -> StoreResult<ImportResult> {
         request.validate()?;
         let mut conn = self.lock();
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         if let Some(existing) = read_import(&tx, &request.source_id)? {
             if existing.source_digest != request.source_digest {
                 return Err(StoreError::Conflict(format!(
@@ -681,8 +731,10 @@ impl SessionStore for SqliteSessionStore {
 
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
         let meta = super::memory_helpers::meta_for_create(request);
-        let conn = self.lock();
-        insert_session(&conn, &meta, 1)?;
+        let mut conn = self.lock();
+        let tx = write_transaction(&mut conn)?;
+        insert_session(&tx, &meta, 1)?;
+        tx.commit().map_err(map_sql)?;
         Ok(meta)
     }
 
@@ -772,7 +824,7 @@ impl SessionStore for SqliteSessionStore {
 
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent> {
         let mut conn = self.lock();
-        let tx = conn.transaction().map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         let stored = append_in_tx(&tx, &self.hooks, session_id, event)?;
         tx.commit().map_err(map_sql)?;
         Ok(stored)
@@ -825,7 +877,7 @@ impl SessionStore for SqliteSessionStore {
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult> {
         let mut conn = self.lock();
-        let tx = conn.transaction().map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         let (parent_meta, _) = read_session_meta(&tx, session_id)?;
         let parent_events = load_all_events(&tx, session_id)?;
         if !parent_events
@@ -889,7 +941,7 @@ impl SessionStore for SqliteSessionStore {
         at_event_id: EventId,
     ) -> StoreResult<TruncateResult> {
         let mut conn = self.lock();
-        let tx = conn.transaction().map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         let (mut meta, _) = read_session_meta(&tx, session_id)?;
         let exists: bool = tx
             .query_row(
@@ -1015,7 +1067,7 @@ impl SessionStore for SqliteSessionStore {
 
     async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {
         let mut conn = self.lock();
-        let tx = conn.transaction().map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         // Read the pre-receipt chain root inside the transaction so the
         // root we sign is exactly the chain the receipt finalises, with
         // no window for a concurrent append to move the tip.
@@ -1125,3 +1177,7 @@ impl SessionStore for SqliteSessionStore {
         ))
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_tests.rs"]
+mod tests;

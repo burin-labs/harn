@@ -76,6 +76,7 @@ impl SchemaCompatProfile {
                 "$id",
                 "id",
                 "default",
+                "const",
                 "minimum",
                 "maximum",
                 "exclusiveMinimum",
@@ -200,6 +201,9 @@ impl SchemaSanitizer<'_> {
     }
 
     fn sanitize_object(&mut self, object: &mut Map<String, Value>, path: &str) {
+        self.rewrite_openai_strict_discriminated_union(object, path);
+        self.rewrite_openai_strict_const(object, path);
+
         for keyword in self.profile.unsupported_keywords() {
             if let Some(removed) = object.remove(*keyword) {
                 if self.profile.should_note_removed_keyword(keyword) {
@@ -264,6 +268,77 @@ impl SchemaSanitizer<'_> {
                 }
             }
         }
+    }
+
+    fn rewrite_openai_strict_discriminated_union(
+        &mut self,
+        object: &mut Map<String, Value>,
+        path: &str,
+    ) {
+        if self.profile != SchemaCompatProfile::OpenAiStrict
+            || path == "#"
+            || object.contains_key("anyOf")
+        {
+            return;
+        }
+        let Some(discriminator) = object
+            .get("oneOf")
+            .and_then(Value::as_array)
+            .and_then(|branches| closed_union_discriminator(branches))
+        else {
+            return;
+        };
+        let Some(branches) = object.remove("oneOf") else {
+            return;
+        };
+        object.insert("anyOf".to_string(), branches);
+        self.record(
+            &child_path(path, "oneOf"),
+            "oneOf",
+            "rewritten_to_any_of",
+            format!(
+                "closed branches with distinct `{discriminator}` literals preserve one-of semantics as anyOf in {} schemas",
+                self.profile.label()
+            ),
+        );
+    }
+
+    fn rewrite_openai_strict_const(&mut self, object: &mut Map<String, Value>, path: &str) {
+        if self.profile != SchemaCompatProfile::OpenAiStrict {
+            return;
+        }
+        let Some(value) = object.remove("const") else {
+            return;
+        };
+        let (values, action, detail) = match object.remove("enum") {
+            None => (
+                vec![value],
+                "rewritten_to_single_value_enum",
+                "single-value enum preserves const semantics in openai_strict schemas",
+            ),
+            Some(Value::Array(values))
+                if value.as_str().is_some_and(|constant| {
+                    values
+                        .iter()
+                        .any(|candidate| candidate.as_str() == Some(constant))
+                }) => (
+                vec![value],
+                "intersected_with_const",
+                "single-value enum preserves the string const and enum intersection in openai_strict schemas",
+            ),
+            Some(_) => (
+                Vec::new(),
+                "rewritten_to_empty_enum",
+                "empty enum fails closed when const and enum have no safely supported intersection in openai_strict schemas",
+            ),
+        };
+        object.insert("enum".to_string(), Value::Array(values));
+        self.record(
+            &child_path(path, "const"),
+            "const",
+            action,
+            detail.to_string(),
+        );
     }
 
     fn sanitize_additional_properties(&mut self, object: &mut Map<String, Value>, path: &str) {
@@ -452,6 +527,52 @@ fn schema_is_object_like(object: &Map<String, Value>) -> bool {
     object.contains_key("properties") || object.get("type").is_some_and(type_includes_object)
 }
 
+fn closed_union_discriminator(branches: &[Value]) -> Option<String> {
+    if branches.len() < 2 {
+        return None;
+    }
+    let first_properties = branches
+        .first()?
+        .as_object()?
+        .get("properties")?
+        .as_object()?;
+    for name in first_properties.keys() {
+        let Some(values) = branches
+            .iter()
+            .map(|branch| closed_object_discriminator_value(branch, name))
+            .collect::<Option<Vec<_>>>()
+        else {
+            continue;
+        };
+        let distinct = values.iter().copied().collect::<BTreeSet<_>>();
+        if distinct.len() == branches.len() {
+            return Some(name.clone());
+        }
+    }
+    None
+}
+
+fn closed_object_discriminator_value<'a>(branch: &'a Value, name: &str) -> Option<&'a str> {
+    let object = branch.as_object()?;
+    if object.get("type").and_then(Value::as_str) != Some("object")
+        || object.get("additionalProperties").and_then(Value::as_bool) != Some(false)
+        || !object
+            .get("required")?
+            .as_array()?
+            .iter()
+            .any(|required| required.as_str() == Some(name))
+    {
+        return None;
+    }
+    object
+        .get("properties")?
+        .as_object()?
+        .get(name)?
+        .as_object()?
+        .get("const")?
+        .as_str()
+}
+
 fn required_property_set(value: Option<&Value>) -> BTreeSet<String> {
     value
         .and_then(Value::as_array)
@@ -494,8 +615,105 @@ fn escape_json_pointer(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) fn closed_discriminated_union_schema(
+        combinator: &str,
+        literal_keyword: &str,
+    ) -> Value {
+        let literal = |value: &str| {
+            let mut schema = Map::new();
+            let value = Value::String(value.to_string());
+            schema.insert(
+                literal_keyword.to_string(),
+                if literal_keyword == "enum" {
+                    Value::Array(vec![value])
+                } else {
+                    value
+                },
+            );
+            Value::Object(schema)
+        };
+        let mut source = Map::new();
+        source.insert(
+            combinator.to_string(),
+            serde_json::json!([
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "kind": literal("cron"),
+                        "cron": {"type": "string"},
+                        "timezone": {"type": "string"}
+                    },
+                    "required": ["kind", "cron", "timezone"]
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "kind": literal("external"),
+                        "provider": {"type": "string"},
+                        "event": {"type": "string"}
+                    },
+                    "required": ["kind", "provider", "event"]
+                }
+            ]),
+        );
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "schema_version": literal("1"),
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+                "goal": {"type": "string"},
+                "template": {"enum": [
+                    "deterministic-sweeper",
+                    "hybrid-classify-then-act",
+                    "frontier-judgment-loop"
+                ]},
+                "source": Value::Object(source)
+            },
+            "required": ["schema_version", "name", "description", "goal", "template", "source"]
+        })
+    }
+
+    fn openai_receipt_change(path: &str, keyword: &str, action: &str, detail: &str) -> Value {
+        serde_json::json!({
+            "schema": RECEIPT_SCHEMA,
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "profile": "openai_strict",
+            "surface": "structured_output",
+            "path": path,
+            "keyword": keyword,
+            "action": action,
+            "detail": detail
+        })
+    }
+
+    fn sanitize_openai_with_changes(schema: &Value) -> (Value, Value) {
+        let mut sanitizer = SchemaSanitizer {
+            provider: "openai",
+            model: "gpt-5.4",
+            profile: SchemaCompatProfile::OpenAiStrict,
+            surface: SchemaSurface::StructuredOutput,
+            receipts: Vec::new(),
+        };
+        let mut sanitized = schema.clone();
+        sanitizer.sanitize_node(&mut sanitized, "#");
+        let changes = serde_json::to_value(sanitizer.receipts).expect("serialize schema changes");
+        (sanitized, changes)
+    }
+
+    fn omitted_one_of_note(branches: &Value) -> String {
+        format!(
+            "Original JSON Schema `oneOf` constraint omitted for openai_strict provider compatibility: {}.",
+            value_summary(branches)
+        )
+    }
 
     #[test]
     fn google_profile_preserves_user_property_named_pattern() {
@@ -693,20 +911,158 @@ mod tests {
     }
 
     #[test]
+    fn openai_strict_rewrites_closed_discriminated_union_without_losing_branches() {
+        let schema = closed_discriminated_union_schema("oneOf", "const");
+        let sanitized = sanitize_schema_for_provider(
+            "openai",
+            "gpt-5.4",
+            SchemaCompatProfile::OpenAiStrict,
+            SchemaSurface::StructuredOutput,
+            &schema,
+        );
+
+        assert_eq!(
+            sanitized,
+            closed_discriminated_union_schema("anyOf", "enum")
+        );
+    }
+
+    #[test]
+    fn openai_strict_does_not_rewrite_overlapping_discriminator_branches() {
+        let mut schema = closed_discriminated_union_schema("oneOf", "const");
+        schema["properties"]["source"]["oneOf"][1]["properties"]["kind"]["const"] =
+            Value::String("cron".to_string());
+        let note = omitted_one_of_note(&schema["properties"]["source"]["oneOf"]);
+
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+        let mut expected = schema;
+        expected["properties"]["schema_version"] = serde_json::json!({"enum": ["1"]});
+        expected["properties"]["source"] = serde_json::json!({"description": note});
+
+        assert_eq!(sanitized, expected);
+        assert_eq!(
+            changes,
+            Value::Array(vec![
+                openai_receipt_change(
+                    "#/properties/schema_version/const",
+                    "const",
+                    "rewritten_to_single_value_enum",
+                    "single-value enum preserves const semantics in openai_strict schemas",
+                ),
+                openai_receipt_change(
+                    "#/properties/source/oneOf",
+                    "oneOf",
+                    "removed",
+                    "keyword is not accepted by openai_strict schemas",
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn openai_strict_does_not_rewrite_json_schema_equal_numeric_discriminators() {
+        let mut schema = closed_discriminated_union_schema("oneOf", "const");
+        schema["properties"]["source"]["oneOf"][0]["properties"]["kind"]["const"] =
+            serde_json::json!(1);
+        schema["properties"]["source"]["oneOf"][1]["properties"]["kind"]["const"] =
+            serde_json::json!(1.0);
+        let note = omitted_one_of_note(&schema["properties"]["source"]["oneOf"]);
+
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+        let mut expected = schema;
+        expected["properties"]["schema_version"] = serde_json::json!({"enum": ["1"]});
+        expected["properties"]["source"] = serde_json::json!({"description": note});
+
+        assert_eq!(sanitized, expected);
+        assert_eq!(
+            changes,
+            Value::Array(vec![
+                openai_receipt_change(
+                    "#/properties/schema_version/const",
+                    "const",
+                    "rewritten_to_single_value_enum",
+                    "single-value enum preserves const semantics in openai_strict schemas",
+                ),
+                openai_receipt_change(
+                    "#/properties/source/oneOf",
+                    "oneOf",
+                    "removed",
+                    "keyword is not accepted by openai_strict schemas",
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn openai_strict_does_not_rewrite_root_discriminated_union() {
+        let schema =
+            closed_discriminated_union_schema("oneOf", "const")["properties"]["source"].clone();
+        let note = omitted_one_of_note(&schema["oneOf"]);
+
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+
+        assert_eq!(sanitized, serde_json::json!({"description": note}));
+        assert_eq!(
+            changes,
+            Value::Array(vec![openai_receipt_change(
+                "#/oneOf",
+                "oneOf",
+                "removed",
+                "keyword is not accepted by openai_strict schemas",
+            )])
+        );
+    }
+
+    #[test]
+    fn openai_strict_intersects_string_const_with_enum() {
+        let schema = serde_json::json!({"type": "string", "const": "a", "enum": ["a", "b"]});
+
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+
+        assert_eq!(
+            sanitized,
+            serde_json::json!({"type": "string", "enum": ["a"]})
+        );
+        assert_eq!(
+            changes,
+            Value::Array(vec![openai_receipt_change(
+                "#/const",
+                "const",
+                "intersected_with_const",
+                "single-value enum preserves the string const and enum intersection in openai_strict schemas",
+            )])
+        );
+    }
+
+    #[test]
+    fn openai_strict_fails_closed_for_empty_const_enum_intersection() {
+        let schema = serde_json::json!({"type": "string", "const": "a", "enum": ["b"]});
+
+        let (sanitized, changes) = sanitize_openai_with_changes(&schema);
+
+        assert_eq!(sanitized, serde_json::json!({"type": "string", "enum": []}));
+        assert_eq!(
+            changes,
+            Value::Array(vec![openai_receipt_change(
+                "#/const",
+                "const",
+                "rewritten_to_empty_enum",
+                "empty enum fails closed when const and enum have no safely supported intersection in openai_strict schemas",
+            )])
+        );
+    }
+
+    #[test]
     fn emits_structured_sanitization_receipt() {
         let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
         crate::events::clear_event_sinks();
         crate::events::add_event_sink(sink.clone());
 
-        let schema = serde_json::json!({
-            "type": "object",
-            "default": {},
-            "properties": {"value": {"type": "string"}}
-        });
+        let schema = closed_discriminated_union_schema("oneOf", "const");
         let _ = sanitize_schema_for_provider(
-            "anthropic",
-            "claude-sonnet-4-6",
-            SchemaCompatProfile::AnthropicStrict,
+            "openai",
+            "gpt-5.4",
+            SchemaCompatProfile::OpenAiStrict,
             SchemaSurface::StructuredOutput,
             &schema,
         );
@@ -720,15 +1076,36 @@ mod tests {
             event.metadata["schema"],
             Value::String(RECEIPT_SCHEMA.to_string())
         );
+        assert_eq!(event.metadata["provider"], Value::String("openai".into()));
         assert_eq!(
-            event.metadata["provider"],
-            Value::String("anthropic".into())
+            event.metadata["changes"],
+            Value::Array(vec![
+                openai_receipt_change(
+                    "#/properties/schema_version/const",
+                    "const",
+                    "rewritten_to_single_value_enum",
+                    "single-value enum preserves const semantics in openai_strict schemas",
+                ),
+                openai_receipt_change(
+                    "#/properties/source/oneOf",
+                    "oneOf",
+                    "rewritten_to_any_of",
+                    "closed branches with distinct `kind` literals preserve one-of semantics as anyOf in openai_strict schemas",
+                ),
+                openai_receipt_change(
+                    "#/properties/source/anyOf/0/properties/kind/const",
+                    "const",
+                    "rewritten_to_single_value_enum",
+                    "single-value enum preserves const semantics in openai_strict schemas",
+                ),
+                openai_receipt_change(
+                    "#/properties/source/anyOf/1/properties/kind/const",
+                    "const",
+                    "rewritten_to_single_value_enum",
+                    "single-value enum preserves const semantics in openai_strict schemas",
+                ),
+            ])
         );
-        assert!(event.metadata["changes"]
-            .as_array()
-            .expect("changes array")
-            .iter()
-            .any(|change| change["keyword"] == "default"));
 
         crate::events::reset_event_sinks();
     }

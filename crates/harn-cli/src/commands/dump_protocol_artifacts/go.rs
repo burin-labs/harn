@@ -2,9 +2,9 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use harn_serve::adapters::acp::{
-    ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
-    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
@@ -58,6 +58,11 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
             "// ACPSchemaCompatibility is the upstream ACP schema version Harn tracks.\n",
             "ACPSchemaCompatibility",
             ACP_SCHEMA_COMPATIBILITY,
+        ),
+        (
+            "// ACPPromptErrorDataSchema identifies typed session/prompt JSON-RPC error data.\n",
+            "ACPPromptErrorDataSchema",
+            ACP_PROMPT_ERROR_DATA_SCHEMA,
         ),
         (
             "// A2AProtocolVersion is the A2A protocol version Harn implements.\n",
@@ -180,6 +185,11 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
         "HarnWorkerStatus",
         "HarnWorkerStatuses",
         &worker_status_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
+        "AgentTerminalClass",
+        "AgentTerminalClasses",
+        &agent_terminal_class_values(),
     ));
     out.push_str(&go_typed_array(
         "ToolCallReceiptStatus",
@@ -316,6 +326,12 @@ type ACPError struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+// HarnACPPromptErrorData is the typed data payload for failed session/prompt calls.
+type HarnACPPromptErrorData struct {
+	Schema        string             `json:"schema"`
+	TerminalClass AgentTerminalClass `json:"terminalClass"`
 }
 
 // ACPResponse is a JSON-RPC response envelope.

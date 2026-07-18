@@ -125,6 +125,9 @@ pub struct CallRequest {
     pub arguments: CallArguments,
     pub auth: AuthRequest,
     pub caller: String,
+    /// Stable identity for an adapter-level retry of the same logical request.
+    /// `None` disables replay; a supplied key must be unique within the
+    /// configured replay cache and ordinary repeated calls must not share one.
     pub replay_key: Option<String>,
     pub trace_id: Option<TraceId>,
     pub parent_span_id: Option<String>,
@@ -448,18 +451,12 @@ impl DispatchCore {
             ))
         })?;
 
-        // Rate-limit + backpressure gate. Held across the dispatch so
-        // the in-flight counter decrements on drop (including panics).
-        // Cached replies skip the gate to keep replay-cache hits free
-        // and avoid double-charging buckets the original call already
-        // paid for.
+        // Rate-limit + backpressure gate. Every dispatch attempt passes this
+        // gate before replay lookup. The in-flight counter decrements when the
+        // guard drops, including on cached replies and panics.
         let _limit_guard = self.check_limits(&request, function)?;
 
-        let replay_key = request
-            .replay_key
-            .clone()
-            .map(ReplayKey)
-            .or_else(|| Some(self.default_replay_key(&request)));
+        let replay_key = request.replay_key.clone().map(ReplayKey);
         if let Some(key) = replay_key.as_ref() {
             if let Some(cached) = self.config.replay_cache.get(key).await? {
                 return Ok(CallResponse {
@@ -585,25 +582,6 @@ impl DispatchCore {
         }
     }
 
-    fn default_replay_key(&self, request: &CallRequest) -> ReplayKey {
-        let args = match &request.arguments {
-            CallArguments::Named(values) => serde_json::Value::Object(
-                values
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect(),
-            ),
-            CallArguments::Positional(values) => serde_json::Value::Array(values.clone()),
-        };
-        let key = serde_json::json!({
-            "adapter": &request.adapter,
-            "function": &request.function,
-            "actor_chain": request.actor_chain.as_ref().map(ActorChain::to_json_value),
-            "arguments": harn_vm::mcp_file_upload::redact_data_uris_for_logs(&args),
-        });
-        ReplayKey(serde_json::to_string(&key).unwrap_or_default())
-    }
-
     async fn invoke_function(
         &self,
         request: &CallRequest,
@@ -691,18 +669,8 @@ impl DispatchCore {
                     self.config.script_path.display()
                 ))
             })?;
-        let program = harn_parser::parse_source(&source).map_err(|error| {
-            DispatchError::Validation(format!(
-                "failed to parse {}: {error}",
-                self.config.script_path.display()
-            ))
-        })?;
-        let chunk = Arc::new(
-            harn_vm::Compiler::new()
-                .compile_named(&program, &function.name)
-                .map_err(|error| DispatchError::Validation(format!("compile error: {error}")))?,
-        );
-        let globals = build_pipeline_globals(&request.arguments, function)?;
+        let arguments = request.arguments.clone();
+        let function = function.clone();
         let script_path = self.config.script_path.clone();
         let cancel_token = request
             .cancel_token
@@ -739,11 +707,15 @@ impl DispatchCore {
                     let mut vm = Vm::new();
                     install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
                     self.config.vm_configurator.configure(&mut vm)?;
-                    for (name, value) in globals {
-                        vm.set_global(&name, value);
-                    }
-
-                    let result = vm.execute_arc(Arc::clone(&chunk)).await;
+                    let exports = vm
+                        .load_module_exports_from_source(script_path.clone(), &source)
+                        .await
+                        .map_err(classify_vm_error)?;
+                    let closure = exports
+                        .get(&function.name)
+                        .ok_or_else(|| DispatchError::MissingExport(function.name.clone()))?;
+                    let args = build_vm_args(&arguments, &function, &vm)?;
+                    let result = vm.call_closure_pub(closure, &args).await;
 
                     match result {
                         Ok(_) => {
@@ -837,6 +809,11 @@ fn build_vm_args(
             values.iter().map(json_to_vm_value).collect::<Vec<_>>()
         }
         CallArguments::Named(values) => {
+            // Tolerate clients that emit a single-object-param tool's arguments
+            // FLAT at the top level instead of nested under the parameter name
+            // (harn#5039). See `lift_flat_single_object_arg`.
+            let lifted = lift_flat_single_object_arg(params, values);
+            let values: &BTreeMap<String, serde_json::Value> = lifted.as_ref().unwrap_or(values);
             let mut args = Vec::new();
             let mut saw_gap = false;
             for param in params {
@@ -870,6 +847,49 @@ fn build_vm_args(
     Ok(prefix)
 }
 
+/// Tolerate MCP/JSON-RPC clients that emit a single-object-parameter tool's
+/// arguments FLAT at the top level instead of nested under the parameter name
+/// (harn#5039).
+///
+/// Harn projects `pub fn tool(params: { field: T, .. })` into an MCP
+/// `inputSchema` that nests every field under `params`. Some model clients
+/// (notably local/open-weight models) ignore that wrapper and emit the inner
+/// fields at the top level — e.g. `{ "events_dir": ".." }` instead of
+/// `{ "params": { "events_dir": ".." } }`. Bound by name, those flat keys match
+/// no parameter and are dropped, so the tool silently runs on its default and
+/// reports the field as "required".
+///
+/// When the function declares exactly one object-typed parameter and the
+/// incoming named map both (a) omits that parameter's own name and (b) is
+/// non-empty, wrap the whole map as that parameter's value. This is:
+/// - **idempotent** — a correctly-nested `{ "params": { .. } }` call already
+///   contains the parameter name, so it is passed through untouched;
+/// - **strictly additive** — it only rewrites calls whose keys would otherwise
+///   all be dropped (the parameter falling back to its default), never a call
+///   that already binds the parameter;
+/// - **shape-guarded** — it fires only for object-typed parameters, so a scalar
+///   single-parameter tool still reports a clear "missing required argument"
+///   instead of a spurious type error.
+///
+/// Returns the rewritten map when the lift applies, else `None` (bind the
+/// original arguments unchanged).
+fn lift_flat_single_object_arg(
+    params: &[crate::ExportedParam],
+    values: &BTreeMap<String, serde_json::Value>,
+) -> Option<BTreeMap<String, serde_json::Value>> {
+    let [only] = params else {
+        return None;
+    };
+    if only.rest || !only.accepts_json_object() {
+        return None;
+    }
+    if values.is_empty() || values.contains_key(&only.name) {
+        return None;
+    }
+    let wrapped = serde_json::Value::Object(values.clone().into_iter().collect());
+    Some(BTreeMap::from([(only.name.clone(), wrapped)]))
+}
+
 /// `true` when the first exported param is the canonical `harness`
 /// capability handle slot. Type annotation is optional (most pubs use
 /// untyped `harness` in stdlib) so we only check the name; the
@@ -880,54 +900,6 @@ fn first_param_is_harness(function: &crate::ExportedFunction) -> bool {
         .first()
         .map(|param| param.name == "harness")
         .unwrap_or(false)
-}
-
-fn build_pipeline_globals(
-    arguments: &CallArguments,
-    function: &crate::ExportedFunction,
-) -> Result<harn_vm::value::DictMap, DispatchError> {
-    let mut globals = harn_vm::value::DictMap::new();
-    match arguments {
-        CallArguments::Positional(values) => {
-            for (index, param) in function.params.iter().enumerate() {
-                match values.get(index) {
-                    Some(value) => {
-                        globals.insert(
-                            harn_vm::value::intern_key(&param.name),
-                            json_to_vm_value(value),
-                        );
-                    }
-                    None if param.has_default => {}
-                    None => {
-                        return Err(DispatchError::Validation(format!(
-                            "missing required argument '{}' for '{}'",
-                            param.name, function.name
-                        )));
-                    }
-                }
-            }
-        }
-        CallArguments::Named(values) => {
-            for param in &function.params {
-                match values.get(&param.name) {
-                    Some(value) => {
-                        globals.insert(
-                            harn_vm::value::intern_key(&param.name),
-                            json_to_vm_value(value),
-                        );
-                    }
-                    None if param.has_default => {}
-                    None => {
-                        return Err(DispatchError::Validation(format!(
-                            "missing required argument '{}' for '{}'",
-                            param.name, function.name
-                        )));
-                    }
-                }
-            }
-        }
-    }
-    Ok(globals)
 }
 
 fn trim_trailing_defaults(mut args: Vec<VmValue>) -> Vec<VmValue> {
@@ -963,6 +935,106 @@ fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct TrackingReplayCache {
+        inner: InMemoryReplayCache,
+        gets: AtomicUsize,
+        puts: AtomicUsize,
+    }
+
+    impl TrackingReplayCache {
+        fn counts(&self) -> (usize, usize) {
+            (
+                self.gets.load(Ordering::SeqCst),
+                self.puts.load(Ordering::SeqCst),
+            )
+        }
+    }
+
+    #[async_trait]
+    impl ReplayCache for TrackingReplayCache {
+        async fn get(&self, key: &ReplayKey) -> Result<Option<ReplayCacheEntry>, DispatchError> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            self.inner.get(key).await
+        }
+
+        async fn put(&self, key: ReplayKey, value: ReplayCacheEntry) -> Result<(), DispatchError> {
+            self.puts.fetch_add(1, Ordering::SeqCst);
+            self.inner.put(key, value).await
+        }
+    }
+
+    struct CountingVmConfigurator {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl VmConfigurator for CountingVmConfigurator {
+        fn configure(&self, vm: &mut Vm) -> Result<(), DispatchError> {
+            let calls = self.calls.clone();
+            vm.register_builtin("test_increment_call_count", move |_args, _output| {
+                let count = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                Ok(VmValue::Int(
+                    count.try_into().expect("test call count fits in i64"),
+                ))
+            });
+            Ok(())
+        }
+    }
+
+    fn replay_test_fixture() -> (
+        tempfile::TempDir,
+        DispatchCore,
+        Arc<AtomicUsize>,
+        Arc<TrackingReplayCache>,
+    ) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r"
+pub fn observe_execution() -> int {
+  return test_increment_call_count()
+}
+",
+        )
+        .expect("write script");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let cache = Arc::new(TrackingReplayCache::default());
+        let mut config = DispatchCoreConfig::for_script(&script);
+        config.replay_cache = cache.clone();
+        config.vm_configurator = Arc::new(CountingVmConfigurator {
+            calls: calls.clone(),
+        });
+        let core = DispatchCore::new(config).expect("core");
+        (dir, core, calls, cache)
+    }
+
+    fn replay_test_request(replay_key: Option<&str>) -> CallRequest {
+        CallRequest {
+            adapter: "mcp".to_string(),
+            function: "observe_execution".to_string(),
+            arguments: CallArguments::Named(BTreeMap::new()),
+            auth: AuthRequest::default(),
+            caller: "tester".to_string(),
+            replay_key: replay_key.map(str::to_string),
+            trace_id: None,
+            parent_span_id: None,
+            metadata: BTreeMap::new(),
+            cancel_token: None,
+            agent_session_id: None,
+            agent_event_sink: None,
+            actor_chain: None,
+            actor_chain_hop: None,
+            progress: None,
+            tenant_id: None,
+            request_id: None,
+            auth_context: None,
+            auth_principal: None,
+        }
+    }
 
     #[tokio::test]
     async fn dispatch_executes_exported_function() {
@@ -1009,6 +1081,125 @@ pub fn greet(name: string) -> string {
 
         assert_eq!(response.value, serde_json::json!("alice"));
         assert!(!response.cached);
+    }
+
+    /// harn#5039: a single-object-param tool (the `pub fn tool(params: {..})`
+    /// convention) whose MCP `inputSchema` nests fields under `params` must
+    /// still bind when a client emits those fields FLAT at the top level, the
+    /// exact 6/6-failing shape the local model produced against
+    /// `burin-harness-debugger` (`{events_dir: ".."}` rather than
+    /// `{params: {events_dir: ".."}}`). The flat keys must reach the parameter
+    /// instead of being dropped so the tool falls back to its default.
+    async fn dispatch_echo_params(arguments: CallArguments) -> serde_json::Value {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn stage_triage(
+  params: {events_dir: string, verdict_path?: string} = {events_dir: ""},
+) -> dict {
+  return params
+}
+"#,
+        )
+        .expect("write script");
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        core.dispatch(CallRequest {
+            adapter: "mcp".to_string(),
+            function: "stage_triage".to_string(),
+            arguments,
+            auth: AuthRequest::default(),
+            caller: "tester".to_string(),
+            replay_key: None,
+            trace_id: None,
+            parent_span_id: None,
+            metadata: BTreeMap::new(),
+            cancel_token: None,
+            agent_session_id: None,
+            agent_event_sink: None,
+            actor_chain: None,
+            actor_chain_hop: None,
+            progress: None,
+            tenant_id: None,
+            request_id: None,
+            auth_context: None,
+            auth_principal: None,
+        })
+        .await
+        .expect("dispatch")
+        .value
+    }
+
+    #[tokio::test]
+    async fn flat_single_object_arg_binds_like_nested_5039() {
+        // FLAT emission (local-model shape) now reaches the `params` parameter.
+        let flat = dispatch_echo_params(CallArguments::Named(BTreeMap::from([(
+            "events_dir".to_string(),
+            serde_json::json!("/runs/20260717-175909"),
+        )])))
+        .await;
+        assert_eq!(
+            flat,
+            serde_json::json!({ "events_dir": "/runs/20260717-175909" }),
+            "flat top-level args must be lifted into the single object parameter",
+        );
+
+        // Correctly-nested emission (Claude shape) is untouched — idempotent.
+        let nested = dispatch_echo_params(CallArguments::Named(BTreeMap::from([(
+            "params".to_string(),
+            serde_json::json!({ "events_dir": "/runs/nested" }),
+        )])))
+        .await;
+        assert_eq!(
+            nested,
+            serde_json::json!({ "events_dir": "/runs/nested" }),
+            "a correctly-nested call must not be double-lifted",
+        );
+
+        // No arguments falls back to the declared default (no spurious lift).
+        let empty = dispatch_echo_params(CallArguments::Named(BTreeMap::new())).await;
+        assert_eq!(empty, serde_json::json!({ "events_dir": "" }));
+    }
+
+    #[test]
+    fn flat_lift_is_scoped_to_single_object_param() {
+        use crate::ExportedParam;
+
+        let obj_param = |name: &str| ExportedParam {
+            name: name.to_string(),
+            type_expr: None,
+            input_schema: serde_json::json!({ "type": "object", "properties": {} }),
+            has_default: true,
+            rest: false,
+        };
+        let scalar_param = |name: &str| ExportedParam {
+            name: name.to_string(),
+            type_expr: None,
+            input_schema: serde_json::json!({ "type": "string" }),
+            has_default: false,
+            rest: false,
+        };
+        let flat = BTreeMap::from([("events_dir".to_string(), serde_json::json!("x"))]);
+
+        // Single object param, flat args, param name absent -> lift.
+        let params = [obj_param("params")];
+        let lifted = lift_flat_single_object_arg(&params, &flat).expect("lift");
+        assert_eq!(lifted["params"], serde_json::json!({ "events_dir": "x" }));
+
+        // Param name already present -> no lift (idempotent).
+        let nested = BTreeMap::from([("params".to_string(), serde_json::json!({ "a": 1 }))]);
+        assert!(lift_flat_single_object_arg(&params, &nested).is_none());
+
+        // Scalar single param -> no lift (preserves clear "missing required arg").
+        assert!(lift_flat_single_object_arg(&[scalar_param("name")], &flat).is_none());
+
+        // Multiple params -> no lift (normal named binding).
+        assert!(lift_flat_single_object_arg(&[obj_param("a"), obj_param("b")], &flat).is_none());
+
+        // Empty args -> no lift (default applies).
+        assert!(lift_flat_single_object_arg(&params, &BTreeMap::new()).is_none());
     }
 
     #[cfg(feature = "hostlib")]
@@ -1117,172 +1308,47 @@ pipeline default(task) {
     }
 
     #[tokio::test]
-    async fn dispatch_uses_replay_cache_before_reinvoking() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
-            r#"
-pub fn greet(name: string) -> string {
-  return "fresh"
-}
-"#,
-        )
-        .expect("write script");
-
-        let cache = Arc::new(InMemoryReplayCache::new());
-        cache
-            .put(
-                ReplayKey("fixed-key".to_string()),
-                ReplayCacheEntry {
-                    value: serde_json::json!("cached"),
-                    printed_output: String::new(),
-                },
-            )
-            .await
-            .expect("seed cache");
-
-        let mut config = DispatchCoreConfig::for_script(&script);
-        config.replay_cache = cache;
-        let core = DispatchCore::new(config).expect("core");
-        let response = core
-            .dispatch(CallRequest {
-                adapter: "mcp".to_string(),
-                function: "greet".to_string(),
-                arguments: CallArguments::Named(BTreeMap::from([(
-                    "name".to_string(),
-                    serde_json::json!("alice"),
-                )])),
-                auth: AuthRequest::default(),
-                caller: "tester".to_string(),
-                replay_key: Some("fixed-key".to_string()),
-                trace_id: None,
-                parent_span_id: None,
-                metadata: BTreeMap::new(),
-                cancel_token: None,
-                agent_session_id: None,
-                agent_event_sink: None,
-                actor_chain: None,
-                actor_chain_hop: None,
-                progress: None,
-                tenant_id: None,
-                request_id: None,
-                auth_context: None,
-                auth_principal: None,
-            })
-            .await
-            .expect("dispatch");
-
-        assert_eq!(response.value, serde_json::json!("cached"));
-        assert!(response.cached);
-    }
-
-    #[test]
-    fn default_replay_key_redacts_data_uri_payloads() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
-            r"
-pub fn inspect(upload: string) -> string {
-  return upload
-}
-",
-        )
-        .expect("write script");
-
-        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-        let request = |payload: serde_json::Value| CallRequest {
-            adapter: "mcp".to_string(),
-            function: "inspect".to_string(),
-            arguments: CallArguments::Named(BTreeMap::from([("upload".to_string(), payload)])),
-            auth: AuthRequest::default(),
-            caller: "tester".to_string(),
-            replay_key: None,
-            trace_id: None,
-            parent_span_id: None,
-            metadata: BTreeMap::new(),
-            cancel_token: None,
-            agent_session_id: None,
-            agent_event_sink: None,
-            actor_chain: None,
-            actor_chain_hop: None,
-            progress: None,
-            tenant_id: None,
-            request_id: None,
-            auth_context: None,
-            auth_principal: None,
-        };
+    async fn dispatch_without_replay_key_executes_each_request_without_cache_access() {
+        let (_dir, core, calls, cache) = replay_test_fixture();
 
         let first = core
-            .default_replay_key(&request(serde_json::json!(
-                "data:text/plain;base64,aGVsbG8="
-            )))
-            .0;
+            .dispatch(replay_test_request(None))
+            .await
+            .expect("first dispatch");
         let second = core
-            .default_replay_key(&request(serde_json::json!(
-                "data:text/plain;base64,d29ybGQ="
-            )))
-            .0;
+            .dispatch(replay_test_request(None))
+            .await
+            .expect("second dispatch");
 
-        assert!(first.contains("data:text/plain;redacted;sha256="));
-        assert!(!first.contains("aGVsbG8="));
-        assert!(!second.contains("d29ybGQ="));
-        assert_ne!(first, second);
+        assert_eq!(
+            [first.value, second.value],
+            [serde_json::json!(1), serde_json::json!(2)]
+        );
+        assert_eq!([first.cached, second.cached], [false, false]);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(cache.counts(), (0, 0));
     }
 
-    #[test]
-    fn default_replay_key_includes_actor_chain() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("server.harn");
-        std::fs::write(
-            &script,
-            r"
-pub fn inspect(value: string) -> string {
-  return value
-}
-",
-        )
-        .expect("write script");
-
-        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-        let request = |actor_chain: ActorChain| CallRequest {
-            adapter: "mcp".to_string(),
-            function: "inspect".to_string(),
-            arguments: CallArguments::Named(BTreeMap::from([(
-                "value".to_string(),
-                serde_json::json!("same"),
-            )])),
-            auth: AuthRequest::default(),
-            caller: "tester".to_string(),
-            replay_key: None,
-            trace_id: None,
-            parent_span_id: None,
-            metadata: BTreeMap::new(),
-            cancel_token: None,
-            agent_session_id: None,
-            agent_event_sink: None,
-            actor_chain: Some(actor_chain),
-            actor_chain_hop: None,
-            progress: None,
-            tenant_id: None,
-            request_id: None,
-            auth_context: None,
-            auth_principal: None,
-        };
+    #[tokio::test]
+    async fn dispatch_with_same_explicit_replay_key_executes_once_and_replays_once() {
+        let (_dir, core, calls, cache) = replay_test_fixture();
 
         let first = core
-            .default_replay_key(&request(
-                ActorChain::new("user:kenneth").pushed("agent:root"),
-            ))
-            .0;
+            .dispatch(replay_test_request(Some("fixed-key")))
+            .await
+            .expect("first dispatch");
         let second = core
-            .default_replay_key(&request(ActorChain::new("user:maya").pushed("agent:root")))
-            .0;
+            .dispatch(replay_test_request(Some("fixed-key")))
+            .await
+            .expect("second dispatch");
 
-        assert_ne!(first, second);
-        assert!(first.contains(r#""sub":"user:kenneth""#));
-        assert!(second.contains(r#""sub":"user:maya""#));
+        assert_eq!(
+            [first.value, second.value],
+            [serde_json::json!(1), serde_json::json!(1)]
+        );
+        assert_eq!([first.cached, second.cached], [false, true]);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(cache.counts(), (2, 1));
     }
 
     #[tokio::test]
@@ -1645,49 +1711,8 @@ pub fn whoami(harness: Harness) -> string {
         assert_eq!(response.value, serde_json::json!("override-tenant"));
     }
 
-    #[test]
-    fn budget_category_recovers_every_dimension() {
-        // Structured guards (mcp/pg call counts, LLM preflight) carry the
-        // dimension on the `limit` field.
-        let structured = |limit: &str| {
-            harn_vm::VmError::Thrown(harn_vm::VmValue::dict(std::collections::BTreeMap::from([
-                (
-                    "category".to_string(),
-                    harn_vm::VmValue::String(arcstr::ArcStr::from("budget_exceeded")),
-                ),
-                (
-                    "limit".to_string(),
-                    harn_vm::VmValue::String(arcstr::ArcStr::from(limit)),
-                ),
-            ])))
-        };
-        assert_eq!(
-            budget_category_from_error(&structured("mcp_calls")).as_deref(),
-            Some("mcp_calls"),
-        );
-        assert_eq!(
-            budget_category_from_error(&structured("pg_queries")).as_deref(),
-            Some("pg_queries"),
-        );
-
-        // LLM cost/token mid-call exhaustion raises the categorised
-        // variant; the message disambiguates cost from tokens so the
-        // per-class telemetry is accurate.
-        let categorized = |message: &str| harn_vm::VmError::CategorizedError {
-            message: message.to_string(),
-            category: harn_vm::ErrorCategory::BudgetExceeded,
-        };
-        assert_eq!(
-            budget_category_from_error(&categorized("LLM budget exceeded: spent $0.01 of $0.00"))
-                .as_deref(),
-            Some("llm_cost_usd"),
-        );
-        assert_eq!(
-            budget_category_from_error(&categorized(
-                "LLM token budget exceeded: spent 11 of 10 tokens"
-            ))
-            .as_deref(),
-            Some("llm_tokens"),
-        );
-    }
+    #[path = "dispatch_error_tests.rs"]
+    mod dispatch_error_tests;
+    #[path = "typed_pipeline_tests.rs"]
+    mod typed_pipeline_tests;
 }

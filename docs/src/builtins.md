@@ -1867,6 +1867,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `runtime_introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `llm_call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier, family, lineage}` via providers.toml |
+| `llm_execution_contract(selector)` | selector: string | dict | Return secret-free resolved route facts for durable receipts: `{schema, selector, model_id, provider, wire_model, tool_format, tier, family, lineage, generation_defaults}`. Only Harn-validated generation defaults are included; arbitrary operator route overlays are omitted. |
 | `llm_model_info(model)` | model: string | dict | Return resolved model/provider metadata plus normalized `family`/`lineage`, catalog entry, capabilities, API-key availability, and QC default |
 | `llm_pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
 | `llm_complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost |
@@ -2149,6 +2150,7 @@ distinguish new failure modes.
 | `overloaded` | Upstream provider is shedding load (HTTP 503 / 529). Distinct from `rate_limit`: no quota was exceeded and the provider recovers on its own |
 | `server_error` | Provider-side 5xx (500, 502) that is not specifically overload |
 | `transient_network` | Network-level transient failure — connection reset, DNS hiccup, partial stream. Retryable but not provider-status-coded |
+| `resource_busy` | A shared local resource is temporarily unavailable, such as a contended database write lock |
 | `schema_validation` | LLM output failed schema validation. Retryable via `schema_retries` |
 | `schema_stream_aborted` | A streaming response was aborted because the partial content could not satisfy `output_schema`. Consumes one `schema_retries` slot; see `schema_stream_abort` |
 | `tool_error` | Tool execution failed |

@@ -53,6 +53,36 @@ fn test_fix_mutable_never_reassigned() {
 }
 
 #[test]
+fn test_fix_shadowed_loop_local_preserves_execution() {
+    // This mirrors the release-harness shape behind harn#5024: a loop-local
+    // `pin` is unrelated to the later closure parameter named `pin`. The
+    // autofix must preserve the same strict parse/typecheck/execute result.
+    let source = r#"
+pipeline default(task) {
+  let pins = []
+  for line in ["alpha", "beta"] {
+    let pin = {name: line}
+    pins = pins + [pin]
+  }
+  const labels = pins.map({ pin -> pin.name })
+  log(labels.join(","))
+}
+"#;
+    let diagnostics = lint_source(source);
+    let fixed = apply_fixes(source, &diagnostics);
+
+    assert!(
+        fixed.contains("const pin = {name: line}"),
+        "expected the loop-local `pin` fix, got: {fixed}"
+    );
+    assert_eq!(
+        execute_strict_source(source),
+        execute_strict_source(&fixed),
+        "let-to-const autofix must preserve runtime behavior under parameter shadowing"
+    );
+}
+
+#[test]
 fn test_compound_assignment_counts_as_reassignment() {
     // `x += 1` is a reassignment: tightening to `const` would break it.
     let diags = lint_source(

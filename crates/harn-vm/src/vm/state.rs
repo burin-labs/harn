@@ -40,8 +40,12 @@ pub(crate) struct ResolvedLazyCallable {
 }
 
 pub(crate) type LazyCallableResolution = Arc<ResolvedLazyCallable>;
+pub(crate) struct LazyCallableCacheSlot {
+    pub(crate) execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+    pub(crate) resolution: Arc<tokio::sync::OnceCell<LazyCallableResolution>>,
+}
 pub(crate) type LazyCallableModuleCache =
-    Arc<VmMutex<BTreeMap<PathBuf, Arc<tokio::sync::OnceCell<LazyCallableResolution>>>>>;
+    Arc<VmMutex<BTreeMap<PathBuf, Vec<LazyCallableCacheSlot>>>>;
 
 /// RAII guard that starts a tracing span on creation and ends it on drop.
 pub(crate) struct ScopeSpan(u64);
@@ -166,7 +170,7 @@ pub(crate) struct LocalSlot {
 
 impl Drop for LocalSlot {
     fn drop(&mut self) {
-        // Slot locals hold script values directly (e.g. a `var` bound to a
+        // Slot locals hold script values directly (e.g. a `let` bound to a
         // deeply nested list). When a frame is torn down, the default
         // recursive drop of such a value would overflow the native stack and
         // abort the process. For the overwhelmingly common scalar slot this is
@@ -218,7 +222,7 @@ pub(crate) struct CallFrame {
     pub(crate) saved_source_dir: Option<std::path::PathBuf>,
     /// Module-local named functions available to symbolic calls within this frame.
     pub(crate) module_functions: Option<ModuleFunctionRegistry>,
-    /// Shared module-level env for top-level `var` / `let` bindings of
+    /// Shared module-level env for top-level `let` / `const` bindings of
     /// this frame's originating module. Looked up after `self.env` and
     /// before `self.globals` by `GetVar` / `SetVar`, giving each module
     /// its own live static state that persists across calls. See the
@@ -559,6 +563,7 @@ impl VmBaseline {
     }
 
     pub fn instantiate(&self) -> Vm {
+        crate::initialize_runtime_assets();
         let mut source_cache = BTreeMap::new();
         if let (Some(file), Some(text)) = (&self.source_file, &self.source_text) {
             source_cache.insert(std::path::PathBuf::from(file), text.clone());
@@ -820,6 +825,7 @@ impl Vm {
     }
 
     pub fn new() -> Self {
+        crate::initialize_runtime_assets();
         Self {
             stack: Vec::with_capacity(256),
             env: VmEnv::new(),
@@ -1340,6 +1346,12 @@ impl Default for Vm {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn vm_construction_initializes_shared_secret_patterns() {
+        let _vm = Vm::new();
+        assert!(crate::secret_patterns::default_secret_patterns_initialized());
+    }
 
     fn baseline_with_stdlib(source: &str) -> VmBaseline {
         let mut vm = Vm::new();

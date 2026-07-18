@@ -410,6 +410,7 @@ impl AcpServer {
                 current_mode_id: modes::DEFAULT_MODE_ID.to_string(),
                 budget: SessionBudget::Inherit,
                 profile_turn: 0,
+                capability_profile: None,
             },
         );
         harn_vm::agent_sessions::open_or_create_with_actor_chain(

@@ -42,7 +42,7 @@ pub struct ScalarFunction {
 }
 
 impl ScalarFunction {
-    /// Number of local slots (parameters plus `let`/`var` bindings).
+    /// Number of local slots (parameters plus `let`/`const` bindings).
     #[must_use]
     pub fn slot_count(&self) -> usize {
         self.slot_types.len()

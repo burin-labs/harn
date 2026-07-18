@@ -1,8 +1,7 @@
 // @harn-entrypoint-category llm.stdlib
 //
-// std/llm/handlers — composable middleware around the (call) -> envelope
-// caller seam wired into agent_loop. Each `with_*` returns a NEW caller
-// closure that wraps `next`. Compose left-to-right via `compose`.
+// std/llm/handlers — composable middleware around agent_loop's caller seam.
+// Each `with_*` wraps `next`; compose left-to-right via `compose`.
 //
 // Caller shape:
 //   call    = {prompt, system, opts, turn: {iteration, session_id, attempt}}
@@ -13,12 +12,10 @@
 // "caller_skipped", "exception", "schema_validation", "rate_limited",
 // "timeout", "network", "provider_5xx", "stream_interrupt",
 // "context_window_exceeded", "auth", "policy_blocked", "circuit_open".
-// "context_overflow" (the tag `std/llm/safe` emits for the same
-// context-window condition) is treated as an alias of
-// "context_window_exceeded" by the default retry predicate.
+// "context_overflow" is an alias of "context_window_exceeded".
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
-import { llm_call_options } from "std/llm/options"
+import { llm_call_options, llm_clear_one_shot_prefill } from "std/llm/options"
 import {
   __wrap_llm_result,
   parse_first_json,
@@ -328,7 +325,10 @@ pub fn with_retry(next, opts = nil) {
     let attempt = 1
     let last_envelope = {ok: false, status: "exception", error: "with_retry: no attempts"}
     while attempt <= max_attempts {
-      const attempt_call = call + {turn: base_turn + {attempt: attempt}}
+      let attempt_call = call + {turn: base_turn + {attempt: attempt}}
+      if attempt > 1 {
+        attempt_call = attempt_call + {opts: llm_clear_one_shot_prefill(call?.opts)}
+      }
       const envelope = __safe_invoke(next, attempt_call)
       last_envelope = envelope
       const should_retry = if predicate != nil {
@@ -651,10 +651,10 @@ fn __budget_check(limit_name, max_value, observed, on_exceed) {
  *
  * Tracks per-caller-instance usage across calls.
  *
- * IMPORTANT: Harn closures capture by VALUE, so we cannot persist a free-form
- * dict across calls. Counters are instead held as `atomic` handles, whose
- * underlying Arc<AtomicI64> is shared across closure invocations. This means
- * with_budget tracks INTEGER counters (tokens, calls, micro-cents) only.
+ * IMPORTANT: counters are held as `atomic` handles (Arc<AtomicI64>), not a
+ * captured dict. Closures capture by reference, but a plain captured binding
+ * still races under `parallel`/`spawn` (HARN-LNT-064), so the atomics stay —
+ * confining with_budget to INTEGER counters (tokens, calls, micro-cents).
  *
  * Options (all optional):
  *   - max_total_tokens: int (input + output)

@@ -1,0 +1,42 @@
+// std/host_lease — typed read-only authority for local machine lease state.
+//
+// Lifecycle policy intentionally remains out of this first surface. The
+// hostlib capability owns the authoritative registry read and stale recovery;
+// callers receive the versioned contract directly without parsing CLI output.
+pub type HostLeasePriorityClass = "interactive" | "measurement" | "ci-verify" | "deferrable"
+
+pub type HostLeaseHandle = {
+  schema_version: int,
+  host: string,
+  lease_id: string,
+  owner: string,
+  priority_class: HostLeasePriorityClass,
+  acquired_at_ms: int,
+  updated_at_ms: int,
+  expires_at_ms?: int,
+  owner_pid?: int,
+  owner_process_identity?: int,
+  reason?: string,
+  metadata: dict,
+}
+
+pub type HostLeaseStatus = {
+  schema_version: int,
+  host: string,
+  observed_at_ms: int,
+  active?: HostLeaseHandle,
+  recovered_stale_lease: bool,
+}
+
+/**
+ * Read the authoritative state for an explicitly named local host resource.
+ *
+ * This is inspection only. It never acquires, renews, releases, or claims to
+ * observe a resource on another machine.
+ *
+ * @effects: []
+ * @errors: [backend_error, invalid_parameter, missing_parameter]
+ */
+pub fn host_lease_status(host: string) -> HostLeaseStatus {
+  return hostlib_host_lease_status({host: host})
+}

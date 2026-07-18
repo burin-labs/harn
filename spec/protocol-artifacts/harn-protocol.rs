@@ -11,7 +11,7 @@
 #![allow(dead_code)]
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.21";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.23";
 
 /// Upstream ACP schema version Harn tracks.
 pub const ACP_SCHEMA_COMPATIBILITY: &str = "agentclientprotocol/agent-client-protocol schema v0.12.2";
@@ -21,6 +21,9 @@ pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
 
 /// JSON-RPC method for Harn's provider catalog extension.
 pub const HARN_PROVIDER_CATALOG_METHOD: &str = "_harn/providerCatalog";
+
+/// Schema discriminator for typed `session/prompt` JSON-RPC error data.
+pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str = "harn.acp.prompt_error.v1";
 
 pub const ACP_AGENT_METHOD_INITIALIZE: &str = "initialize";
 pub const ACP_AGENT_METHOD_SESSION_INJECT: &str = "session/inject";
@@ -546,6 +549,31 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "tool_call_audit",
     "tool_format_override",
     "typed_checkpoint",
+];
+
+pub const AGENT_TERMINAL_CLASS_CONTEXT_OVERFLOW: &str = "context_overflow";
+pub const AGENT_TERMINAL_CLASS_PROVIDER_MISCONFIGURED: &str = "provider_misconfigured";
+pub const AGENT_TERMINAL_CLASS_PROVIDER_UNAVAILABLE: &str = "provider_unavailable";
+pub const AGENT_TERMINAL_CLASS_RATE_LIMITED: &str = "rate_limited";
+pub const AGENT_TERMINAL_CLASS_TIMEOUT: &str = "timeout";
+pub const AGENT_TERMINAL_CLASS_RESOURCE_BUSY: &str = "resource_busy";
+pub const AGENT_TERMINAL_CLASS_TOOL_POLICY_REJECTED: &str = "tool_policy_rejected";
+pub const AGENT_TERMINAL_CLASS_HOST_BRIDGE_UNIMPLEMENTED: &str = "host_bridge_unimplemented";
+pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_protocol_failure";
+pub const AGENT_TERMINAL_CLASS_GENERIC_THROW: &str = "generic_throw";
+
+/// Stable terminal classes carried by typed ACP prompt-error data.
+pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
+    "context_overflow",
+    "provider_misconfigured",
+    "provider_unavailable",
+    "rate_limited",
+    "timeout",
+    "resource_busy",
+    "tool_policy_rejected",
+    "host_bridge_unimplemented",
+    "agent_loop_protocol_failure",
+    "generic_throw",
 ];
 
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA: &str = "visible_delta";

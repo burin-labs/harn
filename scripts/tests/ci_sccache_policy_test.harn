@@ -1,4 +1,4 @@
-import { ci_sccache_policy_errors } from "../check_ci_cache_policy"
+import { ci_sccache_policy_errors, windows_shared_cache_errors } from "../check_ci_cache_policy"
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -47,8 +47,8 @@ fn workflow() {
   const rust = persistent_job(
     gha_expression(disable + " && 'ubuntu-latest' || matrix.runner"),
     gha_expression("matrix.cache_key"),
-    "matrix.kind == 'lint' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-    "matrix.kind != 'lint' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
   )
   return {
     jobs: {
@@ -64,26 +64,48 @@ fn workflow() {
           matrix: {
             include: [
               {runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
-              {runner: "ubuntu-latest", cache_key: "workspace-test"},
-              {runner: "ubuntu-latest", cache_key: "workspace-audit"},
+              {runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-behavior"},
             ],
           },
         },
         steps: rust.steps
           + [
-          {name: "Run affected-crate tests (PR fast feedback)", env: {CARGO_BUILD_JOBS: "2"}},
-          {
-            name: "Run full test suite (merge queue + non-metadata push backstop)",
-            env: {CARGO_BUILD_JOBS: "2"},
-          },
+          {name: "Build portable behavior payload", env: {CARGO_BUILD_JOBS: "4"}},
+          {name: "Run full environment-neutral test suite", env: {CARGO_BUILD_JOBS: "4"}},
         ],
       },
-      "audit-scripts": persistent_job(
-        gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
-        "audit-scripts",
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
-      ),
+    },
+  }
+}
+
+fn windows_cache_pair() {
+  const checkout = {uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"}
+  const toolchain = {uses: "./.github/actions/rust-toolchain"}
+  const environment = {CARGO_INCREMENTAL: "0", CARGO_TERM_COLOR: "always", RUSTFLAGS: "-D warnings"}
+  return {
+    consumer: {
+      env: environment,
+      jobs: {
+        windows: {
+          steps: [
+            checkout,
+            toolchain,
+            {uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-windows"}},
+          ],
+        },
+      },
+    },
+    producer: {
+      env: environment,
+      jobs: {
+        nextest: {
+          steps: [
+            checkout,
+            toolchain,
+            {uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-windows", save: true}},
+          ],
+        },
+      },
     },
   }
 }
@@ -100,7 +122,6 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
     jobs: {
       "package-audit": {"runs-on": "ubuntu-latest", steps: []},
       "rust-builds": {"runs-on": "ubuntu-latest", steps: []},
-      "audit-scripts": {"runs-on": "ubuntu-latest", steps: []},
       surprise: {steps: [{uses: "./.github/actions/sccache"}]},
     },
   }
@@ -113,4 +134,49 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
   )
   assert(errors.contains("ci.yml:package-audit must cap persistent sccache at 15G"))
   assert(errors.contains("ci.yml:surprise uses persistent sccache without a lane policy"))
+}
+
+@test
+pipeline test_accepts_plain_rustc_windows_cache_pair(task) {
+  const pair = windows_cache_pair()
+  assert_eq(windows_shared_cache_errors(pair.consumer, pair.producer), [])
+}
+
+@test
+pipeline test_rejects_windows_cache_wrapper_drift(task) {
+  const pair = windows_cache_pair()
+  const producer = {
+    ...pair.producer,
+    jobs: {
+      ...pair.producer.jobs,
+      nextest: {
+        ...pair.producer.jobs.nextest,
+        steps: [
+          pair.producer.jobs.nextest.steps[0],
+          pair.producer.jobs.nextest.steps[1],
+          {uses: "mozilla-actions/sccache-action@untrusted"},
+          pair.producer.jobs.nextest.steps[2],
+        ],
+      },
+    },
+  }
+  assert_eq(
+    windows_shared_cache_errors(pair.consumer, producer),
+    [
+      "workspace-windows producer and consumer must use plain rustc: [\"mozilla-actions/sccache-action@untrusted\"]",
+      "workspace-windows cache-key inputs drift: consumer=[\"CARGO_INCREMENTAL=0\",\"CARGO_TERM_COLOR=always\",\"RUSTC_WRAPPER=<unset>\",\"RUSTFLAGS=-D warnings\",\"pre-cache-uses=actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\",\"pre-cache-uses=./.github/actions/rust-toolchain\"] producer=[\"CARGO_INCREMENTAL=0\",\"CARGO_TERM_COLOR=always\",\"RUSTC_WRAPPER=<unset>\",\"RUSTFLAGS=-D warnings\",\"pre-cache-uses=actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\",\"pre-cache-uses=./.github/actions/rust-toolchain\",\"pre-cache-uses=mozilla-actions/sccache-action@untrusted\"]",
+    ],
+  )
+}
+
+@test
+pipeline test_rejects_windows_cache_environment_drift(task) {
+  const pair = windows_cache_pair()
+  const producer = {...pair.producer, env: {...pair.producer.env, RUSTFLAGS: "-D warnings -C target-cpu=native"}}
+  assert_eq(
+    windows_shared_cache_errors(pair.consumer, producer),
+    [
+      "workspace-windows cache-key inputs drift: consumer=[\"CARGO_INCREMENTAL=0\",\"CARGO_TERM_COLOR=always\",\"RUSTC_WRAPPER=<unset>\",\"RUSTFLAGS=-D warnings\",\"pre-cache-uses=actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\",\"pre-cache-uses=./.github/actions/rust-toolchain\"] producer=[\"CARGO_INCREMENTAL=0\",\"CARGO_TERM_COLOR=always\",\"RUSTC_WRAPPER=<unset>\",\"RUSTFLAGS=-D warnings -C target-cpu=native\",\"pre-cache-uses=actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\",\"pre-cache-uses=./.github/actions/rust-toolchain\"]",
+    ],
+  )
 }

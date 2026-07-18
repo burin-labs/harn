@@ -1,0 +1,220 @@
+import { persona_compile_prompt } from "std/personas/prompt_compiler"
+import { llm_text, with_llm_script } from "std/testing"
+import { persona_prompt_eval_comparison } from "../../../evals/persona_prompt_compiler/report.harn"
+import {
+  persona_prompt_eval_verdict,
+  persona_prompt_materialized_verdict,
+} from "../../../evals/persona_prompt_compiler/rubric.harn"
+import { persona_prompt_eval_manifest } from "../../../evals/persona_prompt_compiler/run.harn"
+
+const PROVIDERS = [
+  {
+    provider: "cron",
+    kinds: ["cron"],
+    schema_name: "CronEventPayload",
+    outbound_methods: [],
+    secret_requirements: [],
+    signature_verification: {kind: "none"},
+    runtime: {kind: "builtin"},
+  },
+]
+
+const EXPECTED_CASE_FINGERPRINTS = {"cron-case": "case-cron-case", "external-case": "case-external-case"}
+
+const EXPECTED_HARNESS_FINGERPRINT = "harness-v1"
+
+fn trial_rows(
+  commit: string,
+  passes: int,
+  harness_fingerprint: string,
+  trials: int = 5,
+  skips: int = 0,
+) -> list {
+  let rows = []
+  for case_name in ["cron-case", "external-case"] {
+    for trial in range(trials) {
+      const pass = trial < passes
+      rows = rows
+        + [
+        {
+          case_name: case_name,
+          trial: trial + 1,
+          verification: if pass {
+            "PASS"
+          } else if trial >= trials - skips {
+            "SKIP"
+          } else {
+            "FAIL"
+          },
+          wall_time_seconds: 1.0,
+          cost_usd: 0.01,
+          case_fingerprint: "case-" + case_name,
+          harness_config_fingerprint: harness_fingerprint,
+          metadata: {
+            group: if case_name == "cron-case" {
+              "cron"
+            } else {
+              "external"
+            },
+          },
+          commit: commit,
+        },
+      ]
+    }
+  }
+  return rows
+}
+
+fn comparison(baseline: list, treatment: list, split: string = "meter-holdout") -> dict {
+  return persona_prompt_eval_comparison(
+    baseline,
+    treatment,
+    "baseline",
+    "treatment",
+    "mock",
+    split,
+    EXPECTED_CASE_FINGERPRINTS,
+    EXPECTED_HARNESS_FINGERPRINT,
+  )
+}
+
+@test
+pipeline test_persona_prompt_eval_rubric(_task) {
+  with_llm_script(
+    [
+      llm_text(
+        "{\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up work.\",\"goal\":\"Surface replies every four hours.\",\"template\":\"deterministic-sweeper\",\"source\":{\"kind\":\"cron\",\"cron\":\"0 */4 * * *\",\"timezone\":\"UTC\"}}",
+      ),
+    ],
+    { ->
+      const receipt = persona_compile_prompt(
+        "Create a reply digest every four hours in UTC.",
+        {provider: "mock", name_override: "reply_digest"},
+        PROVIDERS,
+      )
+      const expected = {
+        name: "reply_digest",
+        template: "deterministic-sweeper",
+        source_kind: "cron",
+        cron: "0 */4 * * *",
+        timezone: "UTC",
+      }
+      const accepted = persona_prompt_eval_verdict(receipt, expected)
+      assert_eq(accepted.pass, true)
+      const repaired_receipt = receipt + {checkpoint: receipt.checkpoint + {repaired: true}}
+      const repaired = persona_prompt_eval_verdict(repaired_receipt, expected)
+      assert_eq(repaired.pass, false)
+      const manifest = {
+        personas: [
+          {
+            name: "reply_digest",
+            autonomy_tier: "suggest",
+            receipt_policy: "required",
+            entry_workflow: "src/reply_digest.harn#run",
+          },
+        ],
+        triggers: [
+          {
+            id: "reply_digest-cron",
+            kind: "cron",
+            provider: "cron",
+            match: {events: ["cron.tick"]},
+            schedule: "0 */4 * * *",
+            timezone: "UTC",
+            handler: "persona://reply_digest",
+          },
+        ],
+      }
+      const lowering = receipt.lowering
+      guard lowering != nil else {
+        throw "accepted receipt is missing lowering"
+      }
+      const materialized = persona_prompt_materialized_verdict(manifest, lowering)
+      assert_eq(materialized.pass, true)
+      const widened = persona_prompt_materialized_verdict(
+        manifest + {personas: [(manifest.personas[0] ?? {}) + {autonomy_tier: "act_auto"}]},
+        lowering,
+      )
+      assert_eq(widened.pass, false)
+    },
+  )
+  const eval_root = path_join(source_dir(), "../../../evals/persona_prompt_compiler")
+  const pack = eval_pack_manifest(
+    toml_parse(harness.fs.read_text(path_join(eval_root, "harn.eval.toml"))) + {base_dir: eval_root},
+  )
+  assert_eq(len(pack.cases), 12)
+  assert_eq(len(pack.split["meter-tune"]), 6)
+  assert_eq(len(pack.split["meter-holdout"]), 6)
+  assert_eq(len(unique(pack.split["meter-tune"] + pack.split["meter-holdout"])), 12)
+  const projected = persona_prompt_eval_manifest(
+    pack,
+    "meter-holdout",
+    5,
+    "mock",
+    "mock",
+    "/tmp/harn-events/evals.sqlite",
+  )
+  assert_eq(projected.cases.map({ eval_case -> eval_case.id }), pack.split["meter-holdout"])
+  assert_eq(projected.split.keys(), ["meter-holdout"])
+  assert_eq(projected.metadata.provider, "mock")
+  assert_eq(projected.metadata.model, "mock")
+  assert_eq(projected.executor.argv[2:4], ["--write-root", "/tmp/harn-events"])
+  const baseline = trial_rows("baseline", 0, "harness-v1")
+  const treatment = trial_rows("treatment", 5, "harness-v1")
+  const confirmed = comparison(baseline, treatment)
+  assert_eq(confirmed.gate_evaluable, true)
+  assert_eq(confirmed.confirmed_improvement, true)
+  assert_eq(confirmed.verdict, "improved")
+  const mismatched = comparison(baseline, trial_rows("treatment", 5, "harness-v2"))
+  assert_eq(mismatched.gate_evaluable, false)
+  assert_eq(mismatched.verdict, "insufficient_evidence")
+  const mixed_generation = comparison(baseline, treatment + trial_rows("treatment", 5, "harness-v2"))
+  assert_eq(mixed_generation.treatment.fingerprint_integrity.complete, true)
+  assert_eq(mixed_generation.treatment.fingerprint_integrity.consistent, false)
+  assert_eq(mixed_generation.gate_evaluable, false)
+  assert_eq(mixed_generation.verdict, "insufficient_evidence")
+  const partial = comparison(
+    baseline.filter({ row -> row.case_name == "cron-case" }).to_list(),
+    treatment.filter({ row -> row.case_name == "cron-case" }).to_list(),
+  )
+  assert_eq(partial.gate_evaluable, false)
+  const underpowered = comparison(trial_rows("baseline", 0, "harness-v1", 3), trial_rows("treatment", 3, "harness-v1", 3))
+  assert_eq(underpowered.gate_evaluable, false)
+  const skip_heavy = comparison(
+    trial_rows("baseline", 0, EXPECTED_HARNESS_FINGERPRINT, 5, 4),
+    trial_rows("treatment", 1, EXPECTED_HARNESS_FINGERPRINT, 5, 4),
+  )
+  assert_eq(skip_heavy.baseline.skip_rate, 0.8)
+  assert_eq(skip_heavy.treatment.skip_rate, 0.8)
+  assert_eq(skip_heavy.baseline.minimum_trials_met, false)
+  assert_eq(skip_heavy.treatment.minimum_trials_met, false)
+  assert_eq(skip_heavy.gate_evaluable, false)
+  assert_eq(skip_heavy.confirmed_improvement, false)
+  const stale_cases = comparison(
+    baseline.map({ row -> row + {case_fingerprint: "stale-" + row.case_name} }).to_list(),
+    treatment.map({ row -> row + {case_fingerprint: "stale-" + row.case_name} }).to_list(),
+  )
+  assert_eq(stale_cases.baseline.fingerprint_integrity.consistent, true)
+  assert_eq(stale_cases.treatment.fingerprint_integrity.consistent, true)
+  assert_eq(stale_cases.baseline.matches_frozen_manifest, false)
+  assert_eq(stale_cases.treatment.matches_frozen_manifest, false)
+  assert_eq(stale_cases.gate_evaluable, false)
+  const foreign_cases = comparison(
+    baseline.map({ row -> row + {case_name: "foreign-" + row.case_name} }).to_list(),
+    treatment.map({ row -> row + {case_name: "foreign-" + row.case_name} }).to_list(),
+  )
+  assert_eq(foreign_cases.baseline.fingerprint_integrity.consistent, true)
+  assert_eq(foreign_cases.treatment.fingerprint_integrity.consistent, true)
+  assert_eq(foreign_cases.baseline.matches_frozen_manifest, false)
+  assert_eq(foreign_cases.treatment.matches_frozen_manifest, false)
+  assert_eq(foreign_cases.gate_evaluable, false)
+  const stale_harness = comparison(trial_rows("baseline", 0, "stale-harness"), trial_rows("treatment", 5, "stale-harness"))
+  assert_eq(stale_harness.baseline.fingerprint_integrity.consistent, true)
+  assert_eq(stale_harness.treatment.fingerprint_integrity.consistent, true)
+  assert_eq(stale_harness.baseline.matches_frozen_manifest, false)
+  assert_eq(stale_harness.treatment.matches_frozen_manifest, false)
+  assert_eq(stale_harness.gate_evaluable, false)
+  const ad_hoc_split = comparison(baseline, treatment, "ad-hoc")
+  assert_eq(ad_hoc_split.gate_evaluable, false)
+  log("persona prompt eval rubric ok")
+}

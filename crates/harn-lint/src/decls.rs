@@ -2,6 +2,8 @@
 //! during the walk. These are crate-internal and should not leak into
 //! the public API.
 
+use std::collections::HashSet;
+
 use harn_lexer::Span;
 
 /// A variable declaration tracked during linting.
@@ -19,12 +21,28 @@ pub(crate) struct Declaration {
 /// An import tracked during linting.
 pub(crate) struct ImportInfo {
     pub(crate) names: Vec<String>,
+    /// Names rejected by canonical module resolution. Suppressing their
+    /// derivative unused-import warning also avoids an unsafe autofix.
+    pub(crate) invalid_names: HashSet<String>,
     pub(crate) span: Span,
     /// True for `pub import { ... } from "..."`. The selectively listed
     /// names are part of the module's public surface, so the
     /// `unused-import` lint must not flag them as unused even if no
     /// local code references them.
     pub(crate) is_pub: bool,
+}
+
+impl ImportInfo {
+    pub(crate) fn is_unused(
+        &self,
+        name: &str,
+        value_references: &HashSet<String>,
+        type_references: &HashSet<String>,
+    ) -> bool {
+        !self.invalid_names.contains(name)
+            && !value_references.contains(name)
+            && !type_references.contains(name)
+    }
 }
 
 /// A parameter declaration tracked during linting.

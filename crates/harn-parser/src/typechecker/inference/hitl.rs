@@ -302,98 +302,62 @@ impl TypeChecker {
 
 fn approval_record_shape() -> TypeExpr {
     TypeExpr::Shape(vec![
-        ShapeField {
-            name: "approved".into(),
-            type_expr: TypeExpr::Named("bool".into()),
-            optional: false,
-        },
-        ShapeField {
-            name: "reviewers".into(),
-            type_expr: TypeExpr::List(Box::new(TypeExpr::Named("string".into()))),
-            optional: false,
-        },
-        ShapeField {
-            name: "approved_at".into(),
-            type_expr: TypeExpr::Named("string".into()),
-            optional: false,
-        },
-        ShapeField {
-            name: "reason".into(),
-            type_expr: TypeExpr::Union(vec![
+        ShapeField::synthetic("approved", TypeExpr::Named("bool".into()), false),
+        ShapeField::synthetic(
+            "reviewers",
+            TypeExpr::List(Box::new(TypeExpr::Named("string".into()))),
+            false,
+        ),
+        ShapeField::synthetic("approved_at", TypeExpr::Named("string".into()), false),
+        ShapeField::synthetic(
+            "reason",
+            TypeExpr::Union(vec![
                 TypeExpr::Named("string".into()),
                 TypeExpr::Named("nil".into()),
             ]),
-            optional: true,
-        },
-        ShapeField {
-            name: "signatures".into(),
-            type_expr: TypeExpr::List(Box::new(TypeExpr::Shape(vec![
-                ShapeField {
-                    name: "reviewer".into(),
-                    type_expr: TypeExpr::Named("string".into()),
-                    optional: false,
-                },
-                ShapeField {
-                    name: "signed_at".into(),
-                    type_expr: TypeExpr::Named("string".into()),
-                    optional: false,
-                },
-                ShapeField {
-                    name: "signature".into(),
-                    type_expr: TypeExpr::Named("string".into()),
-                    optional: false,
-                },
+            true,
+        ),
+        ShapeField::synthetic(
+            "signatures",
+            TypeExpr::List(Box::new(TypeExpr::Shape(vec![
+                ShapeField::synthetic("reviewer", TypeExpr::Named("string".into()), false),
+                ShapeField::synthetic("signed_at", TypeExpr::Named("string".into()), false),
+                ShapeField::synthetic("signature", TypeExpr::Named("string".into()), false),
             ]))),
-            optional: false,
-        },
+            false,
+        ),
     ])
 }
 
 fn escalation_handle_shape() -> TypeExpr {
     TypeExpr::Shape(vec![
-        ShapeField {
-            name: "request_id".into(),
-            type_expr: TypeExpr::Named("string".into()),
-            optional: false,
-        },
-        ShapeField {
-            name: "role".into(),
-            type_expr: TypeExpr::Named("string".into()),
-            optional: false,
-        },
-        ShapeField {
-            name: "reason".into(),
-            type_expr: TypeExpr::Named("string".into()),
-            optional: false,
-        },
-        ShapeField {
-            name: "trace_id".into(),
-            type_expr: TypeExpr::Named("string".into()),
-            optional: false,
-        },
-        ShapeField {
-            name: "status".into(),
-            type_expr: TypeExpr::Union(vec![
+        ShapeField::synthetic("request_id", TypeExpr::Named("string".into()), false),
+        ShapeField::synthetic("role", TypeExpr::Named("string".into()), false),
+        ShapeField::synthetic("reason", TypeExpr::Named("string".into()), false),
+        ShapeField::synthetic("trace_id", TypeExpr::Named("string".into()), false),
+        ShapeField::synthetic(
+            "status",
+            TypeExpr::Union(vec![
                 TypeExpr::LitString("pending".into()),
                 TypeExpr::LitString("accepted".into()),
             ]),
-            optional: false,
-        },
-        ShapeField {
-            name: "accepted_at".into(),
-            type_expr: TypeExpr::Union(vec![
+            false,
+        ),
+        ShapeField::synthetic(
+            "accepted_at",
+            TypeExpr::Union(vec![
                 TypeExpr::Named("string".into()),
                 TypeExpr::Named("nil".into()),
             ]),
-            optional: true,
-        },
-        ShapeField {
-            name: "reviewer".into(),
-            type_expr: TypeExpr::Union(vec![
+            true,
+        ),
+        ShapeField::synthetic(
+            "reviewer",
+            TypeExpr::Union(vec![
                 TypeExpr::Named("string".into()),
                 TypeExpr::Named("nil".into()),
             ]),
-            optional: true,
-        },
+            true,
+        ),
     ])
 }

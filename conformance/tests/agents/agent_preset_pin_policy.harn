@@ -16,7 +16,7 @@ pipeline test() {
   }
   // Explicit caller pin_policy wins over the pack row.
   const overridden = agent_preset("merge_captain", {pin_policy: {kinds: ["decision"], preserve_on_compact: false}})
-  assert(overridden.pin_policy.kinds == ["decision"], "caller pin_policy kinds win over the pack")
+  assert_eq(overridden.pin_policy.kinds, ["decision"], "caller pin_policy kinds win over the pack")
   assert(!overridden.pin_policy.preserve_on_compact, "caller preserve_on_compact wins over the pack")
   // A kind without a pin_policy pack row leaves the option absent.
   assert(agent_preset("audit")?.pin_policy == nil, "no pin_policy pack row leaves it absent")

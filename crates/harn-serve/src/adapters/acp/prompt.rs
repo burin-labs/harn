@@ -9,7 +9,7 @@ impl AcpServer {
         let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => {
-                self.send_error(id, -32602, "Missing sessionId");
+                self.send_prompt_protocol_error(id, "Missing sessionId");
                 return;
             }
         };
@@ -17,7 +17,7 @@ impl AcpServer {
         let prompt = match normalize_acp_prompt(params) {
             Ok(prompt) => prompt,
             Err(message) => {
-                self.send_prompt_error(&session_id, id, &message);
+                self.send_prompt_protocol_error(id, &message);
                 return;
             }
         };
@@ -36,7 +36,7 @@ impl AcpServer {
                     )
                 }
                 None => {
-                    self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+                    self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
                     return;
                 }
             };
@@ -54,10 +54,14 @@ impl AcpServer {
             self.send_prompt_error(&session_id, id, &message);
             return;
         }
-        let (cwd, project_root) = match self.sessions.get(&session_id) {
-            Some(session) => (session.cwd.clone(), session.project_root.clone()),
+        let (cwd, project_root, capability_profile) = match self.sessions.get(&session_id) {
+            Some(session) => (
+                session.cwd.clone(),
+                session.project_root.clone(),
+                session.capability_profile.clone(),
+            ),
             None => {
-                self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+                self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
                 return;
             }
         };
@@ -271,6 +275,7 @@ impl AcpServer {
                 cwd: &cwd,
                 project_root: Some(&project_root),
                 runtime_configurator: self.runtime_configurator.clone(),
+                session_profile: capability_profile.clone(),
             },
         )
         .await;
@@ -325,7 +330,12 @@ impl AcpServer {
                         serde_json::json!({"stopReason": "cancelled"}),
                     );
                 } else {
-                    self.send_prompt_error(&sid, &id_owned, &e);
+                    self.send_prompt_error_with_class(
+                        &sid,
+                        &id_owned,
+                        &e.message,
+                        e.terminal_class,
+                    );
                 }
             }
         }

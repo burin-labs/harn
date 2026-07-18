@@ -36,6 +36,14 @@ type EvalAxisBreakdown = {
   missing_count: int,
 }
 
+type EvalFingerprintIntegrity = {
+  complete: bool,
+  consistent: bool,
+  case_fingerprints: dict<string, string>,
+  harness_fingerprints: list<string>,
+  inconsistent_cases: list<string>,
+}
+
 fn __float(value) -> float {
   return to_float(value) ?? 0.0
 }
@@ -195,6 +203,45 @@ fn __row_harness_fingerprint(row: dict) -> string {
       ],
     ),
   )
+}
+
+/**
+ * Check that one raw eval cohort has complete, internally consistent fingerprints.
+ *
+ * A cohort is consistent only when every case has one stable case fingerprint and
+ * every row was produced by the same harness configuration.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn eval_fingerprint_integrity(rows: list) -> EvalFingerprintIntegrity {
+  let case_fingerprints = {}
+  let harness_fingerprints: list<string> = []
+  let inconsistent_cases: list<string> = []
+  let missing = len(rows) == 0
+  for row in rows {
+    const name = __row_case_name(row)
+    const case_fingerprint = __row_fingerprint(row)
+    const harness_fingerprint = __row_harness_fingerprint(row)
+    if name == "" || case_fingerprint == "" || harness_fingerprint == "" {
+      missing = true
+    }
+    const prior = case_fingerprints[name]
+    if prior != nil && prior != case_fingerprint && !contains(inconsistent_cases, name) {
+      inconsistent_cases = inconsistent_cases + [name]
+    }
+    case_fingerprints = case_fingerprints + {[name]: case_fingerprint}
+    if harness_fingerprint != "" && !contains(harness_fingerprints, harness_fingerprint) {
+      harness_fingerprints = harness_fingerprints + [harness_fingerprint]
+    }
+  }
+  return {
+    complete: !missing,
+    consistent: len(inconsistent_cases) == 0 && len(harness_fingerprints) == 1,
+    case_fingerprints: case_fingerprints,
+    harness_fingerprints: harness_fingerprints.sort(),
+    inconsistent_cases: inconsistent_cases.sort(),
+  }
 }
 
 fn __group_prefix(name: string) -> string {
@@ -657,7 +704,7 @@ pub fn timeout_rate(rows: list) -> float {
  * @errors: []
  * @example: cost_per_solved([{passes: 1, trials: 1, skips: 0, costUsd: 0.25}])
  */
-pub fn cost_per_solved(rows: list) {
+pub fn cost_per_solved(rows: list) -> float? {
   let solved_cases = 0
   let total_cost = 0.0
   for row in rows {
@@ -688,7 +735,7 @@ pub fn cost_per_solved(rows: list) {
  * @effects: []
  * @errors: []
  */
-pub fn estimate_cost_usd(pricing, usage: dict) {
+pub fn estimate_cost_usd(pricing: dict?, usage: dict) -> float? {
   if pricing == nil {
     return nil
   }
@@ -716,7 +763,7 @@ pub fn estimate_cost_usd(pricing, usage: dict) {
  * @effects: []
  * @errors: []
  */
-pub fn realized_trial_cost_usd(derived_cost_usd, cache_replay: bool) {
+pub fn realized_trial_cost_usd(derived_cost_usd: float?, cache_replay: bool) -> float? {
   if cache_replay && derived_cost_usd != nil {
     return 0.0
   }

@@ -6,6 +6,8 @@
 // (`model_info`, `resolved_options`) instead of the underlying builtin
 // names (`llm_model_info`, `llm_resolved_options`) so that wrapping
 // does not shadow the builtin and recurse infinitely.
+import { render_table } from "std/table"
+
 /**
  * Wraps the llm_model_info(selector) Rust builtin. The runtime always
  * returns a dict; when the selector is unknown, the dict's `catalog`
@@ -16,6 +18,19 @@
  */
 pub fn model_info(selector) {
   return llm_model_info(selector)
+}
+
+/**
+ * Return the resolved model-route facts that are safe to persist in eval,
+ * replay, cost, and audit receipts. The runtime omits arbitrary
+ * operator-specific route overlay fields; `generation_defaults` contains only
+ * Harn's validated generation-default schema.
+ *
+ * @effects: []
+ * @errors: ["llm_execution_contract: selector is required"]
+ */
+pub fn execution_contract(selector) -> dict {
+  return llm_execution_contract(selector)
 }
 
 /**
@@ -474,4 +489,435 @@ pub fn pick_model(opts = nil) {
     return nil
   }
   return result.models[0] + {_relaxed_step: result.relaxed_step, _relaxed_opts: result.relaxed_opts}
+}
+
+/**
+ * Stable sort fields for catalog query consumers. Numeric sorts are ascending
+ * with missing metadata last; provider and id sorts use the model id as a
+ * deterministic tie-breaker.
+ */
+pub type ModelCatalogSort = "provider" | "id" | "pricing.input" | "pricing.output" | "pricing.cache_read" | "context_window"
+
+/**
+ * Named presentation columns for model catalog queries. These are deliberately
+ * an allowlist rather than arbitrary paths so the CLI and script callers share
+ * one auditable, typed projection contract.
+ */
+pub type ModelCatalogColumn = "id" | "provider" | "tier" | "strengths" | "open_weight" | "installed" | "context_window" | "pricing.input" | "pricing.output" | "pricing.cache_read" | "tool_support.parity" | "tool_support.parity_notes"
+
+/**
+ * Reusable model-catalog query. `strengths` uses exact all-of membership;
+ * `tool_parity` is the runtime catalog's tool-mode parity fact, not an
+ * inference from provider identity. The CLI normalizes its string flags into
+ * this contract before querying.
+ */
+pub type ModelCatalogQuery = {
+  provider?: string,
+  tier?: string,
+  strengths?: list<string>,
+  tool_parity?: string,
+  open_weight?: bool,
+  installed_only?: bool,
+  sort?: ModelCatalogSort,
+  columns?: list<ModelCatalogColumn>,
+}
+
+const MODEL_CATALOG_QUERY_SCHEMA_VERSION = 1
+
+const MODEL_CATALOG_DEFAULT_COLUMNS = ["provider", "id", "tier", "strengths", "tool_support.parity"]
+
+const MODEL_CATALOG_SORT_FIELDS = ["provider", "id", "pricing.input", "pricing.output", "pricing.cache_read", "context_window"]
+
+const MODEL_CATALOG_COLUMNS = [
+  "id",
+  "provider",
+  "tier",
+  "strengths",
+  "open_weight",
+  "installed",
+  "context_window",
+  "pricing.input",
+  "pricing.output",
+  "pricing.cache_read",
+  "tool_support.parity",
+  "tool_support.parity_notes",
+]
+
+fn __catalog_query_text(value, label) {
+  if type_of(value) != "string" {
+    throw "model_catalog_query: " + label + " must be a non-empty string"
+  }
+  const text = trim(value)
+  if text == "" {
+    throw "model_catalog_query: " + label + " must be a non-empty string"
+  }
+  return text
+}
+
+fn __catalog_query_string(query, key, value) {
+  const existing = query[key]
+  if existing != nil && existing != value {
+    throw "model_catalog_query: conflicting values for " + key
+  }
+  return query + {[key]: value}
+}
+
+fn __catalog_query_bool(query, key, value) {
+  const existing = query[key]
+  if existing != nil && existing != value {
+    throw "model_catalog_query: conflicting values for " + key
+  }
+  return query + {[key]: value}
+}
+
+fn __catalog_query_strengths(query, value) {
+  const existing = query.strengths ?? []
+  if existing.contains(value) {
+    return query
+  }
+  return query + {strengths: existing.push(value)}
+}
+
+fn __catalog_query_where_values(raw) {
+  if raw == nil {
+    return []
+  }
+  if type_of(raw) == "string" {
+    return [raw]
+  }
+  if type_of(raw) != "list" {
+    throw "model_catalog_query: where must be a string or list of strings"
+  }
+  let values = []
+  for value in raw {
+    if type_of(value) != "string" {
+      throw "model_catalog_query: where values must be strings"
+    }
+    values = values.push(value)
+  }
+  return values
+}
+
+fn __catalog_query_apply_where(query, raw) {
+  let out = query
+  for expression in __catalog_query_where_values(raw) {
+    for part in split(expression, ",") {
+      const pieces = split(part, "=")
+      if len(pieces) != 2 {
+        throw "model_catalog_query: --where entries must be key=value"
+      }
+      const key = trim(pieces[0])
+      const value = __catalog_query_text(pieces[1], "where value")
+      if key == "provider" || key == "tier" {
+        out = __catalog_query_string(out, key, value)
+      } else if key == "strengths" {
+        out = __catalog_query_strengths(out, value)
+      } else if key == "tool_support.parity" {
+        out = __catalog_query_string(out, "tool_parity", value)
+      } else if key == "open_weight" {
+        const lowered = lowercase(value)
+        if lowered != "true" && lowered != "false" {
+          throw "model_catalog_query: open_weight must be true or false"
+        }
+        out = __catalog_query_bool(out, "open_weight", lowered == "true")
+      } else {
+        throw "model_catalog_query: unknown where field '" + key
+          + "' (allowed: provider, tier, strengths, tool_support.parity, open_weight)"
+      }
+    }
+  }
+  return out
+}
+
+fn __catalog_query_columns(raw) {
+  if raw == nil {
+    return []
+  }
+  const source = if type_of(raw) == "string" {
+    split(raw, ",")
+  } else if type_of(raw) == "list" {
+    raw
+  } else {
+    throw "model_catalog_query: columns must be a comma-separated string or list of strings"
+  }
+  let columns = []
+  for item in source {
+    const column = __catalog_query_text(item, "column")
+    if !MODEL_CATALOG_COLUMNS.contains(column) {
+      throw "model_catalog_query: unknown column '" + column + "'"
+    }
+    if !columns.contains(column) {
+      columns = columns.push(column)
+    }
+  }
+  if len(columns) == 0 {
+    throw "model_catalog_query: columns must not be empty"
+  }
+  return columns
+}
+
+/**
+ * Normalize untyped boundary input into a ModelCatalogQuery. This is the one
+ * parser for CLI `--where` / `--columns` strings and makes malformed or
+ * conflicting filters fail before any catalog row is selected.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn normalize_model_catalog_query(raw = nil) -> ModelCatalogQuery {
+  if raw != nil && type_of(raw) != "dict" {
+    throw "model_catalog_query: query must be a dict"
+  }
+  const input = raw ?? {}
+  let query = {}
+  if input?.provider != nil {
+    query = __catalog_query_string(query, "provider", __catalog_query_text(input.provider, "provider"))
+  }
+  if input?.tier != nil {
+    query = __catalog_query_string(query, "tier", __catalog_query_text(input.tier, "tier"))
+  }
+  if input?.installed_only != nil {
+    if type_of(input.installed_only) != "bool" {
+      throw "model_catalog_query: installed_only must be a bool"
+    }
+    query = query + {installed_only: input.installed_only}
+  }
+  // `where` is a language keyword, so access this externally supplied JSON
+  // key through the dict boundary rather than member syntax.
+  query = __catalog_query_apply_where(query, input["where"])
+  const sort = if input?.sort == nil {
+    "provider"
+  } else {
+    __catalog_query_text(input.sort, "sort")
+  }
+  if !MODEL_CATALOG_SORT_FIELDS.contains(sort) {
+    throw "model_catalog_query: unknown sort '" + sort + "'"
+  }
+  query = query + {sort: sort}
+  const columns = __catalog_query_columns(input?.columns)
+  if len(columns) > 0 {
+    query = query + {columns: columns}
+  }
+  return query
+}
+
+fn __catalog_row_string(row, key) {
+  const value = row[key]
+  if type_of(value) == "string" {
+    return value
+  }
+  return ""
+}
+
+fn __catalog_row_number(row, key) {
+  const value = row[key]
+  if type_of(value) == "int" || type_of(value) == "float" {
+    return to_float(value)
+  }
+  return nil
+}
+
+fn __catalog_pricing_value(row, key) {
+  const pricing = row?.pricing
+  if type_of(pricing) != "dict" {
+    return nil
+  }
+  return __catalog_row_number(pricing, key)
+}
+
+fn __catalog_row_matches(row, query) {
+  if query?.provider != nil && __catalog_row_string(row, "provider") != query.provider {
+    return false
+  }
+  if query?.tier != nil && __catalog_row_string(row, "tier") != query.tier {
+    return false
+  }
+  if query?.tool_parity != nil && __catalog_row_string(row, "tool_mode_parity") != query.tool_parity {
+    return false
+  }
+  if query?.open_weight != nil && row?.open_weight != query.open_weight {
+    return false
+  }
+  if query?.installed_only ?? false {
+    if row?.installed != true {
+      return false
+    }
+  }
+  for strength in query?.strengths ?? [] {
+    const strengths = row?.strengths ?? []
+    if type_of(strengths) != "list" || !strengths.contains(strength) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __catalog_numeric_sort_key(value, id) {
+  if value == nil {
+    return pair(pair(1, 0.0), id)
+  }
+  return pair(pair(0, value), id)
+}
+
+fn __catalog_sort_key(row, sort) {
+  const id = __catalog_row_string(row, "id")
+  if sort == "pricing.input" {
+    return __catalog_numeric_sort_key(__catalog_pricing_value(row, "input_per_mtok"), id)
+  }
+  if sort == "pricing.output" {
+    return __catalog_numeric_sort_key(__catalog_pricing_value(row, "output_per_mtok"), id)
+  }
+  if sort == "pricing.cache_read" {
+    return __catalog_numeric_sort_key(__catalog_pricing_value(row, "cache_read_per_mtok"), id)
+  }
+  if sort == "context_window" {
+    return __catalog_numeric_sort_key(__catalog_row_number(row, "context_window"), id)
+  }
+  if sort == "id" {
+    return pair(id, __catalog_row_string(row, "provider"))
+  }
+  return pair(__catalog_row_string(row, "provider"), id)
+}
+
+/**
+ * Add local-installation facts to the catalog without inventing a second
+ * catalog. Curated Ollama rows gain `installed` / `cataloged`; installed but
+ * uncurated ids remain visible as minimal local rows.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn catalog_with_installed_ollama_models(catalog: list, installed_ollama_models: list = []) -> list {
+  let installed = {}
+  for raw_id in installed_ollama_models {
+    if type_of(raw_id) == "string" && trim(raw_id) != "" {
+      installed = installed + {[raw_id]: true}
+    }
+  }
+  let known_ollama = {}
+  let rows = []
+  for raw in catalog {
+    if type_of(raw) != "dict" {
+      continue
+    }
+    const id = __catalog_row_string(raw, "id")
+    const provider = __catalog_row_string(raw, "provider")
+    if id == "" || provider == "" {
+      continue
+    }
+    if provider == "ollama" {
+      known_ollama = known_ollama + {[id]: true}
+    }
+    rows = rows.push(raw + {installed: provider == "ollama" && (installed[id] ?? false), cataloged: true})
+  }
+  for raw_id in installed_ollama_models {
+    if type_of(raw_id) != "string" || trim(raw_id) == "" || (known_ollama[raw_id] ?? false) {
+      continue
+    }
+    rows = rows
+      .push(
+      {
+        id: raw_id,
+        provider: "ollama",
+        capabilities: ["local"],
+        strengths: [],
+        installed: true,
+        cataloged: false,
+      },
+    )
+  }
+  return rows
+}
+
+/**
+ * Query authoritative runtime catalog rows. The returned `models` entries are
+ * the original full rows, never a lossy display projection; renderers choose
+ * columns separately.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_catalog_query(catalog: list, query: ModelCatalogQuery = {}) -> dict {
+  // Callers receive a ModelCatalogQuery from normalize_model_catalog_query at
+  // the untyped boundary. Re-parsing it here would discard normalized fields
+  // such as strengths and tool_parity because they are no longer raw `where`
+  // expressions.
+  const normalized = query + {sort: query.sort ?? "provider"}
+  let models = []
+  for row in catalog {
+    if type_of(row) == "dict" && __catalog_row_matches(row, normalized) {
+      models = models.push(row)
+    }
+  }
+  const sorted = models.sort_by({ row -> __catalog_sort_key(row, normalized.sort ?? "provider") })
+  return {schemaVersion: MODEL_CATALOG_QUERY_SCHEMA_VERSION, query: normalized, models: sorted}
+}
+
+fn __catalog_column_value(row, column) {
+  if column == "pricing.input" {
+    return __catalog_pricing_value(row, "input_per_mtok") ?? ""
+  }
+  if column == "pricing.output" {
+    return __catalog_pricing_value(row, "output_per_mtok") ?? ""
+  }
+  if column == "pricing.cache_read" {
+    return __catalog_pricing_value(row, "cache_read_per_mtok") ?? ""
+  }
+  if column == "tool_support.parity" {
+    return __catalog_row_string(row, "tool_mode_parity")
+  }
+  if column == "tool_support.parity_notes" {
+    return __catalog_row_string(row, "tool_mode_parity_notes")
+  }
+  if column == "strengths" {
+    const strengths = row?.strengths
+    if type_of(strengths) == "list" {
+      return join(strengths, ",")
+    }
+    return ""
+  }
+  const value = row[column]
+  if value == nil {
+    return ""
+  }
+  return to_string(value)
+}
+
+fn __catalog_column_specs(columns) {
+  let specs = []
+  for column in columns {
+    const header = if column == "tool_support.parity" {
+      "tool parity"
+    } else if column == "tool_support.parity_notes" {
+      "parity notes"
+    } else {
+      column
+    }
+    specs = specs.push({key: column, header: header, align: "left"})
+  }
+  return specs
+}
+
+/**
+ * Render selected catalog fields with the shared deterministic table renderer.
+ * Use `model_catalog_query` for the full machine-readable rows; this function
+ * intentionally performs only the human display projection.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn render_model_catalog_table(models: list, query: ModelCatalogQuery = {}) -> string {
+  const columns = query.columns ?? MODEL_CATALOG_DEFAULT_COLUMNS
+  let rows = []
+  for model in models {
+    if type_of(model) != "dict" {
+      continue
+    }
+    let row = {}
+    for column in columns {
+      row = row + {[column]: __catalog_column_value(model, column)}
+    }
+    rows = rows.push(row)
+  }
+  return render_table(rows, {columns: __catalog_column_specs(columns), empty: "(no models match)"})
 }

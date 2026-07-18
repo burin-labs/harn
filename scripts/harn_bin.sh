@@ -7,7 +7,14 @@ source "$script_dir/lib/cargo_env.sh"
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$script_dir/lib/harn_bin.sh"
 
-mode="build"
+case "${HARN_BIN_NO_BUILD:-0}" in
+  0) mode="build" ;;
+  1) mode="no-build" ;;
+  *)
+    echo "error: HARN_BIN_NO_BUILD must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
 print_only=0
 
 usage() {
@@ -18,8 +25,9 @@ Resolves a worktree harn binary through Cargo unless HARN_BIN is explicit. With
 command arguments, executes the resolved binary.
 
 Environment:
-  HARN_BIN          explicit executable to validate and use
-  CARGO_TARGET_DIR  target directory for --no-build worktree lookup
+  HARN_BIN           explicit executable to validate and use
+  HARN_BIN_NO_BUILD  set to 1 to forbid implicit Cargo builds
+  CARGO_TARGET_DIR   target directory for --no-build worktree lookup
 EOF
 }
 

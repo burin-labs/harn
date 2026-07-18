@@ -35,8 +35,8 @@ include!(concat!(env!("OUT_DIR"), "/demo_assets_table.rs"));
 
 /// Bundled scenarios shipped with the binary. Keep ordered by the
 /// "first-touch impact" we want stranger users to see — the menu and
-/// `--list` print in this order, and a bare `harn demo` (no scenario
-/// arg, non-interactive context) defaults to the first entry.
+/// `--list` print in this order, and the interactive menu offers the first
+/// entry as its default choice.
 const SCENARIOS: &[Scenario] = &[
     Scenario {
         id: "merge-captain",
@@ -337,6 +337,30 @@ pub fn scenario_ids() -> Vec<&'static str> {
     SCENARIOS.iter().map(|s| s.id).collect()
 }
 
+/// What a bare `harn demo` (no scenario argument) should do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoScenarioAction {
+    /// Render the scenario list as JSON.
+    ListJson,
+    /// Prompt for a choice on an interactive terminal.
+    Prompt,
+    /// Print the scenario list as a table.
+    ListTable,
+}
+
+/// Prompting needs a terminal at both ends: stdout to render the menu and stdin
+/// to read the choice. Anywhere else — a pipe, a redirect, CI — print the menu
+/// rather than running a scenario the caller never named.
+fn no_scenario_action(json: bool, stdout_tty: bool, stdin_tty: bool) -> NoScenarioAction {
+    if json {
+        return NoScenarioAction::ListJson;
+    }
+    if stdout_tty && stdin_tty {
+        return NoScenarioAction::Prompt;
+    }
+    NoScenarioAction::ListTable
+}
+
 pub(crate) async fn run(args: DemoArgs) -> i32 {
     if args.list {
         print_list_table(args.json);
@@ -344,15 +368,21 @@ pub(crate) async fn run(args: DemoArgs) -> i32 {
     }
 
     let Some(scenario_id) = args.scenario.clone() else {
-        if args.json {
-            print_list_table(true);
-            return 0;
-        }
-        if std::io::stdout().is_terminal() {
-            return interactive_pick(&args).await;
-        }
-        // Non-interactive default: pick the first scenario.
-        return run_scenario(&args, SCENARIOS[0]).await;
+        return match no_scenario_action(
+            args.json,
+            std::io::stdout().is_terminal(),
+            std::io::stdin().is_terminal(),
+        ) {
+            NoScenarioAction::ListJson => {
+                print_list_table(true);
+                0
+            }
+            NoScenarioAction::Prompt => interactive_pick(&args).await,
+            NoScenarioAction::ListTable => {
+                print_list_table(false);
+                0
+            }
+        };
     };
 
     let Some(scenario) = lookup_scenario(&scenario_id) else {
@@ -750,6 +780,27 @@ fn print_json_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_demo_action_covers_every_stdio_shape() {
+        let cases = [
+            (false, true, true, NoScenarioAction::Prompt),
+            (false, true, false, NoScenarioAction::ListTable),
+            (false, false, true, NoScenarioAction::ListTable),
+            (false, false, false, NoScenarioAction::ListTable),
+            (true, true, true, NoScenarioAction::ListJson),
+            (true, true, false, NoScenarioAction::ListJson),
+            (true, false, true, NoScenarioAction::ListJson),
+            (true, false, false, NoScenarioAction::ListJson),
+        ];
+        for (json, stdout_tty, stdin_tty, expected) in cases {
+            assert_eq!(
+                no_scenario_action(json, stdout_tty, stdin_tty),
+                expected,
+                "json={json} stdout_tty={stdout_tty} stdin_tty={stdin_tty}"
+            );
+        }
+    }
 
     #[test]
     fn scenarios_have_unique_nonempty_ids() {

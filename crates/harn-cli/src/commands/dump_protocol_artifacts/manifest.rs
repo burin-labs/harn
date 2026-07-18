@@ -1,7 +1,7 @@
 use harn_serve::adapters::acp::{
-    ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
-    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{
@@ -9,6 +9,7 @@ use harn_vm::llm::receipts::{
     TOOL_CALL_RECEIPT_SCHEMA_VERSION, TOOL_CALL_RECEIPT_STATUSES,
 };
 use serde_json::json;
+use std::path::Path;
 
 use super::constants::*;
 use super::support::*;
@@ -25,14 +26,24 @@ pub(super) fn generate_tool_call_receipt_schema() -> Result<String, String> {
 /// (downstream hosts, cloud platforms) can compare against vendored copies without
 /// shelling out to `dump-protocol-artifacts`.
 pub(crate) fn manifest_json() -> Result<String, String> {
-    generate_manifest()
+    let cwd = std::env::current_dir()
+        .map_err(|error| format!("failed to inspect the current directory: {error}"))?;
+    manifest_json_from(&cwd)
 }
 
-pub(super) fn generate_manifest() -> Result<String, String> {
-    generate_manifest_for_version(env!("CARGO_PKG_VERSION"))
+pub(crate) fn manifest_json_from(anchor: &Path) -> Result<String, String> {
+    let source = ProtocolArtifactSource::from_anchor(anchor)?;
+    generate_manifest(&source)
 }
 
-pub(super) fn generate_manifest_for_version(artifact_version: &str) -> Result<String, String> {
+pub(super) fn generate_manifest(source: &ProtocolArtifactSource) -> Result<String, String> {
+    generate_manifest_for_version(source, env!("CARGO_PKG_VERSION"))
+}
+
+pub(super) fn generate_manifest_for_version(
+    source: &ProtocolArtifactSource,
+    artifact_version: &str,
+) -> Result<String, String> {
     let mut schemas = SCHEMA_COPIES
         .iter()
         .map(|schema| {
@@ -40,7 +51,7 @@ pub(super) fn generate_manifest_for_version(artifact_version: &str) -> Result<St
                 "protocol": schema.protocol,
                 "source": schema.source,
                 "artifact": schema.artifact,
-                "provenance": schema_provenance(schema.source)?,
+                "provenance": source.schema_provenance(schema.source)?,
             }))
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -111,6 +122,8 @@ pub(super) fn generate_manifest_for_version(artifact_version: &str) -> Result<St
             "toolCallStatuses": tool_call_status_values(),
             "toolCallErrorCategories": tool_call_error_category_values(),
             "toolMutationStatuses": tool_mutation_status_values(),
+            "promptErrorDataSchema": ACP_PROMPT_ERROR_DATA_SCHEMA,
+            "promptErrorTerminalClasses": agent_terminal_class_values(),
             "toolExecutorSimpleValues": ACP_TOOL_EXECUTOR_SIMPLE_VALUES,
             "workerStatuses": worker_status_values(),
         },
@@ -320,7 +333,14 @@ pub(super) fn generate_round_trip_fixture_for_version(
     let error_response = json!({
         "jsonrpc": "2.0",
         "id": "abc",
-        "error": {"code": -32601, "message": "method not found"},
+        "error": {
+            "code": -32000,
+            "message": "Provider-looking prose is not the authority",
+            "data": {
+                "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
+                "terminalClass": "tool_policy_rejected",
+            },
+        },
     });
     let a2a_task = json!({
         "id": "task-1",

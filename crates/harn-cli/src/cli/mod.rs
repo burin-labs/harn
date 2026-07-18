@@ -131,7 +131,9 @@ pub(crate) use guard::{
 };
 pub(crate) use host::{
     HostArgs, HostCommand, HostLeaseAcquireArgs, HostLeaseArgs, HostLeaseCommand,
-    HostLeasePriorityArg, HostLeaseReleaseArgs, HostLeaseRenewArgs, HostLeaseStatusArgs,
+    HostLeasePriorityArg, HostLeaseReleaseArgs, HostLeaseRenewArgs, HostLeaseResourceClassArg,
+    HostLeaseRunArgs, HostLeaseRunCargoArgs, HostLeaseRunCargoWorkerArgs, HostLeaseRunCommand,
+    HostLeaseStatusArgs,
 };
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
@@ -155,9 +157,9 @@ pub(crate) use models::{
     ModelInfoArgs, ModelRecommendArgs, ModelsArgs, ModelsBatchArgs, ModelsBatchCancelArgs,
     ModelsBatchCommand, ModelsBatchDownloadArgs, ModelsBatchManifestArgs, ModelsBatchPlanArgs,
     ModelsBatchPrepareArgs, ModelsBatchStatusArgs, ModelsBatchSubmitArgs, ModelsCommand,
-    ModelsInstallArgs, ModelsListArgs, ModelsLoraArgs, ModelsLoraCommand, ModelsLoraExportArgs,
-    ModelsLoraInspectArgs, ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs,
-    ModelsLoraPromoteArgs, ModelsLoraTrainArgs, ModelsTestArgs,
+    ModelsInstallArgs, ModelsListArgs, ModelsListSort, ModelsLoraArgs, ModelsLoraCommand,
+    ModelsLoraExportArgs, ModelsLoraInspectArgs, ModelsLoraManifestArgs, ModelsLoraPlanArgs,
+    ModelsLoraPreflightArgs, ModelsLoraPromoteArgs, ModelsLoraTrainArgs, ModelsTestArgs,
 };
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,
@@ -179,10 +181,10 @@ pub(crate) use package::{
 pub(crate) use parse_tokens::{ParseArgs, TokensArgs};
 pub(crate) use persona::{
     PersonaActivateArgs, PersonaActivationsArgs, PersonaArgs, PersonaCheckArgs, PersonaCommand,
-    PersonaControlArgs, PersonaDeactivateArgs, PersonaDoctorArgs, PersonaInspectArgs,
-    PersonaListArgs, PersonaMaterializeArgs, PersonaNewArgs, PersonaSpendArgs, PersonaStatusArgs,
-    PersonaSupervisionCommand, PersonaSupervisionTailArgs, PersonaTemplateKind, PersonaTickArgs,
-    PersonaTriggerArgs,
+    PersonaCompilePromptArgs, PersonaControlArgs, PersonaDeactivateArgs, PersonaDoctorArgs,
+    PersonaInspectArgs, PersonaListArgs, PersonaMaterializeArgs, PersonaNewArgs, PersonaSpendArgs,
+    PersonaStatusArgs, PersonaSupervisionCommand, PersonaSupervisionTailArgs, PersonaTemplateKind,
+    PersonaTickArgs, PersonaTriggerArgs,
 };
 pub(crate) use pg::{PgArgs, PgCodegenArgs, PgCommand};
 pub(crate) use playground::PlaygroundArgs;

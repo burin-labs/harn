@@ -1,4 +1,4 @@
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 
 use super::util::llm_model_completion_parser;
 
@@ -16,7 +16,7 @@ pub(crate) enum ModelsCommand {
     Info(ModelInfoArgs),
     /// Inspect LoRA adapter metadata and compatibility with a Harn model route.
     Lora(Box<ModelsLoraArgs>),
-    /// List models grouped by provider.
+    /// List or query models from the authoritative runtime catalog.
     List(ModelsListArgs),
     /// Pull an Ollama model or print setup steps for a known local runtime.
     Install(ModelsInstallArgs),
@@ -658,12 +658,44 @@ pub(crate) struct ModelsListArgs {
     /// Restrict to a single provider.
     #[arg(long)]
     pub provider: Option<String>,
+    /// Filter catalog rows with KEY=VALUE. Repeat or join filters with commas.
+    #[arg(long = "where", value_name = "KEY=VALUE")]
+    pub where_filters: Vec<String>,
+    /// Sort rows by an authoritative catalog field (ascending, missing values last).
+    #[arg(long, value_enum)]
+    pub sort: Option<ModelsListSort>,
+    /// Comma-separated human-table columns. JSON always returns complete rows.
+    #[arg(long, value_name = "FIELD[,FIELD...]")]
+    pub columns: Option<String>,
     /// Emit JSON instead of a human table.
     #[arg(long)]
     pub json: bool,
     /// Only show locally-installed (Ollama) models.
     #[arg(long = "installed-only")]
     pub installed_only: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum ModelsListSort {
+    #[value(name = "pricing.input")]
+    PricingInput,
+    #[value(name = "pricing.output")]
+    PricingOutput,
+    #[value(name = "pricing.cache_read")]
+    PricingCacheRead,
+    #[value(name = "context_window")]
+    ContextWindow,
+}
+
+impl ModelsListSort {
+    pub(crate) const fn catalog_field(self) -> &'static str {
+        match self {
+            Self::PricingInput => "pricing.input",
+            Self::PricingOutput => "pricing.output",
+            Self::PricingCacheRead => "pricing.cache_read",
+            Self::ContextWindow => "context_window",
+        }
+    }
 }
 
 #[derive(Debug, Args)]

@@ -113,14 +113,34 @@ pub fn sha256_bytes(bytes: &[u8]) -> String {
 }
 
 pub fn canonical_source_text(source: &str) -> String {
-    String::from_utf8(crate::codegen_fingerprint::canonical_source_bytes(
-        source.as_bytes(),
-    ))
-    .expect("canonical source preserves UTF-8")
+    String::from_utf8(canonical_source_bytes(source.as_bytes()))
+        .expect("canonical source preserves UTF-8")
 }
 
 pub fn sha256_source_bytes(bytes: &[u8]) -> String {
-    sha256_bytes(&crate::codegen_fingerprint::canonical_source_bytes(bytes))
+    sha256_bytes(&canonical_source_bytes(bytes))
+}
+
+/// Normalize line endings without importing the workspace-only compiler
+/// fingerprint helper. This module is also compiled by the published
+/// `harn-cli` package's build script, where sibling workspace sources do not
+/// exist.
+fn canonical_source_bytes(bytes: &[u8]) -> Vec<u8> {
+    let mut normalized = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                normalized.push(b'\n');
+                if bytes.get(index + 1) == Some(&b'\n') {
+                    index += 1;
+                }
+            }
+            byte => normalized.push(byte),
+        }
+        index += 1;
+    }
+    normalized
 }
 
 pub fn sha256_file(path: &Path) -> Result<String, String> {

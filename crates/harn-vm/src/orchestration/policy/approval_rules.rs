@@ -1357,6 +1357,7 @@ mod tests {
                 branch: None,
                 base_ref: None,
                 cleanup: None,
+                grants: Vec::new(),
             },
         ));
         policy_with_path_annotation("read_file", ToolKind::Read);

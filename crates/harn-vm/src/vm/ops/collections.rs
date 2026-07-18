@@ -492,13 +492,20 @@ impl super::super::Vm {
         let prop_name = Self::const_str(&chunk.constants[prop_idx])?;
         let var_name = Self::const_str(&chunk.constants[var_idx])?;
         let new_value = self.pop()?;
-        if let Some(obj) = self
-            .active_local_slot_value(var_name)
-            .or_else(|| self.env.get(var_name))
-        {
+        let target = self
+            .env
+            .get(var_name)
+            .map(|value| (value, true))
+            .or_else(|| {
+                self.active_local_slot_value(var_name)
+                    .map(|value| (value, false))
+            });
+        if let Some((obj, environment_backed)) = target {
             let assign_value = |vm: &mut Self, value: VmValue| -> Result<(), VmError> {
-                if !vm.assign_active_local_slot(var_name, value.clone(), false)? {
+                if environment_backed {
                     vm.env.assign(var_name, value)?;
+                } else {
+                    vm.assign_active_local_slot(var_name, value, false)?;
                 }
                 Ok(())
             };
@@ -536,6 +543,32 @@ impl super::super::Vm {
         let index = self.pop()?;
         let new_value = self.pop()?;
 
+        // A captured cell is an explicit lexical address and wins over any
+        // unrelated same-named slot still active in the frame.
+        if let Some(obj) = self.env.get(var_name) {
+            match obj {
+                VmValue::List(items) => {
+                    let Some(i) = index.as_int() else {
+                        return Err(Self::list_index_type_error(&index));
+                    };
+                    let mut new_items =
+                        Arc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
+                    let idx = resolve_list_assign_index(i, new_items.len())?;
+                    new_items[idx] = new_value;
+                    self.env
+                        .assign(var_name, VmValue::List(std::sync::Arc::new(new_items)))?;
+                }
+                VmValue::Dict(map) => {
+                    let key = crate::value::intern_key(&index.display());
+                    let mut new_map = Arc::try_unwrap(map).unwrap_or_else(|map| (*map).clone());
+                    new_map.insert(key, new_value);
+                    self.env.assign(var_name, VmValue::dict(new_map))?;
+                }
+                other => return Err(Self::subscript_assign_type_error(&other)),
+            }
+            return Ok(());
+        }
+
         // Fast path: when the binding is an active local slot, mutate the
         // contained dict/list in place via `Arc::make_mut`. This skips the
         // defensive `VmValue::clone` + collection clone the env-fallback
@@ -570,32 +603,6 @@ impl super::super::Vm {
             }
         }
 
-        // Fallback: variable lives in `env` (e.g. captured by a closure or
-        // declared in an outer scope). The env path still has to rebind
-        // because `env.get` returns by value, but `Arc::try_unwrap` keeps
-        // the no-other-references case allocation-free.
-        if let Some(obj) = self.env.get(var_name) {
-            match obj {
-                VmValue::List(items) => {
-                    let Some(i) = index.as_int() else {
-                        return Err(Self::list_index_type_error(&index));
-                    };
-                    let mut new_items =
-                        Arc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
-                    let idx = resolve_list_assign_index(i, new_items.len())?;
-                    new_items[idx] = new_value;
-                    self.env
-                        .assign(var_name, VmValue::List(std::sync::Arc::new(new_items)))?;
-                }
-                VmValue::Dict(map) => {
-                    let key = crate::value::intern_key(&index.display());
-                    let mut new_map = Arc::try_unwrap(map).unwrap_or_else(|map| (*map).clone());
-                    new_map.insert(key, new_value);
-                    self.env.assign(var_name, VmValue::dict(new_map))?;
-                }
-                other => return Err(Self::subscript_assign_type_error(&other)),
-            }
-        }
         Ok(())
     }
 

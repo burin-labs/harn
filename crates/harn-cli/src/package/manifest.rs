@@ -1309,7 +1309,6 @@ pub struct ResolvedHookConfig {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Trigger metadata is carried forward for harn#156 doctor and harn#159 dispatcher work.
 pub struct ResolvedTriggerConfig {
     pub id: String,
     pub kind: TriggerKind,
@@ -1338,6 +1337,7 @@ pub struct ResolvedTriggerConfig {
     pub manifest_path: PathBuf,
     pub package_name: Option<String>,
     pub exports: HashMap<String, String>,
+    pub execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
     pub table_index: usize,
     pub shape_error: Option<String>,
 }

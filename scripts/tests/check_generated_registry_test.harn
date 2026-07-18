@@ -150,6 +150,39 @@ pipeline test_flag_errors_missing_output(task) {
 }
 
 @test
+pipeline test_flag_errors_release_package_output_can_be_absent(task) {
+  const art = {id: "a", lifecycle: "release-package", outputs: ["generated/payload.bin"]}
+  assert_eq(artifact_flag_errors(art, "check-a", "", "", ["generated/payload.bin"]), [])
+}
+
+// --- artifact_lifecycle_errors -------------------------------------------
+@test
+pipeline test_lifecycle_defaults_to_source(task) {
+  assert_eq(artifact_lifecycle_errors({id: "a"}), [])
+}
+
+@test
+pipeline test_lifecycle_accepts_release_package(task) {
+  const art = {id: "a", lifecycle: "release-package", ci: true, make_all: false}
+  assert_eq(artifact_lifecycle_errors(art), [])
+}
+
+@test
+pipeline test_lifecycle_requires_explicit_release_package_policy(task) {
+  const errs = artifact_lifecycle_errors({id: "a", lifecycle: "release-package"})
+  assert_eq(errs.count, 2)
+  assert_eq(errs[0].contains("ci = true"), true)
+  assert_eq(errs[1].contains("make_all = false"), true)
+}
+
+@test
+pipeline test_lifecycle_rejects_unknown_value(task) {
+  const errs = artifact_lifecycle_errors({id: "a", lifecycle: "ephemeral"})
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("unsupported lifecycle `ephemeral`"), true)
+}
+
+@test
 pipeline test_flag_errors_empty_check_suppresses_flag_errors(task) {
   // With an empty check, ci/make_all flag checks short-circuit (check != "").
   const art = {id: "a", ci: true, make_all: true}
@@ -212,6 +245,58 @@ pipeline test_hygiene_no_overlap(task) {
   assert_eq(exempt_hygiene_errors(["check-a"], ["check-b"]).count, 0)
 }
 
+// --- preflight_dispatch_errors --------------------------------------------
+@test
+pipeline test_preflight_unclassified_check(task) {
+  // A check-* target absent from the dispatch table is flagged.
+  assert_eq(
+    preflight_dispatch_errors(["check-foo"], {}),
+    [
+      "Makefile target `check-foo` is not classified in [preflight.dispatch] in scripts/generated_artifacts.toml (add it with tier source|binary|excluded).",
+    ],
+  )
+}
+
+@test
+pipeline test_preflight_umbrella_check_not_required(task) {
+  // The umbrella `check` has no hyphen, so it is not required to be classified.
+  assert_eq(preflight_dispatch_errors(["check", "all", "test"], {}).count, 0)
+}
+
+@test
+pipeline test_preflight_classified_ok(task) {
+  const dispatch = {"check-a": "source", "check-b": "binary"}
+  const errs = preflight_dispatch_errors(["check-a", "check-b"], dispatch)
+  assert_eq(errs, [])
+}
+
+@test
+pipeline test_preflight_dead_target_flagged(task) {
+  // A dispatch entry naming a target that does not exist is flagged.
+  assert_eq(
+    preflight_dispatch_errors([], {"check-gone": "source"}),
+    [
+      "[preflight.dispatch] classifies `check-gone` but no such Makefile target exists — remove it or fix the name.",
+    ],
+  )
+}
+
+@test
+pipeline test_preflight_invalid_tier_flagged(task) {
+  assert_eq(
+    preflight_dispatch_errors(["check-a"], {"check-a": "sourced"}),
+    ["[preflight.dispatch] `check-a` has invalid tier `sourced` (expected source|binary|excluded)."],
+  )
+}
+
+@test
+pipeline test_preflight_lint_target_allowed(task) {
+  // A lint-* target may be classified (it is a real target with a valid tier)
+  // without being required — only check-* targets are mandatory.
+  const dispatch = {"lint-x": "source", "check-a": "source"}
+  assert_eq(preflight_dispatch_errors(["lint-x", "check-a"], dispatch), [])
+}
+
 // --- validate (integration of the pure pieces) ----------------------------
 @test
 pipeline test_validate_clean(task) {
@@ -225,6 +310,13 @@ pipeline test_validate_missing_check(task) {
   const errs = validate([{id: "x"}], [], [], "", "", [])
   assert_eq(errs.count, 1)
   assert_eq(errs[0], "[x] missing required `check` target")
+}
+
+@test
+pipeline test_validate_rejects_unknown_lifecycle(task) {
+  const errs = validate([{id: "x", check: "check-x", lifecycle: "ephemeral"}], [], ["check-x"], "", "", [])
+  assert_eq(errs.count, 1)
+  assert_eq(errs[0].contains("unsupported lifecycle"), true)
 }
 
 @test

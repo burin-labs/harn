@@ -16,17 +16,17 @@ base64 = "0.22"
 bytes = "1"
 futures = "0.3"
 globset = "0.4"
-harn-clock = { path = "../harn-clock", version = "=0.10.21" }
-harn-modules = { path = "../harn-modules", version = "=0.10.21" }
-harn-parser = { path = "../harn-parser", version = "=0.10.21" }
-harn-session-store = { path = "../harn-session-store", version = "=0.10.21" }
+harn-clock = { path = "../harn-clock", version = "=0.10.23" }
+harn-modules = { path = "../harn-modules", version = "=0.10.23" }
+harn-parser = { path = "../harn-parser", version = "=0.10.23" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.23" }
 # `default-features = false` keeps the in-process embedding surface lean:
 # Postgres (sqlx) and the hostlib grammars are opt-in via this crate's
 # feature flags rather than dragged in unconditionally. harn-cli re-enables
 # the full set for CLI parity; Cargo's feature unification means any build
 # that includes harn-cli still gets everything.
-harn-vm = { path = "../harn-vm", version = "=0.10.21", default-features = false }
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.21", optional = true, default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.23", default-features = false }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.23", optional = true, default-features = false }
 hex = "0.4"
 hmac = "0.13"
 ipnet = "2"
@@ -40,7 +40,7 @@ sha2 = "0.11"
 subtle = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 time = { version = "0.3", features = ["formatting"] }
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 toml = "1.1"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["compression-br", "compression-gzip", "compression-zstd", "cors"] }
@@ -96,7 +96,7 @@ filetime = "0.2"
 # makes `cargo nextest run -p harn-serve` green in isolation without the test
 # silently relying on workspace-wide feature unification (which masked the gap:
 # it passed under `--workspace` but failed under `-p harn-serve`).
-harn-vm = { path = "../harn-vm", version = "=0.10.21", default-features = false, features = ["postgres"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.23", default-features = false, features = ["postgres"] }
 futures-util = "0.3"
 hex = "0.4"
 tempfile = "3"

@@ -753,7 +753,14 @@ while trusted native dynamic libraries use `nativeRuleDirs`.
 harn lint main.harn
 harn lint src/ tests/
 harn lint prompts/system.harn.prompt
+harn lint --require-public-api-types src/
 ```
+
+`--require-public-api-types` reports every untyped public function or pipeline
+parameter and return as `HARN-LNT-067`. Set
+`[lint] require_public_api_types = true` in `harn.toml` to apply the same policy
+to CLI and LSP linting across the project. The rule has no autofix because
+choosing a public contract is an API-design decision.
 
 Pass `--fix` to automatically apply safe fixes (e.g., `var` → `let` for
 never-reassigned bindings, boolean comparison simplification, unused import
@@ -849,6 +856,7 @@ harn check src/ tests/
 harn check --host-capabilities host-capabilities.json main.harn
 harn check --bundle-root .bundle main.harn
 harn check --invariants main.harn
+harn check --strict --strict-types src/
 harn check --workspace
 harn check --preflight warning src/
 ```
@@ -860,6 +868,7 @@ harn check --preflight warning src/
 | `--invariants` | Evaluate `@invariant(...)` annotations on functions, tools, and pipelines. Violations fail the check and are reported as `invariant[<name>]` diagnostics with concrete source spans. |
 | `--workspace` | Walk every path listed in `[workspace].pipelines` of the nearest `harn.toml`. Positional targets remain additive. |
 | `--preflight <severity>` | Override preflight diagnostic severity: `error` (default, fails the check), `warning` (reports but does not fail), or `off` (suppresses all preflight diagnostics). Overrides `[check].preflight_severity`. |
+| `--strict` | Treat every warning as a failure after rendering all files. Monotonically enables `[check].strict`; it never disables workspace strictness. |
 | `--strict-types` | Fail on unvalidated boundary-API values used in field or subscript access. |
 
 Files are checked on a parallel worker pool sized to the machine's available
@@ -927,6 +936,14 @@ project = ["ensure_enriched", "enrich"]
 workspace = ["read_text", "write_text"]
 
 [check]
+# Treat warnings from any check phase as failures. The one-shot equivalent is
+# `harn check --strict`; the CLI flag can enable but never disable this setting.
+strict = true
+
+# Enable boundary-value type checks persistently. Combine the one-shot flags as
+# `harn check --strict --strict-types` for a zero-warning type-safety gate.
+strict_types = true
+
 # Downgrade preflight errors to warnings (or suppress entirely with "off").
 # Keeps type diagnostics visible while an external capability schema is
 # still catching up to a host's live surface.
@@ -1130,7 +1147,7 @@ without any API keys, project setup, or network access. Designed for
 the cold-start "what does Harn actually do?" moment.
 
 ```bash
-harn demo                         # menu of bundled scenarios (default: merge-captain)
+harn demo                         # interactive menu on a TTY; prints the list otherwise
 harn demo merge-captain           # persona-supervised PR triage with structured receipts
 harn demo review-captain          # HITL clarifying-question loop on a 5-file diff
 harn demo provider-race           # latency-aware provider race with cost attribution
@@ -1464,6 +1481,28 @@ harn local profile ollama-gemma4 --json
 Statuses are `preferred`, `experimental`, `vision_only_experimental`,
 `quarantined`, or `unknown`. `harn local switch` refuses experimental and
 quarantined profiles unless the required probes pass or `--force` is supplied.
+
+## harn models list
+
+Query the same provider/model catalog Harn resolves at runtime. The human view
+uses a deterministic table; `--json` returns the complete catalog rows rather
+than a lossy display projection, including `pricing.cache_read_per_mtok`,
+`tool_mode_parity`, and `tool_mode_parity_notes` where known.
+
+```bash
+harn models list --where tier=frontier,strengths=coding --sort pricing.input \
+  --columns id,provider,pricing.input,pricing.cache_read,context_window,tool_support.parity,tool_support.parity_notes
+harn models list --provider anthropic --where open_weight=false --sort context_window
+harn models list --where tool_support.parity=native_unreliable --json
+```
+
+Repeat `--where KEY=VALUE` for additional all-of filters, or separate entries
+with commas. Supported fields are `provider`, `tier`, `strengths` (exact tag
+membership), `tool_support.parity`, and `open_weight`. Sort fields are
+`pricing.input`, `pricing.output`, `pricing.cache_read`, and `context_window`;
+numeric sorts are ascending with missing metadata last. `--columns` selects a
+strict allowlist for the human table and cannot be combined with `--json`,
+which intentionally returns complete authoritative rows.
 
 ## harn models test
 

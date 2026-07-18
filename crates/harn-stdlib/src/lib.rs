@@ -147,7 +147,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/ensemble" => "stdlib/llm/ensemble.harn",
     "llm/rerank" => "stdlib/llm/rerank.harn",
     "agent/reasoning" => "stdlib/agent/reasoning.harn",
+    "agent/caller_transport" => "stdlib/agent/caller_transport.harn",
     "agent/options" => "stdlib/agent/options.harn",
+    "agent/llm_dispatch" => "stdlib/agent/llm_dispatch.harn",
+    "agent/prefill" => "stdlib/agent/prefill.harn",
     "agent/retry" => "stdlib/agent/retry.harn",
     "llm/judge" => "stdlib/llm/judge.harn",
     "llm/faithfulness" => "stdlib/llm/faithfulness.harn",
@@ -158,6 +161,9 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/primitives" => "stdlib/agent/primitives.harn",
     "agent/progress" => "stdlib/agent/progress.harn",
     "agent/required_tools" => "stdlib/agent/required_tools.harn",
+    "agent/monologue_actuation" => "stdlib/agent/monologue_actuation.harn",
+    "agent/monologue_actuation_types" => "stdlib/agent/monologue_actuation_types.harn",
+    "agent/stall_types" => "stdlib/agent/stall_types.harn",
     "agent/stall" => "stdlib/agent/stall.harn",
     "agent/governors" => "stdlib/agent/governors.harn",
     "agent/control" => "stdlib/agent/control.harn",
@@ -169,6 +175,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/user" => "stdlib/agent/user.harn",
     "agent/tool_search" => "stdlib/agent/tool_search.harn",
     "agent/tool_annotations" => "stdlib/agent/tool_annotations.harn",
+    "agent/tool_lifecycle" => "stdlib/agent/tool_lifecycle.harn",
     "agent/turn" => "stdlib/agent/turn.harn",
     "agent/workers" => "stdlib/agent/workers.harn",
     "agent/introspection" => "stdlib/agent/introspection.harn",
@@ -204,6 +211,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/goal" => "stdlib/agent/goal.harn",
     "agent/task_plan" => "stdlib/agent/task_plan.harn",
     "personas/compiler" => "stdlib/personas/compiler.harn",
+    "personas/prompt_compiler" => "stdlib/personas/prompt_compiler.harn",
     "agent_state" => "stdlib/stdlib_agent_state.harn",
     "memory" => "stdlib/stdlib_memory.harn",
     "session-store" => "stdlib/stdlib_session_store.harn",
@@ -214,6 +222,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "sqlite" => "stdlib/stdlib_sqlite.harn",
     "checkpoint" => "stdlib/stdlib_checkpoint.harn",
     "host" => "stdlib/stdlib_host.harn",
+    "host_lease" => "stdlib/stdlib_host_lease.harn",
     "git" => "stdlib/stdlib_git.harn",
     "hitl" => "stdlib/stdlib_hitl.harn",
     "trust" => "stdlib/stdlib_trust.harn",
@@ -347,6 +356,7 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliSc
     "eval/prompt" => "stdlib/cli/eval/prompt.harn",
     "explain" => "stdlib/cli/explain.harn",
     "graph" => "stdlib/cli/graph.harn",
+    "personas/compile_prompt" => "stdlib/cli/personas/compile_prompt.harn",
     "personas/materialize" => "stdlib/cli/personas/materialize.harn",
     "models/batch_plan" => "stdlib/cli/models/batch_plan.harn",
     "models/list" => "stdlib/cli/models/list.harn",
@@ -379,6 +389,39 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
     STDLIB_SOURCES
         .iter()
         .find_map(|entry| (entry.module == module).then_some(entry.source))
+}
+
+/// Builtins a stdlib module re-exports under its own name, so
+/// `import { assert_eq } from "std/testing"` resolves.
+///
+/// Some of the standard library is implemented in Rust rather than Harn — the
+/// value differ behind `assert_eq` needs to walk the runtime representation of
+/// a value, which Harn source cannot do. Those builtins are callable without an
+/// import, but a reader who has just typed `import { assert_throws } from
+/// "std/testing"` has every reason to expect its sibling `assert_eq` to come
+/// from the same place, and no reason to know which side of the Rust/Harn line
+/// a given assertion happens to fall on. This table erases that seam: the
+/// module's export surface is its `pub fn`s plus the names listed here.
+///
+/// The list is explicit rather than derived from the builtins' `category`
+/// metadata: a category is a free-form label for docs and observability, and an
+/// export surface is an API contract. Deriving one from the other would let an
+/// unrelated metadata edit silently add or remove a public export.
+///
+/// `harn_vm::stdlib::tests` pins every name here to a registered builtin, so an
+/// entry cannot rot into a name that no longer exists.
+pub fn builtin_reexports(module: &str) -> &'static [&'static str] {
+    match module {
+        "testing" => &[
+            "assert",
+            "assert_approx",
+            "assert_eq",
+            "assert_matches",
+            "assert_ne",
+            "value_diff",
+        ],
+        _ => &[],
+    }
 }
 
 /// Find an embedded CLI subcommand script by name. Returns the embedded
@@ -689,6 +732,7 @@ mod tests {
             "personas/bulletins",
             "agent/host_tools",
             "agent/host_injection",
+            "agent/tool_lifecycle",
             "agent/user",
             "agent/governors",
             "agent/guardrails",
@@ -712,6 +756,7 @@ mod tests {
             "triage",
             "dashboard/jobs",
             "ui_resource",
+            "host_lease",
         ] {
             assert!(
                 get_stdlib_source(module).is_some(),
@@ -933,6 +978,7 @@ mod tests {
             "add_v",
             "is_v_semver",
             "parse",
+            "max_canonical_tag",
             "next",
             "bump_type",
             "version_from_release_branch",

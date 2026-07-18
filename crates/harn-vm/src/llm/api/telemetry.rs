@@ -110,6 +110,12 @@ pub struct ProviderTelemetry {
     /// Provider-supplied request id (`x-request-id` / `request_id`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// Provider/router metadata returned alongside an otherwise standard wire
+    /// response. Gateways use this for the resolved upstream, fallback
+    /// attempts, routing policy, and exact billed cost. Preserved as JSON so
+    /// Harn does not hard-code one router's schema.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_metadata: Option<serde_json::Value>,
 }
 
 impl ProviderTelemetry {
@@ -139,6 +145,7 @@ impl ProviderTelemetry {
             runtime_memory_vram_bytes,
             runtime_keep_alive_until,
             request_id,
+            provider_metadata,
         } = self;
         source.is_empty()
             && server_total_ms.is_none()
@@ -154,6 +161,7 @@ impl ProviderTelemetry {
             && runtime_memory_vram_bytes.is_none()
             && runtime_keep_alive_until.is_none()
             && request_id.is_none()
+            && provider_metadata.is_none()
     }
 
     /// Convert nanoseconds (Ollama's reporting unit) to milliseconds with
@@ -265,6 +273,18 @@ impl ProviderTelemetry {
         telemetry
     }
 
+    /// Preserve a non-empty top-level `provider_metadata` object. OpenAI-style
+    /// gateways put it on both non-streaming responses and the final SSE frame.
+    pub fn capture_provider_metadata(&mut self, response: &serde_json::Value) {
+        if let Some(metadata) = response
+            .get("provider_metadata")
+            .filter(|value| !value.is_null())
+            .filter(|value| !value.as_object().is_some_and(serde_json::Map::is_empty))
+        {
+            self.provider_metadata = Some(metadata.clone());
+        }
+    }
+
     /// Merge a `/api/ps` snapshot of a loaded Ollama model into this
     /// telemetry envelope. Only fills in fields that were not already
     /// populated so a per-call extraction keeps precedence.
@@ -327,6 +347,12 @@ impl ProviderTelemetry {
         }
         if let Some(ref request_id) = self.request_id {
             dict.put_str("request_id", request_id.as_str());
+        }
+        if let Some(ref provider_metadata) = self.provider_metadata {
+            dict.insert(
+                crate::value::intern_key("provider_metadata"),
+                crate::stdlib::json_to_vm_value(provider_metadata),
+            );
         }
         Some(VmValue::dict(dict))
     }
@@ -572,5 +598,37 @@ mod tests {
             }),
             Some(120)
         );
+    }
+
+    #[test]
+    fn gateway_provider_metadata_is_preserved_without_schema_coupling() {
+        let response = serde_json::json!({
+            "provider_metadata": {
+                "gateway": {
+                    "routing": {
+                        "resolvedProvider": "openai",
+                        "modelAttemptCount": 1
+                    },
+                    "cost": "0.00003865"
+                }
+            }
+        });
+        let mut telemetry = ProviderTelemetry::default();
+        telemetry.capture_provider_metadata(&response);
+
+        assert_eq!(
+            telemetry
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.pointer("/gateway/routing/resolvedProvider"))
+                .and_then(serde_json::Value::as_str),
+            Some("openai")
+        );
+        assert!(!telemetry.is_empty());
+        let value = telemetry
+            .as_vm_dict()
+            .expect("metadata makes telemetry visible");
+        let dict = value.as_dict().expect("dict body");
+        assert!(dict.get("provider_metadata").is_some());
     }
 }

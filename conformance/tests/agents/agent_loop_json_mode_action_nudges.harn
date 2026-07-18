@@ -1,0 +1,249 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Fenced-JSON (`tool_format = "json"`) counterpart to the text-mode action
+ * nudges: the toolless-turn recovery gate (fenced-call + missing-tool-call)
+ * now fires on json lanes too, and every corrective nudge renders the taught
+ * call syntax from the single format-aware owner (`agent_tool_call_paradigm`),
+ * so a json lane is told to emit a ```tool block — never a `<tool_call>` block.
+ *
+ *  1. Fenced-call attempt: the model wraps a call in a ```python fence the
+ *     fenced-JSON parser does NOT lift, so the turn is toolless →
+ *     `fenced_call_attempt` nudge fires in fenced-JSON vocabulary.
+ *  2. Classifier-backed tool intent with no parsed call → `missing_tool_call`
+ *     nudge whose exemplar is a ```tool JSON block, not a `<tool_call>` block.
+ *  3. A real ```tool call does NOT trip either content nudge.
+ */
+fn edit_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit a file.",
+    {
+      handler: { args -> "edited " + (args?.path ?? "") },
+      parameters: {path: {type: "string", description: "Path to edit"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn injected_in(calls, idx, marker) {
+  if idx >= len(calls) {
+    return false
+  }
+  return contains(json_stringify(calls[idx].messages), marker)
+}
+
+fn edit_missing_tool_call_recovery() {
+  return {
+    classifier: { _payload -> return {
+      action: "tool_call_intended",
+      tool_name: "edit",
+      confidence: 0.96,
+      evidence: "fixture classifier found a tool action",
+      language: "fixture",
+    } },
+  }
+}
+
+fn json_call(path) {
+  return "```tool\n{ \"name\": \"edit\", \"args\": { \"path\": \"" + path + "\" } }\n```"
+}
+
+fn read_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "Inspect a value.",
+    {
+      handler: { args -> "observed " + (args?.path ?? "") },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  return tools
+}
+
+fn json_read_call(path) {
+  return "```tool\n{ \"name\": \"inspect\", \"args\": { \"path\": \"" + path + "\" } }\n```"
+}
+
+pipeline default() {
+  // 1. Fenced ```python attempt on a json lane → fenced_call_attempt nudge,
+  //    rendered in fenced-JSON vocabulary.
+  with_llm_script(
+    [
+      llm_text("Here is the change:\n```python\nedit(path=\"a.txt\")\n```"),
+      llm_text(json_call("a.txt")),
+      llm_text("All set."),
+    ],
+    { ->
+      const r = agent_loop(
+        "Edit a.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "json",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+        },
+      )
+      const calls = llm_mock_calls()
+      __io_println("fenced.status=" + r.status)
+      __io_println("fenced.nudge=" + to_string(injected_in(calls, 1, "fenced_call_attempt")))
+      __io_println(
+        "fenced.vocab_json="
+          + to_string(injected_in(calls, 1, "Emit the call as a ```tool JSON block")),
+      )
+      __io_println("fenced.no_tag=" + to_string(!injected_in(calls, 1, "bare inside <tool_call>")))
+    },
+  )
+  // 2. Classifier-backed missing tool call on a json lane → missing_tool_call
+  //    nudge whose exemplar is a ```tool block, not a <tool_call> block.
+  with_llm_script(
+    [
+      llm_text("Voy a editar el archivo ahora, un momento."),
+      llm_text(json_call("b.txt")),
+      llm_text("Done."),
+    ],
+    { ->
+      const r = agent_loop(
+        "Edit b.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "json",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+          missing_tool_call_recovery: edit_missing_tool_call_recovery(),
+        },
+      )
+      const calls = llm_mock_calls()
+      __io_println("missing.status=" + r.status)
+      __io_println("missing.nudge=" + to_string(injected_in(calls, 1, "missing_tool_call")))
+      __io_println("missing.vocab_json=" + to_string(injected_in(calls, 1, "Emit the call now: ```tool")))
+      __io_println(
+        "missing.no_tag=" + to_string(!injected_in(calls, 1, "Emit the call now: <tool_call>")),
+      )
+    },
+  )
+  // 3. A real ```tool call does NOT trip either content nudge.
+  with_llm_script(
+    [llm_text(json_call("c.txt")), llm_text("Done.")],
+    { ->
+      const r = agent_loop(
+        "Edit c.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "json",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+        },
+      )
+      const calls = llm_mock_calls()
+      __io_println("realcall.successful=" + json_stringify(r.tools.successful))
+      __io_println("realcall.no_fenced=" + to_string(!injected_in(calls, 1, "fenced_call_attempt")))
+      __io_println("realcall.no_missing=" + to_string(!injected_in(calls, 1, "missing_tool_call")))
+    },
+  )
+  // 4. A valid call and sentinel in one turn must dispatch and continue so
+  //    the model can consume the tool observation before completing.
+  with_llm_script(
+    [
+      llm_text(json_call("d.txt") + "\n<done>##DONE##</done>"),
+      llm_text("<user_response>Done after observation.</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const r = agent_loop(
+        "Edit d.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "json",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          max_nudges: 1,
+          tools: edit_tools(),
+        },
+      )
+      __io_println("same_turn.status=" + r.status)
+      __io_println("same_turn.successful=" + json_stringify(r.tools.successful))
+      __io_println("same_turn.iterations=" + to_string(r.llm.iterations))
+      __io_println("same_turn.final=" + r.visible_text)
+    },
+  )
+  // 5. Exact duplicate read-only calls in one text-channel turn collapse to
+  //    one dispatch; mutating/native calls retain their original semantics.
+  with_llm_script(
+    [
+      llm_text(json_read_call("settings") + "\n" + json_read_call("settings")),
+      llm_text("<user_response>Observed once.</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const r = agent_loop(
+        "Inspect settings.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "json",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          max_nudges: 1,
+          tools: read_tools(),
+        },
+      )
+      __io_println("duplicate.status=" + r.status)
+      __io_println("duplicate.successful=" + json_stringify(r.tools.successful))
+      __io_println("duplicate.calls=" + to_string(len(r.tools.calls)))
+      __io_println("duplicate.iterations=" + to_string(r.llm.iterations))
+      __io_println("duplicate.final=" + r.visible_text)
+    },
+  )
+  // 6. Native calls retain both provider call IDs and both dispatches. The
+  //    duplicate-read collapse is only a text-channel recovery policy.
+  with_llm_script(
+    [
+      {
+        tool_calls: [
+          {id: "inspect-1", name: "inspect", arguments: {path: "settings"}},
+          {id: "inspect-2", name: "inspect", arguments: {path: "settings"}},
+        ],
+      },
+      llm_text("<user_response>Observed twice.</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const r = agent_loop(
+        "Inspect settings twice.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          max_nudges: 1,
+          tools: read_tools(),
+        },
+      )
+      __io_println("native_duplicate.status=" + r.status)
+      __io_println("native_duplicate.successful=" + json_stringify(r.tools.successful))
+      __io_println("native_duplicate.calls=" + to_string(len(r.tools.calls)))
+      __io_println("native_duplicate.iterations=" + to_string(r.llm.iterations))
+      __io_println("native_duplicate.final=" + r.visible_text)
+    },
+  )
+}

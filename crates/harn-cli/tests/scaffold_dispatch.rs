@@ -264,6 +264,44 @@ fn init_agent_dispatch_is_deterministic() {
 }
 
 #[test]
+fn init_agent_result_surface_reports_terminal_status() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let init = run_scaffold(&["init", "--template", "agent"], root);
+    assert_eq!(init.status.code(), Some(0));
+
+    fs::write(
+        root.join("result-probe.harn"),
+        r#"import { emit_agent_result } from "agent/app"
+
+fn main(harness: Harness) {
+  if argv[0] == "done" {
+    exit(emit_agent_result(harness, {status: "done", visible_text: "complete"}))
+  }
+  exit(emit_agent_result(harness, {status: "error", error: {message: "provider unavailable"}}))
+}
+"#,
+    )
+    .expect("write result probe");
+
+    let success = run_scaffold(&["run", "result-probe.harn", "--", "done"], root);
+    assert_eq!(
+        (success.status.code(), success.stdout, success.stderr),
+        (Some(0), b"complete\n".to_vec(), Vec::new())
+    );
+
+    let failure = run_scaffold(&["run", "result-probe.harn", "--", "error"], root);
+    assert_eq!(
+        (failure.status.code(), failure.stdout, failure.stderr),
+        (
+            Some(1),
+            Vec::new(),
+            b"agent did not complete (status: error)\nprovider unavailable\n".to_vec(),
+        )
+    );
+}
+
+#[test]
 fn init_chat_dispatch_is_deterministic() {
     let (harn_snap, repeat_snap) = pair_run(
         "init chat",

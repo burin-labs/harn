@@ -12,18 +12,19 @@ pub(crate) use super::{
     CanonCommand, CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
     ConnectorCommand, CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand,
     FlowCommand, HarnessThreadingMode, HostCommand, HostLeaseCommand, HostLeasePriorityArg,
-    LocalCommand, McpCommand, McpMockCommand, MergeCaptainCommand, ModelsBatchCommand,
-    ModelsCommand, ModelsLoraCommand, OrchestratorCommand, OrchestratorDeployProvider,
-    OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
-    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
-    PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand, ProviderCatalogCommand,
-    ProviderCommand, PublishArgs, RuleCommand, RunsCommand, SessionCommand, SkillCommand,
-    SkillKeyCommand, SkillTrustCommand, ToolCommand, TraceCommand, TriggerCommand, TrustCommand,
-    TrustOutcomeArg, TrustTierArg,
+    HostLeaseResourceClassArg, HostLeaseRunCommand, LocalCommand, McpCommand, McpMockCommand,
+    MergeCaptainCommand, ModelsBatchCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
+    OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
+    OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
+    PackageScaffoldCommand, PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand,
+    ProviderCatalogCommand, ProviderCommand, PublishArgs, RuleCommand, RunsCommand, SessionCommand,
+    SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand, TraceCommand, TriggerCommand,
+    TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 
 mod parse_cmds;
 mod parse_core;
+mod parse_models;
 mod parse_orchestration;
 mod parse_packaging;
 mod parse_provider_dispatch_audit;

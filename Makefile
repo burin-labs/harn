@@ -1,4 +1,4 @@
-.PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords verify-tree-sitter-parse check-generated-registry check-release-audit-contract check-ci-cache-policy
+.PHONY: setup setup-rust clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy
 .PHONY: test-pr-gate-post-warm-integrations
 
 HARN_BIN ?=
@@ -7,6 +7,7 @@ HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
 HARN_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --,$(HARN_BIN_CMD) --)
+HARN_NO_BUILD_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --no-build --,$(HARN_BIN_CMD) --no-build --)
 HARN_CMD_VERBOSE = $(HARN_CMD)
 HARN_CLI_CMD = $(HARN_CMD)
 HARN_BIN_ASSIGN = harn_bin="$$($(HARN_BIN_PRINT_CMD))"
@@ -16,16 +17,22 @@ HARN_PROTOCOL_ARTIFACT_CHECK_ARGS = $(if $(strip $(HARN_PROTOCOL_ARTIFACT_VERSIO
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-cli-aot check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
 
 check: all
 
 setup:
 	./scripts/dev_setup.sh
 
-# Reclaim orphaned per-worktree Cargo target dirs under $TMPDIR/harn-target
-# (left behind when an agent/codex worktree is removed). Add --dry-run to
-# preview: make clean-stale-targets ARGS=--dry-run
+# Focused Rust setup for remote or constrained machines. It configures local
+# build paths and runs the workspace check without installing optional tools or
+# frontend dependencies.
+setup-rust:
+	HARN_DEV_SETUP_PROFILE=rust HARN_DEV_TARGET_WORKTREE_PATH="$(CURDIR)" ./scripts/dev_setup.sh
+
+# Reclaim orphaned per-worktree Cargo target dirs under known setup storage
+# roots (left behind when an agent/codex worktree is removed). Add
+# --dry-run to preview: make clean-stale-targets ARGS=--dry-run
 clean-stale-targets:
 	./scripts/prune_stale_targets.sh $(ARGS)
 
@@ -338,16 +345,19 @@ test-pr-gate-scripts:
 	./scripts/tests/hook_fast_default_mode_test.sh
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/hook_timing_instrument_test.sh
+	./scripts/tests/hook_registry_harn_bin_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
+	./scripts/tests/behavior_artifact_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/release_smoke_workflow_test.sh
+	./scripts/tests/dev_setup_profile_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
 	./scripts/tests/cli_aot_merge_driver_test.sh
@@ -367,7 +377,9 @@ test-pr-gate-post-warm-integrations:
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
+	./scripts/tests/embedded_asset_rebuild_test.sh
 
 # Format check (no changes, for CI)
 fmt-check:
@@ -419,16 +431,16 @@ portal:
 portal-demo:
 	./scripts/portal_demo.sh
 
-# Regenerate committed bytecode for the Harn-backed CLI commands. The generator
-# compiles harn-vm in Cargo's normal graph; harn-cli's build script only verifies
-# and embeds these outputs.
+# Generate a target-independent CLI AOT payload for package/release assembly.
+# The generator validates the full workspace; harn-cli's build script validates
+# and embeds only the package-local payload. Source builds use source fallback.
 gen-cli-aot:
 	$(HARN_CARGO_CMD) run -p harn-cli-aot-gen -- --workspace-root "$(CURDIR)"
 
 check-cli-aot:
-	@echo "=== Checking committed CLI AOT artifacts ==="
+	@echo "=== Checking release/package CLI AOT payload ==="
 	@$(HARN_CARGO_CMD) run -p harn-cli-aot-gen -- --workspace-root "$(CURDIR)" --check
-	@echo "    CLI AOT artifacts OK."
+	@echo "    CLI AOT payload OK."
 
 # Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib.
 # Run this whenever keywords or globally-available builtins change.
@@ -501,13 +513,13 @@ check-run-view-fixtures:
 # canonical authoring source). Mirrors what release_gate.sh audit's
 # sync_language_spec.harn step does.
 sync-language-spec:
-	$(HARN_CMD) run scripts/sync_language_spec.harn
+	$(HARN_NO_BUILD_CMD) run scripts/sync_language_spec.harn
 
 # CI guard: fail if docs/src/language-spec.md is stale relative to
 # spec/HARN_SPEC.md. `make sync-language-spec` fixes it.
 check-language-spec:
 	@echo "=== Checking docs/src/language-spec.md is up to date ==="
-	@$(HARN_CMD) run scripts/sync_language_spec.harn -- --check
+	@$(HARN_NO_BUILD_CMD) run scripts/sync_language_spec.harn -- --check
 	@echo "    Language spec mirror OK."
 
 # Regenerate the LLM trigger quickref from the live ProviderCatalog metadata.
@@ -703,10 +715,10 @@ check-ported-handler-loc:
 # grandfathered at exact per-source counts so unrelated refactors cannot
 # conflict in a central baseline. Regeneration only tightens existing debt.
 check-source-file-lengths:
-	@$(HARN_CMD) run scripts/check_source_file_lengths.harn
+	@$(HARN_NO_BUILD_CMD) run scripts/check_source_file_lengths.harn
 
 update-source-file-length-baseline:
-	@$(HARN_CMD) run scripts/check_source_file_lengths.harn -- --update
+	@$(HARN_NO_BUILD_CMD) run scripts/check_source_file_lengths.harn -- --update
 
 check-python-boundary:
 	@$(HARN_CMD) run scripts/check_python_boundary.harn
@@ -761,3 +773,31 @@ check-release-audit-contract:
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
 	@$(HARN_CMD) run scripts/check_ci_cache_policy.harn
+
+# Fast "before you declare clean" drift preflight. The member set is DERIVED
+# from the [preflight.dispatch] table in scripts/generated_artifacts.toml (the
+# single source of truth), tier = source: audits that read committed files at
+# interpret time, so they are trustworthy the instant you save a file — no
+# rebuild needed. `make check-generated-registry` guarantees every check-*
+# target is classified there, so this set can never silently omit a guard.
+# `make all` remains the full slow gate; this is the seconds-scale local gate.
+# For guards whose verdict depends on current binary semantics (generated
+# output, parser, checker, or linter), run `check-drift-binary` after a rebuild
+# or with a fresh HARN_BIN; stale executable bytes can false-pass those guards.
+check-drift:
+	@echo "=== Fast drift preflight (source-reading tier) ==="
+	@harn_bin="$$(HARN_BIN_NO_BUILD=1 $(HARN_BIN_PRINT_CMD))" || exit 1; \
+	members="$$($$harn_bin run scripts/drift_preflight_members.harn -- --tier source)" || exit 1; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" $$members
+	@echo "    Drift preflight (source) OK."
+
+# Binary-semantics drift tier: each member's verdict depends on current
+# executable behavior, so a stale binary can false-pass. Run this only with a
+# binary built from current source (after `make build` / with a fresh HARN_BIN);
+# CI is safe because CI's HARN_BIN is freshly built.
+check-drift-binary:
+	@echo "=== Drift preflight (binary-semantics tier; needs a fresh HARN_BIN) ==="
+	@harn_bin="$$(HARN_BIN_NO_BUILD=1 $(HARN_BIN_PRINT_CMD))" || exit 1; \
+	members="$$($$harn_bin run scripts/drift_preflight_members.harn -- --tier binary)" || exit 1; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" $$members
+	@echo "    Drift preflight (binary) OK."

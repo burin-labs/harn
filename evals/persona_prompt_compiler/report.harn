@@ -1,0 +1,213 @@
+import "std/eval/stats"
+import { is_absolute } from "std/path"
+import { persona_prompt_eval_manifest } from "./run.harn"
+
+fn __group_rows(rows: list) -> dict {
+  let grouped = {}
+  for row in rows {
+    const name = row.case_name ?? row.name
+    grouped = grouped + {[name]: (grouped[name] ?? []) + [row]}
+  }
+  return grouped
+}
+
+fn __aggregate_rows(rows: list) -> list {
+  const grouped = __group_rows(rows)
+  let aggregated = []
+  for name in grouped.keys().sort() {
+    const trials = grouped[name]
+    const first = trials[0]
+    aggregated = aggregated
+      + [
+      aggregate_trials(
+        name,
+        trials,
+        (first.metadata ?? {})
+          + {
+          case_fingerprint: first.case_fingerprint,
+          harness_config_fingerprint: first.harness_config_fingerprint,
+        },
+      ),
+    ]
+  }
+  return aggregated
+}
+
+fn __failure_buckets(rows: list) -> dict {
+  let buckets = {}
+  for row in rows {
+    const bucket = row.trial_report?.tool_call_summary?.failure_bucket ?? "unknown"
+    buckets = buckets + {[bucket]: (buckets[bucket] ?? 0) + 1}
+  }
+  return buckets
+}
+
+fn __all_have_decided_trials(rows: list, minimum: int) -> bool {
+  return len(rows) > 0 && rows.all({ row -> row.passes + row.fails >= minimum })
+}
+
+fn __case_fingerprints(manifest: dict) -> dict<string, string> {
+  let expected: dict<string, string> = {}
+  for eval_case in manifest.cases {
+    expected = expected + {[eval_case.id]: eval_case.case_fingerprint}
+  }
+  return expected
+}
+
+/** Aggregate one raw persona eval ledger cohort into meter-stick metrics. */
+pub fn persona_prompt_eval_cohort(rows: list, minimum_trials: int = 5) -> dict {
+  const aggregated = __aggregate_rows(rows)
+  const fingerprint_integrity = eval_fingerprint_integrity(rows)
+  const total_cost = aggregated.reduce(0.0, { total, row -> total + (row.total_cost_usd ?? 0.0) })
+  const valid_trials = rows.filter({ row -> row.verification == "PASS" }).count()
+  return {
+    cases: len(aggregated),
+    trials: len(rows),
+    minimum_trials_met: __all_have_decided_trials(aggregated, minimum_trials),
+    fingerprint_integrity: fingerprint_integrity,
+    macro_pass_at_1: macro_pass_at_1(aggregated),
+    reliability: reliability_breakdown(aggregated),
+    skip_rate: skip_rate(aggregated),
+    timeout_rate: timeout_rate(aggregated),
+    worst_group: worst_group(aggregated),
+    cost_per_solved: cost_per_solved(aggregated),
+    valid_yield_per_dollar: if total_cost > 0.0 {
+      to_float(valid_trials) / total_cost
+    } else {
+      nil
+    },
+    total_cost_usd: total_cost,
+    mean_wall_time_seconds: if len(aggregated) > 0 {
+      aggregated.reduce(0.0, { total, row -> total + row.mean_wall_time_seconds })
+        / to_float(len(aggregated))
+    } else {
+      0.0
+    },
+    failure_buckets: __failure_buckets(rows),
+    rows: aggregated,
+  }
+}
+
+/** Compare two raw persona eval ledger cohorts with the frozen paired gate. */
+pub fn persona_prompt_eval_comparison(
+  baseline_rows: list,
+  treatment_rows: list,
+  baseline_commit: string,
+  treatment_commit: string,
+  model: string,
+  split: string,
+  expected_case_fingerprints: dict<string, string>,
+  expected_harness_fingerprint: string,
+  minimum_trials: int = 5,
+) -> dict {
+  const baseline = persona_prompt_eval_cohort(baseline_rows, minimum_trials)
+  const treatment = persona_prompt_eval_cohort(treatment_rows, minimum_trials)
+  const expected_cases = len(expected_case_fingerprints)
+  const baseline_identity_matches = baseline.fingerprint_integrity.case_fingerprints == expected_case_fingerprints
+    && baseline.fingerprint_integrity.harness_fingerprints == [expected_harness_fingerprint]
+  const treatment_identity_matches = treatment.fingerprint_integrity.case_fingerprints == expected_case_fingerprints
+    && treatment.fingerprint_integrity.harness_fingerprints == [expected_harness_fingerprint]
+  const paired = paired_delta_report(baseline.rows, treatment.rows)
+  const regression = regression_gate(baseline.rows, treatment.rows)
+  const gate_evaluable = minimum_trials >= 5
+    && expected_cases > 0
+    && trim(baseline_commit) != ""
+    && trim(treatment_commit) != ""
+    && baseline_commit != treatment_commit
+    && trim(model) != ""
+    && contains(["meter-tune", "meter-holdout"], split)
+    && baseline.minimum_trials_met
+    && treatment.minimum_trials_met
+    && baseline.fingerprint_integrity.complete
+    && treatment.fingerprint_integrity.complete
+    && baseline.fingerprint_integrity.consistent
+    && treatment.fingerprint_integrity.consistent
+    && baseline_identity_matches
+    && treatment_identity_matches
+    && baseline.cases == expected_cases
+    && treatment.cases == expected_cases
+    && paired.n_cases == expected_cases
+  const confirmed_improvement = gate_evaluable && paired.improved && regression.passed
+  return {
+    schema: "harn.persona.prompt_eval_comparison.v1",
+    suite: "persona-prompt-compiler-v1",
+    model: model,
+    split: split,
+    expected_cases: expected_cases,
+    minimum_trials: minimum_trials,
+    baseline_commit: baseline_commit,
+    treatment_commit: treatment_commit,
+    gate_evaluable: gate_evaluable,
+    confirmed_improvement: confirmed_improvement,
+    expected_harness_fingerprint: expected_harness_fingerprint,
+    expected_case_fingerprints: expected_case_fingerprints,
+    baseline: baseline + {matches_frozen_manifest: baseline_identity_matches},
+    treatment: treatment + {matches_frozen_manifest: treatment_identity_matches},
+    paired_delta: paired,
+    realized_ci_half_width: (paired.ci_hi - paired.ci_lo) / 2.0,
+    regression_gate: regression,
+    verdict: if !gate_evaluable {
+      "insufficient_evidence"
+    } else if !regression.passed {
+      "regression"
+    } else if paired.improved {
+      "improved"
+    } else {
+      "inconclusive"
+    },
+  }
+}
+
+fn main(harness: Harness) -> int {
+  const baseline_commit = harness.env.get_or("HARN_PERSONA_EVAL_BASELINE_COMMIT", "")
+  const treatment_commit = harness.env.get_or("HARN_PERSONA_EVAL_TREATMENT_COMMIT", "")
+  const provider = harness.env.get_or("HARN_PERSONA_EVAL_PROVIDER", "")
+  const model = harness.env.get_or("HARN_PERSONA_EVAL_MODEL", "")
+  const split = harness.env.get_or("HARN_PERSONA_EVAL_SPLIT", "meter-holdout")
+  const minimum_trials = to_int(harness.env.get_or("HARN_PERSONA_EVAL_MIN_TRIALS", "5")) ?? 5
+  const ledger_path = harness.env.get_or("HARN_EVENT_LOG_SQLITE_PATH", "")
+  const shared_ledger = harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite"
+    && ledger_path != ""
+    && is_absolute(ledger_path)
+  if baseline_commit == "" || treatment_commit == "" || baseline_commit == treatment_commit
+    || provider == ""
+    || model == ""
+    || !contains(["meter-tune", "meter-holdout"], split)
+    || minimum_trials < 5
+    || !shared_ledger {
+    harness.stdio
+      .eprintln(
+      "set distinct commits, provider, model, frozen split, N>=5, and an absolute shared SQLite event-log path",
+    )
+    return 2
+  }
+  const common = {
+    namespace: "persona-prompt-compiler-v1",
+    suite: "persona-prompt-compiler-v1",
+    model: model,
+    split: split,
+  }
+  const baseline_rows = eval_ledger_read(common + {commit: baseline_commit}).rows
+  const treatment_rows = eval_ledger_read(common + {commit: treatment_commit}).rows
+  const manifest_path = path_join(source_dir(), "harn.eval.toml")
+  const raw = eval_pack_manifest(toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: source_dir()})
+  const manifest = persona_prompt_eval_manifest(raw, split, minimum_trials, provider, model, ledger_path)
+  const identity_plan = eval_ledger_resolve_resume_plan(manifest, common + {commit: baseline_commit})
+  const report = persona_prompt_eval_comparison(
+    baseline_rows,
+    treatment_rows,
+    baseline_commit,
+    treatment_commit,
+    model,
+    split,
+    __case_fingerprints(manifest),
+    identity_plan.harness_config_fingerprint,
+    minimum_trials,
+  )
+  harness.stdio.println(json_stringify_pretty(report))
+  return if report.confirmed_improvement {
+    0
+  } else {
+    1
+  }
+}

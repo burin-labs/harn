@@ -27,6 +27,7 @@ impl McpOrchestratorService {
     }
 
     pub(crate) fn new_local(local: OrchestratorLocalArgs) -> Result<Self, String> {
+        harn_vm::initialize_runtime_assets();
         let manifest_source = std::fs::read_to_string(&local.config).map_err(|error| {
             format!(
                 "failed to read manifest {}: {error}",
