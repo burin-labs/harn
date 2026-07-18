@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use super::model::{
     fill_opt, Capabilities, CapabilitiesFile, ComputerUseStyle, ProviderDefaults,
-    ReasoningHistoryWireField, ScreenshotScaling, SystemMessagePlacement, WireDialect,
+    ReasoningHistoryWireField, ScreenshotScaling, WireDialect,
 };
 use crate::llm::providers::anthropic::claude_generation;
 use crate::llm::providers::openai_compat::gpt_generation;
@@ -483,12 +483,6 @@ pub struct ProviderRule {
     /// `acknowledged_safety_checks`). Unset resolves to `false`.
     #[serde(default)]
     pub safety_ack_flow: Option<bool>,
-    /// How this route carries an interleaved `system`/`developer` message:
-    /// `inline`, `native_directive`, or `fold`. Unset derives from the wire
-    /// dialect (OpenAI/Ollama → inline, else fold). See
-    /// [`SystemMessagePlacement`].
-    #[serde(default)]
-    pub system_message_placement: Option<SystemMessagePlacement>,
 }
 
 impl ProviderRule {
@@ -600,7 +594,6 @@ impl ProviderRule {
             computer_use_style,
             screenshot_scaling,
             safety_ack_flow,
-            system_message_placement,
         } = other;
         fill_opt(&mut self.native_tools, native_tools);
         fill_opt(&mut self.message_wire_format, message_wire_format);
@@ -760,7 +753,6 @@ impl ProviderRule {
         fill_opt(&mut self.computer_use_style, computer_use_style);
         fill_opt(&mut self.screenshot_scaling, screenshot_scaling);
         fill_opt(&mut self.safety_ack_flow, safety_ack_flow);
-        fill_opt(&mut self.system_message_placement, system_message_placement);
         // Legacy alias pairs resolve as ONE logical capability
         // (`rule_structured_output`, `rule_thinking_modes`, `rule_vision`),
         // so they fill as a unit: when the accumulated chain has explicitly
@@ -1075,7 +1067,6 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         computer_use_style: None,
         screenshot_scaling: None,
         safety_ack_flow: None,
-        system_message_placement: None,
     };
     let mut caps = rule_to_caps(&empty, defaults);
     caps.preferred_tool_format = None;
@@ -1275,7 +1266,6 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         computer_use_style: rule.computer_use_style,
         screenshot_scaling: rule.screenshot_scaling,
         safety_ack_flow: rule.safety_ack_flow.unwrap_or(false),
-        system_message_placement: rule.system_message_placement,
     }
 }
 

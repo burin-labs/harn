@@ -71,7 +71,7 @@ pub(crate) fn generate_markdown(
     out.push_str("<!-- crates/harn-vm/src/llm/capabilities.toml is generated. -->\n\n");
     out.push_str("<!-- markdownlint-disable MD013 -->\n\n");
     out.push_str(
-        "This table is generated from Harn's live provider capability rules. `Model pattern` is the `model_match` rule used by the runtime; first match wins within each provider. `Version min` is the optional inclusive lower bound for provider-specific model versions; `extends` marks an overlay whose unset fields resolve from later matching rows.\n\n",
+        "This table is generated from Harn's live provider capability rules. `Model pattern` is the `model_match` rule used by the runtime; first match wins within each provider. `Version min` is the optional inclusive lower bound for provider-specific model versions.\n\n",
     );
     out.push_str("Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.\n\n");
     out.push_str(
@@ -406,25 +406,19 @@ fn provider_model_cell(row: &ProviderCapabilityMatrixRow) -> String {
 }
 
 fn version_min_cell(row: &ProviderCapabilityMatrixRow) -> String {
-    let version = if let Some(parts) = row.version_min.as_ref() {
-        match parts.as_slice() {
-            [major, minor] => format!(">={major}.{minor}"),
-            _ => format!(
-                ">={}",
-                parts
-                    .iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join(".")
-            ),
-        }
-    } else {
-        "any".to_string()
+    let Some(parts) = row.version_min.as_ref() else {
+        return "any".to_string();
     };
-    if row.extends {
-        format!("{version}; extends")
-    } else {
-        version
+    match parts.as_slice() {
+        [major, minor] => format!(">={major}.{minor}"),
+        _ => format!(
+            ">={}",
+            parts
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(".")
+        ),
     }
 }
 
@@ -498,7 +492,6 @@ mod tests {
         assert!(markdown.contains(
             "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |"
         ));
-        assert!(markdown.contains("`>=4.8; extends`"));
         assert!(markdown.contains("Tool-format recommendations by catalog model"));
     }
 

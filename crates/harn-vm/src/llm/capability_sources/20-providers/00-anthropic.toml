@@ -151,15 +151,6 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
-# Opus 4.8 accepts a mid-conversation `system` section. Layer the native
-# placement onto the 4.7 capability row below via `extends`; older Opus models
-# keep folding the section to a `<system-reminder>` user block.
-[[provider.anthropic]]
-model_match = "claude-opus-*"
-version_min = [4, 8]
-extends = true
-system_message_placement = "native_directive"
-
 [[provider.anthropic]]
 model_match = "claude-opus-*"
 version_min = [4, 7]
