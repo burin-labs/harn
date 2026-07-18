@@ -64,7 +64,7 @@ pub fn agent_tool_call_paradigm(options = nil) {
       body_close: "\"",
       call_noun: "```tool JSON block",
       final_answer: "as plain text",
-      body_hint: "Each tool call is one ```tool fenced block containing a single JSON object `{ \"name\": \"...\", \"args\": { ... } }`. Pass multi-line or code-bearing fields (file contents, replacement text, exact-match strings) as ordinary JSON string values — escape newlines as \\n, quotes as \\\", backslashes as \\\\. Backticks, `<<EOF`, `}`, and `</tool>` need NO escaping; they are literal bytes inside the JSON string. Emit one ```tool block per call (N blocks for N calls). Never use a heredoc, a Markdown fence around the call, or a triple-quoted string.",
+      body_hint: "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. Pass multi-line or code-bearing fields (file contents, replacement text, exact-match strings) as ordinary JSON string values — escape newlines as \\n, quotes as \\\", backslashes as \\\\. Backticks, `<<EOF`, `}`, and `</tool>` need NO escaping; they are literal bytes inside the JSON string. For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never use a heredoc, a Markdown fence around the call, or a triple-quoted string.",
     }
   }
   return {

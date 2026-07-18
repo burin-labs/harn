@@ -104,26 +104,28 @@ fn content_starting_with_heredoc_opener_is_just_a_string() {
     assert_eq!(arg(&out.calls[0], "content").unwrap(), content);
 }
 
-// ExpectedSingleObject: an array in the fence.
+// A JSON array is not a batch of objects: it is a single non-object entry and
+// is rejected with zero calls (a batch is consecutive objects, not an array).
 #[test]
-fn array_body_is_expected_single_object() {
+fn array_body_is_rejected_as_non_object() {
     let out = parse("```tool\n[{\"name\": \"a\", \"args\": {}}]\n```");
-    assert!(out.calls.is_empty());
+    assert!(out.calls.is_empty(), "calls: {:?}", out.calls);
     assert_eq!(out.errors.len(), 1);
     assert!(
-        out.errors[0].contains("exactly one JSON object"),
+        out.errors[0].contains("non-object") || out.errors[0].contains("one or more JSON"),
         "got: {}",
         out.errors[0]
     );
 }
 
-// ExpectedSingleObject: trailing bytes after the object.
+// Salvage: a complete object followed by trailing non-JSON bytes dispatches the
+// object as a call and surfaces an error for the unparsed tail (never zero).
 #[test]
-fn trailing_bytes_after_object_rejected() {
+fn trailing_bytes_after_object_salvages_the_object() {
     let out = parse("```tool\n{\"name\": \"a\", \"args\": {}} trailing\n```");
-    assert!(out.calls.is_empty());
-    assert_eq!(out.errors.len(), 1);
-    assert!(out.errors[0].contains("exactly one JSON object"));
+    assert_eq!(out.calls.len(), 1, "calls: {:?}", out.calls);
+    assert_eq!(out.calls[0]["name"], "a");
+    assert_eq!(out.errors.len(), 1, "errors: {:?}", out.errors);
 }
 
 // MissingName: object without a name.
@@ -655,4 +657,94 @@ fn xml_arg_value_with_literal_envelope_close_survives() {
     assert_eq!(out.calls.len(), 1);
     assert_eq!(out.calls[0]["name"], "write");
     assert_eq!(arg(&out.calls[0], "content").unwrap(), "</tool_calls>");
+}
+
+// ===================================================================
+// RC0a — turn-1 batched-multi-read robustness (harn#5033). The zig-test
+// probe runs all open with a batched 3-read that parsed to zero across
+// every dialect; these pin the canonical batch shapes to N calls.
+// ===================================================================
+
+// 172505: one ```tool fence containing THREE JSON objects (the canonical
+// turn-1 batched grounding read) -> 3 calls, no error.
+#[test]
+fn batch_three_objects_in_one_tool_fence_parses() {
+    let out = parse(
+        "```tool\n\
+         {\"name\": \"look\", \"args\": {\"file\": \"src/writer.zig\"}}\n\
+         {\"name\": \"look\", \"args\": {\"file\": \"src/parser.zig\"}}\n\
+         {\"name\": \"look\", \"args\": {\"file\": \"src/document.zig\"}}\n\
+         ```",
+    );
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 3, "calls: {:?}", out.calls);
+    for (call, file) in
+        out.calls
+            .iter()
+            .zip(["src/writer.zig", "src/parser.zig", "src/document.zig"])
+    {
+        assert_eq!(call["name"], "look");
+        assert_eq!(arg(call, "file").unwrap(), file);
+    }
+    // Distinct ids so downstream dispatch keeps them ordered/separate.
+    assert_eq!(out.calls[0]["id"], "tc_0");
+    assert_eq!(out.calls[2]["id"], "tc_2");
+}
+
+// 180749 / 181153: double ```tool fence — the model uses the opener as a
+// SEPARATOR between calls and never closes the first block -> 2 calls.
+#[test]
+fn batch_double_tool_fence_separator_parses() {
+    let out = parse(
+        "```tool\n{\"name\": \"look\", \"args\": {\"file\": \"a.zig\"}}\n\
+         ```tool\n{\"name\": \"look\", \"args\": {\"file\": \"b.zig\"}}",
+    );
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 2, "calls: {:?}", out.calls);
+    assert_eq!(arg(&out.calls[0], "file").unwrap(), "a.zig");
+    assert_eq!(arg(&out.calls[1], "file").unwrap(), "b.zig");
+}
+
+// Salvage: complete objects before a truncated tail still dispatch, and the
+// truncated tail is a loud error (never half-applied).
+#[test]
+fn batch_salvages_complete_objects_before_truncated_tail() {
+    let out = parse(
+        "```tool\n{\"name\": \"look\", \"args\": {\"file\": \"a.zig\"}}\n\
+         {\"name\": \"look\", \"args\": {\"file\": \"b.zig\"}}\n\
+         {\"name\": \"look\", \"args\": {\"file\": \"trunc",
+    );
+    assert_eq!(out.calls.len(), 2, "calls: {:?}", out.calls);
+    assert_eq!(arg(&out.calls[0], "file").unwrap(), "a.zig");
+    assert_eq!(arg(&out.calls[1], "file").unwrap(), "b.zig");
+    assert_eq!(out.errors.len(), 1, "errors: {:?}", out.errors);
+    assert!(
+        out.errors[0].contains("Unterminated"),
+        "error: {}",
+        out.errors[0]
+    );
+}
+
+// 170636 / 181632: `<tool_calls>` XML with three nested `<look>` tags (envelope
+// dialect from #5015) parses the full batch to 3 calls.
+#[test]
+fn batch_tool_calls_xml_three_nested_looks_parses() {
+    let out = parse(
+        "<tool_calls>\n<look>\n<file>\nsrc/writer.zig\n</file>\n</look>\n\
+         <look>\n<file>\nsrc/parser.zig\n</file>\n</look>\n\
+         <look>\n<file>\nsrc/document.zig\n</file>\n</look>\n</tool_calls>",
+    );
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 3, "calls: {:?}", out.calls);
+    for call in &out.calls {
+        assert_eq!(call["name"], "look");
+    }
+}
+
+// A single clean object in one fence is still exactly one call (N=1 batch).
+#[test]
+fn batch_single_object_is_one_call() {
+    let out = parse("```tool\n{\"name\": \"look\", \"args\": {\"file\": \"a.zig\"}}\n```");
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 1);
 }
