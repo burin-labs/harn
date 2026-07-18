@@ -1,4 +1,6 @@
 use super::*;
+use crate::diagnostic_codes::Code;
+use crate::typechecker::DiagnosticDetails;
 
 #[test]
 fn enum_payload_closure_reassignment_does_not_poison_outer_narrowing() {
@@ -30,14 +32,23 @@ fn f(value: Option<string>) {
 
 #[test]
 fn parameter_default_resolves_before_current_parameter_binding() {
-    let errs = errors(
+    let diagnostics = check_source(
         r#"const value: string = "outer"
 fn read(value: int = value) -> int { return value }"#,
     );
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("expected int") && err.contains("found string")),
-        "self-named default must resolve the outer string binding: {errs:?}"
+    let mismatch = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == Code::VariableTypeMismatch)
+        .unwrap_or_else(|| {
+            panic!("self-named default must resolve the outer string binding: {diagnostics:?}")
+        });
+    assert!(matches!(
+        mismatch.details,
+        Some(DiagnosticDetails::TypeMismatch)
+    ));
+    assert_eq!(
+        mismatch.message,
+        "parameter default `value`: expected int, found string"
     );
 
     let earlier_param_errs =

@@ -34,7 +34,26 @@ impl TypeChecker {
         scope: &mut TypeScope,
     ) {
         if let Some(default) = &param.default_value {
-            self.check_node_with_expected(default, param_type.as_ref(), scope);
+            let context_checked =
+                self.check_node_with_expected(default, param_type.as_ref(), scope);
+            if !context_checked {
+                match (param_type.as_ref(), self.infer_type(default, scope)) {
+                    (Some(expected), Some(actual))
+                        if !self.types_compatible(expected, &actual, scope) =>
+                    {
+                        self.type_mismatch_at(
+                            Code::VariableTypeMismatch,
+                            format!("parameter default `{}`", param.name),
+                            expected,
+                            &actual,
+                            default.span,
+                            (None, Some(default.span)),
+                            scope,
+                        );
+                    }
+                    _ => {}
+                }
+            }
         }
         scope.define_var(&param.name, param_type);
         if annotated {
