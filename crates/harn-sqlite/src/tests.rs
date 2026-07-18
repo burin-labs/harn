@@ -2,7 +2,10 @@ use std::cell::Cell;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::{mpsc, Arc, Barrier};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    mpsc, Arc, Barrier,
+};
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OpenFlags};
@@ -466,14 +469,17 @@ fn shared_memory_initialization_serializes_the_schema_callback() {
         | OpenFlags::SQLITE_OPEN_URI;
     let anchor = Connection::open_with_flags(URI, flags).expect("open shared-memory anchor");
     let barrier = Arc::new(Barrier::new(3));
+    let callback_runs = Arc::new(AtomicUsize::new(0));
     let threads = (0..2)
         .map(|_| {
             let barrier = barrier.clone();
+            let callback_runs = callback_runs.clone();
             std::thread::spawn(move || {
                 let connection =
                     Connection::open_with_flags(URI, flags).expect("open shared-memory connection");
                 barrier.wait();
                 initialize_transient(&connection, BUSY_TIMEOUT, TEST_SCHEMA, |transaction| {
+                    callback_runs.fetch_add(1, Ordering::SeqCst);
                     transaction.execute_batch(
                         "CREATE TABLE shared_rows (value INTEGER NOT NULL);
                          INSERT INTO shared_rows(value) VALUES (1);",
@@ -497,7 +503,8 @@ fn shared_memory_initialization_serializes_the_schema_callback() {
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
         )
         .expect("inspect serialized shared-memory initialization");
-    assert_eq!(state, (1, 1));
+    let observed = (callback_runs.load(Ordering::SeqCst), state.0, state.1);
+    assert_eq!(observed, (1, 1, 1));
 }
 
 #[cfg(target_os = "linux")]
