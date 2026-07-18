@@ -54,13 +54,13 @@ fn contract() -> ReleaseAuditContract {
       },
       {
         name: "Rust test",
-        job_id: "rust-builds",
-        matrix_kind: "test",
+        job_id: "rust-test",
+        matrix_kind: "",
         proofs: ["rust-audit"],
         steps: [
           proof_step(
             "release-audit-rust-test",
-            "matrix.kind == 'test'",
+            "",
             "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
             {HARN_LLM_CALLS_DISABLED: "1"},
           ),
@@ -287,16 +287,20 @@ pipeline test_release_audit_ci_contract_drift(task) {
         steps: [{id: "release-audit-package", run: "./scripts/verify_crate_packages.sh"}],
       },
       "rust-builds": {
-        strategy: {matrix: {include: [{kind: "lint", name: "Rust lint"}, {kind: "test", name: "Rust test"}]}},
+        strategy: {matrix: {include: [{kind: "lint", name: "Rust lint"}, {kind: "behavior", name: "Behavior build"}]}},
         steps: [
           {
             id: "release-audit-rust-lint",
             if: "matrix.kind == 'lint'",
             run: "./scripts/ci/run_rust_lint_lane.sh",
           },
+        ],
+      },
+      "rust-test": {
+        name: "Rust test",
+        steps: [
           {
             id: "release-audit-rust-test",
-            if: "matrix.kind == 'test'",
             env: {HARN_LLM_CALLS_DISABLED: "1"},
             run: "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
           },
@@ -325,9 +329,9 @@ pipeline test_release_audit_ci_contract_drift(task) {
         ...ci,
         jobs: {
           ...ci.jobs,
-          "rust-builds": {
-            ...ci.jobs["rust-builds"],
-            steps: ci.jobs["rust-builds"].steps
+          "rust-test": {
+            ...ci.jobs["rust-test"],
+            steps: ci.jobs["rust-test"].steps
               .map(
               { step ->
                 if step.id == "release-audit-rust-test" {
@@ -350,9 +354,9 @@ pipeline test_release_audit_ci_contract_drift(task) {
         ...ci,
         jobs: {
           ...ci.jobs,
-          "rust-builds": {
-            ...ci.jobs["rust-builds"],
-            steps: ci.jobs["rust-builds"].steps
+          "rust-test": {
+            ...ci.jobs["rust-test"],
+            steps: ci.jobs["rust-test"].steps
               .map(
               { step ->
                 if step.id == "release-audit-rust-test" {
@@ -375,7 +379,10 @@ pipeline test_release_audit_ci_contract_drift(task) {
         ...ci,
         jobs: {
           ...ci.jobs,
-          "rust-builds": {...ci.jobs["rust-builds"], strategy: {matrix: {include: [{kind: "lint", name: "Rust lint"}]}}},
+          "rust-builds": {
+            ...ci.jobs["rust-builds"],
+            strategy: {matrix: {include: [{kind: "behavior", name: "Behavior build"}]}},
+          },
         },
       },
     ).reason,

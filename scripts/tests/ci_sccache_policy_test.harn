@@ -50,6 +50,12 @@ fn workflow() {
     "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
     "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
   )
+  const test = persistent_job(
+    gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
+    "workspace-behavior",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+  )
   return {
     jobs: {
       "package-audit": persistent_job(
@@ -63,16 +69,25 @@ fn workflow() {
         strategy: {
           matrix: {
             include: [
-              {runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
-              {runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-behavior"},
+              {kind: "lint", runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
+              {kind: "behavior", runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-behavior"},
             ],
           },
         },
         steps: rust.steps
           + [
-          {name: "Build portable behavior payload", env: {CARGO_BUILD_JOBS: "4"}},
-          {name: "Run full environment-neutral test suite", env: {CARGO_BUILD_JOBS: "4"}},
+          {
+            name: "Build portable behavior payload",
+            if: "matrix.kind == 'behavior'",
+            env: {CARGO_BUILD_JOBS: "4"},
+          },
         ],
+      },
+      "rust-test": {
+        ...test,
+        needs: ["changes", "rust-builds"],
+        steps: test.steps
+          + [{name: "Run full environment-neutral test suite", env: {CARGO_BUILD_JOBS: "4"}}],
       },
     },
   }
@@ -90,6 +105,7 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
     jobs: {
       "package-audit": {"runs-on": "ubuntu-latest", steps: []},
       "rust-builds": {"runs-on": "ubuntu-latest", steps: []},
+      "rust-test": {"runs-on": "ubuntu-latest", steps: []},
       surprise: {steps: [{uses: "./.github/actions/sccache"}]},
     },
   }
@@ -102,4 +118,38 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
   )
   assert(errors.contains("ci.yml:package-audit must cap persistent sccache at 15G"))
   assert(errors.contains("ci.yml:surprise uses persistent sccache without a lane policy"))
+}
+
+@test
+pipeline test_rejects_test_consumer_that_cannot_reuse_the_completed_producer(task) {
+  const valid = workflow()
+  const test = valid.jobs["rust-test"]
+  const invalid_cache = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-test": {
+        ...test,
+        steps: test.steps
+          .map(
+          { step ->
+            if step.uses == "./.github/actions/sccache" {
+              {...step, with: {...step.with, "cache-key": "cold-test-cache"}}
+            } else {
+              step
+            }
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const cache_errors = ci_sccache_policy_errors(sccache_action(), invalid_cache)
+  assert(cache_errors.contains("ci.yml:rust-test must reuse the producer's workspace-behavior cache"))
+  const invalid_order = {...valid, jobs: {...valid.jobs, "rust-test": {...test, needs: ["changes"]}}}
+  const order_errors = ci_sccache_policy_errors(sccache_action(), invalid_order)
+  assert(
+    order_errors
+      .contains("ci.yml:rust-test must wait for rust-builds before reusing its persistent cache"),
+  )
 }
