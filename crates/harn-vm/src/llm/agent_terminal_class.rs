@@ -2,9 +2,10 @@
 //!
 //! One place classifies *why* a turn ended into a stable typed
 //! [`AgentTerminalClass`] — `context_overflow`, `provider_misconfigured`,
-//! `provider_unavailable`, `rate_limited`, `timeout`, `tool_policy_rejected`,
-//! `host_bridge_unimplemented`, `agent_loop_protocol_failure`, or the
-//! `generic_throw` fallback. A structured error envelope (typed `category` /
+//! `provider_unavailable`, `rate_limited`, `timeout`, `resource_busy`,
+//! `tool_policy_rejected`, `host_bridge_unimplemented`,
+//! `agent_loop_protocol_failure`, or the `generic_throw` fallback. A structured
+//! error envelope (typed `category` /
 //! `reason` / `code` fields) is authoritative; legacy free-text matching is a
 //! Harn-side fallback only. `host_agent_session_finalize` consumes the class
 //! both to shape the terminal transcript event and to split an error into
@@ -31,6 +32,7 @@ pub enum AgentTerminalClass {
     ProviderUnavailable,
     RateLimited,
     Timeout,
+    ResourceBusy,
     ToolPolicyRejected,
     HostBridgeUnimplemented,
     AgentLoopProtocolFailure,
@@ -38,12 +40,13 @@ pub enum AgentTerminalClass {
 }
 
 impl AgentTerminalClass {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
         Self::RateLimited,
         Self::Timeout,
+        Self::ResourceBusy,
         Self::ToolPolicyRejected,
         Self::HostBridgeUnimplemented,
         Self::AgentLoopProtocolFailure,
@@ -57,6 +60,7 @@ impl AgentTerminalClass {
             Self::ProviderUnavailable => "provider_unavailable",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
+            Self::ResourceBusy => "resource_busy",
             Self::ToolPolicyRejected => "tool_policy_rejected",
             Self::HostBridgeUnimplemented => "host_bridge_unimplemented",
             Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
@@ -82,6 +86,7 @@ impl AgentTerminalClass {
             "provider_unavailable" => Some(Self::ProviderUnavailable),
             "rate_limited" => Some(Self::RateLimited),
             "timeout" => Some(Self::Timeout),
+            "resource_busy" => Some(Self::ResourceBusy),
             "tool_policy_rejected" => Some(Self::ToolPolicyRejected),
             "host_bridge_unimplemented" => Some(Self::HostBridgeUnimplemented),
             "agent_loop_protocol_failure" => Some(Self::AgentLoopProtocolFailure),
@@ -162,6 +167,7 @@ pub fn agent_terminal_class(
                 | "timeout"
                 | "timed_out"
                 | "deadline_exceeded"
+                | "resource_busy"
                 | "tool_policy_rejected"
                 | "tool_rejected"
                 | "permission_denied"
@@ -190,6 +196,9 @@ fn agent_terminal_class_from_structured_error(
     }
     if terminal_error_signal_matches(error, |signal| signal == "no_llm_call") {
         return Some(AgentTerminalClass::ProviderMisconfigured);
+    }
+    if terminal_error_signal_matches(error, |signal| signal == "resource_busy") {
+        return Some(AgentTerminalClass::ResourceBusy);
     }
     if terminal_error_signal_matches(error, |signal| {
         matches!(signal, "tool_rejected" | "egress_blocked")
@@ -294,6 +303,7 @@ fn terminal_class_from_exact_signal(signal: &str) -> Option<AgentTerminalClass> 
         "provider_unavailable" => Some(AgentTerminalClass::ProviderUnavailable),
         "rate_limit" | "rate_limited" => Some(AgentTerminalClass::RateLimited),
         "timeout" | "timed_out" | "deadline_exceeded" => Some(AgentTerminalClass::Timeout),
+        "resource_busy" => Some(AgentTerminalClass::ResourceBusy),
         "tool_policy_rejected" | "tool_rejected" | "permission_denied" | "policy_denied" => {
             Some(AgentTerminalClass::ToolPolicyRejected)
         }
@@ -413,6 +423,7 @@ mod tests {
             ),
             (AgentTerminalClass::RateLimited, "rate_limited"),
             (AgentTerminalClass::Timeout, "timeout"),
+            (AgentTerminalClass::ResourceBusy, "resource_busy"),
             (
                 AgentTerminalClass::ToolPolicyRejected,
                 "tool_policy_rejected",
@@ -464,6 +475,10 @@ mod tests {
             (
                 json!({"terminal_class": "timeout"}),
                 AgentTerminalClass::Timeout,
+            ),
+            (
+                json!({"category": "resource_busy"}),
+                AgentTerminalClass::ResourceBusy,
             ),
             (
                 json!({"terminal_class": "host_bridge_unimplemented"}),

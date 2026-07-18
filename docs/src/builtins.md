@@ -2150,6 +2150,7 @@ distinguish new failure modes.
 | `overloaded` | Upstream provider is shedding load (HTTP 503 / 529). Distinct from `rate_limit`: no quota was exceeded and the provider recovers on its own |
 | `server_error` | Provider-side 5xx (500, 502) that is not specifically overload |
 | `transient_network` | Network-level transient failure — connection reset, DNS hiccup, partial stream. Retryable but not provider-status-coded |
+| `resource_busy` | A shared local resource is temporarily unavailable, such as a contended database write lock |
 | `schema_validation` | LLM output failed schema validation. Retryable via `schema_retries` |
 | `schema_stream_aborted` | A streaming response was aborted because the partial content could not satisfy `output_schema`. Consumes one `schema_retries` slot; see `schema_stream_abort` |
 | `tool_error` | Tool execution failed |
