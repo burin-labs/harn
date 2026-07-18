@@ -1377,31 +1377,61 @@ fn enforce_process_cwd_for_policy(path: &Path, policy: &CapabilityPolicy) -> Res
     )))
 }
 
+/// Close a freshly built command's environment when a session capability
+/// profile is active.
+///
+/// This is the choke point that makes the hermetic contract structural rather
+/// than per-caller. Every spawn seam in the VM and in `harn-hostlib` reaches a
+/// child process through [`std_command_for`] / [`tokio_command_for`] /
+/// [`command_output`], so applying the resolver here means a new spawn site
+/// cannot silently opt out of it — which is exactly how the earlier leaks
+/// happened. Callers still layer their own `env` / `env_remove` on top
+/// afterward; those are explicit opt-ins and are intentionally preserved.
+///
+/// Sandbox confinement itself sets no environment variables (it is wrapper-exec
+/// / seccomp / AppContainer), so clearing here cannot weaken it.
+macro_rules! close_env_for_session {
+    ($command:expr) => {
+        if let Some(env) = crate::stdlib::process::session_closed_env(std::iter::empty())? {
+            $command.env_clear();
+            for (key, value) in env {
+                $command.env(key, value);
+            }
+        }
+    };
+}
+
 pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
-    let (policy, profile) = match active_sandbox_policy() {
-        Some(value) => value,
+    let mut command = match active_sandbox_policy() {
+        Some((policy, profile)) => {
+            build_std_command::<ActiveBackend>(program, args, &policy, profile)?
+        }
         None => {
             let mut command = Command::new(program);
             command.args(args);
-            return Ok(command);
+            command
         }
     };
-    build_std_command::<ActiveBackend>(program, args, &policy, profile)
+    close_env_for_session!(command);
+    Ok(command)
 }
 
 pub fn tokio_command_for(
     program: &str,
     args: &[String],
 ) -> Result<tokio::process::Command, VmError> {
-    let (policy, profile) = match active_sandbox_policy() {
-        Some(value) => value,
+    let mut command = match active_sandbox_policy() {
+        Some((policy, profile)) => {
+            build_tokio_command::<ActiveBackend>(program, args, &policy, profile)?
+        }
         None => {
             let mut command = tokio::process::Command::new(program);
             command.args(args);
-            return Ok(command);
+            command
         }
     };
-    build_tokio_command::<ActiveBackend>(program, args, &policy, profile)
+    close_env_for_session!(command);
+    Ok(command)
 }
 
 pub fn command_output(
@@ -1423,6 +1453,27 @@ pub fn command_output(
 
     let recording =
         crate::testbench::process_tape::start_recording(program, args, config.cwd.as_deref());
+
+    // Callers reach `command_output` with configs built several different ways
+    // (`process_command_config`, `ProcessCommandConfig::default()`, hand-rolled).
+    // Close the environment here rather than trusting each of them: a config
+    // that already went through the resolver carries `closed_env`, and anything
+    // else gets the profile applied now with its own `env` still winning.
+    let closed_config;
+    let config = if config.closed_env {
+        config
+    } else if let Some(env) =
+        crate::stdlib::process::session_closed_env(config.env.iter().cloned())?
+    {
+        closed_config = ProcessCommandConfig {
+            env,
+            closed_env: true,
+            ..config.clone()
+        };
+        &closed_config
+    } else {
+        config
+    };
 
     let output = match active_sandbox_policy() {
         Some((policy, profile)) => {
