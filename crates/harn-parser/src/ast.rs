@@ -98,7 +98,7 @@ pub enum Node {
     },
     Pipeline {
         name: String,
-        params: Vec<String>,
+        params: Vec<TypedParam>,
         return_type: Option<TypeExpr>,
         /// Declared exception channel: `throws E` / `throws (E1 | E2)`, parsed
         /// as a single [`TypeExpr`] (a `throws (E1 | E2)` clause is a
@@ -744,7 +744,7 @@ pub enum BindingPattern {
     Pair(String, String),
 }
 
-/// `_` is the discard binding name in `let`/`var`/destructuring positions.
+/// `_` is the discard binding name in `let`/`const`/destructuring positions.
 pub fn is_discard_name(name: &str) -> bool {
     name == "_"
 }

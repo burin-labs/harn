@@ -12,7 +12,7 @@
 // Exits 0 with `patch`, `minor`, or `major` on stdout.
 // Exits 1 on shape mismatch with a human-readable error on stderr.
 // Exits 2 when Cargo.toml and CHANGELOG.md already match (no bump needed).
-import { bump_type } from "std/semver"
+import { BumpKind, bump_type } from "std/semver"
 
 const CARGO_PATH = "Cargo.toml"
 
@@ -46,7 +46,7 @@ pub fn read_changelog_top_version() -> string {
  * loud error so the workflow stops early instead of producing a blank
  * stdout.
  */
-pub fn detect(current: string, target: string) -> string {
+pub fn detect(current: string, target: string) -> BumpKind {
   const kind = bump_type(current, target)
   if kind == nil {
     throw "${current} -> ${target} is not a single patch/minor/major bump"

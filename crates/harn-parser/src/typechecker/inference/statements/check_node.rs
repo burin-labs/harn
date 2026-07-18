@@ -469,7 +469,7 @@ impl TypeChecker {
                 } else {
                     // Each iteration binds the element; destructure against its
                     // type so dict/list patterns in `for`-`in` gain the same
-                    // inference as in `let`/`var`.
+                    // inference as in `let`/`const`.
                     let elem_source = iter_type
                         .as_ref()
                         .and_then(|ty| self.iterable_item_type(ty, scope));

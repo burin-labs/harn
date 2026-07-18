@@ -1,10 +1,6 @@
 import { command_run } from "std/command"
-import {
-  PersonaBlueprint,
-  PersonaBlueprintLowering,
-  PersonaPromptCompileReceipt,
-  persona_compile_prompt,
-} from "std/personas/compiler"
+import { PersonaBlueprint, PersonaBlueprintLowering } from "std/personas/compiler"
+import { PersonaPromptCompileReceipt, persona_compile_prompt } from "std/personas/prompt_compiler"
 import "std/schema"
 import {
   PERSONA_PROMPT_EVAL_ARTIFACT_SCHEMA,

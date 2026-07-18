@@ -566,10 +566,11 @@ pub fn grade_file(path) {
 }
 ```
 
-Top-level mutable `var` cross-fn mutation is not fully supported yet
-(each function closure captures its own value copy). If you need
-shared mutable state across functions, use atomics (`atomic(0)`,
-`atomic_add`, `atomic_get`) or a channel.
+Top-level mutable `let` bindings are shared across functions: a mutation
+in one function is visible to the others. For state mutated from
+`parallel`/`spawn` bodies, prefer atomics (`atomic(0)`, `atomic_add`,
+`atomic_get`) or a channel — concurrent branches share one cell and a
+plain read-modify-write races (see HARN-LNT-064).
 
 ## Attributes (`@name(...)`)
 
@@ -3869,11 +3870,12 @@ Nine opinionated modules wrap common LLM patterns:
   `judge_payload`, `verdict_normalize`, `schema_retry_nudge_for`.
 - `std/llm/prompts` — `system_prelude`, `tool_use_prelude`,
   `structured_output_preface`.
-- `std/llm/catalog` — `model_info(selector)`, `resolved_options(opts)`,
-  `has_capability(model, cap)`, `family_of(model_id)`,
-  `lineage_of(model_id)`, `complementary_reviewer(opts)`. Note:
-  Harn-side names are `model_info` / `resolved_options` to avoid
-  shadowing the same-named builtins.
+- `std/llm/catalog` — `model_info(selector)`, `execution_contract(selector)`,
+  `resolved_options(opts)`, `has_capability(model, cap)`,
+  `family_of(model_id)`, `lineage_of(model_id)`,
+  `complementary_reviewer(opts)`. `execution_contract` is the secret-free
+  durable receipt for an effective model route; it omits arbitrary operator
+  overlays. Harn-side names avoid shadowing the same-named builtins.
 
 Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/stdlib/llm-handlers.html).
 
@@ -4633,9 +4635,9 @@ mem.delete("github")
   (`cloud_get / cloud_set / cloud_delete` plus refresh-lock acquire/release);
   a cloud platform enforces RLS and backend-native refresh locking.
 - `custom({get, set, delete, with_refresh_lock?, id?})` validates that the
-  required handlers are callables and then dispatches to them. Closure capture
-  is by-value, so back the closures with a real store (HTTP, MCP, a cloud
-  platform) rather than a captured local.
+  required handlers are callables and then dispatches to them. Back the
+  closures with a real store (HTTP, MCP, a cloud platform) rather than a
+  captured local, so state survives restarts and is shared across sessions.
 
 Full reference: [`docs/src/stdlib/oauth-storage.md`](https://harnlang.com/stdlib/oauth-storage.html).
 

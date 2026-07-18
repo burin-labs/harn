@@ -166,7 +166,7 @@ pub(crate) struct LocalSlot {
 
 impl Drop for LocalSlot {
     fn drop(&mut self) {
-        // Slot locals hold script values directly (e.g. a `var` bound to a
+        // Slot locals hold script values directly (e.g. a `let` bound to a
         // deeply nested list). When a frame is torn down, the default
         // recursive drop of such a value would overflow the native stack and
         // abort the process. For the overwhelmingly common scalar slot this is
@@ -218,7 +218,7 @@ pub(crate) struct CallFrame {
     pub(crate) saved_source_dir: Option<std::path::PathBuf>,
     /// Module-local named functions available to symbolic calls within this frame.
     pub(crate) module_functions: Option<ModuleFunctionRegistry>,
-    /// Shared module-level env for top-level `var` / `let` bindings of
+    /// Shared module-level env for top-level `let` / `const` bindings of
     /// this frame's originating module. Looked up after `self.env` and
     /// before `self.globals` by `GetVar` / `SetVar`, giving each module
     /// its own live static state that persists across calls. See the

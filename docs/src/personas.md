@@ -239,9 +239,14 @@ activation layer does not itself enforce.
 Runtime extension loading includes root personas plus dependency personas whose
 activation still matches the installed package content and exported policy.
 Package or policy drift fails closed with a reactivation diagnostic; installing
-or inspecting a package alone never registers its triggers. Activated personas
-keep their qualified identity in trigger bindings and lifecycle state, and an
-explicit handler may address one as `persona://agents/reviewer`.
+or inspecting a package alone never registers its triggers. After activation,
+canonical root `[[triggers]]` rows that target the activated persona enter the
+runtime with their schedule, matching, secret, and provider policy intact;
+unrelated package triggers remain inert. The runtime qualifies the projected
+trigger ID and persona handler with the dependency alias, so an explicit handler
+may address the same persona as `persona://agents/reviewer` without colliding
+with another package's exports. Activated personas keep that qualified identity
+in trigger bindings and lifecycle state.
 The runtime compiles the entry and imports from the exact bytes captured by a
 successful content-hash check. Imports may cross into content-hashed
 dependencies pinned by the activated generation lock; paths outside that

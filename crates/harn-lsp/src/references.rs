@@ -70,7 +70,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 refs.push(snode.span);
             }
             for p in params {
-                if p == target_name {
+                if p.name == target_name {
                     refs.push(snode.span);
                 }
             }

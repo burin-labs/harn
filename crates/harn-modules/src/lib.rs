@@ -12,6 +12,7 @@ pub mod package_execution;
 mod package_imports;
 pub mod package_snapshot;
 pub mod personas;
+pub mod project_config;
 mod stdlib;
 
 pub use package_imports::{
