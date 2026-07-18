@@ -94,7 +94,7 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     };
     let completion = match wait_for_worker(worker).await {
         Ok(completion) => completion,
-        Err(error) => return print_error("host_lease_run_cargo", &error.to_string(), false),
+        Err(error) => return print_error("host_lease_run_cargo", &error, false),
     };
     match finalize_run(store, &run.run_id, completion) {
         Ok(exit) => exit,
