@@ -19,11 +19,26 @@
 //! a native-tuned model to copy into a JSON content string (the `line 0: <<`
 //! production-failure class is unrepresentable here).
 //!
+//! One deliberate exception rides on top of this invariant: the verbatim content
+//! lane (harn#5033, see [`verbatim`]). #5015 relocated payload fragility into
+//! JSON-string escaping, which a cheap model cannot hold across a
+//! backslash/newline-dense body. An object MAY declare an argument verbatim by
+//! setting its JSON string value to a heredoc opener (`<<TAG:N`); the matching
+//! count-anchored `<<TAG:N ... TAG` body then trails the JSON header and is
+//! decoded by the shared `scan_heredoc` authority (no second decoder). The
+//! declaration is in-JSON and the `:N` count closes the body, so it does NOT
+//! reopen the collision class above: a ```` ``` ````, a `<<EOF`, or the tag
+//! itself inside the counted body is just content. A block whose arguments are
+//! all ordinary strings is byte-identical to before.
+//!
 //! Downstream dispatch consumes the same `{ id, name, arguments }` record the
 //! tagged parser emits, so the agent loop / feedback / history are untouched.
 
 use super::syntax::preview_str;
 use super::TextToolParseResult;
+
+mod verbatim;
+use verbatim::VerbatimSegment;
 
 /// Canonical backtick fence used to open/close a fenced-JSON tool block.
 const BACKTICK_FENCE: &str = "```";
@@ -93,8 +108,9 @@ impl BlockError {
     }
 }
 
-/// One LAYER 0 block: the raw body bytes between the open and close fence and
-/// the 0-based line index of the open fence (for diagnostics).
+/// One LAYER 0 block: the JSON header text between the open and close fence
+/// (with any verbatim segments removed) and the 0-based line index of the open
+/// fence (for diagnostics).
 struct FenceBlock {
     body: String,
     open_line: usize,
@@ -102,6 +118,12 @@ struct FenceBlock {
     /// with a warning. Surfaced as a `protocol_violation` so telemetry sees
     /// drift while the turn progresses.
     drifted_opener: Option<String>,
+    /// Decoded verbatim segments (harn#5033), folded into the batch's args
+    /// before dispatch. Empty for a canonical pure-JSON block.
+    segments: Vec<VerbatimSegment>,
+    /// A structural failure in a verbatim segment frame (bad count,
+    /// unterminated). When set, the block fails loud instead of half-applying.
+    verbatim_error: Option<BlockError>,
 }
 
 /// Parse a model response under the fenced-JSON tool protocol.
@@ -127,7 +149,14 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
                  requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
             ));
         }
-        let (block_calls, block_errors) = parse_block_bodies(&block.body, block.open_line);
+        // A broken verbatim frame (harn#5033) is fail-loud: never dispatch a
+        // batch whose payload framing did not round-trip.
+        if let Some(err) = block.verbatim_error {
+            errors.push(err.into_message());
+            continue;
+        }
+        let (block_calls, block_errors) =
+            parse_block_bodies(&block.body, block.open_line, block.segments);
         for (name, arguments) in block_calls {
             calls.push(serde_json::json!({
                 "id": format!("tc_{}", calls.len()),
@@ -218,45 +247,35 @@ fn chunk_fence_blocks(src: &str) -> (Vec<FenceBlock>, String, Vec<String>, Vec<S
     let mut violations: Vec<String> = Vec::new();
     let errors: Vec<String> = Vec::new();
 
-    let lines: Vec<&str> = src.lines().collect();
-    let mut idx = 0usize;
-    while idx < lines.len() {
-        let line = lines[idx];
+    // Byte-offset walk (not `src.lines()`) so a verbatim segment's value can be
+    // sliced byte-exact, preserving `\r` in a CRLF payload. `line_index` tracks
+    // the 0-based opener line for diagnostics.
+    let mut cursor = 0usize;
+    let mut line_index = 0usize;
+    while cursor < src.len() {
+        let (line, _, next) = verbatim::line_at(src, cursor);
         match fence_open_kind(line) {
             Some(open) => {
-                let open_line = idx;
-                let mut body_lines: Vec<&str> = Vec::new();
-                let mut closed = false;
-                idx += 1;
-                while idx < lines.len() {
-                    if is_bare_fence(lines[idx], open.close_fence) {
-                        closed = true;
-                        idx += 1;
-                        break;
-                    }
-                    // A new fence-open line while still inside a block means the
-                    // model used the opener as a SEPARATOR between calls and never
-                    // closed the first block. Treat it as an implicit close and
-                    // reopen: end this block here without consuming the line, so
-                    // the outer loop starts a fresh block at the new opener. Safe
-                    // under the no-raw-newline invariant — a ```tool line cannot
-                    // sit inside a JSON string value.
-                    if fence_open_kind(lines[idx]).is_some() {
-                        break;
-                    }
-                    body_lines.push(lines[idx]);
-                    idx += 1;
-                }
-                let _ = closed; // EOF-before-close is handled by LAYER 1 balance check.
+                // The unified consumer is the single authority for the block's
+                // end and its verbatim segments: a ``` (or a ```tool separator,
+                // or the sentinel) INSIDE a count-anchored segment is content,
+                // while a ```tool separator in the header context is an implicit
+                // close + reopen (#5037), and a bare ``` closes the block.
+                let consumed = verbatim::consume_tool_block(src, next, open.close_fence);
                 blocks.push(FenceBlock {
-                    body: body_lines.join("\n"),
-                    open_line,
+                    body: consumed.header,
+                    open_line: line_index,
                     drifted_opener: open.drifted_opener,
+                    segments: consumed.segments,
+                    verbatim_error: consumed.error,
                 });
+                line_index += src[cursor..consumed.block_end].matches('\n').count();
+                cursor = consumed.block_end;
             }
             None => {
                 prose_lines.push(line);
-                idx += 1;
+                line_index += 1;
+                cursor = next;
             }
         }
     }
@@ -322,11 +341,6 @@ fn is_recoverable_tool_fence_drift(fence: &str, info: &str) -> bool {
         .is_some_and(|ch| ch.is_ascii_whitespace() || ch == '_' || ch == '-')
 }
 
-/// True when `line` is exactly a bare close fence matching the opener.
-fn is_bare_fence(line: &str, fence: &str) -> bool {
-    line.trim() == fence
-}
-
 /// Join leftover non-fence lines back into prose, trimming surrounding
 /// whitespace. Empty -> empty string.
 fn collapse_prose(lines: &[&str]) -> String {
@@ -352,10 +366,15 @@ fn collapse_prose(lines: &[&str]) -> String {
 fn parse_block_bodies(
     body: &str,
     open_line: usize,
+    segments: Vec<VerbatimSegment>,
 ) -> (Vec<(String, serde_json::Value)>, Vec<BlockError>) {
     let trimmed = body.trim();
     let mut calls = Vec::new();
     let mut errors = Vec::new();
+    // Verbatim segments (harn#5033) are matched to sentinel-valued arguments by
+    // name as each object is parsed; leftovers below are a header/segment
+    // mismatch that must fail loud rather than silently drop a payload.
+    let mut pool = segments;
     if trimmed.is_empty() {
         errors.push(BlockError::Unterminated { open_line });
         return (calls, errors);
@@ -372,7 +391,8 @@ fn parse_block_bodies(
             Some(Ok(value)) => {
                 saw_value = true;
                 match value {
-                    serde_json::Value::Object(map) => {
+                    serde_json::Value::Object(mut map) => {
+                        inject_verbatim_segments(&mut map, &mut pool);
                         match normalize_json_tool_call_object(map, false) {
                             Ok(call) => calls.push(call),
                             Err(err) => errors.push(err),
@@ -398,10 +418,43 @@ fn parse_block_bodies(
         }
     }
 
+    // A trailing heredoc no argument's value declared is a header/body mismatch —
+    // fail loud so a stray body is never silently dropped.
+    for leftover in &pool {
+        errors.push(BlockError::InvalidJson {
+            detail: format!(
+                "a verbatim heredoc `{}` trails the block but no argument's value declared it",
+                leftover.opener
+            ),
+        });
+    }
+
     if !saw_value && errors.is_empty() {
         errors.push(BlockError::Unterminated { open_line });
     }
     (calls, errors)
+}
+
+/// Bind each argument in `obj`'s nested `args`/`arguments` map whose value is a
+/// heredoc opener to its trailing body, claimed from `pool` (harn#5033). A no-op
+/// when the object has no nested args object or declares nothing verbatim.
+fn inject_verbatim_segments(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    pool: &mut Vec<VerbatimSegment>,
+) {
+    let args_key = if obj.contains_key("args") {
+        "args"
+    } else if obj.contains_key("arguments") {
+        "arguments"
+    } else {
+        return;
+    };
+    if let Some(args) = obj
+        .get_mut(args_key)
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        verbatim::apply_segments(args, pool);
+    }
 }
 
 /// Normalize one JSON tool-call object into Harn's `{ name, arguments }`
@@ -450,8 +503,9 @@ fn parse_bare_json_tool_call(body: &str) -> Result<(String, serde_json::Value), 
         return Err(BlockError::ExpectedSingleObject);
     }
     // Bare (un-fenced) recovery is single-object only: require exactly one clean
-    // object with no trailing/partial bytes before accepting it.
-    let (calls, errors) = parse_block_bodies(body, 0);
+    // object with no trailing/partial bytes before accepting it. No fenced block
+    // means no verbatim segments.
+    let (calls, errors) = parse_block_bodies(body, 0, Vec::new());
     match (calls.len(), errors.is_empty()) {
         (1, true) => Ok(calls.into_iter().next().unwrap()),
         _ => Err(BlockError::ExpectedSingleObject),

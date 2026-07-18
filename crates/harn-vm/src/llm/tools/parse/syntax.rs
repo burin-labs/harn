@@ -433,6 +433,7 @@ pub(crate) struct HeredocSpan {
 
 /// Why a `<<` opener is not a complete heredoc. Carries the tag where one was
 /// read so the value parser can reproduce its precise model-facing diagnostics.
+#[derive(Debug)]
 pub(crate) enum HeredocError {
     /// `<<` was not followed by an identifier tag (e.g. a bare shift operator).
     MissingTag,
@@ -474,6 +475,25 @@ pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, Hered
     if has_quote && bytes.get(pos).copied() == quote_char {
         pos += 1;
     }
+    // Opt-in count-anchored close (harn#5033): `<<TAG:N` declares exactly N body
+    // lines, so the close is defined by COUNT, not by the first line that matches
+    // the tag. A declared count is collision-proof — a bare `TAG` line, a ```` ```
+    // ````, or any other byte inside the body is content, which an author-chosen
+    // tag close (the legacy form) can never guarantee. This is the one addition
+    // the fenced-JSON escaping-tail needs: an escape-free body channel whose close
+    // cannot be forged by the payload.
+    let mut declared_lines: Option<usize> = None;
+    if bytes.get(pos) == Some(&b':') {
+        let digits_start = pos + 1;
+        let mut digits_end = digits_start;
+        while bytes.get(digits_end).is_some_and(u8::is_ascii_digit) {
+            digits_end += 1;
+        }
+        if digits_end > digits_start {
+            declared_lines = src[digits_start..digits_end].parse::<usize>().ok();
+            pos = digits_end;
+        }
+    }
     if bytes.get(pos) == Some(&b'\r') {
         pos += 1;
     }
@@ -492,6 +512,9 @@ pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, Hered
     }
     pos += 1;
     let content_start = pos;
+    if let Some(declared) = declared_lines {
+        return scan_counted_heredoc_body(src, content_start, tag, declared);
+    }
     while pos < bytes.len() {
         let line_start = pos;
         while let Some(byte) = bytes.get(pos) {
@@ -527,6 +550,61 @@ pub(crate) fn scan_heredoc(src: &str, start: usize) -> Result<HeredocSpan, Hered
         }
     }
     unterminated_or_implicit_close(src, content_start, tag)
+}
+
+/// Scan the body of a count-anchored `<<TAG:N` heredoc (harn#5033): exactly `n`
+/// physical lines starting at `content_start`, then a line that — after leading
+/// whitespace — is the closing `tag` at a word boundary.
+///
+/// The returned `content` is the BYTE-EXACT slice of those `n` newline-terminated
+/// lines, INCLUDING each line's trailing `\n` (so a payload's final newline and
+/// any `\r` in a CRLF line survive; unlike the legacy tag-close form, nothing is
+/// stripped). Because the close is fixed by the count, a bare `TAG` line, a
+/// ```` ``` ````, or any other byte inside those `n` lines is content, never an
+/// early close. A count that does not land the closing tag on line `n + 1` — the
+/// model miscounted, or the body was truncated — is a fail-loud `Unterminated`,
+/// never a half-applied truncated body.
+fn scan_counted_heredoc_body(
+    src: &str,
+    content_start: usize,
+    tag: String,
+    n: usize,
+) -> Result<HeredocSpan, HeredocError> {
+    let bytes = src.as_bytes();
+    let mut pos = content_start;
+    for _ in 0..n {
+        while pos < bytes.len() && bytes[pos] != b'\n' {
+            pos += 1;
+        }
+        if pos >= bytes.len() {
+            // Fewer than `n` newline-terminated lines before end of input.
+            return Err(HeredocError::Unterminated { tag });
+        }
+        pos += 1; // consume the line's `\n`
+    }
+    let content_end = pos;
+    // Line `n + 1` must be the closing tag; anything else means the count was
+    // wrong (or the body truncated) — reject rather than dispatch a wrong slice.
+    let line_start = pos;
+    while pos < bytes.len() && bytes[pos] != b'\n' {
+        pos += 1;
+    }
+    let line = &src[line_start..pos];
+    let leading_ws_len = line.len() - line.trim_start().len();
+    let after_ws = &line[leading_ws_len..];
+    let closes = after_ws.strip_prefix(&tag).is_some_and(|rest| {
+        rest.chars()
+            .next()
+            .is_none_or(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'))
+    });
+    if !closes {
+        return Err(HeredocError::Unterminated { tag });
+    }
+    Ok(HeredocSpan {
+        content: content_start..content_end,
+        end: line_start + leading_ws_len + tag.len(),
+        escaped: false,
+    })
 }
 
 /// Recover a heredoc whose closing tag the model botched (indented, misspelled,
@@ -987,5 +1065,84 @@ pub(crate) fn parse_ts_call_from(
             "TOOL CALL PARSE ERROR: `{name}(...)` — expected an object literal argument, \
              got `{other}`. Wrap the value in braces: `{name}({{ key: value }})`."
         )),
+    }
+}
+
+#[cfg(test)]
+mod counted_heredoc_tests {
+    //! Executable adversarial negatives for the `<<TAG:N` count-anchored close
+    //! (harn#5033). These are the tests a non-author review runs to clear the
+    //! edit-surface change: byte-exact round-trip, collision inputs where the
+    //! body contains the tag / a fence, and fail-loud on a wrong count.
+    use super::{scan_heredoc, HeredocError};
+
+    /// The decoded body of a heredoc at the start of `src`, or `Err` on any
+    /// heredoc error (the fail-loud path).
+    fn body(src: &str) -> Result<&str, HeredocError> {
+        scan_heredoc(src, 0).map(|span| &src[span.content])
+    }
+
+    #[test]
+    fn counted_body_is_byte_exact_including_trailing_newline() {
+        // 3 newline-terminated lines: the value keeps every byte, trailing \n included.
+        assert_eq!(body("<<E:3\na\nb\nc\nE").unwrap(), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn counted_close_is_by_count_so_a_tag_line_in_the_body_is_content() {
+        // A bare `E` line at body position 2 (< N) is content, not an early close.
+        // The author-chosen-tag legacy close could never guarantee this.
+        assert_eq!(body("<<E:3\na\nE\nc\nE").unwrap(), "a\nE\nc\n");
+    }
+
+    #[test]
+    fn counted_body_may_contain_a_fence_and_the_sentinel_bytes() {
+        let src = "<<E:4\n```\n<<EOF\n}\n</tool>\nE";
+        assert_eq!(body(src).unwrap(), "```\n<<EOF\n}\n</tool>\n");
+    }
+
+    #[test]
+    fn counted_crlf_body_keeps_every_carriage_return() {
+        assert_eq!(body("<<E:2\na\r\nb\r\nE").unwrap(), "a\r\nb\r\n");
+    }
+
+    #[test]
+    fn counted_empty_body_is_valid() {
+        assert_eq!(body("<<E:0\nE").unwrap(), "");
+    }
+
+    #[test]
+    fn wrong_count_too_high_fails_loud_never_truncates() {
+        // Declares 5 lines but only 2 precede the close: the close tag is not on
+        // line 6, so this is a fail-loud Unterminated, never a dispatched slice.
+        assert!(matches!(
+            body("<<E:5\na\nb\nE"),
+            Err(HeredocError::Unterminated { .. })
+        ));
+    }
+
+    #[test]
+    fn wrong_count_too_low_fails_loud() {
+        // Declares 1 line but the real body is 3: line 2 (`b`) is not the close
+        // tag, so the count did not land the close — reject.
+        assert!(matches!(
+            body("<<E:1\na\nb\nc\nE"),
+            Err(HeredocError::Unterminated { .. })
+        ));
+    }
+
+    #[test]
+    fn truncated_before_count_fails_loud() {
+        // End of input before N newline-terminated lines: never half-apply.
+        assert!(matches!(
+            body("<<E:3\na\nb"),
+            Err(HeredocError::Unterminated { .. })
+        ));
+    }
+
+    #[test]
+    fn legacy_uncounted_heredoc_is_unchanged() {
+        // No `:N` -> the author-chosen-tag close, with its trailing-newline strip.
+        assert_eq!(body("<<E\na\nb\nE").unwrap(), "a\nb");
     }
 }

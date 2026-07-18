@@ -748,3 +748,223 @@ fn batch_single_object_is_one_call() {
     assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
     assert_eq!(out.calls.len(), 1);
 }
+
+// ─── The verbatim content lane (harn#5033) ──────────────────────────────────
+
+/// Wrap `payload` (byte-exact intended file content) into a ```tool block whose
+/// `arg` value is the count-anchored heredoc opener `<<TAG:N` and whose matching
+/// `<<TAG:N ... TAG` body trails the JSON header. `payload` must be
+/// newline-terminated; `N` is exactly its newline count. Reuses the shared
+/// scan_heredoc grammar — no bespoke sentinel.
+fn verbatim_block(
+    name: &str,
+    other_args_json: &str,
+    arg: &str,
+    tag: &str,
+    payload: &str,
+) -> String {
+    let n = payload.matches('\n').count();
+    let sep = if other_args_json.is_empty() { "" } else { ", " };
+    format!(
+        "```tool\n{{ \"name\": \"{name}\", \"args\": {{ {other_args_json}{sep}\"{arg}\": \"<<{tag}:{n}\" }} }}\n\
+         <<{tag}:{n}\n{payload}{tag}\n```",
+    )
+}
+
+// GATE (harn#5033): tc_19's ~921-line Zig test suite — the payload the 2× JSON
+// backslash transform mangled — round-trips byte-exact through the count-anchored
+// heredoc. The real rejected-edit body from the P3 run (249 `\`, 611 `"`).
+#[test]
+fn tc19_zig_body_round_trips_byte_exact() {
+    let payload = include_str!("fixtures/tc19_zig_tests.zig");
+    let block = verbatim_block(
+        "edit_file",
+        "\"path\": \"src/writer.zig\"",
+        "new_string",
+        "Z",
+        payload,
+    );
+    let out = parse(&block);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 1);
+    assert_eq!(out.calls[0]["name"], "edit_file");
+    assert_eq!(arg(&out.calls[0], "path").unwrap(), "src/writer.zig");
+    assert_eq!(
+        arg(&out.calls[0], "new_string").unwrap().as_str().unwrap(),
+        payload
+    );
+}
+
+// ADVERSARIAL: the body contains a line that is exactly the close tag. The count
+// is authoritative, so the interior tag line is content, not an early close.
+#[test]
+fn verbatim_body_containing_the_tag_line_round_trips() {
+    let payload = "before\nEND\nmiddle\nEND\nafter\n";
+    let block = verbatim_block(
+        "write_file",
+        "\"path\": \"a.txt\"",
+        "content",
+        "END",
+        payload,
+    );
+    let out = parse(&block);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(
+        arg(&out.calls[0], "content").unwrap().as_str().unwrap(),
+        payload
+    );
+}
+
+// ADVERSARIAL: every #5015-promised literal — a bare ``` fence, `<<EOF`, `}`,
+// `</tool>`, `</tool_calls>`, backticks — appears in the body and survives.
+#[test]
+fn verbatim_body_with_all_promised_literals_round_trips() {
+    let payload = "```\n<<EOF\n}\n</tool>\n</tool_calls>\nconst raw = `go run`;\n```\nEOF\n";
+    let block = verbatim_block("write_file", "\"path\": \"b.txt\"", "content", "T", payload);
+    let out = parse(&block);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 1);
+    assert_eq!(
+        arg(&out.calls[0], "content").unwrap().as_str().unwrap(),
+        payload
+    );
+}
+
+// ADVERSARIAL: an empty body (`<<T:0`) is a valid segment.
+#[test]
+fn verbatim_empty_body_round_trips() {
+    let block = verbatim_block("write_file", "\"path\": \"empty.txt\"", "content", "T", "");
+    let out = parse(&block);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(arg(&out.calls[0], "content").unwrap().as_str().unwrap(), "");
+}
+
+// ADVERSARIAL: a CRLF body keeps every `\r` (scan_heredoc's byte-exact count slice).
+#[test]
+fn verbatim_crlf_body_round_trips() {
+    let payload = "line one\r\nline two\r\n\r\nline four\r\n";
+    let block = verbatim_block(
+        "write_file",
+        "\"path\": \"crlf.txt\"",
+        "content",
+        "T",
+        payload,
+    );
+    let out = parse(&block);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(
+        arg(&out.calls[0], "content").unwrap().as_str().unwrap(),
+        payload
+    );
+}
+
+// A ```tool separator inside a count-anchored body is content, NOT the #5037
+// double-fence split — the count protects the body interior.
+#[test]
+fn verbatim_tool_fence_in_body_is_content_not_split() {
+    let payload = "line a\n```tool\nline c\n";
+    let block = verbatim_block("write_file", "\"path\": \"d.txt\"", "content", "T", payload);
+    let out = parse(&block);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 1);
+    assert_eq!(
+        arg(&out.calls[0], "content").unwrap().as_str().unwrap(),
+        payload
+    );
+}
+
+// Two verbatim arguments in one call bind by their opener string; the trailing
+// bodies are matched to the args regardless of JSON key order.
+#[test]
+fn verbatim_two_bodies_matched_by_opener() {
+    let block = "```tool\n{ \"name\": \"edit_file\", \"args\": { \"path\": \"x.rs\", \
+         \"old_string\": \"<<OLD:1\", \"new_string\": \"<<NEW:2\" } }\n\
+         <<NEW:2\nNEW a\\b\nNEW c\nNEW\n\
+         <<OLD:1\nOLD \"q\"\nOLD\n```";
+    let out = parse(block);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 1);
+    assert_eq!(
+        arg(&out.calls[0], "new_string").unwrap().as_str().unwrap(),
+        "NEW a\\b\nNEW c\n"
+    );
+    assert_eq!(
+        arg(&out.calls[0], "old_string").unwrap().as_str().unwrap(),
+        "OLD \"q\"\n"
+    );
+}
+
+// Verbatim coexists with #5037 batching: a batched read object plus a verbatim
+// edit object in one block both dispatch, the body binding only the edit.
+#[test]
+fn verbatim_coexists_with_batched_object() {
+    let block = "```tool\n{ \"name\": \"read_file\", \"args\": { \"path\": \"a.zig\" } }\n\
+         { \"name\": \"write_file\", \"args\": { \"path\": \"b.zig\", \"content\": \"<<C:1\" } }\n\
+         <<C:1\nconst x = \"a\\tb\";\nC\n```";
+    let out = parse(block);
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 2, "calls: {:?}", out.calls);
+    assert_eq!(out.calls[0]["name"], "read_file");
+    assert_eq!(out.calls[1]["name"], "write_file");
+    assert_eq!(
+        arg(&out.calls[1], "content").unwrap().as_str().unwrap(),
+        "const x = \"a\\tb\";\n"
+    );
+}
+
+// A wrong declared count fails loud (the close tag is not on line N+1) and never
+// dispatches a half-applied call.
+#[test]
+fn verbatim_wrong_count_fails_loud() {
+    // Declares 5 lines but only two precede the close tag.
+    let block = "```tool\n{ \"name\": \"write_file\", \"args\": { \"path\": \"a\", \"content\": \"<<C:5\" } }\n\
+         <<C:5\nl1\nl2\nC\n```";
+    let out = parse(block);
+    assert!(out.calls.is_empty(), "must not dispatch: {:?}", out.calls);
+    assert!(
+        out.errors
+            .iter()
+            .any(|e| e.contains("recount") || e.contains("did not close")),
+        "expected actionable recount error, got {:?}",
+        out.errors
+    );
+}
+
+// #5015 PRESERVATION: an argument whose value is literally `<<EOF` with NO
+// trailing heredoc body stays a literal string — never misread as a declaration.
+#[test]
+fn literal_heredoc_opener_value_without_body_survives() {
+    let out = parse("```tool\n{\"name\": \"write_file\", \"args\": {\"path\": \"a\", \"content\": \"<<EOF\"}}\n```");
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 1);
+    assert_eq!(
+        arg(&out.calls[0], "content").unwrap().as_str().unwrap(),
+        "<<EOF"
+    );
+}
+
+// A trailing heredoc no argument declared is a fail-loud mismatch, never dropped.
+#[test]
+fn orphan_trailing_heredoc_fails_loud() {
+    let block = "```tool\n{ \"name\": \"write_file\", \"args\": { \"path\": \"a\", \"content\": \"x\" } }\n\
+         <<ORPHAN:1\nstray\nORPHAN\n```";
+    let out = parse(block);
+    assert!(
+        !out.errors.is_empty(),
+        "expected a fail-loud mismatch, got {:?}",
+        out.errors
+    );
+}
+
+// A pure-JSON block with no heredoc-opener argument is byte-identical #5015/
+// #5037 behavior — the verbatim lane is strictly additive.
+#[test]
+fn pure_json_block_is_unchanged_by_verbatim_lane() {
+    let out = parse("```tool\n{\"name\": \"write_file\", \"args\": {\"path\": \"a\", \"content\": \"x\\ny\"}}\n```");
+    assert!(out.errors.is_empty(), "errors: {:?}", out.errors);
+    assert_eq!(out.calls.len(), 1);
+    assert_eq!(
+        arg(&out.calls[0], "content").unwrap().as_str().unwrap(),
+        "x\ny"
+    );
+}
