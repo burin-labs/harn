@@ -15,11 +15,18 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use crate::runtime_sqlite::{
+    initialize_runtime_sqlite, initialize_transient_runtime_sqlite, RuntimeSqliteSchema,
+    DEFAULT_BUSY_TIMEOUT,
+};
+
 use super::backend::{AtomRef, FlowSlice, GitExportReceipt, ShipReceipt, VcsBackend};
 use super::{Atom, AtomId, Intent, IntentId, Slice as DerivedSlice, SliceId, VcsBackendError};
 
 const SQLITE_ATOM_REF_PREFIX: &str = "sqlite://atoms";
 const SQLITE_SLICE_REF_PREFIX: &str = "sqlite://slices";
+const SQLITE_SCHEMA: RuntimeSqliteSchema =
+    RuntimeSqliteSchema::new("harn_flow", 1, FLOW_SCHEMA_SQL);
 
 /// Per-site causal clock vector for one principal/persona stream.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,8 +91,9 @@ impl SqliteFlowStore {
         site_id: impl Into<String>,
     ) -> Result<Self, VcsBackendError> {
         let site_id = normalize_site_id(site_id.into())?;
+        let path = path.as_ref();
         let conn = Connection::open(path)?;
-        initialize_schema(&conn)?;
+        initialize_file_schema(&conn)?;
         Ok(Self {
             site_id,
             conn: Mutex::new(conn),
@@ -96,7 +104,7 @@ impl SqliteFlowStore {
     pub fn in_memory(site_id: impl Into<String>) -> Result<Self, VcsBackendError> {
         let site_id = normalize_site_id(site_id.into())?;
         let conn = Connection::open_in_memory()?;
-        initialize_schema(&conn)?;
+        initialize_transient_schema(&conn)?;
         Ok(Self {
             site_id,
             conn: Mutex::new(conn),
@@ -598,13 +606,7 @@ impl VcsBackend for SqliteFlowStore {
     }
 }
 
-fn initialize_schema(conn: &Connection) -> Result<(), VcsBackendError> {
-    conn.execute_batch(
-        r"
-        PRAGMA foreign_keys = ON;
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
-
+const FLOW_SCHEMA_SQL: &str = r"
         CREATE TABLE IF NOT EXISTS atoms (
             id BLOB PRIMARY KEY CHECK(length(id) = 32),
             principal TEXT NOT NULL,
@@ -731,8 +733,22 @@ fn initialize_schema(conn: &Connection) -> Result<(), VcsBackendError> {
         BEGIN
             SELECT RAISE(ABORT, 'slice atom edges are append-only');
         END;
-        ",
-    )?;
+        ";
+
+fn initialize_file_schema(conn: &Connection) -> Result<(), VcsBackendError> {
+    configure_flow_connection(conn)?;
+    initialize_runtime_sqlite(conn, DEFAULT_BUSY_TIMEOUT, &SQLITE_SCHEMA)
+        .map_err(|error| VcsBackendError::Sqlite(error.to_string()))
+}
+
+fn initialize_transient_schema(conn: &Connection) -> Result<(), VcsBackendError> {
+    configure_flow_connection(conn)?;
+    initialize_transient_runtime_sqlite(conn, DEFAULT_BUSY_TIMEOUT, &SQLITE_SCHEMA)
+        .map_err(|error| VcsBackendError::Sqlite(error.to_string()))
+}
+
+fn configure_flow_connection(conn: &Connection) -> Result<(), VcsBackendError> {
+    conn.pragma_update(None, "foreign_keys", true)?;
     Ok(())
 }
 
@@ -1024,6 +1040,7 @@ mod tests {
     use super::*;
     use crate::flow::{Approval, CoverageMap, PredicateHash, Slice, SliceStatus, TestId, TextOp};
     use ed25519_dalek::SigningKey;
+    use tempfile::TempDir;
     use time::OffsetDateTime;
 
     fn key(seed: u8) -> SigningKey {
@@ -1054,6 +1071,32 @@ mod tests {
             &persona,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn file_store_uses_versioned_runtime_sqlite_contract() {
+        let temp = TempDir::new().unwrap();
+        let store = SqliteFlowStore::open(temp.path().join("flow.sqlite"), "site-a").unwrap();
+        let conn = store.lock_conn().unwrap();
+
+        let journal_mode = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))
+            .unwrap();
+        let foreign_keys = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+            .unwrap();
+        let schema_version = conn
+            .query_row(
+                "SELECT version FROM _harn_sqlite_schema_versions WHERE name = ?1",
+                ["harn_flow"],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+
+        assert_eq!(
+            (journal_mode, foreign_keys, schema_version),
+            ("wal".to_string(), 1, 1)
+        );
     }
 
     #[test]

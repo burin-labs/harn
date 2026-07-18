@@ -311,8 +311,9 @@ async fn sqlite_upgrade_cleans_pre_foreign_key_orphans_and_records_v2() {
 
     let conn = rusqlite::Connection::open(&path).expect("open legacy connection");
     conn.execute_batch(
-        "DROP TABLE session_imports;
-         DELETE FROM schema_version;
+        "DROP TABLE _harn_sqlite_schema_versions;
+         DROP TABLE session_imports;
+         CREATE TABLE schema_version (version INTEGER NOT NULL PRIMARY KEY);
          INSERT INTO schema_version(version) VALUES (1);
          DELETE FROM sessions WHERE id = 'reused';",
     )
@@ -338,12 +339,23 @@ async fn sqlite_upgrade_cleans_pre_foreign_key_orphans_and_records_v2() {
     drop(store);
 
     let conn = rusqlite::Connection::open(path).expect("inspect upgraded sqlite");
-    let max_version: i64 = conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
-            row.get(0)
-        })
-        .expect("schema version");
-    assert_eq!(max_version, 2);
+    let schema_state = (
+        conn.query_row(
+            "SELECT version FROM _harn_sqlite_schema_versions WHERE name = 'session_store'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("shared schema version"),
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'schema_version'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .expect("legacy schema table state"),
+    );
+    assert_eq!(schema_state, (2, false));
     let stale_children: i64 = conn
         .query_row(
             "SELECT
@@ -360,16 +372,24 @@ async fn sqlite_upgrade_cleans_pre_foreign_key_orphans_and_records_v2() {
 fn sqlite_rejects_a_newer_schema_version() {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("future.sqlite");
-    drop(SqliteSessionStore::open(&path).expect("create sqlite"));
     let conn = rusqlite::Connection::open(&path).expect("open raw sqlite");
-    conn.execute("INSERT INTO schema_version(version) VALUES (99)", [])
-        .expect("mark future schema");
+    conn.execute_batch(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL PRIMARY KEY);
+         INSERT INTO schema_version(version) VALUES (99);",
+    )
+    .expect("mark future legacy schema");
     drop(conn);
 
     let error = SqliteSessionStore::open(path)
         .err()
         .expect("reject future schema");
-    assert!(error.to_string().contains("newer than supported version 2"));
+    assert_eq!(
+        error,
+        StoreError::Backend(
+            "schema initialization failed: backend error: session store schema version 99 is newer than supported version 2"
+                .to_string()
+        )
+    );
 }
 
 #[tokio::test]

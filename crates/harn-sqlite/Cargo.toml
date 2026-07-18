@@ -1,0 +1,20 @@
+[package]
+name = "harn-sqlite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Cross-process SQLite initialization primitives for Harn runtimes"
+
+[dependencies]
+fs2 = "0.4"
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
+wait-timeout = "0.2"
+
+[lints]
+workspace = true
