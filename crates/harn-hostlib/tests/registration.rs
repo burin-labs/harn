@@ -20,8 +20,8 @@ use harn_hostlib::{
     fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability,
     host_lease_capability::HostLeaseCapability, scanner::ScannerCapability, schemas,
     secret_store::SecretStoreCapability, tools::permissions, tools::ToolsCapability,
-    BuiltinRegistry, HostLeasePriorityClass, HostLeaseRequest, HostLeaseStore, HostlibCapability,
-    HostlibError, HostlibRegistry, HOST_LEASE_ROOT_ENV,
+    BuiltinRegistry, HostLeasePriorityClass, HostLeaseRequest, HostLeaseResourceClass,
+    HostLeaseStore, HostlibCapability, HostlibError, HostlibRegistry, HOST_LEASE_ROOT_ENV,
 };
 use harn_lexer::Lexer;
 use harn_parser::Parser;
@@ -649,6 +649,8 @@ pipeline default(task) {
     let acquired = store
         .try_acquire(HostLeaseRequest {
             host: "mac-local".to_string(),
+            resource_class: HostLeaseResourceClass::WholeMachine,
+            execution_context: None,
             owner: "registration-test".to_string(),
             priority_class: HostLeasePriorityClass::Measurement,
             ttl_ms: Some(60_000),

@@ -142,17 +142,20 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::host_lease::HostLeasePriorityClass;
+    use crate::host_lease::{HostLeasePriorityClass, HostLeaseResourceClass};
 
     #[test]
     fn status_value_preserves_active_and_recovery_evidence() {
         let state = HostLeaseState {
             schema_version: 1,
             host: "mac-local".to_string(),
+            resource_class: HostLeaseResourceClass::WholeMachine,
             observed_at_ms: 42,
             active: Some(HostLeaseHandle {
                 schema_version: 1,
                 host: "mac-local".to_string(),
+                resource_class: HostLeaseResourceClass::WholeMachine,
+                execution_context: None,
                 lease_id: "lease-1".to_string(),
                 owner: "owner".to_string(),
                 priority_class: HostLeasePriorityClass::Measurement,
