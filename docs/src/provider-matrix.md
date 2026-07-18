@@ -74,7 +74,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `fireworks` | `accounts/fireworks/models/glm-5p*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `fireworks` | `accounts/fireworks/models/deepseek-v4*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `fireworks` | `accounts/fireworks/models/minimax-m3*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `fireworks` | `accounts/fireworks/models/minimax-m3*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | yes |
 | `fireworks` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `fireworks` | `*qwen3p6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `fireworks` | `*qwen*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -122,7 +122,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `mistral` | `devstral-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
-| `moonshot` | `*kimi-k3*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `moonshot` | `*kimi-k3*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | yes |
 | `moonshot` | `*kimi-k2.7-code*` | `any` | `enabled` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `moonshot` | `*kimi*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `nebius` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -321,7 +321,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `fireworks` | `accounts/fireworks/models/kimi-k2p5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p7-code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `fireworks` | `accounts/fireworks/models/minimax-m3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `fireworks` | `accounts/fireworks/models/minimax-m3` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Fireworks /v1, N=2): native carried the large backslash/quote/unicode string argument byte-exact on tool_choice auto and required (2/2); the Harn text-tool channel parsed byte-exact 2/2 (finish=stop, no reasoning over-run). |
 | `gemini` | `gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-flash-lite` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -367,7 +367,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `moonshot` | `moonshot/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `moonshot` | `moonshot/kimi-k2.7-code` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
 | `moonshot` | `moonshot/kimi-k2.7-code-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
-| `moonshot` | `moonshot/kimi-k3` | `native` | `unknown` | - | - | - | - | - | catalog note: Moonshot documents native OpenAI-compatible tools; credentialed Harn probe not run because MOONSHOT_API_KEY is unavailable in this lane. |
+| `moonshot` | `moonshot/kimi-k3` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode. |
 | `nvidia` | `nvidia/deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
