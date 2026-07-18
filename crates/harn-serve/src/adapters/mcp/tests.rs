@@ -2,6 +2,24 @@ use super::auth::{attach_legacy_deprecation_headers, should_stream_post_response
 use super::*;
 use crate::{ApiKeyAuthConfig, AuthMethodConfig, DispatchCoreConfig};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct McpMutationConfigurator {
+    calls: Arc<AtomicUsize>,
+}
+
+impl crate::VmConfigurator for McpMutationConfigurator {
+    fn configure(&self, vm: &mut harn_vm::Vm) -> Result<(), DispatchError> {
+        let calls = self.calls.clone();
+        vm.register_builtin("test_increment_call_count", move |_args, _output| {
+            let count = calls.fetch_add(1, Ordering::SeqCst) + 1;
+            Ok(harn_vm::VmValue::Int(
+                count.try_into().expect("test call count fits in i64"),
+            ))
+        });
+        Ok(())
+    }
+}
 
 #[tokio::test]
 async fn tools_list_exposes_public_functions() {
@@ -456,6 +474,100 @@ async fn mcp_response(server: &McpServer, request: JsonValue, session: SharedSes
             panic!("expected MCP JSON-RPC response")
         }
     }
+}
+
+async fn mcp_tool_response(
+    server: &McpServer,
+    request: JsonValue,
+    session: SharedSession,
+) -> JsonValue {
+    let job = match server
+        .process_message(request, session, AuthRequest::default())
+        .await
+    {
+        ImmediateResult::Stream(job) => job,
+        ImmediateResult::Response(_) | ImmediateResult::Accepted => {
+            panic!("expected MCP tool stream job")
+        }
+    };
+    let responses = Arc::new(Mutex::new(Vec::new()));
+    let captured = responses.clone();
+    server
+        .execute_streaming_job(
+            *job,
+            notify_channel(move |response| {
+                captured.lock().expect("response lock").push(response);
+            }),
+        )
+        .await;
+    let response = responses
+        .lock()
+        .expect("response lock")
+        .pop()
+        .expect("tool response");
+    response
+}
+
+#[tokio::test]
+async fn repeated_tool_calls_with_same_arguments_observe_mutated_backing_state() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r"
+pub fn observe_execution() -> int {
+  return test_increment_call_count()
+}
+",
+    )
+    .expect("write script");
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.vm_configurator = Arc::new(McpMutationConfigurator {
+        calls: calls.clone(),
+    });
+    let core = DispatchCore::new(config).expect("core");
+    let server = McpServer::new(McpServerConfig::new(core));
+    let session = SharedSession::new();
+    let _ = server.handle_initialize(
+        json!(1),
+        &session,
+        &json!({
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "clientInfo": {"name": "test", "version": "1"}
+        }),
+    );
+
+    let first = mcp_tool_response(
+        &server,
+        harn_vm::jsonrpc::request(
+            2,
+            "tools/call",
+            json!({"name": "observe_execution", "arguments": {}}),
+        ),
+        session.clone(),
+    )
+    .await;
+    let second = mcp_tool_response(
+        &server,
+        harn_vm::jsonrpc::request(
+            3,
+            "tools/call",
+            json!({"name": "observe_execution", "arguments": {}}),
+        ),
+        session,
+    )
+    .await;
+
+    assert_eq!(
+        [
+            first["result"]["content"][0]["text"].clone(),
+            second["result"]["content"][0]["text"].clone(),
+        ],
+        [json!("1"), json!("2")]
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
