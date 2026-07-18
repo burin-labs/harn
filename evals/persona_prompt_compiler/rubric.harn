@@ -15,14 +15,36 @@ pub type PersonaPromptEvalExpected = {
 
 pub type PersonaPromptEvalVerdict = {pass: bool, failure_bucket: string, failures: list<string>}
 
+type PersonaDispatchReceipt = {
+  persona: string,
+  status: string,
+  result: {ok: bool, status: string, receipt: {status: string}},
+}
+
 pub type PersonaPromptEvalArtifactEvidence = {
   schema: string,
   case_id: string,
+  trial: int,
   pass: bool,
-  compiler: {ok: bool},
-  compile_verdict: {pass: bool},
-  materialization: {ok: bool},
-  daemon_fire: {ok: bool},
+  expected: PersonaPromptEvalExpected,
+  compiler: PersonaPromptCompileReceipt,
+  materialization: {manifest_path: string, result: {success: bool}},
+  daemon_fire: {result: {success: bool, stdout: string}},
+}
+
+/** Validate the frozen semantic fields shared by the runner and verifier. */
+pub fn persona_prompt_eval_expected_schema() -> dict {
+  return schema_object(
+    {
+      name: schema_string(),
+      template: schema_string(),
+      source_kind: schema_string(),
+      cron: schema_field(schema_string(), false),
+      timezone: schema_field(schema_string(), false),
+      provider: schema_field(schema_string(), false),
+      event: schema_field(schema_string(), false),
+    },
+  )
 }
 
 /** Validate the durable evidence fields consumed by the eval verifier. */
@@ -31,13 +53,52 @@ pub fn persona_prompt_eval_artifact_schema() -> dict {
     {
       schema: schema_literal(PERSONA_PROMPT_EVAL_ARTIFACT_SCHEMA),
       case_id: schema_string(),
+      trial: schema_int(),
       pass: schema_bool(),
-      compiler: schema_object({ok: schema_bool()}),
-      compile_verdict: schema_object({pass: schema_bool()}),
-      materialization: schema_object({ok: schema_bool()}),
-      daemon_fire: schema_object({ok: schema_bool()}),
+      expected: persona_prompt_eval_expected_schema(),
+      compiler: schema_dict(),
+      materialization: schema_object({manifest_path: schema_string(), result: schema_object({success: schema_bool()})}),
+      daemon_fire: schema_object({result: schema_object({success: schema_bool(), stdout: schema_string()})}),
     },
   )
+}
+
+fn __command_failure_detail(result: dict) -> string {
+  const stderr = trim(result.stderr ?? "")
+  if stderr != "" {
+    return stderr
+  }
+  return trim(result.combined ?? "")
+}
+
+fn __dispatch_receipt_schema() -> dict {
+  return schema_object(
+    {
+      persona: schema_string(),
+      status: schema_string(),
+      result: schema_object(
+        {ok: schema_bool(), status: schema_string(), receipt: schema_object({status: schema_string()})},
+      ),
+    },
+  )
+}
+
+fn __dispatch_receipt(stdout: string) -> PersonaDispatchReceipt? {
+  const prefix = "- result="
+  for line in split(stdout, "\n") {
+    if starts_with(line, prefix) {
+      const raw = split(line, prefix)[1] ?? ""
+      if raw == "" || raw == "-" {
+        return nil
+      }
+      return try {
+        schema_expect(json_parse(raw), __dispatch_receipt_schema())
+      } catch (_error) {
+        nil
+      }
+    }
+  }
+  return nil
 }
 
 fn __expect(condition: bool, message: string, failures: list<string>) -> list<string> {
@@ -45,6 +106,48 @@ fn __expect(condition: bool, message: string, failures: list<string>) -> list<st
     return failures
   }
   return failures + [message]
+}
+
+/** Adjudicate raw `harn orchestrator fire` evidence for one generated persona binding. */
+pub fn persona_prompt_fire_verdict(result: dict, expected_persona: string, expected_binding: string) -> PersonaPromptEvalVerdict {
+  const stdout = result.stdout ?? ""
+  const lines = split(trim(stdout), "\n")
+  const receipt = __dispatch_receipt(stdout)
+  let failures: list<string> = []
+  failures = __expect(
+    result.success,
+    "orchestrator fire command failed: " + __command_failure_detail(result),
+    failures,
+  )
+  failures = __expect(
+    contains(lines, "- binding_id=" + expected_binding),
+    "orchestrator fire returned a different binding",
+    failures,
+  )
+  failures = __expect(
+    contains(lines, "- status=dispatched") && contains(lines, "- error=-"),
+    "orchestrator fire did not report a clean dispatched status",
+    failures,
+  )
+  failures = __expect(
+    receipt != nil
+      && receipt.persona == expected_persona
+      && receipt.status == "completed"
+      && receipt.result.ok
+      && contains(["completed", "success"], receipt.result.status)
+      && receipt.result.receipt.status == "success",
+    "persona dispatch result did not prove successful workflow completion",
+    failures,
+  )
+  return {
+    pass: len(failures) == 0,
+    failure_bucket: if len(failures) == 0 {
+      "daemon_fired"
+    } else {
+      "daemon_fire_failed"
+    },
+    failures: failures,
+  }
 }
 
 fn __compile_failures(receipt: PersonaPromptCompileReceipt, expected: PersonaPromptEvalExpected) -> list<string> {

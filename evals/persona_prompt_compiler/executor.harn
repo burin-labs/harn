@@ -9,7 +9,9 @@ import "std/schema"
 import {
   PERSONA_PROMPT_EVAL_ARTIFACT_SCHEMA,
   PersonaPromptEvalExpected,
+  persona_prompt_eval_expected_schema,
   persona_prompt_eval_verdict,
+  persona_prompt_fire_verdict,
   persona_prompt_materialized_verdict,
 } from "./rubric.harn"
 
@@ -34,12 +36,6 @@ type PersonaPromptExecutionResult = {
   fired: PersonaPromptFireResult,
 }
 
-type PersonaDispatchReceipt = {
-  persona: string,
-  status: string,
-  result: {ok: bool, status: string, receipt: {status: string}},
-}
-
 fn __safe_token(value: string) -> bool {
   return regex_match("^[A-Za-z0-9_-]+$", value) != nil
 }
@@ -50,36 +46,6 @@ fn __command_failure_detail(result: dict) -> string {
     return stderr
   }
   return trim(result.combined ?? "")
-}
-
-fn __dispatch_receipt_schema() -> dict {
-  return schema_object(
-    {
-      persona: schema_string(),
-      status: schema_string(),
-      result: schema_object(
-        {ok: schema_bool(), status: schema_string(), receipt: schema_object({status: schema_string()})},
-      ),
-    },
-  )
-}
-
-fn __dispatch_receipt(stdout: string) -> PersonaDispatchReceipt? {
-  const prefix = "- result="
-  for line in split(stdout, "\n") {
-    if starts_with(line, prefix) {
-      const raw = split(line, prefix)[1] ?? ""
-      if raw == "" || raw == "-" {
-        return nil
-      }
-      return try {
-        schema_expect(json_parse(raw), __dispatch_receipt_schema())
-      } catch (_error) {
-        nil
-      }
-    }
-  }
-  return nil
 }
 
 fn __write_outcome(harness: Harness, outcome) -> int {
@@ -161,21 +127,14 @@ fn __compile_prompt(
 }
 
 fn __request_schema() -> dict {
-  const expected = schema_object(
-    {
-      name: schema_string(),
-      template: schema_string(),
-      source_kind: schema_string(),
-      cron: schema_field(schema_string(), false),
-      timezone: schema_field(schema_string(), false),
-      provider: schema_field(schema_string(), false),
-      event: schema_field(schema_string(), false),
-    },
-  )
   return schema_object(
     {
       case: schema_object(
-        {id: schema_string(), task: schema_string(), metadata: schema_object({expected: expected})},
+        {
+          id: schema_string(),
+          task: schema_string(),
+          metadata: schema_object({expected: persona_prompt_eval_expected_schema()}),
+        },
       ),
       manifest: schema_object(
         {
@@ -270,38 +229,11 @@ fn __fire(
     },
     {capture: {max_inline_bytes: 65536}},
   )
-  const stdout = result.stdout ?? ""
-  const has_binding = contains(stdout, "binding_id=" + trigger_id)
-  const dispatched = contains(stdout, "status=dispatched") && contains(stdout, "error=-")
-  const receipt = __dispatch_receipt(stdout)
-  const completed = receipt != nil
-    && receipt.persona == lowering.persona.name
-    && receipt.status == "completed"
-    && receipt.result.ok
-    && contains(["completed", "success"], receipt.result.status)
-    && receipt.result.receipt.status == "success"
-  const ok = result.success && has_binding && dispatched && completed
-  let failures: list<string> = []
-  if !result.success {
-    failures = failures + ["orchestrator fire command failed: " + __command_failure_detail(result)]
-  }
-  if result.success && !has_binding {
-    failures = failures + ["orchestrator fire returned a different binding"]
-  }
-  if result.success && !dispatched {
-    failures = failures + ["orchestrator fire did not report a clean dispatched status"]
-  }
-  if result.success && !completed {
-    failures = failures + ["persona dispatch result did not prove successful workflow completion"]
-  }
+  const verdict = persona_prompt_fire_verdict(result, lowering.persona.name, trigger_id)
   return {
-    ok: ok,
-    failure_bucket: if ok {
-      "daemon_fired"
-    } else {
-      "daemon_fire_failed"
-    },
-    failures: failures,
+    ok: verdict.pass,
+    failure_bucket: verdict.failure_bucket,
+    failures: verdict.failures,
     result: result,
   }
 }
