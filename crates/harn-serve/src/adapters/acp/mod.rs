@@ -85,7 +85,10 @@ use std::time::{Instant, SystemTime};
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use harn_vm::agent_events::{clear_session_sinks, register_sink, AgentEventSink};
+use harn_vm::agent_events::{
+    clear_session_sinks, flush_and_clear_session_sinks, flush_session_sinks, register_sink,
+    AgentEventSink,
+};
 use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;

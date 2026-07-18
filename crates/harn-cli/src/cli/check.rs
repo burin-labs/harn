@@ -48,6 +48,12 @@ pub(crate) struct CheckArgs {
     /// Evaluate `@invariant(...)` annotations and fail on violations.
     #[arg(long = "invariants")]
     pub invariants: bool,
+    /// Analyze each collected source as an independent target while sharing
+    /// this process and its bounded worker pool. This preserves one-file
+    /// module resolution for fixture corpora without paying one CLI startup
+    /// per file.
+    #[arg(long = "independent")]
+    pub independent: bool,
     /// One or more .harn files or directories. Optional when `--workspace`
     /// is set.
     pub targets: Vec<String>,

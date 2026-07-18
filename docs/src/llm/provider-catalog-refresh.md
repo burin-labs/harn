@@ -273,7 +273,7 @@ available:
 - REST: `GET /v1/provider-catalog`
 - ACP: JSON-RPC request method `_harn/providerCatalog`
 
-Both return the same provider catalog v5 artifact shape:
+Both return the same provider catalog v6 artifact shape:
 `schema_version`, `schema`, `generated_by`,
 `providers`, `models`, `aliases`, `variants`, `families`, `routing_routes`, and
 `qc_defaults`. The

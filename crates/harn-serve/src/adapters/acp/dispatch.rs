@@ -164,7 +164,8 @@ impl AcpServer {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_close(&id, &params, "session/close");
+                self.handle_session_close(&id, &params, "session/close")
+                    .await;
             }
             "session/stop" => {
                 if self.reject_unauthenticated(&id) {
@@ -174,7 +175,8 @@ impl AcpServer {
                 eprintln!(
                     "warning: ACP method session/stop is deprecated; use session/close instead"
                 );
-                self.handle_session_close(&id, &params, "session/stop");
+                self.handle_session_close(&id, &params, "session/stop")
+                    .await;
             }
             "session/inject" => {
                 if self.reject_unauthenticated(&id) {
