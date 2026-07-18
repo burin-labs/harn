@@ -81,6 +81,10 @@ write_paths windows_source crates/harn-hostlib/src/lib.rs
 assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_source"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_source"
 
+write_paths windows_selector scripts/ci/affected_crate_args.sh
+assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_selector"
+assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_selector"
+
 write_paths package_paths \
   crates/harn-modules/src/package_execution.rs \
   crates/harn-modules/src/package_imports.rs \
