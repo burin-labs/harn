@@ -131,6 +131,10 @@ extra operations declared in `[check.host_capabilities]` or
 
 ```bash
 harn persona new incident_triager --template hybrid-classify-then-act
+harn persona compile-prompt \
+  --prompt "Triage #alerts in Slack: page me, investigate, or ignore." --json
+harn persona new --from-prompt \
+  "Every four hours, digest what I need to reply to." --name reply_digest
 harn persona materialize --blueprint incident_triager.blueprint.json
 harn persona list
 harn persona list --json
@@ -155,6 +159,20 @@ the complete package beside its destination, and publishes it only after every
 doctor check and the smoke test pass. `--force` backs up the existing package
 and restores it if publication fails; validation failures never modify the
 destination.
+
+`persona compile-prompt` makes one schema-bound LLM call and returns a closed
+compiler receipt without writing files. The receipt records prompt and compact
+trigger-catalog digests, call attempts, model/provider, tokens, realized cost,
+the validated blueprint, and its deterministic lowering. Schema retries,
+validator retries, and repair are disabled; output defaults to 512 tokens and
+cannot exceed 1,200. The model cannot author Harn, TOML, paths, tools,
+capabilities, budgets, authority, filters, or notification destinations.
+
+`persona new --from-prompt` passes the accepted lowering directly to the same
+strict staged transaction as manual scaffolding. Generated personas always use
+`autonomy_tier = "suggest"`, require receipts, and install exactly one validated
+daemon trigger. `--name` overrides only the model-proposed persona identifier;
+it does not widen the blueprint or policy surface.
 
 `persona materialize` accepts only a closed JSON blueprint. Harn validates and
 lowers its name, goal, template, and one trigger; the CLI then applies that
