@@ -1,0 +1,393 @@
+import { command_run } from "std/command"
+import {
+  PersonaBlueprint,
+  PersonaBlueprintLowering,
+  PersonaPromptCompileReceipt,
+  persona_compile_prompt,
+} from "std/personas/compiler"
+import "std/schema"
+import {
+  PERSONA_PROMPT_EVAL_ARTIFACT_SCHEMA,
+  PersonaPromptEvalExpected,
+  persona_prompt_eval_expected_schema,
+  persona_prompt_eval_verdict,
+  persona_prompt_fire_verdict,
+  persona_prompt_materialized_verdict,
+} from "./rubric.harn"
+
+type PersonaPromptMaterializeResult = {
+  ok: bool,
+  failure_bucket: string,
+  failures: list<string>,
+  result?: dict,
+  package_root?: string,
+  manifest_path?: string,
+}
+
+type PersonaPromptFireResult = {
+  ok: bool,
+  failure_bucket: string,
+  failures: list<string>,
+  result?: dict,
+}
+
+type PersonaPromptExecutionResult = {
+  materialized: PersonaPromptMaterializeResult,
+  fired: PersonaPromptFireResult,
+}
+
+fn __safe_token(value: string) -> bool {
+  return regex_match("^[A-Za-z0-9_-]+$", value) != nil
+}
+
+fn __command_failure_detail(result: dict) -> string {
+  const stderr = trim(result.stderr ?? "")
+  if stderr != "" {
+    return stderr
+  }
+  return trim(result.combined ?? "")
+}
+
+fn __write_outcome(harness: Harness, outcome) -> int {
+  harness.stdio.println(json_stringify(outcome))
+  return 0
+}
+
+fn __failure_outcome(
+  harness: Harness,
+  started_ms: int,
+  bucket: string,
+  message: string,
+  stage_count: int = 0,
+) -> dict {
+  return {
+    verification: "FAIL",
+    wallTimeSeconds: to_float(harness.clock.monotonic_ms() - started_ms) / 1000.0,
+    costUsd: 0.0,
+    stageCount: stage_count,
+    failures: [message],
+    toolCallSummary: {model_calls: 0, failure_bucket: bucket, accepted: false},
+  }
+}
+
+fn __ensure_clean_dir(harness: Harness, path: string) {
+  if harness.fs.exists(path) {
+    harness.fs.delete(path)
+  }
+  harness.fs.mkdir(path)
+}
+
+fn __artifact_path(case_id: string, trial: int) -> string {
+  return path_join("receipts", case_id + "-" + to_string(trial) + ".json")
+}
+
+fn __latest_artifact_path(case_id: string) -> string {
+  return path_join("receipts", case_id + ".json")
+}
+
+fn __mock_blueprint(prompt: string, expected: PersonaPromptEvalExpected) -> dict {
+  let blueprint = {
+    schema_version: "1",
+    name: expected.name,
+    description: "Deterministic persona compiler eval fixture.",
+    goal: prompt,
+    template: expected.template,
+  }
+  if expected.source_kind == "cron" {
+    blueprint = blueprint + {cron: {cron: expected.cron, timezone: expected.timezone}}
+  } else {
+    blueprint = blueprint + {external: {provider: expected.provider, event: expected.event}}
+  }
+  return blueprint
+}
+
+fn __compile_prompt(
+  prompt: string,
+  expected: PersonaPromptEvalExpected,
+  provider: string,
+  model: string,
+  max_tokens: int,
+) -> PersonaPromptCompileReceipt {
+  if provider == "mock" {
+    llm_mock_clear()
+    llm_mock(
+      {
+        text: json_stringify(__mock_blueprint(prompt, expected)),
+        provider: "mock",
+        model: "mock",
+        input_tokens: 20,
+        output_tokens: 20,
+      },
+    )
+  }
+  return persona_compile_prompt(
+    prompt,
+    {provider: provider, model: model, max_tokens: max_tokens, name_override: expected.name},
+  )
+}
+
+fn __request_schema() -> dict {
+  return schema_object(
+    {
+      case: schema_object(
+        {
+          id: schema_string(),
+          task: schema_string(),
+          metadata: schema_object({expected: persona_prompt_eval_expected_schema()}),
+        },
+      ),
+      manifest: schema_object(
+        {
+          metadata: schema_object({provider: schema_string(), model: schema_string(), max_tokens: schema_int()}),
+        },
+      ),
+      trial: schema_int(),
+    },
+  )
+}
+
+fn __materialize(
+  harness: Harness,
+  blueprint: PersonaBlueprint,
+  lowering: PersonaBlueprintLowering,
+  case_id: string,
+  trial: int,
+) -> PersonaPromptMaterializeResult {
+  const trial_root = path_join("generated", case_id + "-" + to_string(trial))
+  __ensure_clean_dir(harness, trial_root)
+  const blueprint_path = path_join(trial_root, "blueprint.json")
+  const output_root = path_join(trial_root, "personas")
+  harness.fs.write_text(blueprint_path, json_stringify_pretty(blueprint))
+  const result = command_run(
+    {
+      argv: ["harn", "persona", "materialize", "--blueprint", blueprint_path, "--output-root", output_root],
+      timeout_ms: 120000,
+    },
+    {capture: {max_inline_bytes: 65536}},
+  )
+  const package_root = path_join(output_root, lowering.persona.name)
+  if !result.success {
+    return {
+      ok: false,
+      failure_bucket: "materialize_command_failed",
+      failures: ["canonical persona materialization failed: " + __command_failure_detail(result)],
+      result: result,
+      package_root: package_root,
+    }
+  }
+  const manifest_path = path_join(package_root, "harn.toml")
+  if !harness.fs.exists(manifest_path) {
+    return {
+      ok: false,
+      failure_bucket: "materialize_output_missing",
+      failures: ["canonical materializer did not publish harn.toml"],
+      result: result,
+      package_root: package_root,
+    }
+  }
+  const manifest = toml_parse(harness.fs.read_text(manifest_path))
+  const verdict = persona_prompt_materialized_verdict(manifest, lowering)
+  return {
+    ok: verdict.pass,
+    failure_bucket: verdict.failure_bucket,
+    failures: verdict.failures,
+    result: result,
+    package_root: package_root,
+    manifest_path: manifest_path,
+  }
+}
+
+fn __fire(
+  harness: Harness,
+  lowering: PersonaBlueprintLowering,
+  materialized: PersonaPromptMaterializeResult,
+  case_id: string,
+  trial: int,
+) -> PersonaPromptFireResult {
+  const state_dir = path_join("generated", case_id + "-" + to_string(trial), "orchestrator-state")
+  const trigger = lowering.triggers[0]
+  guard trigger != nil else {
+    return {
+      ok: false,
+      failure_bucket: "daemon_trigger_missing",
+      failures: ["accepted lowering has no daemon trigger"],
+    }
+  }
+  const manifest_path = materialized.manifest_path
+  guard manifest_path != nil else {
+    return {
+      ok: false,
+      failure_bucket: "materialize_output_missing",
+      failures: ["materialization receipt has no manifest path"],
+    }
+  }
+  const trigger_id = trigger.id
+  const result = command_run(
+    {
+      argv: ["harn", "orchestrator", "fire", trigger_id, "--config", manifest_path, "--state-dir", state_dir],
+      timeout_ms: 120000,
+    },
+    {capture: {max_inline_bytes: 65536}},
+  )
+  const verdict = persona_prompt_fire_verdict(result, lowering.persona.name, trigger_id)
+  return {
+    ok: verdict.pass,
+    failure_bucket: verdict.failure_bucket,
+    failures: verdict.failures,
+    result: result,
+  }
+}
+
+fn __execute_compiled(
+  harness: Harness,
+  receipt: PersonaPromptCompileReceipt,
+  case_id: string,
+  trial: int,
+) -> PersonaPromptExecutionResult {
+  const blueprint = receipt.blueprint
+  guard blueprint != nil else {
+    return {
+      materialized: {
+        ok: false,
+        failure_bucket: "compile_contract_missing",
+        failures: ["accepted compiler receipt has no blueprint"],
+      },
+      fired: {ok: false, failure_bucket: "compile_contract_missing", failures: []},
+    }
+  }
+  const lowering = receipt.lowering
+  guard lowering != nil else {
+    return {
+      materialized: {
+        ok: false,
+        failure_bucket: "compile_contract_missing",
+        failures: ["accepted compiler receipt has no lowering"],
+      },
+      fired: {ok: false, failure_bucket: "compile_contract_missing", failures: []},
+    }
+  }
+  const materialized = __materialize(harness, blueprint, lowering, case_id, trial)
+  const fired = if materialized.ok {
+    __fire(harness, lowering, materialized, case_id, trial)
+  } else {
+    {ok: false, failure_bucket: materialized.failure_bucket, failures: []}
+  }
+  return {materialized: materialized, fired: fired}
+}
+
+fn main(harness: Harness) -> int {
+  const started_ms = harness.clock.monotonic_ms()
+  const raw = read_stdin()
+  if raw == nil || trim(raw) == "" {
+    return __write_outcome(
+      harness,
+      __failure_outcome(harness, started_ms, "invalid_request", "eval executor request is empty"),
+    )
+  }
+  const request = try {
+    schema_expect(json_parse(raw), __request_schema())
+  } catch (e) {
+    return __write_outcome(
+      harness,
+      __failure_outcome(
+        harness,
+        started_ms,
+        "invalid_request",
+        "eval executor request is invalid JSON: " + to_string(e),
+      ),
+    )
+  }
+  const case_id = request.case.id
+  const expected: PersonaPromptEvalExpected = request.case.metadata.expected
+  const prompt = request.case.task
+  const trial = request.trial
+  if !__safe_token(case_id) || !__safe_token(expected.name) || trial < 1 {
+    return __write_outcome(
+      harness,
+      __failure_outcome(
+        harness,
+        started_ms,
+        "invalid_request",
+        "eval executor request failed its closed boundary checks",
+      ),
+    )
+  }
+  if !harness.fs.exists("receipts") {
+    harness.fs.mkdir("receipts")
+  }
+  if !harness.fs.exists("generated") {
+    harness.fs.mkdir("generated")
+  }
+  const receipt = __compile_prompt(
+    prompt,
+    expected,
+    request.manifest.metadata.provider,
+    request.manifest.metadata.model,
+    request.manifest.metadata.max_tokens,
+  )
+  const compile_verdict = persona_prompt_eval_verdict(receipt, expected)
+  let materialized: PersonaPromptMaterializeResult = {ok: false, failure_bucket: "compile_rejected", failures: []}
+  let fired: PersonaPromptFireResult = {ok: false, failure_bucket: "compile_rejected", failures: []}
+  if compile_verdict.pass {
+    const execution = __execute_compiled(harness, receipt, case_id, trial)
+    materialized = execution.materialized
+    fired = execution.fired
+  }
+  const pass = compile_verdict.pass && materialized.ok && fired.ok
+  const failure_bucket = if !compile_verdict.pass {
+    compile_verdict.failure_bucket
+  } else if !materialized.ok {
+    materialized.failure_bucket
+  } else {
+    fired.failure_bucket
+  }
+  const failures = compile_verdict.failures + materialized.failures + fired.failures
+  const artifact_path = __artifact_path(case_id, trial)
+  const latest_artifact_path = __latest_artifact_path(case_id)
+  const artifact = {
+    schema: PERSONA_PROMPT_EVAL_ARTIFACT_SCHEMA,
+    case_id: case_id,
+    trial: trial,
+    pass: pass,
+    failure_bucket: failure_bucket,
+    expected: expected,
+    compiler: receipt,
+    compile_verdict: compile_verdict,
+    materialization: materialized,
+    daemon_fire: fired,
+  }
+  const artifact_json = json_stringify_pretty(artifact)
+  harness.fs.write_text(artifact_path, artifact_json)
+  harness.fs.write_text(latest_artifact_path, artifact_json)
+  return __write_outcome(
+    harness,
+    {
+      verification: if pass {
+        "PASS"
+      } else {
+        "FAIL"
+      },
+      wallTimeSeconds: to_float(harness.clock.monotonic_ms() - started_ms) / 1000.0,
+      costUsd: receipt.usage.realized_cost_usd ?? 0.0,
+      producedPaths: [artifact_path, latest_artifact_path],
+      stageCount: if fired.ok {
+        3
+      } else if materialized.ok {
+        2
+      } else {
+        1
+      },
+      failures: failures,
+      runId: "persona-prompt:" + case_id + ":" + to_string(trial),
+      workflowId: "persona-prompt-compiler-v1",
+      sourcePath: artifact_path,
+      toolCallSummary: {
+        model_calls: receipt.checkpoint.attempts,
+        failure_bucket: failure_bucket,
+        accepted: receipt.ok,
+        materialized: materialized.ok,
+        daemon_fired: fired.ok,
+      },
+    },
+  )
+}
