@@ -1,0 +1,90 @@
+import { is_absolute } from "std/path"
+
+fn __env_int(harness: Harness, name: string, default_value: int) -> int {
+  return to_int(harness.env.get_or(name, to_string(default_value))) ?? default_value
+}
+
+fn __shared_ledger_configured(harness: Harness) -> bool {
+  const path = harness.env.get_or("HARN_EVENT_LOG_SQLITE_PATH", "")
+  return harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite"
+    && path != ""
+    && is_absolute(path)
+}
+
+fn __selected_cases(manifest, split: string) -> list {
+  if split == "all" {
+    return manifest.cases
+  }
+  const ids = manifest.split?.[split] ?? []
+  return manifest.cases.filter({ entry -> contains(ids, entry.id) }).to_list()
+}
+
+fn main(harness: Harness) -> int {
+  const path = path_join(source_dir(), "harn.eval.toml")
+  const raw = eval_pack_manifest(toml_parse(harness.fs.read_text(path)) + {base_dir: source_dir()})
+  const split = harness.env.get_or("HARN_PERSONA_EVAL_SPLIT", "meter-tune")
+  if !contains(["meter-tune", "meter-holdout", "all"], split) {
+    harness.stdio.eprintln("HARN_PERSONA_EVAL_SPLIT must be meter-tune, meter-holdout, or all")
+    return 2
+  }
+  const trials = __env_int(harness, "HARN_PERSONA_EVAL_TRIALS", raw.trials ?? 5)
+  if trials < 1 || trials > 20 {
+    harness.stdio.eprintln("HARN_PERSONA_EVAL_TRIALS must be between 1 and 20")
+    return 2
+  }
+  const provider = harness.env.get_or("HARN_PERSONA_EVAL_PROVIDER", raw.metadata.provider ?? "mock")
+  const model = harness.env.get_or("HARN_PERSONA_EVAL_MODEL", raw.metadata.model ?? "mock")
+  const cases = __selected_cases(raw, split)
+  const planned_cells = len(cases) * trials
+  if len(cases) == 0 {
+    harness.stdio.eprintln("selected persona prompt eval split has no cases")
+    return 2
+  }
+  if provider != "mock" {
+    const confirmed = harness.env.get_or("HARN_PERSONA_EVAL_CONFIRM_SPEND", "0") == "1"
+    const max_cells = __env_int(harness, "HARN_PERSONA_EVAL_MAX_CELLS", 0)
+    if !confirmed || max_cells < planned_cells || !__shared_ledger_configured(harness) {
+      harness.stdio
+        .eprintln(
+        "live persona prompt eval requires spend confirmation, a cell ceiling >= "
+          + to_string(planned_cells)
+          + ", and HARN_EVENT_LOG_BACKEND=sqlite with an absolute HARN_EVENT_LOG_SQLITE_PATH shared by both revisions",
+      )
+      return 2
+    }
+  }
+  const manifest = eval_pack_manifest(
+    raw
+      + {
+      base_dir: source_dir(),
+      trials: trials,
+      cases: cases,
+      metadata: raw.metadata + {provider: provider, model: model},
+    },
+  )
+  let options = {
+    namespace: raw.metadata.ledger_namespace,
+    suite: raw.id,
+    model: model,
+    split: if split == "all" {
+      nil
+    } else {
+      split
+    },
+  }
+  const commit = harness.env.get_or("HARN_PERSONA_EVAL_COMMIT", "")
+  const branch = harness.env.get_or("HARN_PERSONA_EVAL_BRANCH", "")
+  if commit != "" {
+    options = options + {commit: commit}
+  }
+  if branch != "" {
+    options = options + {branch: branch}
+  }
+  const report = eval_pack_run(manifest, options)
+  harness.stdio.println(json_stringify_pretty(report))
+  return if report.pass {
+    0
+  } else {
+    1
+  }
+}

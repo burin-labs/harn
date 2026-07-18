@@ -1,0 +1,34 @@
+import {
+  PersonaPromptEvalArtifactEvidence,
+  persona_prompt_eval_artifact_schema,
+} from "./rubric.harn"
+
+fn main(harness: Harness) -> int {
+  const case_id = argv[0] ?? ""
+  if regex_match("^[A-Za-z0-9_-]+$", case_id) == nil {
+    harness.stdio.eprintln("invalid persona prompt eval case id")
+    return 2
+  }
+  const path = path_join("receipts", case_id + ".json")
+  if !harness.fs.exists(path) {
+    harness.stdio.eprintln("missing persona prompt eval artifact: " + path)
+    return 1
+  }
+  const artifact: PersonaPromptEvalArtifactEvidence = try {
+    schema_expect(json_parse(harness.fs.read_text(path)), persona_prompt_eval_artifact_schema())
+  } catch (e) {
+    harness.stdio.eprintln("invalid persona prompt eval artifact: " + to_string(e))
+    return 1
+  }
+  const valid = artifact.case_id == case_id
+    && artifact.pass
+    && artifact.compiler.ok
+    && artifact.compile_verdict.pass
+    && artifact.materialization.ok
+    && artifact.daemon_fire.ok
+  if !valid {
+    harness.stdio.eprintln("persona prompt eval artifact did not prove the full compile-to-fire path")
+    return 1
+  }
+  return 0
+}
