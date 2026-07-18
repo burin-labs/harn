@@ -12,6 +12,8 @@
 
 mod acp;
 pub(crate) mod anthropic;
+#[cfg(test)]
+mod anthropic_wire_tests;
 pub(crate) mod azure_openai;
 pub(crate) mod bedrock;
 mod common;
