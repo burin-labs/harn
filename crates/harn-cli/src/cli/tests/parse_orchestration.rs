@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli::PersonaTemplateKind;
 
 #[test]
 fn test_parses_host_lease_acquire_contract() {
@@ -646,6 +647,113 @@ fn test_parses_persona_check_flags() {
         Some(PathBuf::from("personas/ship_captain/harn.toml"))
     );
     assert!(check.json);
+}
+
+#[test]
+fn test_parses_manual_persona_new_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "new",
+        "incident_triager",
+        "--template",
+        "hybrid-classify-then-act",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::New(new) = args.command else {
+        panic!("expected persona new command");
+    };
+    assert_eq!(new.name.as_deref(), Some("incident_triager"));
+    assert_eq!(
+        new.template,
+        Some(PersonaTemplateKind::HybridClassifyThenAct)
+    );
+    assert!(new.from_prompt.is_none());
+}
+
+#[test]
+fn test_parses_persona_compile_prompt_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "compile-prompt",
+        "--prompt",
+        "Triage Slack alerts.",
+        "--name",
+        "alerts_triage",
+        "--provider",
+        "mock",
+        "--model",
+        "mock-model",
+        "--max-tokens",
+        "1200",
+        "--json",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::CompilePrompt(compile) = args.command else {
+        panic!("expected persona compile-prompt command");
+    };
+    assert_eq!(compile.prompt, "Triage Slack alerts.");
+    assert_eq!(compile.name.as_deref(), Some("alerts_triage"));
+    assert_eq!(compile.provider.as_deref(), Some("mock"));
+    assert_eq!(compile.model.as_deref(), Some("mock-model"));
+    assert_eq!(compile.max_tokens, 1200);
+    assert!(compile.json);
+}
+
+#[test]
+fn test_parses_persona_new_from_prompt_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "new",
+        "--from-prompt",
+        "Digest replies every four hours.",
+        "--name",
+        "reply_digest",
+        "--provider",
+        "mock",
+        "--max-tokens",
+        "512",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    let PersonaCommand::New(new) = args.command else {
+        panic!("expected persona new command");
+    };
+    assert!(new.name.is_none());
+    assert!(new.template.is_none());
+    assert_eq!(
+        new.from_prompt.as_deref(),
+        Some("Digest replies every four hours.")
+    );
+    assert_eq!(new.prompt_name.as_deref(), Some("reply_digest"));
+    assert_eq!(new.provider.as_deref(), Some("mock"));
+    assert_eq!(new.max_tokens, Some(512));
+}
+
+#[test]
+fn test_persona_prompt_token_ceiling_is_hard() {
+    let error = Cli::try_parse_from([
+        "harn",
+        "persona",
+        "compile-prompt",
+        "--prompt",
+        "Compile this.",
+        "--max-tokens",
+        "1201",
+    ])
+    .unwrap_err();
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
 }
 
 #[test]
