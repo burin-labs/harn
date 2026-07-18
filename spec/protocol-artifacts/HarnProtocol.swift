@@ -352,6 +352,7 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
     case parseAborted = "parse_aborted"
     case timeout = "timeout"
     case network = "network"
+    case resourceBusy = "resource_busy"
     case cancelled = "cancelled"
     case abandonedAtLoopExit = "abandoned_at_loop_exit"
     case unknown = "unknown"
@@ -366,6 +367,7 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
         "parse_aborted",
         "timeout",
         "network",
+        "resource_busy",
         "cancelled",
         "abandoned_at_loop_exit",
         "unknown",

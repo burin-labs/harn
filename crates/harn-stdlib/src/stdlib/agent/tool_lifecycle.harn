@@ -1,0 +1,76 @@
+pub type AgentToolLifecycleErrorCategory = "schema_validation" | "tool_error" | "mcp_server_error" | "host_bridge_error" | "permission_denied" | "rejected_loop" | "parse_aborted" | "timeout" | "network" | "resource_busy" | "cancelled" | "unknown"
+
+pub type AgentToolMutationStatus = "applied" | "not_applied" | "unknown"
+
+const TOOL_LIFECYCLE_ERROR_CATEGORIES = [
+  "schema_validation",
+  "tool_error",
+  "mcp_server_error",
+  "host_bridge_error",
+  "permission_denied",
+  "rejected_loop",
+  "parse_aborted",
+  "timeout",
+  "network",
+  "resource_busy",
+  "cancelled",
+  "unknown",
+]
+
+/**
+ * Normalize VM, provider, and middleware failures to the public tool-event taxonomy.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_tool_lifecycle_error_category(raw: any) -> AgentToolLifecycleErrorCategory? {
+  if raw == nil {
+    return nil
+  }
+  const category = to_string(raw)
+  if category == "" {
+    return nil
+  }
+  if contains(TOOL_LIFECYCLE_ERROR_CATEGORIES, category) {
+    return category
+  }
+  if contains(["intra_turn_failure_fanout_collapsed", "intra_turn_resource_fail_fast"], category) {
+    return "rejected_loop"
+  }
+  if contains(["tool_rejected", "consent_denied", "egress_blocked", "scope_violation"], category) {
+    return "permission_denied"
+  }
+  if contains(
+    ["schema_violation", "schema_stream_aborted", "validator_failure", "repair_failed"],
+    category,
+  ) {
+    return "schema_validation"
+  }
+  if contains(["rate_limit", "overloaded", "server_error", "transient_network"], category) {
+    return "network"
+  }
+  if contains(["tool_middleware_exception", "tool_parallel_dispatch_exception", "generic"], category) {
+    return "tool_error"
+  }
+  if contains(["auth", "channel_closed", "not_found", "circuit_open", "budget_exceeded"], category) {
+    return "host_bridge_error"
+  }
+  return "unknown"
+}
+
+/**
+ * Normalize execution-boundary mutation evidence without inspecting rendered output.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_tool_mutation_status(raw: any) -> AgentToolMutationStatus {
+  if raw == nil {
+    return "unknown"
+  }
+  const status = to_string(raw)
+  if contains(["applied", "not_applied", "unknown"], status) {
+    return status
+  }
+  return "unknown"
+}

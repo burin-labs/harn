@@ -301,6 +301,7 @@ HARN_TOOL_CALL_ERROR_CATEGORIES: tuple = (
     "parse_aborted",
     "timeout",
     "network",
+    "resource_busy",
     "cancelled",
     "abandoned_at_loop_exit",
     "unknown",
@@ -566,6 +567,7 @@ class HarnToolCallErrorCategory(str, Enum):
     PARSE_ABORTED = "parse_aborted"
     TIMEOUT = "timeout"
     NETWORK = "network"
+    RESOURCE_BUSY = "resource_busy"
     CANCELLED = "cancelled"
     ABANDONED_AT_LOOP_EXIT = "abandoned_at_loop_exit"
     UNKNOWN = "unknown"

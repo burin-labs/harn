@@ -221,6 +221,7 @@ export const HARN_TOOL_CALL_ERROR_CATEGORIES = [
   "parse_aborted",
   "timeout",
   "network",
+  "resource_busy",
   "cancelled",
   "abandoned_at_loop_exit",
   "unknown",

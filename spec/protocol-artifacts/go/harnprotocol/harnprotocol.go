@@ -257,6 +257,7 @@ var HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
 	"parse_aborted",
 	"timeout",
 	"network",
+	"resource_busy",
 	"cancelled",
 	"abandoned_at_loop_exit",
 	"unknown",
