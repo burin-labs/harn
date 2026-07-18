@@ -188,7 +188,7 @@ fn precompile_one(
     }
 
     let artifacts = compile_artifacts(source_path, &program)?;
-    let key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source);
+    let entry_key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source);
 
     let entry_dest = output_path(
         source_path,
@@ -196,17 +196,18 @@ fn precompile_one(
         out_root,
         harn_vm::bytecode_cache::CACHE_EXTENSION,
     )?;
-    harn_vm::bytecode_cache::store_at(&entry_dest, &key, &artifacts.entry_chunk)
+    harn_vm::bytecode_cache::store_at(&entry_dest, &entry_key, &artifacts.entry_chunk)
         .map_err(|e| format!("write {}: {e}", entry_dest.display()))?;
 
     if let Some(module_artifact) = &artifacts.module_artifact {
+        let module_key = harn_vm::bytecode_cache::CacheKey::from_module_source(&source);
         let module_dest = output_path(
             source_path,
             source_root,
             out_root,
             harn_vm::bytecode_cache::MODULE_CACHE_EXTENSION,
         )?;
-        harn_vm::bytecode_cache::store_module_at(&module_dest, &key, module_artifact)
+        harn_vm::bytecode_cache::store_module_at(&module_dest, &module_key, module_artifact)
             .map_err(|e| format!("write {}: {e}", module_dest.display()))?;
     }
 
