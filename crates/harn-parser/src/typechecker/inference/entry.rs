@@ -32,11 +32,8 @@ impl TypeChecker {
         Self::register_imported_callable_signatures_into(scope_mut, &self.imported_callable_decls);
         // First pass: collect declarations (type/enum/struct/interface) into scope
         // before type-checking bodies so forward references resolve.
-        Self::register_declarations_into(scope_mut, program);
-        for snode in program {
-            if let Node::Pipeline { body, .. } = &snode.node {
-                Self::register_declarations_into(scope_mut, body);
-            }
+        for nodes in crate::lexical::module_scope_node_slices(program) {
+            Self::register_declarations_into(scope_mut, nodes);
         }
         // Pre-register every top-level `fn`/`pipeline`/`tool` name so a
         // caller earlier in the file can reference a callable defined
@@ -92,6 +89,7 @@ impl TypeChecker {
                     body,
                     ..
                 } => {
+                    let root_scope = Rc::clone(&self.scope);
                     let mut child = TypeScope::child_of(&self.scope);
                     for p in params {
                         child.define_var(p, None);
@@ -108,6 +106,7 @@ impl TypeChecker {
                             params,
                             body,
                             inner_node.span,
+                            root_scope.as_ref(),
                         );
                     }
                     if let Some(ret_type) = return_type.as_ref() {
@@ -154,6 +153,7 @@ impl TypeChecker {
                     is_stream,
                     ..
                 } => {
+                    let inference_scope = Rc::clone(&self.scope);
                     // `declared` is the user-written/`gen`-implied return type
                     // (`None` when unannotated). The signature additionally
                     // carries an *inferred* return type so callers recover a
@@ -166,10 +166,13 @@ impl TypeChecker {
                     let sig = Self::fn_signature_from_decl(
                         inner_node,
                         Some(snode.span),
-                        |params, body| self.infer_unannotated_fn_return(params, body),
+                        |params, body| {
+                            self.infer_unannotated_fn_return(params, body, inference_scope.as_ref())
+                        },
                     )
                     .expect("matched FnDecl");
                     Rc::make_mut(&mut self.scope).define_fn(name, sig);
+                    let body_scope = Rc::clone(&self.scope);
                     if name == "main" {
                         self.check_main_signature(params, snode.span);
                     }
@@ -181,9 +184,16 @@ impl TypeChecker {
                         where_clauses,
                         *is_stream,
                         snode.span,
+                        body_scope.as_ref(),
                     );
                     if let Some(declared_throws) = throws {
-                        self.check_declared_throws(declared_throws, params, body, snode.span);
+                        self.check_declared_throws(
+                            declared_throws,
+                            params,
+                            body,
+                            snode.span,
+                            body_scope.as_ref(),
+                        );
                     }
                 }
                 _ => {

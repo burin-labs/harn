@@ -1,5 +1,7 @@
 use harn_parser::{Node, SNode, TypeExpr};
 
+mod bindings;
+mod catalogs;
 mod closures;
 mod concurrency;
 mod decls;
@@ -122,8 +124,25 @@ struct LoopContext {
 }
 
 #[derive(Clone, Copy, Debug)]
+enum LocalStorage {
+    Slot(u16),
+    /// An environment-backed cell that still participates in lexical
+    /// shadowing. Captured mutable bindings use cells so closures see later
+    /// writes, but a later same-named declaration must not retroactively
+    /// redirect earlier references into a new local slot.
+    Environment,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocalBindingKind {
+    Value,
+    Callable,
+}
+
+#[derive(Clone, Copy, Debug)]
 struct LocalBinding {
-    slot: u16,
+    storage: LocalStorage,
+    kind: LocalBindingKind,
     mutable: bool,
 }
 
@@ -139,6 +158,18 @@ pub struct Compiler {
     /// pattern (`Ok(v)`, `Some(x)`) resolve to its enum without
     /// qualification when the variant name is unambiguous.
     enum_variant_owners: std::collections::HashMap<String, Vec<String>>,
+    /// Source spans of enums predeclared into the module catalog. Re-visiting
+    /// those AST nodes during bytecode emission must not replace the final
+    /// prepass view with an earlier duplicate declaration.
+    predeclared_enum_declarations: std::collections::HashSet<(usize, usize)>,
+    /// Catalog snapshots paired with lexical bytecode scopes. Enum
+    /// declarations update the active catalog in source order; restoring the
+    /// snapshot on scope exit prevents a block-local enum from leaking into
+    /// later outer match patterns.
+    enum_catalog_scopes: Vec<(
+        std::collections::HashSet<String>,
+        std::collections::HashMap<String, Vec<String>>,
+    )>,
     /// Track struct type names to declared field order for indexed instances.
     struct_layouts: std::collections::HashMap<String, Vec<String>>,
     /// Track interface names → method names for runtime enforcement.
@@ -186,9 +217,10 @@ pub struct Compiler {
     /// Current-chunk string constant index. This avoids repeatedly scanning the
     /// constant pool while compiling name-heavy scripts.
     string_constants: std::collections::HashMap<String, u16>,
-    /// Lexical variable slots for the current compiled frame. The compiler
-    /// only consults this for names declared inside the current function-like
-    /// body; all unresolved names stay on the existing dynamic/name path.
+    /// Lexical bindings for the current compiled frame. Ordinary locals use
+    /// indexed slots; mutable values captured by nested callables retain an
+    /// environment-backed marker so lexical shadowing and dynamic cell access
+    /// agree on the same declaration.
     local_scopes: Vec<std::collections::HashMap<String, LocalBinding>>,
     /// True when this compiler is emitting code outside any function-like
     /// scope (module top-level statements). `try*` is rejected here
@@ -653,10 +685,15 @@ impl Compiler {
             // every value-discarding context (`compile_top_level_declarations`
             // pops nothing) — a latent imbalance surfaced by the #2622 balance
             // assertion.
+            Node::EnumDecl { name, variants, .. } => {
+                let declaration = (snode.span.start, snode.span.end);
+                if !self.predeclared_enum_declarations.contains(&declaration) {
+                    self.register_enum_decl(name, variants);
+                }
+            }
             Node::Pipeline { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
-            | Node::EnumDecl { .. }
             | Node::InterfaceDecl { .. } => {}
             Node::TryCatch {
                 has_catch: _,

@@ -44,17 +44,28 @@ impl Compiler {
         let parent = program.iter().find(
             |node| matches!(peel_node(node), Node::Pipeline { name, .. } if name == parent_name),
         );
-        if let Some(parent) = parent {
-            if let Node::Pipeline { body, extends, .. } = peel_node(parent) {
-                if let Some(grandparent) = extends {
-                    self.compile_parent_pipeline(program, grandparent)?;
-                }
-                for statement in body {
-                    self.compile_discarded_stmt(statement)?;
-                }
+        let Some(parent) = parent else {
+            return Ok(());
+        };
+        let Node::Pipeline { body, extends, .. } = peel_node(parent) else {
+            return Ok(());
+        };
+
+        // Each pipeline is typechecked in a fresh child of the final module
+        // catalog. Inheritance sequences runtime statements, but a parent's
+        // source-order enum shadowing must not change how its child is lowered.
+        let saved_catalog = (self.enum_names.clone(), self.enum_variant_owners.clone());
+        let result: Result<(), CompileError> = (|| {
+            if let Some(grandparent) = extends {
+                self.compile_parent_pipeline(program, grandparent)?;
             }
-        }
-        Ok(())
+            for statement in body {
+                self.compile_discarded_stmt(statement)?;
+            }
+            Ok(())
+        })();
+        (self.enum_names, self.enum_variant_owners) = saved_catalog;
+        result
     }
 
     fn append_parent_pipeline_nodes(

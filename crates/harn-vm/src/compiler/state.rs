@@ -36,6 +36,8 @@ impl Compiler {
             column: 1,
             enum_names: std::collections::HashSet::new(),
             enum_variant_owners: std::collections::HashMap::new(),
+            predeclared_enum_declarations: std::collections::HashSet::new(),
+            enum_catalog_scopes: Vec::new(),
             struct_layouts: std::collections::HashMap::new(),
             interface_methods: std::collections::HashMap::new(),
             loop_stack: Vec::new(),
@@ -289,10 +291,10 @@ impl Compiler {
     pub fn compile(mut self, program: &[SNode]) -> Result<Chunk, CompileError> {
         // Pre-scan so we can recognize EnumName.Variant as enum construction
         // even when the enum is declared inside a pipeline.
-        Self::collect_enum_names(program, &mut self.enum_names);
-        self.enum_names.insert("Result".to_string());
-        Self::collect_enum_variant_owners(program, &mut self.enum_variant_owners);
-        Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
+        self.collect_module_enum_catalog(program);
+        if self.enum_names.insert("Result".to_string()) {
+            Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
+        }
         Self::collect_struct_layouts(program, &mut self.struct_layouts);
         Self::collect_interface_methods(program, &mut self.interface_methods);
         self.collect_type_aliases(program);
@@ -300,7 +302,7 @@ impl Compiler {
         // closure captures (harn#4479). Nested `fn`/closure/`tool` bodies reseed
         // their own capture set when compiled, so this only governs the
         // module-level bindings emitted by `self`.
-        self.seed_captured_idents(program);
+        self.seed_module_captured_idents(program);
 
         for sn in program {
             match &sn.node {
@@ -415,10 +417,10 @@ impl Compiler {
         pipeline_name: &str,
         bind_params_from_globals: bool,
     ) -> Result<Chunk, CompileError> {
-        Self::collect_enum_names(program, &mut self.enum_names);
-        self.enum_names.insert("Result".to_string());
-        Self::collect_enum_variant_owners(program, &mut self.enum_variant_owners);
-        Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
+        self.collect_module_enum_catalog(program);
+        if self.enum_names.insert("Result".to_string()) {
+            Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
+        }
         Self::collect_struct_layouts(program, &mut self.struct_layouts);
         Self::collect_interface_methods(program, &mut self.interface_methods);
         self.collect_type_aliases(program);
@@ -426,7 +428,7 @@ impl Compiler {
         // closure captures (harn#4479). Nested `fn`/closure/`tool` bodies reseed
         // their own capture set when compiled, so this only governs the
         // module-level bindings emitted by `self`.
-        self.seed_captured_idents(program);
+        self.seed_module_captured_idents(program);
 
         for sn in program {
             if matches!(
@@ -929,116 +931,23 @@ impl Compiler {
             harn_parser::lexical::captured_bindings_in_nested_callables(body, &match_patterns);
     }
 
+    fn seed_module_captured_idents(&mut self, body: &[SNode]) {
+        let match_patterns = self.lexical_match_pattern_catalog();
+        self.captured_bindings =
+            harn_parser::lexical::captured_bindings_in_compiled_module(body, &match_patterns);
+    }
+
     pub(super) fn lexical_match_pattern_catalog(
         &self,
     ) -> harn_parser::lexical::MatchPatternCatalog {
         harn_parser::lexical::MatchPatternCatalog::new(&self.enum_names, &self.enum_variant_owners)
     }
 
-    /// Whether this mutable source binding must be boxed into a shared cell
-    /// because a nested callable captures this exact declaration.
-    #[inline]
-    fn is_boxed_capture(&self, binding: &harn_parser::lexical::BindingId, mutable: bool) -> bool {
-        mutable && self.captured_bindings.contains(binding)
-    }
-
-    fn define_local_slot(&mut self, name: &str, mutable: bool) -> Option<u16> {
-        if self.module_level || harn_parser::is_discard_name(name) {
-            return None;
-        }
-        let current = self.local_scopes.last_mut()?;
-        if let Some(existing) = current.get_mut(name) {
-            if existing.mutable || mutable {
-                if mutable {
-                    existing.mutable = true;
-                    if let Some(info) = self.chunk.local_slots.get_mut(existing.slot as usize) {
-                        info.mutable = true;
-                    }
-                }
-                return Some(existing.slot);
-            }
-            return None;
-        }
-        let slot = self
-            .chunk
-            .add_local_slot(name.to_string(), mutable, self.scope_depth);
-        current.insert(name.to_string(), super::LocalBinding { slot, mutable });
-        Some(slot)
-    }
-
-    pub(super) fn resolve_local_slot(&self, name: &str) -> Option<super::LocalBinding> {
-        if self.module_level {
-            return None;
-        }
-        self.local_scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.get(name).copied())
-    }
-
-    pub(super) fn emit_get_binding(&mut self, name: &str) {
-        if let Some(binding) = self.resolve_local_slot(name) {
-            self.chunk
-                .emit_u16(Op::GetLocalSlot, binding.slot, self.line);
-        } else {
-            let idx = self.string_constant(name);
-            self.chunk.emit_u16(Op::GetVar, idx, self.line);
-        }
-    }
-
-    pub(super) fn emit_define_binding(&mut self, name: &str, mutable: bool) {
-        if let Some(slot) = self.define_local_slot(name, mutable) {
-            self.chunk.emit_u16(Op::DefLocalSlot, slot, self.line);
-        } else {
-            let idx = self.string_constant(name);
-            let op = if mutable { Op::DefVar } else { Op::DefLet };
-            self.chunk.emit_u16(op, idx, self.line);
-        }
-    }
-
-    /// Define a binding parsed from source. Synthetic compiler temporaries use
-    /// [`Self::emit_define_binding`] and are deliberately absent from lexical
-    /// capture analysis.
-    pub(super) fn emit_source_binding(
-        &mut self,
-        name: &str,
-        mutable: bool,
-        binding: harn_parser::lexical::BindingId,
-    ) {
-        if self.is_boxed_capture(&binding, mutable) {
-            // Box a closure-captured mutable local into a shared cell. Runs
-            // regardless of `module_level`: a captured top-level `let` needs the
-            // same shared cell so a top-level closure observes its writes.
-            let idx = self.string_constant(name);
-            self.chunk.emit_u16(Op::DefCell, idx, self.line);
-        } else {
-            self.emit_define_binding(name, mutable);
-        }
-    }
-
-    pub(super) fn emit_init_or_define_binding(&mut self, name: &str, mutable: bool) {
-        if let Some(binding) = self.resolve_local_slot(name) {
-            self.chunk
-                .emit_u16(Op::DefLocalSlot, binding.slot, self.line);
-        } else {
-            self.emit_define_binding(name, mutable);
-        }
-    }
-
-    pub(super) fn emit_set_binding(&mut self, name: &str) {
-        if let Some(binding) = self.resolve_local_slot(name) {
-            let _ = binding.mutable;
-            self.chunk
-                .emit_u16(Op::SetLocalSlot, binding.slot, self.line);
-        } else {
-            let idx = self.string_constant(name);
-            self.chunk.emit_u16(Op::SetVar, idx, self.line);
-        }
-    }
-
     pub(super) fn begin_scope(&mut self) {
         self.chunk.emit(Op::PushScope, self.line);
         self.scope_depth += 1;
+        self.enum_catalog_scopes
+            .push((self.enum_names.clone(), self.enum_variant_owners.clone()));
         self.type_scopes.push(std::collections::HashMap::new());
         self.local_scopes.push(std::collections::HashMap::new());
     }
@@ -1047,6 +956,10 @@ impl Compiler {
         if self.scope_depth > 0 {
             self.chunk.emit(Op::PopScope, self.line);
             self.scope_depth -= 1;
+            if let Some((names, owners)) = self.enum_catalog_scopes.pop() {
+                self.enum_names = names;
+                self.enum_variant_owners = owners;
+            }
             self.type_scopes.pop();
             self.local_scopes.pop();
         }
@@ -1294,23 +1207,7 @@ impl Compiler {
         // mode. Keep in step with the import-time init path in
         // `crates/harn-vm/src/vm/imports.rs` (`module_state` construction).
         for sn in program {
-            let handled_elsewhere = matches!(
-                peel_node(sn),
-                Node::Pipeline { .. }
-                    | Node::ImportDecl { .. }
-                    | Node::SelectiveImport { .. }
-                    | Node::OverrideDecl { .. }
-                    | Node::EvalPackDecl { .. }
-                    | Node::FnDecl { .. }
-                    | Node::ToolDecl { .. }
-                    | Node::SkillDecl { .. }
-                    | Node::ImplBlock { .. }
-                    | Node::StructDecl { .. }
-                    | Node::EnumDecl { .. }
-                    | Node::InterfaceDecl { .. }
-                    | Node::TypeDecl { .. }
-            );
-            if !handled_elsewhere {
+            if !harn_parser::lexical::is_deferred_module_declaration(sn) {
                 self.compile_discarded_stmt(sn)?;
             }
         }
@@ -1356,178 +1253,6 @@ impl Compiler {
             }
         }
         Ok(())
-    }
-
-    /// Recursively collect all enum type names from the AST.
-    pub(super) fn collect_enum_names(
-        nodes: &[SNode],
-        names: &mut std::collections::HashSet<String>,
-    ) {
-        for sn in nodes {
-            match &sn.node {
-                Node::EnumDecl { name, .. } => {
-                    names.insert(name.clone());
-                }
-                Node::Pipeline { body, .. } => {
-                    Self::collect_enum_names(body, names);
-                }
-                Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => {
-                    Self::collect_enum_names(body, names);
-                }
-                Node::SkillDecl { fields, .. } => {
-                    for (_k, v) in fields {
-                        Self::collect_enum_names(std::slice::from_ref(v), names);
-                    }
-                }
-                Node::EvalPackDecl {
-                    fields,
-                    body,
-                    summarize,
-                    ..
-                } => {
-                    for (_k, v) in fields {
-                        Self::collect_enum_names(std::slice::from_ref(v), names);
-                    }
-                    Self::collect_enum_names(body, names);
-                    if let Some(summary_body) = summarize {
-                        Self::collect_enum_names(summary_body, names);
-                    }
-                }
-                Node::Block(stmts) => {
-                    Self::collect_enum_names(stmts, names);
-                }
-                Node::AttributedDecl { inner, .. } => {
-                    Self::collect_enum_names(std::slice::from_ref(inner), names);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Collect variant name → owning enum names across the whole program
-    /// (including nested declarations). Powers bare call-shaped match
-    /// patterns (`Ok(v)` without the `Result.` qualifier): a pattern
-    /// resolves only when exactly one visible enum owns the variant name.
-    pub(super) fn collect_enum_variant_owners(
-        nodes: &[SNode],
-        owners: &mut std::collections::HashMap<String, Vec<String>>,
-    ) {
-        harn_parser::visit::walk_program(nodes, &mut |sn| {
-            if let Node::EnumDecl { name, variants, .. } = &sn.node {
-                for variant in variants {
-                    let entry = owners.entry(variant.name.clone()).or_default();
-                    if !entry.contains(name) {
-                        entry.push(name.clone());
-                    }
-                }
-            }
-        });
-    }
-
-    /// Seed the built-in `Result` enum's variants into the owner map (the
-    /// same special-casing `compile`/`compile_named` apply to `enum_names`).
-    pub(super) fn seed_builtin_variant_owners(
-        owners: &mut std::collections::HashMap<String, Vec<String>>,
-    ) {
-        for variant in ["Ok", "Err"] {
-            let entry = owners.entry(variant.to_string()).or_default();
-            if !entry.contains(&"Result".to_string()) {
-                entry.push("Result".to_string());
-            }
-        }
-    }
-
-    pub(super) fn collect_struct_layouts(
-        nodes: &[SNode],
-        layouts: &mut std::collections::HashMap<String, Vec<String>>,
-    ) {
-        for sn in nodes {
-            match &sn.node {
-                Node::StructDecl { name, fields, .. } => {
-                    layouts.insert(
-                        name.clone(),
-                        fields.iter().map(|field| field.name.clone()).collect(),
-                    );
-                }
-                Node::Pipeline { body, .. }
-                | Node::FnDecl { body, .. }
-                | Node::ToolDecl { body, .. } => {
-                    Self::collect_struct_layouts(body, layouts);
-                }
-                Node::SkillDecl { fields, .. } => {
-                    for (_k, v) in fields {
-                        Self::collect_struct_layouts(std::slice::from_ref(v), layouts);
-                    }
-                }
-                Node::EvalPackDecl {
-                    fields,
-                    body,
-                    summarize,
-                    ..
-                } => {
-                    for (_k, v) in fields {
-                        Self::collect_struct_layouts(std::slice::from_ref(v), layouts);
-                    }
-                    Self::collect_struct_layouts(body, layouts);
-                    if let Some(summary_body) = summarize {
-                        Self::collect_struct_layouts(summary_body, layouts);
-                    }
-                }
-                Node::Block(stmts) => {
-                    Self::collect_struct_layouts(stmts, layouts);
-                }
-                Node::AttributedDecl { inner, .. } => {
-                    Self::collect_struct_layouts(std::slice::from_ref(inner), layouts);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    pub(super) fn collect_interface_methods(
-        nodes: &[SNode],
-        interfaces: &mut std::collections::HashMap<String, Vec<String>>,
-    ) {
-        for sn in nodes {
-            match &sn.node {
-                Node::InterfaceDecl { name, methods, .. } => {
-                    let method_names: Vec<String> =
-                        methods.iter().map(|m| m.name.clone()).collect();
-                    interfaces.insert(name.clone(), method_names);
-                }
-                Node::Pipeline { body, .. }
-                | Node::FnDecl { body, .. }
-                | Node::ToolDecl { body, .. } => {
-                    Self::collect_interface_methods(body, interfaces);
-                }
-                Node::SkillDecl { fields, .. } => {
-                    for (_k, v) in fields {
-                        Self::collect_interface_methods(std::slice::from_ref(v), interfaces);
-                    }
-                }
-                Node::EvalPackDecl {
-                    fields,
-                    body,
-                    summarize,
-                    ..
-                } => {
-                    for (_k, v) in fields {
-                        Self::collect_interface_methods(std::slice::from_ref(v), interfaces);
-                    }
-                    Self::collect_interface_methods(body, interfaces);
-                    if let Some(summary_body) = summarize {
-                        Self::collect_interface_methods(summary_body, interfaces);
-                    }
-                }
-                Node::Block(stmts) => {
-                    Self::collect_interface_methods(stmts, interfaces);
-                }
-                Node::AttributedDecl { inner, .. } => {
-                    Self::collect_interface_methods(std::slice::from_ref(inner), interfaces);
-                }
-                _ => {}
-            }
-        }
     }
 
     /// Compile a function body into a CompiledFunction (for import support).

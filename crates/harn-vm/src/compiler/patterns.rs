@@ -248,19 +248,14 @@ impl Compiler {
         variant: &str,
         line: u32,
     ) -> Result<Option<String>, CompileError> {
-        match harn_parser::lexical::resolve_bare_variant_owners(
-            self.enum_variant_owners.get(variant).map(Vec::as_slice),
-        ) {
+        let catalog = self.lexical_match_pattern_catalog();
+        match catalog.resolve_bare_variant(variant) {
             harn_parser::lexical::BareVariantResolution::NotVariant => Ok(None),
             harn_parser::lexical::BareVariantResolution::Unique(owner) => {
                 Ok(Some(owner.to_string()))
             }
             harn_parser::lexical::BareVariantResolution::Ambiguous(owners) => Err(CompileError {
-                message: format!(
-                    "match pattern `{variant}(...)` is ambiguous: variant `{variant}` is declared by enums {}; qualify it as `{}.{variant}(...)`",
-                    owners.join(", "),
-                    owners[0],
-                ),
+                message: harn_parser::lexical::ambiguous_bare_variant_message(variant, owners),
                 line,
             }),
         }

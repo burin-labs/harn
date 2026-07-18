@@ -1,4 +1,6 @@
-use super::tests_runtime::run_harn;
+use crate::compiler::CompilerOptions;
+
+use super::tests_runtime::{run_harn, run_harn_result_display_with_options};
 
 fn mixed_pin_probe(binding_keyword: &str) -> String {
     let source = r#"pipeline default(task) {
@@ -58,15 +60,58 @@ log(read())
 fn reassigned_callable_is_observed_by_reference() {
     let (output, _) = run_harn(
         r#"pipeline default(task) {
+let callable = { -> "outer" }
+{
 let callable = { -> "before" }
 const invoke = { -> callable() }
 callable = { -> "after" }
-log(invoke())
 fn callable() { return "later" }
+log(invoke() + "|" + callable())
+}
+log(callable())
 }"#,
     );
 
-    assert_eq!(output.trim_end(), "[harn] after");
+    assert_eq!(output.trim_end(), "[harn] after|after\n[harn] outer");
+}
+
+#[test]
+fn environment_backed_captures_preserve_collection_write_paths() {
+    let (output, _) = run_harn(
+        r#"pipeline default(task) {
+let items = ["outer"]
+let record = {value: "outer", extra: "outer"}
+{
+let items = ["a"]
+let record = {value: "before"}
+const read = { -> items.join("") + "|" + record.value + "|" + record.extra }
+items = items + ["b"]
+record.value = "after"
+record["extra"] = "ok"
+log(read())
+}
+log(items.join("") + "|" + record.value + "|" + record.extra)
+}"#,
+    );
+
+    assert_eq!(
+        output.trim_end(),
+        "[harn] ab|after|ok\n[harn] outer|outer|outer"
+    );
+}
+
+#[test]
+fn pipeline_before_later_module_binding_captures_shared_cell() {
+    let (output, _) = run_harn(
+        r#"pipeline default(task) {
+const increment = { -> counter = counter + 1 }
+increment()
+log(counter)
+}
+let counter = 0"#,
+    );
+
+    assert_eq!(output.trim_end(), "[harn] 1");
 }
 
 #[test]
@@ -148,4 +193,139 @@ pipeline default(task) {
             .contains("variant `Shared` is declared by enums First, Second"),
         "unexpected ambiguity error: {error}"
     );
+}
+
+#[test]
+fn captured_builtin_reference_shadows_same_named_builtin_for_all_call_positions() {
+    let (output, _) = run_harn(
+        r#"fn local_tail(value) {
+    const len = to_int
+    return len(value)
+}
+pipeline default(task) {
+const len = to_int
+const ordinary = { value -> len(value) }
+const tail = { value -> return len(value) }
+log("${ordinary("42")}|${tail("43")}|${local_tail("44")}")
+}"#,
+    );
+
+    assert_eq!(output.trim_end(), "[harn] 42|43|44");
+}
+
+#[test]
+fn loaded_builtin_reference_is_not_resolved_by_name_again() {
+    let (output, _) = run_harn(
+        r#"pipeline default(task) {
+const convert = to_int
+const to_int = 7
+const spread = { args -> convert(...args) }
+log("${convert("42")}|${spread(["43"])}")
+}"#,
+    );
+
+    assert_eq!(output.trim_end(), "[harn] 42|43");
+}
+
+#[test]
+fn lexical_binding_shadows_special_runtime_name() {
+    let (output, _) = run_harn(
+        r#"pipeline default(task) {
+const cancel = to_int
+const ordinary = { value -> cancel(value) }
+const tail = { value -> return cancel(value) }
+log("${ordinary("42")}|${tail("43")}")
+}"#,
+    );
+
+    assert_eq!(output.trim_end(), "[harn] 42|43");
+}
+
+#[test]
+fn captured_non_callable_shadows_same_named_builtin() {
+    let error = run_harn_result_display_with_options(
+        r#"pipeline default(task) {
+const len = 7
+const invoke = { -> len("abc") }
+invoke()
+}"#,
+        CompilerOptions::optimized(),
+    )
+    .expect_err("the captured integer must not fall through to builtin len");
+
+    assert!(error.contains("Cannot call 7"), "unexpected error: {error}");
+}
+
+#[test]
+fn return_spread_calls_use_the_regular_spread_dispatcher() {
+    let (output, _) = run_harn(
+        r#"fn add3(first, second, third) {
+    return first + second + third
+}
+fn invoke(callable, args) {
+    return callable(...args)
+}
+fn largest(args) {
+    return max(...args)
+}
+pipeline default(task) {
+    log("${invoke(add3, [1, 2, 3])}|${largest([4, 9, 5])}")
+}"#,
+    );
+
+    assert_eq!(output.trim_end(), "[harn] 6|9");
+}
+
+#[test]
+fn nested_enum_does_not_make_outer_bare_pattern_ambiguous() {
+    let (output, _) = run_harn(
+        r#"enum Outer {
+    Shared(value)
+}
+fn nested_declaration() {
+    enum Inner {
+        Shared(value)
+    }
+    return Inner.Shared(2)
+}
+pipeline default(task) {
+    match Outer.Shared(1) {
+        Shared(value) -> { log(value) }
+    }
+}"#,
+    );
+
+    assert_eq!(output.trim_end(), "[harn] 1");
+}
+
+#[test]
+fn duplicate_pipeline_enums_shadow_in_source_order() {
+    let (output, _) = run_harn(
+        r#"pipeline default(task) {
+    enum Event { First(value) }
+    match Event.First(1) {
+        First(value) -> { log(value) }
+    }
+    enum Event { Second(value) }
+}"#,
+    );
+
+    assert_eq!(output.trim_end(), "[harn] 1");
+}
+
+#[test]
+fn inherited_pipeline_enum_does_not_change_child_catalog() {
+    let (output, _) = run_harn(
+        r#"pipeline base(task) {
+    enum Event { Base(value) }
+}
+pipeline default(task) extends base {
+    match Event.Child(1) {
+        Child(value) -> { log(value) }
+    }
+    enum Event { Child(value) }
+}"#,
+    );
+
+    assert_eq!(output.trim_end(), "[harn] 1");
 }

@@ -48,21 +48,51 @@ pub fn resolve_bare_variant_owners(owners: Option<&[String]>) -> BareVariantReso
     }
 }
 
+pub fn ambiguous_bare_variant_message(variant: &str, owners: &[String]) -> String {
+    format!(
+        "match pattern `{variant}(...)` is ambiguous: variant `{variant}` is declared by enums {}; qualify it as `{}.{variant}(...)`",
+        owners.join(", "),
+        owners[0],
+    )
+}
+
+/// Node slices whose declarations are predeclared in the module type scope.
+///
+/// Top-level declarations and declarations directly inside pipeline bodies
+/// share one module-visible namespace. Function, tool, closure, and nested
+/// block declarations remain lexical to those bodies. The typechecker and VM
+/// compiler consume this same projection so an inaccessible nested enum cannot
+/// make a bare match pattern ambiguous in only one subsystem.
+pub fn module_scope_node_slices(program: &[SNode]) -> Vec<&[SNode]> {
+    let mut scopes = vec![program];
+    for node in program {
+        let inner = match &node.node {
+            Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => node,
+        };
+        if let Node::Pipeline { body, .. } = &inner.node {
+            scopes.push(body);
+        }
+    }
+    scopes
+}
+
 impl MatchPatternCatalog {
     pub fn new(
         enum_names: &HashSet<String>,
         variant_owners: &HashMap<String, Vec<String>>,
     ) -> Self {
-        Self {
-            enum_names: enum_names.clone(),
-            variant_owners: variant_owners.clone(),
-        }
+        Self::from_parts(enum_names.clone(), variant_owners.clone())
     }
 
     pub fn from_parts(
         enum_names: HashSet<String>,
-        variant_owners: HashMap<String, Vec<String>>,
+        mut variant_owners: HashMap<String, Vec<String>>,
     ) -> Self {
+        for owners in variant_owners.values_mut() {
+            owners.sort();
+            owners.dedup();
+        }
         Self {
             enum_names,
             variant_owners,
@@ -75,6 +105,20 @@ impl MatchPatternCatalog {
 
     pub fn is_enum_name(&self, name: &str) -> bool {
         self.enum_names.contains(name)
+    }
+
+    fn register_enum(&mut self, name: &str, variants: &[crate::ast::EnumVariant]) {
+        for owners in self.variant_owners.values_mut() {
+            owners.retain(|owner| owner != name);
+        }
+        self.variant_owners.retain(|_, owners| !owners.is_empty());
+        self.enum_names.insert(name.to_string());
+        for variant in variants {
+            self.variant_owners
+                .entry(variant.name.clone())
+                .or_default()
+                .push(name.to_string());
+        }
     }
 }
 
@@ -128,6 +172,48 @@ pub fn captured_bindings_in_nested_callables(
     analysis.captured
 }
 
+/// Bindings captured under module execution order.
+///
+/// Module statements execute in source order first; callable declarations and
+/// pipeline bodies are materialized only after every statement has run. This
+/// differs from an ordinary block, where a later value is not visible to an
+/// earlier nested callable. Modeling the two phases here keeps boxing aligned
+/// with the bytecode compiler without teaching the VM another scope heuristic.
+pub fn captured_bindings_in_compiled_module(
+    body: &[SNode],
+    match_patterns: &MatchPatternCatalog,
+) -> HashSet<BindingId> {
+    let mut analysis = LexicalAnalysis::new(match_patterns);
+    let mut value_scope = Scope::new();
+
+    for node in body {
+        if is_deferred_module_declaration(node) {
+            continue;
+        }
+        analysis.walk_node(
+            node,
+            std::slice::from_ref(&value_scope),
+            false,
+            &BindingOwner::Current,
+        );
+        extend_scope_with_value_declaration(&mut value_scope, node, &BindingOwner::Current);
+    }
+
+    let mut phase_two_scope = hoisted_callable_scope(body);
+    phase_two_scope.extend(value_scope);
+    for node in body {
+        if is_deferred_module_declaration(node) {
+            analysis.walk_node(
+                node,
+                std::slice::from_ref(&phase_two_scope),
+                false,
+                &BindingOwner::Current,
+            );
+        }
+    }
+    analysis.captured
+}
+
 /// Names reassigned by a nested callable that are free relative to the current
 /// callable body. Type-flow narrowing uses this conservative summary: unknown
 /// names remain included so parameter captures continue to invalidate their
@@ -155,18 +241,18 @@ enum ScopeBinding {
 
 type Scope = HashMap<String, ScopeBinding>;
 
-struct LexicalAnalysis<'a> {
+struct LexicalAnalysis {
     captured: HashSet<BindingId>,
     reassigned: BTreeSet<String>,
-    match_patterns: &'a MatchPatternCatalog,
+    match_patterns: MatchPatternCatalog,
 }
 
-impl<'a> LexicalAnalysis<'a> {
-    fn new(match_patterns: &'a MatchPatternCatalog) -> Self {
+impl LexicalAnalysis {
+    fn new(match_patterns: &MatchPatternCatalog) -> Self {
         Self {
             captured: HashSet::new(),
             reassigned: BTreeSet::new(),
-            match_patterns,
+            match_patterns: match_patterns.clone(),
         }
     }
 
@@ -188,6 +274,7 @@ impl<'a> LexicalAnalysis<'a> {
         owner: BindingOwner,
         extra_bindings: Scope,
     ) {
+        let outer_match_patterns = self.match_patterns.clone();
         // Named callables are late-bound and may recurse or mutually recurse.
         // Value bindings become visible only after their declaration executes.
         let mut scope = hoisted_callable_scope(body);
@@ -195,12 +282,20 @@ impl<'a> LexicalAnalysis<'a> {
         scopes.push(scope);
         for node in body {
             self.walk_node(node, &scopes, inside_nested_callable, &owner);
+            let declaration = match &node.node {
+                Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => node,
+            };
+            if let Node::EnumDecl { name, variants, .. } = &declaration.node {
+                self.match_patterns.register_enum(name, variants);
+            }
             extend_scope_with_value_declaration(
                 scopes.last_mut().expect("body scope"),
                 node,
                 &owner,
             );
         }
+        self.match_patterns = outer_match_patterns;
     }
 
     fn walk_node(
@@ -617,6 +712,32 @@ fn hoisted_callable_scope(body: &[SNode]) -> Scope {
     scope
 }
 
+/// Whether module compilation defers this declaration until after executable
+/// top-level statements. Capture analysis and bytecode lowering share this
+/// predicate so their visibility phases cannot drift.
+pub fn is_deferred_module_declaration(node: &SNode) -> bool {
+    let node = match &node.node {
+        Node::AttributedDecl { inner, .. } => &inner.node,
+        node => node,
+    };
+    matches!(
+        node,
+        Node::Pipeline { .. }
+            | Node::OverrideDecl { .. }
+            | Node::EvalPackDecl { .. }
+            | Node::FnDecl { .. }
+            | Node::ToolDecl { .. }
+            | Node::SkillDecl { .. }
+            | Node::ImplBlock { .. }
+            | Node::StructDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::InterfaceDecl { .. }
+            | Node::TypeDecl { .. }
+            | Node::ImportDecl { .. }
+            | Node::SelectiveImport { .. }
+    )
+}
+
 fn extend_scope_with_value_declaration(scope: &mut Scope, node: &SNode, owner: &BindingOwner) {
     let (Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. }) = &node.node else {
         return;
@@ -780,6 +901,43 @@ mod tests {
             captured,
             HashSet::from([BindingId::from_declaration("callable", callable.span)])
         );
+    }
+
+    #[test]
+    fn deferred_module_callable_sees_later_module_value() {
+        let read = fn_decl(10, "read", vec![identifier(11, "counter")]);
+        let counter = let_binding(20, "counter");
+
+        let captured = captured_bindings_in_compiled_module(
+            &[read, counter.clone()],
+            &MatchPatternCatalog::default(),
+        );
+
+        assert_eq!(
+            captured,
+            HashSet::from([BindingId::from_declaration("counter", counter.span)])
+        );
+    }
+
+    #[test]
+    fn module_statement_does_not_see_later_module_value() {
+        let early = node(
+            10,
+            Node::ConstBinding {
+                pattern: BindingPattern::Identifier("read".to_string()),
+                type_ann: None,
+                value: Box::new(closure(11, Vec::new(), vec![identifier(12, "counter")])),
+                is_pub: false,
+            },
+        );
+        let counter = let_binding(20, "counter");
+
+        let captured = captured_bindings_in_compiled_module(
+            &[early, counter],
+            &MatchPatternCatalog::default(),
+        );
+
+        assert!(captured.is_empty());
     }
 
     #[test]

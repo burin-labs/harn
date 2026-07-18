@@ -58,7 +58,7 @@ impl Compiler {
         self.chunk.functions.push(Arc::new(func));
 
         self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
-        self.emit_define_binding(name, false);
+        self.emit_callable_binding(name);
         Ok(())
     }
 
