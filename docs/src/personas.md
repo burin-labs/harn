@@ -136,6 +136,7 @@ harn persona compile-prompt \
 harn persona new --from-prompt \
   "Every four hours, digest what I need to reply to." --name reply_digest
 harn persona materialize --blueprint incident_triager.blueprint.json
+harn persona materialize --compile-receipt reviewed-prompt-receipt.json
 harn persona list
 harn persona list --json
 harn persona check personas/ship_captain/harn.toml
@@ -174,10 +175,16 @@ strict staged transaction as manual scaffolding. Generated personas always use
 daemon trigger. `--name` overrides only the model-proposed persona identifier;
 it does not widen the blueprint or policy surface.
 
-`persona materialize` accepts only a closed JSON blueprint. Harn validates and
-lowers its name, goal, template, and one trigger; the CLI then applies that
-lowering to the same staged template transaction used by `persona new`. It
-never accepts generated source, TOML, credentials, or policy overrides.
+`persona materialize --blueprint` accepts only a closed JSON blueprint. Harn
+validates and lowers its name, goal, template, and one trigger; the CLI applies
+that lowering to the same staged transaction used by `persona new`. It never
+accepts generated source, TOML, credentials, or policy overrides.
+Alternatively, `--compile-receipt` accepts a successful v1 `compile-prompt`
+receipt after review. Harn revalidates its blueprint against the current trigger
+catalog and requires the freshly derived lowering to exactly match the reviewed
+lowering before entering that same transaction. Replay makes no model call;
+stale, failed, incomplete, or edited receipts publish nothing. The two input
+flags are mutually exclusive.
 
 `--manifest` accepts a `harn.toml` path or a directory containing one. Without
 it, Harn walks up from the current directory to the nearest `harn.toml`, stopping
