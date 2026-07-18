@@ -9,6 +9,7 @@ suggest
 required
 persona://acme_sdk_watch
 true
+signing_secret
 true
 1
 hybrid-classify-then-act
@@ -25,4 +26,6 @@ event_namespace_mismatch
 false
 not_attempted
 max_tokens_out_of_range
+4
+true
 4

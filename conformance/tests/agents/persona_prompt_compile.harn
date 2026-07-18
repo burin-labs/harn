@@ -31,6 +31,17 @@ const PROVIDERS = [
   },
 ]
 
+const PROVIDERS_WITH_ROTATED_SLACK_SECRET = PROVIDERS
+  .map(
+  { provider ->
+    if provider.provider == "slack" {
+      provider + {secret_requirements: [{name: "bot_token", required: true, namespace: "slack"}]}
+    } else {
+      provider
+    }
+  },
+)
+
 pipeline main() {
   with_llm_script(
     [
@@ -73,6 +84,11 @@ pipeline main() {
       }
       __io_println(sdk_trigger.handler)
       __io_println(starts_with(sdk.catalog_digest, "sha256:"))
+      const slack_catalog = sdk.catalog.find({ entry -> entry.provider == "slack" })
+      guard slack_catalog != nil else {
+        throw "Compile receipt has no Slack catalog entry"
+      }
+      __io_println(slack_catalog.required_secrets.join(","))
       const slack = persona_compile_prompt(
         "Triage #alerts in Slack: page me, start investigating, or ignore.",
         {provider: "mock", max_tokens: 1200},
@@ -125,6 +141,10 @@ pipeline main() {
         throw "Over-budget prompt has no diagnostic"
       }
       __io_println(over_budget_error.code)
+      __io_println(len(llm_mock_calls()))
+      const baseline_catalog = persona_compile_prompt("", {provider: "mock"}, PROVIDERS)
+      const rotated_catalog = persona_compile_prompt("", {provider: "mock"}, PROVIDERS_WITH_ROTATED_SLACK_SECRET)
+      __io_println(baseline_catalog.catalog_digest != rotated_catalog.catalog_digest)
       __io_println(len(llm_mock_calls()))
     },
   )
