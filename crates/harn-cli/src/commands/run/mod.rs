@@ -603,6 +603,9 @@ pub struct RunSandboxOptions {
     /// Extra read-only filesystem roots. `path` resolving under one of
     /// these entries is scoped for reads, but writes still fail.
     pub read_only_roots: Vec<PathBuf>,
+    /// Raise the direct-run side-effect ceiling to permit network-capable
+    /// subprocesses without disabling filesystem or process confinement.
+    pub allow_process_network: bool,
 }
 
 impl Default for RunSandboxOptions {
@@ -612,6 +615,7 @@ impl Default for RunSandboxOptions {
             workspace_root: None,
             write_roots: Vec::new(),
             read_only_roots: Vec::new(),
+            allow_process_network: false,
         }
     }
 }
@@ -624,6 +628,7 @@ impl RunSandboxOptions {
             workspace_root: None,
             write_roots: Vec::new(),
             read_only_roots: Vec::new(),
+            allow_process_network: false,
         }
     }
 
@@ -648,6 +653,13 @@ impl RunSandboxOptions {
         I: IntoIterator<Item = PathBuf>,
     {
         self.read_only_roots = read_only_roots.into_iter().collect();
+        self
+    }
+
+    /// Permit addressable sockets in commands spawned by this run while the
+    /// rest of the direct-run sandbox remains active.
+    pub fn with_process_network(mut self, enabled: bool) -> Self {
+        self.allow_process_network = enabled;
         self
     }
 }
@@ -989,6 +1001,7 @@ fn install_run_sandbox_scope(
             workspace_root,
             &options.write_roots,
             &options.read_only_roots,
+            options.allow_process_network,
         ));
         Some(ExecutionPolicyGuard)
     } else {
@@ -1011,6 +1024,7 @@ fn default_run_capability_policy(
     workspace_root: &Path,
     write_roots: &[PathBuf],
     read_only_roots: &[PathBuf],
+    allow_process_network: bool,
 ) -> harn_vm::orchestration::CapabilityPolicy {
     let mut workspace_roots = Vec::with_capacity(1 + write_roots.len());
     workspace_roots.push(
@@ -1032,7 +1046,15 @@ fn default_run_capability_policy(
             .map(|path| normalize_run_workspace_root(path.as_path()))
             .map(|path| path.display().to_string())
             .collect(),
-        side_effect_level: Some("process_exec".to_string()),
+        side_effect_level: Some(
+            if allow_process_network {
+                harn_vm::tool_annotations::SideEffectLevel::Network
+            } else {
+                harn_vm::tool_annotations::SideEffectLevel::ProcessExec
+            }
+            .as_str()
+            .to_string(),
+        ),
         sandbox_profile: harn_vm::orchestration::SandboxProfile::Worktree,
         ..harn_vm::orchestration::CapabilityPolicy::default()
     }
@@ -1069,6 +1091,13 @@ fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json::Value {
         .as_ref()
         .map(|policy| policy.sandbox_profile.as_str())
         .unwrap_or("unrestricted");
+    let side_effect_level = active_policy
+        .as_ref()
+        .and_then(|policy| policy.side_effect_level.as_deref())
+        .unwrap_or(harn_vm::tool_annotations::SideEffectLevel::MAX.as_str());
+    let process_network_enabled =
+        harn_vm::tool_annotations::SideEffectLevel::rank_str(side_effect_level)
+            >= harn_vm::tool_annotations::SideEffectLevel::Network.rank();
     let egress = if sandbox.enabled {
         "explicit_policy_required"
     } else if active {
@@ -1089,6 +1118,9 @@ fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json::Value {
         "write_roots": write_roots,
         "read_only_roots": read_only_roots,
         "profile": profile,
+        "process_network_requested": sandbox.allow_process_network,
+        "process_network_enabled": process_network_enabled,
+        "side_effect_level": side_effect_level,
         "egress": egress,
     })
 }

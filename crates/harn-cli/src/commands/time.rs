@@ -146,6 +146,7 @@ pub(crate) async fn run(args: TimeRunArgs) {
         crate::commands::run::RunSandboxOptions::disabled()
     } else {
         crate::commands::run::RunSandboxOptions::default()
+            .with_process_network(args.allow_process_network)
             .with_write_roots(args.write_root.iter().cloned())
             .with_read_only_roots(args.read_only_root.iter().cloned())
     };

@@ -2314,7 +2314,12 @@ fn is_dev_fd_descriptor(path: &Path) -> bool {
     !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
 pub(crate) fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
     use crate::tool_annotations::SideEffectLevel;
     policy
