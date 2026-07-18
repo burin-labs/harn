@@ -1,6 +1,8 @@
 import { parse_args } from "std/cli"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v6"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v7"
+
+const RUNTIME_RECEIPT_SCHEMA = "harn.provider_tool_probe_runtime.v1"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
@@ -25,6 +27,17 @@ pub type ProviderToolProbeBehavior = {
   cheap: bool,
 }
 
+pub type ProviderToolProbeRuntimeStatus = "verified" | "unavailable" | "invalid"
+
+pub type ProviderToolProbeRuntimeReceipt = {
+  schema_version: "harn.provider_tool_probe_runtime.v1",
+  command: list<string>,
+  status: ProviderToolProbeRuntimeStatus,
+  exit_code: int,
+  version: string,
+  reason: string,
+}
+
 pub type ProviderToolProbeCell = {
   id: string,
   provider: string,
@@ -44,7 +57,8 @@ pub type ProviderToolProbeCell = {
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v6",
+  schema_version: "harn.provider_tool_probe_campaign.v7",
+  runtime: ProviderToolProbeRuntimeReceipt,
   live: bool,
   include_expensive: bool,
   route_count: int,
@@ -60,6 +74,75 @@ pub type ProviderToolProbeCampaignReport = {
   behaviors: list<ProviderToolProbeBehavior>,
   cells: list<ProviderToolProbeCell>,
   artifacts: dict,
+}
+
+/** Normalize the target CLI's `version --json` result into campaign provenance. */
+pub fn provider_tool_probe_campaign_runtime_receipt(harn_bin: string, child: dict) -> ProviderToolProbeRuntimeReceipt {
+  const command = [harn_bin, "version", "--json"]
+  const exit_code = to_int(child?.exit_code) ?? -1
+  if exit_code != 0 {
+    const stderr = trim(to_string(child?.stderr ?? ""))
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "unavailable",
+      exit_code: exit_code,
+      version: "",
+      reason: if stderr != "" {
+        stderr
+      } else {
+        "target Harn runtime exited unsuccessfully"
+      },
+    }
+  }
+  const parsed = try {
+    json_parse(to_string(child?.stdout ?? ""))
+  } catch (_) {
+    nil
+  }
+  if type_of(parsed) != "dict" {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      reason: "target Harn runtime produced invalid version JSON",
+    }
+  }
+  const name = trim(to_string(parsed?.data?.name ?? ""))
+  const version = trim(to_string(parsed?.data?.version ?? ""))
+  if parsed?.schemaVersion != 1 || parsed?.ok != true || name != "harn-cli" || version == "" {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      reason: "target Harn runtime version JSON did not match the harn-cli contract",
+    }
+  }
+  return {
+    schema_version: RUNTIME_RECEIPT_SCHEMA,
+    command: command,
+    status: "verified",
+    exit_code: exit_code,
+    version: version,
+    reason: "target Harn runtime identified",
+  }
+}
+
+pub fn provider_tool_probe_campaign_runtime_allows_live(runtime: ProviderToolProbeRuntimeReceipt) -> bool {
+  return runtime.status == "verified" && runtime.version != ""
+}
+
+fn __provider_tool_probe_campaign_runtime(harness: Harness, harn_bin: string) -> ProviderToolProbeRuntimeReceipt {
+  const child = try {
+    harness.process.spawn_captured({cmd: harn_bin, args: ["version", "--json"]})
+  } catch (e) {
+    {exit_code: -1, stdout: "", stderr: to_string(e)}
+  }
+  return provider_tool_probe_campaign_runtime_receipt(harn_bin, child)
 }
 
 fn __split_once(text: string, sep: string) -> dict? {
@@ -1167,10 +1250,12 @@ pub fn provider_tool_probe_campaign_report(
   repeat: int,
   env: dict,
   env_source: dict,
+  runtime: ProviderToolProbeRuntimeReceipt,
   campaign_slice: dict = {},
 ) -> ProviderToolProbeCampaignReport {
   return {
     schema_version: SCHEMA_VERSION,
+    runtime: runtime,
     live: live,
     include_expensive: include_expensive,
     route_count: len(routes),
@@ -1215,6 +1300,7 @@ fn __markdown_status(status: string) -> string {
 pub fn provider_tool_probe_campaign_markdown(report: ProviderToolProbeCampaignReport) -> string {
   let out = "# Provider Tool-Probe Campaign\n\n"
   out = out + "- Schema: `" + report.schema_version + "`\n"
+  out = out + "- Target runtime: `" + json_stringify(report.runtime) + "`\n"
   out = out + "- Live: " + to_string(report.live) + "\n"
   out = out + "- Include expensive defaults: " + to_string(report.include_expensive) + "\n"
   out = out + "- Routes: " + to_string(report.route_count) + "\n"
@@ -1322,12 +1408,12 @@ fn __load_env_file(harness: Harness, env_file: string) -> dict {
   return {env: env, source: __env_load_receipt(env_file, true, true, len(env.keys()), "loaded")}
 }
 
-fn __default_env_file(harness: Harness) -> string {
-  const explicit = trim(harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_ENV_FILE", ""))
-  if explicit != "" {
-    return explicit
+pub fn provider_tool_probe_campaign_env_file(explicit: string, configured: string) -> string {
+  const requested = trim(explicit)
+  if requested != "" {
+    return requested
   }
-  return path_join(home_dir(), "projects", "burin-code", ".env")
+  return trim(configured)
 }
 
 fn __ensure_dir(harness: Harness, path: string) {
@@ -1423,17 +1509,22 @@ fn main(harness: Harness) {
     exit(2)
   }
   const harn_bin = to_string(parsed?.harn_bin ?? "harn")
+  const runtime = __provider_tool_probe_campaign_runtime(harness, harn_bin)
+  if live && !provider_tool_probe_campaign_runtime_allows_live(runtime) {
+    harness.stdio
+      .eprintln(
+      "target Harn runtime is not identifiable; refusing live provider probes: " + runtime.reason,
+    )
+    exit(2)
+  }
   const output_dir = to_string(parsed?.output_dir ?? DEFAULT_OUTPUT_DIR)
   __ensure_dir(harness, ".harn-runs")
   __ensure_dir(harness, output_dir)
   const env_file_arg = trim(to_string(parsed?.env_file ?? ""))
-  const env_file_path = if env_file_arg != "" {
-    env_file_arg
-  } else if live {
-    __default_env_file(harness)
-  } else {
-    ""
-  }
+  const env_file_path = provider_tool_probe_campaign_env_file(
+    env_file_arg,
+    harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_ENV_FILE", ""),
+  )
   const env_load = __load_env_file(harness, env_file_path)
   const env = env_load.env ?? {}
   const cell_plan = if live {
@@ -1473,6 +1564,7 @@ fn main(harness: Harness) {
     repeat,
     env,
     env_load.source ?? {},
+    runtime,
     cell_plan.slice ?? {},
   )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
