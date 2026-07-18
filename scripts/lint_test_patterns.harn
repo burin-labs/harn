@@ -167,6 +167,7 @@ const DIRECT_HARN_BINARY_BASELINE = [
   {path: "crates/harn-cli/tests/codemod_dispatch.rs", count: 3},
   {path: "crates/harn-cli/tests/conformance_json_cli.rs", count: 1},
   {path: "crates/harn-cli/tests/coverage_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/demo_cli.rs", count: 1},
   {path: "crates/harn-cli/tests/dev_cli.rs", count: 1},
   {path: "crates/harn-cli/tests/dispatch_snapshot.rs", count: 1},
   {path: "crates/harn-cli/tests/doctor_cli.rs", count: 1},
