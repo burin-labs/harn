@@ -94,7 +94,7 @@ pub type StallDiagnostics = {
   reserved_terminal_verify?: bool,
   reserved_terminal_verify_iterations?: int,
   zero_write_terminal_verify?: bool,
-  monologue_actuation?: bool | {enabled?: bool, max_firings?: int},
+  monologue_actuation?: bool | {enabled?: bool, max_firings?: int, read_only_turns?: int},
 }
 
 /**

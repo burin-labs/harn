@@ -1,0 +1,30 @@
+import {
+  agent_tool_calls_are_read_only,
+  agent_tool_is_read_only,
+  agent_tool_single_workspace_write_name,
+} from "std/agent/tool_annotations"
+
+fn entry(name, annotations) {
+  return {name: name, annotations: annotations}
+}
+
+pipeline default() {
+  const read = entry("read", {kind: "read"})
+  const mcp_read = entry("mcp_read", {readOnlyHint: true, destructiveHint: false})
+  const destructive = entry("destructive", {readOnlyHint: true, destructiveHint: true})
+  const edit = entry("edit", {kind: "edit", side_effect_level: "workspace_write"})
+  const tools = {tools: [read, mcp_read, destructive, edit]}
+  __io_println(agent_tool_is_read_only(read))
+  __io_println(agent_tool_is_read_only(mcp_read))
+  __io_println(agent_tool_is_read_only(destructive))
+  __io_println(agent_tool_calls_are_read_only([{name: "read"}, {name: "mcp_read"}], tools))
+  __io_println(agent_tool_calls_are_read_only([{name: "read"}, {name: "edit"}], tools))
+  __io_println(agent_tool_calls_are_read_only([{name: "unknown"}], tools))
+  __io_println(agent_tool_single_workspace_write_name(tools))
+  __io_println(
+    agent_tool_single_workspace_write_name(
+      {tools: tools.tools.push(entry("second_edit", {kind: "edit"}))},
+    )
+      == "",
+  )
+}

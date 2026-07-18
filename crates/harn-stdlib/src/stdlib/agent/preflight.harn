@@ -123,6 +123,25 @@ pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
 }
 
 /**
+ * Render the physical prefix of one named tool call while leaving its argument
+ * object open for assistant prefill continuation.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_render_tool_call_prefix(name: string, options = nil) -> string {
+  const p = agent_tool_call_paradigm(options)
+  if p.kind == "native" || name == "" {
+    return ""
+  }
+  if p.kind == "json" {
+    return p.call_open + "{\"name\":" + json_stringify(name) + ",\"args\":{"
+  }
+  return p.call_open + name + "({ "
+}
+
+/**
  * Return whether an agent option shape carries at least one usable tool
  * registry. Keeping this contract in preflight lets recovery and prompt
  * policy share the same tool-availability definition.

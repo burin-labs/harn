@@ -1,7 +1,7 @@
 import {
-  agent_monologue_actuation_arm,
   agent_monologue_actuation_config,
   agent_monologue_actuation_initial_state,
+  agent_monologue_actuation_observe,
 } from "std/agent/monologue_actuation"
 import {
   AgentStallConfig,
@@ -1788,33 +1788,29 @@ fn __agent_stall_apply_action_signal(
   )
 }
 
-fn __agent_stall_arm_monologue_actuation(observation: AgentStallObservation) -> AgentStallObservation {
+fn __agent_stall_observe_monologue_actuation(
+  observation: AgentStallObservation,
+  turn_read_only: bool,
+) -> AgentStallObservation {
   return observation
     + {
     state: observation.state
       + {
-      monologue_actuation: agent_monologue_actuation_arm(
+      monologue_actuation: agent_monologue_actuation_observe(
         observation.state.monologue_actuation,
         observation.config.monologue_actuation,
         to_string(observation.warning?.pattern ?? ""),
+        turn_read_only,
       ),
     },
   }
 }
 
 /**
- * agent_stall_observe_tool_calls detects degenerate agent loops, folds the
- * current-failure model when post-edit verification is enabled, and when the
- * evidence-aware repair nudge is enabled (`stall_diagnostics.repair_aware`)
- * nudges a strategy shift on a stuck diagnostic. `turn_made_edit` reports
- * whether the PRIOR turn (the one `prev_dispatch` describes) made a successful
- * workspace-mutating edit; it is inert unless `post_edit_reverify` or
- * `repair_aware` is set.
- *
- * `payload` is the full post-turn payload; it is passed to the host's
- * `progress_signal` verify-state callback (#burin-cutover seam 1) and is
- * otherwise unused. Absent a `progress_signal` callback it is ignored, so the
- * default (payload nil / callback unset) is byte-identical to today.
+ * Fold one turn through stall, repair, action, verification, and optional
+ * actuation detectors. `turn_made_edit` describes the prior dispatch;
+ * `turn_read_only` classifies the current calls. `payload` reaches configured
+ * host fact callbacks only. Defaulted inputs preserve existing behavior.
  *
  * @effects: [agent]
  * @errors: [agent_loop]
@@ -1833,6 +1829,7 @@ pub fn agent_stall_observe_tool_calls(
   turn_made_edit = false,
   turn_stop_reason = "",
   payload = nil,
+  turn_read_only = false,
 ) -> AgentStallObservation {
   const observation = __agent_stall_observe_core(
     session_id,
@@ -1877,7 +1874,7 @@ pub fn agent_stall_observe_tool_calls(
       state: __agent_stall_fold_verify_state(resolved.state, observation.config, payload, turn_made_edit),
     }
   }
-  return __agent_stall_arm_monologue_actuation(resolved)
+  return __agent_stall_observe_monologue_actuation(resolved, turn_read_only)
 }
 
 /**

@@ -1,20 +1,27 @@
+import { agent_render_tool_call_prefix } from "std/agent/preflight"
 import { agent_emit_event } from "std/agent/state"
 
 /**
- * Bounded, opt-in recovery for a run that repeatedly narrates intended work
- * without emitting a tool call. This module owns the small state machine and
- * transport-independent receipt; the agent loop supplies current route facts
- * and attaches the returned prefill to its next main request only.
+ * Bounded, opt-in recovery for tool-less action narration or a repeated
+ * read-only loop that never commits to an available workspace-write tool. This
+ * module owns the small state machine and transport-independent receipt; the
+ * agent loop attaches the returned prefill to its next main request only.
  */
-pub type MonologueActuationConfig = {enabled: bool, max_firings: int}
+pub type MonologueActuationConfig = {enabled: bool, max_firings: int, read_only_turns: int}
 
-pub type MonologueActuationState = {pending: bool, firing_count: int}
+pub type MonologueActuationState = {
+  pending: bool,
+  pending_trigger: string,
+  firing_count: int,
+  read_only_streak: int,
+}
 
 pub type MonologueActuationDecision = {
   state: MonologueActuationState,
   applied: bool,
   reason: string,
   prefill: string,
+  trigger: string,
   firing_count: int,
   max_firings: int,
 }
@@ -28,7 +35,7 @@ pub type MonologueActuationDecision = {
  * @api_stability: experimental
  */
 pub fn agent_monologue_actuation_config(value = nil) -> MonologueActuationConfig {
-  const defaults: MonologueActuationConfig = {enabled: false, max_firings: 1}
+  const defaults: MonologueActuationConfig = {enabled: false, max_firings: 1, read_only_turns: 4}
   if value == nil {
     return defaults
   }
@@ -49,7 +56,16 @@ pub fn agent_monologue_actuation_config(value = nil) -> MonologueActuationConfig
     throw "agent_loop: stall_diagnostics.monologue_actuation.max_firings must be a positive int; got "
       + type_of(max_firings)
   }
-  return {enabled: enabled ?? true, max_firings: max_firings ?? defaults.max_firings}
+  const read_only_turns = value?.read_only_turns
+  if read_only_turns != nil && (type_of(read_only_turns) != "int" || read_only_turns < 1) {
+    throw "agent_loop: stall_diagnostics.monologue_actuation.read_only_turns must be a positive int; got "
+      + type_of(read_only_turns)
+  }
+  return {
+    enabled: enabled ?? true,
+    max_firings: max_firings ?? defaults.max_firings,
+    read_only_turns: read_only_turns ?? defaults.read_only_turns,
+  }
 }
 
 /**
@@ -60,26 +76,38 @@ pub fn agent_monologue_actuation_config(value = nil) -> MonologueActuationConfig
  * @api_stability: experimental
  */
 pub fn agent_monologue_actuation_initial_state() -> MonologueActuationState {
-  return {pending: false, firing_count: 0}
+  return {pending: false, pending_trigger: "", firing_count: 0, read_only_streak: 0}
 }
 
 /**
- * Arm the next main request only after the detector identifies the exact
- * no-progress-monologue failure class. Other warnings remain unaffected.
+ * Fold one turn into the actuation trigger. Tool-less monologue warnings arm
+ * immediately; explicitly read-only calls arm only after a bounded streak.
+ * Any other action resets that streak.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_monologue_actuation_arm(
+pub fn agent_monologue_actuation_observe(
   state: MonologueActuationState,
   config: MonologueActuationConfig,
   warning_pattern: string,
+  turn_read_only: bool,
 ) -> MonologueActuationState {
-  if !config.enabled || warning_pattern != "no_progress_monologue" {
+  if !config.enabled {
     return state
   }
-  return state + {pending: true}
+  if warning_pattern == "no_progress_monologue" {
+    return state + {pending: true, pending_trigger: warning_pattern}
+  }
+  if !turn_read_only {
+    return state + {read_only_streak: 0}
+  }
+  const next = state + {read_only_streak: state.read_only_streak + 1}
+  if next.read_only_streak < config.read_only_turns {
+    return next
+  }
+  return next + {pending: true, pending_trigger: "read_only_streak"}
 }
 
 fn __agent_monologue_actuation_route_supports_prefill(options) -> bool {
@@ -114,6 +142,7 @@ fn __agent_monologue_actuation_receipt(
       firing_count: decision.firing_count,
       max_firings: decision.max_firings,
       tool_format: tool_format,
+      trigger: decision.trigger,
     },
   )
 }
@@ -137,6 +166,7 @@ pub fn agent_monologue_actuation_take(
   llm_options,
   prefill_available: bool,
   paradigm = nil,
+  commit_tool_name = "",
 ) -> MonologueActuationDecision {
   if !state.pending {
     return {
@@ -144,19 +174,27 @@ pub fn agent_monologue_actuation_take(
       applied: false,
       reason: "not_pending",
       prefill: "",
+      trigger: "",
       firing_count: state.firing_count,
       max_firings: config.max_firings,
     }
   }
-  const cleared = state + {pending: false}
+  const trigger = state.pending_trigger
+  const cleared = state + {pending: false, pending_trigger: "", read_only_streak: 0}
   const tool_format = to_string(paradigm?.kind ?? "")
   const call_open = to_string(paradigm?.call_open ?? "")
+  const actuation_prefill = if trigger == "read_only_streak" {
+    agent_render_tool_call_prefix(commit_tool_name, llm_options)
+  } else {
+    call_open
+  }
   const decision = if !config.enabled {
     {
       state: cleared,
       applied: false,
       reason: "disabled",
       prefill: "",
+      trigger: trigger,
       firing_count: cleared.firing_count,
       max_firings: config.max_firings,
     }
@@ -166,6 +204,7 @@ pub fn agent_monologue_actuation_take(
       applied: false,
       reason: "max_firings_exhausted",
       prefill: "",
+      trigger: trigger,
       firing_count: cleared.firing_count,
       max_firings: config.max_firings,
     }
@@ -175,6 +214,7 @@ pub fn agent_monologue_actuation_take(
       applied: false,
       reason: "no_tools",
       prefill: "",
+      trigger: trigger,
       firing_count: cleared.firing_count,
       max_firings: config.max_firings,
     }
@@ -184,6 +224,17 @@ pub fn agent_monologue_actuation_take(
       applied: false,
       reason: "prefill_already_present",
       prefill: "",
+      trigger: trigger,
+      firing_count: cleared.firing_count,
+      max_firings: config.max_firings,
+    }
+  } else if trigger == "read_only_streak" && commit_tool_name == "" {
+    {
+      state: cleared,
+      applied: false,
+      reason: "commit_tool_unavailable",
+      prefill: "",
+      trigger: trigger,
       firing_count: cleared.firing_count,
       max_firings: config.max_firings,
     }
@@ -193,6 +244,7 @@ pub fn agent_monologue_actuation_take(
       applied: false,
       reason: "tool_call_opener_unavailable",
       prefill: "",
+      trigger: trigger,
       firing_count: cleared.firing_count,
       max_firings: config.max_firings,
     }
@@ -202,6 +254,7 @@ pub fn agent_monologue_actuation_take(
       applied: false,
       reason: "assistant_prefill_unsupported",
       prefill: "",
+      trigger: trigger,
       firing_count: cleared.firing_count,
       max_firings: config.max_firings,
     }
@@ -211,7 +264,8 @@ pub fn agent_monologue_actuation_take(
       state: applied_state,
       applied: true,
       reason: "eligible_text_tool_paradigm",
-      prefill: call_open,
+      prefill: actuation_prefill,
+      trigger: trigger,
       firing_count: applied_state.firing_count,
       max_firings: config.max_firings,
     }

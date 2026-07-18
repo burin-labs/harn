@@ -89,7 +89,12 @@ import {
   agent_session_totals,
 } from "std/agent/state"
 import { agent_step_judge } from "std/agent/step_judge"
-import { agent_tool_annotations, agent_tool_entry_annotations } from "std/agent/tool_annotations"
+import {
+  agent_tool_annotations,
+  agent_tool_calls_are_read_only,
+  agent_tool_entry_annotations,
+  agent_tool_single_workspace_write_name,
+} from "std/agent/tool_annotations"
 import {
   agent_tool_search_emit_queries,
   agent_tool_search_inject_if_needed,
@@ -2523,18 +2528,9 @@ fn __tool_names_by_status(dispatch, want_ok) {
   return names
 }
 
-// Workspace-mutating annotation kinds (mirrors postturn's tool-surface
-// classifier vocabulary). A successful call to a tool of one of these kinds is
-// a corrective edit for the current-failure model's `write_epoch`.
+// A successful annotated workspace mutation advances the repair write epoch.
 const __REPAIR_EDIT_KINDS = ["edit", "write", "scaffold", "delete", "mutation", "mutate"]
 
-/**
- * __turn_made_edit reports whether `dispatch` (a single turn's dispatch
- * results) contains a SUCCESSFUL workspace-mutating tool call, by looking up
- * each successful tool's annotation kind in the registry. Reuses
- * `__tool_names_by_status` + `__tool_registry_entry`; only consulted when
- * post-edit verification or repair-aware diagnostics are enabled.
- */
 fn __turn_made_edit(dispatch, tools) -> bool {
   if dispatch == nil {
     return false
@@ -4316,6 +4312,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           turn_llm_opts,
           pending_prefill.prefill == "",
           agent_tool_call_paradigm(turn_llm_opts),
+          agent_tool_single_workspace_write_name(turn_opts?.tools, turn_opts?.policy),
         )
         stall_state = stall_state + {monologue_actuation: monologue_actuation.state}
         const one_shot_prefill = if monologue_actuation.applied {
@@ -4590,6 +4587,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           stall_prev_turn_made_edit,
           llm_result?.stop_reason ?? "",
           {dispatch: stall_prev_dispatch, iteration: iteration_index + 1, session_id: session.session_id},
+          agent_tool_calls_are_read_only(tool_calls, turn_opts?.tools, turn_opts?.policy),
         )
         stall_state = stall_observation.state
         stall_enabled_seen = stall_enabled_seen || stall_observation.enabled

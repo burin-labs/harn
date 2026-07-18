@@ -14,6 +14,17 @@ fn lookup_tools() {
       annotations: {kind: "read"},
     },
   )
+  tools = tool_define(
+    tools,
+    "mutate",
+    "Write a file.",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
   return tools
 }
 
@@ -25,6 +36,20 @@ fn lookup_call(tool_format = "text") {
     return llm_text("```tool\n{\"name\":\"lookup\",\"args\":{\"path\":\"app.txt\"}}\n```")
   }
   return llm_text("<tool_call>lookup({ path: \"app.txt\" })</tool_call>")
+}
+
+fn mutate_call() {
+  return llm_text("<tool_call>mutate({ path: \"app.txt\" })</tool_call>")
+}
+
+fn read_loop_script(tool_format = "text") {
+  return [
+    lookup_call(tool_format),
+    lookup_call(tool_format),
+    lookup_call(tool_format),
+    lookup_call(tool_format),
+    llm_text("Inspection complete. ##DONE##"),
+  ]
 }
 
 fn actuation_receipts(events) {
@@ -93,6 +118,40 @@ pipeline default() {
   __io_println(text.calls[2].prefill == "<tool_call>")
   __io_println(text.calls[3].prefill == nil)
   __io_println(text_receipts[0].checkpoint.outcome)
+  const read_loop = run_case(
+    read_loop_script(),
+    "monologue-actuation-read-loop-" + uuid(),
+    {enabled: true, read_only_turns: 3},
+  )
+  const read_loop_receipt = actuation_receipts(read_loop.events)[0].checkpoint
+  __io_println(read_loop.result.status)
+  __io_println(read_loop.calls[2].prefill == nil)
+  __io_println(read_loop.calls[3].prefill == "<tool_call>mutate({ ")
+  __io_println(read_loop_receipt.trigger)
+  const json_read_loop = run_case(
+    read_loop_script("json"),
+    "monologue-actuation-json-read-loop-" + uuid(),
+    {enabled: true, read_only_turns: 3},
+    "json",
+  )
+  __io_println(json_read_loop.result.status)
+  __io_println(json_read_loop.calls[3].prefill == "```tool\n{\"name\":\"mutate\",\"args\":{")
+  __io_println(actuation_receipts(json_read_loop.events)[0].checkpoint.trigger)
+  const read_loop_reset = run_case(
+    [
+      lookup_call(),
+      lookup_call(),
+      mutate_call(),
+      lookup_call(),
+      lookup_call(),
+      llm_text("Work complete. ##DONE##"),
+    ],
+    "monologue-actuation-read-loop-reset-" + uuid(),
+    {enabled: true, read_only_turns: 3},
+  )
+  __io_println(read_loop_reset.result.status)
+  __io_println(read_loop_reset.calls.all({ call -> call.prefill == nil }))
+  __io_println(len(actuation_receipts(read_loop_reset.events)))
   const json = run_case(
     [
       llm_text("I should inspect app.txt before editing."),
