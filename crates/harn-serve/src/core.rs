@@ -125,6 +125,9 @@ pub struct CallRequest {
     pub arguments: CallArguments,
     pub auth: AuthRequest,
     pub caller: String,
+    /// Stable identity for an adapter-level retry of the same logical request.
+    /// `None` disables replay; a supplied key must be unique within the
+    /// configured replay cache and ordinary repeated calls must not share one.
     pub replay_key: Option<String>,
     pub trace_id: Option<TraceId>,
     pub parent_span_id: Option<String>,
@@ -448,11 +451,9 @@ impl DispatchCore {
             ))
         })?;
 
-        // Rate-limit + backpressure gate. Held across the dispatch so
-        // the in-flight counter decrements on drop (including panics).
-        // Cached replies skip the gate to keep replay-cache hits free
-        // and avoid double-charging buckets the original call already
-        // paid for.
+        // Rate-limit + backpressure gate. Every dispatch attempt passes this
+        // gate before replay lookup. The in-flight counter decrements when the
+        // guard drops, including on cached replies and panics.
         let _limit_guard = self.check_limits(&request, function)?;
 
         let replay_key = request.replay_key.clone().map(ReplayKey);
