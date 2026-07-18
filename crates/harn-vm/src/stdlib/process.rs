@@ -1078,7 +1078,10 @@ fn process_command_config(
     if let Some(value) = env_override(HARN_REPLAY_ENV) {
         config.env.push((HARN_REPLAY_ENV.to_string(), value));
     }
-    if let Some(env) = session_closed_env(config.env.drain(..))? {
+    // `iter().cloned()`, not `drain(..)`: `Drain`'s destructor removes the
+    // range even when the iterator is never consumed, so draining here would
+    // silently empty `config.env` on the no-profile path.
+    if let Some(env) = session_closed_env(config.env.iter().cloned())? {
         config.env = env;
         config.closed_env = true;
     }
