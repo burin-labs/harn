@@ -627,8 +627,8 @@ pipeline default() {
     "first_turn"
   }
   const user_prompt = if resume_mode == "session" {
-    const last = qa_history[len(qa_history) - 1]
-    const answer = if type_of(last?.answer) == "string" {
+    let last = qa_history[len(qa_history) - 1]
+    let answer = if type_of(last?.answer) == "string" {
       last.answer
     } else {
       ""

@@ -80,7 +80,7 @@ fn __destination_path(
   const relative = if source_root == "" {
     path_basename(source_path)
   } else {
-    const rel = path_relative_to(source_path, source_root)
+    let rel = path_relative_to(source_path, source_root)
     if rel == nil {
       path_basename(source_path)
     } else {
@@ -178,7 +178,7 @@ fn main(harness: Harness) {
     const per_file_out = if out_root == "" {
       ""
     } else {
-      const dest = __destination_path(source, source_root, out_root, "harnbc")
+      let dest = __destination_path(source, source_root, out_root, "harnbc")
       __ensure_parent(harness, dest)
       path_parent(dest)
     }

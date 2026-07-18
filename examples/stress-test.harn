@@ -19,7 +19,7 @@ pipeline default(task) {
   ]
   const summaries = people.map(
     { p ->
-      const total = p.scores.reduce(0, { acc, s -> acc + s })
+      let total = p.scores.reduce(0, { acc, s -> acc + s })
       {name: p.name, total: total, avg: total / p.scores.count}
     },
   )

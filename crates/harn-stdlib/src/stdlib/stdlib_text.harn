@@ -60,7 +60,7 @@ pub fn parse_float_or(value, fallback) {
 pub fn extract_paths(text) {
   const lines = split(text, "\n").filter(
     { line ->
-      const t = trim(line)
+      let t = trim(line)
       return contains(t, "/")
         && !starts_with(t, "//")
         && !starts_with(t, "#")

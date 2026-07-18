@@ -178,7 +178,7 @@ pub fn agreement_decision(
   const exec_ids = ids_of(exec_passes)
   const reexec_concurring = exec_passes.filter(
     { v ->
-      const id = to_string(v?.id ?? "")
+      let id = to_string(v?.id ?? "")
       contains(reexecution_ids, id) || id == required_execution_id
     },
   )

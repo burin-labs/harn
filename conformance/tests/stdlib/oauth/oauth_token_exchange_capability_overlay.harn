@@ -93,7 +93,7 @@ pipeline test(task) {
   )
   const overlay_capability = token_exchange_capability("enterprise-as", [overlay_row])
   assert(overlay_capability != nil, "overlay capability should exist")
-  assert_eq(overlay_capability.actor_token_types, [actor_type], "overlay lookup by id")
+  assert_eq(overlay_capability?.actor_token_types, [actor_type], "overlay lookup by id")
   const bare_provider = custom(
     {
       id: "enterprise-as",

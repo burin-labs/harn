@@ -214,7 +214,7 @@ fn __agent_apply_extension(command: AgentLoopCommand, budget: AgentLoopBudget, c
   const target = if command.until > 0 {
     command.until
   } else {
-    const by = if command.by > 0 {
+    let by = if command.by > 0 {
       command.by
     } else {
       budget.extend_by

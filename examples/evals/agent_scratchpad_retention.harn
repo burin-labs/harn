@@ -120,8 +120,8 @@ fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
   const call_count = atomic(0)
   const prompt_chars = atomic(0)
   const caller = { call ->
-    const turn = call?.turn?.iteration ?? 1
-    const system = call?.system ?? ""
+    let turn = call?.turn?.iteration ?? 1
+    let system = call?.system ?? ""
     atomic_add(call_count, 1)
     atomic_add(prompt_chars, len(system))
     return {

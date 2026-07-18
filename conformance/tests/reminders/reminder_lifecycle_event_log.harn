@@ -9,7 +9,7 @@ pipeline main() {
     first.transcript,
     {body: "second", tags: ["lifecycle"], dedupe_key: "slot", ttl_turns: 3},
   )
-  const _ = transcript.clear_reminders(second.transcript, {id: second.reminder_id})
+  const _cleared = transcript.clear_reminders(second.transcript, {id: second.reminder_id})
   const stream = event_log.subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
   const first_injected = stream.next().value
   const deduped = stream.next().value

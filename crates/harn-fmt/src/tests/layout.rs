@@ -42,6 +42,20 @@ fn source_newlines_do_not_split_a_short_method_call() {
     );
 }
 
+/// Reformatting a chain must preserve whether each hop is nil-propagating.
+/// This also guards the mechanical corpus rewrite: `?.` is behavior, not
+/// layout, even when the receiver is known non-nil at one call site.
+#[test]
+fn chain_layout_preserves_safe_navigation() {
+    let source = "fn t(value: any) {\n  return value?.actor_token_types\n}\n";
+    let out = formatted(source);
+    assert!(
+        out.contains("value?.actor_token_types"),
+        "safe navigation was changed into a strict property access:\n{out}"
+    );
+    assert_roundtrip(source);
+}
+
 fn indent_of(out: &str, needle: &str) -> Option<usize> {
     out.lines()
         .find(|l| l.trim_start().starts_with(needle))

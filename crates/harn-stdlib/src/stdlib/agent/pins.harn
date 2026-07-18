@@ -71,15 +71,13 @@ fn __pin_role_hint(kind) {
   return __PIN_ROLE_HINTS[kind] ?? "system"
 }
 
-/**
- * Taxonomy-registration seam (ADDITIVE, default-off). The fixed 5 kinds are the
- * generic taxonomy; a caller (e.g. burin's structural working-set with
- * guardrails/task_contract/file_view/remaining_failures/verification_hud) may
- * widen the accepted set for a single `pin(...)` call via `opts.register_kinds`
- * instead of `pin()` throwing on its domain kinds. When `register_kinds` is
- * unset the accepted set is EXACTLY `__PIN_KINDS`, so validation — and its
- * throw message — is byte-identical to the pre-seam behavior.
- */
+// Taxonomy-registration seam (ADDITIVE, default-off). The fixed 5 kinds are the
+// generic taxonomy; a caller (e.g. burin's structural working-set with
+// guardrails/task_contract/file_view/remaining_failures/verification_hud) may
+// widen the accepted set for a single `pin(...)` call via `opts.register_kinds`
+// instead of `pin()` throwing on its domain kinds. When `register_kinds` is
+// unset the accepted set is EXACTLY `__PIN_KINDS`, so validation — and its
+// throw message — is byte-identical to the pre-seam behavior.
 fn __pin_allowed_kinds(options) {
   const extra = options?.register_kinds ?? []
   if type_of(extra) != "list" {

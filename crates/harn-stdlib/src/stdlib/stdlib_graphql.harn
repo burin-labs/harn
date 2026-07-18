@@ -382,7 +382,7 @@ pub fn graphql_execute_operation(client, operation, variables = nil, options = n
   }
   const request_options = merge(client_options, options ?? {})
   const checked_variables = if operation.variables_schema != nil {
-    const checked = schema_check(variables ?? {}, operation.variables_schema)
+    let checked = schema_check(variables ?? {}, operation.variables_schema)
     if is_err(checked) {
       throw_error(unwrap_err(checked).message)
     }

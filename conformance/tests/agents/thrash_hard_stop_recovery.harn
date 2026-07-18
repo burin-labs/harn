@@ -55,8 +55,8 @@ pipeline default() {
       llm_text("Read the Entry model. ##DONE##"),
     ],
     { ->
-      const session = "thrash-recovery-conformance-" + uuid()
-      const opts: AgentLoopOptions = {
+      let session = "thrash-recovery-conformance-" + uuid()
+      let opts: AgentLoopOptions = {
         provider: "mock",
         tools: toolset(),
         tool_format: "native",
@@ -74,14 +74,14 @@ pipeline default() {
           max_feedback: 2,
         },
       }
-      const captured = agent_capture_events(
+      let captured = agent_capture_events(
         session,
         fn() { return agent_loop("Write tests after inspecting the target model.", nil, opts) },
       )
-      const receipts = events_of(captured.events, "typed_checkpoint").filter(
+      let receipts = events_of(captured.events, "typed_checkpoint").filter(
         { event -> event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1" },
       )
-      const decisions = events_of(captured.events, "loop_control_decision").filter(
+      let decisions = events_of(captured.events, "loop_control_decision").filter(
         { event -> event.reason == "thrash_recovery_continue" },
       )
       __io_println(captured.result.status)

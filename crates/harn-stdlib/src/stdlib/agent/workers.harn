@@ -908,7 +908,7 @@ pub fn agent_fanout(requests, options = nil) {
     let outcomes = []
     for request in wave {
       const outcome = try {
-        const handle = sub_agent_run(request.task, request.options + {background: true, name: request.label})
+        let handle = sub_agent_run(request.task, request.options + {background: true, name: request.label})
         {spawned: true, handle: handle}
       } catch (spawn_error) {
         {spawned: false, error: spawn_error}

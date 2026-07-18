@@ -24,7 +24,7 @@ pipeline main() {
       const captured = agent_capture_events(
         session_id,
         fn() {
-          const handle = sub_agent_run(
+          let handle = sub_agent_run(
             "Park until a reviewer responds.",
             {
               provider: "mock",

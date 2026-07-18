@@ -107,7 +107,7 @@ fn block_submitter_case(bp) {
   const queued = pool.submit(constant("queued"))
   const submitter = spawn {
     send(started, "started")
-    const late = pool.submit(constant("late"))
+    let late = pool.submit(constant("late"))
     send(returned, "returned")
     return late
   }

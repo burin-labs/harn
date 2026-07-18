@@ -74,8 +74,8 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
       llm_text("Read the Entry model. ##DONE##"),
     ],
     { ->
-      const session = "thrash-recovery-" + uuid()
-      const opts: AgentLoopOptions = {
+      let session = "thrash-recovery-" + uuid()
+      let opts: AgentLoopOptions = {
         provider: "mock",
         tools: toolset(),
         tool_format: "native",
@@ -93,22 +93,22 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
           max_feedback: 2,
         },
       }
-      const captured = agent_capture_events(
+      let captured = agent_capture_events(
         session,
         fn() { return agent_loop("Write tests after inspecting the target model.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
       assert(contains(captured.result.tools.successful, "look"), "recovery look should dispatch")
-      const decisions = events_of(captured.events, "loop_control_decision").filter(
+      let decisions = events_of(captured.events, "loop_control_decision").filter(
         { event -> event.reason == "thrash_recovery_continue" },
       )
       assert_eq(len(decisions), 1)
       assert_eq(decisions[0].action, "extend")
-      const iteration_ends = events_of(captured.events, "iteration_end").filter(
+      let iteration_ends = events_of(captured.events, "iteration_end").filter(
         { event -> event.iteration_info?.skip_reason == "thrash_recovery" },
       )
       assert_eq(len(iteration_ends), 1)
-      const receipts = events_of(captured.events, "typed_checkpoint").filter(
+      let receipts = events_of(captured.events, "typed_checkpoint").filter(
         { event -> event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1" },
       )
       assert_eq(len(receipts), 1)
@@ -116,8 +116,8 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
       assert_eq(receipts[0].checkpoint.reason, "thrash_recovery_continue")
       assert_eq(receipts[0].checkpoint.warning.pattern, "repeated_same_observation")
       assert(contains(receipts[0].checkpoint.tool_names, "run"))
-      const calls = llm_mock_calls()
-      const recovery_prompt = json_stringify(calls[2].messages)
+      let calls = llm_mock_calls()
+      let recovery_prompt = json_stringify(calls[2].messages)
       assert(contains(recovery_prompt, "thrash_recovery"))
       assert(contains(recovery_prompt, "Do not issue that same call again"))
     },
@@ -235,17 +235,17 @@ pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(task) {
 }
 
 pipeline test_final_wrapup_tool_call_skip_is_observable(task) {
-  const session = "wrapup-tool-skip-" + uuid()
-  const wrapup_counter = shared_cell({scope: "task_group", key: "wrapup-tool-skip-" + session, initial: 0})
-  const mock_llm = { call ->
+  let session = "wrapup-tool-skip-" + uuid()
+  let wrapup_counter = shared_cell({scope: "task_group", key: "wrapup-tool-skip-" + session, initial: 0})
+  let mock_llm = { call ->
     if call?.opts?._final_wrapup == true {
-      const snap = shared_snapshot(wrapup_counter)
+      let snap = shared_snapshot(wrapup_counter)
       shared_cas(wrapup_counter, snap, snap.value + 1)
       return {ok: true, value: look_call("wrapup_look") + {provider: "mock", model: "mock"}}
     }
     return {ok: true, value: run_call("r1") + {provider: "mock", model: "mock"}}
   }
-  const opts: AgentLoopOptions = {
+  let opts: AgentLoopOptions = {
     provider: "mock",
     tools: toolset(),
     tool_format: "native",
@@ -256,13 +256,13 @@ pipeline test_final_wrapup_tool_call_skip_is_observable(task) {
     session_id: session,
     llm_caller: mock_llm,
   }
-  const captured = agent_capture_events(
+  let captured = agent_capture_events(
     session,
     fn() { return agent_loop("Run out of budget while still trying tools.", nil, opts) },
   )
   assert_eq(captured.result.status, "budget_exhausted")
   assert_eq(shared_get(wrapup_counter), 1)
-  const skipped = events_of(captured.events, "typed_checkpoint").filter(
+  let skipped = events_of(captured.events, "typed_checkpoint").filter(
     { event -> event.checkpoint?.kind == "final_wrapup_tool_calls_skipped" },
   )
   assert_eq(len(skipped), 1)

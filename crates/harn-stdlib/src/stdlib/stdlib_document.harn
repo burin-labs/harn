@@ -66,8 +66,8 @@ pub fn write_pdf(
   source: string | bytes | nil,
   options: PdfRenderOptions = {},
 ) -> PdfWriteResult {
-  const opts = options ?? {}
-  const bytes = pdf_bytes(source, opts)
+  let opts = options ?? {}
+  let bytes = pdf_bytes(source, opts)
   harness.fs.write_bytes(path, bytes)
   return {
     path: path,

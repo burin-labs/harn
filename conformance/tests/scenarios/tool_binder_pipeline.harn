@@ -231,29 +231,29 @@ pipeline default() {
   __io_println(r7.arguments.path)
   // (9) Option validation is schema-backed: malformed public options fail
   // deterministically before any binder hop can run.
-  const missing_provider = try {
+  let missing_provider = try {
     with_natural_language_executor({model: "gpt-oss-120b", binder_fn: mock_binder})
   }
   __io_println(error_contains(missing_provider, "provider"))
-  const bad_timeout = try {
+  let bad_timeout = try {
     with_natural_language_executor(
       {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 0, binder_fn: mock_binder},
     )
   }
   __io_println(error_contains(bad_timeout, "timeout_ms"))
-  const bad_intent_field = try {
+  let bad_intent_field = try {
     with_natural_language_executor(
       {provider: "cerebras", model: "gpt-oss-120b", intent_field: "   ", binder_fn: mock_binder},
     )
   }
   __io_println(error_contains(bad_intent_field, "intent_field"))
-  const bad_failure_mode = try {
+  let bad_failure_mode = try {
     with_natural_language_executor(
       {provider: "cerebras", model: "gpt-oss-120b", on_failure: "retry", binder_fn: mock_binder},
     )
   }
   __io_println(error_contains(bad_failure_mode, "on_failure"))
-  const bad_binder_fn = try {
+  let bad_binder_fn = try {
     with_natural_language_executor({provider: "cerebras", model: "gpt-oss-120b", binder_fn: "nope"})
   }
   __io_println(error_contains(bad_binder_fn, "binder_fn"))
