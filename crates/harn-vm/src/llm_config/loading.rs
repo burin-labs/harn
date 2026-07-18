@@ -4,11 +4,11 @@
 //! catalog.
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use super::*;
 
-static CONFIG: OnceLock<ProvidersConfig> = OnceLock::new();
+static CONFIG: OnceLock<Arc<ProvidersConfig>> = OnceLock::new();
 static CONFIG_PATH: OnceLock<String> = OnceLock::new();
 static RUNTIME_CATALOG_OVERLAY: OnceLock<RwLock<Option<ProvidersConfig>>> = OnceLock::new();
 
@@ -90,6 +90,10 @@ impl RuntimeProviderEndpointOverrides {
 
 /// Load and cache the providers config. Called once at VM startup.
 pub fn load_config() -> &'static ProvidersConfig {
+    load_config_snapshot().as_ref()
+}
+
+fn load_config_snapshot() -> &'static Arc<ProvidersConfig> {
     CONFIG.get_or_init(|| {
         let mut config = default_config();
         let verbose_config_logging = matches!(
@@ -103,7 +107,7 @@ pub fn load_config() -> &'static ProvidersConfig {
             if let Some(overlay) = read_external_config(&path, verbose_config_logging) {
                 config.merge_from(&overlay);
                 let _ = CONFIG_PATH.set(path);
-                return config;
+                return Arc::new(config);
             }
         }
         if should_load_home_config() {
@@ -112,11 +116,11 @@ pub fn load_config() -> &'static ProvidersConfig {
                 if let Some(overlay) = read_external_config(&path, false) {
                     config.merge_from(&overlay);
                     let _ = CONFIG_PATH.set(path);
-                    return config;
+                    return Arc::new(config);
                 }
             }
         }
-        config
+        Arc::new(config)
     })
 }
 
@@ -486,9 +490,29 @@ pub fn clear_runtime_catalog_overlay() {
     set_runtime_catalog_overlay(None);
 }
 
-pub(crate) fn effective_config() -> ProvidersConfig {
-    let user_overrides = LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| cell.borrow().clone());
-    effective_config_with_user_overrides(user_overrides.as_ref())
+/// Return the effective catalog as an immutable snapshot.
+///
+/// The overwhelmingly common no-overlay path shares the process-wide catalog;
+/// runtime and per-execution overlays still produce an isolated merged value.
+pub(crate) fn effective_config() -> Arc<ProvidersConfig> {
+    LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| {
+        let user_overrides = cell.borrow();
+        let runtime_overlay = runtime_catalog_overlay()
+            .read()
+            .expect("runtime catalog overlay poisoned");
+        if user_overrides.is_none() && runtime_overlay.is_none() {
+            return Arc::clone(load_config_snapshot());
+        }
+
+        let mut merged = load_config().clone();
+        if let Some(overlay) = runtime_overlay.as_ref() {
+            merged.merge_from(overlay);
+        }
+        if let Some(overlay) = user_overrides.as_ref() {
+            merged.merge_from(overlay);
+        }
+        Arc::new(merged)
+    })
 }
 
 /// Provider config built purely from the compiled-in `EMBEDDED_PROVIDERS_TOML`
