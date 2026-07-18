@@ -1,4 +1,3 @@
-// @harn-entrypoint-category agent.stdlib
 import { agent_merge_llm_options } from "std/agent/options"
 
 /**

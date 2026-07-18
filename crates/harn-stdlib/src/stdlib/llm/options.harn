@@ -304,6 +304,8 @@ fn __llm_one_shot_prefill_options(options) -> dict {
  * way for retry/recovery code to consume it without disturbing ordinary
  * caller-supplied prefills.
  *
+ * @effects: []
+ * @errors: []
  * @api_stability: experimental
  */
 pub fn llm_arm_one_shot_prefill(prefill: string, options = nil) -> dict {
@@ -318,6 +320,8 @@ pub fn llm_arm_one_shot_prefill(prefill: string, options = nil) -> dict {
  * Clear only an armed Harn one-shot prefill. This is the retry/recovery
  * boundary: regular prefills retain their existing multi-attempt behavior.
  *
+ * @effects: []
+ * @errors: []
  * @api_stability: experimental
  */
 pub fn llm_clear_one_shot_prefill(options = nil) -> dict {
