@@ -282,7 +282,7 @@ fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
     fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755))
         .expect("make fake Cargo executable");
 
-    let mut paths = vec![fake_bin.clone()];
+    let mut paths = vec![fake_bin];
     paths.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     ));

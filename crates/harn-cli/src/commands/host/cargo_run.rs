@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+
+use harn_vm::clock::{now_wall_ms, RealClock};
 
 use crate::cli::{
     HostLeaseRunArgs, HostLeaseRunCargoArgs, HostLeaseRunCargoWorkerArgs, HostLeaseRunCommand,
@@ -718,10 +720,7 @@ fn record_start_failure(
 }
 
 fn unix_now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
-        .unwrap_or_default()
+    now_wall_ms(&RealClock::new())
 }
 
 fn elapsed_since_ms(started_at_ms: i64) -> u64 {
