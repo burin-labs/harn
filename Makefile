@@ -368,6 +368,7 @@ test-pr-gate-post-warm-integrations:
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
+	./scripts/tests/embedded_asset_rebuild_test.sh
 
 # Format check (no changes, for CI)
 fmt-check:
