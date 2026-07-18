@@ -1159,7 +1159,7 @@ mod tests {
 
     #[test]
     fn module_artifact_is_relocatable_and_rebinds_exact_source_path() {
-        let source = "pub fn answer() { fn inner() { return 42 } return inner() }\n";
+        let source = "pub fn answer() { fn inner() { return 42 }; return inner() }\n";
         let first_path = Path::new("/workspace/first/module.harn");
         let second_path = Path::new("/workspace/second/module.harn");
         let key = CacheKey::from_module_source(source);
