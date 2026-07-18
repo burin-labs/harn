@@ -359,6 +359,13 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 "max_tool_calls".to_string(),
                 c.max_tool_calls.map(VmValue::Int).unwrap_or(VmValue::Nil),
             );
+            dict.insert(
+                "prefill".to_string(),
+                c.prefill
+                    .as_deref()
+                    .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+                    .unwrap_or(VmValue::Nil),
+            );
             VmValue::dict(dict)
         })
         .collect();

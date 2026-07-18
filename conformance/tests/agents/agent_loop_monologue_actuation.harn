@@ -1,0 +1,320 @@
+import { agent_capture_events } from "std/agent/events"
+import { default_llm_caller } from "std/llm/handlers"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn lookup_tools(fail_reads = false) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Read a file.",
+    {
+      handler: { args ->
+        if fail_reads {
+          throw "read failed for " + args.path
+        }
+        return "contents of " + args.path
+      },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "mutate",
+    "Write a file.",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "scaffold",
+    "Create a file from a template.",
+    {
+      handler: { args -> "created " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn lookup_call(tool_format = "text", narration = "", path = "app.txt") {
+  if tool_format == "native" {
+    return llm_tool_call("lookup", {path: path})
+  }
+  if tool_format == "json" {
+    return llm_text(narration + "```tool\n{\"name\":\"lookup\",\"args\":{\"path\":\"" + path + "\"}}\n```")
+  }
+  return llm_text(narration + "<tool_call>lookup({ path: \"" + path + "\" })</tool_call>")
+}
+
+fn mutate_call() {
+  return llm_text("<tool_call>mutate({ path: \"app.txt\" })</tool_call>")
+}
+
+fn read_loop_script(tool_format = "text") {
+  return [
+    lookup_call(tool_format, "I will inspect one more location before changing it.\n"),
+    lookup_call(tool_format, "The answer may be elsewhere, so I will inspect again.\n"),
+    lookup_call(tool_format, "I need one more read before I can edit.\n"),
+    lookup_call(tool_format, "I should keep inspecting before committing.\n"),
+    lookup_call(tool_format, "Another read should make the change clearer.\n"),
+    lookup_call(tool_format, "I will inspect once more.\n"),
+    llm_text("Inspection complete. ##DONE##"),
+  ]
+}
+
+fn actuation_receipts(events) {
+  return events
+    .filter({ event -> event.type == "typed_checkpoint" })
+    .filter({ event -> event.checkpoint?.schema == "harn.agent_loop_monologue_actuation.v1" })
+}
+
+fn options(session, actuation = nil, tool_format = "text", extra = nil) {
+  let stall_diagnostics = {enabled: true, no_progress_messages: 2}
+  if actuation != nil {
+    stall_diagnostics = stall_diagnostics + {monologue_actuation: actuation}
+  }
+  return {
+    provider: "mock",
+    model: "claude-opus-3-5",
+    tools: lookup_tools(),
+    tool_format: tool_format,
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    done_judge: nil,
+    final_wrapup: false,
+    max_iterations: 10,
+    max_nudges: 10,
+    session_id: session,
+    stall_diagnostics: stall_diagnostics,
+  }
+    + (extra ?? {})
+}
+
+fn run_case(script, session, actuation = nil, tool_format = "text", extra = nil) {
+  return with_llm_script(
+    script,
+    { -> return agent_capture_events(
+      session,
+      fn() { return agent_loop("Inspect app.txt.", nil, options(session, actuation, tool_format, extra)) },
+    )
+      + {calls: llm_mock_calls()} },
+  )
+}
+
+pipeline default() {
+  const off = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call(),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-off-" + uuid(),
+  )
+  __io_println(off.result.status)
+  __io_println(off.calls[2].prefill == nil)
+  __io_println(len(actuation_receipts(off.events)))
+  const text = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call(),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-text-" + uuid(),
+    {enabled: true},
+  )
+  const text_receipts = actuation_receipts(text.events)
+  __io_println(text.result.status)
+  __io_println(text.calls[2].prefill == "<tool_call>")
+  __io_println(text.calls[3].prefill == nil)
+  __io_println(text_receipts[0].checkpoint.outcome)
+  const read_loop = run_case(
+    read_loop_script(),
+    "monologue-actuation-read-loop-" + uuid(),
+    {enabled: true, read_only_turns: 4, write_tool: "mutate"},
+  )
+  const read_loop_receipt = actuation_receipts(read_loop.events)[0].checkpoint
+  __io_println(read_loop.result.status)
+  __io_println(read_loop.calls[3].prefill == nil)
+  __io_println(read_loop.calls[4].prefill == "<tool_call>mutate({ ")
+  __io_println(read_loop_receipt.trigger)
+  const json_read_loop = run_case(
+    read_loop_script("json"),
+    "monologue-actuation-json-read-loop-" + uuid(),
+    {enabled: true, read_only_turns: 4, write_tool: "mutate"},
+    "json",
+  )
+  __io_println(json_read_loop.result.status)
+  __io_println(json_read_loop.calls[4].prefill == "```tool\n{\"name\":\"mutate\",\"args\":{")
+  __io_println(actuation_receipts(json_read_loop.events)[0].checkpoint.trigger)
+  const read_loop_reset = run_case(
+    [
+      lookup_call(),
+      lookup_call(),
+      mutate_call(),
+      lookup_call(),
+      lookup_call(),
+      llm_text("Work complete. ##DONE##"),
+    ],
+    "monologue-actuation-read-loop-reset-" + uuid(),
+    {enabled: true, read_only_turns: 4, write_tool: "mutate"},
+  )
+  __io_println(read_loop_reset.result.status)
+  __io_println(read_loop_reset.calls.all({ call -> call.prefill == nil }))
+  __io_println(len(actuation_receipts(read_loop_reset.events)))
+  const failed_reads = run_case(
+    [
+      lookup_call("text", "", "a"),
+      lookup_call("text", "", "b"),
+      lookup_call("text", "", "c"),
+      lookup_call("text", "", "d"),
+      lookup_call("text", "", "e"),
+      llm_text("Unable to read. ##DONE##"),
+    ],
+    "monologue-actuation-failed-reads-" + uuid(),
+    {enabled: true, read_only_turns: 4, write_tool: "mutate"},
+    "text",
+    {tools: lookup_tools(true)},
+  )
+  __io_println(failed_reads.result.status)
+  __io_println(failed_reads.calls.all({ call -> call.prefill == nil }))
+  __io_println(len(actuation_receipts(failed_reads.events)))
+  const veto_count = atomic(0)
+  const vetoed_reads = run_case(
+    [
+      lookup_call("text", "", "a"),
+      lookup_call("text", "", "b"),
+      lookup_call("text", "", "c"),
+      lookup_call("text", "", "d"),
+      lookup_call("text", "", "e"),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-vetoed-reads-" + uuid(),
+    {enabled: true, read_only_turns: 4, write_tool: "mutate"},
+    "text",
+    {
+      structural_validator: { envelope, next ->
+        const base = next(envelope)
+        const count = atomic_add(veto_count, 1)
+        if count < 4 {
+          return base
+            + {
+            result: {
+              configured: true,
+              vetoed: true,
+              on_failure: "regenerate_with_feedback",
+              feedback: "retry the read",
+              rule: "fixture_veto",
+            },
+          }
+        }
+        return base
+      },
+    },
+  )
+  __io_println(vetoed_reads.result.status)
+  __io_println(vetoed_reads.calls.all({ call -> call.prefill == nil }))
+  __io_println(len(actuation_receipts(vetoed_reads.events)))
+  const json = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call("json"),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-json-" + uuid(),
+    {enabled: true},
+    "json",
+  )
+  __io_println(json.result.status)
+  __io_println(json.calls[2].prefill == "```tool\n")
+  __io_println(actuation_receipts(json.events)[0].checkpoint.tool_format)
+  const native = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call("native"),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-native-" + uuid(),
+    {enabled: true},
+    "native",
+  )
+  const native_receipt = actuation_receipts(native.events)[0].checkpoint
+  __io_println(native.result.status)
+  __io_println(native.calls[2].prefill == nil)
+  __io_println(native_receipt.outcome)
+  __io_println(native_receipt.reason)
+  const parse_error = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("<tool_call>lookup({ path:"),
+      lookup_call(),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-parse-error-" + uuid(),
+    {enabled: true},
+  )
+  __io_println(parse_error.result.status)
+  __io_println(parse_error.calls[2].prefill == nil)
+  __io_println(len(actuation_receipts(parse_error.events)))
+  const external_caller = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call(),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-external-caller-" + uuid(),
+    {enabled: true},
+    "text",
+    {llm_caller: default_llm_caller()},
+  )
+  __io_println(external_caller.result.status)
+  __io_println(external_caller.calls[2].prefill == nil)
+  __io_println(actuation_receipts(external_caller.events)[0].checkpoint.reason)
+  const explicit_failover = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call(),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-explicit-failover-" + uuid(),
+    {enabled: true},
+    "text",
+    {equivalent_failover: {max_routes: 2, on_no_dispatch: true}},
+  )
+  __io_println(explicit_failover.result.status)
+  __io_println(explicit_failover.calls[2].prefill == nil)
+  __io_println(actuation_receipts(explicit_failover.events)[0].checkpoint.reason)
+  const bounded = run_case(
+    [
+      llm_text("I should inspect app.txt before editing."),
+      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      lookup_call(),
+      llm_text("I should inspect app.txt again."),
+      llm_text("I still need another inspection, but I am only narrating."),
+      lookup_call(),
+      llm_text("Inspection complete. ##DONE##"),
+    ],
+    "monologue-actuation-bounded-" + uuid(),
+    {enabled: true, max_firings: 1},
+  )
+  const bounded_receipts = actuation_receipts(bounded.events)
+  __io_println(bounded.result.status)
+  __io_println(bounded.calls[2].prefill == "<tool_call>")
+  __io_println(bounded.calls[5].prefill == nil)
+  __io_println(len(bounded_receipts))
+  __io_println(bounded_receipts[1].checkpoint.reason)
+}
