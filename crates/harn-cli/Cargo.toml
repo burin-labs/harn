@@ -105,7 +105,7 @@ url = "2"
 webbrowser = "1"
 rand = "0.10"
 regex = "1"
-jsonschema = { version = "0.48.1", default-features = false }
+jsonschema = { version = "0.46.4", default-features = false }
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
 clap_complete = "4"
