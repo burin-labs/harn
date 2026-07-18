@@ -1,0 +1,131 @@
+import { persona_compile_prompt } from "std/personas/compiler"
+import { llm_text, with_llm_script } from "std/testing"
+
+const PROVIDERS = [
+  {
+    provider: "cron",
+    kinds: ["cron"],
+    schema_name: "CronEventPayload",
+    outbound_methods: [],
+    secret_requirements: [],
+    signature_verification: {kind: "none"},
+    runtime: {kind: "builtin"},
+  },
+  {
+    provider: "github",
+    kinds: ["webhook"],
+    schema_name: "GitHubEventPayload",
+    outbound_methods: [],
+    secret_requirements: [{name: "webhook_secret", required: true, namespace: "github"}],
+    signature_verification: {kind: "hmac_sha256"},
+    runtime: {kind: "placeholder"},
+  },
+  {
+    provider: "slack",
+    kinds: ["webhook"],
+    schema_name: "SlackEventPayload",
+    outbound_methods: [],
+    secret_requirements: [{name: "signing_secret", required: true, namespace: "slack"}],
+    signature_verification: {kind: "hmac_sha256"},
+    runtime: {kind: "placeholder"},
+  },
+]
+
+pipeline main() {
+  with_llm_script(
+    [
+      llm_text(
+        "{\"schema_version\":\"1\",\"name\":\"sdk_watch\",\"description\":\"Narrates SDK changes.\",\"goal\":\"Watch github.com/acme/sdk every morning.\",\"template\":\"deterministic-sweeper\",\"cron\":{\"cron\":\"0 9 * * *\",\"timezone\":\"UTC\"}}",
+      )
+        + {usage: {input_tokens: 11, output_tokens: 7, total_tokens: 18}},
+      llm_text(
+        "{\"schema_version\":\"1\",\"name\":\"alerts_triage\",\"description\":\"Classifies alerts.\",\"goal\":\"Page, investigate, or ignore each alert.\",\"template\":\"hybrid-classify-then-act\",\"external\":{\"provider\":\"slack\",\"event\":\"slack.message\"}}",
+      ),
+      llm_text(
+        "{\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up.\",\"goal\":\"Surface replies every four hours.\",\"template\":\"deterministic-sweeper\",\"cron\":{\"cron\":\"0 */4 * * *\",\"timezone\":\"America/Los_Angeles\"}}",
+      ),
+      llm_text(
+        "{\"schema_version\":\"1\",\"name\":\"bad_route\",\"description\":\"Invalid route.\",\"goal\":\"Reject mismatched namespaces.\",\"template\":\"hybrid-classify-then-act\",\"external\":{\"provider\":\"slack\",\"event\":\"github.push\"}}",
+      ),
+    ],
+    { ->
+      const sdk = persona_compile_prompt(
+        "Watch github.com/acme/sdk and narrate meaningful changes every morning.",
+        {provider: "mock", name_override: "acme_sdk_watch"},
+        PROVIDERS,
+      )
+      __io_println(sdk.ok)
+      __io_println(sdk.checkpoint.attempts)
+      __io_println(sdk.checkpoint.repaired)
+      __io_println(sdk.usage.input_tokens)
+      __io_println(sdk.usage.output_tokens)
+      __io_println(sdk.usage.total_tokens)
+      const sdk_lowering = sdk.lowering
+      guard sdk_lowering != nil else {
+        throw "SDK prompt did not lower"
+      }
+      __io_println(sdk_lowering.persona.name)
+      __io_println(sdk_lowering.policy.autonomy_tier)
+      __io_println(sdk_lowering.policy.receipt_policy)
+      const sdk_trigger = sdk_lowering.triggers[0]
+      guard sdk_trigger != nil else {
+        throw "SDK lowering has no trigger"
+      }
+      __io_println(sdk_trigger.handler)
+      __io_println(starts_with(sdk.catalog_digest, "sha256:"))
+      const slack = persona_compile_prompt(
+        "Triage #alerts in Slack: page me, start investigating, or ignore.",
+        {provider: "mock", max_tokens: 1200},
+        PROVIDERS,
+      )
+      __io_println(slack.ok)
+      __io_println(slack.checkpoint.attempts)
+      const slack_lowering = slack.lowering
+      guard slack_lowering != nil else {
+        throw "Slack prompt did not lower"
+      }
+      __io_println(slack_lowering.template)
+      const slack_trigger = slack_lowering.triggers[0]
+      guard slack_trigger != nil else {
+        throw "Slack lowering has no trigger"
+      }
+      __io_println(slack_trigger.provider)
+      __io_println(slack_trigger.events[0])
+      const digest = persona_compile_prompt(
+        "Every 4 hours, digest what I need to reply to or follow up on.",
+        {provider: "mock"},
+        PROVIDERS,
+      )
+      __io_println(digest.ok)
+      __io_println(digest.checkpoint.attempts)
+      const digest_lowering = digest.lowering
+      guard digest_lowering != nil else {
+        throw "Digest prompt did not lower"
+      }
+      const digest_trigger = digest_lowering.triggers[0]
+      guard digest_trigger != nil else {
+        throw "Digest lowering has no trigger"
+      }
+      __io_println(digest_trigger.schedule)
+      const rejected = persona_compile_prompt("Route a mismatched event.", {provider: "mock"}, PROVIDERS)
+      __io_println(rejected.ok)
+      __io_println(rejected.checkpoint.status)
+      __io_println(rejected.checkpoint.attempts)
+      const rejected_error = rejected.error
+      guard rejected_error != nil else {
+        throw "Rejected prompt has no diagnostic"
+      }
+      __io_println(rejected_error.code)
+      __io_println(len(llm_mock_calls()))
+      const over_budget = persona_compile_prompt("Compile me.", {provider: "mock", max_tokens: 1201}, PROVIDERS)
+      __io_println(over_budget.ok)
+      __io_println(over_budget.checkpoint.status)
+      const over_budget_error = over_budget.error
+      guard over_budget_error != nil else {
+        throw "Over-budget prompt has no diagnostic"
+      }
+      __io_println(over_budget_error.code)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+}

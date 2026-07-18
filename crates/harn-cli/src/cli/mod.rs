@@ -179,10 +179,10 @@ pub(crate) use package::{
 pub(crate) use parse_tokens::{ParseArgs, TokensArgs};
 pub(crate) use persona::{
     PersonaActivateArgs, PersonaActivationsArgs, PersonaArgs, PersonaCheckArgs, PersonaCommand,
-    PersonaControlArgs, PersonaDeactivateArgs, PersonaDoctorArgs, PersonaInspectArgs,
-    PersonaListArgs, PersonaMaterializeArgs, PersonaNewArgs, PersonaSpendArgs, PersonaStatusArgs,
-    PersonaSupervisionCommand, PersonaSupervisionTailArgs, PersonaTemplateKind, PersonaTickArgs,
-    PersonaTriggerArgs,
+    PersonaCompilePromptArgs, PersonaControlArgs, PersonaDeactivateArgs, PersonaDoctorArgs,
+    PersonaInspectArgs, PersonaListArgs, PersonaMaterializeArgs, PersonaNewArgs, PersonaSpendArgs,
+    PersonaStatusArgs, PersonaSupervisionCommand, PersonaSupervisionTailArgs, PersonaTemplateKind,
+    PersonaTickArgs, PersonaTriggerArgs,
 };
 pub(crate) use pg::{PgArgs, PgCodegenArgs, PgCommand};
 pub(crate) use playground::PlaygroundArgs;
