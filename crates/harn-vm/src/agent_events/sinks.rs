@@ -35,18 +35,26 @@ pub trait AgentEventSink: Send + Sync {
 pub type AgentEventSinkFlush<'a> =
     Pin<Box<dyn Future<Output = Result<(), AgentEventSinkError>> + Send + 'a>>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentEventSinkError {
     sink: &'static str,
     message: String,
 }
 
 impl AgentEventSinkError {
-    fn new(sink: &'static str, error: impl std::fmt::Display) -> Self {
+    pub fn new(sink: &'static str, error: impl std::fmt::Display) -> Self {
         Self {
             sink,
             message: error.to_string(),
         }
+    }
+
+    pub fn sink(&self) -> &'static str {
+        self.sink
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
     }
 }
 
@@ -245,7 +253,7 @@ impl EventLogSink {
                 let append_error = first_error
                     .lock()
                     .expect("event-log sink error mutex poisoned")
-                    .take();
+                    .clone();
                 let flush_result = log
                     .flush()
                     .await
@@ -253,6 +261,20 @@ impl EventLogSink {
                 append_error.map_or(flush_result, Err)
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enqueue_flush_for_test(
+        &self,
+    ) -> tokio::sync::oneshot::Receiver<Result<(), AgentEventSinkError>> {
+        let EventLogSinkDispatch::Async(sender) = &self.dispatch else {
+            panic!("test flush enqueue requires an async event-log sink");
+        };
+        let (reply, response) = tokio::sync::oneshot::channel();
+        sender
+            .send(EventLogSinkCommand::Flush(reply))
+            .expect("event-log sink worker should accept test flush");
+        response
     }
 }
 
@@ -274,7 +296,7 @@ async fn run_event_log_sink_worker(
                     .flush()
                     .await
                     .map_err(|error| AgentEventSinkError::new("event_log", error));
-                let result = first_error.take().map_or(flush_result, Err);
+                let result = first_error.clone().map_or(flush_result, Err);
                 let _ = reply.send(result);
             }
         }
@@ -429,13 +451,20 @@ impl AgentEventSink for MultiSink {
 
     fn flush(&self) -> AgentEventSinkFlush<'_> {
         let sinks = self.sinks.lock().expect("sink mutex poisoned").clone();
-        Box::pin(async move {
-            for sink in sinks {
-                sink.flush().await?;
-            }
-            Ok(())
-        })
+        Box::pin(flush_all_sinks(sinks))
     }
+}
+
+pub(super) async fn flush_all_sinks(
+    sinks: impl IntoIterator<Item = Arc<dyn AgentEventSink>>,
+) -> Result<(), AgentEventSinkError> {
+    let mut first_error = None;
+    for sink in sinks {
+        if let Err(error) = sink.flush().await {
+            first_error.get_or_insert(error);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 pub(super) fn now_ms() -> i64 {

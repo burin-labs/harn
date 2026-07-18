@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
+use super::sinks::flush_all_sinks;
 use super::{AgentEvent, AgentEventSink, AgentEventSinkError};
 
 #[cfg(test)]
@@ -143,10 +144,7 @@ pub fn emit_event(event: &AgentEvent) {
 pub async fn flush_session_sinks(session_id: &str) -> Result<(), AgentEventSinkError> {
     let mut sinks = session_sink_snapshot(session_id);
     sinks.extend(wildcard_sink_snapshot());
-    for sink in sinks {
-        sink.flush().await?;
-    }
-    Ok(())
+    flush_all_sinks(sinks).await
 }
 
 /// Opaque handle returned by [`register_wildcard_sink`]. Pass back to

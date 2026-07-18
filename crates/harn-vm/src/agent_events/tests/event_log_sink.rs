@@ -1,11 +1,40 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::agent_events::{
     clear_session_sinks, emit_event, flush_session_sinks, register_sink, register_wildcard_sink,
-    unregister_wildcard_sink, AgentEvent, AgentEventSink, EventLogSink, ToolCallStatus,
-    ToolMutationStatus,
+    unregister_wildcard_sink, AgentEvent, AgentEventSink, AgentEventSinkError, AgentEventSinkFlush,
+    EventLogSink, MultiSink, ToolCallStatus, ToolMutationStatus,
 };
-use crate::event_log::{AnyEventLog, EventLog, MemoryEventLog, Topic};
+use crate::event_log::{AnyEventLog, EventLog, MemoryEventLog, SqliteEventLog, Topic};
+
+struct FlushProbe {
+    name: &'static str,
+    failure: Option<AgentEventSinkError>,
+    flushed: Arc<Mutex<Vec<&'static str>>>,
+}
+
+impl AgentEventSink for FlushProbe {
+    fn handle_event(&self, _event: &AgentEvent) {}
+
+    fn flush(&self) -> AgentEventSinkFlush<'_> {
+        Box::pin(async move {
+            self.flushed.lock().unwrap().push(self.name);
+            self.failure.clone().map_or(Ok(()), Err)
+        })
+    }
+}
+
+fn flush_probe(
+    name: &'static str,
+    failure: Option<AgentEventSinkError>,
+    flushed: &Arc<Mutex<Vec<&'static str>>>,
+) -> Arc<dyn AgentEventSink> {
+    Arc::new(FlushProbe {
+        name,
+        failure,
+        flushed: flushed.clone(),
+    })
+}
 
 #[test]
 fn redacts_tool_payloads_before_append() {
@@ -116,7 +145,78 @@ async fn session_flush_is_a_causal_registry_barrier() {
     let topic = Topic::new("observability.agent_events.registry-flush-session").unwrap();
     let events = log.read_range(&topic, None, 8).await.unwrap();
     assert_eq!(events.len(), 1);
+    assert_eq!(events[0].1.payload["event"]["content"], "causally durable");
     clear_session_sinks(session_id);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_flush_drains_later_sinks_after_first_failure() {
+    let session_id = "drain-all-session";
+    let flushed = Arc::new(Mutex::new(Vec::new()));
+    register_sink(
+        session_id,
+        flush_probe(
+            "first",
+            Some(AgentEventSinkError::new("first", "expected failure")),
+            &flushed,
+        ),
+    );
+    register_sink(session_id, flush_probe("second", None, &flushed));
+
+    let error = flush_session_sinks(session_id)
+        .await
+        .expect_err("first sink failure must be reported after all sinks drain");
+
+    assert_eq!(error.sink(), "first");
+    assert_eq!(error.message(), "expected failure");
+    assert_eq!(*flushed.lock().unwrap(), ["first", "second"]);
+    clear_session_sinks(session_id);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn multi_sink_flush_drains_later_sinks_after_first_failure() {
+    let flushed = Arc::new(Mutex::new(Vec::new()));
+    let sinks = MultiSink::new();
+    sinks.push(flush_probe(
+        "first",
+        Some(AgentEventSinkError::new("first", "expected failure")),
+        &flushed,
+    ));
+    sinks.push(flush_probe("second", None, &flushed));
+
+    let error = sinks
+        .flush()
+        .await
+        .expect_err("first sink failure must be reported after all sinks drain");
+
+    assert_eq!(error.sink(), "first");
+    assert_eq!(*flushed.lock().unwrap(), ["first", "second"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancelled_flush_does_not_consume_sticky_append_error() {
+    let temp = tempfile::tempdir().expect("event-log tempdir");
+    let path = temp.path().join("events.sqlite");
+    drop(SqliteEventLog::open(path.clone(), 8).expect("initialize writable event log"));
+    let read_only = SqliteEventLog::open_read_only(path, 8).expect("open read-only event log");
+    let sink = EventLogSink::new(
+        Arc::new(AnyEventLog::Sqlite(read_only)),
+        "cancelled-flush-session",
+    );
+    sink.handle_event(&AgentEvent::AgentMessageChunk {
+        session_id: "cancelled-flush-session".into(),
+        content: "append must fail".into(),
+    });
+
+    let cancelled = sink.enqueue_flush_for_test();
+    drop(cancelled);
+    let error = sink
+        .flush()
+        .await
+        .expect_err("append error must remain visible after a cancelled flush waiter");
+
+    assert_eq!(error.sink(), "event_log");
+    assert!(error.message().contains("readonly") || error.message().contains("read-only"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -152,7 +252,23 @@ async fn flush_drains_concurrent_producers_without_scheduler_polling() {
         .read_range(&topic, None, PRODUCERS * EVENTS_PER_PRODUCER)
         .await
         .unwrap();
-    assert_eq!(events.len(), PRODUCERS * EVENTS_PER_PRODUCER);
+    let mut actual = events
+        .iter()
+        .map(|(_, record)| {
+            record.payload["event"]["content"]
+                .as_str()
+                .expect("agent message content")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    actual.sort();
+    let mut expected = (0..PRODUCERS)
+        .flat_map(|producer| {
+            (0..EVENTS_PER_PRODUCER).map(move |event| format!("producer-{producer}-event-{event}"))
+        })
+        .collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(actual, expected);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -172,5 +288,9 @@ async fn session_flush_includes_wildcard_sinks() {
     let topic = Topic::new("observability.agent_events.wildcard-flush-session").unwrap();
     let events = log.read_range(&topic, None, 8).await.unwrap();
     assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].1.payload["event"]["content"],
+        "persisted by wildcard"
+    );
     unregister_wildcard_sink(handle);
 }

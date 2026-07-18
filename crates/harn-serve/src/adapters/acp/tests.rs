@@ -15,7 +15,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc;
-
 fn acp_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -1877,6 +1876,7 @@ fn every_session_dispatch_arm_checks_authentication() {
 }
 
 mod commands;
+mod event_log_barrier;
 mod modes;
 mod prompt_errors;
 mod runtime_overrides;
