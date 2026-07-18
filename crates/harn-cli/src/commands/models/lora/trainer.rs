@@ -226,6 +226,9 @@ pub(super) fn trainer_environment_check(
         observation.optional_extensions,
         &mut errors,
     );
+    require_environment_facts("resolver", &resolver, &mut errors);
+    require_environment_facts("runtime", &runtime, &mut errors);
+    require_environment_facts("packages", &packages, &mut errors);
     if !errors.is_empty() {
         return TrainerEnvironmentCheck {
             schema_version: LORA_TRAINER_ENVIRONMENT_SCHEMA_VERSION,
@@ -281,6 +284,19 @@ fn normalize_environment_facts(
         }
     }
     normalized
+}
+
+/// A promotable attestation must describe the realized trainer, not just its schema.
+fn require_environment_facts(
+    field: &str,
+    facts: &BTreeMap<String, String>,
+    errors: &mut Vec<String>,
+) {
+    if facts.is_empty() {
+        errors.push(format!(
+            "trainer environment observation {field} must contain at least one fact"
+        ));
+    }
 }
 
 fn normalize_environment_key(field: &str, key: &str, errors: &mut Vec<String>) -> Option<String> {
@@ -420,5 +436,73 @@ mod tests {
         let mlx_check = trainer_environment_check(Some(declared), Some(mlx));
         assert!(mlx_check.promotable);
         assert_eq!(mlx_check.status, "attested");
+    }
+
+    #[test]
+    fn trainer_environment_rejects_vacuous_core_facts() {
+        let declared =
+            make_trainer_identity("revision", "mlx-trainer-r1").expect("declared identity");
+        let empty: TrainerEnvironmentObservation = serde_json::from_str(
+            r#"{
+              "schema_version": 1,
+              "resolver": {},
+              "runtime": {},
+              "packages": {},
+              "optional_extensions": {}
+            }"#,
+        )
+        .expect("empty observation is syntactically valid");
+
+        let check = trainer_environment_check(Some(declared), Some(empty));
+
+        assert_eq!(check.status, "invalid_observation");
+        assert!(!check.promotable);
+        assert!(check.attestation.is_none());
+        assert_eq!(
+            check.errors,
+            vec![
+                "trainer environment observation resolver must contain at least one fact",
+                "trainer environment observation runtime must contain at least one fact",
+                "trainer environment observation packages must contain at least one fact",
+            ]
+        );
+    }
+
+    #[test]
+    fn trainer_environment_accepts_minimal_core_facts_with_no_extensions() {
+        let declared =
+            make_trainer_identity("revision", "mlx-trainer-r1").expect("declared identity");
+        let observation: TrainerEnvironmentObservation = serde_json::from_str(
+            r#"{
+              "schema_version": 1,
+              "resolver": {" Tool ": "  pixi   0.39.0 "},
+              "runtime": {"Engine": " mlx "},
+              "packages": {"mlx_lm": " 0.23.0 "},
+              "optional_extensions": {}
+            }"#,
+        )
+        .expect("minimal observation");
+
+        let check = trainer_environment_check(Some(declared.clone()), Some(observation));
+
+        assert_eq!(check.status, "attested");
+        assert!(check.promotable);
+        assert!(check.errors.is_empty());
+        let attestation = check.attestation.expect("promotable attestation");
+        assert_eq!(attestation.declared_trainer_identity, declared);
+        assert_eq!(
+            attestation.resolver,
+            BTreeMap::from([("tool".to_string(), "pixi 0.39.0".to_string())])
+        );
+        assert_eq!(
+            attestation.runtime,
+            BTreeMap::from([("engine".to_string(), "mlx".to_string())])
+        );
+        assert_eq!(
+            attestation.packages,
+            BTreeMap::from([("mlx_lm".to_string(), "0.23.0".to_string())])
+        );
+        assert!(attestation.optional_extensions.is_empty());
+        assert!(attestation.digest.starts_with("sha256:"));
     }
 }
