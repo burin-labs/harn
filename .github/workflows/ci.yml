@@ -458,6 +458,7 @@ jobs:
         if: matrix.kind == 'test'
         env:
           CARGO_BUILD_JOBS: "4"
+          HARN_LLM_CALLS_DISABLED: "1"
           NEXTEST_PROFILE: ci
         run: >-
           scripts/ci/run_rust_test_lane.sh

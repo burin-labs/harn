@@ -343,6 +343,7 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_finalize_sccache_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
+	./scripts/tests/behavior_artifact_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh

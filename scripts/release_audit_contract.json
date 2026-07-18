@@ -51,6 +51,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "matrix.kind == 'test'",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
           "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'"
         }
       ]
