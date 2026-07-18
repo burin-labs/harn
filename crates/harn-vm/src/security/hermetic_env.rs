@@ -119,6 +119,54 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "LD",
 ];
 
+/// The filesystem-path-valued subset of [`TOOLCHAIN_ENV_ALLOWLIST`]: toolchain
+/// install roots, module paths, and cache dirs (never the flag/program-name
+/// vars like `RUST_BACKTRACE`, `CC`, or `LD`). Consumers that need to reason
+/// about *where a toolchain lives* — e.g. enriching a sandbox environment-denial
+/// diagnostic with the roots a relocated toolchain points at — read this list so
+/// there is no second per-language path table to drift from the allowlist.
+pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
+    // Rust / Cargo
+    "CARGO_HOME",
+    "CARGO_TARGET_DIR",
+    "RUSTUP_HOME",
+    // Node / npm / pnpm
+    "NODE_PATH",
+    "NPM_CONFIG_CACHE",
+    "NVM_DIR",
+    "PNPM_HOME",
+    // Python / uv / pyenv
+    "PYENV_ROOT",
+    "PYTHONPATH",
+    "UV_CACHE_DIR",
+    "VIRTUAL_ENV",
+    // Go
+    "GOCACHE",
+    "GOMODCACHE",
+    "GOPATH",
+    "GOROOT",
+    // JVM
+    "JAVA_HOME",
+];
+
+/// The write-cache subset of [`TOOLCHAIN_PATH_ENV_VARS`]: dirs a toolchain
+/// *writes* while building (build caches, module/download caches, install
+/// homes that hold mutable registry caches). Deliberately excludes read-only
+/// install/lib roots like `GOROOT`, `JAVA_HOME`, and `PYTHONPATH`, which usually
+/// live under a system-preset prefix and so must not be flagged as an
+/// out-of-jail gap. A denial while one of these points *outside* the sandbox
+/// jail is a provable environment/config gap, not the workload's code defect.
+pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
+    "CARGO_HOME",
+    "GOCACHE",
+    "GOMODCACHE",
+    "GOPATH",
+    "NPM_CONFIG_CACHE",
+    "PNPM_HOME",
+    "RUSTUP_HOME",
+    "UV_CACHE_DIR",
+];
+
 /// The complete set of environment variable names admitted into a
 /// profile-governed child process. The single owner; see the module docs.
 pub const ENV_ALLOWLIST: &[&str] = &const_concat();
@@ -174,6 +222,26 @@ pub fn resolve_env(
 mod tests {
     use super::*;
     use crate::security::session_grants::{GrantSourceSpec, GrantSpec, SessionProfileKind};
+
+    #[test]
+    fn toolchain_path_env_vars_are_a_subset_of_the_allowlist() {
+        // The path-valued view must never name a var the child env would not
+        // even carry; keep it a strict subset of the single-owner toolchain
+        // allowlist so a diagnostic never references an inaccessible var.
+        for name in TOOLCHAIN_PATH_ENV_VARS {
+            assert!(
+                TOOLCHAIN_ENV_ALLOWLIST.contains(name),
+                "{name} is in TOOLCHAIN_PATH_ENV_VARS but not TOOLCHAIN_ENV_ALLOWLIST"
+            );
+        }
+        // The cache subset must in turn be path-valued (and so allowlisted).
+        for name in TOOLCHAIN_CACHE_ENV_VARS {
+            assert!(
+                TOOLCHAIN_PATH_ENV_VARS.contains(name),
+                "{name} is in TOOLCHAIN_CACHE_ENV_VARS but not TOOLCHAIN_PATH_ENV_VARS"
+            );
+        }
+    }
 
     /// A local re-derivation of the "looks like a secret" shape. It cannot call
     /// `harn-hostlib::is_sensitive_env_name` (that crate depends on this one), so

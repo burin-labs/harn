@@ -322,6 +322,113 @@ fn standard_device_profile_rules() -> &'static str {
 mod tests {
     use super::*;
 
+    #[test]
+    fn sandbox_profile_allows_go_build_and_module_caches_read_write() {
+        // Regression for the 2026-07-18 Burin dogfood repro. `go build`/`go test`
+        // write compiled objects to GOCACHE and modules to GOMODCACHE; when the
+        // default (unset-env) locations are not writable, go fails with the
+        // misleading "package fmt is not in std (GOROOT/src/fmt)". Assert the
+        // writable profile grants read AND write to the default Go caches.
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let cache_roots =
+            super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+        let go_build = cache_roots
+            .iter()
+            .find(|path| path.ends_with(std::path::Path::new("Library/Caches/go-build")))
+            .expect("macOS Go build cache root")
+            .display()
+            .to_string();
+        let go_mod = cache_roots
+            .iter()
+            .find(|path| path.ends_with(std::path::Path::new("go/pkg/mod")))
+            .expect("Go module cache root")
+            .display()
+            .to_string();
+
+        let writable = render_profile_with_extra_read_roots(
+            &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+            &[],
+            &[],
+            &cache_roots,
+        );
+        let write_line = writable
+            .lines()
+            .find(|line| line.starts_with("(allow file-write* (subpath"))
+            .expect("a multi-subpath file-write* allow line");
+        for path in [&go_build, &go_mod] {
+            let escaped = sandbox_profile_escape(path);
+            assert!(
+                writable.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
+                "Go cache should be readable: {writable}"
+            );
+            assert!(
+                write_line.contains(&format!("(subpath \"{escaped}\")")),
+                "Go cache should be writable under a writable policy: {writable}"
+            );
+        }
+    }
+
+    /// End-to-end regression: `go build` of a stdlib-only module must succeed
+    /// under the DEFAULT sandbox profile (all presets, no relocated GOCACHE).
+    /// Before the toolchain-cache-preset fix this failed with
+    /// `package fmt is not in std (/opt/homebrew/.../src/fmt)` because the
+    /// default GOCACHE (`~/Library/Caches/go-build`) was not a writable root.
+    /// Skips cleanly where `sandbox-exec` or `go` is unavailable.
+    #[test]
+    fn sandbox_exec_profile_allows_go_build_with_default_cache() {
+        let Some(go) = [
+            "/opt/homebrew/bin/go",
+            "/usr/local/go/bin/go",
+            "/usr/bin/go",
+        ]
+        .into_iter()
+        .find(|path| Path::new(path).exists()) else {
+            return;
+        };
+        if !Path::new(SANDBOX_EXEC_PATH).exists() {
+            return;
+        }
+        let temp = tempfile::TempDir::new().expect("temp go module");
+        std::fs::write(temp.path().join("go.mod"), "module repromod\n\ngo 1.24\n")
+            .expect("write go.mod");
+        std::fs::write(
+            temp.path().join("main.go"),
+            "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hi\") }\n",
+        )
+        .expect("write main.go");
+
+        // Default presets (process_sandbox default => all four incl.
+        // SystemRuntime + DeveloperToolchains cache roots). Workspace-write so
+        // the module dir is writable; GOCACHE/GOMODCACHE come from the toolchain
+        // cache preset, NOT from an env override.
+        let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+        policy.workspace_roots = vec![temp.path().to_string_lossy().into_owned()];
+        let PrepareOutcome::WrappedExec { wrapper, args } = wrap_with_sandbox_exec(
+            go,
+            &strings(["build", "-o", "/dev/null", "./..."]),
+            &policy,
+            SandboxProfile::Worktree,
+        )
+        .expect("wrap go build") else {
+            panic!("macOS backend should wrap with sandbox-exec");
+        };
+
+        let output = Command::new(wrapper)
+            .args(args)
+            .current_dir(temp.path())
+            .output()
+            .expect("run sandboxed go build");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "go build must succeed under the default sandbox\nstderr:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("is not in std"),
+            "go must not report a toolchain-cache denial as a std-package defect: {stderr}"
+        );
+    }
+
     fn macos_policy_with_workspace_ops(ops: &[&str]) -> CapabilityPolicy {
         CapabilityPolicy {
             tools: Vec::new(),
