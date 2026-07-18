@@ -79,7 +79,6 @@ pub fn run() {
     install_broken_pipe_panic_hook();
     harn_vm::initialize_runtime_assets();
     let raw_args = normalize_serve_args(bootstrap::args_after_pre_runtime_command());
-
     // Defeat rlib dead-code stripping of `#[harn_builtin]`-emitted statics
     // (linkme issue #36). Without this touch the linker can drop every
     // builtin's distributed-slice entry, leaving `ALL_BUILTIN_DEFS` empty
