@@ -530,13 +530,15 @@ fn collect_symbols(
                         fields: variant
                             .fields
                             .iter()
-                            .map(|field| ShapeField {
-                                name: field.name.clone(),
-                                type_expr: field
-                                    .type_expr
-                                    .clone()
-                                    .unwrap_or(TypeExpr::Named("any".to_string())),
-                                optional: false,
+                            .map(|field| {
+                                ShapeField::synthetic(
+                                    field.name.clone(),
+                                    field
+                                        .type_expr
+                                        .clone()
+                                        .unwrap_or(TypeExpr::Named("any".to_string())),
+                                    false,
+                                )
                             })
                             .collect(),
                     })
@@ -563,6 +565,7 @@ fn collect_symbols(
                         .clone()
                         .unwrap_or(TypeExpr::Named("any".to_string())),
                     optional: field.optional,
+                    span: field.span,
                 })
                 .collect::<Vec<_>>();
             let fields_str = fields
@@ -1060,11 +1063,7 @@ pub(crate) fn infer_literal_type(snode: &SNode) -> Option<TypeExpr> {
                 };
                 let val_type =
                     infer_literal_type(&entry.value).unwrap_or(TypeExpr::Named("nil".into()));
-                fields.push(ShapeField {
-                    name: key,
-                    type_expr: val_type,
-                    optional: false,
-                });
+                fields.push(ShapeField::synthetic(key, val_type, false));
             }
             if !fields.is_empty() {
                 Some(TypeExpr::Shape(fields))
@@ -1185,16 +1184,8 @@ mod tests {
 
     fn shape(kind_value: &str, other_name: &str, other_type: &str) -> TypeExpr {
         TypeExpr::Shape(vec![
-            ShapeField {
-                name: "kind".into(),
-                type_expr: TypeExpr::LitString(kind_value.into()),
-                optional: false,
-            },
-            ShapeField {
-                name: other_name.into(),
-                type_expr: TypeExpr::Named(other_type.into()),
-                optional: false,
-            },
+            ShapeField::synthetic("kind", TypeExpr::LitString(kind_value.into()), false),
+            ShapeField::synthetic(other_name, TypeExpr::Named(other_type.into()), false),
         ])
     }
 

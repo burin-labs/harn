@@ -1,5 +1,5 @@
 use crate::ast::*;
-use harn_lexer::TokenKind;
+use harn_lexer::{Span, TokenKind};
 
 use super::error::ParserError;
 use super::state::Parser;
@@ -347,6 +347,7 @@ impl Parser {
             // Shape field names parallel dict-literal keys: a few reserved
             // keywords (`type`, `match`, …) are common discriminant names
             // and must work in shape-type position too.
+            let field_start = self.current_span();
             let name = self.consume_identifier_or_keyword("field name")?;
             let optional = if self.check(&TokenKind::Question) {
                 self.advance();
@@ -360,6 +361,7 @@ impl Parser {
                 name,
                 type_expr,
                 optional,
+                span: Span::merge(field_start, self.prev_span()),
             });
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {

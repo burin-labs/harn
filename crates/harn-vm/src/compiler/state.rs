@@ -164,9 +164,8 @@ impl Compiler {
                 fields
                     .iter()
                     .map(|field| ShapeField {
-                        name: field.name.clone(),
                         type_expr: self.expand_alias_inner(&field.type_expr, visiting),
-                        optional: field.optional,
+                        ..field.clone()
                     })
                     .collect(),
             ),
@@ -174,9 +173,8 @@ impl Compiler {
                 fields: fields
                     .iter()
                     .map(|field| ShapeField {
-                        name: field.name.clone(),
                         type_expr: self.expand_alias_inner(&field.type_expr, visiting),
-                        optional: field.optional,
+                        ..field.clone()
                     })
                     .collect(),
                 rests: rests

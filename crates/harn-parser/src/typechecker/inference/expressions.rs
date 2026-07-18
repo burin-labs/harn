@@ -565,14 +565,8 @@ impl TypeChecker {
                     let val_type = self
                         .infer_type(&entry.value, scope)
                         .unwrap_or_else(Self::wildcard_type);
-                    fields = merge_shape_fields(
-                        &fields,
-                        &[ShapeField {
-                            name: key,
-                            type_expr: val_type,
-                            optional: false,
-                        }],
-                    );
+                    fields =
+                        merge_shape_fields(&fields, &[ShapeField::synthetic(key, val_type, false)]);
                 }
                 // A dict literal has statically known fields, so it is a
                 // precise closed record — the empty literal `{}` is the empty

@@ -818,6 +818,54 @@ fn struct_field_doc_comments_stay_on_their_fields() {
     assert_roundtrip(source);
 }
 
+/// Public `type` aliases are Harn's importable record contract, so a field
+/// doc must be formatted as a member of the shape rather than be adopted by
+/// the next declaration.
+#[test]
+fn public_type_shape_field_comments_stay_on_their_fields() {
+    let source = "pub type RetryConfig = {\n  /** How many times to retry. */\n  retries: int,\n  /** Upper bound for a backoff delay in milliseconds. */\n  max_delay_ms: int, // bounded\n  // Keep this after the final field.\n}\n\npub type Other = {name: string}\n";
+    let formatted = format_source(source).unwrap();
+    let retries_doc = formatted
+        .find("/** How many times to retry. */")
+        .expect("retries doc was lost");
+    let retries = formatted.find("retries: int,").expect("no retries field");
+    let delay_doc = formatted
+        .find("/** Upper bound for a backoff delay in milliseconds. */")
+        .expect("delay doc was lost");
+    let delay = formatted
+        .find("max_delay_ms: int,  // bounded")
+        .expect("no max_delay_ms field");
+    let tail = formatted
+        .find("// Keep this after the final field.")
+        .expect("shape tail comment was lost");
+    let other = formatted.find("pub type Other").expect("no following type");
+    assert!(
+        retries_doc < retries
+            && retries < delay_doc
+            && delay_doc < delay
+            && delay < tail
+            && tail < other,
+        "shape comments must stay ordered inside their type alias, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn public_type_shape_closing_line_comment_stays_on_the_alias() {
+    let source =
+        "pub type RetryConfig = {\n  /** Retry count. */\n  retries: int,\n} // public contract\n";
+    let formatted = format_source(source).unwrap();
+    assert!(
+        formatted.contains("}  // public contract"),
+        "closing-line comment belongs to the alias, not its last field, got:\n{formatted}"
+    );
+    assert!(
+        !formatted.contains("// public contract\n}"),
+        "closing-line comment was moved inside the shape, got:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
 #[test]
 fn struct_field_line_comment_stays_in_the_struct() {
     let source =

@@ -1,4 +1,4 @@
-use harn_parser::{Node, ParallelMode, SNode};
+use harn_parser::{Node, ParallelMode, SNode, ShapeField, TypeExpr};
 
 use crate::helpers::{
     escape_string, format_attribute, format_catch_param, format_pattern, format_throws_clause,
@@ -566,8 +566,28 @@ impl Formatter<'_> {
                     + name.len()
                     + params.len()
                     + " = ".len();
-                let te = format_type_expr_wrapped(type_expr, self.indent, prefix, self.line_width);
-                self.writeln(&format!("{pub_prefix}type {name}{params} = {te}"));
+                let has_field_comments = matches!(type_expr, TypeExpr::Shape(_))
+                    && self.has_unclaimed_comments_in_range(node_line + 1, node_end_line);
+                if has_field_comments {
+                    let TypeExpr::Shape(fields) = type_expr else {
+                        unreachable!("only shape aliases can carry shape-field comments")
+                    };
+                    self.writeln(&format!("{pub_prefix}type {name}{params} = {{"));
+                    self.indent();
+                    self.format_members(
+                        fields,
+                        |field| field.span,
+                        node_line,
+                        Some(node_end_line),
+                        |formatter, field| formatter.format_shape_field(field),
+                    );
+                    self.dedent();
+                    self.writeln("}");
+                } else {
+                    let te =
+                        format_type_expr_wrapped(type_expr, self.indent, prefix, self.line_width);
+                    self.writeln(&format!("{pub_prefix}type {name}{params} = {te}"));
+                }
             }
             Node::Block(stmts) => {
                 self.writeln("block {");
@@ -692,6 +712,14 @@ impl Formatter<'_> {
         } else {
             self.writeln(&format!("{}{opt}", f.name));
         }
+    }
+
+    fn format_shape_field(&mut self, field: &ShapeField) {
+        let optional = if field.optional { "?" } else { "" };
+        let prefix_len = self.indent * 2 + field.name.len() + optional.len() + 2;
+        let type_expr =
+            format_type_expr_wrapped(&field.type_expr, self.indent, prefix_len, self.line_width);
+        self.writeln(&format!("{}{optional}: {type_expr},", field.name));
     }
 
     fn format_associated_type(&mut self, a: &harn_parser::AssociatedType) {
