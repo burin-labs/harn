@@ -284,9 +284,11 @@ pipeline default() {
     "text",
     prefill_capable_caller_options(),
   )
-  __io_println(compatible_text.result.status)
-  __io_println(compatible_text.calls[2].prefill == "<tool_call>")
-  __io_println(actuation_receipts(compatible_text.events)[0].checkpoint.outcome)
+  const compatible_text_receipts = actuation_receipts(compatible_text.events)
+  require compatible_text.result.status == "done"
+  require compatible_text.calls[2].prefill == "<tool_call>"
+  require len(compatible_text_receipts) == 1
+  require compatible_text_receipts[0].checkpoint.outcome == "applied"
   const compatible_json = run_case(
     [
       llm_text("I should inspect app.txt before editing."),
@@ -299,9 +301,11 @@ pipeline default() {
     "json",
     prefill_capable_caller_options(),
   )
-  __io_println(compatible_json.result.status)
-  __io_println(compatible_json.calls[2].prefill == "```tool\n")
-  __io_println(actuation_receipts(compatible_json.events)[0].checkpoint.outcome)
+  const compatible_json_receipts = actuation_receipts(compatible_json.events)
+  require compatible_json.result.status == "done"
+  require compatible_json.calls[2].prefill == "```tool\n"
+  require len(compatible_json_receipts) == 1
+  require compatible_json_receipts[0].checkpoint.outcome == "applied"
   const external_caller = run_case(
     [
       llm_text("I should inspect app.txt before editing."),
@@ -314,9 +318,12 @@ pipeline default() {
     "text",
     {llm_caller: default_llm_caller()},
   )
-  __io_println(external_caller.result.status)
-  __io_println(external_caller.calls[2].prefill == nil)
-  __io_println(actuation_receipts(external_caller.events)[0].checkpoint.reason)
+  const external_caller_receipts = actuation_receipts(external_caller.events)
+  require external_caller.result.status == "done"
+  require external_caller.calls[2].prefill == nil
+  require len(external_caller_receipts) == 1
+  require external_caller_receipts[0].checkpoint.outcome == "suppressed"
+  require external_caller_receipts[0].checkpoint.reason == "external_llm_caller_unsupported"
   const explicit_failover = run_case(
     [
       llm_text("I should inspect app.txt before editing."),

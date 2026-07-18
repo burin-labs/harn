@@ -54,13 +54,21 @@ pipeline default() {
   __io_println(explicit_ledger.task_ledger.root_task)
   __io_println(explicit_ledger.task_ledger.deliverables[0].id)
   const default_transport = agent_loop_options({provider: "mock"})
-  __io_println(default_transport._llm_caller_transport.forwards_assistant_prefill)
+  require default_transport._llm_caller_transport == {forwards_assistant_prefill: false}
   const prefill_transport = agent_loop_options({provider: "mock", llm_caller_transport: {forwards_assistant_prefill: true}})
-  __io_println(prefill_transport._llm_caller_transport.forwards_assistant_prefill)
-  const invalid_transport = try {
+  require prefill_transport._llm_caller_transport == {forwards_assistant_prefill: true}
+  const invalid_prefill = try {
     agent_loop_options({provider: "mock", llm_caller_transport: {forwards_assistant_prefill: "yes"}})
   }
-  __io_println(is_err(invalid_transport))
+  require is_err(invalid_prefill)
+  require to_string(unwrap_err(invalid_prefill))
+    == "agent_loop: `llm_caller_transport.forwards_assistant_prefill` must be a bool; got string"
+  const invalid_transport = try {
+    agent_loop_options({provider: "mock", llm_caller_transport: true})
+  }
+  require is_err(invalid_transport)
+  require to_string(unwrap_err(invalid_transport))
+    == "agent_loop: `llm_caller_transport` must be a dict or nil; got bool"
   const invalid_expose_decisions = try {
     agent_loop_options(
       {provider: "mock", iteration_budget: {mode: "adaptive", expose_decisions: "yes"}},
