@@ -36,10 +36,20 @@ fi
 api_url=${GITHUB_API_URL:-https://api.github.com}
 curl_bin=${CURL_BIN:-curl}
 jq_bin=${JQ_BIN:-jq}
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+contract_path=${RELEASE_AUDIT_CONTRACT_PATH:-$repo_root/scripts/release_audit_contract.json}
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 runs_response="$tmp_dir/runs.json"
 run_ids="$tmp_dir/run-ids.txt"
+
+if ! "$jq_bin" -e '
+  .schema_version == "harn.release_audit_contract.v1"
+    and (.merge_group_jobs | type == "array" and length > 0)
+    and all(.merge_group_jobs[]; .name | type == "string" and length > 0)
+' "$contract_path" >/dev/null 2>&1; then
+  fail_closed "release-audit contract is absent or invalid"
+fi
 
 github_api_get() {
   local output=$1
@@ -106,19 +116,13 @@ while IFS= read -r run_id; do
   # A successful workflow conclusion is not sufficient: merge-group docs-only
   # tails intentionally skip the expensive lanes. Reuse proof only when every
   # lane this push plans to prune actually completed successfully for this run.
+  # The release-audit contract owns all reusable audit proof names. Only the
+  # two non-audit lanes needed for safe pruning remain local to this boundary.
   # shellcheck disable=SC2016 # $response, $required, and $name are jq variables.
-  if "$jq_bin" -e '
+  if "$jq_bin" -e --slurpfile contract "$contract_path" '
     . as $response
-    | [
-        "Format check",
-        "Package audit",
-        "Rust lint",
-        "Rust test",
-        "Rust security proof",
-        "Harn conformance + audit",
-        "Audit scripts",
-        "Windows cross-compile check"
-      ] as $required
+    | (($contract[0].merge_group_jobs | map(.name)) + ["Audit scripts", "Windows cross-compile check"])
+      as $required
     | all(
         $required[];
         . as $name

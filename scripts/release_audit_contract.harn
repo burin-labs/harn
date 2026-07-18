@@ -13,7 +13,10 @@ import {
 
 pub type ReleaseAuditLane = {name: string, runner: string, proof: "merge_group" | "residual"}
 
-pub type ReleaseAuditCiEnvironment = {HARN_LLM_CALLS_DISABLED?: "1"}
+pub type ReleaseAuditCiEnvironment = {
+  HARN_LLM_CALLS_DISABLED?: "1",
+  AUDIT_GATES_SKIP_CONFORMANCE?: "1",
+}
 
 pub type ReleaseAuditCiStep = {
   id: string,
@@ -76,7 +79,12 @@ fn ci_job_schema() {
             condition: schema_string(),
             run: schema_string() + {min_len: 1},
             required_env: schema_field(
-              schema_closed_object({HARN_LLM_CALLS_DISABLED: schema_field(schema_literal("1"), false)}),
+              schema_closed_object(
+                {
+                  HARN_LLM_CALLS_DISABLED: schema_field(schema_literal("1"), false),
+                  AUDIT_GATES_SKIP_CONFORMANCE: schema_field(schema_literal("1"), false),
+                },
+              ),
               false,
             ),
           },

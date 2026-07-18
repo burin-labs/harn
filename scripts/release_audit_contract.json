@@ -70,7 +70,63 @@
       ]
     },
     {
-      "name": "Harn conformance + audit",
+      "name": "Harn conformance (1/4)",
+      "job_id": "harn-conformance",
+      "matrix_kind": "shard-1",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn-conformance",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "\"$HARN_BIN\" test conformance --shard-index ${{ matrix.shard }} --shard-total 4"
+        }
+      ]
+    },
+    {
+      "name": "Harn conformance (2/4)",
+      "job_id": "harn-conformance",
+      "matrix_kind": "shard-2",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn-conformance",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "\"$HARN_BIN\" test conformance --shard-index ${{ matrix.shard }} --shard-total 4"
+        }
+      ]
+    },
+    {
+      "name": "Harn conformance (3/4)",
+      "job_id": "harn-conformance",
+      "matrix_kind": "shard-3",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn-conformance",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "\"$HARN_BIN\" test conformance --shard-index ${{ matrix.shard }} --shard-total 4"
+        }
+      ]
+    },
+    {
+      "name": "Harn conformance (4/4)",
+      "job_id": "harn-conformance",
+      "matrix_kind": "shard-4",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn-conformance",
+          "condition": "",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "\"$HARN_BIN\" test conformance --shard-index ${{ matrix.shard }} --shard-total 4"
+        }
+      ]
+    },
+    {
+      "name": "Harn audit",
       "job_id": "harn-audit",
       "matrix_kind": "",
       "proofs": ["harn-audit"],
@@ -78,6 +134,7 @@
         {
           "id": "release-audit-harn",
           "condition": "",
+          "required_env": {"AUDIT_GATES_SKIP_CONFORMANCE": "1"},
           "run": "./scripts/audit_gates.sh"
         }
       ]

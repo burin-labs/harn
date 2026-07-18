@@ -553,12 +553,61 @@ jobs:
           --workspace-remap "$GITHUB_WORKSPACE"
           -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'
 
+  harn-conformance:
+    name: ${{ matrix.name }}
+    needs: [changes, rust-builds]
+    if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: shard-1
+            name: Harn conformance (1/4)
+            shard: 1
+          - kind: shard-2
+            name: Harn conformance (2/4)
+            shard: 2
+          - kind: shard-3
+            name: Harn conformance (3/4)
+            shard: 3
+          - kind: shard-4
+            name: Harn conformance (4/4)
+            shard: 4
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download portable behavior payload
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: harn-behavior.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify portable behavior payload
+        run: >-
+          ./scripts/ci/behavior_artifact.sh restore
+          "$RUNNER_TEMP/harn-behavior.tar.zst"
+          "$RUNNER_TEMP/harn-behavior"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - name: Run Harn conformance shard
+        id: release-audit-harn-conformance
+        env:
+          HARN_LLM_CALLS_DISABLED: "1"
+        run: >-
+          "$HARN_BIN" test conformance
+          --shard-index ${{ matrix.shard }}
+          --shard-total 4
+
   harn-audit:
-    name: Harn conformance + audit
+    name: Harn audit
     needs: [changes, rust-builds]
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     permissions:
       actions: read
       contents: read
@@ -591,11 +640,11 @@ jobs:
           npm ci
           touch src/parser.c
           ./scripts/tree-sitter-cli.sh build
-      - name: Run Harn conformance and audit
+      - name: Run Harn audit
         id: release-audit-harn
         env:
           AUDIT_GATES_CONCURRENCY: "4"
-          HARN_CONFORMANCE_SHARDS: "4"
+          AUDIT_GATES_SKIP_CONFORMANCE: "1"
         run: ./scripts/audit_gates.sh
       - name: Summarize rolling merge-group wall time
         if: github.event_name == 'merge_group' && steps.release-audit-harn.outcome == 'success'
@@ -1188,7 +1237,7 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [runner-availability, changes, fmt, package-audit, lint-md, rust-builds, rust-test, rust-security, harn-audit, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
+    needs: [runner-availability, changes, fmt, package-audit, lint-md, rust-builds, rust-test, rust-security, harn-conformance, harn-audit, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
         env:
@@ -1267,13 +1316,24 @@ jobs:
             fi
           fi
 
+          harn_conformance_result="${{ needs['harn-conformance'].result }}"
+          echo "Harn conformance: $harn_conformance_result"
+          if [ "$harn_conformance_result" != "success" ]; then
+            if [ "$harn_conformance_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+              :
+            else
+              echo "::error::Harn conformance failed or skipped while Rust proof was required."
+              exit 1
+            fi
+          fi
+
           harn_audit_result="${{ needs['harn-audit'].result }}"
-          echo "Harn conformance + audit: $harn_audit_result"
+          echo "Harn audit: $harn_audit_result"
           if [ "$harn_audit_result" != "success" ]; then
             if [ "$harn_audit_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
               :
             else
-              echo "::error::Harn conformance + audit failed or skipped while Rust proof was required."
+              echo "::error::Harn audit failed or skipped while Rust proof was required."
               exit 1
             fi
           fi

@@ -32,7 +32,7 @@ const MAKEFILE = "Makefile"
 
 const WORKFLOWS_GLOB = ".github/workflows/*.yml"
 
-// The "Harn conformance + audit" CI lane delegates its gate battery to this
+// The "Harn audit" CI lane delegates its independent gate battery to this
 // runner (see ci.yml), so a `make check-*` reference here counts as "runs in
 // CI" for the ci = true invariant just like a direct workflow reference.
 const AUDIT_GATE_RUNNER = "scripts/audit_gates.sh"

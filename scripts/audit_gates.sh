@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Parallel runner for the Harn conformance + audit gate battery.
+# Parallel runner for the local Harn conformance + audit gate battery.
 #
-# The CI "Harn conformance + audit" lane historically ran a long SERIAL chain
+# The combined CI lane historically ran a long SERIAL chain
 # of `make` targets. Every target after `make conformance` reuses the same
 # already-warm `target/debug/harn` binary and is INDEPENDENT of its siblings,
 # yet they ran one after another — and with `HARN_BIN` unset each `cargo run`
@@ -24,6 +24,8 @@
 #   HARN_BIN                 pre-built binary to reuse (skips the warm build)
 #   AUDIT_GATES_CONCURRENCY  `make -j` cap (default: nproc)
 #   HARN_CONFORMANCE_SHARDS  process shard count (default: min(nproc, 4))
+#   AUDIT_GATES_SKIP_CONFORMANCE=1 runs only the independent audit fanout;
+#                            CI distributes conformance across separate jobs.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -84,6 +86,12 @@ case "$conformance_shards" in
   ''|*[!0-9]*) conformance_shards="$default_shards" ;;
 esac
 [ "$conformance_shards" -lt 1 ] && conformance_shards=1
+
+skip_conformance="${AUDIT_GATES_SKIP_CONFORMANCE:-0}"
+if [ "$skip_conformance" != "0" ] && [ "$skip_conformance" != "1" ]; then
+  echo "error: AUDIT_GATES_SKIP_CONFORMANCE must be 0 or 1" >&2
+  exit 2
+fi
 
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 
@@ -163,40 +171,44 @@ child_pids+=("$audit_pid")
 
 conformance_status=0
 conformance_started="$(date +%s)"
-echo "=== conformance ($conformance_shards process-isolated shards, HARN_BIN warm) ==="
 conformance_pids=()
-for shard_index in $(seq 1 "$conformance_shards"); do
-  shard_log="$conformance_log_dir/shard-$shard_index.log"
-  (
-    HARN_LLM_CALLS_DISABLED=1 "$HARN_BIN" test conformance \
-      --shard-index "$shard_index" \
-      --shard-total "$conformance_shards"
-  ) >"$shard_log" 2>&1 &
-  shard_pid=$!
-  conformance_pids+=("$shard_pid")
-  child_pids+=("$shard_pid")
-done
-
 conformance_failures=()
-for offset in "${!conformance_pids[@]}"; do
-  shard_index=$((offset + 1))
-  shard_pid="${conformance_pids[$offset]}"
-  if wait "$shard_pid"; then
-    shard_status=0
-  else
-    shard_status=$?
-    conformance_status="$shard_status"
-    conformance_failures+=("$shard_index:$shard_status")
-  fi
-  child_pids[offset + 1]=""
-  echo "=== conformance shard $shard_index/$conformance_shards ==="
-  cat "$conformance_log_dir/shard-$shard_index.log"
-done
-
-if [ "$conformance_status" -eq 0 ]; then
-  echo "ok: conformance ($conformance_shards shards, $(( $(date +%s) - conformance_started ))s)"
+if [ "$skip_conformance" = "1" ]; then
+  echo "=== conformance delegated to CI shard jobs ==="
 else
-  echo "FAIL: conformance shard(s) ${conformance_failures[*]} failed ($(( $(date +%s) - conformance_started ))s)" >&2
+  echo "=== conformance ($conformance_shards process-isolated shards, HARN_BIN warm) ==="
+  for shard_index in $(seq 1 "$conformance_shards"); do
+    shard_log="$conformance_log_dir/shard-$shard_index.log"
+    (
+      HARN_LLM_CALLS_DISABLED=1 "$HARN_BIN" test conformance \
+        --shard-index "$shard_index" \
+        --shard-total "$conformance_shards"
+    ) >"$shard_log" 2>&1 &
+    shard_pid=$!
+    conformance_pids+=("$shard_pid")
+    child_pids+=("$shard_pid")
+  done
+
+  for offset in "${!conformance_pids[@]}"; do
+    shard_index=$((offset + 1))
+    shard_pid="${conformance_pids[$offset]}"
+    if wait "$shard_pid"; then
+      shard_status=0
+    else
+      shard_status=$?
+      conformance_status="$shard_status"
+      conformance_failures+=("$shard_index:$shard_status")
+    fi
+    child_pids[offset + 1]=""
+    echo "=== conformance shard $shard_index/$conformance_shards ==="
+    cat "$conformance_log_dir/shard-$shard_index.log"
+  done
+
+  if [ "$conformance_status" -eq 0 ]; then
+    echo "ok: conformance ($conformance_shards shards, $(( $(date +%s) - conformance_started ))s)"
+  else
+    echo "FAIL: conformance shard(s) ${conformance_failures[*]} failed ($(( $(date +%s) - conformance_started ))s)" >&2
+  fi
 fi
 
 if wait "$audit_pid"; then
@@ -244,4 +256,8 @@ if [ "$audit_status" -ne 0 ]; then
   failure_summary "audit gates"
   exit "$audit_status"
 fi
-echo "=== conformance and audit gates passed ==="
+if [ "$skip_conformance" = "1" ]; then
+  echo "=== audit gates passed ==="
+else
+  echo "=== conformance and audit gates passed ==="
+fi
