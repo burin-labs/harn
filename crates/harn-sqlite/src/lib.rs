@@ -447,11 +447,11 @@ fn acquire_readiness_lock<E>(
             return Err(InitializationError::InitializationLockOpen { path, source });
         }
     };
-    match file.try_lock_shared() {
+    match FileExt::try_lock_shared(&file) {
         Ok(()) => {}
         Err(source) if source.kind() == std::io::ErrorKind::WouldBlock => {
             on_contention();
-            file.lock_shared().map_err(|source| {
+            FileExt::lock_shared(&file).map_err(|source| {
                 InitializationError::InitializationLockAcquire {
                     path: path.clone(),
                     source,
