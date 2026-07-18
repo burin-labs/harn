@@ -300,7 +300,7 @@ pipeline default() {
     prefill_capable_caller_options(),
   )
   __io_println(compatible_json.result.status)
-  __io_println(compatible_json.calls[2].prefill == "```tool\\n")
+  __io_println(compatible_json.calls[2].prefill == "```tool\n")
   __io_println(actuation_receipts(compatible_json.events)[0].checkpoint.outcome)
   const external_caller = run_case(
     [
