@@ -1,5 +1,11 @@
-import { agent_render_tool_call_prefix } from "std/agent/preflight"
+import {
+  MonologueActuationConfig,
+  MonologueActuationDecision,
+  MonologueActuationState,
+} from "std/agent/monologue_actuation_types"
+import { agent_has_tools, agent_render_tool_call_prefix } from "std/agent/preflight"
 import { agent_emit_event } from "std/agent/state"
+import { agent_tool_resolve_workspace_write_name } from "std/agent/tool_annotations"
 
 /**
  * Bounded, opt-in recovery for tool-less action narration or a repeated
@@ -7,25 +13,6 @@ import { agent_emit_event } from "std/agent/state"
  * module owns the small state machine and transport-independent receipt; the
  * agent loop attaches the returned prefill to its next main request only.
  */
-pub type MonologueActuationConfig = {enabled: bool, max_firings: int, read_only_turns: int}
-
-pub type MonologueActuationState = {
-  pending: bool,
-  pending_trigger: string,
-  firing_count: int,
-  read_only_streak: int,
-}
-
-pub type MonologueActuationDecision = {
-  state: MonologueActuationState,
-  applied: bool,
-  reason: string,
-  prefill: string,
-  trigger: string,
-  firing_count: int,
-  max_firings: int,
-}
-
 /**
  * Normalize the nested `stall_diagnostics.monologue_actuation` input. It is
  * intentionally default-off, and a bool is shorthand for `{enabled: bool}`.
@@ -35,7 +22,7 @@ pub type MonologueActuationDecision = {
  * @api_stability: experimental
  */
 pub fn agent_monologue_actuation_config(value = nil) -> MonologueActuationConfig {
-  const defaults: MonologueActuationConfig = {enabled: false, max_firings: 1, read_only_turns: 4}
+  const defaults: MonologueActuationConfig = {enabled: false, max_firings: 1, read_only_turns: 4, write_tool: ""}
   if value == nil {
     return defaults
   }
@@ -61,10 +48,16 @@ pub fn agent_monologue_actuation_config(value = nil) -> MonologueActuationConfig
     throw "agent_loop: stall_diagnostics.monologue_actuation.read_only_turns must be a positive int; got "
       + type_of(read_only_turns)
   }
+  const write_tool = value?.write_tool
+  if write_tool != nil && type_of(write_tool) != "string" {
+    throw "agent_loop: stall_diagnostics.monologue_actuation.write_tool must be a string; got "
+      + type_of(write_tool)
+  }
   return {
     enabled: enabled ?? true,
     max_firings: max_firings ?? defaults.max_firings,
     read_only_turns: read_only_turns ?? defaults.read_only_turns,
+    write_tool: trim(write_tool ?? ""),
   }
 }
 
@@ -272,4 +265,40 @@ pub fn agent_monologue_actuation_take(
   }
   __agent_monologue_actuation_receipt(session_id, iteration, decision, tool_format)
   return decision
+}
+
+/**
+ * Resolve host policy and consume a pending recovery for one main agent turn.
+ * Keeping this projection here prevents the oversized loop from duplicating
+ * config normalization and write-tool validation.
+ *
+ * @effects: [agent]
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_monologue_actuation_take_for_turn(
+  session_id: string,
+  iteration: int,
+  state: MonologueActuationState,
+  turn_options,
+  llm_options,
+  prefill_available: bool,
+  paradigm = nil,
+) -> MonologueActuationDecision {
+  const config = agent_monologue_actuation_config(turn_options?.stall_diagnostics?.monologue_actuation)
+  return agent_monologue_actuation_take(
+    session_id,
+    iteration,
+    state,
+    config,
+    agent_has_tools(turn_options),
+    llm_options,
+    prefill_available,
+    paradigm,
+    agent_tool_resolve_workspace_write_name(
+      turn_options?.tools,
+      turn_options?.policy,
+      config.write_tool,
+    ),
+  )
 }

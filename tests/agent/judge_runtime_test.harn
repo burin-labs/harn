@@ -22,6 +22,7 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(task) {
     data: {
       verdict: "continue",
       reasoning: "The verifier has not run.",
+      next_step: "Run `harn test tests/agent/judge_runtime_test.harn` now.",
       specific_gaps: ["Run the narrow verifier."],
     },
     text: "```json\n{\"verdict\":\"continue\",\"specific_gaps\":[\"Run the narrow verifier.\"]}\n```",
@@ -43,7 +44,7 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(task) {
         fn() { return agent_loop("Finish after satisfying the judge.", nil, opts) },
       )
       const feedback = __feedback_contents(captured, "verify_completion")
-      assert_eq(feedback, ["Address these specific gaps before finishing:\n- Run the narrow verifier."])
+      assert_eq(feedback, ["Run `harn test tests/agent/judge_runtime_test.harn` now."])
       assert_eq(captured.result.status, "verify_capped")
       assert_eq(captured.result.stop_reason, "completion_judge_cap_reached")
     },

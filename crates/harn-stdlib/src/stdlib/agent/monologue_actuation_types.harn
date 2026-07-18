@@ -1,0 +1,34 @@
+/** Caller-facing options for bounded monologue and read-loop actuation. */
+pub type MonologueActuationOptions = {
+  enabled?: bool,
+  max_firings?: int,
+  read_only_turns?: int,
+  write_tool?: string,
+}
+
+/** Normalized actuation policy. */
+pub type MonologueActuationConfig = {
+  enabled: bool,
+  max_firings: int,
+  read_only_turns: int,
+  write_tool: string,
+}
+
+/** Per-run state for the bounded actuation policy. */
+pub type MonologueActuationState = {
+  pending: bool,
+  pending_trigger: string,
+  firing_count: int,
+  read_only_streak: int,
+}
+
+/** One applied or suppressed actuation decision. */
+pub type MonologueActuationDecision = {
+  state: MonologueActuationState,
+  applied: bool,
+  reason: string,
+  prefill: string,
+  trigger: string,
+  firing_count: int,
+  max_firings: int,
+}

@@ -116,6 +116,18 @@ fn __agent_tool_find_entry(registry, name) {
   return nil
 }
 
+fn __agent_tool_is_workspace_write(entry, policy, name) -> bool {
+  const annotations = agent_tool_annotations(entry, policy, name)
+  if annotations?.destructiveHint == true {
+    return false
+  }
+  const kind = lowercase(to_string(annotations?.kind ?? ""))
+  if kind != "" {
+    return kind == "edit"
+  }
+  return lowercase(to_string(annotations?.side_effect_level ?? "")) == "workspace_write"
+}
+
 /**
  * True only when a non-empty turn consists entirely of explicitly read-only
  * calls. Unknown tools fail closed, matching `agent_tool_is_read_only`.
@@ -150,15 +162,7 @@ pub fn agent_tool_single_workspace_write_name(registry, policy = nil) -> string 
   let found = ""
   for entry in __agent_tool_registry_entries(registry) {
     const name = __agent_tool_entry_name(entry)
-    const annotations = agent_tool_annotations(entry, policy, name)
-    const kind = lowercase(to_string(annotations?.kind ?? ""))
-    const level = lowercase(to_string(annotations?.side_effect_level ?? ""))
-    const workspace_write = if kind != "" {
-      kind == "edit"
-    } else {
-      level == "workspace_write" && annotations?.destructiveHint != true
-    }
-    if name != "" && workspace_write {
+    if name != "" && __agent_tool_is_workspace_write(entry, policy, name) {
       if found != "" {
         return ""
       }
@@ -166,4 +170,26 @@ pub fn agent_tool_single_workspace_write_name(registry, policy = nil) -> string 
     }
   }
   return found
+}
+
+/**
+ * Resolve a non-destructive workspace-write tool from the active registry. A
+ * host may name its product-specific primary writer; Harn validates that entry
+ * against the same annotation contract. Without a preference, the surface must
+ * expose exactly one eligible writer.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_resolve_workspace_write_name(registry, policy = nil, preferred = "") -> string {
+  const name = trim(preferred)
+  if name == "" {
+    return agent_tool_single_workspace_write_name(registry, policy)
+  }
+  const entry = __agent_tool_find_entry(registry, name)
+  if entry == nil || !__agent_tool_is_workspace_write(entry, policy, name) {
+    return ""
+  }
+  return name
 }

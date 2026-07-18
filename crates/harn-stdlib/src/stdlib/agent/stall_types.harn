@@ -1,4 +1,7 @@
-import { MonologueActuationConfig, MonologueActuationState } from "std/agent/monologue_actuation"
+import {
+  MonologueActuationConfig,
+  MonologueActuationState,
+} from "std/agent/monologue_actuation_types"
 
 /** Normalized internal configuration for the agent stall detector. */
 pub type AgentStallConfig = {

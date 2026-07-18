@@ -22,10 +22,7 @@ import {
   agent_mcp_bootstrap_if_needed,
   agent_mcp_mount_additional,
 } from "std/agent/mcp"
-import {
-  agent_monologue_actuation_config,
-  agent_monologue_actuation_take,
-} from "std/agent/monologue_actuation"
+import { agent_monologue_actuation_take_for_turn } from "std/agent/monologue_actuation"
 import {
   agent_loop_options,
   agent_merge_llm_options,
@@ -43,7 +40,6 @@ import { agent_take_one_shot_prefill } from "std/agent/prefill"
 import {
   agent_build_turn_messages,
   agent_build_turn_system_fragments,
-  agent_has_tools,
   agent_tool_call_paradigm,
 } from "std/agent/preflight"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
@@ -93,7 +89,6 @@ import {
   agent_tool_annotations,
   agent_tool_calls_are_read_only,
   agent_tool_entry_annotations,
-  agent_tool_single_workspace_write_name,
 } from "std/agent/tool_annotations"
 import {
   agent_tool_search_emit_queries,
@@ -4303,16 +4298,14 @@ fn __agent_loop_run(message, session, initial_opts) {
           primary_model,
           opts,
         )
-        const monologue_actuation = agent_monologue_actuation_take(
+        const monologue_actuation = agent_monologue_actuation_take_for_turn(
           session.session_id,
           iteration_index + 1,
           stall_state.monologue_actuation,
-          agent_monologue_actuation_config(turn_opts?.stall_diagnostics?.monologue_actuation),
-          agent_has_tools(turn_opts),
+          turn_opts,
           turn_llm_opts,
           pending_prefill.prefill == "",
           agent_tool_call_paradigm(turn_llm_opts),
-          agent_tool_single_workspace_write_name(turn_opts?.tools, turn_opts?.policy),
         )
         stall_state = stall_state + {monologue_actuation: monologue_actuation.state}
         const one_shot_prefill = if monologue_actuation.applied {

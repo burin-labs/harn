@@ -25,17 +25,28 @@ fn lookup_tools() {
       annotations: {kind: "edit", side_effect_level: "workspace_write"},
     },
   )
+  tools = tool_define(
+    tools,
+    "scaffold",
+    "Create a file from a template.",
+    {
+      handler: { args -> "created " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
   return tools
 }
 
-fn lookup_call(tool_format = "text") {
+fn lookup_call(tool_format = "text", narration = "") {
   if tool_format == "native" {
     return llm_tool_call("lookup", {path: "app.txt"})
   }
   if tool_format == "json" {
-    return llm_text("```tool\n{\"name\":\"lookup\",\"args\":{\"path\":\"app.txt\"}}\n```")
+    return llm_text(narration + "```tool\n{\"name\":\"lookup\",\"args\":{\"path\":\"app.txt\"}}\n```")
   }
-  return llm_text("<tool_call>lookup({ path: \"app.txt\" })</tool_call>")
+  return llm_text(narration + "<tool_call>lookup({ path: \"app.txt\" })</tool_call>")
 }
 
 fn mutate_call() {
@@ -44,10 +55,12 @@ fn mutate_call() {
 
 fn read_loop_script(tool_format = "text") {
   return [
-    lookup_call(tool_format),
-    lookup_call(tool_format),
-    lookup_call(tool_format),
-    lookup_call(tool_format),
+    lookup_call(tool_format, "I will inspect one more location before changing it.\n"),
+    lookup_call(tool_format, "The answer may be elsewhere, so I will inspect again.\n"),
+    lookup_call(tool_format, "I need one more read before I can edit.\n"),
+    lookup_call(tool_format, "I should keep inspecting before committing.\n"),
+    lookup_call(tool_format, "Another read should make the change clearer.\n"),
+    lookup_call(tool_format, "I will inspect once more.\n"),
     llm_text("Inspection complete. ##DONE##"),
   ]
 }
@@ -121,21 +134,21 @@ pipeline default() {
   const read_loop = run_case(
     read_loop_script(),
     "monologue-actuation-read-loop-" + uuid(),
-    {enabled: true, read_only_turns: 3},
+    {enabled: true, read_only_turns: 4, write_tool: "mutate"},
   )
   const read_loop_receipt = actuation_receipts(read_loop.events)[0].checkpoint
   __io_println(read_loop.result.status)
-  __io_println(read_loop.calls[2].prefill == nil)
-  __io_println(read_loop.calls[3].prefill == "<tool_call>mutate({ ")
+  __io_println(read_loop.calls[3].prefill == nil)
+  __io_println(read_loop.calls[4].prefill == "<tool_call>mutate({ ")
   __io_println(read_loop_receipt.trigger)
   const json_read_loop = run_case(
     read_loop_script("json"),
     "monologue-actuation-json-read-loop-" + uuid(),
-    {enabled: true, read_only_turns: 3},
+    {enabled: true, read_only_turns: 4, write_tool: "mutate"},
     "json",
   )
   __io_println(json_read_loop.result.status)
-  __io_println(json_read_loop.calls[3].prefill == "```tool\n{\"name\":\"mutate\",\"args\":{")
+  __io_println(json_read_loop.calls[4].prefill == "```tool\n{\"name\":\"mutate\",\"args\":{")
   __io_println(actuation_receipts(json_read_loop.events)[0].checkpoint.trigger)
   const read_loop_reset = run_case(
     [
@@ -147,7 +160,7 @@ pipeline default() {
       llm_text("Work complete. ##DONE##"),
     ],
     "monologue-actuation-read-loop-reset-" + uuid(),
-    {enabled: true, read_only_turns: 3},
+    {enabled: true, read_only_turns: 4, write_tool: "mutate"},
   )
   __io_println(read_loop_reset.result.status)
   __io_println(read_loop_reset.calls.all({ call -> call.prefill == nil }))
