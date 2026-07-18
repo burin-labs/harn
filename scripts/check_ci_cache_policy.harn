@@ -369,8 +369,7 @@ fn persistent_sccache_job_errors(
   return errors
 }
 
-/** Validate the persistent local sccache action and every authorized heavy CI consumer. */
-pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
+fn sccache_action_errors(action) -> list<string> {
   let errors: list<string> = []
   const action_steps = action?.runs?.steps ?? []
   const sticky = action_steps
@@ -397,6 +396,11 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     || len(matching_steps(action?.runs, "./.github/actions/configure-cargo-sccache")) != 1 {
     errors = errors + ["${SCCACHE_ACTION_PATH} must own pinned sccache setup and wrapper configuration"]
   }
+  return errors
+}
+
+fn sccache_producer_errors(workflow) -> list<string> {
+  let errors: list<string> = []
   errors = errors
     + persistent_sccache_job_errors(
     workflow,
@@ -448,6 +452,11 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   if producer_condition != "matrix.kind == 'behavior'" {
     errors = errors + ["ci.yml:rust-builds behavior build must be owned by the behavior matrix row"]
   }
+  return errors
+}
+
+fn sccache_consumer_errors(workflow) -> list<string> {
+  let errors: list<string> = []
   const test_job = workflow?.jobs?.["rust-test"]
   for consumer in ["package-audit", "rust-test"] {
     const job = workflow?.jobs?.[consumer]
@@ -481,6 +490,13 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     }
   }
   return errors
+}
+
+/** Validate the persistent local sccache action and every authorized heavy CI consumer. */
+pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
+  return sccache_action_errors(action)
+    + sccache_producer_errors(workflow)
+    + sccache_consumer_errors(workflow)
 }
 
 /** Return every policy violation without stopping at the first workflow. */
