@@ -311,6 +311,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"provider_unavailable",
 	"rate_limited",
 	"timeout",
+	"resource_busy",
 	"tool_policy_rejected",
 	"host_bridge_unimplemented",
 	"agent_loop_protocol_failure",

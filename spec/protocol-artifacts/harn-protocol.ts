@@ -139,6 +139,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "provider_unavailable",
   "rate_limited",
   "timeout",
+  "resource_busy",
   "tool_policy_rejected",
   "host_bridge_unimplemented",
   "agent_loop_protocol_failure",

@@ -432,6 +432,7 @@ public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
     case providerUnavailable = "provider_unavailable"
     case rateLimited = "rate_limited"
     case timeout = "timeout"
+    case resourceBusy = "resource_busy"
     case toolPolicyRejected = "tool_policy_rejected"
     case hostBridgeUnimplemented = "host_bridge_unimplemented"
     case agentLoopProtocolFailure = "agent_loop_protocol_failure"
@@ -443,6 +444,7 @@ public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
         "provider_unavailable",
         "rate_limited",
         "timeout",
+        "resource_busy",
         "tool_policy_rejected",
         "host_bridge_unimplemented",
         "agent_loop_protocol_failure",

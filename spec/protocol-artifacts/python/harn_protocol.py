@@ -208,6 +208,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "provider_unavailable",
     "rate_limited",
     "timeout",
+    "resource_busy",
     "tool_policy_rejected",
     "host_bridge_unimplemented",
     "agent_loop_protocol_failure",
@@ -528,6 +529,7 @@ class AgentTerminalClass(str, Enum):
     PROVIDER_UNAVAILABLE = "provider_unavailable"
     RATE_LIMITED = "rate_limited"
     TIMEOUT = "timeout"
+    RESOURCE_BUSY = "resource_busy"
     TOOL_POLICY_REJECTED = "tool_policy_rejected"
     HOST_BRIDGE_UNIMPLEMENTED = "host_bridge_unimplemented"
     AGENT_LOOP_PROTOCOL_FAILURE = "agent_loop_protocol_failure"
