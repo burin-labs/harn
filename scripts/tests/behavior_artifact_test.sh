@@ -23,7 +23,7 @@ case "$1" in
       cat <<'VERSION'
 cargo-nextest 0.9.132 (6e4a9d6f2 2026-03-20)
 release: 0.9.132
-commit-hash: 65e806bd589d12c4341d3696a02a9788bd437c3c
+commit-hash: 6e4a9d6f2c4964f30ff54a8cd5466f8869267daa
 VERSION
       exit 0
     fi
