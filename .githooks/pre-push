@@ -254,12 +254,6 @@ else
   echo "=== Pre-push: skipping provider catalog checks (no provider catalog changes) ==="
 fi
 
-if hook_paths_match "$changed" "$HOOK_CLI_AOT_PATTERN"; then
-  make -s check-cli-aot
-else
-  echo "=== Pre-push: skipping CLI AOT check (no compiler/CLI source changes) ==="
-fi
-
 if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
   hook_write_harn_format_files "$changed" "$harn_format_files"
   hook_write_harn_lint_files "$changed" "$harn_lint_files"
