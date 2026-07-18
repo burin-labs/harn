@@ -1,22 +1,18 @@
 //! Shared helpers for `harn local …` subcommands: provider enumeration,
 //! readiness snapshots, Ollama `/api/ps` loaded-model details, and PID-file
-//! tracking for self-launched llama.cpp / MLX processes.
+//! tracking for Harn-launched processes.
 
 use std::path::Path;
 use std::time::Duration;
 
 use harn_vm::llm::api::OllamaPsModel;
 use harn_vm::llm::readiness::{probe_provider_readiness, ProviderReadiness, ReadinessStatus};
-use harn_vm::llm_config::{self, ProviderDef};
+use harn_vm::llm_config::{self, LocalRuntimeLifecycle, LocalRuntimeWireProtocol, ProviderDef};
 use serde::Serialize;
 
 use crate::net;
 
 use super::state::{read_pid_record, PidRecord};
-
-/// Provider ids Harn treats as "local LLM runtimes" for lifecycle purposes.
-/// Order is canonical for output stability.
-pub(crate) const LOCAL_PROVIDERS: &[&str] = &["ollama", "llamacpp", "mlx", "local", "vllm"];
 
 pub(crate) fn normalize_local_provider_id(provider: &str) -> String {
     let trimmed = provider.trim();
@@ -67,20 +63,62 @@ pub(crate) struct LoadedModel {
 }
 
 pub(crate) fn local_provider_ids(filter: Option<&str>) -> Vec<String> {
-    let mut ids = Vec::new();
     if let Some(name) = filter.map(str::trim).filter(|name| !name.is_empty()) {
         let id = normalize_local_provider_id(name);
-        if llm_config::provider_config(&id).is_some() {
-            ids.push(id);
-        }
-        return ids;
+        return local_runtime_for_provider(&id)
+            .is_some()
+            .then_some(id)
+            .into_iter()
+            .collect();
     }
-    for id in LOCAL_PROVIDERS {
-        if llm_config::provider_config(id).is_some() {
-            ids.push((*id).to_string());
-        }
+    llm_config::provider_names()
+        .into_iter()
+        .filter(|id| local_runtime_for_provider(id).is_some())
+        .collect()
+}
+
+/// Return lifecycle metadata from the effective provider catalog. Local
+/// commands use this rather than a parallel provider-name list so catalog
+/// additions are listable, launchable when managed, and never mis-owned.
+pub(crate) fn local_runtime_for_provider(
+    provider: &str,
+) -> Option<harn_vm::llm_config::LocalRuntimeDef> {
+    let provider = normalize_local_provider_id(provider);
+    llm_config::provider_config(&provider).and_then(|def| def.local_runtime)
+}
+
+/// Resolve and validate a provider's catalog-owned lifecycle contract once at
+/// the command boundary. Callers dispatch on its closed protocol enum, never
+/// on a provider-name convention.
+pub(crate) fn local_runtime_lifecycle_for_provider(
+    provider: &str,
+) -> Result<LocalRuntimeLifecycle, String> {
+    let provider = normalize_local_provider_id(provider);
+    let runtime = local_runtime_for_provider(&provider)
+        .ok_or_else(|| format!("'{provider}' has no local runtime catalog row"))?;
+    runtime
+        .lifecycle()
+        .map_err(|error| format!("provider '{provider}' {error}"))
+}
+
+/// Whether the catalog declares the Ollama wire contract required by the
+/// model-info verifier. This is protocol behavior, never provider identity.
+pub(crate) fn uses_ollama_wire_protocol(provider: &str) -> bool {
+    local_runtime_lifecycle_for_provider(provider)
+        .is_ok_and(|lifecycle| lifecycle.wire_protocol == LocalRuntimeWireProtocol::OllamaApi)
+}
+
+/// Return detailed resident-model state when the runtime's wire contract
+/// exposes it. The `LoadedModel` shape is Ollama-specific; OpenAI-compatible
+/// runtimes still contribute their served models through readiness probes.
+pub(crate) async fn loaded_models_for_lifecycle(
+    lifecycle: LocalRuntimeLifecycle,
+    base_url: &str,
+) -> Result<Vec<LoadedModel>, String> {
+    match lifecycle.wire_protocol {
+        LocalRuntimeWireProtocol::OllamaApi => fetch_ollama_ps(base_url).await,
+        LocalRuntimeWireProtocol::OpenAiCompatible => Ok(Vec::new()),
     }
-    ids
 }
 
 pub(crate) async fn snapshot_provider(
@@ -90,22 +128,39 @@ pub(crate) async fn snapshot_provider(
     let provider = normalize_local_provider_id(provider);
     let def = llm_config::provider_config(&provider)
         .ok_or_else(|| format!("unknown provider: {provider}"))?;
+    snapshot_resolved_provider(&provider, def, state_dir).await
+}
+
+async fn snapshot_resolved_provider(
+    provider: &str,
+    def: ProviderDef,
+    state_dir: &Path,
+) -> Result<LocalProviderSnapshot, String> {
+    let lifecycle = def
+        .local_runtime
+        .as_ref()
+        .ok_or_else(|| format!("'{provider}' has no local runtime catalog row"))?
+        .lifecycle()
+        .map_err(|error| format!("provider '{provider}' {error}"))?;
     let base_url = llm_config::resolve_base_url(&def);
 
-    let (reachable, status, message, served_models) = if provider == "ollama" {
-        snapshot_ollama_reachability(&base_url).await
-    } else {
-        snapshot_openai_reachability(&provider, &base_url).await
+    let (reachable, status, message, served_models) = match lifecycle.wire_protocol {
+        LocalRuntimeWireProtocol::OllamaApi => snapshot_ollama_reachability(&base_url).await,
+        LocalRuntimeWireProtocol::OpenAiCompatible => {
+            snapshot_openai_reachability(provider, &base_url).await
+        }
     };
 
-    let loaded_models = if provider == "ollama" && reachable {
-        fetch_ollama_ps(&base_url).await.unwrap_or_default()
+    let loaded_models = if reachable {
+        loaded_models_for_lifecycle(lifecycle, &base_url)
+            .await
+            .unwrap_or_default()
     } else {
         Vec::new()
     };
 
     Ok(LocalProviderSnapshot {
-        provider: provider.clone(),
+        provider: provider.to_string(),
         display_name: def.display_name.clone(),
         base_url: base_url.clone(),
         base_url_env: def.base_url_env.clone(),
@@ -115,7 +170,7 @@ pub(crate) async fn snapshot_provider(
         message,
         served_models,
         loaded_models,
-        pid_record: read_pid_record(state_dir, &provider).ok().flatten(),
+        pid_record: read_pid_record(state_dir, provider).ok().flatten(),
     })
 }
 
@@ -358,11 +413,15 @@ fn local_http_client() -> Result<reqwest::Client, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_vm::llm_config::{LocalRuntimeKind, LocalRuntimeStop};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
 
     #[test]
     fn local_provider_ids_filters_unknown_filter() {
         let ids = local_provider_ids(Some("ollama"));
         assert_eq!(ids, vec!["ollama".to_string()]);
+        assert!(local_provider_ids(Some("openai")).is_empty());
     }
 
     #[test]
@@ -383,11 +442,83 @@ mod tests {
     }
 
     #[test]
-    fn local_provider_ids_returns_canonical_list() {
+    fn local_provider_ids_derive_sorted_catalog_lifecycle_rows() {
         let ids = local_provider_ids(None);
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(ids.contains(&"ollama".to_string()));
         assert!(ids.contains(&"llamacpp".to_string()));
         assert!(ids.contains(&"mlx".to_string()));
+        assert!(ids.contains(&"local".to_string()));
+        assert!(ids.contains(&"tgi".to_string()));
+        assert!(ids.contains(&"vllm".to_string()));
+        for id in ids {
+            assert!(
+                local_runtime_for_provider(&id).is_some(),
+                "{id} must be catalog-declared"
+            );
+        }
+    }
+
+    #[test]
+    fn generic_local_runtime_is_explicitly_external() {
+        let runtime = local_runtime_for_provider("local")
+            .expect("generic local provider has catalog lifecycle metadata");
+        assert_eq!(runtime.kind, Some(LocalRuntimeKind::External));
+        assert_eq!(runtime.stop, Some(LocalRuntimeStop::External));
+    }
+
+    #[test]
+    fn non_ollama_runtime_uses_the_catalog_openai_lifecycle_contract() {
+        let lifecycle = local_runtime_lifecycle_for_provider("tgi")
+            .expect("TGI has a coherent catalog lifecycle");
+        assert_eq!(
+            lifecycle.wire_protocol,
+            LocalRuntimeWireProtocol::OpenAiCompatible
+        );
+        assert_eq!(lifecycle.kind, LocalRuntimeKind::ManagedProcess);
+        assert_eq!(lifecycle.stop, LocalRuntimeStop::Pid);
+        assert!(!uses_ollama_wire_protocol("tgi"));
+        assert!(uses_ollama_wire_protocol("ollama"));
+    }
+
+    #[tokio::test]
+    async fn tgi_snapshot_uses_openai_models_route_without_ollama_enrichment() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind TGI stub");
+        let addr = listener.local_addr().expect("TGI stub address");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("TGI stub accepts request");
+            let mut bytes = [0_u8; 4096];
+            let read = stream.read(&mut bytes).expect("TGI stub reads request");
+            let request = String::from_utf8_lossy(&bytes[..read]);
+            assert!(
+                request.starts_with("GET /v1/models HTTP/1.1\r\n"),
+                "TGI must use the catalog's OpenAI lifecycle route, got:\n{request}"
+            );
+            let body = r#"{"data":[{"id":"zephyr-7b-beta"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("TGI stub writes response");
+        });
+
+        let mut tgi = resolve_provider_def("tgi").expect("TGI provider catalog row");
+        tgi.base_url = format!("http://{addr}");
+        tgi.base_url_env = None;
+        let state_dir = tempfile::tempdir().expect("snapshot state directory");
+        let snapshot = snapshot_resolved_provider("tgi", tgi, state_dir.path())
+            .await
+            .expect("TGI snapshot");
+        handle.join().expect("TGI stub joins");
+
+        assert!(snapshot.reachable, "{}", snapshot.message);
+        assert_eq!(snapshot.served_models, vec!["zephyr-7b-beta"]);
+        assert!(
+            snapshot.loaded_models.is_empty(),
+            "OpenAI-compatible TGI must not issue an Ollama loaded-model probe"
+        );
     }
 
     #[test]

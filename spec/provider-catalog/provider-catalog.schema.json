@@ -437,10 +437,18 @@
             "pid",
             "external"
           ]
+        },
+        "wire_protocol": {
+          "enum": [
+            "ollama_api",
+            "open_ai_compatible"
+          ]
         }
       },
       "required": [
-        "kind"
+        "kind",
+        "wire_protocol",
+        "stop"
       ],
       "type": "object"
     },
@@ -1450,7 +1458,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v5.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v6.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1494,10 +1502,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v5.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v6.json"
     },
     "schema_version": {
-      "const": 5
+      "const": 6
     },
     "variants": {
       "items": {

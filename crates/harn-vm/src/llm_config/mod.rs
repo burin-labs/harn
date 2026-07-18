@@ -18,6 +18,8 @@ mod reviewer;
 mod taxonomy;
 
 #[cfg(test)]
+mod local_runtime_tests;
+#[cfg(test)]
 mod logical_defaults_tests;
 #[cfg(test)]
 mod provider_endpoint_tests;

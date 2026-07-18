@@ -609,8 +609,7 @@ fn provider_probe_mock_human_with_model_is_byte_identical_across_runs() {
     );
 }
 
-/// JSON-mode coverage with `--model` set — exercises the `runtime_profile`
-/// branch even though mock isn't in `LOCAL_PROVIDERS`.
+/// JSON-mode coverage with `--model` set for a non-local provider.
 #[test]
 fn provider_probe_mock_json_with_model_is_structurally_identical_across_runs() {
     let harn = run(&["provider", "probe", "mock", "--model", "mock"], &[]);
@@ -630,6 +629,24 @@ fn provider_probe_mock_json_with_model_is_structurally_identical_across_runs() {
         repeat_value["readiness"]["ok"], harn_value["readiness"]["ok"],
         "readiness.ok diverged"
     );
+}
+
+#[test]
+fn provider_probe_profiles_catalog_declared_local_runtime() {
+    let harn = run(
+        &[
+            "provider",
+            "probe",
+            "tgi",
+            "--model",
+            "zephyr-7b-beta",
+            "--base-url",
+            "http://127.0.0.1:1",
+        ],
+        &[],
+    );
+    let value = parse_json(&harn.stdout, "harn");
+    assert_eq!(value["runtime_profile"]["provider"], "tgi");
 }
 
 /// Tool-probe fixture with `--mode streaming` — exercises a different
@@ -742,10 +759,16 @@ fn provider_tool_scorecard_json_is_structurally_identical_across_runs() {
         repeat.stdout, harn.stdout
     );
     assert_eq!(harn_value["route_count"], 2);
-    assert_eq!(harn_value["summary"]["pass"], 1);
+    assert_eq!(harn_value["summary"]["pass"], 0);
+    assert_eq!(harn_value["summary"]["warn"], 1);
     assert_eq!(harn_value["summary"]["fail"], 1);
+    assert_eq!(harn_value["summary"]["trusted"], 0);
+    assert_eq!(harn_value["summary"]["needs_review"], 1);
+    assert_eq!(harn_value["summary"]["quarantined"], 1);
     assert_eq!(harn_value["routes"][0]["provider"], "anthropic");
+    assert_eq!(harn_value["routes"][0]["trust_status"], "needs_review");
     assert_eq!(harn_value["routes"][1]["status"], "fail");
+    assert_eq!(harn_value["routes"][1]["trust_status"], "quarantined");
 }
 
 #[test]
@@ -775,8 +798,50 @@ fn provider_tool_scorecard_plan_json_includes_fixed_micro_case_matrix() {
     );
     assert_eq!(harn_value["kind"], "plan");
     assert_eq!(harn_value["route_count"], 1);
+    assert_eq!(harn_value["readiness_command_count"], 1);
+    assert_eq!(harn_value["case_count"], 9);
+    assert_eq!(harn_value["required_case_count"], 8);
+    assert_eq!(harn_value["executable_case_count"], 9);
+    assert_eq!(harn_value["live_tool_probe_case_count"], 7);
+    assert_eq!(harn_value["offline_request_case_count"], 2);
+    assert_eq!(harn_value["not_applicable_case_count"], 0);
+    assert_eq!(harn_value["batch_manifest_request_count"], 7);
+    assert_eq!(
+        harn_value["provider_summaries"],
+        serde_json::json!([
+            {
+                "provider": "anthropic",
+                "route_count": 1,
+                "case_count": 9,
+                "required_case_count": 8,
+                "executable_case_count": 9,
+                "live_tool_probe_case_count": 7,
+                "offline_request_case_count": 2,
+                "readiness_command_count": 1,
+                "batch_manifest_request_count": 7,
+                "not_applicable_case_count": 0
+            }
+        ])
+    );
     assert_eq!(harn_value["routes"][0]["provider"], "anthropic");
     assert_eq!(harn_value["routes"][0]["model"], "claude-sonnet-5");
+    assert_eq!(harn_value["routes"][0]["trust_status"], "needs_review");
+    assert_eq!(
+        harn_value["routes"][0]["trust_reasons"],
+        serde_json::json!(["missing_live_evidence"])
+    );
+    assert_eq!(
+        harn_value["routes"][0]["readiness"]["command"],
+        serde_json::json!([
+            "harn",
+            "provider",
+            "probe",
+            "anthropic",
+            "--model",
+            "claude-sonnet-5",
+            "--json"
+        ])
+    );
     let cases = harn_value["routes"][0]["cases"]
         .as_array()
         .expect("cases should be an array");
@@ -965,9 +1030,26 @@ fn provider_tool_scorecard_plan_human_is_byte_identical_across_runs() {
         harn.stdout
     );
     assert!(
-        harn.stdout.contains("required=8 batch_manifest_requests=0")
+        harn.stdout
+            .contains(
+                "required=8 executable=9 live_tool_probes=7 offline_request_checks=2 not_applicable=0 batch_manifest_requests=0 readiness_commands=1"
+            )
             && harn.stdout.contains("executable=9 missing_runner=0"),
         "execution summary missing from human output: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains(
+            "trust=needs_review trust_reasons=missing_live_evidence readiness=executable"
+        ),
+        "trust/readiness summary missing from human output: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains(
+            "provider-summary anthropic routes=1 cases=9 required=8 executable=9 live_tool_probes=7 offline_request_checks=2 readiness_commands=1 batch_manifest_requests=0 not_applicable=0"
+        ),
+        "provider scheduling summary missing from human output: {}",
         harn.stdout
     );
 }
@@ -1002,13 +1084,22 @@ fn provider_tool_scorecard_plan_markdown_is_byte_identical_across_runs() {
         harn.stdout
     );
     assert!(
-        harn.stdout.contains("| Provider | Model | Preferred |"),
+        harn.stdout
+            .contains("| Provider | Model | Trust | Trust reasons | Readiness |"),
         "markdown table missing: {}",
         harn.stdout
     );
     assert!(
         harn.stdout.contains("| Executable | Missing runner |"),
         "execution columns missing from markdown output: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("## Provider Scheduling Summary")
+            && harn
+                .stdout
+                .contains("| anthropic | 1 | 9 | 8 | 9 | 7 | 2 | 1 | 0 | 0 |"),
+        "provider scheduling summary missing from markdown output: {}",
         harn.stdout
     );
     assert!(
@@ -1044,7 +1135,7 @@ fn provider_tool_scorecard_json_reports_catalog_mismatches() {
 
     assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    assert_eq!(harn_value["schema_version"], 3);
+    assert_eq!(harn_value["schema_version"], 7);
     let route = &harn_value["routes"][0];
     assert_eq!(route["provider"], provider);
     assert_eq!(route["model"], model);
@@ -1158,7 +1249,7 @@ fn provider_tool_scorecard_json_reports_unknown_catalog_route() {
 
     assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    assert_eq!(harn_value["schema_version"], 3);
+    assert_eq!(harn_value["schema_version"], 7);
     let route = &harn_value["routes"][0];
     assert!(route["catalog_claim"].is_null());
     assert_eq!(
@@ -1179,7 +1270,7 @@ fn provider_tool_scorecard_human_is_byte_identical_across_runs() {
         &fixture,
         1,
         "anthropic",
-        "claude",
+        "claude-sonnet-5",
         "structured_native_tool_call",
         true,
     );
@@ -1206,8 +1297,13 @@ fn provider_tool_scorecard_human_is_byte_identical_across_runs() {
     );
     assert!(
         harn.stdout
-            .contains("provider tool-call scorecard: routes=1 pass=1 warn=0 fail=0"),
+            .contains("provider tool-call scorecard: routes=1 pass=0 warn=1 fail=0 trusted=0 needs_review=1 quarantined=0"),
         "unexpected human output: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("trust=needs_review"),
+        "trust summary missing from human output: {}",
         harn.stdout
     );
 }

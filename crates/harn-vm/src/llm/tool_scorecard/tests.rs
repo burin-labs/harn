@@ -7,7 +7,7 @@ use crate::llm::tool_conformance::{
 fn scorecard_ranks_successful_native_route_first() {
     let pass = complete_success_reports(
         "anthropic",
-        "claude",
+        "claude-sonnet-5",
         ToolProbeClassification::StructuredNativeToolCall,
     );
     let fail = report(
@@ -20,14 +20,21 @@ fn scorecard_ranks_successful_native_route_first() {
 
     assert_eq!(scorecard.schema_version, TOOL_SCORECARD_SCHEMA_VERSION);
     assert_eq!(scorecard.route_count, 2);
-    assert_eq!(scorecard.summary.pass, 1);
-    assert_eq!(scorecard.summary.warn, 0);
+    assert_eq!(scorecard.summary.pass, 0);
+    assert_eq!(scorecard.summary.warn, 1);
     assert_eq!(scorecard.summary.fail, 1);
+    assert_eq!(scorecard.summary.trusted, 0);
+    assert_eq!(scorecard.summary.needs_review, 1);
+    assert_eq!(scorecard.summary.quarantined, 1);
     assert_eq!(scorecard.routes[0].provider, "anthropic");
-    assert_eq!(scorecard.routes[0].status, "pass");
-    assert_eq!(scorecard.routes[0].evidence_status, "complete");
+    assert_eq!(scorecard.routes[0].status, "warn");
+    assert_eq!(scorecard.routes[0].trust_status, "needs_review");
+    assert!(scorecard.routes[0]
+        .trust_reasons
+        .contains(&"incomplete_required_request_evidence"));
+    assert_eq!(scorecard.routes[0].evidence_status, "partial");
     assert_eq!(scorecard.routes[0].probe_evidence_status, "complete");
-    assert_eq!(scorecard.routes[0].request_evidence_status, "complete");
+    assert_eq!(scorecard.routes[0].request_evidence_status, "partial");
     assert_eq!(scorecard.routes[0].recommended_tool_mode, "native");
     assert_eq!(
         scorecard.routes[1].issues,
@@ -49,6 +56,8 @@ fn scorecard_reports_catalog_drift_without_failing_route() {
 
     let route = &scorecard.routes[0];
     assert_eq!(route.status, "warn");
+    assert_eq!(route.trust_status, "needs_review");
+    assert!(route.trust_reasons.contains(&"catalog_drift"));
     assert_eq!(route.recommended_tool_mode, "text");
     assert!(route.catalog_claim.is_some());
     assert!(route
@@ -72,6 +81,8 @@ fn scorecard_does_not_complete_mode_both_plan_with_non_streaming_only_reports() 
 
     let route = &scorecard.routes[0];
     assert_eq!(route.status, "warn");
+    assert_eq!(route.trust_status, "needs_review");
+    assert!(route.trust_reasons.contains(&"incomplete_evidence"));
     assert_eq!(route.probe_evidence_status, "partial");
     assert_eq!(route.request_evidence_status, "partial");
     assert_eq!(route.quality_score, 100);
@@ -258,6 +269,8 @@ fn scorecard_does_not_suggest_catalog_disable_without_positive_evidence() {
 
     let route = &scorecard.routes[0];
     assert_eq!(route.status, "fail");
+    assert_eq!(route.trust_status, "quarantined");
+    assert!(route.trust_reasons.contains(&"scorecard_failed"));
     assert_eq!(route.recommended_tool_mode, "disabled");
     assert!(route.catalog_mismatches.is_empty());
     assert!(route.suggested_catalog_updates.is_empty());
@@ -298,9 +311,30 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert_eq!(plan.schema_version, TOOL_SCORECARD_PLAN_SCHEMA_VERSION);
     assert_eq!(plan.kind, "plan");
     assert_eq!(plan.route_count, 1);
+    assert_eq!(plan.readiness_command_count, 1);
     assert!(plan.unscorecardable_provider_count > 0);
     assert_eq!(plan.routes[0].provider, "anthropic");
     assert_eq!(plan.routes[0].model, "claude-sonnet-5");
+    assert_eq!(plan.routes[0].trust_status, "needs_review");
+    assert_eq!(plan.routes[0].trust_reasons, vec!["missing_live_evidence"]);
+    assert_eq!(plan.routes[0].readiness.status, "executable");
+    assert_eq!(plan.routes[0].readiness.runner, "provider_probe");
+    assert_eq!(
+        plan.routes[0].readiness.command.as_ref().unwrap(),
+        &vec![
+            "harn".to_string(),
+            "provider".to_string(),
+            "probe".to_string(),
+            "anthropic".to_string(),
+            "--model".to_string(),
+            "claude-sonnet-5".to_string(),
+            "--json".to_string(),
+        ]
+    );
+    assert_eq!(
+        plan.routes[0].readiness.artifact_hint.as_deref(),
+        Some("provider-readiness-anthropic-claude-sonnet-5.json")
+    );
     assert!(plan.catalog.hash_blake3.starts_with("blake3:"));
     let case_ids = plan.routes[0]
         .cases
@@ -313,7 +347,23 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert!(case_ids.contains(&"signed_thinking_tool_result_followup"));
     assert!(case_ids.contains(&"done_sentinel"));
     assert_eq!(plan.case_count, plan.routes[0].cases.len());
-    assert!(plan.required_case_count >= 7);
+    assert_eq!(plan.required_case_count, 8);
+    assert_eq!(plan.executable_case_count, 9);
+    assert_eq!(plan.live_tool_probe_case_count, 7);
+    assert_eq!(plan.offline_request_case_count, 2);
+    assert_eq!(plan.not_applicable_case_count, 0);
+    assert_eq!(plan.provider_summaries.len(), 1);
+    let provider_summary = &plan.provider_summaries[0];
+    assert_eq!(provider_summary.provider, "anthropic");
+    assert_eq!(provider_summary.route_count, 1);
+    assert_eq!(provider_summary.case_count, 9);
+    assert_eq!(provider_summary.required_case_count, 8);
+    assert_eq!(provider_summary.executable_case_count, 9);
+    assert_eq!(provider_summary.live_tool_probe_case_count, 7);
+    assert_eq!(provider_summary.offline_request_case_count, 2);
+    assert_eq!(provider_summary.readiness_command_count, 1);
+    assert_eq!(provider_summary.batch_manifest_request_count, 7);
+    assert_eq!(provider_summary.not_applicable_case_count, 0);
     let unscorecardable_by_provider = plan
         .unscorecardable_providers
         .iter()
@@ -327,6 +377,14 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert!(vllm.local_runtime);
     assert!(!vllm.auth_required);
     assert!(vllm.credential_env_names.is_empty());
+    let tgi = unscorecardable_by_provider
+        .get("tgi")
+        .expect("TGI provider state should be explicit");
+    assert_eq!(tgi.reason, "requires_runtime_model");
+    assert_eq!(tgi.model_count, 0);
+    assert!(tgi.local_runtime);
+    assert!(!tgi.auth_required);
+    assert!(tgi.credential_env_names.is_empty());
     let bedrock = unscorecardable_by_provider
         .get("bedrock")
         .expect("Bedrock provider state should be explicit");
@@ -533,6 +591,16 @@ fn scorecard_plan_does_not_require_tool_cases_for_no_tool_routes() {
     let plan = tool_scorecard_plan_from_catalog(&[String::from("groq:groq/compound")], false)
         .expect("plan from catalog");
     let cases = &plan.routes[0].cases;
+    assert_eq!(plan.case_count, 9);
+    assert_eq!(plan.required_case_count, 4);
+    assert_eq!(plan.executable_case_count, 4);
+    assert_eq!(plan.live_tool_probe_case_count, 3);
+    assert_eq!(plan.offline_request_case_count, 1);
+    assert_eq!(plan.not_applicable_case_count, 5);
+    assert_eq!(plan.provider_summaries.len(), 1);
+    assert_eq!(plan.provider_summaries[0].provider, "groq");
+    assert_eq!(plan.provider_summaries[0].case_count, 9);
+    assert_eq!(plan.provider_summaries[0].not_applicable_case_count, 5);
 
     for case_id in [
         "single_tool_call",
