@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 
 type WorkspacePackage = {dir: string, name: string}
 
@@ -132,29 +132,34 @@ pub fn nextest_filter_for_paths(paths: list<string>, packages: list<WorkspacePac
   return filters.join(" or ")
 }
 
-fn arg_spec() -> list {
-  return [{kind: "option", name: "root", flags: ["--root"], parse: "string", default: ""}]
+fn arg_spec() {
+  return parser(
+    {
+      name: "nextest_filters_from_paths",
+      args: [
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+        {kind: "positional", name: "paths", parse: "string", required: false, variadic: true, default: []},
+      ],
+    },
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio
       .println(
       "usage: harn run scripts/nextest_filters_from_paths.harn -- [--root PATH] [file ...]",
     )
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 {
-    harness.stdio.eprintln(join(parsed?._errors ?? [], "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
-    exit(2)
-  }
-  const paths = parsed?._positional ?? []
+  const invocation = unwrap(parsed_result)
+  const parsed = invocation.options
+  const paths = parsed.paths + invocation.rest
   if paths.count == 0 {
     return nil
   }

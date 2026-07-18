@@ -67,6 +67,46 @@ fn test_fix_unused_import_partial() {
 }
 
 #[test]
+fn invalid_selective_import_suppresses_derivative_unused_warning() {
+    let temp = tempfile::tempdir().unwrap();
+    let entry = temp.path().join("entry.harn");
+    std::fs::write(
+        temp.path().join("types.harn"),
+        "pub type CurrentReceipt = {ok: bool}\n",
+    )
+    .unwrap();
+    let source =
+        "import { StaleReceipt, CurrentReceipt } from \"./types\"\npub fn run() -> int { 1 }\n";
+    std::fs::write(&entry, source).unwrap();
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let graph = harn_modules::build_with_source(&entry, source);
+    let diagnostics = lint_with_module_graph(
+        &program,
+        &[],
+        Some(source),
+        &HashSet::new(),
+        &graph,
+        &entry,
+        &LintOptions {
+            file_path: Some(&entry),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.rule == "unused-import")
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>(),
+        vec!["imported name `CurrentReceipt` is never used"]
+    );
+}
+
+#[test]
 fn test_import_used_in_destructuring_default_is_kept() {
     let source = r#"import { seed_registry } from "mod"
 pipeline default(task) {

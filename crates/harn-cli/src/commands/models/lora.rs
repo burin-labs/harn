@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 use crate::cli::{ModelsLoraArgs, ModelsLoraCommand, ModelsLoraInspectArgs, ModelsLoraPlanArgs};
@@ -15,8 +15,16 @@ mod promote;
 mod promotion_templates;
 mod render;
 mod train;
+mod trainer;
+
 use promotion_templates::lora_promotion_probe_command_templates;
 pub(super) use render::{render_embedded_lora_report, run_embedded_lora_report};
+use trainer::{
+    normalize_lora_trainer, parse_trainer_identity, read_trainer_identity_file,
+    trainer_environment_check, trainer_identity_args, trainer_identity_check,
+    trainer_identity_from_args, TrainerEnvironmentCheck, TrainerEnvironmentObservation,
+    TrainerIdentity, TrainerIdentityCheck,
+};
 
 const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
 const LORA_INSPECT_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY";
@@ -27,8 +35,7 @@ const LORA_CONTRACT_HASH_SCHEMA_VERSION: u64 = 3;
 const LORA_TRAINING_CONTRACT_SCHEMA_VERSION: u64 = 3;
 const LORA_PEFT_SAVE_POLICY_SCHEMA_VERSION: u64 = 1;
 const LORA_TOOL_CATALOG_CONTRACT_SCHEMA_VERSION: u64 = 1;
-const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 4;
-const LORA_TRAINER_IDENTITY_SCHEMA_VERSION: u64 = 1;
+const LORA_PROMOTION_EVIDENCE_SCHEMA_VERSION: u64 = 5;
 
 pub(crate) async fn run(args: ModelsLoraArgs) {
     let exit_code = match args.command {
@@ -765,8 +772,8 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "models".to_string(),
         "lora".to_string(),
         "promote".to_string(),
-        "--manifest".to_string(),
-        "ADAPTER_OUTPUT_DIR/adapter.manifest.json".to_string(),
+        "--train-receipt".to_string(),
+        "ADAPTER_OUTPUT_DIR/train.receipt.json".to_string(),
         "--probe-root".to_string(),
         "PROMOTION_PROBES".to_string(),
         "--base-probe-root".to_string(),
@@ -871,16 +878,17 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             &decision.effective,
             dataset_format,
         ),
-        evaluation: lora_evaluation_recipe(
-            &contract_id,
-            &resolved.id,
-            &provider,
-            &request_model,
-            &decision.effective,
-            &eval_dataset,
-            Some(&trainer_identity),
+        evaluation: lora_evaluation_recipe(LoraEvaluationRecipeInput {
+            contract_id: &contract_id,
+            base_model: &resolved.id,
+            provider: &provider,
+            request_model: &request_model,
+            tool_format: &decision.effective,
+            eval_dataset: &eval_dataset,
+            trainer_identity: Some(&trainer_identity),
+            trainer_environment: None,
             eval_command,
-        ),
+        }),
         serving,
         launch: PlanLaunchHints {
             preflight_command,
@@ -1063,153 +1071,6 @@ fn normalize_lora_method(raw: &str) -> Result<String, String> {
             "unsupported LoRA method `{raw}`; expected `qlora` or `lora`"
         )),
     }
-}
-
-fn normalize_lora_trainer(raw: &str) -> Result<String, String> {
-    let trainer = raw.trim().to_ascii_lowercase().replace('-', "_");
-    match trainer.as_str() {
-        "trl" | "trl_sft" | "trl_sft_trainer" => Ok("trl_sft_trainer".to_string()),
-        "unsloth" | "unsloth_sft" | "unsloth_trl_sft" => Ok("unsloth_sft".to_string()),
-        "mlx" | "mlx_lm" | "mlx_lm_sft" | "mlx_lora" => Ok("mlx_lm".to_string()),
-        "external" | "external_sft" | "external_sft_trainer" => {
-            Ok("external_sft_trainer".to_string())
-        }
-        _ => Err(format!(
-            "unsupported LoRA trainer `{raw}`; expected `trl_sft_trainer`, `unsloth_sft`, `mlx_lm`, or `external_sft_trainer`"
-        )),
-    }
-}
-
-pub(super) fn trainer_identity_from_args(
-    trainer_identity: Option<&str>,
-    trainer_version: Option<&str>,
-) -> Result<Option<TrainerIdentity>, String> {
-    if let Some(raw) = trainer_identity {
-        return parse_trainer_identity(raw).map(Some);
-    }
-    trainer_version
-        .map(|version| {
-            make_trainer_identity("version", version)
-                .map_err(|error| format!("invalid --trainer-version `{version}`: {error}"))
-        })
-        .transpose()
-}
-
-pub(super) fn parse_trainer_identity(raw: &str) -> Result<TrainerIdentity, String> {
-    let Some((kind, value)) = raw.split_once('=') else {
-        return Err(format!(
-            "invalid trainer identity `{raw}`; expected KIND=VALUE"
-        ));
-    };
-    make_trainer_identity(kind, value)
-}
-
-fn make_trainer_identity(kind: &str, value: &str) -> Result<TrainerIdentity, String> {
-    let kind = kind.trim().to_ascii_lowercase().replace('-', "_");
-    let value = value.trim();
-    if value.is_empty() {
-        return Err("value must be non-empty".to_string());
-    }
-    if !matches!(
-        kind.as_str(),
-        "version" | "revision" | "lockfile_sha256" | "container_digest" | "backend_fingerprint"
-    ) {
-        return Err(format!(
-            "unsupported trainer identity kind `{kind}`; expected version, revision, lockfile_sha256, container_digest, or backend_fingerprint"
-        ));
-    }
-    Ok(TrainerIdentity {
-        schema_version: LORA_TRAINER_IDENTITY_SCHEMA_VERSION,
-        kind,
-        value: value.to_string(),
-    })
-}
-
-pub(super) fn read_trainer_identity_file(path: &Path) -> Result<Option<TrainerIdentity>, String> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let raw = std::fs::read_to_string(path).map_err(|error| {
-        format!(
-            "failed to read trainer identity {}: {error}",
-            path.display()
-        )
-    })?;
-    let value = serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| {
-        format!(
-            "failed to parse trainer identity {}: {error}",
-            path.display()
-        )
-    })?;
-    trainer_identity_from_value(&value)
-        .map(Some)
-        .map_err(|error| format!("invalid trainer identity {}: {error}", path.display()))
-}
-
-fn trainer_identity_from_value(value: &serde_json::Value) -> Result<TrainerIdentity, String> {
-    let object = value
-        .get("trainer_identity")
-        .or_else(|| value.get("identity"))
-        .unwrap_or(value);
-    let kind = object
-        .get("kind")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| "missing kind".to_string())?;
-    let value = object
-        .get("value")
-        .or_else(|| object.get("fingerprint"))
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| "missing value".to_string())?;
-    make_trainer_identity(kind, value)
-}
-
-pub(super) fn trainer_identity_check(
-    expected: Option<TrainerIdentity>,
-    observed: Option<TrainerIdentity>,
-) -> TrainerIdentityCheck {
-    let mut errors = Vec::new();
-    let status = match (&expected, &observed) {
-        (Some(expected), Some(observed)) if expected == observed => "matched",
-        (Some(expected), Some(observed)) => {
-            errors.push(format!(
-                "trainer identity mismatch: expected {}={} observed {}={}",
-                expected.kind, expected.value, observed.kind, observed.value
-            ));
-            "mismatched"
-        }
-        (Some(_), None) => {
-            errors.push("observed trainer identity is missing".to_string());
-            "missing_observed"
-        }
-        (None, Some(_)) => {
-            errors.push("expected trainer identity is missing".to_string());
-            "missing_expected"
-        }
-        (None, None) => {
-            errors.push("expected trainer identity is missing".to_string());
-            "missing_expected"
-        }
-    }
-    .to_string();
-    TrainerIdentityCheck {
-        schema_version: LORA_TRAINER_IDENTITY_SCHEMA_VERSION,
-        expected,
-        observed,
-        status: status.clone(),
-        promotable: status == "matched",
-        errors,
-    }
-}
-
-fn trainer_identity_args(identity: Option<&TrainerIdentity>) -> Vec<String> {
-    identity
-        .map(|identity| {
-            vec![
-                "--trainer-identity".to_string(),
-                format!("{}={}", identity.kind, identity.value),
-            ]
-        })
-        .unwrap_or_default()
 }
 
 pub(super) fn resolve_lora_provider(provider: Option<&str>, resolved_provider: &str) -> String {
@@ -2386,16 +2247,30 @@ fn model_aware_selection_recipe(
     }
 }
 
-pub(super) fn lora_evaluation_recipe(
-    contract_id: &str,
-    base_model: &str,
-    provider: &str,
-    request_model: &str,
-    tool_format: &str,
-    eval_dataset: &str,
-    trainer_identity: Option<&TrainerIdentityCheck>,
-    eval_command: Vec<String>,
-) -> EvaluationRecipe {
+pub(super) struct LoraEvaluationRecipeInput<'a> {
+    pub(super) contract_id: &'a str,
+    pub(super) base_model: &'a str,
+    pub(super) provider: &'a str,
+    pub(super) request_model: &'a str,
+    pub(super) tool_format: &'a str,
+    pub(super) eval_dataset: &'a str,
+    pub(super) trainer_identity: Option<&'a TrainerIdentityCheck>,
+    pub(super) trainer_environment: Option<&'a TrainerEnvironmentCheck>,
+    pub(super) eval_command: Vec<String>,
+}
+
+pub(super) fn lora_evaluation_recipe(input: LoraEvaluationRecipeInput<'_>) -> EvaluationRecipe {
+    let LoraEvaluationRecipeInput {
+        contract_id,
+        base_model,
+        provider,
+        request_model,
+        tool_format,
+        eval_dataset,
+        trainer_identity,
+        trainer_environment,
+        eval_command,
+    } = input;
     let parser_metric = if matches!(tool_format, "text" | "json") {
         "Harn text parser acceptance rate"
     } else {
@@ -2419,6 +2294,7 @@ pub(super) fn lora_evaluation_recipe(
         "require zero contract-id drift between export manifest, adapter metadata, and served route"
             .to_string(),
         "require matching expected and observed trainer identity before promotion".to_string(),
+        "require Harn-normalized trainer environment attestation before promotion".to_string(),
         "require no regression on non-tool chat smoke prompts".to_string(),
     ];
     let evidence_contract = lora_promotion_evidence_contract(PromotionEvidenceInput {
@@ -2432,6 +2308,7 @@ pub(super) fn lora_evaluation_recipe(
         required_metrics: &required_metrics,
         gates: &gates,
         trainer_identity,
+        trainer_environment,
     });
     EvaluationRecipe {
         holdout_policy:
@@ -2443,6 +2320,39 @@ pub(super) fn lora_evaluation_recipe(
         evidence_contract,
         eval_command,
     }
+}
+
+/// Rebuild promotion evidence after execution finalizes provenance.
+///
+/// The initial train plan intentionally carries a non-promotable environment
+/// placeholder. Backend execution can change both provenance checks, so the
+/// promotion id must be derived again from the finalized Harn-owned values.
+pub(super) fn refresh_lora_promotion_evidence(
+    recipe: &mut EvaluationRecipe,
+    trainer_identity: &TrainerIdentityCheck,
+    trainer_environment: &TrainerEnvironmentCheck,
+) {
+    let evidence = &recipe.evidence_contract;
+    let contract_id = evidence.lora_contract_id.clone();
+    let base_model = evidence.base_route.model.clone();
+    let provider = evidence.base_route.provider.clone();
+    let request_model = evidence.adapter_route.model.clone();
+    let tool_format = evidence.adapter_route.tool_format.clone();
+    let eval_dataset = evidence.eval_dataset.clone();
+    let minimum_trials = evidence.minimum_trials;
+    recipe.evidence_contract = lora_promotion_evidence_contract(PromotionEvidenceInput {
+        contract_id: &contract_id,
+        base_model: &base_model,
+        provider: &provider,
+        request_model: &request_model,
+        tool_format: &tool_format,
+        eval_dataset: &eval_dataset,
+        minimum_trials,
+        required_metrics: &recipe.required_metrics,
+        gates: &recipe.gates,
+        trainer_identity: Some(trainer_identity),
+        trainer_environment: Some(trainer_environment),
+    });
 }
 
 fn lora_promotion_evidence_contract(
@@ -2469,6 +2379,7 @@ fn lora_promotion_evidence_contract(
             tool_format: input.tool_format.to_string(),
         },
         trainer_identity: input.trainer_identity.cloned(),
+        trainer_environment: input.trainer_environment.cloned(),
         eval_dataset: input.eval_dataset.to_string(),
         minimum_trials: input.minimum_trials,
         required_receipts: vec![
@@ -2621,6 +2532,7 @@ struct PromotionEvidenceInput<'a> {
     required_metrics: &'a [String],
     gates: &'a [String],
     trainer_identity: Option<&'a TrainerIdentityCheck>,
+    trainer_environment: Option<&'a TrainerEnvironmentCheck>,
 }
 
 fn lora_promotion_id(
@@ -2630,7 +2542,7 @@ fn lora_promotion_id(
 ) -> String {
     let mut hasher = Sha256::new();
     for part in [
-        "harn_lora_promotion_v4",
+        "harn_lora_promotion_v5",
         input.contract_id,
         input.base_model,
         input.provider,
@@ -2646,6 +2558,12 @@ fn lora_promotion_id(
         let trainer_identity_bytes =
             serde_json::to_vec(trainer_identity).expect("trainer identity is JSON-serializable");
         hasher.update(trainer_identity_bytes);
+    }
+    hasher.update([0]);
+    if let Some(trainer_environment) = input.trainer_environment {
+        let trainer_environment_bytes = serde_json::to_vec(trainer_environment)
+            .expect("trainer environment is JSON-serializable");
+        hasher.update(trainer_environment_bytes);
     }
     hasher.update([0]);
     for metric in input.required_metrics {
@@ -3000,23 +2918,6 @@ struct TrainingRecipe {
     notes: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(super) struct TrainerIdentity {
-    schema_version: u64,
-    kind: String,
-    value: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(super) struct TrainerIdentityCheck {
-    schema_version: u64,
-    expected: Option<TrainerIdentity>,
-    observed: Option<TrainerIdentity>,
-    status: String,
-    promotable: bool,
-    errors: Vec<String>,
-}
-
 #[derive(Clone, Debug, Serialize)]
 struct PrecisionContract {
     schema_version: u64,
@@ -3170,6 +3071,7 @@ struct PromotionEvidenceContract {
     base_route: PromotionRoute,
     adapter_route: PromotionRoute,
     trainer_identity: Option<TrainerIdentityCheck>,
+    trainer_environment: Option<TrainerEnvironmentCheck>,
     eval_dataset: String,
     minimum_trials: u64,
     required_receipts: Vec<String>,
@@ -3891,8 +3793,8 @@ mod tests {
                 "models",
                 "lora",
                 "promote",
-                "--manifest",
-                "ADAPTER_OUTPUT_DIR/adapter.manifest.json",
+                "--train-receipt",
+                "ADAPTER_OUTPUT_DIR/train.receipt.json",
                 "--probe-root",
                 "PROMOTION_PROBES",
                 "--base-probe-root",
@@ -4050,6 +3952,7 @@ mod tests {
             required_metrics: &metrics,
             gates: &original_gates,
             trainer_identity: None,
+            trainer_environment: None,
         };
         let required_probe_cases = lora_required_probe_cases(original.tool_format);
         let probe_command_templates =
@@ -4074,6 +3977,81 @@ mod tests {
     }
 
     #[test]
+    fn trainer_environment_attestation_is_canonical_and_binds_promotion() {
+        let declared =
+            super::trainer::make_trainer_identity("lockfile_sha256", "sha256:declared-lock")
+                .expect("declared identity");
+        let first: TrainerEnvironmentObservation = serde_json::from_str(
+            r#"{
+              "schema_version": 1,
+              "resolver": {"lock_digest": "sha256:resolved-lock", "tool": "uv 0.7.0"},
+              "runtime": {"implementation": "CPython", "version": "3.12.3"},
+              "packages": {"torch": "2.8.0", "transformers": "4.54.0"},
+              "optional_extensions": {"flash_attn": "absent", "unsloth": "present"}
+            }"#,
+        )
+        .expect("first observation");
+        let reordered: TrainerEnvironmentObservation = serde_json::from_str(
+            r#"{
+              "schema_version": 1,
+              "optional_extensions": {"unsloth": "present", "flash_attn": "absent"},
+              "packages": {"transformers": "4.54.0", "torch": "2.8.0"},
+              "runtime": {"version": "3.12.3", "implementation": "CPython"},
+              "resolver": {"tool": "uv 0.7.0", "lock_digest": "sha256:resolved-lock"}
+            }"#,
+        )
+        .expect("reordered observation");
+        let first_check = trainer_environment_check(Some(declared.clone()), Some(first));
+        let reordered_check = trainer_environment_check(Some(declared.clone()), Some(reordered));
+        assert!(first_check.promotable);
+        assert_eq!(first_check, reordered_check);
+
+        let changed: TrainerEnvironmentObservation = serde_json::from_str(
+            r#"{
+              "schema_version": 1,
+              "resolver": {"lock_digest": "sha256:resolved-lock", "tool": "uv 0.7.0"},
+              "runtime": {"implementation": "CPython", "version": "3.12.3"},
+              "packages": {"torch": "2.8.1", "transformers": "4.54.0"},
+              "optional_extensions": {"flash_attn": "absent", "unsloth": "present"}
+            }"#,
+        )
+        .expect("changed observation");
+        let changed_check = trainer_environment_check(Some(declared.clone()), Some(changed));
+        assert!(changed_check.promotable);
+        assert_ne!(first_check, changed_check);
+
+        let identity = trainer_identity_check(Some(declared), None);
+        let metrics = vec!["exact tool-name + argument match rate".to_string()];
+        let gates = vec!["require a positive paired lift".to_string()];
+        let input = PromotionEvidenceInput {
+            contract_id: "sha256:contract",
+            base_model: "base",
+            provider: "vllm",
+            request_model: "adapter",
+            tool_format: "json",
+            eval_dataset: "tool-calls",
+            minimum_trials: 5,
+            required_metrics: &metrics,
+            gates: &gates,
+            trainer_identity: Some(&identity),
+            trainer_environment: Some(&first_check),
+        };
+        let required_probe_cases = lora_required_probe_cases(input.tool_format);
+        let first_templates = lora_promotion_probe_command_templates(&input, &required_probe_cases);
+        let first_id = lora_promotion_id(&input, &required_probe_cases, &first_templates);
+        let changed_input = PromotionEvidenceInput {
+            trainer_environment: Some(&changed_check),
+            ..input
+        };
+        let changed_templates =
+            lora_promotion_probe_command_templates(&changed_input, &required_probe_cases);
+        assert_ne!(
+            first_id,
+            lora_promotion_id(&changed_input, &required_probe_cases, &changed_templates)
+        );
+    }
+
+    #[test]
     fn lora_promotion_id_tracks_probe_matrix_drift() {
         let metrics = vec!["exact tool-name + argument match rate".to_string()];
         let gates = vec!["require a positive paired lift".to_string()];
@@ -4088,6 +4066,7 @@ mod tests {
             required_metrics: &metrics,
             gates: &gates,
             trainer_identity: None,
+            trainer_environment: None,
         };
         let required_probe_cases = lora_required_probe_cases(input.tool_format);
         let probe_command_templates =

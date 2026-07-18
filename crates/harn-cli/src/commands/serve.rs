@@ -38,6 +38,23 @@ use crate::cli::{
 /// axum buffers a request.
 pub(crate) const SERVE_DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
+/// End a script-backed MCP server before its transport starts.
+///
+/// MCP reserves stdout for protocol messages, so pipeline output belongs on
+/// stderr. An explicit Harn `exit(code)` remains terminal control flow rather
+/// than a runtime error and must preserve its requested status.
+pub(crate) fn exit_after_mcp_pipeline_error(vm: &harn_vm::Vm, error: &harn_vm::VmError) -> ! {
+    let output = vm.output();
+    if !output.is_empty() {
+        eprint!("{output}");
+    }
+    if let Some(code) = error.process_exit_code() {
+        std::process::exit(code);
+    }
+    eprint!("{}", vm.format_runtime_error(error));
+    std::process::exit(1);
+}
+
 pub(crate) async fn run_command(command: ServeCommand) {
     match command {
         ServeCommand::Acp(args) => {

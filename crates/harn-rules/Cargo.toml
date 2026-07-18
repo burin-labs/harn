@@ -9,7 +9,7 @@ homepage.workspace = true
 description = "Declarative structural rule engine for Harn — rule model, pattern compiler, and matcher built on the harn-hostlib tree-sitter machinery."
 
 [dependencies]
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.21", default-features = false, features = ["ast"] }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.23", default-features = false, features = ["ast"] }
 tree-sitter = "0.26"
 streaming-iterator = "0.1"
 regex = "1"

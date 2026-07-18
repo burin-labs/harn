@@ -114,11 +114,11 @@ pub(super) fn schema_type_expr_from_dict(
         for entry in property_entries {
             let field_name = schema_entry_key(&entry.key)?;
             let field_type = schema_type_expr_from_node(&entry.value, scope)?;
-            fields.push(ShapeField {
-                name: field_name.clone(),
-                type_expr: field_type,
-                optional: !required_names.contains(&field_name),
-            });
+            fields.push(ShapeField::synthetic(
+                field_name.clone(),
+                field_type,
+                !required_names.contains(&field_name),
+            ));
         }
         TypeExpr::Shape(fields)
     } else if let Some(item_node) = items {

@@ -9,7 +9,7 @@ impl AcpServer {
         let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => {
-                self.send_error(id, -32602, "Missing sessionId");
+                self.send_prompt_protocol_error(id, "Missing sessionId");
                 return;
             }
         };
@@ -17,7 +17,7 @@ impl AcpServer {
         let prompt = match normalize_acp_prompt(params) {
             Ok(prompt) => prompt,
             Err(message) => {
-                self.send_prompt_error(&session_id, id, &message);
+                self.send_prompt_protocol_error(id, &message);
                 return;
             }
         };
@@ -36,7 +36,7 @@ impl AcpServer {
                     )
                 }
                 None => {
-                    self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+                    self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
                     return;
                 }
             };
@@ -54,10 +54,14 @@ impl AcpServer {
             self.send_prompt_error(&session_id, id, &message);
             return;
         }
-        let (cwd, project_root) = match self.sessions.get(&session_id) {
-            Some(session) => (session.cwd.clone(), session.project_root.clone()),
+        let (cwd, project_root, capability_profile) = match self.sessions.get(&session_id) {
+            Some(session) => (
+                session.cwd.clone(),
+                session.project_root.clone(),
+                session.capability_profile.clone(),
+            ),
             None => {
-                self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+                self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
                 return;
             }
         };
@@ -203,11 +207,13 @@ impl AcpServer {
             Err(message) => {
                 // Drop the error's "Compilation error: " prefix added inside
                 // the helper — the caller used to format it identically.
-                let formatted = message
+                let mut formatted = message
                     .strip_prefix("Compilation error: ")
                     .map(|rest| format!("Compilation error: {rest}"))
                     .unwrap_or(message);
-                self.clear_active_prompt_transport(&session_id);
+                if let Err(error) = self.clear_active_prompt_transport(&session_id).await {
+                    formatted.push_str(&format!("; failed to persist agent events: {error}"));
+                }
                 self.send_prompt_error(&session_id, id, &formatted);
                 return;
             }
@@ -242,9 +248,11 @@ impl AcpServer {
             .await
         {
             Ok(value) => value,
-            Err(message) => {
+            Err(mut message) => {
                 self.finish_profile_turn(&session_id, profile_turn);
-                self.clear_active_prompt_transport(&session_id);
+                if let Err(error) = self.clear_active_prompt_transport(&session_id).await {
+                    message.push_str(&format!("; failed to persist agent events: {error}"));
+                }
                 self.send_prompt_error(&session_id, id, &message);
                 return;
             }
@@ -271,25 +279,40 @@ impl AcpServer {
                 cwd: &cwd,
                 project_root: Some(&project_root),
                 runtime_configurator: self.runtime_configurator.clone(),
+                session_profile: capability_profile.clone(),
             },
         )
         .await;
         self.finish_profile_turn(&session_id, profile_turn);
         drop(_mode_guard);
-        self.clear_active_prompt_transport(&session_id);
+        let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
 
         match result {
             Ok(output) => {
+                if cancellation.cancelled.load(Ordering::SeqCst) {
+                    send_json_response(
+                        &send_output,
+                        &id_owned,
+                        cancelled_prompt_result(sink_flush_error.as_ref()),
+                    );
+                    return;
+                }
+                if let Some(error) = sink_flush_error {
+                    self.send_prompt_error(
+                        &sid,
+                        &id_owned,
+                        &format!(
+                            "Failed to persist agent events before prompt completion: {error}"
+                        ),
+                    );
+                    return;
+                }
                 if !output.is_empty() {
                     bridge.send_update(&output);
                 }
-                let stop_reason = if cancellation.cancelled.load(Ordering::SeqCst) {
-                    "cancelled".to_string()
-                } else {
-                    host_bridge_for_response
-                        .take_prompt_stop_reason()
-                        .unwrap_or_else(|| "end_turn".to_string())
-                };
+                let stop_reason = host_bridge_for_response
+                    .take_prompt_stop_reason()
+                    .unwrap_or_else(|| "end_turn".to_string());
                 if stop_reason != "cancelled" {
                     #[cfg(feature = "hostlib")]
                     let fs_snapshot_ids = harn_hostlib::fs_snapshot::list_snapshots(&session_id)
@@ -322,12 +345,30 @@ impl AcpServer {
                     send_json_response(
                         &send_output,
                         &id_owned,
-                        serde_json::json!({"stopReason": "cancelled"}),
+                        cancelled_prompt_result(sink_flush_error.as_ref()),
                     );
-                } else {
-                    self.send_prompt_error(&sid, &id_owned, &e);
+                    return;
                 }
+                let message = match sink_flush_error {
+                    Some(error) => {
+                        format!("{}; failed to persist agent events: {error}", e.message)
+                    }
+                    None => e.message,
+                };
+                self.send_prompt_error_with_class(&sid, &id_owned, &message, e.terminal_class);
             }
         }
     }
+}
+
+pub(super) fn cancelled_prompt_result(
+    persistence_error: Option<&harn_vm::agent_events::AgentEventSinkError>,
+) -> serde_json::Value {
+    let mut result = serde_json::json!({"stopReason": "cancelled"});
+    if let Some(error) = persistence_error {
+        result["_meta"] = serde_json::json!({
+            "harn": {"persistenceError": error.to_string()}
+        });
+    }
+    result
 }

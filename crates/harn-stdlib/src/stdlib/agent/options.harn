@@ -1,3 +1,9 @@
+import {
+  LlmCallerTransport,
+  __normalize_llm_caller_transport,
+  __validate_llm_caller,
+} from "std/agent/caller_transport"
+import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
 import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
@@ -5,19 +11,13 @@ import { agent_scratchpad_options } from "std/agent/scratchpad"
 import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
-// -------------------------------------------------------------------------------------------------
-
 // Typed option aliases (the documented way to build agent_loop options).
-//
 // Co-located with the `agent_loop_options` normalizer below so the alias and
 // the normalization/validation logic stay in one file. Rust twins for the
 // workflow-facing policies live in
 // `crates/harn-vm/src/orchestration/policy/types.rs` (`TurnPolicy`) and
 // `crates/harn-vm/src/orchestration/compaction.rs` (`CompactionPolicy`); key
 // parity is pinned by `crates/harn-vm/tests/typed_options_parity.rs`.
-
-// -------------------------------------------------------------------------------------------------
-
 /**
  * Iteration budget accepted by `agent_loop`'s `iteration_budget:` option.
  * Normalized by `__normalize_iteration_budget` below.
@@ -99,6 +99,7 @@ pub type StallDiagnostics = {
   reserved_terminal_verify?: bool,
   reserved_terminal_verify_iterations?: int,
   zero_write_terminal_verify?: bool,
+  monologue_actuation?: bool | MonologueActuationOptions,
 }
 
 /**
@@ -233,6 +234,7 @@ pub type AgentLoopOptions = {
   timeout?: int,
   timeout_ms?: int,
   messages?: list,
+  prefill?: string,
   history?: list,
   transcript?: dict,
   session_id?: string,
@@ -266,6 +268,7 @@ pub type AgentLoopOptions = {
   retry?: bool | AgentLoopRetryOptions,
   llm_retry?: AgentLoopRetryOptions,
   llm_caller?: any,
+  llm_caller_transport?: LlmCallerTransport,
   tool_caller?: any,
   structural_validator?: any,
   input_guardrail?: any,
@@ -1113,15 +1116,6 @@ fn __validate_terminal_callback(value) {
   }
 }
 
-fn __validate_llm_caller(value) {
-  if value == nil {
-    return
-  }
-  if type_of(value) != "closure" {
-    throw "agent_loop: `llm_caller` must be a closure or nil; got " + type_of(value)
-  }
-}
-
 fn __validate_on_delta(value) {
   if value == nil {
     return
@@ -1761,6 +1755,7 @@ pub fn agent_loop_options(options = nil) {
   opts = defaults + opts
   opts = agent_apply_default_retry(opts)
   const llm_caller = opts?.llm_caller
+  const llm_caller_transport = __normalize_llm_caller_transport(opts?.llm_caller_transport)
   const llm_retry = opts?._llm_retry
   const on_delta = opts?.on_delta
   const tool_caller = opts?.tool_caller
@@ -1817,6 +1812,7 @@ pub fn agent_loop_options(options = nil) {
   opts = opts
     + {
     _llm_caller: llm_caller,
+    _llm_caller_transport: llm_caller_transport,
     _llm_retry: llm_retry,
     _on_delta: on_delta,
     _tool_caller: tool_caller,

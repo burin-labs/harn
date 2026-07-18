@@ -12,8 +12,26 @@ impl AcpServer {
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
+        // Resolve the declared capability profile (if any) at the launch
+        // boundary, snapshotting the server environment for env-source grants.
+        // A malformed profile config or a rejected launch (e.g. a grant on a
+        // hermetic profile) fails the session loudly rather than silently
+        // downgrading to an ungoverned environment.
+        let capability_profile = match self.resolve_session_profile(params) {
+            Ok(profile) => profile,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+
         let session_id = self.next_session_id();
         self.insert_session(session_id.clone(), cwd, SessionInfo::default());
+        if capability_profile.is_some() {
+            if let Some(session) = self.sessions.get_mut(&session_id) {
+                session.capability_profile = capability_profile;
+            }
+        }
         let session = self
             .session_item_json(&session_id, "live", None)
             .unwrap_or_else(|| serde_json::json!({"sessionId": session_id}));
@@ -29,6 +47,31 @@ impl AcpServer {
         );
 
         self.emit_available_commands(&session_id);
+    }
+
+    /// Parse and launch the `profile` block of a `session/new` request, if
+    /// present. Returns `Ok(None)` when no profile was declared (the legacy
+    /// path), `Ok(Some(profile))` for a resolved profile, and `Err(message)`
+    /// for a malformed config or a rejected launch. Env-source grants are
+    /// snapshotted from the server environment here, at the launch boundary.
+    fn resolve_session_profile(
+        &self,
+        params: &serde_json::Value,
+    ) -> Result<Option<harn_vm::security::SessionProfile>, String> {
+        let Some(raw) = params.get("profile") else {
+            return Ok(None);
+        };
+        if raw.is_null() {
+            return Ok(None);
+        }
+        let config: AcpSessionProfileConfig = serde_json::from_value(raw.clone())
+            .map_err(|error| format!("invalid session profile config: {error}"))?;
+        let profile =
+            harn_vm::security::SessionProfile::launch(config.kind, config.grants, &|name| {
+                std::env::var(name).ok()
+            })
+            .map_err(|error| format!("session profile launch failed: {error}"))?;
+        Ok(Some(profile))
     }
 
     pub(super) fn ensure_workspace_anchor(
@@ -449,6 +492,12 @@ impl AcpServer {
             .get(&src_id)
             .map(|session| session.budget.clone())
             .unwrap_or_default();
+        // A fork is the same session lineage: it inherits the parent's
+        // capability profile (and thus its grants), not a fresh legacy env.
+        let parent_profile = self
+            .sessions
+            .get(&src_id)
+            .and_then(|session| session.capability_profile.clone());
         let cancellation = self.register_session_cancellation(&new_session_id);
         let fork_cwd = harn_vm::agent_sessions::workspace_anchor(&new_session_id)
             .map(|anchor| anchor.primary)
@@ -467,6 +516,7 @@ impl AcpServer {
                 current_mode_id: parent_mode_id.clone(),
                 budget: parent_budget,
                 profile_turn: 0,
+                capability_profile: parent_profile,
             },
         );
         self.emit_session_info_update(&new_session_id, &info);

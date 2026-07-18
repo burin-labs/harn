@@ -63,67 +63,47 @@ pub fn ssrf_client_cache_key(allow_private_for_hosts: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::egress::{require_ssrf_guard_for_host, reset_egress_policy_for_tests};
-
-    fn spawn_one_shot_ok_server() -> (u16, std::thread::JoinHandle<()>) {
-        use std::io::{Read, Write};
-        let listener =
-            std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback probe server");
-        let port = listener.local_addr().expect("probe server addr").port();
-        let handle = std::thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0u8; 1024];
-                let _ = stream.read(&mut buf);
-                let _ = stream.write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-                );
-                let _ = stream.flush();
-            }
-        });
-        (port, handle)
-    }
+    use crate::egress::{
+        require_ssrf_guard_for_host, test_support::OneShotHttpServer, EgressTestConfigGuard,
+    };
 
     #[tokio::test]
     async fn install_ssrf_guard_private_host_allowlist_permits_configured_provider_host_only() {
-        let (port, server) = spawn_one_shot_ok_server();
-        reset_egress_policy_for_tests();
-        {
+        let server = OneShotHttpServer::start();
+        let client = {
+            let _config = EgressTestConfigGuard::new();
             let _scope = require_ssrf_guard_for_host();
-            let client = install_ssrf_guard_with_private_host_allowlist(
+            install_ssrf_guard_with_private_host_allowlist(
                 reqwest::Client::builder(),
                 &[String::from("localhost")],
             )
             .build()
-            .expect("guarded client builds");
-            let response = client
-                .get(format!("http://localhost:{port}/probe"))
-                .send()
-                .await
-                .expect("configured provider host may reach local inference endpoint");
-            assert_eq!(response.status().as_u16(), 200);
-        }
-        server.join().expect("probe server thread");
+            .expect("guarded client builds")
+        };
+        let response = client
+            .get(server.url())
+            .send()
+            .await
+            .expect("configured provider host may reach local inference endpoint");
+        assert_eq!(response.status().as_u16(), 200);
+        server.join();
 
-        let (port, server) = spawn_one_shot_ok_server();
-        reset_egress_policy_for_tests();
-        {
+        let server = OneShotHttpServer::start();
+        let client = {
+            let _config = EgressTestConfigGuard::new();
             let _scope = require_ssrf_guard_for_host();
-            let client = install_ssrf_guard_with_private_host_allowlist(
+            install_ssrf_guard_with_private_host_allowlist(
                 reqwest::Client::builder(),
                 &[String::from("other.local")],
             )
             .build()
-            .expect("guarded client builds");
-            let result = client
-                .get(format!("http://localhost:{port}/probe"))
-                .send()
-                .await;
-            assert!(
-                result.is_err(),
-                "unlisted loopback hostname must remain guarded, got {result:?}"
-            );
-        }
-        drop(server);
-        reset_egress_policy_for_tests();
+            .expect("guarded client builds")
+        };
+        let result = client.get(server.url()).send().await;
+        assert!(
+            result.is_err(),
+            "unlisted loopback hostname must remain guarded, got {result:?}"
+        );
+        server.unblock_and_join();
     }
 }

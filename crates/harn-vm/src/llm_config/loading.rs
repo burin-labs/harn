@@ -4,11 +4,11 @@
 //! catalog.
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use super::*;
 
-static CONFIG: OnceLock<ProvidersConfig> = OnceLock::new();
+static CONFIG: OnceLock<Arc<ProvidersConfig>> = OnceLock::new();
 static CONFIG_PATH: OnceLock<String> = OnceLock::new();
 static RUNTIME_CATALOG_OVERLAY: OnceLock<RwLock<Option<ProvidersConfig>>> = OnceLock::new();
 
@@ -90,6 +90,10 @@ impl RuntimeProviderEndpointOverrides {
 
 /// Load and cache the providers config. Called once at VM startup.
 pub fn load_config() -> &'static ProvidersConfig {
+    load_config_snapshot().as_ref()
+}
+
+fn load_config_snapshot() -> &'static Arc<ProvidersConfig> {
     CONFIG.get_or_init(|| {
         let mut config = default_config();
         let verbose_config_logging = matches!(
@@ -103,7 +107,7 @@ pub fn load_config() -> &'static ProvidersConfig {
             if let Some(overlay) = read_external_config(&path, verbose_config_logging) {
                 config.merge_from(&overlay);
                 let _ = CONFIG_PATH.set(path);
-                return config;
+                return Arc::new(config);
             }
         }
         if should_load_home_config() {
@@ -112,11 +116,11 @@ pub fn load_config() -> &'static ProvidersConfig {
                 if let Some(overlay) = read_external_config(&path, false) {
                     config.merge_from(&overlay);
                     let _ = CONFIG_PATH.set(path);
-                    return config;
+                    return Arc::new(config);
                 }
             }
         }
-        config
+        Arc::new(config)
     })
 }
 
@@ -486,9 +490,49 @@ pub fn clear_runtime_catalog_overlay() {
     set_runtime_catalog_overlay(None);
 }
 
-pub(crate) fn effective_config() -> ProvidersConfig {
-    let user_overrides = LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| cell.borrow().clone());
-    effective_config_with_user_overrides(user_overrides.as_ref())
+/// Return the effective catalog as an immutable snapshot.
+///
+/// The overwhelmingly common no-overlay path shares the process-wide catalog;
+/// runtime and per-execution overlays still produce an isolated merged value.
+pub(crate) fn effective_config() -> Arc<ProvidersConfig> {
+    LLM_CONFIG_OVERRIDES_CONTEXT.with(|cell| {
+        let user_overrides = cell.borrow();
+        let runtime_overlay = runtime_catalog_overlay()
+            .read()
+            .expect("runtime catalog overlay poisoned");
+        effective_config_snapshot(
+            load_config_snapshot(),
+            runtime_overlay.as_ref(),
+            user_overrides.as_ref(),
+        )
+    })
+}
+
+fn effective_config_snapshot(
+    base: &Arc<ProvidersConfig>,
+    runtime_overlay: Option<&ProvidersConfig>,
+    user_overrides: Option<&ProvidersConfig>,
+) -> Arc<ProvidersConfig> {
+    if runtime_overlay.is_none() && user_overrides.is_none() {
+        Arc::clone(base)
+    } else {
+        Arc::new(merge_config_overlays(base, runtime_overlay, user_overrides))
+    }
+}
+
+fn merge_config_overlays(
+    base: &ProvidersConfig,
+    runtime_overlay: Option<&ProvidersConfig>,
+    user_overrides: Option<&ProvidersConfig>,
+) -> ProvidersConfig {
+    let mut merged = base.clone();
+    if let Some(overlay) = runtime_overlay {
+        merged.merge_from(overlay);
+    }
+    if let Some(overlay) = user_overrides {
+        merged.merge_from(overlay);
+    }
+    merged
 }
 
 /// Provider config built purely from the compiled-in `EMBEDDED_PROVIDERS_TOML`
@@ -519,18 +563,10 @@ pub fn embedded_config(explicit_overlay: Option<&ProvidersConfig>) -> ProvidersC
 pub(crate) fn effective_config_with_user_overrides(
     user_overrides: Option<&ProvidersConfig>,
 ) -> ProvidersConfig {
-    let mut merged = load_config().clone();
-    if let Some(overlay) = runtime_catalog_overlay()
+    let runtime_overlay = runtime_catalog_overlay()
         .read()
-        .expect("runtime catalog overlay poisoned")
-        .as_ref()
-    {
-        merged.merge_from(overlay);
-    }
-    if let Some(overlay) = user_overrides {
-        merged.merge_from(overlay);
-    }
-    merged
+        .expect("runtime catalog overlay poisoned");
+    merge_config_overlays(load_config(), runtime_overlay.as_ref(), user_overrides)
 }
 
 fn runtime_catalog_overlay() -> &'static RwLock<Option<ProvidersConfig>> {
@@ -569,4 +605,64 @@ pub(crate) fn merge_global_config(overlay: ProvidersConfig) -> ProvidersConfig {
     let mut config = default_config();
     config.merge_from(&overlay);
     config
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    fn config(default_provider: &str, qc_defaults: &[(&str, &str)]) -> ProvidersConfig {
+        ProvidersConfig {
+            default_provider: Some(default_provider.to_string()),
+            qc_defaults: qc_defaults
+                .iter()
+                .map(|(provider, model)| ((*provider).to_string(), (*model).to_string()))
+                .collect(),
+            ..ProvidersConfig::default()
+        }
+    }
+
+    #[test]
+    fn effective_snapshot_reuses_base_without_overlays() {
+        let base = Arc::new(config("base", &[("base", "base/model")]));
+
+        let first = effective_config_snapshot(&base, None, None);
+        let second = effective_config_snapshot(&base, None, None);
+
+        assert!(Arc::ptr_eq(&base, &first));
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn effective_snapshot_isolates_and_exactly_merges_overlays() {
+        let base = Arc::new(config(
+            "base",
+            &[("base", "base/model"), ("shared", "base/shared")],
+        ));
+        let runtime = config(
+            "runtime",
+            &[("runtime", "runtime/model"), ("shared", "runtime/shared")],
+        );
+        let user = config("user", &[("user", "user/model"), ("shared", "user/shared")]);
+
+        let merged = effective_config_snapshot(&base, Some(&runtime), Some(&user));
+
+        assert!(!Arc::ptr_eq(&base, &merged));
+        assert_eq!(
+            merged.as_ref(),
+            &config(
+                "user",
+                &[
+                    ("base", "base/model"),
+                    ("runtime", "runtime/model"),
+                    ("shared", "user/shared"),
+                    ("user", "user/model"),
+                ],
+            )
+        );
+        assert_eq!(
+            base.as_ref(),
+            &config("base", &[("base", "base/model"), ("shared", "base/shared")])
+        );
+    }
 }

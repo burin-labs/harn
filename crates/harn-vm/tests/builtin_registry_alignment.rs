@@ -26,6 +26,7 @@ const LLM_CONFIG_BUILTINS: &[&str] = &[
     "llm_available_providers",
     "llm_complementary_reviewer",
     "llm_config",
+    "llm_execution_contract",
     "llm_healthcheck",
     "llm_infer_provider",
     "llm_known_models",

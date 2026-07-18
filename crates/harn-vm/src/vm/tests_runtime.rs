@@ -324,7 +324,7 @@ fn runtime_error_renderer_normalizes_frame_paths() {
     assert!(!rendered.contains("/../"));
 }
 
-async fn run_harn_result_async(source: &str) -> Result<(String, VmValue), VmError> {
+pub(super) async fn run_harn_result_async(source: &str) -> Result<(String, VmValue), VmError> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
@@ -3056,7 +3056,7 @@ fn typed_param_lambda_uses_check_type_and_walks() {
     assert_eq!(out, "[harn] [2, 3, 4]\n");
 }
 
-/// Regression: a `var` inferred `int` from its initializer but later reassigned
+/// Regression: a `let` inferred `int` from its initializer but later reassigned
 /// through an `any`-typed value of a different primitive must not be specialized
 /// into a typed opcode (`AddInt`), which would hard-error at runtime on a
 /// program the generic path runs correctly. The optimized result must match the

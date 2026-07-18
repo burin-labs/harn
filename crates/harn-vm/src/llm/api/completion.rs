@@ -138,7 +138,8 @@ async fn vm_call_completion_openai_style(
     }
 
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
-    let telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
+    let mut telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
+    telemetry.capture_provider_metadata(&json);
     Ok(LlmResult {
         served_fast: false,
         text: json["choices"][0]["text"]

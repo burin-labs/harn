@@ -1,0 +1,14 @@
+import { execution_contract } from "std/llm/catalog"
+
+pipeline test(task) {
+  const selector = "claude-sonnet-4-20250514"
+  const contract = execution_contract(selector)
+  assert_eq(contract.schema, "harn.llm.execution-contract/v1")
+  assert_eq(contract.selector, selector)
+  assert_eq(type_of(contract.model_id), "string")
+  assert_eq(type_of(contract.provider), "string")
+  assert_eq(type_of(contract.wire_model), "string")
+  assert_eq(type_of(contract.tool_format), "string")
+  assert_eq(type_of(contract.generation_defaults), "dict")
+  log("llm_execution_contract_basic passed")
+}

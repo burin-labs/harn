@@ -132,7 +132,7 @@ impl AcpServer {
         );
     }
 
-    pub(super) fn handle_session_close(
+    pub(super) async fn handle_session_close(
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
@@ -143,12 +143,16 @@ impl AcpServer {
             return;
         };
 
-        let Some(session) = self.sessions.remove(session_id) else {
+        let Some(session) = self.sessions.get(session_id) else {
             self.send_error(id, -32004, &format!("Session not found: {session_id}"));
             return;
         };
 
         session.cancellation.cancel();
+        let flush_result = self.clear_active_prompt_transport(session_id).await;
+        self.sessions
+            .remove(session_id)
+            .expect("validated session should still exist after sink flush");
         self.session_cancellations
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -162,7 +166,6 @@ impl AcpServer {
                 true
             }
         });
-        clear_session_sinks(session_id);
         #[cfg(feature = "hostlib")]
         {
             harn_hostlib::fs_snapshot::drop_session_snapshots(session_id);
@@ -177,7 +180,14 @@ impl AcpServer {
             }),
         );
 
-        self.send_response(id, serde_json::json!({}));
+        match flush_result {
+            Ok(()) => self.send_response(id, serde_json::json!({})),
+            Err(error) => self.send_error(
+                id,
+                -32000,
+                &format!("Failed to persist session {session_id} before close: {error}"),
+            ),
+        }
     }
 
     pub(super) async fn handle_session_inject(
@@ -262,11 +272,15 @@ impl AcpServer {
         );
     }
 
-    pub(super) fn clear_active_prompt_transport(&mut self, session_id: &str) {
+    pub(super) async fn clear_active_prompt_transport(
+        &mut self,
+        session_id: &str,
+    ) -> Result<(), harn_vm::agent_events::AgentEventSinkError> {
+        let flush_result = flush_and_clear_session_sinks(session_id).await;
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.host_bridge = None;
         }
-        clear_session_sinks(session_id);
+        flush_result
     }
 
     pub(super) async fn handle_session_revoke_inject(

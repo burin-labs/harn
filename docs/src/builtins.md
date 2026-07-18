@@ -1,6 +1,9 @@
 # Builtin functions
 
-Complete reference for all built-in functions available in Harn.
+Reference notes for commonly used Harn built-in functions. This page is a
+curated subset, not an exhaustive list. The complete, authoritative builtin
+registry — every function registered via `#[harn_builtin]` — is emitted by
+`harn contracts builtins`.
 
 ## Output
 
@@ -17,7 +20,7 @@ Complete reference for all built-in functions available in Harn.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `type_of(value)` | value: any | string | Returns type name: `"int"`, `"float"`, `"decimal"`, `"string"`, `"bool"`, `"nil"`, `"list"`, `"dict"`, `"closure"`, `"taskHandle"`, `"duration"`, `"enum"`, `"struct"` |
+| `type_of(value)` | value: any | string | Returns the runtime type tag: one of `"string"`, `"bytes"`, `"int"`, `"float"`, `"decimal"`, `"bool"`, `"nil"`, `"list"`, `"dict"`, `"closure"`, `"builtin"`, `"duration"`, `"enum"`, `"struct"`, `"task_handle"`, `"channel"`, `"atomic"`, `"rng"`, `"sync_permit"`, `"mcp_client"`, `"set"`, `"generator"`, `"stream"`, `"range"`, `"iter"`, `"pair"` (harness objects return their own names). The canonical list is `runtime_type_tags::ALL` |
 | `to_string(value)` | value: any | string | Convert to string representation |
 | `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats and decimals truncate, bools become 0/1; non-finite or out-of-range values return `nil` |
 | `to_float(value)` | value: any | float or nil | Parse/convert to float (a decimal converts lossily) |
@@ -598,6 +601,7 @@ does **not** drain the iterator.
 | `path_join(parts...)` | parts: strings | string | Join path components |
 | `path_workspace_info(path, workspace_root?)` | path: string, workspace_root?: string | dict | Classify a path as `workspace_relative`, `host_absolute`, or `invalid`, and project both workspace-relative and host-absolute forms when known |
 | `path_workspace_normalize(path, workspace_root?)` | path: string, workspace_root?: string | string or nil | Normalize a path into workspace-relative form when it is safely inside the workspace (including common leading-slash drift like `/packages/...`) |
+| `path_workspace_canonicalize_existing(path, workspace_root?)` | path: string, workspace_root?: string | string or nil | Canonicalize an existing root and path through the filesystem, returning the canonical workspace-relative child only when it remains under that canonical root. Missing paths and symlink escapes return nil; this never applies root-drift recovery |
 
 ## File I/O
 
@@ -1866,6 +1870,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `runtime_introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `llm_call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier, family, lineage}` via providers.toml |
+| `llm_execution_contract(selector)` | selector: string | dict | Return secret-free resolved route facts for durable receipts: `{schema, selector, model_id, provider, wire_model, tool_format, tier, family, lineage, generation_defaults}`. Only Harn-validated generation defaults are included; arbitrary operator route overlays are omitted. |
 | `llm_model_info(model)` | model: string | dict | Return resolved model/provider metadata plus normalized `family`/`lineage`, catalog entry, capabilities, API-key availability, and QC default |
 | `llm_pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
 | `llm_complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost |
@@ -1893,8 +1898,9 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |
 | `tiktoken_tokenizer_info(model)` | model: string | dict | Return `{model, model_family, source, exact, known_model_family, encoder}` for the encoder or heuristic fallback used by a model ID |
-| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}` (short-circuits the call and surfaces the same structured error dict as live provider failures — useful for testing `llm_call_safe` envelopes and retry loops) |
+| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `scope` (fixture bucket this entry serves; defaults to `default`), `consume` (`once`\|`sticky`), `id` (stable receipt id), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}` (short-circuits the call and surfaces the same structured error dict as live provider failures — useful for testing `llm_call_safe` envelopes and retry loops) |
 | `llm_mock_calls()` | — | list | Return list of `{messages, system, tools}` for all calls made to the mock provider |
+| `llm_mock_receipts()` | — | list | Return the scope-consumption receipts `{scope, matched, entry_id, consume}`, one per mock-provider dispatch while a fixture is active |
 | `llm_mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
 
 FIFO mocks (no `match` field) are consumed in order. Pattern-matched mocks
@@ -2147,6 +2153,7 @@ distinguish new failure modes.
 | `overloaded` | Upstream provider is shedding load (HTTP 503 / 529). Distinct from `rate_limit`: no quota was exceeded and the provider recovers on its own |
 | `server_error` | Provider-side 5xx (500, 502) that is not specifically overload |
 | `transient_network` | Network-level transient failure — connection reset, DNS hiccup, partial stream. Retryable but not provider-status-coded |
+| `resource_busy` | A shared local resource is temporarily unavailable, such as a contended database write lock |
 | `schema_validation` | LLM output failed schema validation. Retryable via `schema_retries` |
 | `schema_stream_aborted` | A streaming response was aborted because the partial content could not satisfy `output_schema`. Consumes one `schema_retries` slot; see `schema_stream_abort` |
 | `tool_error` | Tool execution failed |

@@ -49,7 +49,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Siliconflow` | OpenAI-compatible chat completions | `siliconflow` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Tgi` | OpenAI-compatible chat completions | `tgi` | `text` | no | yes | `none` / `none` | none | no | No | none | `local_zero_cost` | `not_recorded` |
 | `Together` | OpenAI-compatible chat completions | `together:openai/gpt-oss-20b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
-| `Vercel Ai Gateway` | OpenAI-compatible chat completions | `vercel_ai_gateway` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
+| `Vercel AI Gateway` | OpenAI-compatible chat completions | `vercel_ai_gateway:vercel/openai/gpt-5.4-nano` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | No | none | `high` | `not_recorded` |
 | `Vertex` | Gemini generateContent | `vertex:gemini-*` | `native` | yes | yes | `none` / `native_json` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | No | none | `local_zero_cost` | `not_recorded` |
 | `Volcengine Ark` | OpenAI-compatible chat completions | `volcengine_ark` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |

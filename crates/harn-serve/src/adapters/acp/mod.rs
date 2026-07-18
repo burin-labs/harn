@@ -60,15 +60,17 @@ pub use transport::{
 };
 pub use types::{
     AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse,
-    AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpSessionCancelToolCallParams,
-    AcpSessionIdParams, AcpSessionInjectContent, AcpSessionInjectHostEventParams,
-    AcpSessionInjectMode, AcpSessionInjectParams, AcpSessionMessageIdParams, AcpSessionNewParams,
-    AcpSessionPromptParams, AcpSessionPromptResult, AcpSessionReplaceInjectParams,
-    AcpSessionRestoreResult, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
-    ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT,
-    ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
-    ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
+    AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpPromptErrorData,
+    AcpPromptErrorSchema, AcpSessionCancelToolCallParams, AcpSessionIdParams,
+    AcpSessionInjectContent, AcpSessionInjectHostEventParams, AcpSessionInjectMode,
+    AcpSessionInjectParams, AcpSessionMessageIdParams, AcpSessionNewParams,
+    AcpSessionProfileConfig, AcpSessionPromptParams, AcpSessionPromptResult,
+    AcpSessionReplaceInjectParams, AcpSessionRestoreResult, ACP_METHOD_INITIALIZE,
+    ACP_METHOD_SESSION_CANCEL, ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE,
+    ACP_METHOD_SESSION_INJECT, ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_LOAD,
+    ACP_METHOD_SESSION_NEW, ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
     ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
+    ACP_PROMPT_ERROR_DATA_SCHEMA,
 };
 
 #[cfg(feature = "hostlib")]
@@ -83,7 +85,10 @@ use std::time::{Instant, SystemTime};
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use harn_vm::agent_events::{clear_session_sinks, register_sink, AgentEventSink};
+use harn_vm::agent_events::{
+    clear_session_sinks, flush_and_clear_session_sinks, flush_session_sinks, register_sink,
+    AgentEventSink,
+};
 use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;

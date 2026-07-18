@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 use include_dir::{include_dir, Dir};
 
-use crate::cli::{PersonaNewArgs, PersonaTemplateKind};
+use crate::cli::{PersonaMaterializeArgs, PersonaNewArgs, PersonaTemplateKind};
+
+use super::persona_prompt::{self, PromptCompiledPersona, PromptCompiledPersonaLowering};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersonaScaffoldResult {
@@ -15,7 +17,14 @@ static PERSONA_TEMPLATE_ASSETS: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/assets/persona-templates");
 
 async fn scaffold_persona(args: &PersonaNewArgs) -> Result<PersonaScaffoldResult, String> {
-    let name = normalize_name(&args.name)?;
+    let raw_name = args
+        .name
+        .as_deref()
+        .ok_or_else(|| "manual persona scaffolding requires a name".to_string())?;
+    let template = args
+        .template
+        .ok_or_else(|| "manual persona scaffolding requires --template".to_string())?;
+    let name = normalize_name(raw_name)?;
     let target_root = args.output_root.join(&name);
     if target_root.exists() && !args.force {
         return Err(format!(
@@ -24,7 +33,7 @@ async fn scaffold_persona(args: &PersonaNewArgs) -> Result<PersonaScaffoldResult
         ));
     }
 
-    let prepared = prepare_persona_package(&args.output_root, &name, args.template)?;
+    let prepared = prepare_persona_package(&args.output_root, &name, template)?;
     validate_prepared_persona(&prepared, &name).await?;
     publish_prepared_persona(prepared, target_root, args.force)
 }
@@ -36,22 +45,97 @@ pub async fn scaffold_persona_package(
     force: bool,
 ) -> Result<PersonaScaffoldResult, String> {
     let args = PersonaNewArgs {
-        name: name.to_string(),
-        template: parse_template_kind(template)?,
+        name: Some(name.to_string()),
+        template: Some(parse_template_kind(template)?),
+        from_prompt: None,
+        prompt_name: None,
+        provider: None,
+        model: None,
+        max_tokens: None,
         output_root: output_root.to_path_buf(),
         force,
     };
     scaffold_persona(&args).await
 }
 
+async fn materialize_persona(
+    args: &PersonaMaterializeArgs,
+) -> Result<PersonaScaffoldResult, String> {
+    let lowering = match (&args.blueprint, &args.compile_receipt) {
+        (Some(blueprint), None) => persona_prompt::compile_blueprint_path(blueprint).await?,
+        (None, Some(receipt)) => persona_prompt::compile_reviewed_receipt_path(receipt).await?,
+        _ => return Err("exactly one persona materialization input is required".to_string()),
+    };
+    materialize_prompt_compiled_lowering(lowering, &args.output_root, args.force).await
+}
+
+pub async fn materialize_persona_package(
+    blueprint_path: &Path,
+    output_root: &Path,
+    force: bool,
+) -> Result<PersonaScaffoldResult, String> {
+    let lowering = persona_prompt::compile_blueprint_path(blueprint_path).await?;
+    materialize_prompt_compiled_lowering(lowering, output_root, force).await
+}
+
+pub(super) async fn materialize_prompt_compiled_lowering(
+    lowering: PromptCompiledPersonaLowering,
+    output_root: &Path,
+    force: bool,
+) -> Result<PersonaScaffoldResult, String> {
+    let name = normalize_name(&lowering.persona.name)?;
+    let template = parse_template_kind(&lowering.template)?;
+    let target_root = output_root.join(&name);
+    if target_root.exists() && !force {
+        return Err(format!(
+            "{} already exists; pass --force to replace it after validation",
+            target_root.display()
+        ));
+    }
+
+    let mut prepared = prepare_persona_package(output_root, &name, template)?;
+    apply_prompt_compiled_overlay(&mut prepared, &lowering)?;
+    validate_prepared_persona(&prepared, &name).await?;
+    publish_prepared_persona(prepared, target_root, force)
+}
+
 pub(crate) async fn run_new(args: &PersonaNewArgs) -> Result<(), String> {
-    let result = scaffold_persona(args).await?;
+    let (result, name) = if let Some(prompt) = args.from_prompt.as_deref() {
+        let compiled = persona_prompt::compile_prompt(
+            prompt,
+            args.prompt_name.as_deref(),
+            args.provider.as_deref(),
+            args.model.as_deref(),
+            args.max_tokens,
+        )
+        .await?;
+        let lowering = compiled.receipt.into_lowering()?;
+        let name = lowering.persona.name.clone();
+        let result =
+            materialize_prompt_compiled_lowering(lowering, &args.output_root, args.force).await?;
+        (result, name)
+    } else {
+        let name = args
+            .name
+            .as_deref()
+            .ok_or_else(|| "manual persona scaffolding requires a name".to_string())?;
+        (scaffold_persona(args).await?, normalize_name(name)?)
+    };
     println!("created persona package {}", result.root.display());
     for file in &result.files {
         println!("  create {}", file.display());
     }
     println!();
-    println!("  harn persona doctor {}", normalize_name(&args.name)?);
+    println!("  harn persona doctor {name}");
+    Ok(())
+}
+
+pub(crate) async fn run_materialize(args: &PersonaMaterializeArgs) -> Result<(), String> {
+    let result = materialize_persona(args).await?;
+    println!("materialized persona package {}", result.root.display());
+    for file in &result.files {
+        println!("  create {}", file.display());
+    }
     Ok(())
 }
 
@@ -467,11 +551,595 @@ fn render_manifest(template: &str, identity: &TemplateIdentity) -> Result<String
         .map_err(|error| format!("failed to render persona manifest: {error}"))
 }
 
+fn apply_prompt_compiled_overlay(
+    prepared: &mut PreparedPersonaPackage,
+    lowering: &PromptCompiledPersonaLowering,
+) -> Result<(), String> {
+    let root = prepared.staging.path();
+    let manifest_path = root.join("harn.toml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
+    fs::write(
+        &manifest_path,
+        render_prompt_compiled_manifest(&manifest, lowering)?,
+    )
+    .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
+
+    let source_path = root
+        .join("src")
+        .join(format!("{}.harn", lowering.persona.name));
+    let source = fs::read_to_string(&source_path)
+        .map_err(|error| format!("failed to read {}: {error}", source_path.display()))?;
+    fs::write(
+        &source_path,
+        render_prompt_compiled_source(&source, lowering)?,
+    )
+    .map_err(|error| format!("failed to write {}: {error}", source_path.display()))?;
+
+    let prompt_path = root.join("prompts/system.harn.prompt");
+    let prompt = fs::read_to_string(&prompt_path)
+        .map_err(|error| format!("failed to read {}: {error}", prompt_path.display()))?;
+    if prompt.contains("{{persona_goal}}") {
+        return Err("canonical persona prompt already defines persona_goal".to_string());
+    }
+    fs::write(
+        &prompt_path,
+        format!("{}\n\nGoal: {{{{persona_goal}}}}\n", prompt.trim_end()),
+    )
+    .map_err(|error| format!("failed to write {}: {error}", prompt_path.display()))?;
+
+    Ok(())
+}
+
+fn render_prompt_compiled_manifest(
+    rendered_template: &str,
+    lowering: &PromptCompiledPersonaLowering,
+) -> Result<String, String> {
+    let mut manifest = toml::from_str::<toml::Value>(rendered_template)
+        .map_err(|error| format!("generated persona manifest is invalid: {error}"))?;
+    {
+        let package = manifest
+            .get_mut("package")
+            .and_then(toml::Value::as_table_mut)
+            .ok_or_else(|| "generated persona manifest is missing [package]".to_string())?;
+        package.insert(
+            "name".to_string(),
+            toml::Value::String(format!(
+                "harn-{}-persona",
+                to_package_slug(&lowering.persona.name)
+            )),
+        );
+        package.insert(
+            "description".to_string(),
+            toml::Value::String(lowering.persona.description.clone()),
+        );
+    }
+    {
+        let persona = manifest
+            .get_mut("personas")
+            .and_then(toml::Value::as_array_mut)
+            .and_then(|personas| personas.first_mut())
+            .and_then(toml::Value::as_table_mut)
+            .ok_or_else(|| "generated persona manifest is missing [[personas]]".to_string())?;
+        persona.insert(
+            "name".to_string(),
+            toml::Value::String(lowering.persona.name.clone()),
+        );
+        persona.insert(
+            "description".to_string(),
+            toml::Value::String(lowering.persona.description.clone()),
+        );
+        persona.insert(
+            "entry_workflow".to_string(),
+            toml::Value::String(format!("src/{}.harn#run", lowering.persona.name)),
+        );
+        persona.insert(
+            "autonomy_tier".to_string(),
+            toml::Value::String("suggest".to_string()),
+        );
+        persona.insert(
+            "receipt_policy".to_string(),
+            toml::Value::String("required".to_string()),
+        );
+        persona.remove("triggers");
+        persona.remove("schedules");
+    }
+
+    let trigger = lowering
+        .triggers
+        .first()
+        .ok_or_else(|| "prompt_compiled_v1 lowering has no trigger".to_string())?;
+    let mut root_trigger = toml::map::Map::new();
+    root_trigger.insert("id".to_string(), toml::Value::String(trigger.id.clone()));
+    root_trigger.insert(
+        "kind".to_string(),
+        toml::Value::String(trigger.kind.clone()),
+    );
+    root_trigger.insert(
+        "provider".to_string(),
+        toml::Value::String(trigger.provider.clone()),
+    );
+    root_trigger.insert(
+        "match".to_string(),
+        toml::Value::Table(toml::map::Map::from_iter([(
+            "events".to_string(),
+            toml::Value::Array(
+                trigger
+                    .events
+                    .iter()
+                    .cloned()
+                    .map(toml::Value::String)
+                    .collect(),
+            ),
+        )])),
+    );
+    root_trigger.insert(
+        "handler".to_string(),
+        toml::Value::String(trigger.handler.clone()),
+    );
+    if !trigger.secrets.is_empty() {
+        root_trigger.insert(
+            "secrets".to_string(),
+            toml::Value::Table(
+                trigger
+                    .secrets
+                    .iter()
+                    .map(|(name, reference)| (name.clone(), toml::Value::String(reference.clone())))
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(schedule) = &trigger.schedule {
+        root_trigger.insert(
+            "schedule".to_string(),
+            toml::Value::String(schedule.clone()),
+        );
+    }
+    if let Some(timezone) = &trigger.timezone {
+        root_trigger.insert(
+            "timezone".to_string(),
+            toml::Value::String(timezone.clone()),
+        );
+    }
+    let root = manifest
+        .as_table_mut()
+        .ok_or_else(|| "generated persona manifest root is not a table".to_string())?;
+    root.remove("triggers");
+    root.insert(
+        "triggers".to_string(),
+        toml::Value::Array(vec![toml::Value::Table(root_trigger)]),
+    );
+
+    toml::to_string_pretty(&manifest)
+        .map_err(|error| format!("failed to render prompt-compiled manifest: {error}"))
+}
+
+fn render_prompt_compiled_source(
+    rendered_template: &str,
+    lowering: &PromptCompiledPersonaLowering,
+) -> Result<String, String> {
+    let needle = "template_kind:";
+    if rendered_template.matches(needle).count() != 1 {
+        return Err(
+            "canonical persona template must render exactly one prompt binding".to_string(),
+        );
+    }
+    // Liquid renders variable values as data, so a goal such as `{{name}}`
+    // remains literal text rather than becoming executable template syntax.
+    let goal = serde_json::to_string(&lowering.persona.goal)
+        .map_err(|error| format!("failed to encode persona goal: {error}"))?;
+    let source = rendered_template.replacen(
+        needle,
+        &format!("persona_goal: {goal},\n      template_kind:"),
+        1,
+    );
+    let source = rewrite_persona_annotation(&source, &lowering.persona)?;
+    Ok(source)
+}
+
+fn rewrite_persona_annotation(
+    source: &str,
+    persona: &PromptCompiledPersona,
+) -> Result<String, String> {
+    let name = serde_json::to_string(&persona.name)
+        .map_err(|error| format!("failed to encode persona name: {error}"))?;
+    let description = serde_json::to_string(&persona.description)
+        .map_err(|error| format!("failed to encode persona description: {error}"))?;
+    let mut rewritten = String::with_capacity(source.len());
+    let mut found = false;
+    for line in source.split_inclusive('\n') {
+        let (body, newline) = line
+            .strip_suffix('\n')
+            .map_or((line, ""), |body| (body, "\n"));
+        let trimmed = body.trim_start();
+        if !trimmed.starts_with("@persona(") {
+            rewritten.push_str(line);
+            continue;
+        }
+        if found {
+            return Err(
+                "canonical persona source declares more than one @persona annotation".to_string(),
+            );
+        }
+        found = true;
+        let indentation = &body[..body.len() - trimmed.len()];
+        let (_, after_description) = trimmed
+            .split_once(", description: ")
+            .ok_or_else(|| "canonical @persona annotation is missing description".to_string())?;
+        let (_, after_tools) = after_description.split_once("\", tools: ").ok_or_else(|| {
+            "canonical @persona annotation has an unsupported description form".to_string()
+        })?;
+        let (tools, after_autonomy) = after_tools
+            .split_once(", autonomy: ")
+            .ok_or_else(|| "canonical @persona annotation is missing autonomy".to_string())?;
+        let (_, receipts) = after_autonomy
+            .split_once(", receipts: ")
+            .ok_or_else(|| "canonical @persona annotation is missing receipts".to_string())?;
+        rewritten.push_str(indentation);
+        rewritten.push_str("@persona(name: ");
+        rewritten.push_str(&name);
+        rewritten.push_str(", description: ");
+        rewritten.push_str(&description);
+        rewritten.push_str(", tools: ");
+        rewritten.push_str(tools);
+        rewritten.push_str(", autonomy: \"suggest\", receipts: ");
+        rewritten.push_str(receipts);
+        rewritten.push_str(newline);
+    }
+    if !found {
+        return Err("canonical persona source is missing an @persona annotation".to_string());
+    }
+    Ok(rewritten)
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    fn reviewed_compile_receipt() -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": "harn.persona.prompt_compile.v1",
+            "ok": true,
+            "prompt_digest": "sha256:prompt",
+            "catalog_digest": "sha256:catalog",
+            "checkpoint": {
+                "status": "accepted",
+                "attempts": 1,
+                "repaired": false,
+                "provider": "mock",
+                "model": "mock",
+            },
+            "usage": {
+                "input_tokens": 11,
+                "output_tokens": 7,
+                "total_tokens": 18,
+                "realized_cost_usd": 0.0,
+            },
+            "blueprint": {
+                "schema_version": "1",
+                "name": "accepted_prompt_watch",
+                "description": "Watches accepted prompt receipts.",
+                "goal": "Prove the accepted receipt enters the canonical transaction.",
+                "template": "deterministic-sweeper",
+                "cron": {"cron": "0 9 * * *", "timezone": "UTC"},
+            },
+            "lowering": {
+                "profile": "prompt_compiled_v1",
+                "template": "deterministic-sweeper",
+                "persona": {
+                    "name": "accepted_prompt_watch",
+                    "description": "Watches accepted prompt receipts.",
+                    "goal": "Prove the accepted receipt enters the canonical transaction.",
+                },
+                "policy": {
+                    "autonomy_tier": "suggest",
+                    "receipt_policy": "required",
+                },
+                "triggers": [{
+                    "id": "accepted_prompt_watch-cron",
+                    "kind": "cron",
+                    "provider": "cron",
+                    "events": ["cron.tick"],
+                    "secrets": {},
+                    "schedule": "0 9 * * *",
+                    "timezone": "UTC",
+                    "handler": "persona://accepted_prompt_watch",
+                }],
+            },
+            "error": null,
+        })
+    }
+
+    fn materialize_args(receipt: PathBuf, output_root: PathBuf) -> PersonaMaterializeArgs {
+        PersonaMaterializeArgs {
+            blueprint: None,
+            compile_receipt: Some(receipt),
+            output_root,
+            force: false,
+        }
+    }
+
+    #[test]
+    fn prompt_rendering_templates_declare_their_read_capability() {
+        for template in [
+            "deterministic-sweeper",
+            "hybrid-classify-then-act",
+            "frontier-judgment-loop",
+        ] {
+            let source = PERSONA_TEMPLATE_ASSETS
+                .get_file(format!("{template}/src/template_persona.harn"))
+                .and_then(include_dir::File::contents_utf8)
+                .expect("canonical persona template source");
+            let manifest = PERSONA_TEMPLATE_ASSETS
+                .get_file(format!("{template}/harn.toml"))
+                .and_then(include_dir::File::contents_utf8)
+                .expect("canonical persona template manifest");
+            let manifest = toml::from_str::<toml::Value>(manifest)
+                .expect("canonical persona template manifest is valid TOML");
+            let capabilities = manifest["personas"][0]["capabilities"]
+                .as_array()
+                .expect("canonical persona template capabilities");
+
+            assert!(
+                source.contains("render_prompt("),
+                "{template} renders a prompt"
+            );
+            assert!(
+                capabilities
+                    .iter()
+                    .any(|capability| capability.as_str() == Some("workspace.read_text")),
+                "{template} must declare workspace.read_text for render_prompt"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn materialize_compiles_a_closed_blueprint_through_the_strict_scaffold() {
+        let temp = tempfile::tempdir().unwrap();
+        let blueprint = temp.path().join("blueprint.json");
+        let goal = "Keep literal {{not_a_liquid_expression}} text.";
+        fs::write(
+            &blueprint,
+            serde_json::json!({
+                "schema_version": "1",
+                "name": "reply_digest",
+                "description": "Summarizes follow-up work.",
+                "goal": goal,
+                "template": "deterministic-sweeper",
+                "cron": {"cron": "0 */4 * * *", "timezone": "America/Los_Angeles"},
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let output_root = temp.path().join("personas");
+
+        let result = materialize_persona_package(&blueprint, &output_root, false)
+            .await
+            .expect("materialize closed blueprint");
+
+        let manifest = toml::from_str::<toml::Value>(
+            &fs::read_to_string(result.root.join("harn.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["package"]["name"].as_str(),
+            Some("harn-reply-digest-persona")
+        );
+        assert_eq!(
+            manifest["personas"][0]["autonomy_tier"].as_str(),
+            Some("suggest")
+        );
+        assert_eq!(
+            manifest["personas"][0]["receipt_policy"].as_str(),
+            Some("required")
+        );
+        assert!(manifest["personas"][0].get("triggers").is_none());
+        assert!(manifest["personas"][0].get("schedules").is_none());
+        let triggers = manifest["triggers"].as_array().unwrap();
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers[0]["kind"].as_str(), Some("cron"));
+        assert_eq!(
+            triggers[0]["handler"].as_str(),
+            Some("persona://reply_digest")
+        );
+        assert_eq!(triggers[0]["schedule"].as_str(), Some("0 */4 * * *"));
+
+        let source = fs::read_to_string(result.root.join("src/reply_digest.harn")).unwrap();
+        assert!(source.contains("persona_goal: \"Keep literal {{not_a_liquid_expression}} text.\""));
+        assert!(source.contains("autonomy: \"suggest\""));
+        let prompt = fs::read_to_string(result.root.join("prompts/system.harn.prompt")).unwrap();
+        assert!(prompt.contains("Goal: {{persona_goal}}"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn accepted_reviewed_receipt_revalidates_then_enters_the_strict_transaction() {
+        let temp = tempfile::tempdir().unwrap();
+        let receipt_path = temp.path().join("reviewed-receipt.json");
+        fs::write(&receipt_path, reviewed_compile_receipt().to_string()).unwrap();
+        let output_root = temp.path().join("personas");
+
+        let result = materialize_persona(&materialize_args(receipt_path, output_root))
+            .await
+            .expect("materialize accepted reviewed prompt receipt");
+
+        let manifest = toml::from_str::<toml::Value>(
+            &fs::read_to_string(result.root.join("harn.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["personas"][0]["autonomy_tier"].as_str(),
+            Some("suggest")
+        );
+        assert_eq!(
+            manifest["personas"][0]["receipt_policy"].as_str(),
+            Some("required")
+        );
+        assert_eq!(manifest["triggers"].as_array().unwrap().len(), 1);
+        assert_eq!(manifest["triggers"][0]["kind"].as_str(), Some("cron"));
+        assert_eq!(
+            manifest["triggers"][0]["handler"].as_str(),
+            Some("persona://accepted_prompt_watch")
+        );
+        assert!(result.root.join("src/accepted_prompt_watch.harn").is_file());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rejected_reviewed_receipts_publish_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        let cases_root = temp.path().join("cases");
+        fs::create_dir_all(&cases_root).unwrap();
+
+        let mut wrong_version = reviewed_compile_receipt();
+        wrong_version["schema_version"] = serde_json::json!("harn.persona.prompt_compile.v2");
+        let mut failed = reviewed_compile_receipt();
+        failed["ok"] = serde_json::json!(false);
+        failed["checkpoint"]["status"] = serde_json::json!("validator_rejected");
+        failed["error"] = serde_json::json!({"code": "rejected", "message": "not accepted"});
+        let mut missing_blueprint = reviewed_compile_receipt();
+        missing_blueprint
+            .as_object_mut()
+            .unwrap()
+            .remove("blueprint");
+        let mut missing_lowering = reviewed_compile_receipt();
+        missing_lowering.as_object_mut().unwrap().remove("lowering");
+        let mut drifted_lowering = reviewed_compile_receipt();
+        drifted_lowering["lowering"]["triggers"][0]["schedule"] = serde_json::json!("0 10 * * *");
+        let mut invalid_catalog = reviewed_compile_receipt();
+        invalid_catalog["blueprint"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cron");
+        invalid_catalog["blueprint"]["external"] =
+            serde_json::json!({"provider": "missing", "event": "missing.event"});
+
+        let serde_cases = [
+            ("malformed", None, "invalid"),
+            ("wrong-version", Some(wrong_version), "unknown variant"),
+        ];
+        let stable_cases = [
+            ("failed", failed, "rejected: not accepted"),
+            (
+                "missing-blueprint",
+                missing_blueprint,
+                "persona compile receipt has no blueprint",
+            ),
+            (
+                "missing-lowering",
+                missing_lowering,
+                "persona compile receipt has no reviewed lowering",
+            ),
+            (
+                "drifted-lowering",
+                drifted_lowering,
+                "persona compile receipt lowering no longer matches current Harn lowering; compile and review a fresh receipt",
+            ),
+            (
+                "invalid-catalog",
+                invalid_catalog,
+                "unknown_provider: provider `missing` is not in the live trigger catalog",
+            ),
+        ];
+
+        for (name, receipt, expected) in serde_cases {
+            let receipt_path = cases_root.join(format!("{name}.json"));
+            let contents =
+                receipt.map_or_else(|| "not-json".to_string(), |value| value.to_string());
+            fs::write(&receipt_path, contents).unwrap();
+            let output_root = cases_root.join(format!("{name}-output"));
+            let error = materialize_persona(&materialize_args(receipt_path, output_root.clone()))
+                .await
+                .expect_err(name);
+            assert!(error.contains(expected), "{name}: {error}");
+            assert!(!output_root.exists(), "{name} published output");
+        }
+
+        for (name, receipt, expected) in stable_cases {
+            let receipt_path = cases_root.join(format!("{name}.json"));
+            fs::write(&receipt_path, receipt.to_string()).unwrap();
+            let output_root = cases_root.join(format!("{name}-output"));
+            let error = materialize_persona(&materialize_args(receipt_path, output_root.clone()))
+                .await
+                .expect_err(name);
+            assert_eq!(error, expected, "{name}");
+            assert!(!output_root.exists(), "{name} published output");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn materialize_preserves_an_external_trigger_without_cron_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let blueprint = temp.path().join("blueprint.json");
+        fs::write(
+            &blueprint,
+            serde_json::json!({
+                "schema_version": "1",
+                "name": "slack_triage",
+                "description": "Classifies Slack follow-up.",
+                "goal": "Classify every incoming message.",
+                "template": "hybrid-classify-then-act",
+                "external": {"provider": "slack", "event": "slack.message"},
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let result = materialize_persona_package(&blueprint, &temp.path().join("personas"), false)
+            .await
+            .expect("materialize external blueprint");
+
+        let manifest = toml::from_str::<toml::Value>(
+            &fs::read_to_string(result.root.join("harn.toml")).unwrap(),
+        )
+        .unwrap();
+        let triggers = manifest["triggers"].as_array().unwrap();
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers[0]["provider"].as_str(), Some("slack"));
+        assert_eq!(triggers[0]["kind"].as_str(), Some("webhook"));
+        assert_eq!(
+            triggers[0]["match"]["events"][0].as_str(),
+            Some("slack.message")
+        );
+        assert!(triggers[0].get("schedule").is_none());
+        assert!(triggers[0].get("timezone").is_none());
+        assert_eq!(
+            triggers[0]["secrets"]["signing_secret"].as_str(),
+            Some("slack/signing_secret")
+        );
+        assert_eq!(
+            triggers[0]["handler"].as_str(),
+            Some("persona://slack_triage")
+        );
+    }
+
+    #[test]
+    fn materializer_rejects_a_foreign_lowering_profile_before_any_publish() {
+        let response = r#"{
+          "ok": true,
+          "lowering": {
+            "profile": "foreign_profile",
+            "template": "deterministic-sweeper",
+            "persona": {"name": "reply_digest", "description": "Digest", "goal": "Goal"},
+            "policy": {"autonomy_tier": "suggest", "receipt_policy": "required"},
+            "triggers": [{
+              "id": "reply_digest-cron",
+              "kind": "cron",
+              "provider": "cron",
+              "events": ["cron.tick"],
+              "secrets": {},
+              "schedule": "0 * * * *",
+              "timezone": "UTC",
+              "handler": "persona://reply_digest"
+            }]
+          },
+          "error": null
+        }"#;
+
+        assert!(
+            serde_json::from_str::<persona_prompt::MaterializeCompileResponse>(response).is_err()
+        );
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn strict_validation_rejects_a_missing_entry_symbol_before_publish() {

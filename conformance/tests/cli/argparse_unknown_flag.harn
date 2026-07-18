@@ -1,11 +1,22 @@
 import { parse, parser } from "std/cli/argparse"
+import { assert_eq } from "std/testing"
 
-fn main(harness: Harness) {
+pipeline test(task) {
   const spec = parser({name: "demo", args: [{name: "json", kind: "switch", long: "--json"}]})
-  const r = parse(spec, ["--nope"])
-  const err = r.err
-  if err != nil {
-    harness.stdio.println(err.kind)
-    harness.stdio.println(err.arg)
-  }
+  const result = parse(spec, ["--nope"])
+  assert_eq(
+    result,
+    Err(
+      {
+        kind: "cli_parse_failure",
+        stage: "argv",
+        code: "unknown_flag",
+        message: "no flag named --nope",
+        issues: [{stage: "argv", code: "unknown_flag", message: "no flag named --nope", arg: "--nope"}],
+      },
+    ),
+  )
+  const err = unwrap_err(result)
+  harness.stdio.println(err.code)
+  harness.stdio.println(err.issues[0].arg)
 }

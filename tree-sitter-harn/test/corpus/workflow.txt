@@ -35,3 +35,33 @@ pipeline main(task) {
         consequence: (block
           (return_statement
             (identifier)))))))
+
+==================
+Typed Pipeline Contract
+==================
+
+pub pipeline deploy(config: DeployConfig, dry_run: bool) -> string {
+  return config.region
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier)))
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))
+    return_type: (type_annotation
+      (identifier))
+    (block
+      (return_statement
+        (property_access
+          object: (identifier)
+          property: (identifier))))))

@@ -16,11 +16,16 @@ import {
   agent_verify_completion_judge_cap,
   agent_verify_or_continue,
 } from "std/agent/judge"
+import { agent_invoke_llm } from "std/agent/llm_dispatch"
 import {
   agent_mcp_admit_bootstrap,
   agent_mcp_bootstrap_if_needed,
   agent_mcp_mount_additional,
 } from "std/agent/mcp"
+import {
+  agent_monologue_actuation_observe_completed_dispatch,
+  agent_monologue_actuation_take_for_turn,
+} from "std/agent/monologue_actuation"
 import {
   agent_loop_options,
   agent_merge_llm_options,
@@ -34,6 +39,7 @@ import {
   agent_compute_terminal_callback,
   agent_reset_tool_surface_narrowing,
 } from "std/agent/postturn"
+import { agent_take_one_shot_prefill } from "std/agent/prefill"
 import {
   agent_build_turn_messages,
   agent_build_turn_system_fragments,
@@ -47,7 +53,6 @@ import {
   agent_required_tools_inject_feedback,
   agent_required_tools_missing_from_session,
 } from "std/agent/required_tools"
-import { agent_loop_default_retry_predicate } from "std/agent/retry"
 import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
 import { agent_skills_match } from "std/agent/skills"
 import {
@@ -83,7 +88,16 @@ import {
   agent_session_totals,
 } from "std/agent/state"
 import { agent_step_judge } from "std/agent/step_judge"
-import { agent_tool_annotations, agent_tool_entry_annotations } from "std/agent/tool_annotations"
+import {
+  agent_collapse_duplicate_read_calls,
+  agent_tool_annotations,
+  agent_tool_calls_are_read_only,
+  agent_tool_entry_annotations,
+} from "std/agent/tool_annotations"
+import {
+  agent_tool_lifecycle_error_category,
+  agent_tool_mutation_status,
+} from "std/agent/tool_lifecycle"
 import {
   agent_tool_search_emit_queries,
   agent_tool_search_inject_if_needed,
@@ -96,13 +110,13 @@ import {
   suspend_agent,
 } from "std/agent/workers"
 import { omit } from "std/json"
-import { with_retry } from "std/llm/handlers"
-import { llm_call_options } from "std/llm/options"
+import {
+  llm_arm_one_shot_prefill,
+  llm_clear_one_shot_prefill,
+  llm_enable_equivalent_failover,
+} from "std/llm/options"
 
-/**
- * Agent-loop budget timing must route through the VM-level harness clock so
- * paused-clock tests, replay, and capability analysis see the same clock source.
- */
+/** Route agent-loop budget timing through the harness clock for deterministic replay and tests. */
 fn __agent_loop_clock_now_ms() {
   return harness.clock.now_ms()
 }
@@ -118,155 +132,6 @@ const __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH = "post_tool_dispatch"
 const __AGENT_LOOP_HOST_INJECTION_TURN_BOUNDARY = "turn_boundary"
 
 const __AGENT_LOOP_HOST_INJECTION_AFTER_NEXT_TOOL_CALL = "after_next_tool_call"
-
-fn __default_invoke_llm(message, turn_system, llm_opts) {
-  // When a harness registers an `on_delta` callback, issue the per-turn call
-  // through the streaming transport so each visible-text chunk is observed as
-  // it arrives (enabling live rendering/masking of the token stream). The
-  // collector returns the SAME normalized result dict as `llm_call` — tool
-  // calls and usage are preserved, so tool dispatch downstream is unaffected.
-  // A custom `llm_caller` short-circuits before this default path, so a
-  // non-streaming caller simply never fires `on_delta`.
-  const on_delta = llm_opts?._on_delta
-  const call_opts = llm_opts
-  const result = try {
-    if type_of(on_delta) == "closure" {
-      __host_llm_stream_collect(message, turn_system, llm_call_options(call_opts), on_delta)
-    } else {
-      llm_call(message, turn_system, llm_call_options(call_opts))
-    }
-  }
-  if !is_err(result) {
-    return {ok: true, value: unwrap(result)}
-  }
-  const err = unwrap_err(result)
-  const normalized = __llm_provider_error(err, llm_opts)
-  const reason = if type_of(err) == "dict" {
-    err?.reason ?? ""
-  } else {
-    ""
-  }
-  if reason == "budget_exceeded" {
-    return {ok: false, status: "budget_exhausted", stop_reason: "budget_exhausted", error: normalized}
-  }
-  return {ok: false, status: "provider_error", stop_reason: "provider_error", error: normalized}
-}
-
-fn __messages_include_tool_result(messages) {
-  if type_of(messages) != "list" {
-    return false
-  }
-  for msg in messages {
-    const role = to_string(msg?.role ?? "")
-    if role == "tool" || role == "tool_result" {
-      return true
-    }
-  }
-  return false
-}
-
-fn __llm_error_field(err, key, fallback) {
-  if type_of(err) == "dict" {
-    const value = err[key]
-    if value != nil {
-      return to_string(value)
-    }
-  }
-  return fallback
-}
-
-fn __llm_provider_error(err, llm_opts) {
-  const message = __llm_error_field(err, "message", to_string(err))
-  const category = __llm_error_field(err, "category", error_category(err))
-  const reason = __llm_error_field(err, "reason", "")
-  const kind = __llm_error_field(err, "kind", "")
-  const provider = __llm_error_field(err, "provider", to_string(llm_opts?.provider ?? ""))
-  const model = __llm_error_field(err, "model", to_string(llm_opts?.model ?? ""))
-  return {
-    category: category,
-    reason: reason,
-    kind: kind,
-    provider: provider,
-    model: model,
-    message: message,
-    phase: "llm_call",
-    tool_format: to_string(llm_opts?.tool_format ?? ""),
-    after_tool_result: __messages_include_tool_result(llm_opts?.messages),
-  }
-}
-
-fn __agent_loop_emit_llm_call_start(llm_opts) {
-  const session_id = to_string(llm_opts?.session_id ?? "")
-  if session_id == "" {
-    return nil
-  }
-  let checkpoint = {
-    kind: "llm_call_start",
-    phase: "llm_call",
-    iteration: to_int(llm_opts?._iteration ?? 0),
-    attempt: to_int(llm_opts?._truncation_auto_continue_attempt ?? 0) + 1,
-    context_overflow_recovery_attempt: to_int(llm_opts?._context_overflow_recovery_attempt ?? 0),
-    provider: to_string(llm_opts?.provider ?? ""),
-    model: to_string(llm_opts?.model ?? ""),
-    tool_format: to_string(llm_opts?.tool_format ?? ""),
-    final_wrapup: llm_opts?._final_wrapup ?? false,
-  }
-  agent_emit_event(session_id, "typed_checkpoint", checkpoint)
-  return nil
-}
-
-fn __validate_caller_result(r) {
-  if type_of(r) != "dict" {
-    throw "agent_loop: llm_caller must return a dict; got " + type_of(r)
-  }
-  if r?.ok == nil {
-    throw "agent_loop: llm_caller result missing `ok`"
-  }
-  if r.ok && type_of(r?.value) != "dict" {
-    throw "agent_loop: llm_caller returned ok=true but `value` is not a dict"
-  }
-  if !r.ok && type_of(r?.status) != "string" {
-    throw "agent_loop: llm_caller returned ok=false but `status` is not a string"
-  }
-}
-
-fn __invoke_llm(message, turn_system, llm_opts) {
-  __agent_loop_emit_llm_call_start(llm_opts)
-  const caller = llm_opts?._llm_caller
-  if caller == nil {
-    const retry_cfg = llm_opts?._llm_retry
-    if retry_cfg != nil {
-      const retrying_default = with_retry(
-        { call -> __default_invoke_llm(call.prompt, call.system, call.opts) },
-        retry_cfg + {predicate: retry_cfg?.predicate ?? agent_loop_default_retry_predicate},
-      )
-      return retrying_default(
-        {
-          prompt: message,
-          system: turn_system,
-          opts: llm_opts,
-          turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
-        },
-      )
-    }
-    return __default_invoke_llm(message, turn_system, llm_opts)
-  }
-  let call = {
-    prompt: message,
-    system: turn_system,
-    opts: llm_opts,
-    turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
-  }
-  const result = try {
-    caller(call)
-  }
-  if is_err(result) {
-    throw unwrap_err(result)
-  }
-  const r = unwrap(result)
-  __validate_caller_result(r)
-  return r
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -387,7 +252,7 @@ fn __autocontinue_should_continue(call, turn_opts) {
 /**
  * Call the LLM, and on a length-truncated turn with an incomplete tool call,
  * AUTO-CONTINUE by re-issuing with a raised output cap (bounded). Returns the
- * same `{ok, value, ...}` shape `__invoke_llm` returns; callers consume the
+ * same `{ok, value, ...}` shape `agent_invoke_llm` returns; callers consume the
  * final (hopefully complete) result and run their normal parse/stall/dispatch
  * accounting on it. Falls back to the last truncated result once the cap is
  * exhausted, so the existing parse-guidance path still fires.
@@ -400,7 +265,8 @@ fn __invoke_llm_with_autocontinue(
   session_id,
   iteration_index,
 ) {
-  let call = __invoke_llm(message, turn_system, llm_opts)
+  const retry_llm_opts = llm_clear_one_shot_prefill(llm_opts)
+  let call = agent_invoke_llm(message, turn_system, llm_opts)
   const max_continuations = __autocontinue_max_continuations(llm_opts)
   let attempts = 0
   let cap = llm_opts?.max_tokens ?? 0
@@ -425,8 +291,9 @@ fn __invoke_llm_with_autocontinue(
       },
     )
     cap = raised
-    const retry_opts = llm_opts + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
-    call = __invoke_llm(message, turn_system, retry_opts)
+    const retry_opts = retry_llm_opts
+      + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
+    call = agent_invoke_llm(message, turn_system, retry_opts)
   }
   return call
 }
@@ -514,7 +381,7 @@ fn __agent_loop_recover_context_overflow(
     }
     // Rebuild the turn prompt against the now-compacted transcript and re-issue.
     const turn_prompt = __agent_loop_build_turn_prompt(session, llm_opts, iteration_index)
-    const retry_opts = llm_opts
+    const retry_opts = llm_clear_one_shot_prefill(llm_opts)
       + {
       messages: turn_prompt.messages,
       _system_fragments: turn_prompt.fragments,
@@ -534,7 +401,7 @@ fn __agent_loop_recover_context_overflow(
 
 // -------------------------------------------------------------------------------------------------
 
-// Tool middleware seam — composable tool_caller (mirrors __invoke_llm).
+// Tool middleware seam — composable tool_caller (mirrors agent_invoke_llm).
 //
 // Each tool dispatch is funneled through `tool_caller(envelope, next)` when
 // the agent_loop options carry one. The envelope normalizes the call shape
@@ -857,67 +724,6 @@ fn __tool_terminal_status(result) -> string {
   return "failed"
 }
 
-fn __tool_lifecycle_error_category(raw) {
-  if raw == nil {
-    return nil
-  }
-  const category = to_string(raw)
-  if category == "" {
-    return nil
-  }
-  if contains(
-    [
-      "schema_validation",
-      "tool_error",
-      "mcp_server_error",
-      "host_bridge_error",
-      "permission_denied",
-      "rejected_loop",
-      "parse_aborted",
-      "timeout",
-      "network",
-      "cancelled",
-      "unknown",
-    ],
-    category,
-  ) {
-    return category
-  }
-  if contains(["intra_turn_failure_fanout_collapsed", "intra_turn_resource_fail_fast"], category) {
-    return "rejected_loop"
-  }
-  if contains(["tool_rejected", "consent_denied", "egress_blocked", "scope_violation"], category) {
-    return "permission_denied"
-  }
-  if contains(
-    ["schema_violation", "schema_stream_aborted", "validator_failure", "repair_failed"],
-    category,
-  ) {
-    return "schema_validation"
-  }
-  if contains(["rate_limit", "overloaded", "server_error", "transient_network"], category) {
-    return "network"
-  }
-  if contains(["tool_middleware_exception", "tool_parallel_dispatch_exception", "generic"], category) {
-    return "tool_error"
-  }
-  if contains(["auth", "channel_closed", "not_found", "circuit_open", "budget_exceeded"], category) {
-    return "host_bridge_error"
-  }
-  return "unknown"
-}
-
-fn __tool_lifecycle_mutation_status(raw) {
-  if raw == nil {
-    return "unknown"
-  }
-  const status = to_string(raw)
-  if contains(["applied", "not_applied", "unknown"], status) {
-    return status
-  }
-  return "unknown"
-}
-
 fn __emit_tool_lifecycle_finish(envelope, result) {
   const session_id = __tool_lifecycle_session_id(envelope)
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
@@ -940,7 +746,7 @@ fn __emit_tool_lifecycle_finish(envelope, result) {
     tool_name: tool_name,
     status: __tool_terminal_status(result),
     raw_output: raw_output,
-    mutation_status: __tool_lifecycle_mutation_status(result?.mutation_status),
+    mutation_status: agent_tool_mutation_status(result?.mutation_status),
   }
   if result?.error != nil {
     payload = payload + {error: result.error}
@@ -952,7 +758,7 @@ fn __emit_tool_lifecycle_finish(envelope, result) {
   if result?.execution_duration_ms != nil {
     payload = payload + {execution_duration_ms: result.execution_duration_ms}
   }
-  const error_category = __tool_lifecycle_error_category(result?.error_category)
+  const error_category = agent_tool_lifecycle_error_category(result?.error_category)
   if error_category != nil {
     payload = payload + {error_category: error_category}
   }
@@ -2149,7 +1955,7 @@ fn __intra_turn_result_mutation_status(result) -> string {
   if type_of(result) != "dict" {
     return "unknown"
   }
-  return __tool_lifecycle_mutation_status(result?.mutation_status)
+  return agent_tool_mutation_status(result?.mutation_status)
 }
 
 fn __intra_turn_result_mutated(result) {
@@ -2665,18 +2471,9 @@ fn __tool_names_by_status(dispatch, want_ok) {
   return names
 }
 
-// Workspace-mutating annotation kinds (mirrors postturn's tool-surface
-// classifier vocabulary). A successful call to a tool of one of these kinds is
-// a corrective edit for the current-failure model's `write_epoch`.
+// A successful annotated workspace mutation advances the repair write epoch.
 const __REPAIR_EDIT_KINDS = ["edit", "write", "scaffold", "delete", "mutation", "mutate"]
 
-/**
- * __turn_made_edit reports whether `dispatch` (a single turn's dispatch
- * results) contains a SUCCESSFUL workspace-mutating tool call, by looking up
- * each successful tool's annotation kind in the registry. Reuses
- * `__tool_names_by_status` + `__tool_registry_entry`; only consulted when
- * post-edit verification or repair-aware diagnostics are enabled.
- */
 fn __turn_made_edit(dispatch, tools) -> bool {
   if dispatch == nil {
     return false
@@ -2891,40 +2688,17 @@ fn __agent_loop_route_options(provider, model, tool_format) {
   }
 }
 
-fn __agent_loop_route_differs_from_primary(llm_opts, primary_provider, primary_model) {
+fn __agent_loop_enable_equivalent_failover(llm_opts, primary_provider, primary_model, loop_opts) {
   const provider = to_string(llm_opts?.provider ?? "")
   const model = to_string(llm_opts?.model ?? "")
   const has_primary = primary_provider != "" || primary_model != ""
   const has_current = provider != "" || model != ""
-  return has_primary && has_current && (provider != primary_provider || model != primary_model)
-}
-
-fn __agent_loop_has_explicit_routing_owner(llm_opts) {
-  return llm_opts?.routing != nil
-    || llm_opts?.models != nil
-    || llm_opts?.ladder != nil
-    || llm_opts?.model_ladder != nil
-    || llm_opts?.route_policy != nil
-    || llm_opts?.prefer != nil
-    || llm_opts?.fallback_chain != nil
-    || llm_opts?.fallback_strategy != nil
-    || llm_opts?.strategy != nil
-}
-
-fn __agent_loop_has_partial_route_patch(loop_opts) {
-  return (loop_opts?._agent_loop_last_llm_route_patch_seen ?? false)
+  const partial_route_patch = (loop_opts?._agent_loop_last_llm_route_patch_seen ?? false)
     && !(loop_opts?._agent_loop_last_llm_route_patch_complete ?? false)
-}
-
-fn __agent_loop_enable_equivalent_failover(llm_opts, primary_provider, primary_model, loop_opts) {
-  const changed_route = __agent_loop_route_differs_from_primary(llm_opts, primary_provider, primary_model)
-  if (changed_route && __agent_loop_has_partial_route_patch(loop_opts))
-    || __agent_loop_has_explicit_routing_owner(llm_opts)
-    || llm_opts?.equivalent_failover != nil {
-    return llm_opts
-  }
-  return llm_opts
-    + {equivalent_failover: {max_routes: 3, on_no_dispatch: true}}
+  const changed_partial_route = has_primary && has_current
+    && (provider != primary_provider || model != primary_model)
+    && partial_route_patch
+  return llm_enable_equivalent_failover(llm_opts, changed_partial_route)
 }
 
 fn __agent_loop_with_llm_render_context(opts, render) {
@@ -2999,13 +2773,11 @@ fn __next_progress_count(made_progress, turns_since_progress) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn __progress_nudge_text(depth, has_tools, tool_mode = "text", made_tool_calls = false) {
+pub fn __progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
   const action = if has_tools {
-    if tool_mode == "native" {
-      "Call exactly one native tool through the provider tool channel now, or give your final answer and stop."
-    } else {
-      "Emit exactly one well-formed <tool_call> now, or state your final answer in <user_response> and stop."
-    }
+    "Emit exactly one well-formed " + paradigm.call_noun + " now, or state your final answer "
+      + paradigm.final_answer
+      + " and stop."
   } else {
     "Make concrete progress in your reply now, or state your final answer and stop."
   }
@@ -4124,7 +3896,7 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     _iteration: iteration + 1,
     _final_wrapup: true,
   }
-  let call = __invoke_llm(message, turn_system, llm_opts)
+  let call = agent_invoke_llm(message, turn_system, llm_opts)
   if !call.ok {
     return false
   }
@@ -4259,7 +4031,7 @@ fn __agent_loop_apply_output_schema(final_result, opts, session, message, iterat
     _output_schema_repair: true,
   }
   const repair = try {
-    __invoke_llm(__agent_loop_output_schema_repair_prompt(schema, text), nil, repair_opts)
+    agent_invoke_llm(__agent_loop_output_schema_repair_prompt(schema, text), nil, repair_opts)
   }
   if is_err(repair) {
     return final_result + {output: direct.value, output_valid: false}
@@ -4369,6 +4141,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
         const iteration_index = iteration
+        const monologue_actuation_prior_read_streak = stall_state.monologue_actuation.read_only_streak
+        stall_state = stall_state
+          + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
+        const pending_prefill = agent_take_one_shot_prefill(opts)
+        opts = pending_prefill.options
         const iteration_opts = __agent_loop_effective_llm_options(opts)
         agent_emit_event(
           session.session_id,
@@ -4436,19 +4213,39 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
         const turn_prompt = __agent_loop_build_turn_prompt(session, turn_llm_opts, iteration_index)
-        const llm_opts = __agent_loop_enable_equivalent_failover(
-          turn_llm_opts
-            + {
-            messages: turn_prompt.messages,
-            session_id: session.session_id,
-            tool_format: turn_llm_opts.tool_format,
-            _iteration: iteration_index + 1,
-            _system_fragments: turn_prompt.fragments,
-          },
-          primary_provider,
-          primary_model,
-          opts,
+        const direct_llm_opts = turn_llm_opts
+          + {
+          messages: turn_prompt.messages,
+          session_id: session.session_id,
+          tool_format: turn_llm_opts.tool_format,
+          _iteration: iteration_index + 1,
+          _system_fragments: turn_prompt.fragments,
+        }
+        const monologue_actuation = agent_monologue_actuation_take_for_turn(
+          session.session_id,
+          iteration_index + 1,
+          stall_state.monologue_actuation,
+          turn_opts,
+          turn_llm_opts,
+          pending_prefill.prefill == "",
+          agent_tool_call_paradigm(turn_llm_opts),
         )
+        stall_state = stall_state + {monologue_actuation: monologue_actuation.state}
+        const one_shot_prefill = if monologue_actuation.applied {
+          monologue_actuation.prefill
+        } else {
+          pending_prefill.prefill
+        }
+        const base_llm_opts = if monologue_actuation.applied {
+          direct_llm_opts
+        } else {
+          __agent_loop_enable_equivalent_failover(direct_llm_opts, primary_provider, primary_model, opts)
+        }
+        const llm_opts = if one_shot_prefill != "" {
+          llm_arm_one_shot_prefill(one_shot_prefill, base_llm_opts)
+        } else {
+          base_llm_opts
+        }
         let call = __invoke_llm_with_autocontinue(
           message,
           turn_prompt.system,
@@ -4584,11 +4381,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           __resolve_tool_calls(llm_result, parsed)
         }
         const recovered_batch_drop = __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts)
-        tool_calls = recovered_batch_drop.tool_calls
+        tool_calls = agent_collapse_duplicate_read_calls(recovered_batch_drop.tool_calls, turn_opts?.tools, turn_opts)
         const recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
           normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
         } else {
-          normalized
+          normalized + {tool_calls: tool_calls}
         }
         agent_session_record_assistant(session.session_id, recorded_assistant)
         const had_parse_errors_base = __maybe_inject_parse_error_feedback(
@@ -5082,6 +4879,19 @@ fn __agent_loop_run(message, session, initial_opts) {
           },
         )
         const dispatch = dispatched.dispatch
+        const actuation_dispatch_results = __dispatch_results_list(dispatch)
+        stall_state = stall_state
+          + {
+          monologue_actuation: agent_monologue_actuation_observe_completed_dispatch(
+            stall_state.monologue_actuation,
+            stall_observation.config.monologue_actuation,
+            monologue_actuation_prior_read_streak,
+            len(actuation_dispatch_results) > 0
+              && len(actuation_dispatch_results) == len(tool_calls)
+              && actuation_dispatch_results.all({ result -> __tool_result_ok(result) })
+              && agent_tool_calls_are_read_only(tool_calls, turn_opts?.tools, turn_opts?.policy),
+          ),
+        }
         stall_prev_dispatch = dispatch
         audit_background_tasks = __spawn_audit_flushes(audit_background_tasks, dispatched.audit_flushes)
         opts = __sync_tool_search_state(opts, dispatched.turn_opts)
@@ -5328,9 +5138,9 @@ fn __agent_loop_run(message, session, initial_opts) {
             && !(outcome?.nudged_this_turn ?? false)
             && len(turn_rejected) == 0 {
             const has_tools = len(opts?.tools?.tools ?? []) > 0
-            const tool_mode = agent_tool_call_paradigm(turn_opts).kind
+            const paradigm = agent_tool_call_paradigm(turn_opts)
             const made_tool_calls = tool_count > 0
-            const nudge_text = __progress_nudge_text(turns_since_progress, has_tools, tool_mode, made_tool_calls)
+            const nudge_text = __progress_nudge_text(turns_since_progress, has_tools, paradigm, made_tool_calls)
             __inject_feedback_with_tool_repair(session.session_id, "no_progress_streak", nudge_text)
             agent_emit_event(
               session.session_id,

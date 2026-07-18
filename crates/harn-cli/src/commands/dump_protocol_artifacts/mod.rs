@@ -40,7 +40,7 @@ use support::*;
 use swift::*;
 use typescript::*;
 
-pub(crate) use manifest::manifest_json;
+pub(crate) use manifest::{manifest_json, manifest_json_from};
 
 #[derive(Debug)]
 struct Artifact {
@@ -62,7 +62,11 @@ pub(crate) fn run(output_dir: &str, check_only: bool, artifact_version: Option<&
         eprintln!("error: {error}");
         process::exit(2);
     });
-    let artifacts = generate_artifacts(artifact_version).unwrap_or_else(|error| {
+    let source = ProtocolArtifactSource::discover().unwrap_or_else(|error| {
+        eprintln!("error: failed to locate protocol sources: {error}");
+        process::exit(1);
+    });
+    let artifacts = generate_artifacts(&source, artifact_version).unwrap_or_else(|error| {
         eprintln!("error: failed to generate protocol artifacts: {error}");
         process::exit(1);
     });
@@ -114,13 +118,16 @@ fn resolve_artifact_version(requested: Option<&str>) -> Result<&str, String> {
         .map_err(|error| format!("invalid protocol artifact version '{version}': {error}"))
 }
 
-fn generate_artifacts(artifact_version: &str) -> Result<Vec<Artifact>, String> {
+fn generate_artifacts(
+    source: &ProtocolArtifactSource,
+    artifact_version: &str,
+) -> Result<Vec<Artifact>, String> {
     let go_artifact = generate_go_artifact_for_version(artifact_version)?;
     let mut artifacts = vec![
         Artifact::new("README.md", generate_readme()),
         Artifact::new(
             "manifest.json",
-            generate_manifest_for_version(artifact_version)?,
+            generate_manifest_for_version(source, artifact_version)?,
         ),
         Artifact::new(
             "harn-protocol.ts",
@@ -154,7 +161,7 @@ fn generate_artifacts(artifact_version: &str) -> Result<Vec<Artifact>, String> {
     for schema in SCHEMA_COPIES {
         artifacts.push(Artifact::new(
             schema.artifact,
-            read_repo_text(schema.source)?,
+            source.read_text(schema.source)?,
         ));
     }
     artifacts.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));

@@ -1,8 +1,9 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 import { read_json_result, read_yaml } from "std/fs"
 import {
   schema_closed_object,
   schema_enum,
+  schema_field,
   schema_int,
   schema_list,
   schema_literal,
@@ -12,7 +13,14 @@ import {
 
 pub type ReleaseAuditLane = {name: string, runner: string, proof: "merge_group" | "residual"}
 
-pub type ReleaseAuditCiStep = {id: string, condition: string, run: string}
+pub type ReleaseAuditCiEnvironment = {HARN_LLM_CALLS_DISABLED?: "1"}
+
+pub type ReleaseAuditCiStep = {
+  id: string,
+  condition: string,
+  run: string,
+  required_env: ReleaseAuditCiEnvironment,
+}
 
 pub type ReleaseAuditCiJob = {
   name: string,
@@ -67,6 +75,10 @@ fn ci_job_schema() {
             id: schema_string() + {pattern: "^[a-z0-9-]+$"},
             condition: schema_string(),
             run: schema_string() + {min_len: 1},
+            required_env: schema_field(
+              schema_closed_object({HARN_LLM_CALLS_DISABLED: schema_field(schema_literal("1"), false)}),
+              false,
+            ),
           },
         ),
       ),
@@ -157,7 +169,8 @@ fn contract_from_validated(value) -> ReleaseAuditContract {
   for job in value.merge_group_jobs {
     let steps: list<ReleaseAuditCiStep> = []
     for step in job.steps {
-      steps = steps + [{id: step.id, condition: step.condition, run: step.run}]
+      steps = steps
+        + [{id: step.id, condition: step.condition, run: step.run, required_env: step.required_env ?? {}}]
     }
     jobs = jobs
       + [
@@ -377,6 +390,12 @@ pub fn release_audit_ci_contract_report(contract: ReleaseAuditContract, ci) -> d
       if trim(observed?.if ?? "") != trim(required.condition) {
         errors = errors + ["proof condition drift: " + required.id]
       }
+      const observed_env = observed?.env ?? {}
+      for entry in required.required_env {
+        if to_string(observed_env[entry.key] ?? "") != entry.value {
+          errors = errors + ["proof environment drift: " + required.id + ":" + entry.key]
+        }
+      }
     }
   }
   const ok = len(errors) == 0
@@ -391,29 +410,35 @@ pub fn release_audit_ci_contract_report(contract: ReleaseAuditContract, ci) -> d
   }
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "contract", flags: ["--contract"], default: ""},
-    {kind: "option", name: "receipt", flags: ["--receipt"], default: ""},
-    {kind: "option", name: "head_sha", flags: ["--head-sha"], default: ""},
-    {kind: "option", name: "warm_binary_sha256", flags: ["--warm-binary-sha256"], default: ""},
-    {kind: "option", name: "check_ci", flags: ["--check-ci"], default: ""},
-  ]
+fn arg_spec() {
+  return parser(
+    {
+      name: "release_audit_contract",
+      args: [
+        {kind: "flag", name: "contract", long: "--contract", default: ""},
+        {kind: "flag", name: "receipt", long: "--receipt", default: ""},
+        {kind: "flag", name: "head_sha", long: "--head-sha", default: ""},
+        {kind: "flag", name: "warm_binary_sha256", long: "--warm-binary-sha256", default: ""},
+        {kind: "flag", name: "check_ci", long: "--check-ci", default: ""},
+      ],
+    },
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio
       .println(
       "usage: harn run scripts/release_audit_contract.harn -- --contract PATH [--check-ci PATH | --receipt PATH --head-sha SHA]",
     )
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    harness.stdio.eprintln(join((parsed?._errors ?? []) + (parsed?._extras ?? []), "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const contract_path = trim(parsed?.contract ?? "")
   const contract = release_audit_contract_read(contract_path)
   guard contract != nil else {

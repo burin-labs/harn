@@ -10,20 +10,25 @@ use serde_json::Value;
 
 use crate::cli::ModelsLoraTrainArgs;
 
+mod provenance;
+
+use provenance::finalize_executed_trainer_provenance;
+
 use super::{
     adapter_name_from_input, dataset_format_for_tool_format, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_lora_trainer,
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
-    parse_target_metadata, precision_contract_for_method, read_trainer_identity_file,
-    render_embedded_lora_report, resolve_lora_provider, serving_recipe, sha256_file,
-    target_module_contract, target_modules_args, teacher_report, template_recipe_for_route,
-    tool_catalog_args, tool_catalog_contract, trainer_contract_for_dataset, trainer_identity_args,
-    trainer_identity_check, trainer_identity_from_args, BaseModelReport, EvaluationRecipe,
-    LoraContractReport, LoraContractReportInput, LoraTrainingContract, PrecisionContract,
-    ServingRecipe, ServingRecipeInput, TeacherReport, TemplateRecipe, ToolCallingReport,
-    ToolCatalogContract, TrainerIdentity,
+    parse_target_metadata, precision_contract_for_method, render_embedded_lora_report,
+    resolve_lora_provider, serving_recipe, sha256_file, target_module_contract,
+    target_modules_args, teacher_report, template_recipe_for_route, tool_catalog_args,
+    tool_catalog_contract, trainer_contract_for_dataset, trainer_environment_check,
+    trainer_identity_args, trainer_identity_check, trainer_identity_from_args, BaseModelReport,
+    EvaluationRecipe, LoraContractReport, LoraContractReportInput, LoraEvaluationRecipeInput,
+    LoraTrainingContract, PrecisionContract, ServingRecipe, ServingRecipeInput, TeacherReport,
+    TemplateRecipe, ToolCallingReport, ToolCatalogContract, TrainerEnvironmentCheck,
+    TrainerEnvironmentObservation, TrainerIdentity,
 };
 
 const LORA_TRAIN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_TRAIN_PAYLOAD_JSON";
@@ -42,11 +47,11 @@ pub(super) async fn train(args: &ModelsLoraTrainArgs) -> i32 {
         }
     };
     if args.execute {
-        if let Err(error) = execute_backend(&mut report) {
+        if let Err(error) = execute_backend(&mut report, args.json) {
             eprintln!("error: {error}");
             return 1;
         }
-        if let Err(error) = finalize_executed_trainer_identity(&mut report) {
+        if let Err(error) = finalize_executed_trainer_provenance(&mut report) {
             eprintln!("error: {error}");
             return 1;
         }
@@ -82,6 +87,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         .transpose()?;
     let trainer_identity =
         trainer_identity_check(expected_trainer_identity.clone(), observed_trainer_identity);
+    let trainer_environment = trainer_environment_check(expected_trainer_identity.clone(), None);
     let rank = normalize_lora_rank(args.rank)?;
     let alpha = normalize_lora_alpha(args.alpha, rank)?;
     let dropout = normalize_lora_dropout(args.dropout)?;
@@ -213,15 +219,16 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         tool_catalog: &tool_catalog,
     });
     let eval_dataset = args.dataset.display().to_string();
-    let promotion = lora_evaluation_recipe(
-        &contract_id,
-        &resolved.id,
-        &provider,
-        &request_model,
-        &decision.effective,
-        &eval_dataset,
-        Some(&trainer_identity),
-        vec![
+    let promotion = lora_evaluation_recipe(LoraEvaluationRecipeInput {
+        contract_id: &contract_id,
+        base_model: &resolved.id,
+        provider: &provider,
+        request_model: &request_model,
+        tool_format: &decision.effective,
+        eval_dataset: &eval_dataset,
+        trainer_identity: Some(&trainer_identity),
+        trainer_environment: Some(&trainer_environment),
+        eval_command: vec![
             "harn".to_string(),
             "eval".to_string(),
             "tool-calls".to_string(),
@@ -232,7 +239,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
             "--dataset".to_string(),
             eval_dataset.clone(),
         ],
-    );
+    });
     if let Some(correction) = &decision.correction {
         warnings.push(correction.clone());
     }
@@ -359,6 +366,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
             trainer: trainer.clone(),
             trainer_version: args.trainer_version.clone(),
             trainer_identity,
+            trainer_environment,
             method,
             adapter_type: "peft_lora".to_string(),
             rank,
@@ -580,7 +588,7 @@ fn normalize_backend_recipe(input: &str) -> Result<String, String> {
     }
 }
 
-fn execute_backend(report: &mut LoraTrainReport) -> Result<(), String> {
+fn execute_backend(report: &mut LoraTrainReport, json_output: bool) -> Result<(), String> {
     let Some(program) = report.backend.argv.first() else {
         return Err("backend argv is empty".to_string());
     };
@@ -606,8 +614,9 @@ fn execute_backend(report: &mut LoraTrainReport) -> Result<(), String> {
         .ok_or_else(|| format!("failed to capture backend `{program}` stderr"))?;
     let stdout_tail = Arc::new(Mutex::new(OutputTail::new(BACKEND_OUTPUT_TAIL_BYTES)));
     let stderr_tail = Arc::new(Mutex::new(OutputTail::new(BACKEND_OUTPUT_TAIL_BYTES)));
-    let stdout_handle = tee_backend_stream(stdout, false, Arc::clone(&stdout_tail));
-    let stderr_handle = tee_backend_stream(stderr, true, Arc::clone(&stderr_tail));
+    // A structured CLI response owns stdout; backend diagnostics stay in the receipt.
+    let stdout_handle = tee_backend_stream(stdout, false, !json_output, Arc::clone(&stdout_tail));
+    let stderr_handle = tee_backend_stream(stderr, true, true, Arc::clone(&stderr_tail));
     let status = child
         .wait()
         .map_err(|error| format!("failed to wait for backend `{program}`: {error}"))?;
@@ -721,47 +730,6 @@ fn apply_backend_result(report: &mut LoraTrainReport, result: BackendResult) -> 
     Ok(())
 }
 
-fn finalize_executed_trainer_identity(report: &mut LoraTrainReport) -> Result<(), String> {
-    let identity_path = Path::new(&report.backend.trainer_identity_path);
-    let observed = if identity_path.exists() {
-        let file_observed = read_trainer_identity_file(identity_path)?;
-        if let (Some(existing), Some(from_file)) =
-            (&report.training.trainer_identity.observed, &file_observed)
-        {
-            if existing != from_file {
-                report.ok = false;
-                report.backend.status = "completed_trainer_identity_conflict".to_string();
-                return Err(format!(
-                    "backend result trainer identity {}={} conflicts with {} identity sidecar {}={}",
-                    existing.kind,
-                    existing.value,
-                    identity_path.display(),
-                    from_file.kind,
-                    from_file.value
-                ));
-            }
-        }
-        file_observed
-    } else {
-        report.training.trainer_identity.observed.clone()
-    };
-    report.training.trainer_identity =
-        trainer_identity_check(report.training.trainer_identity.expected.clone(), observed);
-    if !report.training.trainer_identity.promotable {
-        report.ok = false;
-        report.backend.status = "completed_non_promotable".to_string();
-        report.warnings.extend(
-            report
-                .training
-                .trainer_identity
-                .errors
-                .iter()
-                .map(|error| format!("trainer identity: {error}")),
-        );
-    }
-    Ok(())
-}
-
 fn default_trainer_identity_path(output_dir: &Path) -> std::path::PathBuf {
     output_dir.join("trainer.identity.json")
 }
@@ -773,9 +741,13 @@ fn default_backend_result_path(output_dir: &Path) -> std::path::PathBuf {
 fn tee_backend_stream<R: Read + Send + 'static>(
     stream: R,
     is_stderr: bool,
+    mirror: bool,
     tail: Arc<Mutex<OutputTail>>,
 ) -> thread::JoinHandle<Result<(), String>> {
     thread::spawn(move || {
+        if !mirror {
+            return capture_backend_stream(stream, &mut std::io::sink(), tail, "stdout");
+        }
         if is_stderr {
             let mut out = std::io::stderr().lock();
             capture_backend_stream(stream, &mut out, tail, "stderr")
@@ -1220,6 +1192,7 @@ struct TrainTraining {
     trainer: String,
     trainer_version: Option<String>,
     trainer_identity: super::TrainerIdentityCheck,
+    trainer_environment: TrainerEnvironmentCheck,
     method: String,
     adapter_type: String,
     rank: u32,
@@ -1278,6 +1251,8 @@ struct BackendResult {
     trainable_records: Option<u64>,
     retention_ratio: Option<f64>,
     trainer_identity: Option<TrainerIdentity>,
+    #[serde(default)]
+    trainer_environment_observation: Option<TrainerEnvironmentObservation>,
     #[serde(default)]
     runtime: BTreeMap<String, Value>,
     #[serde(default)]
@@ -1710,6 +1685,7 @@ mod tests {
                 kind: "version".to_string(),
                 value: "unsloth-2026.7".to_string(),
             }),
+            trainer_environment_observation: None,
             runtime: std::collections::BTreeMap::from([(
                 "torch_version".to_string(),
                 serde_json::Value::String("2.9.0".to_string()),
@@ -1811,6 +1787,7 @@ mod tests {
             trainable_records: None,
             retention_ratio: None,
             trainer_identity: None,
+            trainer_environment_observation: None,
             runtime: std::collections::BTreeMap::new(),
             tokenizer: std::collections::BTreeMap::new(),
             artifacts: std::collections::BTreeMap::new(),

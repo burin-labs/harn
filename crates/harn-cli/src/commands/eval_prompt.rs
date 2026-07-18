@@ -38,9 +38,9 @@ use harn_vm::value::VmValue;
 use serde_json::Value as JsonValue;
 
 use crate::cli::{EvalPromptArgs, EvalPromptMode, EvalPromptOutput};
-use crate::config;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
+use harn_modules::project_config;
 
 use super::eval_prompt_context::{evaluate_context_fixtures, PromptContextEvalReport};
 
@@ -378,7 +378,7 @@ fn mode_label(mode: EvalPromptMode) -> &'static str {
 /// works with `(provider, model)` pairs regardless of input shape.
 fn resolve_fleet(args: &EvalPromptArgs, template_path: &Path) -> Result<Vec<FleetEntry>, String> {
     let raw_selectors: Vec<String> = if let Some(name) = args.fleet_name.as_ref() {
-        let cfg = config::load_for_path(template_path)
+        let cfg = project_config::load_for_path(template_path)
             .map_err(|error| format!("failed to load harn.toml: {error}"))?;
         let Some(fleet) = cfg.eval.fleets.get(name) else {
             let available: Vec<&str> = cfg.eval.fleets.keys().map(|s| s.as_str()).collect();

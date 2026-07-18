@@ -5,8 +5,8 @@
 //!
 //! 1. Edits to the entry pipeline source bust the cache.
 //! 2. Edits to any transitively-imported user file bust the cache.
-//! 3. `harn precompile` produces artifacts that `harn run` recognizes,
-//!    skipping recompile on subsequent runs.
+//! 3. `harn precompile` produces relocatable artifacts that `harn run`
+//!    recognizes, skipping recompile while preserving load-site diagnostics.
 
 use std::collections::HashSet;
 use std::fs;
@@ -247,20 +247,19 @@ fn precompile_then_run_skips_compile() {
 }
 
 #[test]
-fn precompiled_imported_module_uses_adjacent_artifact() {
-    let workdir = TempDir::new().unwrap();
+fn relocated_precompiled_module_uses_adjacent_artifact_and_rebinds_diagnostics() {
+    let build_root = TempDir::new().unwrap();
+    let run_root = TempDir::new().unwrap();
     let cache = TempDir::new().unwrap();
-    let lib = workdir.path().join("lib.harn");
-    fs::write(&lib, "pub fn answer() -> int { return 42 }\n").unwrap();
-    let script = workdir.path().join("entry.harn");
+    let build_lib = build_root.path().join("lib.harn");
     fs::write(
-        &script,
-        "import { answer } from \"./lib\"\n__io_println(answer())\n",
+        &build_lib,
+        "pub fn fail_after_relocation() {\n  throw \"relocated boom\"\n}\n",
     )
     .unwrap();
 
     run_in_harn_runtime({
-        let target = lib;
+        let target = build_lib.clone();
         move || async move {
             let _env_guard = env_lock::lock_env().lock().await;
             harn_vm::reset_thread_local_state();
@@ -276,18 +275,48 @@ fn precompiled_imported_module_uses_adjacent_artifact() {
         }
     });
 
-    let module_adjacent = workdir.path().join("lib.harnmod");
+    let build_artifact = build_root.path().join("lib.harnmod");
     assert!(
-        module_adjacent.exists(),
-        "expected precompile to produce imported module artifact {module_adjacent:?}"
+        build_artifact.exists(),
+        "expected precompile to produce imported module artifact {build_artifact:?}"
     );
 
+    let run_lib = run_root.path().join("lib.harn");
+    let run_artifact = run_root.path().join("lib.harnmod");
+    fs::rename(&build_lib, &run_lib).unwrap();
+    fs::rename(&build_artifact, &run_artifact).unwrap();
+    let script = run_root.path().join("entry.harn");
+    fs::write(
+        &script,
+        "import { fail_after_relocation } from \"./lib\"\nfail_after_relocation()\n",
+    )
+    .unwrap();
+
     let run_result = run_harn(cache.path(), &script);
-    assert_eq!(run_result.exit_code, 0, "run failed: {}", run_result.stderr);
-    assert!(run_result.stdout.contains("42"));
+    assert_ne!(run_result.exit_code, 0, "runtime throw should fail");
+    assert!(
+        run_result.stderr.contains("relocated boom"),
+        "stderr: {}",
+        run_result.stderr
+    );
+    let run_lib_display =
+        harn_parser::diagnostic::normalize_diagnostic_path(&run_lib.to_string_lossy());
+    assert!(
+        run_result.stderr.contains(&run_lib_display),
+        "relocated artifact must attribute the runtime error to its load site {run_lib_display}; \
+         stderr: {}",
+        run_result.stderr
+    );
+    let build_lib_display =
+        harn_parser::diagnostic::normalize_diagnostic_path(&build_lib.to_string_lossy());
+    assert!(
+        !run_result.stderr.contains(&build_lib_display),
+        "relocated artifact leaked its build-time path {build_lib_display}; stderr: {}",
+        run_result.stderr
+    );
     assert!(
         module_cache_entries(cache.path()).is_empty(),
-        "expected adjacent .harnmod to satisfy the import without writing a shared module cache"
+        "relocated adjacent .harnmod should satisfy the import without a shared module-cache write"
     );
 }
 

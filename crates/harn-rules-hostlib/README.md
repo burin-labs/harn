@@ -45,7 +45,7 @@ Two design points worth knowing:
   `Vm::register_async_builtin` in [`install`] rather than through the sync
   `HostlibRegistry`. It obtains a child VM from its `AsyncBuiltinCtx` and calls
   back per match.
-- **Returns rather than mutates.** Harn closures capture by value and
-  `VmValue` has no callable variant carrying captured Rust state, so a
-  mutating `ctx.report(...)` could not accumulate soundly. Returning the
-  report is both the correct option and the simpler one.
+- **Returns rather than mutates.** `VmValue` has no callable variant
+  carrying captured Rust state, so a mutating `ctx.report(...)` cannot be
+  embedded in `ctx`. Returning the report is both the correct option and
+  the simpler one.

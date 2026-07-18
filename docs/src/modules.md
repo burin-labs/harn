@@ -533,6 +533,7 @@ rows whose case or harness-config fingerprints are incompatible.
 | Function | Description |
 |---|---|
 | `aggregate_trials(name, outcomes, metadata?)` | Summarize trial outcomes into a generic eval row |
+| `eval_fingerprint_integrity(rows)` | Return the exact observed case-fingerprint map and require one complete, internally consistent harness generation |
 | `bootstrap_mean_ci(values, resamples, alpha, seed)` | Seeded bootstrap mean CI using high-bit LCG sampling |
 | `macro_pass_at_1(rows)` | Mean pass rate over decided cases with uniform case weights |
 | `reliability_breakdown(rows)` | All-pass, flaky, all-fail, and no-decision case buckets |
@@ -569,6 +570,7 @@ Path manipulation utilities:
 | `is_absolute(path)` | Check if a path is absolute |
 | `workspace_info(path, workspace_root?)` | Classify a path at the workspace boundary |
 | `workspace_normalize(path, workspace_root?)` | Normalize a path into workspace-relative form when safe |
+| `workspace_canonicalize_existing(path, workspace_root?)` | Canonicalize an existing path and return it only when it remains under the canonical workspace root |
 | `list_files(dir)` | List files in a directory (one level) |
 | `list_dirs(dir)` | List subdirectories in a directory |
 

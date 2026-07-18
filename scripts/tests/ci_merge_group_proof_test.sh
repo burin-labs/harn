@@ -45,7 +45,7 @@ write_response() {
 }
 
 successful_jobs="$tmp_root/successful-jobs.json"
-printf '%s\n' '{"total_count":7,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Package audit","status":"completed","conclusion":"success"},{"name":"Rust lint","status":"completed","conclusion":"success"},{"name":"Rust test","status":"completed","conclusion":"success"},{"name":"Harn conformance + audit","status":"completed","conclusion":"success"},{"name":"Audit scripts","status":"completed","conclusion":"success"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"}]}' > "$successful_jobs"
+printf '%s\n' '{"total_count":8,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Package audit","status":"completed","conclusion":"success"},{"name":"Rust lint","status":"completed","conclusion":"success"},{"name":"Rust test","status":"completed","conclusion":"success"},{"name":"Rust security proof","status":"completed","conclusion":"success"},{"name":"Harn conformance + audit","status":"completed","conclusion":"success"},{"name":"Audit scripts","status":"completed","conclusion":"success"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"}]}' > "$successful_jobs"
 
 success_response="$tmp_root/success.json"
 write_response "$success_response" "[{\"id\":123,\"head_sha\":\"$sha\",\"path\":\".github/workflows/ci.yml\",\"event\":\"merge_group\",\"status\":\"completed\",\"conclusion\":\"success\"}]"

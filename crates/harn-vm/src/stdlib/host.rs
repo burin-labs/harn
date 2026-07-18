@@ -1306,6 +1306,10 @@ pub(crate) fn build_sandboxed_command(
             .map_err(|e| VmError::Runtime(format!("host_call {label} cwd: {e}")))?;
         cmd.current_dir(cwd);
     }
+    // Under a session profile the command from `tokio_command_for` already
+    // carries the resolver's closed env (parent env cleared), applied once at
+    // the sandbox funnel; everything below layers onto that closed base.
+    //
     // Track keys the caller set explicitly so the sandbox-local TMPDIR overlay
     // below never clobbers an intentional per-call value.
     let mut caller_env_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -1861,6 +1865,7 @@ mod tests {
                 branch: None,
                 base_ref: None,
                 cleanup: None,
+                grants: Vec::new(),
             },
         ));
 
@@ -1889,6 +1894,7 @@ mod tests {
                     branch: None,
                     base_ref: None,
                     cleanup: None,
+                    grants: Vec::new(),
                 },
             ));
 

@@ -29,6 +29,10 @@ pub(crate) struct CheckArgs {
     /// Alternate root for render/template path checks.
     #[arg(long = "bundle-root")]
     pub bundle_root: Option<String>,
+    /// Treat warnings as failures. Monotonically enables `[check] strict` for
+    /// this invocation; it never disables workspace strictness.
+    #[arg(long)]
+    pub strict: bool,
     /// Flag unvalidated boundary-API values used in field access.
     #[arg(long = "strict-types")]
     pub strict_types: bool,
@@ -44,6 +48,12 @@ pub(crate) struct CheckArgs {
     /// Evaluate `@invariant(...)` annotations and fail on violations.
     #[arg(long = "invariants")]
     pub invariants: bool,
+    /// Analyze each collected source as an independent target while sharing
+    /// this process and its bounded worker pool. This preserves one-file
+    /// module resolution for fixture corpora without paying one CLI startup
+    /// per file.
+    #[arg(long = "independent")]
+    pub independent: bool,
     /// One or more .harn files or directories. Optional when `--workspace`
     /// is set.
     pub targets: Vec<String>,

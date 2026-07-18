@@ -6,7 +6,7 @@
 import { agent_host_tools } from "std/agent/host_tools"
 import { agent_first_tool_format_override_warning_text } from "std/agent/options"
 import { agent_preset } from "std/agent/presets"
-import { parse_args } from "std/cli"
+import { parse, parser } from "std/cli/argparse"
 import { command_run } from "std/command"
 import { edit_apply_old_new_patch } from "std/edit"
 import { write_json } from "std/fs"
@@ -482,7 +482,12 @@ fn __seed_read_only_audit_native_mock() {
 
 fn __seed_read_only_audit_text_mock() {
   llm_mock({text: "<tool_call>\nread_file({ path: \"README.md\" })\n</tool_call>"})
-  llm_mock({text: "<user_response>AUDIT_OK</user_response>\n<done>##DONE##</done>"})
+  llm_mock({text: "AUDIT_OK"})
+}
+
+fn __seed_read_only_audit_json_mock() {
+  llm_mock({text: "```tool\n{\"name\":\"read_file\",\"args\":{\"path\":\"README.md\"}}\n```"})
+  llm_mock({text: "AUDIT_OK"})
 }
 
 fn __seed_no_tool_native_mock() {
@@ -537,6 +542,10 @@ fn __seed_mock(fixture: string, tool_format: string, python: string) {
   }
   if fixture == "read-only-audit" && tool_format == "native" {
     __seed_read_only_audit_native_mock()
+    return
+  }
+  if fixture == "read-only-audit" && tool_format == "json" {
+    __seed_read_only_audit_json_mock()
     return
   }
   if fixture == "read-only-audit" {
@@ -830,7 +839,7 @@ fn __run_fixture_agent(
   override_reason = nil,
   structural_validator_config = nil,
 ) {
-  const done_sentinel = if tool_format == "text" {
+  const done_sentinel = if tool_format == "text" || tool_format == "json" {
     "##DONE##"
   } else {
     nil
@@ -844,7 +853,7 @@ fn __run_fixture_agent(
     tools: tools,
     max_iterations: max_iterations,
     iteration_budget: {mode: "fixed", initial: max_iterations, max: max_iterations, extend_by: 0},
-    turn_policy: {allow_done_sentinel: tool_format == "text", max_prose_chars: 30000},
+    turn_policy: {allow_done_sentinel: tool_format == "text" || tool_format == "json", max_prose_chars: 30000},
     llm_options: {temperature: 0, max_tokens: 2048},
   }
   if step_judge_config != nil {
@@ -858,7 +867,7 @@ fn __run_fixture_agent(
       + {structural_validator: with_structural_validator(structural_validator_config)}
   }
   if fixture == "read-only-audit" {
-    return __run_preset_agent("audit", task, options)
+    return __run_preset_agent("audit", task, options + {require_successful_tools: ["read_file"]})
   }
   if fixture == "no-tool-diagnosis" {
     return __run_preset_agent(
@@ -944,32 +953,33 @@ fn __summary(
 }
 
 fn main(harness: Harness) {
-  const args = parse_args(
-    argv,
-    [
-      {kind: "option", name: "fixture", flags: ["--fixture"], required: true},
-      {kind: "option", name: "task", flags: ["--task"], default: ""},
-      {kind: "option", name: "workspace_root", flags: ["--workspace-root"]},
-      {kind: "option", name: "output_dir", flags: ["--output-dir"], required: true},
-      {kind: "option", name: "provider", flags: ["--provider"], default: "mock"},
-      {kind: "option", name: "model", flags: ["--model"], default: "mock"},
-      {kind: "option", name: "tool_format", flags: ["--tool-format"], default: "native"},
-      {kind: "option", name: "max_iterations", flags: ["--max-iterations"], parse: "int", default: 8},
-      {kind: "option", name: "python", flags: ["--python"], default: "python3"},
-      {kind: "flag", name: "seed_mock", flags: ["--seed-mock"]},
-      {kind: "option", name: "step_judge_json", flags: ["--step-judge-json"], default: ""},
-      {kind: "option", name: "override_reason", flags: ["--override-reason"], default: ""},
+  const parsed = parse(
+    parser(
       {
-        kind: "option",
-        name: "structural_validator_json",
-        flags: ["--structural-validator-json"],
-        default: "",
+        name: "coding_agent_suite",
+        args: [
+          {kind: "flag", name: "fixture", long: "--fixture", required: true},
+          {kind: "flag", name: "task", long: "--task", default: ""},
+          {kind: "flag", name: "workspace_root", long: "--workspace-root"},
+          {kind: "flag", name: "output_dir", long: "--output-dir", required: true},
+          {kind: "flag", name: "provider", long: "--provider", default: "mock"},
+          {kind: "flag", name: "model", long: "--model", default: "mock"},
+          {kind: "flag", name: "tool_format", long: "--tool-format", default: "native"},
+          {kind: "flag", name: "max_iterations", long: "--max-iterations", parse: "int", default: 8},
+          {kind: "flag", name: "python", long: "--python", default: "python3"},
+          {kind: "switch", name: "seed_mock", long: "--seed-mock"},
+          {kind: "flag", name: "step_judge_json", long: "--step-judge-json", default: ""},
+          {kind: "flag", name: "override_reason", long: "--override-reason", default: ""},
+          {kind: "flag", name: "structural_validator_json", long: "--structural-validator-json", default: ""},
+        ],
       },
-    ],
+    ),
+    argv,
   )
-  if len(args._errors) > 0 {
-    throw join(args._errors, "\n")
+  if is_err(parsed) {
+    throw unwrap_err(parsed).message
   }
+  const args = unwrap(parsed).options
   const output_dir = args.output_dir
   const root = args.workspace_root ?? path_join(output_dir, "workspace")
   __seed_workspace(harness, root, args.fixture)
@@ -985,7 +995,7 @@ fn main(harness: Harness) {
   const structural_validator_config = if args.structural_validator_json == "" {
     __default_structural_validator()
   } else {
-    let parsed = json_parse(args.structural_validator_json)
+    const parsed = json_parse(args.structural_validator_json)
     if parsed == nil || (type_of(parsed) == "bool" && !parsed) {
       nil
     } else {

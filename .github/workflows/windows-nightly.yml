@@ -40,22 +40,15 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/rust-toolchain
-      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-        # sccache is a build-cache optimization, not a build requirement. The
-        # upstream action sometimes fails on merge_group / restricted-token
-        # events with "Bad credentials" when api.github.com gates the release
-        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
-        continue-on-error: true
-      - name: Configure Cargo to use sccache
-        if: env.SCCACHE_PATH != ''
-        shell: bash
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
           # This scheduled default-branch run is the sole writer for the
           # native Windows workspace cache. Path-gated PR jobs restore it but
-          # never write, avoiding one immutable cache generation per PR.
+          # never write, avoiding one immutable cache generation per PR. Keep
+          # this producer on plain rustc like the PR consumer: RUSTC_WRAPPER is
+          # part of rust-cache's environment hash, while runner-local sccache
+          # reported zero hits and made this target cache unreachable to PRs.
           shared-key: workspace-windows
           cache-on-failure: true
           cache-bin: false
@@ -63,7 +56,7 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
-          tool: nextest@0.9.133
+          tool: nextest@0.9.132
       - name: Run workspace nextest
         shell: bash
         # No package filter — the whole workspace runs. Tests gated to

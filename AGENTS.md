@@ -26,26 +26,19 @@ local `harn` binary so it matches the version in use.
   tools, repo-local Node tooling when available, sccache config, per-worktree
   Cargo target config when `CODEX_WORKTREE_PATH` is set, and
   `cargo check --workspace`.
-- Build caching is three layers, written into `.cargo/config.toml` by
+- Build caching is two layers, written into `.cargo/config.toml` by
   `scripts/dev_setup.sh`:
-  1. **Shared `build-dir`** (`$TMPDIR/cargo-build-shared`, one per machine —
-     `$TMPDIR` is per-user on macOS): Cargo 1.91+ splits intermediate
-     artifacts from final ones, and Cargo's own fingerprinting dedupes
-     registry-dep and build-script compilation across every worktree that
-     shares the path. This is what gives cross-worktree caching. Older cargos
-     ignore the key harmlessly. Override with `HARN_DEV_BUILD_DIR=<path>` at
-     setup time, or escape-hatch a single invocation back to an isolated
-     build dir with `CARGO_BUILD_BUILD_DIR=target/build`.
-  2. **Per-worktree `target-dir`** (`$TMPDIR/harn-target/<parent>-<leaf>`):
-     final binaries stay isolated per worktree, so concurrent sessions never
-     swap the binary under test out from under each other.
-  3. **sccache** (`rustc-wrapper`): caches same-path recompiles only. Its
-     Rust hash is target-dir-path-dependent, so it does NOT dedupe
-     compilation across different target dirs — the shared build-dir is what
-     does.
+  1. **Per-worktree `target-dir`** (`$TMPDIR/harn-target/<parent>-<leaf>`):
+     final binaries and mutable build-script scratch stay isolated per
+     worktree, while the stable path keeps repeated commands incremental.
+     Do not share Cargo `build-dir` or `target-dir` paths across concurrent
+     worktrees: generated `OUT_DIR` contents are mutable. Operators may set
+     `HARN_DEV_BUILD_DIR=<path>` only when they deliberately provide an
+     equivalent serialization boundary.
+  2. **sccache** (`rustc-wrapper`): caches same-path recompiles. Immutable,
+     commit-bound CI artifacts provide cross-run reuse where appropriate.
   Orphaned per-worktree target dirs are reclaimed by
-  `scripts/prune_stale_targets.sh` (run from setup at most daily); it never
-  touches `cargo-build-shared`.
+  `scripts/prune_stale_targets.sh` (run from setup at most daily).
 - Setup phases are fingerprinted under `.codex/dev-setup/`, so repeated setup
   is normally a fast no-op. Use `HARN_DEV_SETUP_FORCE=1 make setup` to refresh
   every phase.
@@ -124,6 +117,12 @@ filters, `{{# #}}`, `{{ raw }}`, `{{- -}}`) raise parse errors.
 ## Verification
 
 - Start with the narrowest check that covers the touched behavior.
+- Before declaring a change clean, run `make check-drift` (a seconds-scale
+  preflight of every source-reading drift/manifest guard, derived from
+  `scripts/generated_artifacts.toml`) and confirm `git status` is empty. After a
+  Rust-registry edit, also rebuild and run `make check-drift-binary` (the
+  binary-semantics guards, which false-pass on a stale binary). These are the fast
+  local subset; `make all` is still the full gate.
 - Before merge, prefer `make all`.
 - Syntax, parser, or keyword changes need conformance coverage plus
   `make conformance`, `make lint-harn`, `make fmt-harn`, and tree-sitter tests.
@@ -157,6 +156,13 @@ polling loops, `SystemTime::now()`, or short `recv_timeout` calls to tests. Use
   check-generated-registry` fails until the registry, the `all:` recipe, and
   the CI workflows agree, so a new drift guard can't silently skip CI. See the
   registry file header for the checklist.
+- Every `check-*` target must also be classified in the registry's
+  `[preflight.dispatch]` table (`source` reads committed files; `binary`
+  depends on current generator/parser/checker/linter semantics; `excluded`
+  needs a build/toolchain).
+  `make check-generated-registry` fails until it is, so `make check-drift` /
+  `check-drift-binary` (whose members derive from that table) can never silently
+  omit a new guard.
 
 ## Cross-surface changes
 

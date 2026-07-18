@@ -16,6 +16,7 @@ fn basic_constructs_round_trip() {
         r#"pipeline default(task) { match x { "a" -> { log(1) } "b" -> { log(2) } } }"#,
         "interface Printable {\n  fn to_display() -> string\n}\npipeline default(task) { log(1) }",
         "pub pipeline build(task) extends base {\n  return\n}\n\npub enum Result {\n  Ok(value: string)\n}\n\npub struct Config {\n  port?: int\n}\n\npub type ConfigAlias = {port: int}\n\ninterface Repository<T> {\n  fn map<U>(value: T, f: fn(T) -> U) -> U\n}",
+        "pub pipeline deploy(config: {path: string}, dry_run: bool) -> string {\n  return config.path\n}",
         "enum Color {\n  Red\n  Green\n  Blue\n}\npipeline default(task) { log(1) }",
     ] {
         assert_roundtrip(source);

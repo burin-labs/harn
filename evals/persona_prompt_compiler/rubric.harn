@@ -1,0 +1,291 @@
+import { PersonaBlueprintLowering } from "std/personas/compiler"
+import { PersonaPromptCompileReceipt } from "std/personas/prompt_compiler"
+import "std/schema"
+
+pub const PERSONA_PROMPT_EVAL_ARTIFACT_SCHEMA: string = "harn.persona.prompt_eval_trial.v1"
+
+pub type PersonaPromptEvalExpected = {
+  name: string,
+  template: string,
+  source_kind: string,
+  cron?: string,
+  timezone?: string,
+  provider?: string,
+  event?: string,
+}
+
+pub type PersonaPromptEvalVerdict = {pass: bool, failure_bucket: string, failures: list<string>}
+
+type PersonaDispatchReceipt = {
+  persona: string,
+  status: string,
+  result: {ok: bool, status: string, receipt: {status: string}},
+}
+
+pub type PersonaPromptEvalArtifactEvidence = {
+  schema: string,
+  case_id: string,
+  trial: int,
+  pass: bool,
+  expected: PersonaPromptEvalExpected,
+  compiler: PersonaPromptCompileReceipt,
+  materialization: {manifest_path: string, result: {success: bool}},
+  daemon_fire: {result: {success: bool, stdout: string}},
+}
+
+/** Validate the frozen semantic fields shared by the runner and verifier. */
+pub fn persona_prompt_eval_expected_schema() -> dict {
+  return schema_object(
+    {
+      name: schema_string(),
+      template: schema_string(),
+      source_kind: schema_string(),
+      cron: schema_field(schema_string(), false),
+      timezone: schema_field(schema_string(), false),
+      provider: schema_field(schema_string(), false),
+      event: schema_field(schema_string(), false),
+    },
+  )
+}
+
+/** Validate the durable evidence fields consumed by the eval verifier. */
+pub fn persona_prompt_eval_artifact_schema() -> dict {
+  return schema_object(
+    {
+      schema: schema_literal(PERSONA_PROMPT_EVAL_ARTIFACT_SCHEMA),
+      case_id: schema_string(),
+      trial: schema_int(),
+      pass: schema_bool(),
+      expected: persona_prompt_eval_expected_schema(),
+      compiler: schema_dict(),
+      materialization: schema_object({manifest_path: schema_string(), result: schema_object({success: schema_bool()})}),
+      daemon_fire: schema_object({result: schema_object({success: schema_bool(), stdout: schema_string()})}),
+    },
+  )
+}
+
+fn __command_failure_detail(result: dict) -> string {
+  const stderr = trim(result.stderr ?? "")
+  if stderr != "" {
+    return stderr
+  }
+  return trim(result.combined ?? "")
+}
+
+fn __dispatch_receipt_schema() -> dict {
+  return schema_object(
+    {
+      persona: schema_string(),
+      status: schema_string(),
+      result: schema_object(
+        {ok: schema_bool(), status: schema_string(), receipt: schema_object({status: schema_string()})},
+      ),
+    },
+  )
+}
+
+fn __dispatch_receipt(stdout: string) -> PersonaDispatchReceipt? {
+  const prefix = "- result="
+  for line in split(stdout, "\n") {
+    if starts_with(line, prefix) {
+      const raw = split(line, prefix)[1] ?? ""
+      if raw == "" || raw == "-" {
+        return nil
+      }
+      return try {
+        schema_expect(json_parse(raw), __dispatch_receipt_schema())
+      } catch (_error) {
+        nil
+      }
+    }
+  }
+  return nil
+}
+
+fn __expect(condition: bool, message: string, failures: list<string>) -> list<string> {
+  if condition {
+    return failures
+  }
+  return failures + [message]
+}
+
+/** Adjudicate raw `harn orchestrator fire` evidence for one generated persona binding. */
+pub fn persona_prompt_fire_verdict(result: dict, expected_persona: string, expected_binding: string) -> PersonaPromptEvalVerdict {
+  const stdout = result.stdout ?? ""
+  const lines = split(trim(stdout), "\n")
+  const receipt = __dispatch_receipt(stdout)
+  let failures: list<string> = []
+  failures = __expect(
+    result.success,
+    "orchestrator fire command failed: " + __command_failure_detail(result),
+    failures,
+  )
+  failures = __expect(
+    contains(lines, "- binding_id=" + expected_binding),
+    "orchestrator fire returned a different binding",
+    failures,
+  )
+  failures = __expect(
+    contains(lines, "- status=dispatched") && contains(lines, "- error=-"),
+    "orchestrator fire did not report a clean dispatched status",
+    failures,
+  )
+  failures = __expect(
+    receipt != nil
+      && receipt.persona == expected_persona
+      && receipt.status == "completed"
+      && receipt.result.ok
+      && contains(["completed", "success"], receipt.result.status)
+      && receipt.result.receipt.status == "success",
+    "persona dispatch result did not prove successful workflow completion",
+    failures,
+  )
+  return {
+    pass: len(failures) == 0,
+    failure_bucket: if len(failures) == 0 {
+      "daemon_fired"
+    } else {
+      "daemon_fire_failed"
+    },
+    failures: failures,
+  }
+}
+
+fn __compile_failures(receipt: PersonaPromptCompileReceipt, expected: PersonaPromptEvalExpected) -> list<string> {
+  let failures: list<string> = []
+  failures = __expect(receipt.ok, "compiler receipt was not accepted", failures)
+  failures = __expect(receipt.checkpoint.status == "accepted", "checkpoint was not accepted", failures)
+  failures = __expect(
+    receipt.checkpoint.attempts == 1,
+    "checkpoint did not use exactly one model call",
+    failures,
+  )
+  failures = __expect(
+    receipt.checkpoint.checkpoint_attempts == 1,
+    "checkpoint attempted schema recovery",
+    failures,
+  )
+  failures = __expect(!receipt.checkpoint.repaired, "checkpoint repaired model output", failures)
+  failures = __expect(receipt.prompt_digest != "", "prompt digest is missing", failures)
+  failures = __expect(receipt.catalog_digest != "", "catalog digest is missing", failures)
+  failures = __expect(receipt.validation?.valid == true, "blueprint validation did not pass", failures)
+  failures = __expect(receipt.lowering != nil, "lowering is missing", failures)
+  const lowering = receipt.lowering
+  guard lowering != nil else {
+    return failures
+  }
+  failures = __expect(lowering.profile == "prompt_compiled_v1", "lowering profile widened", failures)
+  failures = __expect(
+    lowering.template == expected.template,
+    "template selection differs from the rubric",
+    failures,
+  )
+  failures = __expect(lowering.persona.name == expected.name, "name override was not preserved", failures)
+  failures = __expect(
+    lowering.policy.autonomy_tier == "suggest",
+    "generated authority exceeds suggest",
+    failures,
+  )
+  failures = __expect(
+    lowering.policy.receipt_policy == "required",
+    "generated receipts are not required",
+    failures,
+  )
+  failures = __expect(len(lowering.triggers) == 1, "lowering must contain exactly one daemon trigger", failures)
+  if len(lowering.triggers) != 1 {
+    return failures
+  }
+  const trigger = lowering.triggers[0]
+  guard trigger != nil else {
+    return failures + ["lowering trigger is missing"]
+  }
+  failures = __expect(
+    trigger.handler == "persona://" + expected.name,
+    "daemon handler is not persona-scoped",
+    failures,
+  )
+  if expected.source_kind == "cron" {
+    failures = __expect(trigger.kind == "cron", "cron request lowered to a non-cron transport", failures)
+    failures = __expect(trigger.provider == "cron", "cron request lowered to a non-cron provider", failures)
+    failures = __expect(trigger.events == ["cron.tick"], "cron request lowered to the wrong event", failures)
+    failures = __expect(trigger.schedule == expected.cron, "cron expression differs from the rubric", failures)
+    failures = __expect(trigger.timezone == expected.timezone, "cron timezone differs from the rubric", failures)
+  } else {
+    failures = __expect(
+      trigger.provider == expected.provider,
+      "external provider differs from the rubric",
+      failures,
+    )
+    failures = __expect(trigger.events == [expected.event], "external event differs from the rubric", failures)
+    failures = __expect(trigger.schedule == nil, "external trigger unexpectedly carries a schedule", failures)
+    failures = __expect(trigger.timezone == nil, "external trigger unexpectedly carries a timezone", failures)
+  }
+  return failures
+}
+
+/** Score a compiler receipt against a frozen semantic case contract. */
+pub fn persona_prompt_eval_verdict(
+  receipt: PersonaPromptCompileReceipt,
+  expected: PersonaPromptEvalExpected,
+) -> PersonaPromptEvalVerdict {
+  const failures = __compile_failures(receipt, expected)
+  const failure_bucket = if len(failures) == 0 {
+    "accepted"
+  } else if !receipt.ok {
+    receipt.error?.code ?? receipt.checkpoint.status
+  } else {
+    "contract_mismatch"
+  }
+  return {pass: len(failures) == 0, failure_bucket: failure_bucket, failures: failures}
+}
+
+/** Check that the canonical materializer preserved a safe lowering exactly. */
+pub fn persona_prompt_materialized_verdict(manifest, lowering: PersonaBlueprintLowering) -> PersonaPromptEvalVerdict {
+  let failures: list<string> = []
+  const personas = manifest?.personas ?? []
+  const triggers = manifest?.triggers ?? []
+  failures = __expect(len(personas) == 1, "materialized package must contain exactly one persona", failures)
+  failures = __expect(len(triggers) == 1, "materialized package must contain exactly one root trigger", failures)
+  if len(personas) == 1 {
+    const persona = personas[0]
+    guard persona != nil else {
+      return {
+        pass: false,
+        failure_bucket: "materialization_contract_mismatch",
+        failures: failures + ["materialized persona is missing"],
+      }
+    }
+    failures = __expect(persona.name == lowering.persona.name, "materialized persona name drifted", failures)
+    failures = __expect(persona.autonomy_tier == "suggest", "materialized authority exceeds suggest", failures)
+    failures = __expect(persona.receipt_policy == "required", "materialized receipts are not required", failures)
+    failures = __expect(persona.triggers == nil, "legacy persona triggers survived materialization", failures)
+    failures = __expect(persona.schedules == nil, "legacy persona schedules survived materialization", failures)
+  }
+  if len(triggers) == 1 {
+    const actual = triggers[0]
+    const expected = lowering.triggers[0]
+    guard actual != nil && expected != nil else {
+      return {
+        pass: false,
+        failure_bucket: "materialization_contract_mismatch",
+        failures: failures + ["materialized or lowered trigger is missing"],
+      }
+    }
+    failures = __expect(actual.id == expected.id, "materialized trigger id drifted", failures)
+    failures = __expect(actual.kind == expected.kind, "materialized trigger kind drifted", failures)
+    failures = __expect(actual.provider == expected.provider, "materialized trigger provider drifted", failures)
+    failures = __expect(actual.match?.events == expected.events, "materialized trigger events drifted", failures)
+    failures = __expect(actual.handler == expected.handler, "materialized trigger handler drifted", failures)
+    failures = __expect(actual.schedule == expected.schedule, "materialized trigger schedule drifted", failures)
+    failures = __expect(actual.timezone == expected.timezone, "materialized trigger timezone drifted", failures)
+  }
+  return {
+    pass: len(failures) == 0,
+    failure_bucket: if len(failures) == 0 {
+      "materialized"
+    } else {
+      "materialization_contract_mismatch"
+    },
+    failures: failures,
+  }
+}

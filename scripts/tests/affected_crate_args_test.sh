@@ -74,6 +74,20 @@ if [[ "$output" != "--workspace" ]]; then
 fi
 grep -q "global/workspace-level change detected" "$tmpdir/global.err"
 
+run_view_changes="$tmpdir/run-view-fixtures.txt"
+printf '%s\n' \
+  'spec/run-view-fixtures/cases/root-transcript/expected/session_view.json' \
+  > "$run_view_changes"
+if ! output=$(HARN_BIN="$tmpdir/missing-harn" "$script" --changed-files-file "$run_view_changes" 2>"$tmpdir/run-view.err"); then
+  cat "$tmpdir/run-view.err" >&2
+  exit 1
+fi
+if [[ "$output" != "--workspace" ]]; then
+  echo "expected run-view fixture changes to select --workspace, got: $output" >&2
+  exit 1
+fi
+grep -q "global/workspace-level change detected" "$tmpdir/run-view.err"
+
 no_changes="$tmpdir/empty.txt"
 : > "$no_changes"
 if ! output=$(HARN_BIN="$tmpdir/missing-harn" "$script" --changed-files-file "$no_changes" 2>"$tmpdir/empty.err"); then
@@ -115,6 +129,46 @@ run_case cli-only "-p harn-cli" bash -c '
   printf "\npub fn changed() {}\n" >> crates/harn-cli/src/lib.rs
 '
 grep -q "pruned (not selected): harn-core harn-tools" "$tmpdir/cli-only.err"
+
+windows_metadata="$tmpdir/windows-metadata.json"
+cargo metadata --no-deps --format-version 1 | jq \
+  --arg windows_root 'D:\a\fake-repo' \
+  '. as $metadata
+  | ($metadata.workspace_root) as $unix_root
+  | (.packages[].manifest_path) |=
+      ($windows_root + ((ltrimstr($unix_root) | split("/") | join("\\"))))' \
+  > "$windows_metadata"
+windows_bin="$tmpdir/windows-bin"
+mkdir -p "$windows_bin"
+cat > "$windows_bin/cargo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == "metadata" ]]
+cat "$WINDOWS_METADATA"
+SH
+cat > "$windows_bin/git" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "rev-parse" && "${2:-}" == "--show-toplevel" ]]; then
+  printf '%s\n' 'd:/a/fake-repo'
+  exit 0
+fi
+echo "unexpected git invocation: $*" >&2
+exit 2
+SH
+chmod +x "$windows_bin/cargo" "$windows_bin/git"
+windows_changes="$tmpdir/windows-paths.txt"
+printf '%s\n' 'crates/harn-cli/src/lib.rs' > "$windows_changes"
+output="$(
+  PATH="$windows_bin:$PATH" WINDOWS_METADATA="$windows_metadata" \
+    "$script" --changed-files-file "$windows_changes" 2> "$tmpdir/windows-paths.err"
+)"
+if [[ "$output" != "-p harn-cli" ]]; then
+  echo "expected Windows-spelled metadata to select harn-cli, got: $output" >&2
+  cat "$tmpdir/windows-paths.err" >&2
+  exit 1
+fi
+grep -q "directly changed: harn-cli" "$tmpdir/windows-paths.err"
 
 run_case docs-only "" bash -c '
   printf "hello\n" > docs/readme.md

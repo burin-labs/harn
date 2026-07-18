@@ -369,11 +369,12 @@ audit log sees what the runtime actually attempted.
 
 ## Gotchas
 
-1. **Closures capture by value.** Don't try to share a free-form dict
-   across calls of a stateful middleware — the captured reference is
-   frozen. Use `atomic(0)` for integer counters or `std/cache` for
-   richer state. See the existing `std/llm/handlers::with_budget` for
-   the standard pattern.
+1. **A captured binding is not concurrency-safe.** Closures capture by
+   reference, so a captured dict does persist across calls of a stateful
+   middleware — but under `parallel`/`spawn` every branch shares the one
+   cell, so a read-modify-write races (see HARN-LNT-064). Use `atomic(0)`
+   for integer counters or `std/cache` for richer state. See the existing
+   `std/llm/handlers::with_budget` for the standard pattern.
 2. **Short-circuiting must produce a complete result dict.** The
    downstream `agent_session_record_tool_results` expects the standard
    shape (`tool_name`, `ok` or `success` or `status`, `observation` or

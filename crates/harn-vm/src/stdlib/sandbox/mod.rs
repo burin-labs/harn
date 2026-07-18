@@ -54,10 +54,12 @@ mod locked_append;
 mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
+mod policy;
 #[cfg(target_os = "windows")]
 mod windows;
 
 pub(crate) use locked_append::AppendLockOptions;
+pub(crate) use policy::allows_network as policy_allows_network;
 
 const HANDLER_SANDBOX_ENV: &str = "HARN_HANDLER_SANDBOX";
 #[cfg(any(unix, windows))]
@@ -82,6 +84,13 @@ pub struct ProcessCommandConfig {
     pub cwd: Option<PathBuf>,
     pub env: Vec<(String, String)>,
     pub stdin_null: bool,
+    /// When `true`, the child starts from an EMPTY environment and receives only
+    /// the pairs in [`ProcessCommandConfig::env`] — the closed-by-construction
+    /// path a session profile takes (`security::resolve_env` has already composed
+    /// the allowlist + grants into `env`). When `false` (the default, legacy
+    /// no-profile path), the child inherits the parent environment and `env` is
+    /// overlaid on top.
+    pub closed_env: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1370,31 +1379,55 @@ fn enforce_process_cwd_for_policy(path: &Path, policy: &CapabilityPolicy) -> Res
     )))
 }
 
+/// Close a freshly built command's environment under an active session profile.
+///
+/// This is the choke point that makes the hermetic contract structural: every
+/// spawn seam in the VM and `harn-hostlib` reaches a child through the three
+/// funnel fns below, so a new seam cannot silently opt out. Callers still layer
+/// their own `env` / `env_remove` on top afterward. Sandbox confinement sets no
+/// env vars (wrapper-exec / seccomp / AppContainer), so clearing cannot weaken it.
+macro_rules! close_env_for_session {
+    ($command:expr) => {
+        if let Some(env) = crate::stdlib::process::session_closed_env(std::iter::empty())? {
+            $command.env_clear();
+            for (key, value) in env {
+                $command.env(key, value);
+            }
+        }
+    };
+}
+
 pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmError> {
-    let (policy, profile) = match active_sandbox_policy() {
-        Some(value) => value,
+    let mut command = match active_sandbox_policy() {
+        Some((policy, profile)) => {
+            build_std_command::<ActiveBackend>(program, args, &policy, profile)?
+        }
         None => {
             let mut command = Command::new(program);
             command.args(args);
-            return Ok(command);
+            command
         }
     };
-    build_std_command::<ActiveBackend>(program, args, &policy, profile)
+    close_env_for_session!(command);
+    Ok(command)
 }
 
 pub fn tokio_command_for(
     program: &str,
     args: &[String],
 ) -> Result<tokio::process::Command, VmError> {
-    let (policy, profile) = match active_sandbox_policy() {
-        Some(value) => value,
+    let mut command = match active_sandbox_policy() {
+        Some((policy, profile)) => {
+            build_tokio_command::<ActiveBackend>(program, args, &policy, profile)?
+        }
         None => {
             let mut command = tokio::process::Command::new(program);
             command.args(args);
-            return Ok(command);
+            command
         }
     };
-    build_tokio_command::<ActiveBackend>(program, args, &policy, profile)
+    close_env_for_session!(command);
+    Ok(command)
 }
 
 pub fn command_output(
@@ -1416,6 +1449,25 @@ pub fn command_output(
 
     let recording =
         crate::testbench::process_tape::start_recording(program, args, config.cwd.as_deref());
+
+    // Callers build `config` several ways, so close it here rather than trust
+    // each: an already-resolved config carries `closed_env`; anything else gets
+    // the profile applied now, its own `env` still winning.
+    let closed_config;
+    let config = if config.closed_env {
+        config
+    } else if let Some(env) =
+        crate::stdlib::process::session_closed_env(config.env.iter().cloned())?
+    {
+        closed_config = ProcessCommandConfig {
+            env,
+            closed_env: true,
+            ..config.clone()
+        };
+        &closed_config
+    } else {
+        config
+    };
 
     let output = match active_sandbox_policy() {
         Some((policy, profile)) => {
@@ -1778,6 +1830,14 @@ pub(crate) fn active_sandbox_policy() -> Option<(CapabilityPolicy, SandboxProfil
 fn apply_process_config(command: &mut Command, config: &ProcessCommandConfig) {
     if let Some(cwd) = config.cwd.as_ref() {
         command.current_dir(cwd);
+    }
+    // A profile-governed session builds a closed environment: clear the
+    // inherited parent env first so the child sees ONLY what the resolver
+    // admitted (allowlist + grants), already materialized in `config.env`.
+    // The default no-profile path leaves the inherited env in place and overlays
+    // `config.env` on top, preserving legacy behavior.
+    if config.closed_env {
+        command.env_clear();
     }
     command.envs(config.env.iter().map(|(key, value)| (key, value)));
     if config.stdin_null {
@@ -2297,16 +2357,6 @@ fn is_dev_fd_descriptor(path: &Path) -> bool {
         return false;
     };
     !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
-pub(crate) fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
-    use crate::tool_annotations::SideEffectLevel;
-    policy
-        .side_effect_level
-        .as_ref()
-        .map(|level| SideEffectLevel::rank_str(level) >= SideEffectLevel::Network.rank())
-        .unwrap_or(true)
 }
 
 #[cfg(any(

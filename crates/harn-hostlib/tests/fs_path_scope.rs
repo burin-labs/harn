@@ -81,6 +81,7 @@ impl ExecutionRootGuard {
             branch: None,
             base_ref: None,
             cleanup: None,
+            grants: Vec::new(),
         }));
         ExecutionRootGuard
     }

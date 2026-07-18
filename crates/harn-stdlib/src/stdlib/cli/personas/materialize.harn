@@ -1,0 +1,39 @@
+// Deterministic bridge from an untrusted blueprint JSON document to the closed
+// prompt_compiled_v1 lowering. Rust owns only the atomic scaffold transaction;
+// this script keeps blueprint validation and policy lowering in Harn.
+import { persona_blueprint_compile } from "std/personas/compiler"
+
+fn __write(ok: bool, lowering = nil, error = nil) {
+  __io_println(json_stringify({ok: ok, lowering: lowering, error: error}))
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_PERSONA_BLUEPRINT_JSON", "")
+  if raw == "" {
+    __write(false, nil, {code: "missing_blueprint", message: "HARN_PERSONA_BLUEPRINT_JSON is required"})
+    return 0
+  }
+  const blueprint = try {
+    json_parse(raw)
+  } catch (e) {
+    __write(
+      false,
+      nil,
+      {code: "invalid_blueprint_json", message: "persona blueprint must be valid JSON: " + to_string(e)},
+    )
+    return 0
+  }
+  const compiled = persona_blueprint_compile(blueprint)
+  if is_err(compiled) {
+    const report = unwrap_err(compiled)
+    const error = if len(report.errors) > 0 {
+      {code: report.errors[0].code, message: report.errors[0].message}
+    } else {
+      {code: "blueprint_invalid", message: "persona blueprint failed Harn validation"}
+    }
+    __write(false, nil, error)
+    return 0
+  }
+  __write(true, unwrap(compiled), nil)
+  return 0
+}

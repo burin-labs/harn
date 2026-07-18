@@ -77,6 +77,19 @@ fn pipeline_main_int_clamped_to_byte_range() {
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn explicit_exit_builtin_still_works() {
-    let out = run_script("pipeline main() {\n  exit(3)\n}\n");
+    let out = run_script(
+        "pipeline main() {\n  __io_println(\"stdout before exit\")\n  \\
+         __io_eprintln(\"stderr before exit\")\n  exit(3)\n}\n",
+    );
     assert_eq!(out.status.code(), Some(3));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "stdout before exit\n");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("stderr before exit"),
+        "expected script stderr to flush before exit, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("pipeline returned a nonzero exit code"),
+        "explicit exit is terminal control flow, not a failed return: {stderr}"
+    );
 }

@@ -10,6 +10,8 @@ up.
 
 ```toml
 [check]
+strict = true
+strict_types = true
 host_capabilities_path = "./schemas/host-capabilities.json"
 preflight_severity = "warning"          # "error" (default), "warning", "off"
 preflight_allow = ["mystery.*", "runtime.task"]
@@ -26,6 +28,12 @@ workspace = ["read_text", "write_text"]
   namespaced shape `{ capability: [op, ...], ... }`; nested
   `{ capabilities: { ... } }` wrappers and per-op metadata dictionaries
   are accepted.
+- `strict` treats warnings from every `harn check` phase as failures after all
+  files have been rendered. `harn check --strict` monotonically enables the
+  same policy for one invocation; it cannot disable manifest strictness.
+- `strict_types` enables boundary-value type checks persistently. Its one-shot
+  equivalent is `--strict-types`; combine it with `--strict` for a zero-warning
+  type-safety gate.
 - `preflight_severity` downgrades preflight diagnostics to warnings or
   suppresses them entirely. Type-checker and lint diagnostics are
   unaffected — preflight failures are reported under the `preflight`
@@ -407,6 +415,7 @@ The module exposes:
 | Function | Contract |
 |---|---|
 | `aggregate_trials(name, outcomes, metadata?)` | Collapses trial outcomes into counts, `PASS`/`FAIL`/`FLAKY`/`skip` status, majority, mean/stdev wall time, and cost fields |
+| `eval_fingerprint_integrity(rows)` | Returns the exact observed case-fingerprint map and reports whether every raw row has a case and harness fingerprint, every case has one stable fingerprint, and the cohort has exactly one harness generation |
 | `bootstrap_mean_ci(values, resamples, alpha, seed)` | Returns `{mean, lo, hi, std, n}` for a seeded bootstrap; resample indices are drawn from the high-order LCG state bits so power-of-two case counts do not collapse the CI |
 | `macro_pass_at_1(rows)` | Computes the uniform-case-weighted mean pass rate over decided cases |
 | `reliability_breakdown(rows)` | Returns all-pass, flaky, all-fail, and no-decision fractions plus raw case counts |
@@ -812,6 +821,7 @@ guide for harn-canon rules is in
 disabled = ["unused-import"]
 require_file_header = false
 require_docstrings = false
+require_public_api_types = false
 complexity_threshold = 25
 persona_step_allowlist = ["legacy_helper"]
 ```
@@ -825,6 +835,11 @@ persona_step_allowlist = ["legacy_helper"]
   default — out of the box, `pub fn` needs no docs, and editor
   tooling derives a usage example from the type signature. Embedded
   stdlib sources enforce docstrings regardless of this flag.
+- `require_public_api_types` opts into `missing-public-api-type`, which
+  requires explicit parameter and return annotations on every public function
+  and pipeline. Private callables remain inferable, and explicit `unknown` or
+  `any` satisfies the declaration contract. The same policy is available for
+  a focused migration with `harn lint --require-public-api-types`.
 - `complexity_threshold` overrides the default cyclomatic-complexity
   warning threshold (default **25**, chosen to match Clippy's
   `cognitive_complexity` default). Set lower to tighten, higher to

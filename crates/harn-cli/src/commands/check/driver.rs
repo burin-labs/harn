@@ -22,15 +22,18 @@
 //! (`HARN_CHECK_JOBS=1` restores the fully serial driver for bisection).
 
 use std::collections::{HashMap, HashSet};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use harn_parser::analysis::{AnalysisDatabase, SourceId, SourceVersion};
 
-use crate::package;
+use crate::{package, CLI_RUNTIME_STACK_SIZE};
 
-use super::check_cmd::{check_file_report_inner, CheckFileReport, CheckTextOutput};
+use super::check_cmd::{
+    check_file_report_inner, CheckDiagnostic, CheckFileReport, CheckFileStatus, CheckTextOutput,
+};
 use super::host_capabilities::{resolve_host_capabilities, ResolvedHostCapabilities};
 
 /// Environment override for the check worker-pool size. `1` forces the
@@ -42,9 +45,23 @@ pub(crate) const CHECK_JOBS_ENV: &str = "HARN_CHECK_JOBS";
 pub(crate) struct CheckCliOverrides {
     pub host_capabilities: Option<String>,
     pub bundle_root: Option<String>,
+    pub strict: bool,
     pub strict_types: bool,
     pub preflight: Option<String>,
     pub invariants: bool,
+}
+
+impl From<&crate::cli::CheckArgs> for CheckCliOverrides {
+    fn from(args: &crate::cli::CheckArgs) -> Self {
+        Self {
+            host_capabilities: args.host_capabilities.clone(),
+            bundle_root: args.bundle_root.clone(),
+            strict: args.strict,
+            strict_types: args.strict_types,
+            preflight: args.preflight.clone(),
+            invariants: args.invariants,
+        }
+    }
 }
 
 /// One file's finished check: the structured report, the strictness the
@@ -90,18 +107,14 @@ pub(crate) fn check_files(
     // particular, an external host-capability manifest is read and parsed once
     // per source directory instead of once per checked file.
     let config_by_dir = build_check_contexts(files, overrides);
-    let next = AtomicUsize::new(0);
-
-    let run_worker = || {
-        let mut analysis = AnalysisDatabase::new();
-        let mut produced: Vec<(usize, CheckedFile)> = Vec::new();
-        loop {
-            let index = next.fetch_add(1, Ordering::Relaxed);
-            let Some(file) = files.get(index) else {
-                break;
-            };
-            let checked = check_one(
-                &mut analysis,
+    run_ordered_checks(
+        files,
+        workers,
+        want_text,
+        AnalysisDatabase::new,
+        |analysis, file| {
+            check_one(
+                analysis,
                 file,
                 module_graph,
                 &parsed_sources,
@@ -109,12 +122,84 @@ pub(crate) fn check_files(
                 cross_file_imports,
                 overrides,
                 want_text,
-            );
+            )
+        },
+    )
+}
+
+/// Check a source corpus with one-file module-resolution semantics while
+/// retaining one process and the native bounded worker pool.
+///
+/// A shared graph is the correct default for a project: sibling imports and
+/// cross-file lint exemptions must see each other. Fixture corpora are a
+/// different ownership boundary. Their files are independent programs, and a
+/// graph containing every fixture can make unrelated sources satisfy imports
+/// or activate type-aware lints that a one-file check would not see. The old
+/// workaround spawned `harn check` once per file. This path keeps the exact
+/// semantics without the process and CLI-startup amplification.
+pub(crate) fn check_files_independently(
+    files: &[PathBuf],
+    overrides: &CheckCliOverrides,
+    want_text: bool,
+) -> Vec<CheckedFile> {
+    let workers = worker_count(files.len());
+    let config_by_dir = build_check_contexts(files, overrides);
+    run_ordered_checks(
+        files,
+        workers,
+        want_text,
+        || (),
+        |(), file| {
+            let (module_graph, parsed_sources) =
+                super::build_module_graph_with_parsed_sources(std::slice::from_ref(file));
+            let cross_file_imports = super::collect_cross_file_imports(&module_graph);
+            let parsed_sources = Mutex::new(parsed_sources);
+            let mut analysis = AnalysisDatabase::new();
+            check_one(
+                &mut analysis,
+                file,
+                &module_graph,
+                &parsed_sources,
+                &config_by_dir,
+                &cross_file_imports,
+                overrides,
+                want_text,
+            )
+        },
+    )
+}
+
+fn run_ordered_checks<State>(
+    files: &[PathBuf],
+    workers: usize,
+    want_text: bool,
+    init: impl Fn() -> State + Sync,
+    check: impl Fn(&mut State, &PathBuf) -> CheckedFile + Sync,
+) -> Vec<CheckedFile> {
+    let next = AtomicUsize::new(0);
+    let run_worker = || {
+        let mut state = init();
+        let mut produced = Vec::new();
+        loop {
+            let index = next.fetch_add(1, Ordering::Relaxed);
+            let Some(file) = files.get(index) else {
+                break;
+            };
+            let checked = match catch_unwind(AssertUnwindSafe(|| check(&mut state, file))) {
+                Ok(checked) => checked,
+                Err(_) => {
+                    // A checker panic is an internal failure of this file, not
+                    // permission to drop the rest of a corpus. The unwind may
+                    // have left per-worker analysis state partially mutated,
+                    // so replace it before claiming another file.
+                    state = init();
+                    internal_failure(file, want_text)
+                }
+            };
             produced.push((index, checked));
         }
         produced
     };
-
     let mut merged: Vec<Option<CheckedFile>> = Vec::with_capacity(files.len());
     merged.resize_with(files.len(), || None);
     if workers <= 1 {
@@ -123,7 +208,15 @@ pub(crate) fn check_files(
         }
     } else {
         let produced = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..workers).map(|_| scope.spawn(run_worker)).collect();
+            let handles: Vec<_> = (0..workers)
+                .map(|index| {
+                    std::thread::Builder::new()
+                        .name(format!("harn-check-{index}"))
+                        .stack_size(CLI_RUNTIME_STACK_SIZE)
+                        .spawn_scoped(scope, run_worker)
+                        .expect("failed to spawn harn check worker")
+                })
+                .collect();
             handles
                 .into_iter()
                 .flat_map(|handle| match handle.join() {
@@ -140,6 +233,37 @@ pub(crate) fn check_files(
         .into_iter()
         .map(|slot| slot.expect("every input file produces exactly one check result"))
         .collect()
+}
+
+fn internal_failure(file: &Path, want_text: bool) -> CheckedFile {
+    let path = file.to_string_lossy().into_owned();
+    let message = "internal `harn check` failure while analyzing this file";
+    let text = if want_text {
+        CheckTextOutput {
+            stdout: String::new(),
+            stderr: format!("{path}: error: {message}\n"),
+        }
+    } else {
+        CheckTextOutput::default()
+    };
+    CheckedFile {
+        report: CheckFileReport {
+            path,
+            status: CheckFileStatus::Error,
+            diagnostics: vec![CheckDiagnostic {
+                source: "check",
+                severity: "error",
+                code: None,
+                message: message.to_string(),
+                span: None,
+                help: Some(
+                    "report this reproducible checker failure to the Harn maintainers".to_string(),
+                ),
+            }],
+        },
+        strict: false,
+        text,
+    }
 }
 
 fn check_one(
@@ -285,6 +409,9 @@ fn build_check_contexts_with(
         if let Some(path) = overrides.bundle_root.as_ref() {
             config.bundle_root = Some(path.clone());
         }
+        if overrides.strict {
+            config.strict = true;
+        }
         if overrides.strict_types {
             config.strict_types = true;
         }
@@ -377,5 +504,154 @@ mod tests {
             contexts[&check_config_key(&file)].config.disable_rules,
             ["assert-outside-test"]
         );
+    }
+
+    fn diagnostic_facts(checked: &CheckedFile) -> Vec<(&str, Option<&str>, &str)> {
+        checked
+            .report
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.severity,
+                    diagnostic.code.as_deref(),
+                    diagnostic.message.as_str(),
+                )
+            })
+            .collect()
+    }
+
+    fn successful_file(file: &Path) -> CheckedFile {
+        CheckedFile {
+            report: CheckFileReport {
+                path: file.to_string_lossy().into_owned(),
+                status: CheckFileStatus::Ok,
+                diagnostics: Vec::new(),
+            },
+            strict: false,
+            text: CheckTextOutput::default(),
+        }
+    }
+
+    #[test]
+    fn checker_panic_is_a_file_diagnostic_and_serial_checks_continue() {
+        let files = ["before.harn", "panic.harn", "after.harn"]
+            .map(PathBuf::from)
+            .to_vec();
+        let initializations = AtomicUsize::new(0);
+        let checked = run_ordered_checks(
+            &files,
+            1,
+            true,
+            || initializations.fetch_add(1, Ordering::Relaxed) + 1,
+            |generation, file| {
+                assert_ne!(
+                    file,
+                    Path::new("panic.harn"),
+                    "payload and location must not enter the diagnostic"
+                );
+                if file == Path::new("after.harn") {
+                    assert_eq!(*generation, 2, "worker state must reset after unwind");
+                }
+                successful_file(file)
+            },
+        );
+
+        assert_eq!(initializations.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            checked
+                .iter()
+                .map(|file| file.report.path.as_str())
+                .collect::<Vec<_>>(),
+            ["before.harn", "panic.harn", "after.harn"]
+        );
+        assert_eq!(
+            diagnostic_facts(&checked[1]),
+            [(
+                "error",
+                None,
+                "internal `harn check` failure while analyzing this file"
+            )]
+        );
+        assert_eq!(
+            checked[1].text.stderr,
+            "panic.harn: error: internal `harn check` failure while analyzing this file\n"
+        );
+        assert!(matches!(checked[1].report.status, CheckFileStatus::Error));
+    }
+
+    #[test]
+    fn parallel_checker_panic_preserves_every_ordered_result() {
+        let files = ["zero.harn", "panic.harn", "two.harn", "three.harn"]
+            .map(PathBuf::from)
+            .to_vec();
+        let visits = AtomicUsize::new(0);
+        let checked = run_ordered_checks(
+            &files,
+            3,
+            false,
+            || (),
+            |(), file| {
+                visits.fetch_add(1, Ordering::Relaxed);
+                assert_ne!(file, Path::new("panic.harn"), "adversarial worker panic");
+                successful_file(file)
+            },
+        );
+
+        assert_eq!(visits.load(Ordering::Relaxed), files.len());
+        assert_eq!(
+            checked
+                .iter()
+                .map(|file| file.report.path.as_str())
+                .collect::<Vec<_>>(),
+            ["zero.harn", "panic.harn", "two.harn", "three.harn"]
+        );
+        assert_eq!(diagnostic_facts(&checked[1]).len(), 1);
+        assert!(checked[1].text.stderr.is_empty());
+    }
+
+    #[test]
+    fn independent_checks_match_one_target_module_semantics() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library.harn");
+        let consumer = dir.path().join("consumer.harn");
+        std::fs::write(&library, "fn helper() { return 1 }\n").unwrap();
+        std::fs::write(&consumer, "import { helper } from \"library\"\nhelper()\n").unwrap();
+        let overrides = CheckCliOverrides::default();
+
+        let (single_graph, single_sources) =
+            super::super::build_module_graph_with_parsed_sources(std::slice::from_ref(&library));
+        let single_imports = super::super::collect_cross_file_imports(&single_graph);
+        let single = check_files(
+            std::slice::from_ref(&library),
+            &single_graph,
+            single_sources,
+            &single_imports,
+            &overrides,
+            false,
+        );
+        let independent =
+            check_files_independently(&[library.clone(), consumer.clone()], &overrides, false);
+        assert_eq!(
+            diagnostic_facts(&independent[0]),
+            diagnostic_facts(&single[0])
+        );
+        assert!(diagnostic_facts(&single[0])
+            .iter()
+            .any(|(_, code, _)| *code == Some("HARN-LNT-019")));
+
+        let files = [library, consumer];
+        let (shared_graph, shared_sources) =
+            super::super::build_module_graph_with_parsed_sources(&files);
+        let shared_imports = super::super::collect_cross_file_imports(&shared_graph);
+        let shared = check_files(
+            &files,
+            &shared_graph,
+            shared_sources,
+            &shared_imports,
+            &overrides,
+            false,
+        );
+        assert_ne!(diagnostic_facts(&shared[0]), diagnostic_facts(&single[0]));
     }
 }

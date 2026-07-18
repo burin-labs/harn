@@ -21,7 +21,8 @@ use super::{
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
     parse_target_metadata, render_embedded_lora_report, resolve_lora_provider, sha256_file,
     target_module_contract, tool_catalog_contract, BaseModelReport, EvaluationRecipe,
-    LoraContractReport, LoraContractReportInput, ToolCallingReport, ToolCatalogContract,
+    LoraContractReport, LoraContractReportInput, LoraEvaluationRecipeInput, ToolCallingReport,
+    ToolCatalogContract,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -252,15 +253,16 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         .clone()
         .unwrap_or_else(|| "ADAPTER_MODEL".to_string());
     let eval_dataset = corpus_path.display().to_string();
-    let promotion = lora_evaluation_recipe(
-        &contract_id,
-        &target.base_model,
-        &target.provider,
-        &request_model,
-        &target.harn_tool_format,
-        &eval_dataset,
-        None,
-        vec![
+    let promotion = lora_evaluation_recipe(LoraEvaluationRecipeInput {
+        contract_id: &contract_id,
+        base_model: &target.base_model,
+        provider: &target.provider,
+        request_model: &request_model,
+        tool_format: &target.harn_tool_format,
+        eval_dataset: &eval_dataset,
+        trainer_identity: None,
+        trainer_environment: None,
+        eval_command: vec![
             "harn".to_string(),
             "eval".to_string(),
             "tool-calls".to_string(),
@@ -271,7 +273,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
             "--dataset".to_string(),
             eval_dataset.clone(),
         ],
-    );
+    });
     let manifest_path = if let Some(path) = args.manifest.as_deref() {
         write_export_manifest(
             path,

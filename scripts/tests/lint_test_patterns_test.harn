@@ -65,6 +65,7 @@ pipeline test_runtime_path_excludes_other_crates(task) {
 // --- is_e2e_subprocess_path -------------------------------------------------
 @test
 pipeline test_e2e_exact_entry(task) {
+  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/check_strict_cli.rs"), true)
   assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/orchestrator_cli.rs"), true)
   assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/persona_activation_cli_e2e.rs"), true)
   assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/test_worker_cli_e2e.rs"), true)

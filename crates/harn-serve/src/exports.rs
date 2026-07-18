@@ -16,6 +16,40 @@ pub struct ExportedParam {
     pub rest: bool,
 }
 
+impl ExportedParam {
+    /// Whether this parameter accepts a JSON object value — an inline or aliased
+    /// object shape (declared type, or a projected `inputSchema` carrying
+    /// `"type": "object"` / `properties`) or a bare `dict`. The single owner of
+    /// the "is this a wrapper object parameter" question, shared by the A2A
+    /// structured-message lift and the MCP flat-argument lift so both adapters
+    /// agree on which single-parameter tools take an object.
+    pub fn accepts_json_object(&self) -> bool {
+        self.type_expr
+            .as_ref()
+            .is_some_and(type_expr_accepts_json_object)
+            || self
+                .input_schema
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                == Some("object")
+            || self.input_schema.get("properties").is_some()
+    }
+}
+
+/// Whether a declared type expression accepts a JSON object value: a bare
+/// `dict`, an inline object shape, a `DictType`, or any union/intersection
+/// member that does. Backs [`ExportedParam::accepts_json_object`].
+pub fn type_expr_accepts_json_object(type_expr: &TypeExpr) -> bool {
+    match type_expr {
+        TypeExpr::Named(name) => name == "dict",
+        TypeExpr::Shape(_) | TypeExpr::DictType(_, _) => true,
+        TypeExpr::Union(types) | TypeExpr::Intersection(types) => {
+            types.iter().any(type_expr_accepts_json_object)
+        }
+        _ => false,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExportedCallableKind {
     Function,
@@ -437,9 +471,9 @@ impl ExportCatalog {
                 .or_insert_with(|| ExportedFunction {
                     name: name.clone(),
                     kind: ExportedCallableKind::Pipeline,
-                    params: pipeline_exported_params(params),
+                    params: exported_params(params, &schema_resolver),
                     return_type: return_type.clone(),
-                    input_schema: pipeline_input_schema(params),
+                    input_schema: schema_resolver.json_schema_for_typed_params(params),
                     output_schema: return_type
                         .as_ref()
                         .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
@@ -493,19 +527,6 @@ fn exported_params(
                 .unwrap_or_else(|| serde_json::json!({})),
             has_default: param.default_value.is_some(),
             rest: param.rest,
-        })
-        .collect()
-}
-
-fn pipeline_exported_params(params: &[String]) -> Vec<ExportedParam> {
-    params
-        .iter()
-        .map(|name| ExportedParam {
-            name: name.clone(),
-            type_expr: None,
-            input_schema: serde_json::json!({}),
-            has_default: false,
-            rest: false,
         })
         .collect()
 }
@@ -1281,17 +1302,6 @@ fn retry_from_entries<'a>(
         max_attempts,
         backoff,
     }
-}
-
-fn pipeline_input_schema(params: &[String]) -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": params
-            .iter()
-            .map(|name| (name.clone(), serde_json::json!({})))
-            .collect::<serde_json::Map<_, _>>(),
-        "required": params,
-    })
 }
 
 #[cfg(test)]
@@ -2094,3 +2104,7 @@ pub fn both(req: dict) -> dict { return http_ok({}) }
         assert_eq!(codes, vec![WS_CONFLICTS_WITH_STREAM_OR_RAW]);
     }
 }
+
+#[cfg(test)]
+#[path = "exports/typed_pipeline_tests.rs"]
+mod typed_pipeline_tests;

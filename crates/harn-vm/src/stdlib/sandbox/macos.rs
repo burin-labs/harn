@@ -601,6 +601,19 @@ mod tests {
     }
 
     #[test]
+    fn sandbox_profile_only_allows_network_at_the_network_ceiling() {
+        let mut denied = macos_policy_with_workspace_ops(&["read_text"]);
+        denied.side_effect_level = Some("process_exec".to_string());
+        let denied_profile = render_profile(&denied);
+        assert!(!denied_profile.contains("(allow network*)"));
+
+        let mut allowed = denied;
+        allowed.side_effect_level = Some("network".to_string());
+        let allowed_profile = render_profile(&allowed);
+        assert!(allowed_profile.contains("(allow network*)"));
+    }
+
+    #[test]
     fn sandbox_exec_profile_allows_common_device_runtime_access() {
         if !Path::new(SANDBOX_EXEC_PATH).exists() {
             return;

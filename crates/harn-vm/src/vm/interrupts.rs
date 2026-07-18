@@ -148,6 +148,11 @@ impl Vm {
     }
 
     pub(crate) async fn pending_scope_interrupt(&mut self) -> Option<VmError> {
+        if let Some(code) = self.requested_process_exit() {
+            self.cancel_spawned_tasks();
+            return Some(VmError::ProcessExit(code));
+        }
+
         if self
             .execution_deadline
             .current()

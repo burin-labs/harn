@@ -25,6 +25,10 @@ pub(crate) struct PersonaArgs {
 pub(crate) enum PersonaCommand {
     /// Scaffold a new Harn-first persona package from a template.
     New(PersonaNewArgs),
+    /// Compile a natural-language request into a closed persona blueprint.
+    CompilePrompt(PersonaCompilePromptArgs),
+    /// Materialize a closed persona blueprint through the canonical scaffold transaction.
+    Materialize(PersonaMaterializeArgs),
     /// Validate a persona package end-to-end.
     Doctor(PersonaDoctorArgs),
     /// Validate a persona manifest with the canonical harn-modules schema.
@@ -60,14 +64,94 @@ pub(crate) enum PersonaCommand {
 #[derive(Debug, Args)]
 pub(crate) struct PersonaNewArgs {
     /// Persona package name, for example `my_release_captain`.
-    pub name: String,
+    #[arg(
+        required_unless_present = "from_prompt",
+        conflicts_with = "from_prompt"
+    )]
+    pub name: Option<String>,
     /// Persona control-flow template.
-    #[arg(long, value_enum)]
-    pub template: PersonaTemplateKind,
+    #[arg(
+        long,
+        value_enum,
+        required_unless_present = "from_prompt",
+        conflicts_with = "from_prompt"
+    )]
+    pub template: Option<PersonaTemplateKind>,
+    /// Compile a closed persona package from one natural-language request.
+    #[arg(long, value_name = "PROMPT")]
+    pub from_prompt: Option<String>,
+    /// Override the model-proposed persona name in prompt mode.
+    #[arg(long = "name", requires = "from_prompt")]
+    pub prompt_name: Option<String>,
+    /// LLM provider for prompt compilation; normal Harn routing applies when omitted.
+    #[arg(long, requires = "from_prompt")]
+    pub provider: Option<String>,
+    /// LLM model or alias for prompt compilation.
+    #[arg(long, requires = "from_prompt")]
+    pub model: Option<String>,
+    /// Maximum generated tokens for prompt compilation.
+    #[arg(
+        long,
+        requires = "from_prompt",
+        value_parser = clap::value_parser!(u32).range(1..=1200)
+    )]
+    pub max_tokens: Option<u32>,
     /// Directory under which the persona package is created.
     #[arg(long, value_name = "DIR", default_value = "personas")]
     pub output_root: PathBuf,
     /// Replace an existing generated package.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaCompilePromptArgs {
+    /// Natural-language proactive-agent request.
+    #[arg(long, value_name = "PROMPT")]
+    pub prompt: String,
+    /// Override the model-proposed persona name.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// LLM provider; normal Harn routing applies when omitted.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// LLM model or alias.
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Maximum generated tokens. The compiler never permits more than 1200.
+    #[arg(
+        long,
+        default_value_t = 512,
+        value_parser = clap::value_parser!(u32).range(1..=1200)
+    )]
+    pub max_tokens: u32,
+    /// Emit the complete typed compiler receipt as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PersonaMaterializeArgs {
+    /// Path to a JSON persona blueprint compiled by Harn at the materialization boundary.
+    #[arg(
+        long,
+        value_name = "JSON",
+        required_unless_present = "compile_receipt",
+        conflicts_with = "compile_receipt"
+    )]
+    pub blueprint: Option<PathBuf>,
+    /// Path to an accepted compile-prompt receipt reviewed before materialization.
+    #[arg(
+        long,
+        value_name = "JSON",
+        required_unless_present = "blueprint",
+        conflicts_with = "blueprint"
+    )]
+    pub compile_receipt: Option<PathBuf>,
+    /// Directory under which the persona package is created.
+    #[arg(long, value_name = "DIR", default_value = "personas")]
+    pub output_root: PathBuf,
+    /// Replace an existing generated package after strict validation succeeds.
     #[arg(long)]
     pub force: bool,
 }

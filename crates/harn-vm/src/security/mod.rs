@@ -33,7 +33,9 @@ pub mod battery;
 pub mod behavioral;
 pub mod exfil_precision;
 pub mod file_provenance;
+pub mod hermetic_env;
 pub mod provenance;
+pub mod session_grants;
 pub mod stance_judge;
 
 pub use exfil_precision::{
@@ -41,7 +43,12 @@ pub use exfil_precision::{
     precise_exfil_gate_fires,
 };
 pub use file_provenance::{command_string, path_arguments, FileProvenanceLedger};
+pub use hermetic_env::{resolve_env, ENV_ALLOWLIST};
 pub use provenance::{classify_directive_trust, DirectiveProvenance};
+pub use session_grants::{
+    GrantError, GrantReceipt, GrantSource, GrantSourceSpec, GrantSpec, SessionGrant,
+    SessionProfile, SessionProfileKind,
+};
 
 use crate::value::VmDictExt;
 use std::cell::RefCell;

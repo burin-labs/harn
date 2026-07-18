@@ -40,6 +40,7 @@ pub mod fs_snapshot;
 pub mod fs_watch;
 pub mod host_env_custody;
 pub mod host_lease;
+pub mod host_lease_capability;
 pub mod process;
 mod process_liveness;
 pub mod sandbox;
@@ -57,9 +58,14 @@ mod value_args;
 
 pub use error::HostlibError;
 pub use host_lease::{
-    HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseDeferReason, HostLeaseDeferReceipt,
-    HostLeaseError, HostLeaseHandle, HostLeasePriorityClass, HostLeaseReleaseReceipt,
-    HostLeaseRenewReceipt, HostLeaseRequest, HostLeaseState, HostLeaseStore, HOST_LEASE_ROOT_ENV,
+    HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseCargoExecutionContext,
+    HostLeaseDeferReason, HostLeaseDeferReceipt, HostLeaseError, HostLeaseExecutionContext,
+    HostLeaseHandle, HostLeaseOperationKind, HostLeasePathIdentity, HostLeasePriorityClass,
+    HostLeaseProcessExit, HostLeaseReleaseReceipt, HostLeaseRenewReceipt, HostLeaseRequest,
+    HostLeaseResourceClass, HostLeaseResourceDefinition, HostLeaseResourceKey,
+    HostLeaseRunLaunchFailure, HostLeaseRunReceipt, HostLeaseRunReleaseOutcome,
+    HostLeaseRunStartFailure, HostLeaseRunState, HostLeaseState, HostLeaseStore,
+    HOST_LEASE_ROOT_ENV,
 };
 pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, RegisteredBuiltin};
 
@@ -89,7 +95,8 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(fs_snapshot::FsSnapshotCapability)
         .with(fs_watch::FsWatchCapability)
         .with(tools::ToolsCapability)
-        .with(secret_store::SecretStoreCapability);
+        .with(secret_store::SecretStoreCapability)
+        .with(host_lease_capability::HostLeaseCapability);
     #[cfg(feature = "terminal-session")]
     {
         registry = registry.with(terminal_session::TerminalSessionCapability::new());

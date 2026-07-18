@@ -6,7 +6,10 @@ use bytes::Bytes;
 use futures::stream::BoxStream;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
-use crate::runtime_sqlite::{configure_runtime_sqlite, DEFAULT_BUSY_TIMEOUT};
+use crate::runtime_sqlite::{
+    initialize_runtime_sqlite, require_runtime_sqlite_initialized, RuntimeSqliteSchema,
+    DEFAULT_BUSY_TIMEOUT,
+};
 
 use super::util::{
     event_id_to_sqlite_i64, now_ms, prepare_event_after, sqlite_i64_to_event_id,
@@ -17,6 +20,39 @@ use super::{
     AppendOutcome, CompactReport, ConsumerId, EventId, EventLog, EventLogBackendKind,
     EventLogDescription, LogError, LogEvent, LogEventBytes, Topic,
 };
+
+const SQLITE_SCHEMA: RuntimeSqliteSchema = RuntimeSqliteSchema::new(
+    "event_log",
+    1,
+    "CREATE TABLE IF NOT EXISTS topic_heads (
+        topic TEXT PRIMARY KEY,
+        last_id INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS events (
+        topic TEXT NOT NULL,
+        event_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        payload BLOB NOT NULL,
+        headers TEXT NOT NULL,
+        occurred_at_ms INTEGER NOT NULL,
+        PRIMARY KEY (topic, event_id)
+    );
+    CREATE TABLE IF NOT EXISTS consumers (
+        topic TEXT NOT NULL,
+        consumer_id TEXT NOT NULL,
+        cursor INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL,
+        PRIMARY KEY (topic, consumer_id)
+    );
+    CREATE TABLE IF NOT EXISTS event_idempotency_keys (
+        topic TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        event_id INTEGER NOT NULL,
+        PRIMARY KEY (topic, key, value),
+        FOREIGN KEY (topic, event_id) REFERENCES events(topic, event_id)
+    );",
+);
 
 pub struct SqliteEventLog {
     path: PathBuf,
@@ -50,40 +86,8 @@ impl SqliteEventLog {
         }
         let connection = Connection::open(&path)
             .map_err(|error| LogError::Sqlite(format!("event log open error: {error}")))?;
-        configure_runtime_sqlite(&connection, busy_timeout)
+        initialize_runtime_sqlite(&connection, busy_timeout, &SQLITE_SCHEMA)
             .map_err(|error| LogError::Sqlite(format!("event log sqlite setup error: {error}")))?;
-        connection
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS topic_heads (
-                    topic TEXT PRIMARY KEY,
-                    last_id INTEGER NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS events (
-                    topic TEXT NOT NULL,
-                    event_id INTEGER NOT NULL,
-                    kind TEXT NOT NULL,
-                    payload BLOB NOT NULL,
-                    headers TEXT NOT NULL,
-                    occurred_at_ms INTEGER NOT NULL,
-                    PRIMARY KEY (topic, event_id)
-                );
-                CREATE TABLE IF NOT EXISTS consumers (
-                    topic TEXT NOT NULL,
-                    consumer_id TEXT NOT NULL,
-                    cursor INTEGER NOT NULL,
-                    updated_at_ms INTEGER NOT NULL,
-                    PRIMARY KEY (topic, consumer_id)
-                );
-                CREATE TABLE IF NOT EXISTS event_idempotency_keys (
-                    topic TEXT NOT NULL,
-                    key TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    event_id INTEGER NOT NULL,
-                    PRIMARY KEY (topic, key, value),
-                    FOREIGN KEY (topic, event_id) REFERENCES events(topic, event_id)
-                );",
-            )
-            .map_err(|error| LogError::Sqlite(format!("event log schema error: {error}")))?;
         Ok(Self {
             path,
             connection: Mutex::new(connection),
@@ -97,9 +101,10 @@ impl SqliteEventLog {
             .map_err(|error| {
                 LogError::Sqlite(format!("event log read-only open error: {error}"))
             })?;
-        connection
-            .busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|error| LogError::Sqlite(format!("event log busy-timeout error: {error}")))?;
+        require_runtime_sqlite_initialized(&connection, DEFAULT_BUSY_TIMEOUT, &SQLITE_SCHEMA)
+            .map_err(|error| {
+                LogError::Sqlite(format!("event log read-only setup error: {error}"))
+            })?;
         Ok(Self {
             path,
             connection: Mutex::new(connection),

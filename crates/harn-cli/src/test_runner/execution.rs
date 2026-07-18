@@ -143,6 +143,7 @@ pub(super) async fn execute_case(
                     branch: None,
                     base_ref: None,
                     cleanup: None,
+                    grants: Vec::new(),
                 },
             ));
             if let Some(ref root) = project_root {
