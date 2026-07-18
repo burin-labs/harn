@@ -165,7 +165,7 @@ impl Parse for Opcodes {
 /// See the crate-level doc for syntax. Generated outputs:
 /// - `pub enum Op { ... }` (`#[repr(u8)]`, `Debug + Clone + Copy + Eq`)
 /// - `impl Op { const ALL: &[Self]; const COUNT: usize; fn from_byte(...) -> Option<Self> }`
-/// - `impl crate::vm::Vm { fn execute_op_sync(...); async fn execute_op_async(...) }`
+/// - `impl crate::vm::Vm { fn execute_op_sync(...); fn execute_op_async(...) }`
 /// - `impl crate::chunk::Chunk { fn disassemble_op(...) }`
 /// - One free `pub(crate) fn <flag>(op: Op) -> bool` per declared flag.
 ///   The well-known flags `reads_outer_name` and `adaptive_binary` map
@@ -303,20 +303,28 @@ fn expand(opcodes: &Opcodes) -> syn::Result<TokenStream2> {
             /// Async dispatch table. The caller must have observed `None`
             /// from [`Self::execute_op_sync`] for this opcode; reaching the
             /// catch-all is a coverage bug between the two halves.
-            pub(super) async fn execute_op_async(&mut self, op: Op) -> ::core::result::Result<(), crate::value::VmError> {
-                match op {
-                    #(#async_arms)*
-                    sync_op => {
-                        debug_assert!(
-                            false,
-                            "execute_op_async called with sync opcode {sync_op:?} \
-                             — define_opcodes! kept the two halves aligned"
-                        );
-                        ::core::result::Result::Err(crate::value::VmError::Runtime(format!(
-                            "internal VM dispatch error: {sync_op:?} is not an async opcode"
-                        )))
+            pub(super) fn execute_op_async(
+                &mut self,
+                op: Op,
+            ) -> impl ::core::future::Future<
+                Output = ::core::result::Result<(), crate::value::VmError>,
+            > + ::core::marker::Send
+                   + '_ {
+                OpcodeDispatchFuture::new(async move {
+                    match op {
+                        #(#async_arms)*
+                        sync_op => {
+                            debug_assert!(
+                                false,
+                                "execute_op_async called with sync opcode {sync_op:?} \
+                                 — define_opcodes! kept the two halves aligned"
+                            );
+                            ::core::result::Result::Err(crate::value::VmError::Runtime(format!(
+                                "internal VM dispatch error: {sync_op:?} is not an async opcode"
+                            )))
+                        }
                     }
-                }
+                })
             }
         }
 

@@ -66,6 +66,12 @@ const CLI_COLD_START_BUILD_STEP = "Build release harn"
 
 const CLI_COLD_START_JOB_IF = "(github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))"
 
+const WINDOWS_CACHE_KEY = "workspace-windows"
+
+const WINDOWS_CACHE_INPUTS = ["CARGO_INCREMENTAL", "CARGO_TERM_COLOR", "RUSTC_WRAPPER", "RUSTFLAGS"]
+
+const WINDOWS_SCCACHE_ACTION_PREFIX = "mozilla-actions/sccache-action@"
+
 fn policy_schema() {
   return schema_closed_object(
     {
@@ -326,6 +332,80 @@ fn matching_steps(job, uses: string) -> list {
   return (job?.steps ?? []).filter({ step -> step_uses(step) == uses }).to_list()
 }
 
+fn effective_job_env(workflow, job, key: string) -> string {
+  const value = job?.env?.[key] ?? workflow?.env?.[key]
+  if value == nil {
+    return "<unset>"
+  }
+  return trim(to_string(value))
+}
+
+fn cache_key_inputs(workflow, job) -> list<string> {
+  let inputs = WINDOWS_CACHE_INPUTS
+    .map({ key -> return key + "=" + effective_job_env(workflow, job, key) })
+    .to_list()
+  for step in job?.steps ?? [] {
+    if step_uses(step) == "./.github/actions/rust-cache" {
+      break
+    }
+    const uses = step_uses(step)
+    inputs = inputs
+      + [
+      if uses == "" {
+        "pre-cache-run=" + trim(step?.name ?? "<unnamed>")
+      } else {
+        "pre-cache-uses=" + uses
+      },
+    ]
+  }
+  return inputs
+}
+
+/** Keep the sole native-Windows cache writer byte-compatible with its restore-only PR consumer. */
+pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
+  const consumer = ci_workflow?.jobs?.windows
+  const producer = nightly_workflow?.jobs?.nextest
+  if consumer == nil || producer == nil {
+    return ["workspace-windows must pair ci.yml:windows with windows-nightly.yml:nextest"]
+  }
+  let errors: list<string> = []
+  const consumer_caches = matching_steps(consumer, "./.github/actions/rust-cache")
+  const producer_caches = matching_steps(producer, "./.github/actions/rust-cache")
+  const wrapper_steps = ((consumer?.steps ?? []) + (producer?.steps ?? []))
+    .map({ step -> return step_uses(step) })
+    .filter({ uses -> return uses.starts_with(WINDOWS_SCCACHE_ACTION_PREFIX) })
+    .to_list()
+  if len(wrapper_steps) > 0 {
+    errors = errors
+      + [
+      "workspace-windows producer and consumer must use plain rustc: "
+        + json_stringify(wrapper_steps),
+    ]
+  }
+  if len(consumer_caches) != 1
+    || trim(consumer_caches[0]?.with?.["shared-key"] ?? "") != WINDOWS_CACHE_KEY
+    || save_requested(consumer_caches[0]) {
+    errors = errors + ["ci.yml:windows must restore workspace-windows exactly once without saving"]
+  }
+  if len(producer_caches) != 1
+    || trim(producer_caches[0]?.with?.["shared-key"] ?? "") != WINDOWS_CACHE_KEY
+    || !save_requested(producer_caches[0]) {
+    errors = errors + ["windows-nightly.yml:nextest must write workspace-windows exactly once"]
+  }
+  const consumer_inputs = cache_key_inputs(ci_workflow, consumer)
+  const producer_inputs = cache_key_inputs(nightly_workflow, producer)
+  if consumer_inputs != producer_inputs {
+    errors = errors
+      + [
+      "workspace-windows cache-key inputs drift: consumer="
+        + json_stringify(consumer_inputs)
+        + " producer="
+        + json_stringify(producer_inputs),
+    ]
+  }
+  return errors
+}
+
 fn persistent_sccache_job_errors(
   workflow,
   job_name: string,
@@ -505,6 +585,7 @@ fn main(harness: Harness) {
   }
   const errors = ci_cache_policy_errors(policy, action, node_action, workflows)
     + ci_sccache_policy_errors(sccache_action, workflows["ci.yml"])
+    + windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"])
   if len(errors) > 0 {
     harness.stdio.eprintln("CI cache policy violations:")
     for error in errors {

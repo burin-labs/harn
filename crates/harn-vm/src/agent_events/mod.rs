@@ -37,6 +37,8 @@ mod worker;
 mod from_host_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tool_taxonomy_tests;
 
 pub use agent::AgentEvent;
 pub use host_injection::{

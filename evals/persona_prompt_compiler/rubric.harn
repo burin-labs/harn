@@ -1,4 +1,5 @@
-import { PersonaBlueprintLowering, PersonaPromptCompileReceipt } from "std/personas/compiler"
+import { PersonaBlueprintLowering } from "std/personas/compiler"
+import { PersonaPromptCompileReceipt } from "std/personas/prompt_compiler"
 import "std/schema"
 
 pub const PERSONA_PROMPT_EVAL_ARTIFACT_SCHEMA: string = "harn.persona.prompt_eval_trial.v1"

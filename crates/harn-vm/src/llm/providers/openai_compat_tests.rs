@@ -235,6 +235,10 @@ fn moonshot_kimi_k3_uses_only_its_catalog_authorized_request_knobs() {
             "parameters": {"type": "object"},
         },
     })]);
+    // A forced `required` is deliberately requested to prove the caller clamps
+    // it: K3 always reasons, and Moonshot rejects forced tool_choice with HTTP
+    // 400 "incompatible with thinking enabled", so `required` is not in K3's
+    // `allowed_tool_choice_modes` (`["auto", "none"]`) and must degrade to auto.
     opts.tool_choice = Some(json!("required"));
 
     let payload = LlmRequestPayload::from(&opts);
@@ -243,7 +247,7 @@ fn moonshot_kimi_k3_uses_only_its_catalog_authorized_request_knobs() {
     assert_eq!(body["model"], "kimi-k3");
     assert_eq!(body["max_completion_tokens"], 128);
     assert_eq!(body["reasoning_effort"], "max");
-    assert_eq!(body["tool_choice"], "required");
+    assert_eq!(body["tool_choice"], "auto");
     assert_eq!(body["tools"][0]["function"]["name"], "read");
     for field in [
         "max_tokens",

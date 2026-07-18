@@ -7,6 +7,8 @@
 //! OpenAI-compatible providers.
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ThinkingConfig};
+#[cfg(test)]
+use crate::llm::providers::schema_compat::tests::closed_discriminated_union_schema;
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
@@ -860,6 +862,30 @@ mod tests {
         assert!(body["tools"][1]["parameters"]["properties"]["mode"]
             .get("oneOf")
             .is_none());
+    }
+
+    #[test]
+    fn responses_body_preserves_closed_discriminated_union_as_any_of() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.4".to_string();
+        opts.api_mode = LlmApiMode::Responses;
+        opts.output_format = OutputFormat::JsonSchema {
+            schema: closed_discriminated_union_schema("oneOf", "const"),
+            strict: true,
+        };
+        let payload = LlmRequestPayload::from(&opts);
+
+        let body = OpenAiResponsesProvider::build_request_body(&payload);
+
+        assert_eq!(
+            body["text"]["format"],
+            serde_json::json!({
+                "type": "json_schema",
+                "name": "response",
+                "schema": closed_discriminated_union_schema("anyOf", "enum"),
+                "strict": true
+            })
+        );
     }
 
     #[test]

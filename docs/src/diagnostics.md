@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 66 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 67 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -317,6 +317,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-064`](#harn-lnt-064) | a mutable variable captured from an enclosing scope is reassigned inside a `parallel`/`spawn` body, so concurrent branches share one cell and race | — | — |
 | [`HARN-LNT-065`](#harn-lnt-065) | nil coalesce fallback repeats the left identifier | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-066`](#harn-lnt-066) | the result of a pure collection method is discarded, so the call has no effect on the receiver | — | — |
+| [`HARN-LNT-067`](#harn-lnt-067) | public callable parameter or return is missing an explicit type | — | — |
 
 ## FMT — Formatter
 
@@ -3627,6 +3628,58 @@ lint does not fire. Prefer a `for` loop over `map` when you want effects.
 - A receiver rooted at `harness`, whose methods exist for their effects.
 - A method name the file also declares in an `impl` block, which may be a
   user-defined method with effects of its own.
+
+### `HARN-LNT-067`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+public callable parameter or return is missing an explicit type
+
+A public function or pipeline parameter or return has no explicit type while
+the package enables complete public API contracts.
+
+Untyped private callables remain inferable. Public callables cross a module
+boundary, so their contract must be visible without inspecting the body or a
+particular caller.
+
+```harn
+pub fn load(path) {                  // warning: parameter and return are untyped
+  return {path: path}
+}
+
+pub pipeline deploy(config) {        // warning: parameter and return are untyped
+  return true
+}
+```
+
+#### How to fix
+
+Annotate every public parameter and return:
+
+```harn
+pub fn load(path: string) -> {path: string} {
+  return {path: path}
+}
+
+pub pipeline deploy(config: DeployConfig) -> bool {
+  return true
+}
+```
+
+Use `unknown` or `any` when the boundary is intentionally dynamic. Those are
+explicit contracts; omitting the annotation is not.
+
+Enable this policy for a package with:
+
+```toml
+[lint]
+require_public_api_types = true
+```
+
+or for one lint invocation with `harn lint --require-public-api-types`.
+
+The rule does not choose or insert a type automatically because selecting a
+public contract is an API-design decision.
 
 ### `HARN-FMT-001`
 

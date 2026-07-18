@@ -137,6 +137,55 @@ async fn execution_error_preserves_structured_class_over_misleading_prose() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn execution_error_projects_resource_contention_as_typed_data() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_channel_session().await;
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": session_id,
+                        "prompt": [{
+                            "type": "text",
+                            "text": "throw_error(\"session_store: database is locked\", \"resource_busy\")",
+                        }],
+                    },
+                }))
+                .expect("send session/prompt");
+
+            let mut prompt_response = None;
+            for _ in 0..64 {
+                let message = recv_json(&mut response_rx).await;
+                if message["method"] == "host/capabilities" {
+                    request_tx
+                        .send(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": message["id"].clone(),
+                            "result": {},
+                        }))
+                        .expect("send host capabilities response");
+                    continue;
+                }
+                if message["id"] == 2 {
+                    prompt_response = Some(message);
+                    break;
+                }
+            }
+
+            let response = prompt_response.expect("session/prompt response");
+            assert_prompt_error_data(&response, -32000, "resource_busy");
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn validation_errors_are_typed_protocol_failures() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));

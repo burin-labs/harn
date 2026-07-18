@@ -29,6 +29,11 @@ use super::typescript::*;
 use super::values::*;
 use super::*;
 
+fn protocol_source() -> ProtocolArtifactSource {
+    ProtocolArtifactSource::from_anchor(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+        .expect("harn-cli is compiled from the Harn workspace")
+}
+
 /// Shift-left guard: every `ACP`/`Harn`/`A2A`/`MCP`-prefixed *type* name
 /// referenced in the emitted TypeScript bindings must be declared in the
 /// same artifact. The TS section once used the Python-only name
@@ -271,8 +276,9 @@ fn dispatched_acp_methods_match_artifact() {
     // artifact, this guard fails. We read the adapter source directly so
     // the check has no runtime dependency on a live server. The dispatch
     // `match` lives in the `dispatch` submodule of the ACP adapter.
-    let dispatch =
-        read_repo_text("crates/harn-serve/src/adapters/acp/dispatch.rs").expect("read acp adapter");
+    let dispatch = protocol_source()
+        .read_text("crates/harn-serve/src/adapters/acp/dispatch.rs")
+        .expect("read acp adapter");
     let body = dispatch
         .split_once("match method.as_str() {")
         .expect("dispatch match block")
@@ -335,7 +341,8 @@ fn dispatch_arm_constant_value(trimmed_arm: &str) -> Option<String> {
 
 #[test]
 fn transport_control_acp_methods_match_artifact() {
-    let sessions = read_repo_text("crates/harn-serve/src/adapters/acp/sessions.rs")
+    let sessions = protocol_source()
+        .read_text("crates/harn-serve/src/adapters/acp/sessions.rs")
         .expect("read acp sessions");
     let body = sessions
         .split_once("pub(super) fn apply_session_budget_rearm")
@@ -442,7 +449,8 @@ fn generated_go_includes_harn_wire_vocabularies() {
 #[test]
 fn acp_prompt_error_schema_matches_runtime_terminal_classes() {
     let schema: serde_json::Value = serde_json::from_str(
-        &read_repo_text("conformance/protocols/schemas/acp-session-update.schema.json")
+        &protocol_source()
+            .read_text("conformance/protocols/schemas/acp-session-update.schema.json")
             .expect("read ACP schema"),
     )
     .expect("parse ACP schema");
@@ -556,7 +564,8 @@ fn round_trip_fixture_matches_python_and_go_field_set() {
 #[test]
 fn manifest_advertises_python_and_go_bindings() {
     let manifest: serde_json::Value =
-        serde_json::from_str(&generate_manifest().expect("manifest")).expect("manifest json");
+        serde_json::from_str(&generate_manifest(&protocol_source()).expect("manifest"))
+            .expect("manifest json");
     assert!(manifest["bindings"]["python"]["artifact"].is_string());
     assert!(manifest["bindings"]["go"]["artifact"].is_string());
     assert!(manifest["bindings"]["go"]["modulePath"].is_string());
@@ -636,7 +645,8 @@ fn manifest_advertises_python_and_go_bindings() {
 #[test]
 fn generated_manifest_references_schema_artifacts() {
     let manifest: serde_json::Value =
-        serde_json::from_str(&generate_manifest().expect("manifest")).expect("manifest json");
+        serde_json::from_str(&generate_manifest(&protocol_source()).expect("manifest"))
+            .expect("manifest json");
     for schema in SCHEMA_COPIES {
         assert!(
             manifest["schemas"]
@@ -669,7 +679,7 @@ fn explicit_artifact_version_is_validated_and_stamped_everywhere() {
     assert!(resolve_artifact_version(Some("v9.8.7")).is_err());
     assert!(resolve_artifact_version(Some("next")).is_err());
 
-    let artifacts = generate_artifacts(VERSION).expect("artifacts");
+    let artifacts = generate_artifacts(&protocol_source(), VERSION).expect("artifacts");
     for path in [
         "harn-protocol.ts",
         "HarnProtocol.swift",
@@ -710,10 +720,9 @@ fn explicit_artifact_version_is_validated_and_stamped_everywhere() {
 
 #[test]
 fn committed_protocol_artifacts_match_generator() {
-    let artifacts = generate_artifacts(env!("CARGO_PKG_VERSION")).expect("artifacts");
-    let output_root = repo_root()
-        .expect("test must run from the Harn workspace")
-        .join("spec/protocol-artifacts");
+    let source = protocol_source();
+    let artifacts = generate_artifacts(&source, env!("CARGO_PKG_VERSION")).expect("artifacts");
+    let output_root = source.repo_root().join("spec/protocol-artifacts");
     for artifact in artifacts {
         let path = output_root.join(&artifact.relative_path);
         let on_disk = fs::read_to_string(&path).unwrap_or_else(|error| {

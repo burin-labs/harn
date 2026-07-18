@@ -2,8 +2,10 @@
 // YAML line-by-line (cheaper than a full parse, and mirrors the original
 // Python logic), reduces it to a flat list of `METHOD /path` entries
 // plus component-schema names, and diffs that against the committed
-// `spec/openapi.snapshot` text. Run with `--update` after intentional
-// surface changes; the gate runs without flags from `make check-openapi-snapshot`.
+// `spec/openapi.snapshot` text. `make gen-openapi-snapshot` regenerates the
+// snapshot and embedded copy (this script with `--update`) after intentional
+// surface changes; `make check-openapi-snapshot` runs the flagless drift gate.
+// Both are registered in scripts/generated_artifacts.toml.
 const SPEC_PATH = "spec/openapi.yaml"
 
 const EMBEDDED_SPEC_PATH = "crates/harn-serve/openapi.yaml"
@@ -73,7 +75,7 @@ pipeline main(task) {
   }
   if !harness.fs.exists(EMBEDDED_SPEC_PATH) || harness.fs.read_text(EMBEDDED_SPEC_PATH) != spec_text {
     __io_eprintln(
-      "crates/harn-serve/openapi.yaml is stale. Run `harn run scripts/check_openapi_snapshot.harn -- --update` after reviewing the OpenAPI surface.",
+      "crates/harn-serve/openapi.yaml is stale. Run `make gen-openapi-snapshot` after reviewing the OpenAPI surface.",
     )
     return 1
   }
@@ -86,7 +88,7 @@ pipeline main(task) {
     return 0
   }
   __io_eprintln(
-    "spec/openapi.snapshot is stale. Run `harn run scripts/check_openapi_snapshot.harn -- --update` after reviewing the OpenAPI surface.",
+    "spec/openapi.snapshot is stale. Run `make gen-openapi-snapshot` after reviewing the OpenAPI surface.",
   )
   return 1
 }

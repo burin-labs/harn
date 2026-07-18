@@ -7159,7 +7159,8 @@
         "native": true,
         "text": true,
         "preferred_format": "native",
-        "parity": "unknown",
+        "parity": "interchangeable",
+        "parity_notes": "2026-07-18 credentialed probe (harn 0.10.23, direct Fireworks /v1, N=2): native carried the large backslash/quote/unicode string argument byte-exact on tool_choice auto and required (2/2); the Harn text-tool channel parsed byte-exact 2/2 (finish=stop, no reasoning over-run).",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11309,8 +11310,8 @@
         "native": true,
         "text": true,
         "preferred_format": "native",
-        "parity": "unknown",
-        "parity_notes": "Moonshot documents native OpenAI-compatible tools; credentialed Harn probe not run because MOONSHOT_API_KEY is unavailable in this lane.",
+        "parity": "interchangeable",
+        "parity_notes": "2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode.",
         "tool_search": []
       },
       "structured_output": "native",

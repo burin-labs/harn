@@ -126,8 +126,9 @@ const vault = custom({
 })
 ```
 
-Closure capture in Harn is by-value: a custom backend MUST delegate to a
-real store (HTTP/MCP/vault) inside its closures. See the full reference
+A custom backend MUST delegate to a real store (HTTP/MCP/vault) inside its
+closures rather than a captured local, so state survives process restarts
+and is shared across sessions. See the full reference
 in [OAuth storage stdlib](./stdlib/oauth-storage.md).
 
 ## Authorization-code client (`std/oauth/client`)

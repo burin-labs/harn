@@ -98,8 +98,8 @@ pub(super) struct TypeScope {
     /// (`where T: A, T: B`) or additively (`where T: A + B`); all of them apply.
     /// Used for definition-site checking of generic function bodies.
     pub(super) where_constraints: BTreeMap<String, Vec<TypeExpr>>,
-    /// Variables declared with `var` (mutable). Variables not in this set
-    /// are immutable (`let`, function params, loop vars, etc.).
+    /// Variables declared with `let` (mutable). Variables not in this set
+    /// are immutable (`const`, function params, loop vars, etc.).
     pub(super) mutable_vars: std::collections::BTreeSet<String>,
     /// Variables that have been narrowed by flow-sensitive refinement.
     /// Maps var name → pre-narrowing type (used to restore on reassignment).
@@ -112,7 +112,7 @@ pub(super) struct TypeScope {
     /// contain `.`). Optional (`?.`) and plain (`.`) links collapse to the
     /// same key — the runtime guard inspects the same value either way.
     pub(super) narrowed_paths: BTreeMap<String, PathNarrowing>,
-    /// Mutable vars declared as unannotated `var x = nil`. A local `false`
+    /// Mutable vars declared as unannotated `let x = nil`. A local `false`
     /// entry shadows a parent widenable marker after a new declaration or
     /// after the first successful widening assignment.
     pub(super) nil_widenable_vars: BTreeMap<String, bool>,
@@ -127,7 +127,7 @@ pub(super) struct TypeScope {
     /// `unknown`-typed variable. Drives the exhaustive-narrowing warning at
     /// `unreachable()` / `throw` / `never`-returning calls.
     pub(super) unknown_ruled_out: BTreeMap<String, Vec<String>>,
-    /// Variables whose type came from a user-written annotation (let/var
+    /// Variables whose type came from a user-written annotation (let/const
     /// `: T`, fn param `: T`, fn return type, struct field). Variables in
     /// this set carry an explicit contract, so a property access against a
     /// `Shape` or named struct type is checked strictly. Variables whose
@@ -631,7 +631,7 @@ impl TypeScope {
         self.mutable_vars.insert(name.to_string());
     }
 
-    /// Record that `name`'s type came from a written annotation (let/var
+    /// Record that `name`'s type came from a written annotation (let/const
     /// `: T`, fn param, etc.) rather than literal-driven inference. The
     /// strict missing-field property-access check consults this — a
     /// `let d = {a: 1, b: 2}` whose type is the inferred shape should
@@ -730,7 +730,7 @@ impl TypeScope {
         self.untyped_sources.insert(name.to_string(), String::new());
     }
 
-    /// Check if a variable is mutable (declared with `var`).
+    /// Check if a variable is mutable (declared with `let`).
     pub(super) fn is_mutable(&self, name: &str) -> bool {
         self.mutable_vars.contains(name) || self.parent.as_ref().is_some_and(|p| p.is_mutable(name))
     }

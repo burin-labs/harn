@@ -270,10 +270,22 @@ fn lint_full(
     }
     linter.require_stdlib_metadata = options.require_stdlib_metadata;
     linter.require_docstrings = options.require_docstrings;
+    linter.require_public_api_types = options.require_public_api_types;
     linter
         .persona_step_allowlist
         .extend(options.persona_step_allowlist.iter().cloned());
     linter.lint_program(program);
+    if let Some((module_graph, file_path)) = module_graph {
+        for issue in module_graph.selective_import_issues(file_path) {
+            if let Some(import) = linter
+                .imports
+                .iter_mut()
+                .find(|import| import.span == issue.span)
+            {
+                import.invalid_names.insert(issue.name);
+            }
+        }
+    }
     if let Some(src) = source {
         if options.require_file_header {
             check_require_file_header(src, options.file_path, &mut linter.diagnostics);

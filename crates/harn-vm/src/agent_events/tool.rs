@@ -98,6 +98,9 @@ pub enum ToolCallErrorCategory {
     Timeout,
     /// Transient network / rate-limited / 5xx provider failure.
     Network,
+    /// A shared local resource is temporarily unavailable, such as a
+    /// contended database write lock.
+    ResourceBusy,
     /// The tool was cancelled (e.g. session aborted).
     Cancelled,
     /// The agent loop reached a terminal condition (completion judge `done`,
@@ -114,7 +117,7 @@ pub enum ToolCallErrorCategory {
 }
 
 impl ToolCallErrorCategory {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::SchemaValidation,
         Self::ToolError,
         Self::McpServerError,
@@ -124,6 +127,7 @@ impl ToolCallErrorCategory {
         Self::ParseAborted,
         Self::Timeout,
         Self::Network,
+        Self::ResourceBusy,
         Self::Cancelled,
         Self::AbandonedAtLoopExit,
         Self::Unknown,
@@ -151,6 +155,7 @@ impl ToolCallErrorCategory {
             Self::ParseAborted => "parse_aborted",
             Self::Timeout => "timeout",
             Self::Network => "network",
+            Self::ResourceBusy => "resource_busy",
             Self::Cancelled => "cancelled",
             Self::AbandonedAtLoopExit => "abandoned_at_loop_exit",
             Self::Unknown => "unknown",
@@ -171,6 +176,7 @@ impl ToolCallErrorCategory {
             | Internal::Overloaded
             | Internal::ServerError
             | Internal::TransientNetwork => Self::Network,
+            Internal::ResourceBusy => Self::ResourceBusy,
             Internal::SchemaValidation | Internal::SchemaStreamAborted => Self::SchemaValidation,
             Internal::ToolError => Self::ToolError,
             Internal::ToolRejected => Self::PermissionDenied,

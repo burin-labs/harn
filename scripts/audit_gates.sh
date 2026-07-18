@@ -54,6 +54,7 @@ GATES=(
   check-diagnostics-catalog
   check-protocol-artifacts
   check-connector-schemas
+  check-openapi-snapshot
   check-session-bundle-schema
   check-provider-catalog
   check-provider-catalog-drift

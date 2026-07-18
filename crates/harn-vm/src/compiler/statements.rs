@@ -394,7 +394,7 @@ impl Compiler {
             return Ok(true);
         }
 
-        // Non-local binding (module-level `var`, global): no slot to take, so
+        // Non-local binding (module-level `let`, global): no slot to take, so
         // fall back to clearing the binding's reference between `e` and `Add`
         // so the runtime `try_unwrap` fast path can still fire. Gated to
         // statically-known collections to preserve existing behavior.
@@ -531,7 +531,7 @@ impl Compiler {
         self.begin_scope();
         let finally_floor = self.finally_bodies.len();
         self.compile_destructuring(pattern, true, declaration)?;
-        // A `for`-item binding is reassignable per iteration, so — like a `var`
+        // A `for`-item binding is reassignable per iteration, so — like a `let`
         // — its inferred primitive type may only feed typed-opcode
         // specialization when no reassignment in the loop body can change its
         // primitive kind. Otherwise drop the primitive fact and stay on the

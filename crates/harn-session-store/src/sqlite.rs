@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use harn_sqlite::{initialize_file, initialize_transient, SchemaVersion};
+use harn_sqlite::{
+    initialize_file, initialize_transient, sqlite_contention, SchemaVersion, SqliteContention,
+};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use uuid::Uuid;
 
@@ -29,7 +31,8 @@ use super::signing::{
 use super::store::{
     CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ReadRange,
     SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore, Snapshot, SnapshotId,
-    StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport, MAX_READ_BATCH,
+    StoreContention, StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport,
+    MAX_READ_BATCH,
 };
 
 const SCHEMA_VERSION: i64 = 2;
@@ -224,7 +227,28 @@ fn initialize_session_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
 }
 
 fn map_sql(error: rusqlite::Error) -> StoreError {
-    StoreError::Backend(error.to_string())
+    let message = error.to_string();
+    match sqlite_contention(&error) {
+        Some(SqliteContention::Busy) => StoreError::Contention {
+            kind: StoreContention::DatabaseBusy,
+            message,
+        },
+        Some(SqliteContention::Locked) => StoreError::Contention {
+            kind: StoreContention::DatabaseLocked,
+            message,
+        },
+        None => StoreError::Backend(message),
+    }
+}
+
+fn write_transaction(conn: &mut Connection) -> StoreResult<Transaction<'_>> {
+    // These operations read before they write. With SQLite's default DEFERRED
+    // transaction, two writers can both acquire read locks and then form an
+    // upgrade deadlock; SQLite intentionally skips the busy handler in that
+    // case and returns SQLITE_BUSY immediately. Acquire writer ownership at
+    // the boundary so the configured busy policy can serialize contenders.
+    conn.transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(map_sql)
 }
 
 fn map_create_sql(error: rusqlite::Error, session_id: &str) -> StoreError {
@@ -648,9 +672,7 @@ impl SessionImporter for SqliteSessionStore {
     async fn import(&self, request: ImportSession) -> StoreResult<ImportResult> {
         request.validate()?;
         let mut conn = self.lock();
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         if let Some(existing) = read_import(&tx, &request.source_id)? {
             if existing.source_digest != request.source_digest {
                 return Err(StoreError::Conflict(format!(
@@ -709,8 +731,10 @@ impl SessionStore for SqliteSessionStore {
 
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
         let meta = super::memory_helpers::meta_for_create(request);
-        let conn = self.lock();
-        insert_session(&conn, &meta, 1)?;
+        let mut conn = self.lock();
+        let tx = write_transaction(&mut conn)?;
+        insert_session(&tx, &meta, 1)?;
+        tx.commit().map_err(map_sql)?;
         Ok(meta)
     }
 
@@ -800,7 +824,7 @@ impl SessionStore for SqliteSessionStore {
 
     async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent> {
         let mut conn = self.lock();
-        let tx = conn.transaction().map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         let stored = append_in_tx(&tx, &self.hooks, session_id, event)?;
         tx.commit().map_err(map_sql)?;
         Ok(stored)
@@ -853,7 +877,7 @@ impl SessionStore for SqliteSessionStore {
         child_id: Option<SessionId>,
     ) -> StoreResult<ForkResult> {
         let mut conn = self.lock();
-        let tx = conn.transaction().map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         let (parent_meta, _) = read_session_meta(&tx, session_id)?;
         let parent_events = load_all_events(&tx, session_id)?;
         if !parent_events
@@ -917,7 +941,7 @@ impl SessionStore for SqliteSessionStore {
         at_event_id: EventId,
     ) -> StoreResult<TruncateResult> {
         let mut conn = self.lock();
-        let tx = conn.transaction().map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         let (mut meta, _) = read_session_meta(&tx, session_id)?;
         let exists: bool = tx
             .query_row(
@@ -1043,7 +1067,7 @@ impl SessionStore for SqliteSessionStore {
 
     async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {
         let mut conn = self.lock();
-        let tx = conn.transaction().map_err(map_sql)?;
+        let tx = write_transaction(&mut conn)?;
         // Read the pre-receipt chain root inside the transaction so the
         // root we sign is exactly the chain the receipt finalises, with
         // no window for a concurrent append to move the tip.
@@ -1153,3 +1177,7 @@ impl SessionStore for SqliteSessionStore {
         ))
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_tests.rs"]
+mod tests;

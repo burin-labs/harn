@@ -1,12 +1,8 @@
-//! Lightweight `harn.toml` loader for `harn fmt`, `harn lint`, and
-//! `harn eval prompt --fleet-name <name>`.
+//! Typed project configuration shared by Harn's CLI and language tooling.
 //!
-//! This module is intentionally separate from `crate::package` (which owns
-//! the richer `[check]` + `[dependencies]` manifest model used by
-//! `harn check`, `harn install`, etc.). `harn.toml` can carry both sets of
-//! keys; this loader focuses on the `[fmt]`, `[lint]`, and `[eval.fleets]`
-//! sections and walks up from an input file looking for the nearest
-//! manifest.
+//! `harn.toml` can carry many sections. This loader exposes the generic
+//! `[fmt]`, `[lint]`, and `[eval.fleets]` policy used by every frontend and
+//! walks up from an input file looking for the nearest manifest.
 //!
 //! Recognized keys (snake_case, Cargo-style):
 //!
@@ -20,6 +16,7 @@
 //! disabled = ["unused-import"]
 //! require_file_header = false
 //! require_docstrings = false
+//! require_public_api_types = false
 //! complexity_threshold = 25
 //! persona_step_allowlist = ["legacy_helper"]
 //! template_variant_branch_threshold = 3
@@ -50,8 +47,7 @@ const MANIFEST: &str = "harn.toml";
 /// (e.g. a user's home directory or `/tmp`).
 const MAX_PARENT_DIRS: usize = 16;
 
-/// Combined `harn.toml` view used by `harn fmt`, `harn lint`, and
-/// `harn eval prompt`.
+/// Generic `harn.toml` view shared by the CLI, LSP, and future frontends.
 #[derive(Debug, Default, Clone)]
 pub struct HarnConfig {
     pub fmt: FmtConfig,
@@ -82,6 +78,10 @@ pub struct LintConfig {
     /// Off by default — out of the box, `pub fn` needs no docs.
     #[serde(default, alias = "require-docstrings")]
     pub require_docstrings: Option<bool>,
+    /// Require explicit parameter and return annotations on every public
+    /// function and pipeline.
+    #[serde(default, alias = "require-public-api-types")]
+    pub require_public_api_types: Option<bool>,
     /// Override the default cyclomatic-complexity warning threshold
     /// (see `harn_lint::DEFAULT_COMPLEXITY_THRESHOLD`). Accept both
     /// snake_case and kebab-case for consistency with the other keys.
@@ -95,11 +95,35 @@ pub struct LintConfig {
     /// to [`harn_lint::DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD`].
     #[serde(default, alias = "template-variant-branch-threshold")]
     pub template_variant_branch_threshold: Option<usize>,
-    /// `[lint.severity]` — per-rule severity overrides (#2851), a rule id →
-    /// `"error"` / `"warning"` / `"info"`. Applied after disable-filtering, so
-    /// a project can promote one rule to an error and demote another.
+    /// `[lint.severity]` — typed per-rule severity overrides (#2851). Parsed
+    /// here so every frontend observes the same normalized policy.
     #[serde(default)]
-    pub severity: std::collections::HashMap<String, String>,
+    pub severity: std::collections::HashMap<String, LintSeverity>,
+}
+
+/// Canonical severity used by project lint configuration and lint diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LintSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+impl<'de> Deserialize<'de> for LintSeverity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.to_ascii_lowercase().as_str() {
+            "info" => Ok(Self::Info),
+            "warning" | "warn" => Ok(Self::Warning),
+            "error" => Ok(Self::Error),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown lint severity `{other}`; expected `info`, `warning`, or `error`"
+            ))),
+        }
+    }
 }
 
 /// `[eval]` section of `harn.toml`. Reserves a `[eval.fleets.<name>]`
@@ -248,6 +272,7 @@ mod tests {
         assert!(cfg.lint.disabled.is_none());
         assert!(cfg.lint.require_file_header.is_none());
         assert!(cfg.lint.require_docstrings.is_none());
+        assert!(cfg.lint.require_public_api_types.is_none());
     }
 
     #[test]
@@ -265,6 +290,11 @@ separator_width = 60
 disabled = ["unused-import", "missing-harndoc"]
 require_file_header = true
 require_docstrings = true
+require_public_api_types = true
+
+[lint.severity]
+missing-public-api-type = "ERROR"
+unused-import = "warn"
 "#,
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
@@ -277,6 +307,14 @@ require_docstrings = true
         );
         assert_eq!(cfg.lint.require_file_header, Some(true));
         assert_eq!(cfg.lint.require_docstrings, Some(true));
+        assert_eq!(cfg.lint.require_public_api_types, Some(true));
+        assert_eq!(
+            cfg.lint.severity,
+            std::collections::HashMap::from([
+                ("missing-public-api-type".to_string(), LintSeverity::Error,),
+                ("unused-import".to_string(), LintSeverity::Warning),
+            ])
+        );
     }
 
     #[test]
@@ -310,6 +348,27 @@ line_width = 80
             Err(ConfigError::Parse { .. }) => {}
             other => panic!("expected Parse error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn unknown_lint_severity_is_a_config_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_file(
+            tmp.path(),
+            "harn.toml",
+            "[lint.severity]\nmissing-public-api-type = \"urgent\"\n",
+        );
+        let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
+        let error = load_for_path(&harn_file).expect_err("unknown severity must fail closed");
+        let ConfigError::Parse { path, message } = error else {
+            panic!("expected a typed parse error, got {error:?}");
+        };
+        assert_eq!(path, tmp.path().join("harn.toml"));
+        assert!(
+            message
+                .contains("unknown lint severity `urgent`; expected `info`, `warning`, or `error`"),
+            "serde/toml location prose may vary, but the owned reason must survive: {message}"
+        );
     }
 
     #[test]
@@ -348,6 +407,7 @@ separator-width = 72
 [lint]
 require-file-header = true
 require-docstrings = true
+require-public-api-types = true
 ",
         );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
@@ -356,6 +416,7 @@ require-docstrings = true
         assert_eq!(cfg.fmt.separator_width, Some(72));
         assert_eq!(cfg.lint.require_file_header, Some(true));
         assert_eq!(cfg.lint.require_docstrings, Some(true));
+        assert_eq!(cfg.lint.require_public_api_types, Some(true));
     }
 
     #[test]

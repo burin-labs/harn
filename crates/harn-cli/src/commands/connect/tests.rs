@@ -71,6 +71,7 @@ fn derives_linear_resource_types_from_trigger_events() {
         manifest_path: PathBuf::from("/tmp/harn.toml"),
         package_name: None,
         exports: Default::default(),
+        execution_guard: None,
         table_index: 0,
         shape_error: None,
     };
