@@ -50,7 +50,8 @@ fi
 for asset in \
   'crates/harn-parser/src/diagnostic_codes/explanations/HARN-OWN-003.md' \
   'crates/harn-vm/src/llm/capabilities.toml' \
-  'crates/harn-stdlib/src/stdlib/cli/scaffold/init.harn'; do
+  'crates/harn-stdlib/src/stdlib/cli/scaffold/init.harn' \
+  'tree-sitter-harn/src/node-types.json'; do
   : > "$record"
   printf '%s\n' "$asset" > "$tmp/asset"
   hook_check_generated_registry "$tmp/asset"

@@ -5,11 +5,12 @@ HOOK_RUST_PATTERN='(^Cargo\.toml$|^Cargo\.lock$|\.rs$|^crates/[^/]+/Cargo\.toml$
 # HOOK_RUST_PATTERN, which answers "is there Rust source to format/lint" —
 # this answers "could the binary be stale". Crates compile non-Rust assets in
 # via include_str!/include_bytes! (capability tables, diagnostic explanations,
-# stdlib sources, bytecode), and editing one changes generated output without
-# touching a single .rs file. Matching all of ^crates/ leaves the
-# which-files-matter question to cargo, which already tracks those includes as
-# build dependencies; a path it does not consider an input rebuilds nothing.
-HOOK_BINARY_INPUT_PATTERN='(^Cargo\.toml$|^Cargo\.lock$|\.rs$|^crates/)'
+# stdlib sources, bytecode, and tree-sitter queries), and editing one changes
+# generated output without touching a single .rs file. Matching the production
+# package roots leaves the which-files-matter question to cargo, which already
+# tracks those includes as build dependencies; a path it does not consider an
+# input rebuilds nothing.
+HOOK_BINARY_INPUT_PATTERN='(^Cargo\.toml$|^Cargo\.lock$|\.rs$|^crates/|^tree-sitter-harn/)'
 HOOK_TEST_PATTERN='(^Cargo\.toml$|^Cargo\.lock$|\.rs$|\.harn$|^crates/|^conformance/|^experiments/|^scripts/)'
 HOOK_HARN_PATTERN='(\.harn$|^conformance/tests/|^experiments/)'
 HOOK_MARKDOWN_PATTERN='\.md$'
