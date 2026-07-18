@@ -34,8 +34,6 @@ mod audit;
 mod lookup;
 #[cfg(test)]
 mod lookup_tests_kimi;
-#[cfg(test)]
-mod lookup_tests_system_placement;
 mod model;
 mod overrides;
 mod rule;
@@ -55,27 +53,8 @@ pub use lookup::{
 };
 pub use model::{
     Capabilities, CapabilitiesFile, ComputerUseStyle, GovernorBackoff, ProviderDefaults,
-    ProviderLimits, ReasoningHistoryWireField, ScreenshotScaling, SystemMessagePlacement,
-    WireDialect,
+    ProviderLimits, ReasoningHistoryWireField, ScreenshotScaling, WireDialect,
 };
-
-/// Resolve the effective placement for an interleaved `system`/`developer`
-/// message on this route. An explicit `system_message_placement` capability
-/// wins; otherwise derive from the wire dialect — OpenAI Chat/Responses and
-/// Ollama carry a system/developer message at any position ([`Inline`]), and
-/// every other dialect exposes only a top-level system channel ([`Fold`]).
-///
-/// [`Inline`]: SystemMessagePlacement::Inline
-/// [`Fold`]: SystemMessagePlacement::Fold
-pub(crate) fn resolve_system_message_placement(caps: &Capabilities) -> SystemMessagePlacement {
-    if let Some(explicit) = caps.system_message_placement {
-        return explicit;
-    }
-    match caps.message_wire_format {
-        WireDialect::OpenAiCompat | WireDialect::Ollama => SystemMessagePlacement::Inline,
-        WireDialect::Anthropic | WireDialect::Gemini => SystemMessagePlacement::Fold,
-    }
-}
 pub use rule::ProviderRule;
 pub use tool_format::{
     no_viable_tool_channel, no_viable_tool_channel_with_caps, validate_tool_format,

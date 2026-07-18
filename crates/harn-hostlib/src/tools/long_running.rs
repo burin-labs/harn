@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 
 use harn_vm::VmValue;
@@ -64,8 +64,6 @@ struct CancelState {
     timed_out: AtomicBool,
     /// Structural process-tree cleanup evidence returned by the killer.
     process_cleanup: Mutex<Option<process_handle::ProcessCleanupReport>>,
-    /// Wakes the waiter after cancellation has produced its cleanup receipt.
-    process_cleanup_ready: Condvar,
 }
 
 #[derive(Default)]
@@ -281,7 +279,6 @@ pub(crate) fn spawn_long_running_with_options(
         cancelled: AtomicBool::new(false),
         timed_out: AtomicBool::new(false),
         process_cleanup: Mutex::new(None),
-        process_cleanup_ready: Condvar::new(),
     });
 
     {
@@ -429,17 +426,11 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
 
     let cancelled = cancel_state.cancelled.load(Ordering::Acquire);
     let timed_out = cancelled && cancel_state.timed_out.load(Ordering::Acquire);
-    let mut process_cleanup = cancel_state
+    let process_cleanup = cancel_state
         .process_cleanup
         .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if cancelled {
-        process_cleanup = cancel_state
-            .process_cleanup_ready
-            .wait_while(process_cleanup, |cleanup| cleanup.is_none())
-            .unwrap_or_else(|poison| poison.into_inner());
-    }
-    let process_cleanup = process_cleanup.clone();
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clone();
 
     let (exit_code, signal_name) = match status {
         Some(s) => decode_exit_status(s),
@@ -820,7 +811,6 @@ fn do_kill(killer: Arc<dyn ProcessKiller>, cancel_state: Arc<CancelState>) {
             None => *stored = Some(report),
         }
     }
-    cancel_state.process_cleanup_ready.notify_all();
     cancel_state.cancelled.store(true, Ordering::Release);
 }
 

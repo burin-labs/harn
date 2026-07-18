@@ -16,10 +16,6 @@ preferred_tool_format = "native"
 message_wire_format = "anthropic"
 native_tool_wire_format = "anthropic"
 recommended_endpoint = "/model/{model}/converse"
-# Bedrock Converse has only a top-level `system[]` field — no positional system
-# channel — so an interleaved directive folds into the adjacent user turn rather
-# than mis-deriving to `inline` from the non-`anthropic` catch-all wire format.
-system_message_placement = "fold"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -35,10 +31,6 @@ native_tools = true
 batch_api = true
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
-# Bedrock Converse has only a top-level `system[]` field — no positional system
-# channel — so an interleaved directive folds into the adjacent user turn rather
-# than mis-deriving to `inline` from the non-`anthropic` catch-all wire format.
-system_message_placement = "fold"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -54,10 +46,6 @@ native_tools = true
 batch_api = true
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
-# Bedrock Converse has only a top-level `system[]` field — no positional system
-# channel — so an interleaved directive folds into the adjacent user turn rather
-# than mis-deriving to `inline` from the non-`anthropic` catch-all wire format.
-system_message_placement = "fold"
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
