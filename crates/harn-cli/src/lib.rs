@@ -295,7 +295,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             };
 
             if let Some(resume_target) = args.resume.as_deref() {
-                commands::run::run_resume_with_skill_dirs(
+                let exit_code = commands::run::run_resume_with_skill_dirs(
                     resume_target,
                     args.trace,
                     denied,
@@ -310,6 +310,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     control_options,
                 )
                 .await;
+                runtime::exit_on_error(exit_code);
                 return;
             }
 
@@ -329,12 +330,13 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     let (wrapped, tmp) = commands::run::prepare_eval_temp_file(code)
                         .unwrap_or_else(|e| command_error(&e));
                     let tmp_path: PathBuf = tmp.path().to_path_buf();
-                    fs::write(&tmp_path, &wrapped).unwrap_or_else(|e| {
-                        command_error(&format!("failed to write temp file for -e: {e}"))
-                    });
+                    if let Err(error) = fs::write(&tmp_path, &wrapped) {
+                        drop(tmp);
+                        command_error(&format!("failed to write temp file for -e: {error}"));
+                    }
                     let tmp_str = tmp_path.to_string_lossy().into_owned();
-                    if args.explain_cost {
-                        commands::run::run_explain_cost_file_with_skill_dirs(&tmp_str);
+                    let exit_code = if args.explain_cost {
+                        commands::run::run_explain_cost_file_with_skill_dirs(&tmp_str)
                     } else {
                         commands::run::run_file_with_skill_dirs(
                             &tmp_str,
@@ -351,13 +353,14 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                             control_options.clone(),
                             harnpack_options.clone(),
                         )
-                        .await;
-                    }
+                        .await
+                    };
                     drop(tmp);
+                    runtime::exit_on_error(exit_code);
                 }
                 (None, Some(file)) => {
-                    if args.explain_cost {
-                        commands::run::run_explain_cost_file_with_skill_dirs(file);
+                    let exit_code = if args.explain_cost {
+                        commands::run::run_explain_cost_file_with_skill_dirs(file)
                     } else {
                         commands::run::run_file_with_skill_dirs(
                             file,
@@ -374,8 +377,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                             control_options,
                             harnpack_options,
                         )
-                        .await;
-                    }
+                        .await
+                    };
+                    runtime::exit_on_error(exit_code);
                 }
                 (Some(_), Some(_)) => command_error(
                     "`harn run` accepts either `-e <code>` or `<file.harn>`, not both",
@@ -447,9 +451,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 )
                 .await;
                 println!("{}", json_envelope::to_string_pretty(&outcome.envelope));
-                if outcome.exit_code != 0 {
-                    process::exit(outcome.exit_code);
-                }
+                runtime::exit_on_error(outcome.exit_code);
                 return;
             }
             let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
@@ -667,9 +669,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 ProviderCatalogCommand::Show(show) => {
                     refresh_provider_catalog_if_requested(&show).await;
                     let exit_code = dispatch_provider_catalog(show.available_only).await;
-                    if exit_code != 0 {
-                        process::exit(exit_code);
-                    }
+                    runtime::exit_on_error(exit_code);
                 }
             },
             ProviderCommand::Ready(ready) => {
