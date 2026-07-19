@@ -60,9 +60,7 @@ impl FileStore {
         }
         let bytes = serde_json::to_vec_pretty(map)
             .map_err(|err| io::Error::other(format!("serialize credentials map: {err}")))?;
-        atomic_write(&path, &bytes)?;
-        apply_file_permissions(&path)?;
-        Ok(())
+        harn_vm::atomic_io::atomic_write_with_mode(&path, &bytes, CREDENTIALS_FILE_MODE)
     }
 }
 
@@ -127,10 +125,6 @@ fn home_dir() -> Option<PathBuf> {
     harn_vm::user_dirs::home_dir()
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    harn_vm::atomic_io::atomic_write(path, bytes)
-}
-
 #[cfg(unix)]
 fn apply_dir_permissions(dir: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -142,13 +136,8 @@ fn apply_dir_permissions(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
-fn apply_file_permissions(file: &Path) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(file, fs::Permissions::from_mode(0o600))
-}
-
-#[cfg(not(unix))]
-fn apply_file_permissions(_file: &Path) -> io::Result<()> {
-    Ok(())
-}
+/// Owner-only permissions for the credentials file itself. Applied to the
+/// temp file before the rename, so the secrets are never briefly readable at
+/// the umask default. Ignored on non-Unix targets, matching the surrounding
+/// directory-permission handling.
+const CREDENTIALS_FILE_MODE: u32 = 0o600;

@@ -33,13 +33,13 @@
 //! mismatch is returned as `Ok(None)` so the caller transparently
 //! recompiles. Real I/O errors propagate.
 //!
-//! Concurrency: writes are atomic (write-tmp-then-rename), and parallel
-//! invocations on a cache miss race safely — the last writer wins, but
-//! every reader observes a consistent file because the rename is atomic
-//! on every supported filesystem.
+//! Concurrency: writes go through [`crate::atomic_io`] (write-tmp, fsync,
+//! rename, fsync parent dir), and parallel invocations on a cache miss race
+//! safely — the last writer wins, but every reader observes a consistent file
+//! because the rename is atomic on every supported filesystem.
 
 use std::fs;
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -375,12 +375,12 @@ fn ensure_parent_dir(path: &Path) -> io::Result<()> {
 
 fn write_atomic_chunk(target: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
     let buf = serialize_chunk_artifact(key, chunk)?;
-    write_atomic(target, &buf)
+    crate::atomic_io::atomic_write(target, &buf)
 }
 
 fn write_atomic_module(target: &Path, key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<()> {
     let buf = serialize_module_artifact(key, artifact)?;
-    write_atomic(target, &buf)
+    crate::atomic_io::atomic_write(target, &buf)
 }
 
 /// Serialize an entry-chunk artifact (header + payload) to bytes. The
@@ -428,36 +428,6 @@ fn encode_artifact(key: &CacheKey, kind: u8, payload: &[u8]) -> Vec<u8> {
     buf.extend_from_slice(&key.context_hash);
     buf.extend_from_slice(payload);
     buf
-}
-
-fn write_atomic(target: &Path, buf: &[u8]) -> io::Result<()> {
-    let tmp_path = atomic_tmp_path(target);
-    let mut tmp_file = fs::File::create(&tmp_path)?;
-    tmp_file.write_all(buf)?;
-    tmp_file.sync_all()?;
-    drop(tmp_file);
-    match fs::rename(&tmp_path, target) {
-        Ok(()) => Ok(()),
-        Err(err) => {
-            let _ = fs::remove_file(&tmp_path);
-            Err(err)
-        }
-    }
-}
-
-fn atomic_tmp_path(target: &Path) -> PathBuf {
-    static NEXT_TMP_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let id = NEXT_TMP_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp_name = match target.file_name() {
-        Some(name) => format!(
-            ".{}.{}.{}.tmp",
-            name.to_string_lossy(),
-            std::process::id(),
-            id
-        ),
-        None => format!(".harn-cache.{}.{}.tmp", std::process::id(), id),
-    };
-    target.with_file_name(tmp_name)
 }
 
 /// Parsed cache header. Read by both the chunk and module loaders so the
@@ -1041,17 +1011,6 @@ mod tests {
         payload.push(0xFF);
 
         assert!(deserialize_cache_payload::<CachedChunk>(&payload).is_err());
-    }
-
-    #[test]
-    fn atomic_temp_paths_are_unique_within_process() {
-        let target = Path::new("entry.harnbc");
-        let first = atomic_tmp_path(target);
-        let second = atomic_tmp_path(target);
-        assert_ne!(
-            first, second,
-            "same-process concurrent cache writes must not share a temp file"
-        );
     }
 
     #[test]
