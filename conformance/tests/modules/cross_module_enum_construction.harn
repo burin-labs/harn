@@ -12,7 +12,7 @@
 // imported `pub fn` (`make_cross_module_enum`), a cross-module `match`
 // round-trip over the imported enum (`describe`), and a `pub const` that
 // constructs a variant at import-init time (`DEFAULT_ENUM`).
-import { make_cross_module_enum, describe, DEFAULT_ENUM } from "cross_module_enum_construction_lib"
+import { DEFAULT_ENUM, describe, make_cross_module_enum } from "cross_module_enum_construction_lib"
 
 pipeline default() {
   __io_println(describe(make_cross_module_enum(3)))
