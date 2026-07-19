@@ -9,6 +9,10 @@ trap 'rm -rf "$tmpdir"' EXIT
 summary="$tmpdir/summary.md"
 log="$tmpdir/output.log"
 
+# Cache hits accelerate this lane but must not be required for it to finish.
+rust_test_block="$(sed -n '/^  rust-test:/,/^  rust-security:/p' "$repo_root/.github/workflows/ci.yml")"
+grep -qx '    timeout-minutes: 30' <<<"$rust_test_block"
+
 # shellcheck disable=SC2016 # child bash expands CARGO_BUILD_JOBS
 env -u CARGO_BUILD_JOBS GITHUB_STEP_SUMMARY="$summary" \
   "$script" bash -c 'test "$CARGO_BUILD_JOBS" = "2"' \
