@@ -225,6 +225,10 @@ fn semantic_token_allowances_are_narrow() {
     let crlf = "// comment\r\nfn f() {\r\n}\r\n";
     let lf = "// comment\nfn f() {\n}\n";
     assert_same_semantic_tokens(crlf, lf).unwrap();
+
+    let block_crlf = "/* first\r\n * second\r\n */\r\nfn f() {\r\n}\r\n";
+    let block_lf = "/* first\n * second\n */\nfn f() {\n}\n";
+    assert_same_semantic_tokens(block_crlf, block_lf).unwrap();
 }
 
 fn semantic_tokens(source: &str) -> Result<Vec<TokenKind>, String> {
