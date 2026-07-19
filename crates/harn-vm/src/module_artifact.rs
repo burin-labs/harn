@@ -444,11 +444,11 @@ pub fn run() { return Status.Ready() }
     fn private_declarations_do_not_expand_module_init() {
         let artifact = compile_module_artifact_from_source(
             Path::new("<test>/private-declarations.harn"),
-            r#"
+            r"
 enum PrivateStatus { Ready }
 struct PrivateConfig { value: int }
 pub fn run() { return PrivateStatus.Ready }
-"#,
+",
         )
         .expect("private declarations compile");
 
