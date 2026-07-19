@@ -1,4 +1,6 @@
 use super::*;
+
+use crate::format::shell_quote_path;
 use base64::Engine as _;
 
 #[derive(Debug, Clone)]
@@ -898,16 +900,4 @@ pub(super) fn sanitize_branch_segment(value: &str) -> String {
             }
         })
         .collect()
-}
-
-pub(super) fn shell_quote_path(path: &Path) -> String {
-    let raw = path.display().to_string();
-    if raw
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'-' | b'_'))
-    {
-        raw
-    } else {
-        format!("'{}'", raw.replace('\'', "'\\''"))
-    }
 }

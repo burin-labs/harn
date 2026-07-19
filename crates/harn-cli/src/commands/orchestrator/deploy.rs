@@ -446,7 +446,7 @@ impl SecretSyncPlan {
                 format!(
                     "sync {} secret(s) to Render service {} via API: {}",
                     self.secrets.len(),
-                    shell_quote(&self.target),
+                    shell_words::quote(&self.target),
                     keys
                 )
             }
@@ -454,7 +454,7 @@ impl SecretSyncPlan {
                 format!(
                     "sync {} secret(s) to Fly app {} via Machines API: {}",
                     self.secrets.len(),
-                    shell_quote(&self.target),
+                    shell_words::quote(&self.target),
                     keys
                 )
             }
@@ -462,7 +462,7 @@ impl SecretSyncPlan {
                 format!(
                     "sync {} secret(s) to Railway service {} via GraphQL API: {}",
                     self.secrets.len(),
-                    shell_quote(&self.target),
+                    shell_words::quote(&self.target),
                     keys
                 )
             }
@@ -763,7 +763,7 @@ impl PlannedCommand {
     }
 
     fn display(&self) -> String {
-        let mut rendered = shell_quote(&self.program);
+        let mut rendered = shell_words::quote(&self.program).into_owned();
         for (index, arg) in self.args.iter().enumerate() {
             rendered.push(' ');
             let display_arg = if self.sensitive_args.contains(&index) {
@@ -771,12 +771,12 @@ impl PlannedCommand {
             } else {
                 arg.clone()
             };
-            rendered.push_str(&shell_quote(&display_arg));
+            rendered.push_str(&shell_words::quote(&display_arg));
         }
         if let Some(cwd) = &self.cwd {
             format!(
                 "(cd {} && {rendered})",
-                shell_quote(&cwd.display().to_string())
+                shell_words::quote(&cwd.display().to_string())
             )
         } else {
             rendered
@@ -991,16 +991,6 @@ fn path_segment(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
-fn shell_quote(value: &str) -> String {
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '-' | '_' | ':' | '='))
-    {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 fn redact_arg(value: &str) -> String {
     match value.split_once('=') {
         Some((key, _)) => format!("{key}=***"),
@@ -1160,5 +1150,23 @@ mod tests {
         assert!(command
             .display()
             .contains("/repo/ops/deploy/fly/Dockerfile"));
+    }
+
+    /// An intentionally-empty argument must survive rendering as `''`. The
+    /// previous hand-rolled quoter tested `value.chars().all(is_safe)`, which
+    /// is vacuously true for `""`, so the argument rendered as nothing at all
+    /// and silently vanished from the emitted command line.
+    #[test]
+    fn display_preserves_empty_argument() {
+        let mut command = PlannedCommand::new("flyctl");
+        command.args(["secrets", "set", "FOO="]).arg("");
+        assert_eq!(command.display(), "flyctl secrets set 'FOO=' ''");
+    }
+
+    #[test]
+    fn display_quotes_arguments_containing_shell_metacharacters() {
+        let mut command = PlannedCommand::new("flyctl");
+        command.arg("a b").arg("it's").arg("plain");
+        assert_eq!(command.display(), r#"flyctl 'a b' 'it'\''s' plain"#);
     }
 }

@@ -2886,7 +2886,7 @@ fn test_windows_process_sandbox_denies_write_outside_workspace() {
 
 #[cfg(target_os = "linux")]
 fn shell_quote(path: &std::path::Path) -> String {
-    format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+    shell_words::quote(&path.to_string_lossy()).into_owned()
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]

@@ -50,6 +50,15 @@ pub(crate) fn format_duration_coarse(value: StdDuration) -> String {
     format!("{}d", seconds / (60 * 60 * 24))
 }
 
+/// Quote a path for inclusion in a copy-pasteable shell command line.
+///
+/// Delegates to `shell_words::quote` so every emitted command line shares one
+/// definition of "safe to leave bare"; non-UTF-8 components are rendered
+/// lossily, matching how the path would be displayed elsewhere.
+pub(crate) fn shell_quote_path(path: &Path) -> String {
+    shell_words::quote(&path.to_string_lossy()).into_owned()
+}
+
 /// Render a millisecond duration with a single decimal point of precision
 /// for the ">= 1s" cases (used by portal output).
 pub(crate) fn format_duration_ms(duration_ms: u64) -> String {

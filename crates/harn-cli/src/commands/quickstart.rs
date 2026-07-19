@@ -592,7 +592,7 @@ fn push_env_if_missing(
     if env_file_has_key(existing, key) {
         return;
     }
-    let assignment = format!("{key}={}", shell_quote(value));
+    let assignment = format!("{key}={}", shell_words::quote(value));
     if commented {
         additions.push(format!("# {assignment}"));
     } else {
@@ -803,10 +803,6 @@ fn toml_quote(value: &str) -> String {
     }
     out.push('"');
     out
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 #[cfg(test)]

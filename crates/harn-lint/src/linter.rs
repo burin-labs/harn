@@ -1568,7 +1568,7 @@ impl<'a> Linter<'a> {
         let matching_personas: Vec<_> = self
             .persona_steps
             .iter()
-            .filter(|(persona, _)| Self::simple_glob_match(persona_pattern, persona))
+            .filter(|(persona, _)| harn_glob::match_name(persona_pattern, persona))
             .collect();
         if matching_personas.is_empty() {
             self.diagnostics.push(LintDiagnostic {
@@ -1603,19 +1603,6 @@ impl<'a> Linter<'a> {
             suggestion: Some("use a step name declared with `@step(name: ...)` and called by the matching `@persona`".to_string()),
             fix: None,
         });
-    }
-
-    fn simple_glob_match(pattern: &str, value: &str) -> bool {
-        if pattern == "*" {
-            return true;
-        }
-        if let Some(prefix) = pattern.strip_suffix('*') {
-            return value.starts_with(prefix);
-        }
-        if let Some(suffix) = pattern.strip_prefix('*') {
-            return value.ends_with(suffix);
-        }
-        pattern == value
     }
 
     /// Lint a statement block whose trailing expression is discarded — a `fn`

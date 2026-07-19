@@ -102,3 +102,28 @@ pipeline default() {
     let diagnostics = lint_source(source);
     assert!(!has_rule(&diagnostics, "persona-hook-target"));
 }
+
+/// A `*` in the middle of a pattern used to fall through to string equality,
+/// so a hook registered against `merge_*_captain` matched no persona and the
+/// lint wrongly rejected valid code.
+#[test]
+fn step_hook_target_accepts_mid_pattern_wildcard() {
+    let source = r#"
+@persona(name: "merge_release_captain")
+fn merge_release_captain(ctx) {
+  plan(ctx)
+}
+
+@step(name: "plan")
+fn plan(ctx) {
+  return ctx
+}
+
+pipeline default() {
+  register_step_hook("merge_*_captain", "plan", "PreStep", { ctx -> nil })
+}
+"#;
+
+    let diagnostics = lint_source(source);
+    assert!(!has_rule(&diagnostics, "persona-hook-target"));
+}
