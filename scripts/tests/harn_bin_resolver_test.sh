@@ -66,7 +66,8 @@ chmod +x "$fake_cargo_bin/cargo"
 
 unset HARN_BIN
 
-CARGO_TARGET_DIR="$target_dir" \
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+  CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   PATH="$fake_cargo_bin:$PATH" \
   "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/cargo-run.out"
