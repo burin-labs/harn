@@ -32,7 +32,8 @@ fn ls_precheck() {
         deny: true,
         model_cue: "command denied by policy pattern 'ls *'; use `look` for known files",
         machine_reason: "pattern 'ls *'",
-        human_summary: "Blocked by command policy (pattern 'ls *') — the agent was redirected to a safer tool.",
+        human_summary:
+          "Blocked by command policy (pattern 'ls *') — the agent was redirected to a safer tool.",
       }
     }
     return nil
