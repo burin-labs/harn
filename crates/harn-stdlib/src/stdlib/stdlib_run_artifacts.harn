@@ -4,12 +4,15 @@ import {
   TypedReadResult,
   is_dir,
   read_json,
+  read_json_contract,
+  read_json_contract_result,
   read_json_result,
   read_json_typed,
   read_json_typed_result,
   write_json,
   write_lines,
 } from "std/fs"
+import { SchemaContract, SchemaContractFailure, schema_contract_check } from "std/schema"
 
 type RunArtifactsOpenOptions = {root?: string, namespace?: string, run_id?: string}
 
@@ -193,7 +196,7 @@ pub fn run_artifact_write_json(
 }
 
 /**
- * Validate and atomically replace a JSON artifact through the typed contract.
+ * Validate a JSON artifact before replacing it through the typed contract.
  * The destination is unchanged when schema validation fails.
  *
  * @effects: [fs.read, fs.write]
@@ -209,6 +212,46 @@ pub fn run_artifact_write_json_typed<T>(
   const validated = schema_expect(value, schema)
   write_json(run_artifact_path(run, name), validated, options ?? {})
   return validated
+}
+
+/**
+ * Validate every structural and relational invariant before replacing a JSON
+ * artifact. The destination is unchanged on validation failure.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: [validation, fs]
+ */
+pub fn run_artifact_write_json_contract_result<T>(
+  run: RunArtifactsRun,
+  name: string,
+  value: unknown,
+  contract: SchemaContract<T>,
+  options: RunArtifactWriteOptions = {},
+) -> Result<T, SchemaContractFailure> {
+  const validated = schema_contract_check(value, contract)
+  if !is_ok(validated) {
+    return Err(unwrap_err(validated))
+  }
+  const typed = unwrap(validated)
+  write_json(run_artifact_path(run, name), typed, options ?? {})
+  return Ok(typed)
+}
+
+/**
+ * Validate and replace a contract-bound JSON artifact, throwing its typed
+ * validation failure when the value is invalid.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: [validation, fs, SchemaContractFailure]
+ */
+pub fn run_artifact_write_json_contract<T>(
+  run: RunArtifactsRun,
+  name: string,
+  value: unknown,
+  contract: SchemaContract<T>,
+  options: RunArtifactWriteOptions = {},
+) -> T {
+  return unwrap(run_artifact_write_json_contract_result(run, name, value, contract, options))
 }
 
 /**
@@ -250,6 +293,34 @@ pub fn run_artifact_read_json_typed_result<T>(
   apply_defaults: bool = false,
 ) -> TypedReadResult<T> {
   return read_json_typed_result(run_artifact_path(run, name), schema, apply_defaults)
+}
+
+/**
+ * Read and validate a required JSON artifact through a schema contract.
+ *
+ * @effects: [fs.read]
+ * @errors: [validation, StructuredReadFailure, ContractValidationFailure]
+ */
+pub fn run_artifact_read_json_contract<T>(
+  run: RunArtifactsRun,
+  name: string,
+  contract: SchemaContract<T>,
+) -> T {
+  return read_json_contract(run_artifact_path(run, name), contract)
+}
+
+/**
+ * Read contract-bound JSON without erasing read, schema, or rule failures.
+ *
+ * @effects: [fs.read]
+ * @errors: [validation]
+ */
+pub fn run_artifact_read_json_contract_result<T>(
+  run: RunArtifactsRun,
+  name: string,
+  contract: SchemaContract<T>,
+) -> TypedReadResult<T> {
+  return read_json_contract_result(run_artifact_path(run, name), contract)
 }
 
 /**

@@ -1,0 +1,7 @@
+v2-ready:audit
+rule_failed:3
+expected_version:receipt.version,consistent_fields:receipt.id_version,consistent_fields:receipt.count
+schema_invalid
+rule_error:broken
+audit:v2-stored
+rule_failed:v2-stored

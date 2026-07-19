@@ -1,6 +1,11 @@
 // std/fs - file-system convenience helpers built on the host fs primitives.
 import { pretty } from "std/json"
-import { get_typed_result } from "std/schema"
+import {
+  SchemaContract,
+  SchemaContractFailure,
+  get_typed_result,
+  schema_contract_check,
+} from "std/schema"
 
 type WriteDataOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
 
@@ -25,7 +30,12 @@ pub type SchemaValidationFailure = {
   issues: list<unknown>,
 }
 
-pub type TypedReadFailure = StructuredReadFailure | SchemaValidationFailure
+pub type ContractValidationFailure = SchemaContractFailure \
+  & {format: StructuredDataFormat, path: string}
+
+pub type TypedReadFailure = StructuredReadFailure \
+  | SchemaValidationFailure \
+  | ContractValidationFailure
 
 pub type TypedReadResult<T> = Result<T, TypedReadFailure>
 
@@ -74,7 +84,6 @@ pub type EvidenceOptions = {
   follow_symlinks?: bool,
   include_hidden?: bool,
   respect_gitignore?: bool,
-  /** Match ASCII letters without regard to case. */
   case_insensitive?: bool,
   include?: list<string>,
   exclude?: list<string>,
@@ -83,6 +92,7 @@ pub type EvidenceOptions = {
   threads?: int,
 }
 
+/** Match ASCII letters without regard to case. */
 pub type EvidenceSearchHandle = {
   handle_id: string,
   operation: string,
@@ -232,6 +242,31 @@ fn __fs_read_structured_typed_result<T>(
   )
 }
 
+fn __fs_read_structured_contract_result<T>(
+  path: string,
+  format: StructuredDataFormat,
+  contract: SchemaContract<T>,
+) -> TypedReadResult<T> {
+  const parsed = __fs_read_structured_result(path, format)
+  if !is_ok(parsed) {
+    return Err(unwrap_err(parsed))
+  }
+  const validated = schema_contract_check(unwrap(parsed), contract)
+  if is_ok(validated) {
+    return Ok(unwrap(validated))
+  }
+  const failure = unwrap_err(validated)
+  return Err(
+    {
+      kind: failure.kind,
+      format: format,
+      path: path,
+      detail: failure.detail,
+      issues: failure.issues,
+    },
+  )
+}
+
 fn __fs_require_result<T, E>(result: Result<T, E>) -> T {
   if is_ok(result) {
     return unwrap(result)
@@ -297,6 +332,29 @@ pub fn read_json_typed_result<T>(
  */
 pub fn read_json_typed<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> T {
   return __fs_require_result(read_json_typed_result(path, schema, apply_defaults))
+}
+
+/**
+ * Read, parse, and validate JSON with one structural-and-rule contract.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_json_contract_result<T>(
+  path: string,
+  contract: SchemaContract<T>,
+) -> TypedReadResult<T> {
+  return __fs_read_structured_contract_result(path, "json", contract)
+}
+
+/**
+ * Read required contract-validated JSON, throwing its typed failure.
+ *
+ * @effects: [fs.read]
+ * @errors: [StructuredReadFailure, ContractValidationFailure]
+ */
+pub fn read_json_contract<T>(path: string, contract: SchemaContract<T>) -> T {
+  return __fs_require_result(read_json_contract_result(path, contract))
 }
 
 /**

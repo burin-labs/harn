@@ -80,6 +80,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "graphql" => "stdlib/stdlib_graphql.harn",
     "code_librarian" => "stdlib/stdlib_code_librarian.harn",
     "schema" => "stdlib/stdlib_schema.harn",
+    "schema/contracts" => "stdlib/schema/contracts.harn",
     "identity" => "stdlib/stdlib_identity.harn",
     "disclosure" => "stdlib/stdlib_disclosure.harn",
     "testing" => "stdlib/stdlib_testing.harn",
