@@ -9,25 +9,22 @@ trap 'rm -rf "$tmpdir"' EXIT
 summary="$tmpdir/summary.md"
 log="$tmpdir/output.log"
 
-# Cache hits accelerate this lane but must not be required for it to finish.
+# Archive-only consumers do not compile; keep the short execution budget.
 rust_test_block="$(sed -n '/^  rust-test:/,/^  rust-security:/p' "$repo_root/.github/workflows/ci.yml")"
-grep -qx '    timeout-minutes: 30' <<<"$rust_test_block"
+grep -qx '    timeout-minutes: 12' <<<"$rust_test_block"
 
-# shellcheck disable=SC2016 # child bash expands CARGO_BUILD_JOBS
-env -u CARGO_BUILD_JOBS GITHUB_STEP_SUMMARY="$summary" \
-  "$script" bash -c 'test "$CARGO_BUILD_JOBS" = "2"' \
-  >"$log" 2>&1
-grep -q 'CARGO_BUILD_JOBS=2' "$summary"
+GITHUB_STEP_SUMMARY="$summary" "$script" true >"$log" 2>&1
 grep -q 'Rust test resources before' "$summary"
 grep -q 'Rust test resources after' "$summary"
+grep -q 'Rust test execution' "$summary"
+grep -q 'Exit status: 0' "$summary"
 grep -q '::group::Rust test resources before' "$log"
+grep -q 'rust_test_execution_seconds=' "$log"
 
 custom_summary="$tmpdir/custom-summary.md"
 custom_log="$tmpdir/custom-output.log"
-# shellcheck disable=SC2016 # child bash expands CARGO_BUILD_JOBS
-CARGO_BUILD_JOBS=3 GITHUB_STEP_SUMMARY="$custom_summary" "$script" \
-  bash -c 'test "$CARGO_BUILD_JOBS" = "3"' >"$custom_log" 2>&1
-grep -q 'CARGO_BUILD_JOBS=3' "$custom_summary"
+GITHUB_STEP_SUMMARY="$custom_summary" "$script" true >"$custom_log" 2>&1
+grep -q 'Rust test execution' "$custom_summary"
 
 set +e
 "$script" bash -c 'exit 23' >/dev/null 2>&1

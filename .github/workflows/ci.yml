@@ -356,11 +356,10 @@ jobs:
   # fail-fast enabled: if any required Rust lane fails, GitHub cancels the
   # sibling Rust lane that is still queued or running. The behavior row is the
   # one producer: it compiles the suite once on persistent storage and
-  # publishes only the small security/CLI payload that must execute on GitHub
-  # Ubuntu. Execution-only proof consumers fan out after that immutable
-  # producer succeeds. On the GitHub-hosted fallback, where cross-job compiler
-  # objects are not reusable, the producer also runs the full suite against its
-  # warm target directory instead of paying for a second cold compilation.
+  # publishes an exact-SHA behavior bundle for execution-only proof consumers.
+  # On the GitHub-hosted fallback, where cross-job compiler objects are not
+  # reusable, the producer also runs the full suite against its warm target
+  # directory instead of paying for a second cold compilation.
   rust-builds:
     name: ${{ matrix.name }}
     needs: changes
@@ -484,6 +483,9 @@ jobs:
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --workspace --profile ci
           -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
+      - name: Start portable behavior payload upload timer
+        if: matrix.kind == 'behavior'
+        run: echo "HARN_BEHAVIOR_UPLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - name: Upload portable behavior payload
         if: matrix.kind == 'behavior'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -492,6 +494,17 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
+      - name: Report portable behavior payload upload
+        if: matrix.kind == 'behavior'
+        run: |
+          duration=$(($(date +%s) - HARN_BEHAVIOR_UPLOAD_STARTED_AT))
+          bytes=$(wc -c < "$RUNNER_TEMP/harn-behavior.tar.zst" | tr -d ' ')
+          {
+            echo "### Behavior artifact upload"
+            echo
+            echo "- Duration: ${duration}s"
+            echo "- Compressed bytes: ${bytes}"
+          } >> "$GITHUB_STEP_SUMMARY"
       # sccache-action starts a long-lived `sccache --start-server` daemon that
       # outlives every job step. GitHub's post-job "Cleaning up orphan
       # processes" phase then terminates it, and on the ubuntu lanes that
@@ -504,12 +517,8 @@ jobs:
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
 
-  # Keep the full environment-neutral Rust suite on a dedicated consumer so
-  # Ubuntu proof lanes can start as soon as the producer has published the
-  # exact behavior payload. The producer's workspace-behavior cache is safe to
-  # reuse because this job waits for the complete rust-builds matrix. Keep
-  # enough wall time for the hosted-runner fallback to rebuild on a cold cache;
-  # current cold runs need about 10 minutes to compile before nextest starts.
+  # The producer owns compilation. This consumer verifies the exact-SHA bundle
+  # and only executes its environment-neutral nextest archive.
   rust-test:
     name: Rust test
     needs: [changes, rust-builds]
@@ -518,62 +527,57 @@ jobs:
       && needs.rust-builds.result == 'success'
       && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
-    # GitHub-hosted fallback runners need about 10 minutes for a cold compile
-    # before the 10k-test nextest suite starts. Cache reuse is an optimization,
-    # not a correctness dependency, so leave enough headroom for a fully cold
-    # build followed by the complete environment-neutral suite.
-    timeout-minutes: 30
+    timeout-minutes: 12
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      SCCACHE_BASEDIRS: ${{ github.workspace }}
-      SCCACHE_CACHE_SIZE: 15G
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
-      - uses: ./.github/actions/free-disk-space
-      - name: Install mold linker
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/sccache
-        with:
-          cache-key: workspace-behavior
-          sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
-      - uses: ./.github/actions/rust-cache
-        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
-        continue-on-error: true
-        with:
-          # workspace-test, not workspace-behavior: the test profile compiles
-          # dev-dependencies and test binaries the behavior payload never
-          # builds, so this lane is its own authorized main-branch writer.
-          shared-key: workspace-test
-          cache-on-failure: true
-          cache-bin: false
-          save: "true"
       - name: Install cargo-nextest
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
           tool: nextest@0.9.132
+      - name: Start portable behavior payload download timer
+        run: echo "HARN_BEHAVIOR_DOWNLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Download portable behavior payload
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: harn-behavior.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Report portable behavior payload download
+        run: |
+          duration=$(($(date +%s) - HARN_BEHAVIOR_DOWNLOAD_STARTED_AT))
+          bytes=$(wc -c < "$RUNNER_TEMP/harn-behavior.tar.zst" | tr -d ' ')
+          {
+            echo "### Behavior artifact download"
+            echo
+            echo "- Duration: ${duration}s"
+            echo "- Compressed bytes: ${bytes}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify portable behavior payload
+        env:
+          HARN_VERIFY_RUST_RUNTIME: "1"
+        run: >-
+          ./scripts/ci/behavior_artifact.sh restore
+          "$RUNNER_TEMP/harn-behavior.tar.zst"
+          "$RUNNER_TEMP/harn-behavior"
+          "$GITHUB_SHA"
       # Landlock is the one environment-specific proof owned by rust-security;
       # every other default-suite test remains required here.
       - name: Run full environment-neutral test suite
         id: release-audit-rust-test
         env:
-          CARGO_BUILD_JOBS: "4"
           HARN_LLM_CALLS_DISABLED: "1"
-          NEXTEST_PROFILE: ci
         run: >-
           scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --workspace --profile ci
+          cargo nextest run --profile ci
+          --archive-file "$RUNNER_TEMP/harn-behavior/harn-neutral.tar.zst"
+          --workspace-remap "$GITHUB_WORKSPACE"
           -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
-      - name: Summarize and stop sccache
-        if: always()
-        run: ./scripts/ci/finalize_sccache.sh
 
   rust-security:
     name: Rust security proof
@@ -581,8 +585,12 @@ jobs:
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
@@ -594,6 +602,8 @@ jobs:
           path: ${{ runner.temp }}
           skip-decompress: true
       - name: Verify portable behavior payload
+        env:
+          HARN_VERIFY_RUST_RUNTIME: "1"
         run: >-
           ./scripts/ci/behavior_artifact.sh restore
           "$RUNNER_TEMP/harn-behavior.tar.zst"

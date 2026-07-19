@@ -540,28 +540,63 @@ fn persistent_sccache_job_errors(
   return errors
 }
 
-fn shared_behavior_consumer_errors(workflow, job_name: string) -> list<string> {
+fn archived_behavior_consumer_errors(workflow, job_name: string) -> list<string> {
   const producer = workflow?.jobs?.["rust-builds"]
   const consumer = workflow?.jobs?.[job_name]
-  if producer == nil || consumer == nil {
+  if consumer == nil {
+    return ["ci.yml:${job_name} must define the archived behavior consumer"]
+  }
+  if producer == nil {
     return []
   }
   let errors: list<string> = []
-  const caches = matching_steps(consumer, SCCACHE_ACTION)
-  if len(caches) != 1
-    || trim(caches[0]?.with?.["cache-key"] ?? "") != "workspace-behavior" {
-    errors = errors + ["ci.yml:${job_name} must reuse the workspace-behavior sccache lane"]
+  const runner = trim(consumer?.["runs-on"] ?? "")
+  if !contains(runner, BLACKSMITH_DISABLE_VAR)
+    || !contains(runner, "blacksmith-8vcpu-ubuntu-2404") {
+    errors = errors
+      + ["ci.yml:${job_name} must retain the policy-sized execution runner"]
   }
   const needs = consumer?.needs ?? []
   if !needs.contains("rust-builds") {
-    errors = errors + ["ci.yml:${job_name} must wait for rust-builds before reusing its cache"]
+    errors = errors + ["ci.yml:${job_name} must wait for the behavior artifact producer"]
   }
   if trim(consumer?.env?.RUSTFLAGS ?? "") != trim(producer?.env?.RUSTFLAGS ?? "") {
     errors = errors + ["ci.yml:${job_name} must match rust-builds RUSTFLAGS"]
   }
+  if trim(to_string(consumer?.["timeout-minutes"] ?? "")) != "12" {
+    errors = errors + ["ci.yml:${job_name} must keep the execution-only 12-minute timeout"]
+  }
+  if len(matching_steps(consumer, SCCACHE_ACTION)) > 0
+    || len(
+    matching_steps(consumer, "./.github/actions/rust-cache"),
+  )
+    > 0
+    || len(matching_steps(consumer, "./.github/actions/free-disk-space"))
+    > 0 {
+    errors = errors + ["ci.yml:${job_name} must not restore compiler caches or build-disk setup"]
+  }
+  const restore_step = step_by_name(consumer?.steps ?? [], "Verify portable behavior payload")
+  if trim(restore_step?.env?.HARN_VERIFY_RUST_RUNTIME ?? "") != "1"
+    || !contains(
+    trim(restore_step?.run ?? ""),
+    "behavior_artifact.sh restore",
+  ) {
+    errors = errors + ["ci.yml:${job_name} must verify the archived Rust runtime contract"]
+  }
   const test_step = step_by_name(consumer?.steps ?? [], "Run full environment-neutral test suite")
-  if trim(test_step?.env?.CARGO_BUILD_JOBS ?? "") != "4" {
-    errors = errors + ["ci.yml:${job_name} must keep four-way test fan-out"]
+  const test_command = trim(test_step?.run ?? "")
+  if !contains(test_command, "--archive-file")
+    || !contains(test_command, "harn-neutral.tar.zst")
+    || !contains(test_command, "--workspace-remap")
+    || regex_match(
+    "(^|[ ])--workspace([ ]|$)",
+    test_command,
+  )
+    != nil {
+    errors = errors + ["ci.yml:${job_name} must execute only the remapped nextest archive"]
+  }
+  if trim(test_step?.env?.CARGO_BUILD_JOBS ?? "") != "" {
+    errors = errors + ["ci.yml:${job_name} must not configure compile fan-out"]
   }
   return errors
 }
@@ -617,12 +652,6 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     "matrix.runner",
     "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
   )
-    + persistent_sccache_job_errors(
-    workflow,
-    "rust-test",
-    "blacksmith-8vcpu-ubuntu-2404",
-    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
-  )
   const rust_job = workflow?.jobs?.["rust-builds"]
   const rust_sccache = matching_steps(rust_job, SCCACHE_ACTION)
   if len(rust_sccache) == 1 {
@@ -657,8 +686,8 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     errors = errors
       + ["ci.yml:rust-builds behavior build must keep four-way fan-out on the producer"]
   }
-  errors = errors + shared_behavior_consumer_errors(workflow, "rust-test")
-  const allowed = ["package-audit", "rust-builds", "rust-test"]
+  errors = errors + archived_behavior_consumer_errors(workflow, "rust-test")
+  const allowed = ["package-audit", "rust-builds"]
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
     if len(matching_steps(job, SCCACHE_ACTION)) > 0 && !allowed.contains(job_name) {
       errors = errors + ["ci.yml:${job_name} uses persistent sccache without a lane policy"]

@@ -54,17 +54,23 @@ fn workflow() {
     ...rust,
     env: {...rust.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
   }
-  const rust_test_base = persistent_job(
-    gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
-    "workspace-behavior",
-    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
-  )
   const rust_test = {
-    ...rust_test_base,
-    env: {...rust_test_base.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
+    env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
     "runs-on": gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
     needs: ["changes", "rust-builds"],
+    "timeout-minutes": 12,
+    steps: [
+      {
+        name: "Verify portable behavior payload",
+        env: {HARN_VERIFY_RUST_RUNTIME: "1"},
+        run: "./scripts/ci/behavior_artifact.sh restore bundle destination sha",
+      },
+      {
+        name: "Run full environment-neutral test suite",
+        run:
+          "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-neutral.tar.zst --workspace-remap workspace",
+      },
+    ],
   }
   return {
     jobs: {
@@ -98,13 +104,7 @@ fn workflow() {
           },
         ],
       },
-      "rust-test": {
-        ...rust_test,
-        steps: rust_test.steps
-          + [
-          {name: "Run full environment-neutral test suite", env: {CARGO_BUILD_JOBS: "4"}},
-        ],
-      },
+      "rust-test": rust_test,
     },
   }
 }
@@ -153,6 +153,35 @@ fn windows_cache_pair() {
 @test
 pipeline test_accepts_pinned_lane_local_sticky_cache_with_kill_switch(task) {
   assert_eq(ci_sccache_policy_errors(sccache_action(), workflow()), [])
+}
+
+@test
+pipeline test_rejects_recompiling_behavior_consumer(task) {
+  const valid = workflow()
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-test": {
+        ...valid.jobs["rust-test"],
+        "timeout-minutes": 20,
+        steps: [
+          {uses: "./.github/actions/sccache"},
+          {
+            name: "Run full environment-neutral test suite",
+            env: {CARGO_BUILD_JOBS: "4"},
+            run: "cargo nextest run --workspace --profile ci",
+          },
+        ],
+      },
+    },
+  }
+  const errors = ci_sccache_policy_errors(sccache_action(), invalid)
+  assert(errors.contains("ci.yml:rust-test must keep the execution-only 12-minute timeout"))
+  assert(errors.contains("ci.yml:rust-test must not restore compiler caches or build-disk setup"))
+  assert(errors.contains("ci.yml:rust-test must verify the archived Rust runtime contract"))
+  assert(errors.contains("ci.yml:rust-test must execute only the remapped nextest archive"))
+  assert(errors.contains("ci.yml:rust-test must not configure compile fan-out"))
 }
 
 @test
