@@ -1,0 +1,307 @@
+import "std/agent/loop_call_resolution"
+import "std/agent/loop_support"
+
+/**
+ * Route agent-loop budget timing through the harness clock for deterministic replay and tests.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_clock_now_ms() {
+  return harness.clock.now_ms()
+}
+
+pub fn __agent_loop_clock_sleep_ms(delay_ms) {
+  harness.clock.sleep_ms(delay_ms)
+}
+
+pub const __AGENT_LOOP_CHECKPOINT_ITERATION_START = "iteration_start"
+
+pub const __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH = "post_tool_dispatch"
+
+pub const __AGENT_LOOP_HOST_INJECTION_TURN_BOUNDARY = "turn_boundary"
+
+pub const __AGENT_LOOP_HOST_INJECTION_AFTER_NEXT_TOOL_CALL = "after_next_tool_call"
+
+// -------------------------------------------------------------------------------------------------
+
+// Length-truncation auto-continue.
+//
+// When a value model hits the output-token cap mid-emit, the provider returns a
+// length-truncation stop_reason (`length` for OpenAI/OpenRouter/Ollama,
+// `max_tokens` for Anthropic) and the partial output often holds a TRUNCATED,
+// unparseable tool call. Treating that as a malformed/missing call burns the
+// turn on parse-guidance even though the model was mid-correct-action — a
+// silent-corruption class that hurts even capable models.
+//
+// Instead we detect the specific condition deterministically (no model
+// cooperation, no abuse surface) and re-issue the completion with a RAISED cap
+// so the model can finish the call. The retry is invisible to the rest of the
+// loop body: it does not consume an iteration or run stall/parse accounting.
+// Bounded to a small number of continuations; if still truncated after the cap
+// we return the last result and the existing parse-guidance path takes over.
+//
+// The tool-call gate (`__host_agent_truncated_tool_call`) fires ONLY on a real
+// length truncation with zero usable calls AND a partial-call signal. A second
+// gate covers hidden-reasoning-only truncation: strict providers can return no
+// visible text/tool calls, `stop_reason: length`, and non-empty reasoning. That
+// is still a budget exhaustion, so retry with a larger output cap instead of
+// handing an empty turn to the normal loop body.
+
+// -------------------------------------------------------------------------------------------------
+
+pub fn __autocontinue_max_continuations(llm_opts) {
+  const configured = llm_opts?.truncation_auto_continue_max
+  if type_of(configured) == "int" && configured >= 0 {
+    return configured
+  }
+  return 2
+}
+
+/**
+ * Compute the raised output-token cap for an auto-continue retry. An unset cap
+ * (`<= 0`) means the provider's own default truncated us, so jump to an
+ * explicit base. A set cap doubles. Both are clamped to a ceiling so a
+ * misconfigured model can't request an unbounded body.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __autocontinue_raised_cap(current, llm_opts) {
+  const base = if type_of(llm_opts?.truncation_auto_continue_base) == "int"
+    && llm_opts.truncation_auto_continue_base > 0 {
+    llm_opts.truncation_auto_continue_base
+  } else {
+    16384
+  }
+  const ceiling = if type_of(llm_opts?.truncation_auto_continue_ceiling) == "int"
+    && llm_opts.truncation_auto_continue_ceiling > 0 {
+    llm_opts.truncation_auto_continue_ceiling
+  } else {
+    32768
+  }
+  const raised = if type_of(current) == "int" && current > 0 {
+    current * 2
+  } else {
+    base
+  }
+  if raised > ceiling {
+    return ceiling
+  }
+  return raised
+}
+
+pub fn __autocontinue_is_length_stop(stop_reason) {
+  const normalized = lowercase(trim(to_string(stop_reason ?? "")))
+  return normalized == "length" || normalized == "max_tokens"
+}
+
+pub fn __autocontinue_hidden_reasoning_truncated(llm_result, tool_call_count) {
+  if !__autocontinue_is_length_stop(llm_result?.stop_reason) {
+    return false
+  }
+  if tool_call_count > 0 {
+    return false
+  }
+  if trim(to_string(llm_result?.text ?? "")) != "" {
+    return false
+  }
+  const thinking = trim(to_string(llm_result?.thinking ?? ""))
+  const summary = trim(to_string(llm_result?.thinking_summary ?? ""))
+  if thinking != "" || summary != "" {
+    return true
+  }
+  return (to_int(llm_result?.output_tokens ?? 0) ?? 0) > 0
+}
+
+/**
+ * Detect whether `call` is a length-truncated turn that resolved no usable
+ * tool call but looks like it was mid-call — the one condition where
+ * re-issuing with a raised cap is the right move.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn __autocontinue_should_continue(call, turn_opts) {
+  if !(call?.ok ?? false) {
+    return false
+  }
+  const llm_result = call?.value
+  if type_of(llm_result) != "dict" {
+    return false
+  }
+  const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
+  const parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
+  let tool_calls = __resolve_tool_calls(llm_result, parsed)
+  const has_parse_errors = len(parsed?.tool_parse_errors ?? []) > 0
+  if __host_agent_truncated_tool_call(
+    llm_result?.stop_reason,
+    raw_text,
+    len(tool_calls),
+    has_parse_errors,
+  ) {
+    return true
+  }
+  return __autocontinue_hidden_reasoning_truncated(llm_result, len(tool_calls))
+}
+
+/**
+ * Call the LLM, and on a length-truncated turn with an incomplete tool call,
+ * AUTO-CONTINUE with a bounded raised output cap, then return the same
+ * `{ok, value, ...}` shape callers already parse and account for. Falls back
+ * to the truncated result at the cap so existing parse guidance still fires.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __invoke_llm_with_autocontinue(
+  message,
+  turn_system,
+  llm_opts,
+  turn_opts,
+  session_id,
+  iteration_index,
+) {
+  const retry_llm_opts = llm_clear_one_shot_prefill(llm_opts)
+  agent_session_flush(session_id)
+  let call = agent_invoke_llm(message, turn_system, llm_opts)
+  const max_continuations = __autocontinue_max_continuations(llm_opts)
+  let attempts = 0
+  let cap = llm_opts?.max_tokens ?? 0
+  while attempts < max_continuations && __autocontinue_should_continue(call, turn_opts) {
+    const raised = __autocontinue_raised_cap(cap, llm_opts)
+    // No headroom left to raise — re-issuing would just truncate again at the
+    // same cap, so stop and let parse-guidance take the turn.
+    if type_of(cap) == "int" && cap > 0 && raised <= cap {
+      break
+    }
+    attempts = attempts + 1
+    agent_emit_event(
+      session_id,
+      "llm_auto_continue",
+      {
+        iteration: iteration_index + 1,
+        attempt: attempts,
+        max_continuations: max_continuations,
+        previous_max_tokens: cap,
+        raised_max_tokens: raised,
+        stop_reason: call?.value?.stop_reason ?? "",
+      },
+    )
+    cap = raised
+    const retry_opts = retry_llm_opts
+      + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
+    call = agent_invoke_llm(message, turn_system, retry_opts)
+  }
+  return call
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Context-overflow recovery.
+ *
+ * A provider can reject a turn with a `context_overflow` error when the
+ * assembled prompt exceeds the model's real context window — typically on a
+ * large repo where tool observations accreted past the budget, OR when the
+ * model's window is mis/under-cataloged so auto-compaction never fired. The
+ * agent must NOT die on this: it is a recoverable, self-inflicted condition.
+ *
+ * Recovery is a bounded loop: emergency-compact the live transcript
+ * (deterministic observation masking — never an LLM call, which would itself
+ * overflow), then re-issue the SAME turn. Each attempt compacts more
+ * aggressively (shorter preserved tail). We stop when either the retry
+ * succeeds, or emergency compaction can no longer shrink the transcript
+ * (`archived == 0`, i.e. an irreducible system-prompt + single oversized
+ * message), at which point the overflow is genuinely terminal.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_is_context_overflow(error) {
+  if type_of(error) != "dict" {
+    return false
+  }
+  const reason = to_string(error?.reason ?? "")
+  if reason == "context_overflow" {
+    return true
+  }
+  // Defensive fallback: some routes surface the condition only in the message
+  // text (uncataloged provider, no structured `reason`). Match the canonical
+  // classifier tag the Rust LLM layer stamps onto the error string.
+  const message = to_string(error?.message ?? "")
+  return contains(message, "[context_overflow]")
+}
+
+pub fn __agent_loop_context_overflow_max_recoveries(llm_opts) {
+  const configured = llm_opts?.context_overflow_recover_max
+  if type_of(configured) == "int" && configured >= 0 {
+    return configured
+  }
+  return 3
+}
+
+/**
+ * On a `context_overflow` provider error, emergency-compact + retry (bounded).
+ * Returns a fresh `{ok, ...}` call result: `ok:true` when a retry succeeded,
+ * or the last `ok:false` result (so the caller's terminal path runs unchanged)
+ * when recovery is exhausted or the transcript is irreducible.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_recover_context_overflow(
+  call,
+  message,
+  turn_system,
+  llm_opts,
+  turn_opts,
+  session,
+  iteration_index,
+) {
+  const max_recoveries = __agent_loop_context_overflow_max_recoveries(llm_opts)
+  let current = call
+  let attempt = 0
+  while attempt < max_recoveries && !current.ok
+    && __agent_loop_is_context_overflow(current?.error) {
+    attempt = attempt + 1
+    const archived = agent_emergency_compact(session, llm_opts, attempt)
+    agent_emit_event(
+      session.session_id,
+      "context_overflow_recovery",
+      {
+        iteration: iteration_index + 1,
+        attempt: attempt,
+        max_recoveries: max_recoveries,
+        archived_messages: archived,
+        provider_error: current?.error ?? {},
+      },
+    )
+    // Nothing left to shed: the prompt is irreducible (system prompt + a single
+    // oversized message). Re-issuing would overflow identically, so surface the
+    // original terminal error rather than spin.
+    if archived <= 0 {
+      break
+    }
+    // Rebuild the turn prompt against the now-compacted transcript and re-issue.
+    const turn_prompt = __agent_loop_build_turn_prompt(session, llm_opts, iteration_index)
+    const retry_opts = llm_clear_one_shot_prefill(llm_opts)
+      + {
+      messages: turn_prompt.messages,
+      _system_fragments: turn_prompt.fragments,
+      _context_overflow_recovery_attempt: attempt,
+    }
+    current = __invoke_llm_with_autocontinue(
+      message,
+      turn_prompt.system,
+      retry_opts,
+      turn_opts,
+      session.session_id,
+      iteration_index,
+    )
+  }
+  return current
+}
+
+// -------------------------------------------------------------------------------------------------
+

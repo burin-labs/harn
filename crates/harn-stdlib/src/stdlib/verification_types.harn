@@ -1,25 +1,3 @@
-pub import {
-  verification_file_hash_snapshot,
-  verification_snapshot_staleness,
-  verification_warm_state_facts,
-} from "std/verification_core"
-pub import {
-  verification_affected_targets,
-  verification_diagnostic_delta,
-  verification_finish_check,
-  verification_gate_input,
-  verification_hud_model,
-  verification_hud_text,
-  verification_ladder_plan,
-  verification_observation_from_command_result,
-  verification_record_check_result,
-  verification_run_check,
-  verification_start_check,
-  verification_start_warm_state,
-  verification_teardown_warm_state,
-  verification_toolchain_facts,
-} from "std/verification_public"
-
 pub type VerificationFileHashSnapshotEntry = {
   path: string,
   known: bool,
@@ -129,6 +107,3 @@ pub type VerificationLadderPlan = {
 pub type VerificationDiagnosticDelta = dict
 
 pub type VerificationGateInput = dict
-// Keep public verification aliases on this facade for the same type-checker
-// compatibility boundary as the agent option and stall facades.
-

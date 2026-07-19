@@ -1,0 +1,792 @@
+/**
+ * std/verification — deterministic verification facts and helper shapes.
+ *
+ * Import: import "std/verification"
+ *
+ * This module is the Harn-owned home for reusable verification intelligence
+ * primitives. It intentionally starts with fact capture, not policy: callers
+ * can bind diagnostics and background check results to file snapshots without
+ * duplicating hostlib plumbing or inventing product-specific hash logic.
+ */
+import { command_cancel, command_run, command_wait } from "std/command"
+import { shell_quote } from "std/runtime"
+import { regex_first_capture, truncate_text } from "std/text"
+import "std/verification_core"
+import "std/verification_ladder"
+import "std/verification_targets"
+import "std/verification_types"
+
+/**
+ * Resolve build/test targets affected by changed files using data-declared
+ * adapters. Each adapter row supplies a command `spec` (or `command`) and a
+ * `parser_id`; Harn ships parser ids for generic JSON/line targets, Cargo
+ * metadata, and JS workspace graphs, while arbitrary stacks can add rows
+ * without changing Rust code.
+ *
+ * Supported parser ids:
+ * - `harn.targets_json.v1`: stdout JSON is `[{id, ...}]` or `{targets:[...]}`
+ * - `harn.targets_lines.v1`: one target id per stdout line
+ * - `cargo.metadata.v1`: Cargo metadata JSON; changed files map to packages
+ * - `js.workspace_graph.v1`: `{projects:{name:{root, targets}}}` or list rows
+ *
+ * If adapters produce no targets, the helper falls back to the existing
+ * code-index file graph: the changed file plus reverse importers become
+ * conservative file targets. Pass `{fallback:false}` to disable that.
+ *
+ * @effects: [process, host]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_affected_targets(changed_paths: list<string>, adapters = nil, options = nil) -> VerificationAffectedTargetsFact {
+  const opts = __verification_opts(options)
+  const paths = __verification_string_list(changed_paths)
+  const rows = adapters ?? opts?.adapters ?? []
+  let targets = []
+  let adapter_facts: list<VerificationAffectedAdapterFact> = []
+  let index = 0
+  for row in rows {
+    const adapter_id = __verification_adapter_id(row, index)
+    const parser_id = __verification_parser_id(row)
+    const spec = __verification_adapter_spec(row, paths, opts)
+    if spec == nil {
+      adapter_facts = adapter_facts
+        + [{id: adapter_id, parser_id: parser_id, status: "not_configured", ok: false, target_count: 0}]
+      index = index + 1
+      continue
+    }
+    const result = command_run(spec, __verification_adapter_command_options(row, opts))
+    const parsed = try {
+      __verification_parse_adapter_targets(row, adapter_id, parser_id, result, paths)
+    } catch (e) {
+      if opts?.fail_on_adapter_error ?? false {
+        throw e
+      }
+      adapter_facts = adapter_facts
+        + [
+        {
+          id: adapter_id,
+          parser_id: parser_id,
+          status: result?.status ?? "failed",
+          ok: false,
+          exit: __verification_exit(result, {}),
+          target_count: 0,
+          error: to_string(e),
+        },
+      ]
+      []
+    }
+    for target in parsed {
+      targets = __verification_push_target(targets, target)
+    }
+    if len(parsed) > 0 || len(adapter_facts) == index {
+      adapter_facts = adapter_facts
+        + [
+        {
+          id: adapter_id,
+          parser_id: parser_id,
+          status: result?.status ?? "completed",
+          ok: __verification_result_ok(result),
+          exit: __verification_exit(result, {}),
+          target_count: len(parsed),
+        },
+      ]
+    }
+    index = index + 1
+  }
+  const fallback = if len(targets) == 0 || opts?.include_fallback == true {
+    __verification_code_index_fallback(paths, opts)
+  } else {
+    {enabled: false, available: false, targets: []}
+  }
+  for target in fallback.targets ?? [] {
+    targets = __verification_push_target(targets, target)
+  }
+  return {changed_paths: paths, targets: targets, adapters: adapter_facts, fallback: fallback}
+}
+
+/**
+ * Build a data-driven verification ladder plan from profile rows.
+ *
+ * The selector engine lives in the Harn VM builtin
+ * `verification_profile_matches`; this helper only ranks matching rows by
+ * declared rung, resource class, observed p95 timing, selector specificity,
+ * and row order. It never hardcodes languages, toolchains, or commands.
+ *
+ * Options:
+ * - `dir`: profile-store directory to read from.
+ * - `min_rung` / `max_rung`: inclusive bounds, default `R0`..`R5`.
+ * - `resource_classes`: optional allow-list such as `["cheap", "moderate"]`.
+ * - `timing_kind`: `warm` (default), `cold`, or `any`.
+ * - `unknown_p95_ms`: timing fallback for unseen rows, default `999999`.
+ * - `allow_stale_prone`: set false to skip stale-prone checks.
+ * - `limit`: optional maximum selected checks.
+ *
+ * @effects: [state]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_ladder_plan(query: dict, options = nil) -> VerificationLadderPlan {
+  const opts = __verification_opts(options)
+  const matches = verification_profile_matches(query, opts?.dir)
+  let selected = []
+  let skipped = []
+  for profile_match in matches {
+    const candidate = __verification_ladder_candidate(profile_match, opts)
+    if candidate.entry != nil {
+      selected = selected + [candidate.entry]
+    } else if candidate.skip != nil {
+      skipped = skipped + [candidate.skip]
+    }
+  }
+  selected = selected.sort_by({ entry -> entry.sort_key })
+  const limit = to_int(opts?.limit)
+  if limit != nil && limit >= 0 && len(selected) > limit {
+    selected = selected.slice(0, limit)
+  }
+  const reason = if len(matches) == 0 {
+    "no_profile_rows"
+  } else if len(selected) == 0 {
+    "no_matching_runnable_rows"
+  } else {
+    "profile_rows_selected"
+  }
+  return {
+    schema: "harn.verification.ladder_plan.v1",
+    query: query,
+    matches: matches,
+    selected: selected,
+    skipped: skipped,
+    fallback: len(selected) == 0,
+    reason: reason,
+  }
+}
+
+/**
+ * Build a structured verification HUD model from explicit host facts and
+ * Harn verification profile rows. This is the reusable contract for TUI, IDE,
+ * portal, and transcript renderers: hosts can render the structured fields
+ * directly instead of concatenating verification strings in product-specific
+ * code.
+ *
+ * `state` may include:
+ * - `started_ms`, `last_edit_ms`, `now_ms`
+ * - `dir`, `path`, `language`, `task`, or `query`
+ * - `current_hashes` / `current_snapshot`
+ * - `last_check: {rung, verdict|status, at_ms, bound_snapshot|snapshot}`
+ *
+ * Options:
+ * - `now_ms`: deterministic clock override for tests.
+ * - `plan_options`: forwarded to `verification_ladder_plan`.
+ * - `full_plan_options`: extra options for the full-verify row lookup.
+ *
+ * @effects: [state]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_hud_model(state: dict, options = nil) -> dict {
+  const opts = __verification_opts(options)
+  if type_of(state) != "dict" {
+    return {schema: "harn.verification.hud_model.v1", visible: false, reason: "missing_state", lines: []}
+  }
+  const now_ms = to_int(opts?.now_ms ?? state?.now_ms ?? harness.clock.now_ms()) ?? 0
+  const started_ms = to_int(state?.started_ms ?? now_ms) ?? now_ms
+  const last_edit_ms = to_int(state?.last_edit_ms ?? state?.lastEditMs)
+  const dir = trim(to_string(opts?.dir ?? state?.dir ?? "."))
+  const query = __verification_hud_query(state, opts)
+  const plan_options = __verification_hud_plan_options(dir, opts)
+  const next_plan = verification_ladder_plan(query, plan_options + {limit: to_int(opts?.next_limit ?? 1) ?? 1})
+  const next_check = len(next_plan.selected) > 0 ? __verification_hud_entry(next_plan.selected[0]) : nil
+  const full_options = plan_options
+    + {min_rung: opts?.full_min_rung ?? "R4", max_rung: opts?.full_max_rung ?? "R5", limit: 1}
+    + (opts?.full_plan_options ?? {})
+  const full_plan = verification_ladder_plan(query, full_options)
+  const full_check = len(full_plan.selected) > 0 ? __verification_hud_entry(full_plan.selected[0]) : nil
+  const current_hashes = __verification_snapshot_map(
+    opts?.current_hashes ?? opts?.current_snapshot ?? state?.current_hashes
+      ?? state?.current_snapshot
+      ?? state?.currentSnapshot,
+  )
+  const last_check = __verification_hud_last_check(state, current_hashes, now_ms)
+  const elapsed_ms = now_ms - started_ms
+  const since_edit_ms = last_edit_ms == nil ? nil : now_ms - last_edit_ms
+  const visible = last_check != nil || next_check != nil || full_check != nil
+  return {
+    schema: "harn.verification.hud_model.v1",
+    visible: visible,
+    reason: visible ? "verification_facts_available" : "no_verification_facts",
+    dir: dir,
+    query: query,
+    elapsed_ms: elapsed_ms,
+    elapsed: __verification_duration_label(elapsed_ms),
+    since_last_edit_ms: since_edit_ms,
+    since_last_edit: since_edit_ms == nil ? nil : __verification_duration_label(since_edit_ms),
+    last_check: last_check,
+    next_check: next_check,
+    full_check: full_check,
+    plans: {next: next_plan, full: full_plan},
+  }
+}
+
+/**
+ * Render a `verification_hud_model` as compact transcript text. Products should
+ * prefer the structured model when they can; this renderer exists for prompt
+ * surfaces and backward-compatible transcript injection.
+ *
+ * @effects: [state]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_hud_text(model_or_state: dict, options = nil) -> string {
+  const model = if model_or_state?.schema == "harn.verification.hud_model.v1" {
+    model_or_state
+  } else {
+    verification_hud_model(model_or_state, options)
+  }
+  if !(model?.visible ?? false) {
+    return ""
+  }
+  let lines: list<string> = ["[verification]"]
+  const since = if model?.since_last_edit != nil {
+    " - since last edit: " + to_string(model.since_last_edit)
+  } else {
+    ""
+  }
+  lines = lines + ["elapsed: " + to_string(model?.elapsed ?? "0s") + since]
+  if model?.last_check != nil {
+    lines = lines + [__verification_hud_last_line(model.last_check)]
+  }
+  if model?.next_check != nil {
+    lines = lines + [__verification_hud_next_line("next check", model.next_check)]
+  }
+  if model?.full_check != nil {
+    lines = lines + [__verification_hud_next_line("full verify", model.full_check)]
+  }
+  return lines.join("\n")
+}
+
+/**
+ * Compare previous and current verification diagnostics as normalized sets and
+ * return deterministic progress credit. This is the data-only primitive behind
+ * diagnostic-delta repair policy: advisory/stale/unbound diagnostics never feed
+ * gates; advisory previous diagnostics never become the baseline; a clean
+ * current result clears a gate-bearing failure; removed or changed stuck
+ * signatures advance; the same normalized set does not.
+ *
+ * Inputs may be `nil`, a string signature, a single diagnostic dict, a check
+ * result dict, or `{diagnostics:[...]}` / `{errors:[...]}`. Row-level
+ * normalization is read from `diagnosticDelta`, `diagnostic_delta`,
+ * `signatureNormalization`, or `signature_normalization` on the row and its
+ * check, then overridden by direct options.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_diagnostic_delta(previous, current, options = nil) -> VerificationDiagnosticDelta {
+  const normalization = __verification_delta_normalization(options)
+  const previous_info = __verification_delta_info(previous, normalization)
+  const current_info = __verification_delta_info(current, normalization)
+  const previous_gate_signatures = __verification_delta_gate_signatures(previous_info)
+  const current_gate_signatures = __verification_delta_gate_signatures(current_info)
+  const removed = __verification_delta_set_minus(previous_gate_signatures, current_gate_signatures)
+  const added = __verification_delta_set_minus(current_gate_signatures, previous_gate_signatures)
+  const persisted = __verification_delta_set_intersection(previous_gate_signatures, current_gate_signatures)
+  if !current_info.feedsGates {
+    return __verification_delta_result(
+      "advisory",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "current_diagnostic_does_not_feed_gates",
+    )
+  }
+  const current_clear = current_info.explicit_success || (current_info.has_collection && current_info.count == 0)
+  if current_clear {
+    return __verification_delta_result(
+      "cleared",
+      len(previous_gate_signatures) > 0,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "current_result_is_passing",
+    )
+  }
+  if !current_info.failed || len(current_gate_signatures) == 0 {
+    return __verification_delta_result(
+      "initialized",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "current_has_no_gate_bearing_failure_signature",
+    )
+  }
+  if !previous_info.feedsGates || !previous_info.failed || len(previous_gate_signatures) == 0 {
+    return __verification_delta_result(
+      "initialized",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "no_prior_gate_bearing_failure",
+    )
+  }
+  if len(removed) == 0 && len(added) == 0 {
+    if current_info.count < previous_info.count {
+      return __verification_delta_result(
+        "advanced",
+        true,
+        previous_info,
+        current_info,
+        removed,
+        added,
+        persisted,
+        normalization,
+        "diagnostic_count_decreased",
+      )
+    }
+    if current_info.count > previous_info.count {
+      return __verification_delta_result(
+        "regressed",
+        false,
+        previous_info,
+        current_info,
+        removed,
+        added,
+        persisted,
+        normalization,
+        "diagnostic_count_increased",
+      )
+    }
+    return __verification_delta_result(
+      "unchanged",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "same_diagnostic_signature_set",
+    )
+  }
+  if len(removed) > 0 {
+    return __verification_delta_result(
+      "advanced",
+      true,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "diagnostic_signature_set_changed",
+    )
+  }
+  if len(added) > 0 {
+    return __verification_delta_result(
+      "regressed",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "new_diagnostics_added_without_clearing_prior_signatures",
+    )
+  }
+  return __verification_delta_result(
+    "unchanged",
+    false,
+    previous_info,
+    current_info,
+    removed,
+    added,
+    persisted,
+    normalization,
+    "same_diagnostic_signature_set",
+  )
+}
+
+/**
+ * Build the canonical gate-facing verification object for no-progress,
+ * escalation, and completion policy. The helper classifies both previous and
+ * current diagnostics against `current_hashes`, demotes stale or unbound
+ * diagnostics to advisory, then computes diagnostic-delta progress credit over
+ * only gate-bearing signatures.
+ *
+ * The intent is one DRY seam: callers feed this object to loop policy instead
+ * of re-checking snapshot freshness, regex-normalizing signatures, and
+ * deciding stale/advisory status independently.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_gate_input(previous, current, current_hashes = nil, options = nil) -> VerificationGateInput {
+  const opts = __verification_opts(options)
+  const hashes_available = __verification_gate_hashes_available(current_hashes)
+  const hashes = __verification_gate_hashes(current_hashes)
+  const previous_classification = __verification_gate_classification(previous, hashes, hashes_available)
+  const current_classification = __verification_gate_classification(current, hashes, hashes_available)
+  const previous_delta = __verification_gate_delta_value(previous, previous_classification)
+  const current_delta = __verification_gate_delta_value(current, current_classification)
+  const delta = verification_diagnostic_delta(previous_delta, current_delta, opts)
+  const status = __verification_gate_status(delta, current_classification)
+  const feeds_gates = current_classification?.feedsGates ? true : false
+  const gate_bearing_failure = feeds_gates && len(delta?.current?.signatures ?? []) > 0 && status != "cleared"
+  return {
+    schema: "harn.verification.gate_input.v1",
+    status: status,
+    reason: __verification_gate_reason(delta, current_classification),
+    feedsGates: feeds_gates,
+    feeds_gates: feeds_gates,
+    advisory: !feeds_gates,
+    progress_credit: feeds_gates && delta?.progress_credit ? true : false,
+    no_progress: feeds_gates && status == "unchanged",
+    gate_bearing_failure: gate_bearing_failure,
+    blocks_completion: gate_bearing_failure,
+    stale: current_classification?.status == "bound_stale",
+    stale_files: current_classification?.staleFiles ?? [],
+    previous: {classification: previous_classification, value: previous_delta},
+    current: {classification: current_classification, value: current_delta},
+    delta: delta,
+  }
+}
+
+/**
+ * Convert a normalized command/check result into the canonical profile-store
+ * observation shape: `{durationMs, warm, exit, failureSignature?, snapshot?}`.
+ * This keeps timing capture DRY while leaving scheduler policy to the caller.
+ *
+ * Options:
+ * - `warm` / `cold`: classify the run for warm/cold timing distributions.
+ * - `snapshot`: either a direct file->hash map or a
+ *   `VerificationFileHashSnapshot`.
+ * - `failure_signature`: explicit signature to persist on failing runs.
+ * - `failure_signature_from`: `combined` (default), `stderr`, `stdout`, or
+ *   `none`.
+ * - `max_failure_signature_chars`: defaults to 4000.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_observation_from_command_result(result: dict, options = nil) -> VerificationCheckObservation {
+  const opts = __verification_opts(options)
+  let observation = {warm: __verification_warm(opts)}
+  const duration_ms = __verification_duration_ms(result, opts)
+  if duration_ms != nil {
+    observation = observation + {durationMs: duration_ms}
+  }
+  const exit_code = __verification_exit(result, opts)
+  if exit_code != nil {
+    observation = observation + {exit: exit_code}
+  }
+  const snapshot = __verification_snapshot_map(opts?.snapshot)
+  if snapshot != nil {
+    observation = observation + {snapshot: snapshot}
+  }
+  const failure_signature = __verification_failure_signature(result, opts)
+  if failure_signature != nil {
+    observation = observation + {failureSignature: failure_signature}
+  }
+  if opts?.at != nil {
+    observation = observation + {at: to_string(opts.at)}
+  }
+  return observation
+}
+
+/**
+ * Record one command/check result into a verification profile row and return
+ * the persisted row plus the observation that was applied. Unknown row ids
+ * return `row = nil`, matching `verification_profile_record_run`.
+ *
+ * @effects: [state]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_record_check_result(row_id: string, result: dict, options = nil) -> VerificationRecordedCheck {
+  const opts = __verification_opts(options)
+  const observation = verification_observation_from_command_result(result, opts)
+  const row = verification_profile_record_run(row_id, observation, opts?.dir)
+  return {result: result, observation: observation, row: row, snapshot: nil}
+}
+
+/**
+ * Run a command as one verification check, capture optional launch-time file
+ * hashes, and record exactly one profile observation for the completed result.
+ *
+ * Options:
+ * - `command_options`: options passed to `command_run`.
+ * - `snapshot_paths`: file paths hashed before the command launches.
+ * - `snapshot`: explicit file->hash map when the caller already captured one.
+ * - `record`: set `false` to run and build the observation without updating
+ *   the profile store.
+ * - any `verification_observation_from_command_result` option.
+ *
+ * @effects: [process, host, fs, state]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_run_check(row_id: string, spec, options = nil) -> VerificationRecordedCheck {
+  const opts = __verification_opts(options)
+  if opts?.command_options?.background == true {
+    throw "verification_run_check: background command_options are not supported; use verification_start_check"
+  }
+  const captured = __verification_capture_snapshot(opts)
+  const result = command_run(spec, opts?.command_options)
+  const observation = verification_observation_from_command_result(result, opts + {snapshot: captured.snapshot})
+  let row = nil
+  if opts?.record != false {
+    row = verification_profile_record_run(row_id, observation, opts?.dir)
+  }
+  return {result: result, observation: observation, row: row, snapshot: captured.fact}
+}
+
+/**
+ * Start a verification check in the background after capturing optional
+ * launch-time file hashes. The returned receipt is safe to persist and pass to
+ * `verification_finish_check`; no profile row is updated until finish records
+ * the completed result.
+ *
+ * @effects: [process, host, fs]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_start_check(row_id: string, spec, options = nil) -> VerificationStartedCheck {
+  const opts = __verification_opts(options)
+  const captured = __verification_capture_snapshot(opts)
+  const command_options = (opts?.command_options ?? {}) + {background: true}
+  const started = command_run(spec, command_options)
+  return {
+    row_id: row_id,
+    started: started,
+    observation_options: opts + {snapshot: captured.snapshot},
+    snapshot: captured.fact,
+  }
+}
+
+/**
+ * Wait for a check started by `verification_start_check`, record its completed
+ * command result into the profile row, and return the same recorded-check
+ * receipt shape as `verification_run_check`.
+ *
+ * Options:
+ * - `wait_options`: options passed to `command_wait`.
+ * - `record`: set `false` to wait and build the observation without updating
+ *   the profile store.
+ * - `row_id`: override the row id stored in the started-check receipt.
+ * - any observation option can override the started-check observation options.
+ *
+ * @effects: [process, state]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_finish_check(started_check: dict, options = nil) -> VerificationRecordedCheck {
+  const opts = __verification_opts(options)
+  const row_id = opts?.row_id ?? started_check?.row_id
+  if row_id == nil || trim(to_string(row_id)) == "" {
+    throw "verification_finish_check: row_id must be supplied in the receipt or options"
+  }
+  const result = command_wait(started_check.started, opts?.wait_options ?? {timeout_ms: 60000})
+  const observation_options = (started_check?.observation_options ?? {}) + opts
+  const observation = verification_observation_from_command_result(result, observation_options)
+  let row = nil
+  if opts?.record != false && started_check?.observation_options?.record != false {
+    row = verification_profile_record_run(to_string(row_id), observation, observation_options?.dir)
+  }
+  return {result: result, observation: observation, row: row, snapshot: started_check?.snapshot}
+}
+
+/**
+ * Execute config-declared toolchain probes and return deterministic identity
+ * facts. Rows are data, not code: Harn does not hardcode Go, Zig, Cargo, or
+ * any other toolchain. A row may declare:
+ *
+ * - `id` / `name`
+ * - `versionProbe`: a `command_run` spec or `{spec, versionPattern,
+ *   command_options}`
+ * - `cacheIdentity`: any cache/build-server/env identity fields the scheduler
+ *   wants to bind to the profile row
+ *
+ * Failed or missing probes produce `available = false` facts instead of
+ * throwing, so a verification scheduler can reason about unavailable tools.
+ *
+ * @effects: [process]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_toolchain_facts(rows: list<dict>, options = nil) -> list<VerificationToolchainFact> {
+  const opts = __verification_opts(options)
+  let facts = []
+  let index = 0
+  for row in rows {
+    const id = __verification_row_id(row, index)
+    const name = __verification_toolchain_name(row, id)
+    const spec = __verification_toolchain_probe(row)
+    let result = nil
+    if spec != nil {
+      result = command_run(spec, __verification_toolchain_probe_options(row, opts))
+    }
+    const ok = result != nil && __verification_result_ok(result)
+    const raw_version = result == nil ? "" : __verification_toolchain_raw_version(result)
+    const version = ok ? regex_first_capture(__verification_toolchain_version_pattern(row, opts), raw_version) : nil
+    const exit_code = result == nil ? nil : __verification_exit(result, {})
+    const probe = {
+      status: result?.status ?? "not_configured",
+      exit: exit_code,
+      durationMs: result?.duration_ms,
+      stdout: result?.stdout ?? "",
+      stderr: result?.stderr ?? "",
+    }
+    facts = facts
+      + [
+      {
+        id: id,
+        name: name,
+        available: ok,
+        version: version,
+        raw_version: raw_version,
+        cache_identity: __verification_toolchain_cache_identity(row, opts),
+        probe: probe,
+      },
+    ]
+    index = index + 1
+  }
+  return facts
+}
+
+/**
+ * Ensure a declared warm-state process is running, returning a reusable
+ * lifecycle receipt. This composes the existing hostlib-owned background
+ * command handle machinery: Harn owns the data contract and policy, while
+ * hostlib owns process groups, cancellation, and session cleanup.
+ *
+ * Rows may declare `warmMode.startCommand` / `start_command` / `spawnCommand`
+ * as a normal `std/command` spec. If the readiness probe already reports
+ * warm, no process is spawned. Pass a prior receipt as `existing`/`receipt` to
+ * make reuse explicit; the helper will return that handle instead of spawning
+ * a duplicate while the row is still cold.
+ *
+ * @effects: [process]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_start_warm_state(row: dict, options = nil) -> VerificationWarmStateLifecycleReceipt {
+  const opts = __verification_opts(options)
+  const id = __verification_warm_state_id(row, 0)
+  const name = __verification_warm_state_name(row, id)
+  const existing = opts?.existing ?? opts?.receipt
+  const existing_handle = __verification_warm_state_receipt_handle(existing)
+  const before = __verification_warm_state_first_fact(row, opts)
+  const before_warm = before?.warm ?? false
+  if before_warm {
+    return {
+      id: id,
+      name: name,
+      status: "ready",
+      reused: existing_handle != nil,
+      handle_id: existing_handle,
+      started: existing?.started,
+      initial_fact: before,
+      fact: before,
+      row: row,
+    }
+  }
+  if existing_handle != nil && opts?.reuse_existing != false {
+    return {
+      id: id,
+      name: name,
+      status: "starting",
+      reused: true,
+      handle_id: existing_handle,
+      started: existing?.started,
+      initial_fact: before,
+      fact: before,
+      row: row,
+    }
+  }
+  const spec = __verification_warm_state_start_spec(row)
+  if spec == nil {
+    return {
+      id: id,
+      name: name,
+      status: "not_configured",
+      reused: false,
+      handle_id: nil,
+      started: nil,
+      initial_fact: before,
+      fact: before,
+      row: row,
+    }
+  }
+  const started = command_run(spec, __verification_warm_state_start_options(row, opts) + {background: true})
+  const fact = __verification_warm_state_first_fact(row, opts)
+  const fact_warm = fact?.warm ?? false
+  return {
+    id: id,
+    name: name,
+    status: fact_warm ? "ready" : "starting",
+    reused: false,
+    handle_id: started?.handle_id,
+    started: started,
+    initial_fact: before,
+    fact: fact,
+    row: row,
+  }
+}
+
+/**
+ * Tear down a warm-state lifecycle receipt produced by
+ * `verification_start_warm_state`. If the receipt contains a hostlib
+ * background handle, it is cancelled through `std/command::command_cancel`;
+ * rows may additionally declare `warmMode.teardownCommand` / `stopCommand`
+ * for stack-specific cleanup.
+ *
+ * @effects: [process]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_teardown_warm_state(receipt: dict, options = nil) -> VerificationWarmStateLifecycleReceipt {
+  const opts = __verification_opts(options)
+  const row = opts?.row ?? receipt?.row ?? {}
+  const id = receipt?.id ?? __verification_warm_state_id(row, 0)
+  const name = receipt?.name ?? __verification_warm_state_name(row, id)
+  const handle_id = opts?.handle_id ?? __verification_warm_state_receipt_handle(receipt)
+  let cancel = nil
+  if handle_id != nil {
+    cancel = command_cancel(handle_id, __verification_warm_state_cancel_options(opts))
+  }
+  const spec = __verification_warm_state_teardown_spec(row)
+  let teardown = nil
+  if spec != nil {
+    teardown = command_run(spec, __verification_warm_state_teardown_options(row, opts))
+  }
+  const fact = opts?.probe_after == true ? __verification_warm_state_first_fact(row, opts) : nil
+  return {
+    id: id,
+    name: name,
+    status: "torn_down",
+    handle_id: handle_id,
+    cancelled: cancel?.cancelled ?? false,
+    cancel: cancel,
+    teardown: teardown,
+    fact: fact,
+    row: row,
+  }
+}

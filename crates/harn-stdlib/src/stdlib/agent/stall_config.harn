@@ -1,0 +1,493 @@
+import {
+  agent_monologue_actuation_config,
+  agent_monologue_actuation_initial_state,
+  agent_monologue_actuation_observe,
+} from "std/agent/monologue_actuation"
+import {
+  AgentStallConfig,
+  AgentStallObservation,
+  AgentStallState,
+  AgentStallWarning,
+} from "std/agent/stall_types"
+import {
+  agent_emit_event,
+  agent_session_inject_feedback,
+  agent_session_totals,
+} from "std/agent/state"
+import { verification_gate_input } from "std/verification"
+
+pub const STALL_REPEAT_SAME_OBSERVATION = 4
+
+// same action -> same error repeats before tripping.
+pub const STALL_REPEAT_SAME_ERROR = 3
+
+// consecutive no-progress agent messages (text, no tool call) before tripping.
+pub const STALL_NO_PROGRESS_MESSAGES = 3
+
+// ping-pong cycles (A,B,A,B,...) between two actions before tripping.
+pub const STALL_PING_PONG_CYCLES = 6
+
+// repeated context-window / token-limit errors before tripping.
+pub const STALL_REPEAT_CONTEXT_WINDOW_ERROR = 2
+
+// Evidence-aware repair loop (#repair-diagnostics): default number of repair
+// turns the SAME diagnostic may recur (same signature, no intervening edit)
+// before the detector trips the "stuck_same_diagnostic" strategy-shift nudge.
+pub const STALL_STUCK_SAME_DIAGNOSTIC_AFTER = 3
+
+// Budget-extension guard (default OFF, gated by `no_net_progress_extend_guard`):
+// how many turns the SAME failure signature may recur on the verify-bearing path
+// before a turn stops counting as "progress" for the loop's budget-extension
+// decision. The loop's default extension policy treats any tool-calling turn as
+// progress and keeps extending its own iteration budget; a model thrashing
+// through the same compile/test failure therefore buys unbounded runway. Once
+// the same-diagnostic streak reaches this many turns the verification outcome is
+// provably not advancing, so the turn no longer extends the budget and the loop
+// stops at its current cap. Conservative + outcome-aware: a productive edit
+// changes the signature (streak resets) and a pass clears the failure model, so
+// genuine progress is never suppressed. Set at the same depth as the stuck nudge
+// so the strategy-shift nudge fires before/with the extension cut, not after.
+pub const STALL_NO_NET_PROGRESS_EXTEND_AFTER = 3
+
+// Hard no-net-progress floor (default OFF with `no_net_progress_extend_guard`):
+// a varied/slow-draining failure can dodge the same-diagnostic streak by
+// occasionally changing the failing signature while still never producing a
+// clean verification. Count failing verification turns independently and force a
+// terminal stuck stop once this cap is crossed. It resets ONLY on a clean
+// non-edit verification pass; edit success is not proof the build is green.
+pub const STALL_NO_NET_PROGRESS_HARD_CAP_AFTER = 16
+
+// Reserved terminal-verify guard (default OFF, gated by
+// `reserved_terminal_verify`): how many iterations are HELD BACK from the main
+// loop as a terminal allowance the normal iterations cannot consume. When the
+// loop would otherwise terminate on a budget/iteration boundary while the
+// transcript still has an UNVERIFIED source write (the model wrote source then
+// ran out of runway), the loop spends this reserve on a final verify(+repair)
+// pass instead of terminating blind on a red build. Bounded so the reserve can
+// never itself loop forever: the reserve grants at most this many extra
+// iterations, and the terminal-verify mandate forces a verification on each one
+// (a passing verify ends the run as `done`, a red build surfaces the actual
+// verifier failure rather than a silent `budget_exhausted`).
+pub const STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS = 2
+
+// consecutive un-recovered trips before a hard stop is recommended. A trip
+// "recovers" when a turn produces a step that does not itself trip (the agent
+// broke the loop). Past this many back-to-back trips the detector flags
+// `hard_stop` so the loop can surface a terminal stuck stop instead of
+// nudging forever.
+pub const STALL_HARD_STOP_AFTER_TRIPS = 3
+
+// Verify-state progress axis (#burin-cutover seam 1, default OFF — active only
+// when a `progress_signal` callback is supplied). Two cut predicates:
+//   (A) long-stall: the same failure diagnostic has recurred for at least
+//       `verify_state_streak` turns AND the host's monotone best verify-state
+//       scalar has not advanced for at least `verify_state_stall_turns` turns;
+//       OR the same diagnostic has hard-recurred `verify_state_recurrence_hard`
+//       times on its own.
+//   (B) short write-axis cut (closes the pace-governor blind spot where an edit
+//       lands every turn but the verifier never moves): the verify-state scalar
+//       has not advanced for at least `no_verifier_progress_limit` turns AND a
+//       workspace write landed during that non-advancing streak.
+pub const STALL_VERIFY_STATE_STREAK = 3
+
+pub const STALL_VERIFY_STATE_STALL_TURNS = 12
+
+pub const STALL_VERIFY_STATE_RECURRENCE_HARD = 4
+
+pub const STALL_NO_VERIFIER_PROGRESS_LIMIT = 3
+
+// Delivered-fix trigger (#burin-cutover seam 3, default OFF — active only when a
+// `remediation_delivered` callback is supplied): the same-diagnostic streak at
+// which a delivered-but-not-landing fix escalates to `delivered_fix_not_landing`.
+// Deliberately LOWER than the plain-repeat `stuck_same_diagnostic_after` (3): a
+// fix that was actually attempted and still did not land is a stronger stuck
+// signal than an untouched same-failure repeat, so it fires one turn sooner.
+pub const STALL_DELIVERED_FIX_AFTER = 2
+
+// Per-turn action-signal intake (#burin-cutover seam 4, default OFF — active only
+// when an `action_signal` callback is supplied): the host reports a boolean "this
+// turn performed a flailing action" fact (e.g. burin's desperation_shell_write /
+// truncated_read / edit_oscillation verdicts) that is stuck on a SINGLE occurrence
+// with no streak. harn owns only the TRIGGER (the distinct `flailing_action`
+// pattern on the existing `agent_loop_stall_warning` event + the standard
+// consecutive-trip escalation); the host owns the coding-specific verdict. The
+// callback is invoked ONLY when configured, so an absent callback leaves behavior
+// byte-identical.
+//
+// Hard no-progress floor by ELAPSED TURNS (#burin-cutover seam 5, default OFF —
+// active only when `turns_since_clean_verify` is set): a slow-draining run can
+// dodge both the consecutive `same_diagnostic_streak` AND the failing-verify
+// `no_net_progress_hard_cap_after` (16) counter by rarely producing a FAILING
+// verification (long edit/read storms with only sporadic checks) while never
+// producing a CLEAN one. `turns_since_clean_verify` counts EVERY folded turn since
+// the last clean passing verification (not just failing-verify turns) and forces a
+// terminal stuck stop once it crosses the caller-set floor. It resets ONLY on a
+// clean non-edit verification pass. Distinct from the failing-verify hard cap: this
+// is the total-elapsed axis (burin's 60-turn slow-drain floor), shipped as a
+// caller-set knob with NO default (nil = off) so today's behavior is unchanged.
+// Tools that report progress without changing task state. A turn whose only
+// tool call is one of these is "narrating progress without making it": it is
+// counted as a no-progress turn for stall accounting, so a run of them (e.g. a
+// model spamming `agent_progress` after it gets stuck) trips the no-progress
+// detector instead of masquerading as activity. A turn that also makes a real
+// tool call is unaffected — the real call carries the action stream.
+pub const SOFT_PROGRESS_TOOLS = ["agent_progress"]
+
+/**
+ * Evidence-aware repair loop (#repair-diagnostics), spanning AgentStallConfig /
+ * AgentStallWarning / AgentStallState below. The current-failure model is the
+ * shared invariant for post-edit verification and repair-aware nudges: when
+ * `post_edit_reverify` is enabled, Harn tracks the last live failure so a
+ * workspace write cannot be mistaken for proof that verification passed. When
+ * `repair_aware` is also enabled, the same model drives the strategy-shift nudge
+ * after the same diagnostic recurs across `stuck_same_diagnostic_after` repair
+ * turns.
+ *   - Config knobs: post_edit_reverify / repair_aware / stuck_same_diagnostic_after.
+ *   - Warning extras (only on the "stuck_same_diagnostic" pattern):
+ *     diagnostic_class / diagnostic_signature / diagnostic_snippet.
+ *   - State (the current-failure model — folded by __agent_stall_fold_diagnostic
+ *     from the turn's verification result through std/verification's
+ *     diagnostic-delta semantics, and deliberately NOT cleared by
+ *     __agent_stall_reset_action so a different corrective action does not clear
+ *     "same root failure"): last_diagnostic_class / last_diagnostic_signature /
+ *     last_diagnostic_snippet / last_diagnostic_delta_current / write_epoch /
+ *     same_diagnostic_streak / edit_since_failure / reverify_owed.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_stall_bool(value, fallback: bool, field: string) -> bool {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) == "bool" {
+    return value
+  }
+  throw "agent_loop: stall_diagnostics." + field + " must be a bool; got " + type_of(value)
+}
+
+pub fn __agent_stall_list(value, field: string) -> list {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    return value
+  }
+  throw "agent_loop: stall_diagnostics." + field + " must be a list; got " + type_of(value)
+}
+
+pub fn __agent_stall_int(value, fallback: int, minimum: int) -> int {
+  if type_of(value) == "int" && value >= minimum {
+    return value
+  }
+  return fallback
+}
+
+pub fn __agent_stall_repair_value(flat, nested, key: string) {
+  if flat[key] != nil {
+    return flat[key]
+  }
+  if nested == nil {
+    return nil
+  }
+  return nested[key]
+}
+
+/**
+ * Fact-intake seams (#burin-cutover): `progress_signal` / `remediation_delivered`
+ * / `action_signal` are host-supplied CALLBACKS the mechanism invokes — the host
+ * owns the coding-specific fact, harn owns the loop/escalation decision. All are
+ * optional and validated here so a mistyped value fails loudly at config time
+ * rather than blowing up mid-run when the callback is first invoked.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_stall_closure(value, field: string) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) == "closure" {
+    return value
+  }
+  throw "agent_loop: stall_diagnostics." + field + " must be a closure or nil; got " + type_of(value)
+}
+
+/**
+ * Independently-armable no-net-progress predicates (#burin-cutover). The
+ * verify-state no-net-progress trip (`agent_stall_no_net_progress`, active only
+ * under a `progress_signal` callback) is an OR of three predicates —
+ * `long_stall`, `hard_recurrence`, `write_axis`. A host may disarm any of them so
+ * it can adopt the seam directly instead of clamping the fed streak to route
+ * around one branch (burin's "capped_streak" workaround, which existed solely to
+ * make the hard-recurrence branch unreachable). Unset / absent keys = armed, so
+ * the default is byte-identical to the fixed OR. Unknown predicate keys throw
+ * loudly at config time.
+ */
+pub const __NO_NET_PROGRESS_PREDICATE_KEYS = ["hard_recurrence", "long_stall", "write_axis"]
+
+pub fn __agent_stall_predicates(value, field: string) -> dict {
+  const defaults = {hard_recurrence: true, long_stall: true, write_axis: true}
+  if value == nil {
+    return defaults
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: stall_diagnostics." + field + " must be a dict or nil; got " + type_of(value)
+  }
+  let out = defaults
+  for key in keys(value) {
+    if !contains(__NO_NET_PROGRESS_PREDICATE_KEYS, key) {
+      throw "agent_loop: stall_diagnostics." + field + " has unknown predicate key \"" + key
+        + "\"; known keys: "
+        + join(__NO_NET_PROGRESS_PREDICATE_KEYS, ", ")
+    }
+    out = out + {[key]: __agent_stall_bool(value[key], true, field + "." + key)}
+  }
+  return out
+}
+
+/**
+ * Optional positive-int knob (#burin-cutover): `turns_since_clean_verify` is an
+ * off-by-default caller-set floor. nil = off; any set value must be a positive int
+ * and fails loudly at config time, matching the `__agent_stall_closure` contract.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_stall_opt_int(value, field: string) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) == "int" && value >= 1 {
+    return value
+  }
+  throw "agent_loop: stall_diagnostics." + field + " must be a positive int or nil; got " + type_of(value)
+}
+
+pub fn __agent_stall_default_config() -> AgentStallConfig {
+  return {
+    enabled: false,
+    threshold: 3,
+    inject_feedback: true,
+    max_feedback: 1,
+    exempt_tools: [],
+    include_arguments: false,
+    repeat_same_observation: STALL_REPEAT_SAME_OBSERVATION,
+    repeat_same_error: STALL_REPEAT_SAME_ERROR,
+    no_progress_messages: STALL_NO_PROGRESS_MESSAGES,
+    ping_pong_cycles: STALL_PING_PONG_CYCLES,
+    repeat_context_window_error: STALL_REPEAT_CONTEXT_WINDOW_ERROR,
+    hard_stop_after_trips: STALL_HARD_STOP_AFTER_TRIPS,
+    repair_aware: false,
+    stuck_same_diagnostic_after: STALL_STUCK_SAME_DIAGNOSTIC_AFTER,
+    post_edit_reverify: true,
+    no_net_progress_extend_guard: false,
+    no_net_progress_extend_after: STALL_NO_NET_PROGRESS_EXTEND_AFTER,
+    no_net_progress_hard_cap_after: STALL_NO_NET_PROGRESS_HARD_CAP_AFTER,
+    reserved_terminal_verify: false,
+    reserved_terminal_verify_iterations: STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS,
+    zero_write_terminal_verify: false,
+    verify_state_streak: STALL_VERIFY_STATE_STREAK,
+    verify_state_stall_turns: STALL_VERIFY_STATE_STALL_TURNS,
+    verify_state_recurrence_hard: STALL_VERIFY_STATE_RECURRENCE_HARD,
+    no_verifier_progress_limit: STALL_NO_VERIFIER_PROGRESS_LIMIT,
+    monologue_actuation: agent_monologue_actuation_config(),
+    progress_signal: nil,
+    remediation_delivered: nil,
+    action_signal: nil,
+    turns_since_clean_verify: nil,
+    no_net_progress_predicates: {hard_recurrence: true, long_stall: true, write_axis: true},
+  }
+}
+
+pub fn __agent_stall_config(value) -> AgentStallConfig {
+  const defaults = __agent_stall_default_config()
+  if value == nil {
+    return defaults
+  }
+  if type_of(value) == "bool" {
+    return defaults + {enabled: value}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `stall_diagnostics` must be a dict, bool, or nil; got " + type_of(value)
+  }
+  const repair_diagnostics = value?.repair_diagnostics
+  if repair_diagnostics != nil && type_of(repair_diagnostics) != "dict" {
+    throw "agent_loop: stall_diagnostics.repair_diagnostics must be a dict or nil; got "
+      + type_of(repair_diagnostics)
+  }
+  const {threshold = 3, max_feedback = 1} = value ?? {}
+  const exempt_tools = if value?.exempt_tools != nil {
+    __agent_stall_list(value.exempt_tools, "exempt_tools")
+  } else {
+    __agent_stall_list(value?.allow_repeated_tools, "allow_repeated_tools")
+  }
+  const resolved_threshold = if type_of(threshold) == "int" && threshold >= 2 {
+    threshold
+  } else {
+    3
+  }
+  // The legacy `threshold` knob (N repeated identical calls) IS the same intent
+  // as the same-observation condition, so when a caller sets it explicitly it
+  // also drives `repeat_same_observation` for back-compat. Absent an explicit
+  // `threshold`, the same-observation condition uses the reference default (4).
+  const same_observation_default = if value?.threshold != nil {
+    resolved_threshold
+  } else {
+    STALL_REPEAT_SAME_OBSERVATION
+  }
+  return {
+    enabled: __agent_stall_bool(value?.enabled, true, "enabled"),
+    threshold: resolved_threshold,
+    inject_feedback: __agent_stall_bool(value?.inject_feedback, true, "inject_feedback"),
+    max_feedback: if type_of(max_feedback) == "int" && max_feedback >= 0 {
+      max_feedback
+    } else {
+      1
+    },
+    exempt_tools: exempt_tools,
+    include_arguments: __agent_stall_bool(value?.include_arguments, false, "include_arguments"),
+    repeat_same_observation: __agent_stall_int(value?.repeat_same_observation, same_observation_default, 2),
+    repeat_same_error: __agent_stall_int(value?.repeat_same_error, STALL_REPEAT_SAME_ERROR, 2),
+    no_progress_messages: __agent_stall_int(value?.no_progress_messages, STALL_NO_PROGRESS_MESSAGES, 2),
+    ping_pong_cycles: __agent_stall_int(value?.ping_pong_cycles, STALL_PING_PONG_CYCLES, 2),
+    repeat_context_window_error: __agent_stall_int(value?.repeat_context_window_error, STALL_REPEAT_CONTEXT_WINDOW_ERROR, 1),
+    hard_stop_after_trips: __agent_stall_int(value?.hard_stop_after_trips, STALL_HARD_STOP_AFTER_TRIPS, 1),
+    repair_aware: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "repair_aware"),
+      false,
+      "repair_aware",
+    ),
+    stuck_same_diagnostic_after: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "stuck_same_diagnostic_after"),
+      STALL_STUCK_SAME_DIAGNOSTIC_AFTER,
+      2,
+    ),
+    post_edit_reverify: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "post_edit_reverify"),
+      true,
+      "post_edit_reverify",
+    ),
+    no_net_progress_extend_guard: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_net_progress_extend_guard"),
+      false,
+      "no_net_progress_extend_guard",
+    ),
+    no_net_progress_extend_after: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_net_progress_extend_after"),
+      STALL_NO_NET_PROGRESS_EXTEND_AFTER,
+      2,
+    ),
+    no_net_progress_hard_cap_after: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_net_progress_hard_cap_after"),
+      STALL_NO_NET_PROGRESS_HARD_CAP_AFTER,
+      2,
+    ),
+    reserved_terminal_verify: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "reserved_terminal_verify"),
+      false,
+      "reserved_terminal_verify",
+    ),
+    reserved_terminal_verify_iterations: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "reserved_terminal_verify_iterations"),
+      STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS,
+      1,
+    ),
+    zero_write_terminal_verify: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "zero_write_terminal_verify"),
+      false,
+      "zero_write_terminal_verify",
+    ),
+    verify_state_streak: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "verify_state_streak"),
+      STALL_VERIFY_STATE_STREAK,
+      1,
+    ),
+    verify_state_stall_turns: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "verify_state_stall_turns"),
+      STALL_VERIFY_STATE_STALL_TURNS,
+      1,
+    ),
+    verify_state_recurrence_hard: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "verify_state_recurrence_hard"),
+      STALL_VERIFY_STATE_RECURRENCE_HARD,
+      1,
+    ),
+    no_verifier_progress_limit: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_verifier_progress_limit"),
+      STALL_NO_VERIFIER_PROGRESS_LIMIT,
+      1,
+    ),
+    monologue_actuation: agent_monologue_actuation_config(value?.monologue_actuation),
+    progress_signal: __agent_stall_closure(
+      __agent_stall_repair_value(value, repair_diagnostics, "progress_signal"),
+      "progress_signal",
+    ),
+    remediation_delivered: __agent_stall_closure(
+      __agent_stall_repair_value(value, repair_diagnostics, "remediation_delivered"),
+      "remediation_delivered",
+    ),
+    action_signal: __agent_stall_closure(
+      __agent_stall_repair_value(value, repair_diagnostics, "action_signal"),
+      "action_signal",
+    ),
+    turns_since_clean_verify: __agent_stall_opt_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "turns_since_clean_verify"),
+      "turns_since_clean_verify",
+    ),
+    no_net_progress_predicates: __agent_stall_predicates(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_net_progress_predicates"),
+      "no_net_progress_predicates",
+    ),
+  }
+}
+
+/**
+ * agent_stall_initial_state creates repeated-tool-call diagnostic state.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_initial_state() -> AgentStallState {
+  return {
+    last_signature: "",
+    streak: 0,
+    warnings: [],
+    repeated_tool_calls: 0,
+    feedback_count: 0,
+    last_observation_signature: "",
+    last_outcome_kind: "",
+    same_observation_streak: 0,
+    same_error_streak: 0,
+    context_window_error_streak: 0,
+    no_progress_streak: 0,
+    ping_pong_a: "",
+    ping_pong_b: "",
+    ping_pong_alternations: 0,
+    consecutive_trips: 0,
+    action_flail_trips: 0,
+    hard_stop: false,
+    last_diagnostic_class: "",
+    last_diagnostic_signature: "",
+    last_diagnostic_snippet: "",
+    last_diagnostic_delta_current: {},
+    last_diagnostic_delta_status: "",
+    last_diagnostic_delta_reason: "",
+    write_epoch: 0,
+    same_diagnostic_streak: 0,
+    failing_verify_turns: 0,
+    turns_since_clean_verify: 0,
+    edit_since_failure: false,
+    reverify_owed: false,
+    verified_write_epoch: 0,
+    verify_state_seen: false,
+    verify_state_high: 0.0,
+    verify_turns_since_advance: 0,
+    verify_wrote_since_advance: false,
+    verify_signature_counts: {},
+    remediation_delivered_signature: "",
+    remediation_delivered_count: 0,
+    monologue_actuation: agent_monologue_actuation_initial_state(),
+  }
+}

@@ -1,0 +1,658 @@
+import {
+  LlmCallerTransport,
+  __normalize_llm_caller_transport,
+  __validate_llm_caller,
+} from "std/agent/caller_transport"
+import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
+import "std/agent/options_formats"
+import "std/agent/options_types"
+import "std/agent/options_validation"
+import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
+import { agent_reasoning_apply } from "std/agent/reasoning"
+import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
+import { agent_scratchpad_options } from "std/agent/scratchpad"
+import { pack_for } from "std/llm/defaults"
+import { project_context_profile } from "std/project"
+
+pub fn agent_merge_llm_options(base = nil, overrides = nil) {
+  let merged = (base ?? {}) + (overrides ?? {})
+  if __explicit_tool_format(overrides ?? {}) != nil {
+    merged = merged + {_tool_format_source: "explicit"}
+  }
+  return merged
+}
+
+/**
+ * Re-resolve the effective tool_format for the current provider/model route.
+ * Auto-derived formats from a previous route are discarded before resolution;
+ * explicit caller pins are revalidated and preserved unless catalog parity
+ * steers them the same way the provider wire gate will.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_refresh_tool_format_for_route(options = nil) {
+  let opts = options ?? {}
+  if !__has_key(opts, "tool_format") && opts?.tools == nil {
+    return opts
+  }
+  if __auto_tool_format_source(opts?._tool_format_source) {
+    opts = __clear_tool_format_resolution(opts)
+  }
+  const resolution = agent_tool_format_resolution(opts)
+  return __with_resolved_tool_format(opts, resolution)
+}
+
+pub fn __normalize_iteration_budget(opts) {
+  const raw = opts?.iteration_budget
+  const legacy = opts?.max_iterations
+  if raw == nil && legacy == nil {
+    return {
+      mode: "fixed",
+      initial: 50,
+      max: 50,
+      extend_by: 0,
+      expose_decisions: false,
+      wall_clock_ms: nil,
+      total_cost_usd: nil,
+      consecutive_failures: nil,
+    }
+  }
+  const user_budget = if type_of(raw) == "string" {
+    {mode: raw}
+  } else {
+    raw
+  }
+  if user_budget == nil {
+    const cap = __positive_int_budget_field(legacy, 50, "max_iterations")
+    return {
+      mode: "fixed",
+      initial: cap,
+      max: cap,
+      extend_by: 0,
+      expose_decisions: false,
+      wall_clock_ms: nil,
+      total_cost_usd: nil,
+      consecutive_failures: nil,
+    }
+  }
+  if type_of(user_budget) != "dict" {
+    throw "agent_loop: iteration_budget must be a dict, string, or nil; got "
+      + type_of(user_budget)
+  }
+  const mode = user_budget.mode ?? "fixed"
+  if mode != "fixed" && mode != "adaptive" {
+    throw "agent_loop: iteration_budget.mode must be \"fixed\" or \"adaptive\"; got "
+      + to_string(mode)
+  }
+  const legacy_cap = if legacy != nil {
+    __positive_int_budget_field(legacy, 50, "max_iterations")
+  } else {
+    nil
+  }
+  const max_default = if mode == "adaptive" {
+    16
+  } else if legacy_cap != nil {
+    legacy_cap
+  } else {
+    50
+  }
+  const max_cap = __positive_int_budget_field(user_budget?.max, max_default, "iteration_budget.max")
+  const initial_default = if mode == "adaptive" {
+    const candidate = max_cap / 4
+    if candidate < 1 {
+      1
+    } else {
+      candidate
+    }
+  } else {
+    max_cap
+  }
+  const initial = __positive_int_budget_field(user_budget?.initial, initial_default, "iteration_budget.initial")
+  if initial > max_cap {
+    throw "agent_loop: `iteration_budget.initial` must be less than or equal to `iteration_budget.max`; got initial="
+      + to_string(initial)
+      + ", max="
+      + to_string(max_cap)
+  }
+  const extend_by = if mode == "adaptive" {
+    __positive_int_budget_field(user_budget?.extend_by, 2, "iteration_budget.extend_by")
+  } else {
+    0
+  }
+  const expose_decisions = if user_budget?.expose_decisions != nil {
+    if type_of(user_budget.expose_decisions) != "bool" {
+      throw "agent_loop: `iteration_budget.expose_decisions` must be a bool; got "
+        + type_of(user_budget.expose_decisions)
+    }
+    user_budget.expose_decisions
+  } else {
+    mode == "adaptive"
+  }
+  return {
+    mode: mode,
+    initial: initial,
+    max: max_cap,
+    extend_by: extend_by,
+    expose_decisions: expose_decisions,
+    wall_clock_ms: __positive_int_budget_field(user_budget?.wall_clock_ms, nil, "iteration_budget.wall_clock_ms"),
+    total_cost_usd: __positive_float_budget_field(user_budget?.total_cost_usd, nil, "iteration_budget.total_cost_usd"),
+    consecutive_failures: __normalize_consecutive_failure_budget(user_budget?.consecutive_failures),
+  }
+}
+
+pub fn __autonomy_tier(value) {
+  const tier = value ?? "act_auto"
+  if tier == "shadow" || tier == "suggest" || tier == "act_with_approval" || tier == "act_auto" {
+    return tier
+  }
+  throw "autonomy_policy: tier must be one of shadow, suggest, act_with_approval, act_auto"
+}
+
+/**
+ * autonomy_policy returns the VM-enforced autonomy assignment for an agent.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn autonomy_policy(tier = "act_auto", options = nil) {
+  const opts = options ?? {}
+  return {
+    agent_id: opts?.agent_id ?? opts?.agent,
+    autonomy_tier: __autonomy_tier(tier),
+    action_tiers: opts?.action_tiers ?? {},
+    agent_tiers: opts?.agent_tiers ?? {},
+    agent_action_tiers: opts?.agent_action_tiers ?? {},
+    reviewers: opts?.reviewers ?? [],
+  }
+}
+
+/**
+ * agent_preset_options is the typed constructor for `agent_preset(kind,
+ * overrides)` override dicts. Direct dict literals are checked against
+ * `AgentPresetOptions`, so preset-override typos fail at check time.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_preset_options(options: AgentPresetOptions = {}) -> AgentPresetOptions {
+  return options
+}
+
+/**
+ * agent_options is the typed constructor for `agent_loop` options. Direct
+ * dict literals are checked against `AgentLoopOptions`, so option typos
+ * fail at check time. The returned dict is exactly what was passed in;
+ * `agent_loop` (via `agent_loop_options` below) normalizes it at runtime.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_options(options: AgentLoopOptions = {}) -> AgentLoopOptions {
+  return options
+}
+
+/**
+ * agent_loop_options.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_loop_options(options = nil) {
+  let opts = options ?? {}
+  __validate_removed_agent_loop_options(opts)
+  __validate_agent_loop_completion_options(opts)
+  __validate_agent_loop_callback_options(opts)
+  const profile = opts?.profile ?? "tool_using"
+  const defaults = __profile_defaults(profile)
+  opts = defaults + opts
+  opts = agent_apply_default_retry(opts)
+  const llm_caller = opts?.llm_caller
+  const llm_caller_transport = __normalize_llm_caller_transport(opts?.llm_caller_transport)
+  const llm_retry = opts?._llm_retry
+  const on_delta = opts?.on_delta
+  const tool_caller = opts?.tool_caller
+  const structural_validator = opts?.structural_validator
+  const input_guardrail = opts?.input_guardrail
+  const pre_turn_scope_classifier = opts?.pre_turn_scope_classifier
+  opts = __with_project_context_profile(opts)
+  opts = agent_refresh_tool_format_for_route(opts)
+  if !__has_key(opts, "tool_format")
+    && (opts?.tools == nil || __client_tool_search_requested(opts?.tool_search)) {
+    opts = opts + {tool_format: __fallback_tool_format(), _tool_format_source: "fallback"}
+  }
+  if (opts?.loop_until_done ?? false) && !__has_key(opts, "done_sentinel") {
+    opts = opts
+      + {
+      done_sentinel: if __native_tools_complete_naturally(opts) {
+        nil
+      } else {
+        "##DONE##"
+      },
+    }
+  }
+  if __has_key(opts, "done_judge") && __judge_enabled(opts?.done_judge)
+    && !__has_key(opts, "done_sentinel")
+    && !__native_tools_complete_naturally(opts) {
+    opts = opts + {done_sentinel: "##DONE##"}
+  }
+  if __has_key(opts, "verify_completion_judge") {
+    if __judge_enabled(opts?.verify_completion_judge) {
+      opts = opts
+        + {verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge, opts)}
+    } else {
+      opts = opts + {verify_completion_judge: nil}
+    }
+  }
+  if __has_key(opts, "done_judge") {
+    if __judge_enabled(opts?.done_judge) {
+      opts = opts + {done_judge: __completion_judge_defaults(opts?.done_judge, opts)}
+    } else {
+      opts = opts + {done_judge: nil}
+    }
+  }
+  opts = __with_task_ledger_shorthand(opts)
+  const budget = __normalize_iteration_budget(opts)
+  opts = opts
+    + {
+    iteration_budget: budget,
+    max_iterations: budget.max,
+    tool_surface_narrowing: __normalize_tool_surface_narrowing(opts?.tool_surface_narrowing),
+    read_only_stance: __normalize_read_only_stance(opts?.read_only_stance),
+  }
+  opts = agent_reasoning_apply(opts)
+  opts = __normalize_reminder_provider_options(opts)
+  opts = opts
+    + {
+    _llm_caller: llm_caller,
+    _llm_caller_transport: llm_caller_transport,
+    _llm_retry: llm_retry,
+    _on_delta: on_delta,
+    _tool_caller: tool_caller,
+    _structural_validator: structural_validator,
+    _input_guardrail: input_guardrail,
+    _pre_turn_scope_classifier: pre_turn_scope_classifier,
+  }
+  return opts
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Model-option resolution (moved from the deleted std/agent/stack in v0.10).
+// `agent_model_options` resolves explicit config > role env prefixes >
+// defaults into a capability-sanitized options dict;
+// `agent_sanitize_model_options` strips provider-unsupported knobs.
+
+// -------------------------------------------------------------------------------------------------
+
+pub fn __stack_dict(value) {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+pub fn __stack_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+pub fn __stack_has_key(d, key) -> bool {
+  return type_of(d) == "dict" && contains(d.keys(), key)
+}
+
+pub fn __stack_non_empty_string(value) {
+  if type_of(value) != "string" {
+    return nil
+  }
+  const trimmed = trim(value)
+  if trimmed == "" {
+    return nil
+  }
+  return trimmed
+}
+
+pub fn __stack_env_token(value) -> string {
+  const text = __stack_non_empty_string(value)
+  if text == nil {
+    return ""
+  }
+  const cleaned = regex_replace_all("[^A-Za-z0-9]+", "_", text)
+  return uppercase(regex_replace_all("^_+|_+$", "", cleaned))
+}
+
+pub fn __stack_env_value(name) {
+  const key = __stack_non_empty_string(name)
+  if key == nil {
+    return nil
+  }
+  const value = harness.env.get(key)
+  return __stack_non_empty_string(value)
+}
+
+pub fn __stack_first_non_empty(values) {
+  for value in values {
+    const text = __stack_non_empty_string(value)
+    if text != nil {
+      return text
+    }
+  }
+  return nil
+}
+
+pub fn __stack_env_prefixes(config, role) {
+  const cfg = __stack_dict(config)
+  let prefixes = []
+  const explicit = cfg?.env_prefixes ?? cfg?.env_prefix
+  if type_of(explicit) == "list" {
+    for prefix in explicit {
+      const token = __stack_env_token(prefix)
+      if token != "" && !contains(prefixes, token) {
+        prefixes = prefixes + [token]
+      }
+    }
+  } else {
+    const token = __stack_env_token(explicit)
+    if token != "" {
+      prefixes = prefixes + [token]
+    }
+  }
+  const role_token = __stack_env_token(role)
+  if role_token != "" {
+    for prefix in ["HARN_AGENT_" + role_token, "HARN_LLM_" + role_token, "HARN_" + role_token] {
+      if !contains(prefixes, prefix) {
+        prefixes = prefixes + [prefix]
+      }
+    }
+  }
+  for prefix in ["HARN_AGENT", "HARN_LLM"] {
+    if !contains(prefixes, prefix) {
+      prefixes = prefixes + [prefix]
+    }
+  }
+  return prefixes
+}
+
+pub fn __stack_first_env(prefixes, suffix) {
+  for prefix in prefixes {
+    const value = __stack_env_value(prefix + "_" + suffix)
+    if value != nil {
+      return value
+    }
+  }
+  return nil
+}
+
+pub fn __stack_provider_model_pair(opts) {
+  const provider = __stack_non_empty_string(opts?.provider)
+  const model = __stack_non_empty_string(opts?.model)
+  if provider != nil && model != nil {
+    return {provider: provider, model: model}
+  }
+  if model != nil {
+    const info = try {
+      llm_model_info(model)
+    }
+    if !is_err(info) && type_of(unwrap(info)) == "dict" {
+      const resolved = unwrap(info)
+      return {
+        provider: __stack_non_empty_string(resolved?.provider) ?? provider ?? "auto",
+        model: __stack_non_empty_string(resolved?.id ?? resolved?.model) ?? model,
+      }
+    }
+  }
+  return nil
+}
+
+pub fn __stack_capabilities(opts) {
+  const pair = __stack_provider_model_pair(opts)
+  if pair == nil {
+    return nil
+  }
+  const caps = try {
+    provider_capabilities(pair.provider ?? "auto", pair.model ?? "")
+  }
+  if is_err(caps) || type_of(unwrap(caps)) != "dict" {
+    return nil
+  }
+  return unwrap(caps)
+}
+
+pub fn __stack_sanitize_mode(policy) {
+  const raw = __stack_non_empty_string(__stack_dict(policy)?.mode)
+  if raw == nil {
+    return "request"
+  }
+  return lowercase(raw)
+}
+
+pub fn __stack_thinking_mode(value) {
+  if value == nil {
+    return "disabled"
+  }
+  const kind = type_of(value)
+  if kind == "bool" {
+    if value {
+      return "enabled"
+    }
+    return "disabled"
+  }
+  if kind == "string" {
+    const raw = lowercase(trim(value))
+    if raw == "disabled" || raw == "off" || raw == "none" {
+      return "disabled"
+    }
+    if raw == "adaptive" {
+      return "adaptive"
+    }
+    if raw == "minimal" || raw == "low" || raw == "medium" || raw == "high" || raw == "xhigh" {
+      return "effort"
+    }
+    return "enabled"
+  }
+  if kind == "dict" {
+    if __stack_has_key(value, "enabled") && !(value.enabled ?? false) {
+      return "disabled"
+    }
+    const raw = lowercase(to_string(value?.mode ?? "enabled"))
+    if raw == "disabled" || raw == "off" || raw == "none" {
+      return "disabled"
+    }
+    if raw == "adaptive" {
+      return "adaptive"
+    }
+    if raw == "effort" {
+      return "effort"
+    }
+    return "enabled"
+  }
+  return "enabled"
+}
+
+pub fn __stack_thinking_supported(caps, thinking) {
+  const mode = __stack_thinking_mode(thinking)
+  if mode == "disabled" {
+    return true
+  }
+  const modes = __stack_list(caps?.thinking_modes)
+  if mode == "enabled" {
+    return contains(modes, "enabled") || contains(modes, "adaptive")
+  }
+  return contains(modes, mode)
+}
+
+pub fn __stack_strip_option_keys(options, stripped, keys) {
+  let out = options
+  let removed = stripped
+  for key in keys {
+    if __stack_has_key(out, key) {
+      out = out.remove(key)
+      removed = removed + [key]
+    }
+  }
+  return {options: out, stripped: removed}
+}
+
+pub fn __stack_sanitize_result(options, policy = nil) {
+  let out = __stack_dict(options)
+  let stripped = []
+  const mode = __stack_sanitize_mode(policy)
+  if mode == "healthcheck" || mode == "preflight" || mode == "probe" {
+    const deliberation = __stack_strip_option_keys(out, stripped, ["reasoning_effort", "thinking", "effort"])
+    out = deliberation.options
+    stripped = deliberation.stripped
+  }
+  const caps = __stack_capabilities(out)
+  if caps == nil {
+    return {options: out, stripped: stripped}
+  }
+  if __stack_has_key(out, "reasoning_effort") && !(caps?.reasoning_effort_supported ?? false) {
+    out = out.remove("reasoning_effort")
+    stripped = stripped + ["reasoning_effort"]
+  }
+  if __stack_has_key(out, "thinking") && !__stack_thinking_supported(caps, out.thinking) {
+    out = out.remove("thinking")
+    stripped = stripped + ["thinking"]
+  }
+  if !(caps?.prompt_caching ?? false) {
+    const cache = __stack_strip_option_keys(
+      out,
+      stripped,
+      ["prompt_cache", "prompt_caching", "prompt_cache_ttl", "cache_control"],
+    )
+    out = cache.options
+    stripped = cache.stripped
+  }
+  return {options: out, stripped: stripped}
+}
+
+pub fn __stack_pack_options(base) {
+  const opts = __stack_dict(base)
+  if __stack_non_empty_string(opts?.model) == nil {
+    return opts
+  }
+  const packed = try {
+    pack_for(opts)
+  }
+  if is_err(packed) {
+    return opts
+  }
+  return unwrap(packed)
+}
+
+pub fn __stack_configured_model_options(cfg, prefixes) {
+  const defaults = __stack_dict(cfg?.defaults) + __stack_dict(cfg?.model_defaults)
+  const user = __stack_dict(cfg?.options) + __stack_dict(cfg?.llm_options)
+  const provider = __stack_first_non_empty(
+    [cfg?.provider, user?.provider, __stack_first_env(prefixes, "PROVIDER"), defaults?.provider],
+  )
+  const model = __stack_first_non_empty(
+    [cfg?.model, user?.model, __stack_first_env(prefixes, "MODEL"), defaults?.model],
+  )
+  const model_role = __stack_first_non_empty(
+    [cfg?.model_role, user?.model_role, __stack_first_env(prefixes, "MODEL_ROLE"), defaults?.model_role],
+  )
+  const task = __stack_first_non_empty(
+    [cfg?.task, user?.task, __stack_first_env(prefixes, "TASK"), defaults?.task],
+  )
+  const effort = __stack_first_non_empty(
+    [cfg?.effort, user?.effort, __stack_first_env(prefixes, "EFFORT"), defaults?.effort],
+  )
+  const tool_format = __stack_first_non_empty(
+    [
+      cfg?.tool_format,
+      user?.tool_format,
+      __stack_first_env(prefixes, "TOOL_FORMAT"),
+      defaults?.tool_format,
+    ],
+  )
+  let base = defaults + user
+  if provider != nil {
+    base = base + {provider: provider}
+  }
+  if model != nil {
+    base = base + {model: model}
+  }
+  if model_role != nil {
+    base = base + {model_role: model_role}
+  }
+  if task != nil {
+    base = base + {task: task}
+  }
+  if effort != nil {
+    base = base + {effort: effort}
+  }
+  if tool_format != nil {
+    base = base + {tool_format: tool_format}
+  }
+  return base
+}
+
+/**
+ * Return a capability-sanitized options dict for a provider/model route.
+ * Unsupported provider-specific knobs are dropped instead of leaking to the
+ * wire. Currently strips unsupported `reasoning_effort`, `thinking`, and prompt-cache
+ * request keys. Pass `{mode: "healthcheck"}` (or `"preflight"` / `"probe"`)
+ * to also drop deliberate-reasoning knobs for cheap readiness probes even
+ * when the full route supports them.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_sanitize_model_options(options = nil, policy = nil) {
+  return __stack_sanitize_result(options, policy).options
+}
+
+/**
+ * Resolve model options for an agent role.
+ *
+ * Precedence: explicit config/options > env prefixes > defaults. Env prefixes
+ * are supplied via `env_prefix`/`env_prefixes`; when omitted, role-derived
+ * prefixes such as `HARN_AGENT_PLANNER`, `HARN_LLM_PLANNER`, and
+ * `HARN_PLANNER` are checked before shared `HARN_AGENT`/`HARN_LLM`.
+ *
+ * Returns `{role, env_prefixes, provider, model, options, tool_format,
+ * tool_format_source, stripped, audit}`.
+ *
+ * @effects: [env.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_model_options(config = nil) {
+  const cfg = __stack_dict(config)
+  const role = __stack_non_empty_string(cfg?.role) ?? "agent"
+  const prefixes = __stack_env_prefixes(cfg, role)
+  const configured = __stack_configured_model_options(cfg, prefixes)
+  const packed = __stack_pack_options(configured)
+  const sanitized = __stack_sanitize_result(packed)
+  let options = sanitized.options
+  const resolution = agent_tool_format_resolution(options)
+  if resolution.tool_format != nil {
+    options = options + {tool_format: resolution.tool_format}
+  }
+  return {
+    role: role,
+    env_prefixes: prefixes,
+    provider: options?.provider,
+    model: options?.model,
+    model_role: options?.model_role,
+    options: options,
+    tool_format: options?.tool_format,
+    tool_format_source: resolution.source ?? "unresolved",
+    stripped: sanitized.stripped,
+    audit: {
+      kind: "agent_model_options",
+      role: role,
+      provider: options?.provider,
+      model: options?.model,
+      tool_format: options?.tool_format,
+      stripped: sanitized.stripped,
+    },
+  }
+}

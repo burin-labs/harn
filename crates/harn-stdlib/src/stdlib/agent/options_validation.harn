@@ -1,0 +1,723 @@
+import {
+  LlmCallerTransport,
+  __normalize_llm_caller_transport,
+  __validate_llm_caller,
+} from "std/agent/caller_transport"
+import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
+import "std/agent/options_formats"
+import "std/agent/options_types"
+import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
+import { agent_reasoning_apply } from "std/agent/reasoning"
+import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
+import { agent_scratchpad_options } from "std/agent/scratchpad"
+import { pack_for } from "std/llm/defaults"
+import { project_context_profile } from "std/project"
+
+pub fn __native_tools_complete_naturally(opts) {
+  return opts?.tools != nil && opts?.tool_format == "native"
+}
+
+pub fn __task_ledger_deliverable_text(value) {
+  const text = if type_of(value) == "string" {
+    value
+  } else {
+    to_string(value)
+  }
+  return trim(text)
+}
+
+pub fn __task_ledger_from_shorthand(opts) {
+  const root_task = trim(opts?.root_task ?? "")
+  let deliverables = []
+  const shorthand = opts?.deliverables
+  if type_of(shorthand) == "list" {
+    for (index, item) in iter(shorthand).enumerate() {
+      const text = __task_ledger_deliverable_text(item)
+      if text != "" {
+        deliverables = deliverables
+          .push({id: "deliverable-" + to_string(index + 1), text: text, status: "open", note: nil})
+      }
+    }
+  }
+  if root_task == "" && len(deliverables) == 0 {
+    return nil
+  }
+  return {root_task: root_task, deliverables: deliverables, rationale: "", observations: []}
+}
+
+pub fn __with_task_ledger_shorthand(opts) {
+  if __has_key(opts, "task_ledger") {
+    return opts
+  }
+  const ledger = __task_ledger_from_shorthand(opts)
+  if ledger == nil {
+    return opts
+  }
+  return opts + {task_ledger: ledger}
+}
+
+pub fn __context_profile_root(opts) {
+  return opts?.context_profile_root ?? opts?.project_root ?? opts?.root ?? opts?.cwd ?? "."
+}
+
+pub fn __context_profile_options(opts) {
+  let profile_opts = opts?.context_profile_options ?? {}
+  if opts?.context_signals != nil {
+    profile_opts = profile_opts + {signals: opts.context_signals}
+  }
+  if opts?.code_librarian_signals != nil {
+    profile_opts = profile_opts + {signals: opts.code_librarian_signals}
+  }
+  return profile_opts
+}
+
+pub fn __context_profile_disabled(opts) {
+  const value = opts?.auto_context_profile
+  return type_of(value) == "bool" && !value
+}
+
+pub fn __with_project_context_profile(opts) {
+  if __has_key(opts, "context_profile") || __has_key(opts, "project_context_profile")
+    || __context_profile_disabled(opts) {
+    return opts
+  }
+  const resolved = try {
+    project_context_profile(__context_profile_root(opts), __context_profile_options(opts))
+  }
+  if is_err(resolved) {
+    return opts + {_context_profile_error: to_string(unwrap_err(resolved))}
+  }
+  return opts + {context_profile: unwrap(resolved)}
+}
+
+pub fn __validate_done_sentinel(value) {
+  if value == nil {
+    return
+  }
+  const kind = type_of(value)
+  if kind != "string" {
+    throw "agent_loop: `done_sentinel` must be a non-empty string or nil; got " + kind
+  }
+  if trim(value) == "" {
+    throw "agent_loop: `done_sentinel` must be a non-empty string or nil; got empty string"
+  }
+}
+
+pub fn __validate_verify_completion(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `verify_completion` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+pub fn __validate_judge_dict_or_bool(label, value) {
+  if value == nil {
+    return
+  }
+  const kind = type_of(value)
+  if kind != "dict" && kind != "bool" {
+    throw "agent_loop: `" + label + "` must be a dict, bool, or nil; got " + kind
+  }
+}
+
+pub fn __validate_optional_positive_int(label, field, value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `" + label + "." + field + "` must be an integer or nil; got "
+      + type_of(value)
+  }
+  if value < 1 {
+    throw "agent_loop: `" + label + "." + field + "` must be >= 1"
+  }
+}
+
+pub fn __validate_optional_nonnegative_int(label, field, value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `" + label + "." + field + "` must be an integer or nil; got "
+      + type_of(value)
+  }
+  if value < 0 {
+    throw "agent_loop: `" + label + "." + field + "` must be >= 0"
+  }
+}
+
+pub fn __validate_judge_cadence(label, value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `" + label + "` must be a dict or nil; got " + type_of(value)
+  }
+  __validate_optional_positive_int(label, "every", value?.every)
+  __validate_optional_nonnegative_int(label, "max_invocations", value?.max_invocations)
+  __validate_optional_nonnegative_int(
+    label,
+    "min_iterations_before_first",
+    value?.min_iterations_before_first,
+  )
+  const when = value?.when
+  if when == nil {
+    return
+  }
+  const kind = type_of(when)
+  if kind == "closure" {
+    return
+  }
+  if kind == "string" && (when == "always" || when == "stalled") {
+    return
+  }
+  throw "agent_loop: `" + label + ".when` must be \"always\", \"stalled\", a closure, or nil; got "
+    + to_string(when)
+}
+
+pub fn __validate_done_judge_cadence(value) {
+  if type_of(value) == "dict" {
+    __validate_optional_nonnegative_int("done_judge", "max_invocations", value?.max_invocations)
+    __validate_optional_nonnegative_int("done_judge", "max_feedback", value?.max_feedback)
+    __validate_judge_cadence("done_judge.cadence", value?.cadence)
+  }
+}
+
+pub fn __positive_int_budget_field(value, fallback, label) {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `" + label + "` must be a positive integer; got " + type_of(value)
+  }
+  if value < 1 {
+    throw "agent_loop: `" + label + "` must be a positive integer; got " + to_string(value)
+  }
+  return value
+}
+
+pub fn __nonnegative_int_budget_field(value, fallback, label) {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `" + label + "` must be a non-negative integer; got " + type_of(value)
+  }
+  if value < 0 {
+    throw "agent_loop: `" + label + "` must be a non-negative integer; got " + to_string(value)
+  }
+  return value
+}
+
+pub fn __positive_float_budget_field(value, fallback, label) {
+  if value == nil {
+    return fallback
+  }
+  const kind = type_of(value)
+  if kind != "float" && kind != "int" {
+    throw "agent_loop: `" + label + "` must be a positive number; got " + kind
+  }
+  const parsed = to_float(value)
+  if parsed <= 0.0 {
+    throw "agent_loop: `" + label + "` must be a positive number; got " + to_string(value)
+  }
+  return parsed
+}
+
+pub fn __normalize_consecutive_failure_budget(value) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `iteration_budget.consecutive_failures` must be a dict or nil; got "
+      + type_of(value)
+  }
+  if value?.max == nil {
+    throw "agent_loop: `iteration_budget.consecutive_failures.max` is required"
+  }
+  const max_count = __positive_int_budget_field(value?.max, nil, "iteration_budget.consecutive_failures.max")
+  const kinds = value?.kinds ?? ["transient", "rate_limit", "provider_5xx"]
+  if type_of(kinds) != "list" {
+    throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must be a list of strings; got "
+      + type_of(kinds)
+  }
+  if len(kinds) == 0 {
+    throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must not be empty"
+  }
+  for kind in kinds {
+    if type_of(kind) != "string" || kind == "" {
+      throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must contain non-empty strings"
+    }
+  }
+  return {
+    max: max_count,
+    kinds: kinds,
+    paused_for_ms: __nonnegative_int_budget_field(
+      value?.paused_for_ms,
+      0,
+      "iteration_budget.consecutive_failures.paused_for_ms",
+    ),
+  }
+}
+
+pub fn __validate_loop_control(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `loop_control` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+pub fn __validate_terminal_callback(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `terminal_callback` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+pub fn __validate_on_delta(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `on_delta` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+pub fn __validate_tool_caller(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `tool_caller` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+pub fn __validate_structural_validator(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `structural_validator` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+pub fn __validate_pre_turn_scope_classifier(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `pre_turn_scope_classifier` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+pub fn __validate_input_guardrail(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `input_guardrail` must be a closure or nil; got " + type_of(value)
+  }
+}
+
+pub fn __validate_missing_tool_call_recovery(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) == "bool" {
+    return
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `missing_tool_call_recovery` must be a bool, dict, or nil; got " + type_of(value)
+  }
+  if value?.enabled != nil && type_of(value.enabled) != "bool" {
+    throw "agent_loop: `missing_tool_call_recovery.enabled` must be a bool or nil; got "
+      + type_of(value.enabled)
+  }
+  const classifier = value?.classifier
+  if classifier != nil && type_of(classifier) != "closure" {
+    throw "agent_loop: `missing_tool_call_recovery.classifier` must be a closure or nil; got "
+      + type_of(classifier)
+  }
+}
+
+pub fn __validate_max_concurrent_tools(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `max_concurrent_tools` must be an integer or nil; got " + type_of(value)
+  }
+  if value < 1 {
+    throw "agent_loop: `max_concurrent_tools` must be >= 1; got " + to_string(value)
+  }
+}
+
+pub fn __validate_prefetch_next_turn(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "bool" {
+    throw "agent_loop: `prefetch_next_turn` must be a bool or nil; got " + type_of(value)
+  }
+}
+
+pub fn __validate_string_list(label, value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "list" {
+    throw label + " must be a list of strings or nil; got " + type_of(value)
+  }
+  for item in value {
+    if type_of(item) != "string" || item == "" {
+      throw label + " entries must be non-empty strings"
+    }
+  }
+}
+
+pub fn __default_tool_surface_hard_keep() {
+  return [
+    "look",
+    "search",
+    "lookup",
+    "replace_symbol",
+    "done_sentinel",
+    "load_skill",
+    "agent_await_resumption",
+  ]
+}
+
+pub fn __tool_surface_safe_defaults() {
+  return {
+    enabled: true,
+    window_turns: 5,
+    mode: "safe",
+    hard_keep: __default_tool_surface_hard_keep(),
+    prune_classes: ["read_only"],
+    keep_classes: ["mutating", "approval", "session_control", "progress", "result_polling", "unknown"],
+    unknown_tool_policy: "keep",
+  }
+}
+
+pub fn __tool_surface_aggressive_defaults() {
+  return {
+    enabled: true,
+    window_turns: 5,
+    mode: "aggressive",
+    hard_keep: __default_tool_surface_hard_keep(),
+    prune_classes: ["read_only", "mutating", "approval", "session_control", "progress", "result_polling", "unknown"],
+    keep_classes: [],
+    unknown_tool_policy: "prune",
+  }
+}
+
+pub fn __validate_tool_surface_mode(mode) {
+  if mode == "safe" || mode == "aggressive" {
+    return
+  }
+  throw "agent_loop: `tool_surface_narrowing.mode` must be \"safe\" or \"aggressive\""
+}
+
+pub fn __validate_tool_surface_unknown_policy(policy) {
+  if policy == "keep" || policy == "prune" {
+    return
+  }
+  throw "agent_loop: `tool_surface_narrowing.unknown_tool_policy` must be \"keep\" or \"prune\""
+}
+
+pub fn __default_read_only_stance() {
+  return {
+    enabled: false,
+    armed: nil,
+    escape_tool: "request_write_access",
+    consent_check: nil,
+    classifier: nil,
+    min_confidence: 0.8,
+    hard_keep: [],
+  }
+}
+
+pub fn __normalize_read_only_stance(value) {
+  const defaults = __default_read_only_stance()
+  if value == nil {
+    return defaults
+  }
+  if type_of(value) == "bool" {
+    return defaults + {enabled: value}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `read_only_stance` must be a dict, bool, or nil; got " + type_of(value)
+  }
+  const enabled = value?.enabled ?? true
+  if type_of(enabled) != "bool" {
+    throw "agent_loop: `read_only_stance.enabled` must be a bool"
+  }
+  const armed = value?.armed
+  if armed != nil && type_of(armed) != "bool" {
+    throw "agent_loop: `read_only_stance.armed` must be a bool or nil"
+  }
+  const escape_tool = value?.escape_tool ?? defaults.escape_tool
+  if type_of(escape_tool) != "string" || escape_tool == "" {
+    throw "agent_loop: `read_only_stance.escape_tool` must be a non-empty string"
+  }
+  const min_confidence = value?.min_confidence ?? defaults.min_confidence
+  if type_of(min_confidence) != "float" && type_of(min_confidence) != "int" {
+    throw "agent_loop: `read_only_stance.min_confidence` must be a number"
+  }
+  const hard_keep = value?.hard_keep ?? defaults.hard_keep
+  __validate_string_list("agent_loop: `read_only_stance.hard_keep`", hard_keep)
+  return defaults
+    + value
+    + {
+    enabled: enabled,
+    armed: armed,
+    escape_tool: escape_tool,
+    min_confidence: min_confidence,
+    hard_keep: hard_keep,
+  }
+}
+
+pub fn __normalize_tool_surface_narrowing(value) {
+  const safe_defaults = __tool_surface_safe_defaults()
+  if value == nil {
+    return safe_defaults
+  }
+  if type_of(value) == "bool" {
+    return safe_defaults + {enabled: value}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `tool_surface_narrowing` must be a dict, bool, or nil; got " + type_of(value)
+  }
+  const requested_mode = value?.mode ?? safe_defaults.mode
+  __validate_tool_surface_mode(requested_mode)
+  const defaults = if requested_mode == "aggressive" {
+    __tool_surface_aggressive_defaults()
+  } else {
+    safe_defaults
+  }
+  const enabled = value?.enabled ?? defaults.enabled
+  if type_of(enabled) != "bool" {
+    throw "agent_loop: `tool_surface_narrowing.enabled` must be a bool"
+  }
+  const window_turns = value?.window_turns ?? value?.narrow_window_turns ?? defaults.window_turns
+  if type_of(window_turns) != "int" {
+    throw "agent_loop: `tool_surface_narrowing.window_turns` must be an integer"
+  }
+  if window_turns < 1 {
+    throw "agent_loop: `tool_surface_narrowing.window_turns` must be >= 1"
+  }
+  const hard_keep = value?.hard_keep ?? defaults.hard_keep
+  __validate_string_list("agent_loop: `tool_surface_narrowing.hard_keep`", hard_keep)
+  const prune_classes = value?.prune_classes ?? defaults.prune_classes
+  __validate_string_list("agent_loop: `tool_surface_narrowing.prune_classes`", prune_classes)
+  const keep_classes = value?.keep_classes ?? defaults.keep_classes
+  __validate_string_list("agent_loop: `tool_surface_narrowing.keep_classes`", keep_classes)
+  const unknown_tool_policy = value?.unknown_tool_policy ?? defaults.unknown_tool_policy
+  __validate_tool_surface_unknown_policy(unknown_tool_policy)
+  return defaults
+    + value
+    + {
+    enabled: enabled,
+    window_turns: window_turns,
+    mode: requested_mode,
+    hard_keep: hard_keep,
+    prune_classes: prune_classes,
+    keep_classes: keep_classes,
+    unknown_tool_policy: unknown_tool_policy,
+  }
+}
+
+pub fn __validate_removed_agent_loop_options(opts) {
+  if __has_key(opts, "persistent") {
+    throw "agent_loop: `persistent` was removed; use `loop_until_done` for completion looping and `session_id` for transcript persistence"
+  }
+}
+
+pub fn __validate_agent_loop_completion_options(opts) {
+  if __has_key(opts, "done_sentinel") {
+    __validate_done_sentinel(opts.done_sentinel)
+  }
+  if __has_key(opts, "verify_completion") {
+    __validate_verify_completion(opts.verify_completion)
+  }
+  if __has_key(opts, "verify_completion_judge") {
+    __validate_judge_dict_or_bool("verify_completion_judge", opts.verify_completion_judge)
+    if type_of(opts.verify_completion_judge) == "dict" {
+      __validate_optional_nonnegative_int(
+        "verify_completion_judge",
+        "max_invocations",
+        opts.verify_completion_judge?.max_invocations,
+      )
+      __validate_optional_nonnegative_int(
+        "verify_completion_judge",
+        "max_feedback",
+        opts.verify_completion_judge?.max_feedback,
+      )
+    }
+  }
+  if __has_key(opts, "done_judge") {
+    __validate_judge_dict_or_bool("done_judge", opts.done_judge)
+    __validate_done_judge_cadence(opts.done_judge)
+  }
+}
+
+pub fn __is_transcript_projection_policy(policy) {
+  return policy == "raw" || policy == "clean_tool_repair" || policy == "squash_failed_calls"
+    || policy == "summary_prefix"
+    || policy == "reachability_gc"
+    || policy == "context_gc"
+    || policy == "tool_result_gc"
+    || policy == "custom"
+}
+
+pub fn __is_reachability_projection_policy(policy) {
+  return policy == "reachability_gc" || policy == "context_gc" || policy == "tool_result_gc"
+}
+
+pub fn __validate_non_negative_int_option(label, value) {
+  if value != nil && (type_of(value) != "int" || value < 0) {
+    throw "agent_loop: `" + label + "` must be a non-negative integer"
+  }
+}
+
+pub fn __validate_transcript_projection(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) == "string" {
+    const policy = value
+    if !__is_transcript_projection_policy(policy) {
+      throw "agent_loop: `transcript_projection` policy must be one of raw, clean_tool_repair, squash_failed_calls, summary_prefix, reachability_gc, custom; got "
+        + policy
+    }
+    return
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got " + type_of(value)
+  }
+  const policy = value?.policy ?? "raw"
+  if type_of(policy) != "string" {
+    throw "agent_loop: `transcript_projection.policy` must be a string"
+  }
+  if !__is_transcript_projection_policy(policy) {
+    throw "agent_loop: `transcript_projection.policy` must be one of raw, clean_tool_repair, squash_failed_calls, summary_prefix, reachability_gc, custom; got "
+      + policy
+  }
+  if policy == "custom" {
+    const projector = value?.projector ?? value?.custom
+    if projector == nil || type_of(projector) != "closure" {
+      throw "agent_loop: `transcript_projection.policy = \"custom\"` requires a `projector` closure"
+    }
+  }
+  if policy == "summary_prefix" {
+    __validate_non_negative_int_option("transcript_projection.keep_last", value?.keep_last)
+  }
+  if __is_reachability_projection_policy(policy) {
+    const root_window = value?.root_window ?? value?.recent_messages ?? value?.keep_last
+    __validate_non_negative_int_option("transcript_projection.root_window", root_window)
+    const min_chars = value?.min_chars ?? value?.min_reclaim_chars ?? value?.tool_result_min_chars
+    __validate_non_negative_int_option("transcript_projection.min_chars", min_chars)
+    const require_barrier = value?.require_write_barrier ?? value?.require_barrier
+    if require_barrier != nil && type_of(require_barrier) != "bool" {
+      throw "agent_loop: `transcript_projection.require_write_barrier` must be a bool"
+    }
+  }
+}
+
+pub fn __validate_agent_loop_callback_options(opts) {
+  if __has_key(opts, "loop_control") {
+    __validate_loop_control(opts.loop_control)
+  }
+  if __has_key(opts, "terminal_callback") {
+    __validate_terminal_callback(opts.terminal_callback)
+  }
+  if __has_key(opts, "llm_caller") {
+    __validate_llm_caller(opts.llm_caller)
+  }
+  if __has_key(opts, "on_delta") {
+    __validate_on_delta(opts.on_delta)
+  }
+  if __has_key(opts, "tool_caller") {
+    __validate_tool_caller(opts.tool_caller)
+  }
+  if __has_key(opts, "structural_validator") {
+    __validate_structural_validator(opts.structural_validator)
+  }
+  if __has_key(opts, "input_guardrail") {
+    __validate_input_guardrail(opts.input_guardrail)
+  }
+  if __has_key(opts, "pre_turn_scope_classifier") {
+    __validate_pre_turn_scope_classifier(opts.pre_turn_scope_classifier)
+  }
+  if __has_key(opts, "missing_tool_call_recovery") {
+    __validate_missing_tool_call_recovery(opts.missing_tool_call_recovery)
+  }
+  if __has_key(opts, "max_concurrent_tools") {
+    __validate_max_concurrent_tools(opts.max_concurrent_tools)
+  }
+  if __has_key(opts, "prefetch_next_turn") {
+    __validate_prefetch_next_turn(opts.prefetch_next_turn)
+  }
+  if __has_key(opts, "tool_surface_narrowing") {
+    __normalize_tool_surface_narrowing(opts.tool_surface_narrowing)
+  }
+  if __has_key(opts, "transcript_projection") {
+    __validate_transcript_projection(opts.transcript_projection)
+  }
+  if __has_key(opts, "scratchpad") {
+    agent_scratchpad_options(opts)
+  }
+}
+
+pub fn __normalize_reminder_provider_options(opts) {
+  if !__has_key(opts, "reminders") {
+    return opts + {reminders: {}}
+  }
+  if type_of(opts.reminders) == "list" {
+    return opts + {reminders: {providers: opts.reminders}}
+  }
+  return opts
+}
+
+pub fn __with_resolved_tool_format(opts, resolution) {
+  if resolution?.tool_format == nil {
+    return opts
+  }
+  let next = opts
+    + {tool_format: resolution.tool_format, _tool_format_source: resolution?.source ?? "unresolved"}
+  if resolution?.capability_gap_event != nil {
+    next = next + {_tool_format_capability_gap: resolution.capability_gap_event}
+  }
+  if resolution?.tool_format_override_event != nil {
+    next = next + {_tool_format_override: resolution.tool_format_override_event}
+  }
+  return next
+}
+
+pub fn __auto_tool_format_source(value) {
+  const source = to_string(value ?? "")
+  return source == "capabilities" || source == "fallback" || source == "unresolved"
+}
+
+pub fn __clear_tool_format_resolution(opts) {
+  return opts
+    .remove("tool_format")
+    .remove("_tool_format_source")
+    .remove("_tool_format_capability_gap")
+    .remove("_tool_format_override")
+}
+/**
+ * Merge per-turn LLM overrides while preserving the difference between a
+ * caller-explicit `tool_format` and an auto-resolved format carried from an
+ * earlier route.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */

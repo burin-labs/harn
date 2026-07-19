@@ -1,26 +1,3 @@
-import { LlmCallerTransport } from "std/agent/caller_transport"
-import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
-pub import {
-  agent_first_tool_format_override_warning_text,
-  agent_tool_format,
-  agent_tool_format_override_warning_text,
-  agent_tool_format_resolution,
-} from "std/agent/options_formats"
-pub import {
-  agent_loop_options,
-  agent_merge_llm_options,
-  agent_model_options,
-  agent_options,
-  agent_preset_options,
-  agent_refresh_tool_format_for_route,
-  agent_sanitize_model_options,
-  autonomy_policy,
-} from "std/agent/options_public"
-import { AgentLoopRetryOptions } from "std/agent/retry"
-
-// Keep public option aliases on this facade: runtime `pub import` re-exports
-// carry type schemas, but the type checker currently resolves consumer
-// annotations only from aliases declared directly in the imported module.
 // Typed option aliases (the documented way to build agent_loop options).
 // Co-located with the `agent_loop_options` normalizer below so the alias and
 // the normalization/validation logic stay in one file. Rust twins for the
@@ -363,3 +340,8 @@ pub type AgentLoopOptions = {
  */
 pub type AgentPresetOptions = AgentLoopOptions & {consent?: any, audit_sink?: any, telemetry?: any, rate_limit?: bool | dict, dry_run?: bool | dict, handoff_sink?: any, cheap_caller?: any, frontier_caller?: any, escalate_predicate?: any, logging_sink?: any, logging_options?: dict, llm_options?: dict, persona?: any, task_kind?: string, judge?: bool | JudgeConfig, model_ladder?: list<string>}
 
+import { LlmCallerTransport } from "std/agent/caller_transport"
+
+import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
+
+import { AgentLoopRetryOptions } from "std/agent/retry"
