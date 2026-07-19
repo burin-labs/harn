@@ -234,7 +234,9 @@ harn package docs --check
 
 `harn package pack` validates the package and writes an inspectable artifact
 directory at `.harn/dist/<name>-<version>`. It excludes local build state such
-as `.git/`, `.harn/`, `target/`, and `node_modules/`.
+as Git administrative entries, `.harn/`, any `.harn-*` runtime directory,
+`target/`, and `node_modules/` at any depth. Files such as `.harn-version` are
+package content and remain included.
 
 ```bash
 harn package pack --dry-run
