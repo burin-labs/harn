@@ -9,6 +9,56 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.26
+
+### Breaking
+
+- A failed `session/prompt` now emits exactly one terminal JSON-RPC error and no
+  longer prepends an assistant `agent_message_chunk` carrying `Error: <message>`.
+  Clients that rendered the error prose as assistant content must read the typed
+  `error.data` instead. The `harn.acp.prompt_error.v1` payload gains optional
+  `category`, `kind`, `reason`, `code`, `retryable`, `retryAfterMs`, `provider`,
+  and `model` fields projected from the structured failure, so hosts branch on the
+  route that actually failed rather than the session's model selection or the
+  error prose. Provider/model recorded by a routing fallback are no longer
+  overwritten with the base route.
+
+### Added
+
+- Add pure typed `std/changelog` primitives for deterministic fragment
+  assembly, structural section parsing, and idempotent `Unreleased` merging.
+- Added a one-pass labeled multi-root evidence search with deterministic typed
+  receipts, bounded parallelism, independent root failures, match budgets, and
+  cancellable background execution.
+- `harn run` / `harn time run` now print one precise stderr line naming the
+  delta when a `--write-root` or `--read-only-root` grant (or
+  `--allow-process-network`) widens the still-active sandbox, e.g.
+  `sandbox active; extra write root: /path`. Routine grant-scoped runs no
+  longer emit the blanket `--no-sandbox` filesystem/process/egress warning,
+  which stays reserved for the full `--no-sandbox` escape hatch.
+
+### Fixed
+
+- **Formatter layout now accounts for the complete emitting line (#4892).**
+  Wrapped expressions include declaration, return, chain, collection, and
+  signature prefixes in their width budget, and the formatter verifies the
+  repository Harn corpus against the configured line-width invariant.
+- Conformance scenarios that read an incrementally written state file no longer race the writer. The copy-pasted
+  wait-for-existence helper is replaced by a single shared `wait_for_file_content` in
+  `conformance/tests/_common.harn` that polls until the content the caller actually reads is present (an NDJSON
+  file exists after its first appended line, so an existence wait could release while later lines were still
+  unwritten). The three affected scenarios now wait on their real precondition and report a descriptive timeout.
+- **`runtime.pipeline_input` is memoized per agent-loop iteration (#5190).** Context assembly re-fetched it
+  from the host on every shard — ~20 identical round-trips per turn. The dispatch boundary now serves it from a
+  per-turn memo that clears at each `iteration_start`, so the host is hit once per turn while a value that
+  legitimately changes between turns (e.g. a mid-session model switch) is still observed. No call site changes.
+- Accept CRLF after explicit Harn line continuations so formatter-produced wrapped expressions parse identically on
+  Windows checkouts.
+- Restore the legacy `std/cli` parser compatibility surface removed in v0.10.25; existing
+  `parse_args` and `help_text` callers continue to work while new code uses `std/cli/argparse`.
+- Keep the macOS toolchain-cache sandbox probe outside preset-writable temp aliases so it tests
+  the intended cache/config boundary.
+
 ## v0.10.25
 
 ### Breaking
