@@ -1024,7 +1024,8 @@ pipeline default() {
 
 /// Read the session GET/SSE stream until a JSON message satisfying
 /// `predicate` arrives. The stream is infinite (keep-alives), so parse
-/// incrementally instead of buffering the whole body.
+/// incrementally instead of buffering the whole body; the whole read is
+/// bounded by one outer timeout rather than a wall-clock poll loop.
 async fn read_stream_until<F>(response: reqwest::Response, predicate: F) -> JsonValue
 where
     F: Fn(&JsonValue) -> bool,
@@ -1032,25 +1033,29 @@ where
     use futures::StreamExt as _;
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
-    let deadline = Instant::now() + PROCESS_READY_TIMEOUT;
-    while Instant::now() < deadline {
-        let chunk = match tokio::time::timeout(Duration::from_secs(5), stream.next()).await {
-            Err(_) => continue,
-            Ok(None) | Ok(Some(Err(_))) => break,
-            Ok(Some(Ok(chunk))) => chunk,
-        };
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        for line in buffer.clone().lines() {
-            if let Some(data) = line.strip_prefix("data: ") {
-                if let Ok(msg) = serde_json::from_str::<JsonValue>(data) {
-                    if predicate(&msg) {
-                        return msg;
+    let matched = tokio::time::timeout(PROCESS_READY_TIMEOUT, async {
+        while let Some(chunk) = stream.next().await {
+            let Ok(chunk) = chunk else { return None };
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            for line in buffer.clone().lines() {
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if let Ok(msg) = serde_json::from_str::<JsonValue>(data) {
+                        if predicate(&msg) {
+                            return Some(msg);
+                        }
                     }
                 }
             }
         }
+        None
+    })
+    .await;
+    match matched {
+        Ok(Some(msg)) => msg,
+        Ok(None) | Err(_) => {
+            panic!("timed out waiting for a matching stream message; got: {buffer}")
+        }
     }
-    panic!("timed out waiting for a matching stream message; got: {buffer}");
 }
 
 // Regression for the POST-vs-GET session race: a `tools/call` that needs
@@ -1058,7 +1063,7 @@ where
 // session bus must queue the `elicitation/create` until the stream
 // registers instead of failing the call because no stream existed at the
 // moment the POST was processed.
-#[tokio::test(flavor = "current_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serve_mcp_http_elicits_when_tools_call_beats_the_get_stream() {
     let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
@@ -1136,9 +1141,19 @@ async fn serve_mcp_http_elicits_when_tools_call_beats_the_get_stream() {
         }
     });
 
-    // Give the POST a comfortable head start so the old ordering bug is
-    // exercised deterministically, then open the GET stream late.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait until the server has actually queued the elicitation with no
+    // stream open — the delivery task logs that state — then open the GET
+    // stream late. This orders the race deterministically with no timing
+    // dependence: on the racy implementation the elicitation failed
+    // instead of queueing, so this line never appears. The blocking wait
+    // is safe because the spawned POST progresses on the second worker.
+    mcp_support::wait_for_child_log_suffix(
+        &mut child,
+        &rx,
+        "queueing a server-to-client request",
+        PROCESS_READY_TIMEOUT,
+        "elicitation queue",
+    );
     let stream_response = client
         .get(&url)
         .header("Accept", "text/event-stream")

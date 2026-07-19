@@ -511,6 +511,11 @@ async fn deliver_session_requests(
     bus: harn_vm::mcp_elicit::ElicitationBus,
 ) {
     while let Some(msg) = outbound.recv().await {
+        if stream_watch.borrow().is_none() {
+            eprintln!(
+                "[harn] queueing a server-to-client request until the client opens its event stream"
+            );
+        }
         let deadline = tokio::time::Instant::now() + SESSION_STREAM_GRACE;
         let mut delivered = false;
         loop {
