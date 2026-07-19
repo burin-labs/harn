@@ -10,13 +10,21 @@
 //! producing the per-process state the runtime needs.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use harn_modules::{public_declarations, DefKind};
 use serde::{Deserialize, Serialize};
 
 use crate::chunk::{CachedChunk, CachedCompiledFunction};
 use crate::value::VmError;
+
+type ImportedEnumCache = BTreeMap<PathBuf, ([u8; 32], Vec<String>)>;
+
+fn imported_enum_cache() -> &'static Mutex<ImportedEnumCache> {
+    static CACHE: OnceLock<Mutex<ImportedEnumCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
 
 /// A single `import`-style declaration inside a module. Re-resolved at
 /// instantiation time so that the cached artifact does not bake in
@@ -295,11 +303,57 @@ fn imported_enum_candidates_for_program(
     if !needs_imported_enum_candidates(program) {
         return Vec::new();
     }
-    harn_modules::build_with_source(source_path, source)
-        .imported_names_by_kind_for_file(source_path, DefKind::Enum)
+    let source_hash = *blake3::hash(source.as_bytes()).as_bytes();
+    let cache_key = harn_modules::canonical_path(source_path);
+    if let Some((_cached_hash, candidates)) = imported_enum_cache()
+        .lock()
+        .expect("imported enum cache lock poisoned")
+        .get(&cache_key)
+        .filter(|(cached_hash, _)| *cached_hash == source_hash)
+    {
+        return candidates.clone();
+    }
+
+    // A graph walk is needed to resolve wildcard and re-exported enums, but
+    // the result describes every module in that closure. Publish all those
+    // projections at once so loading a large stdlib does not rebuild the same
+    // reachable graph once per module artifact.
+    let graph = harn_modules::build_with_source(source_path, source);
+    let mut projections = Vec::new();
+    for path in graph.module_paths() {
+        let module_source = if path == cache_key {
+            Some(source.to_string())
+        } else {
+            harn_modules::read_module_source(&path).or_else(|| std::fs::read_to_string(&path).ok())
+        };
+        let Some(module_source) = module_source else {
+            continue;
+        };
+        let mut candidates = graph
+            .imported_names_by_kind_for_file(&path, DefKind::Enum)
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        projections.push((
+            path,
+            (
+                *blake3::hash(module_source.as_bytes()).as_bytes(),
+                candidates,
+            ),
+        ));
+    }
+    let mut cache = imported_enum_cache()
+        .lock()
+        .expect("imported enum cache lock poisoned");
+    for (path, projection) in projections {
+        cache.insert(path, projection);
+    }
+    cache
+        .get(&cache_key)
+        .filter(|(cached_hash, _)| *cached_hash == source_hash)
+        .map(|(_, candidates)| candidates.clone())
         .unwrap_or_default()
-        .into_iter()
-        .collect()
 }
 
 fn needs_imported_enum_candidates(program: &[harn_parser::SNode]) -> bool {
