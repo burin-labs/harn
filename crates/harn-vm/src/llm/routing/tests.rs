@@ -72,6 +72,7 @@ fn routing_exhaustion_preserves_structured_attempt_chain() {
             verifier_outcome: None,
         }],
         selected: None,
+        terminal: None,
         session_cost_usd: 0.0,
     };
 
@@ -601,4 +602,101 @@ fn catalog_step_absent_options_is_none() {
     assert!(super::catalog_step_overrides(Some(&empty), "frugal", 0)
         .expect("ok")
         .is_none());
+}
+
+fn failed_attempt(index: usize, provider: &str, model: &str) -> RoutingAttempt {
+    RoutingAttempt {
+        index,
+        provider: provider.to_string(),
+        model: model.to_string(),
+        label: format!("{provider}:{model}"),
+        status: AttemptStatus::Failed,
+        duration_ms: 5,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+        error: None,
+        verifier_signals: Vec::new(),
+        verifier_outcome: None,
+    }
+}
+
+/// F3: the terminal route diverges from the base/requested route. When the
+/// routed backup (attempt 2) produced the terminal error, the top-level
+/// provider/model must name that routed attempt — not the base route (attempt
+/// 1). Matched by `.index`, so configured order never misattributes.
+#[test]
+fn terminal_attempt_stamps_the_routed_provider_and_model() {
+    let snapshot = RoutingErrorSnapshot {
+        category: "circuit_open".to_string(),
+        code: Some("provider_exhausted".to_string()),
+        reason: Some("overloaded".to_string()),
+        attempt_count: Some(1),
+        message: "overloaded".to_string(),
+        status: None,
+    };
+    let trace = RoutingTrace {
+        label: "test".to_string(),
+        attempts: vec![
+            failed_attempt(1, "base-provider", "base-model"),
+            failed_attempt(2, "routed-provider", "routed-model"),
+        ],
+        selected: None,
+        terminal: Some(TerminalRoute::Attempt(2)),
+        session_cost_usd: 0.0,
+    };
+
+    let VmError::Thrown(VmValue::Dict(fields)) =
+        provider_exhausted_routing_error(&trace, Some(&snapshot))
+    else {
+        panic!("expected typed provider exhaustion");
+    };
+    assert_eq!(
+        fields.get("provider").map(VmValue::display).as_deref(),
+        Some("routed-provider"),
+        "top-level provider must be the routed terminal attempt, not the base"
+    );
+    assert_eq!(
+        fields.get("model").map(VmValue::display).as_deref(),
+        Some("routed-model")
+    );
+    assert!(
+        fields.get("no_single_route").is_none(),
+        "a single-route terminal must not set the composite flag"
+    );
+}
+
+/// F2 (consumption): a `Composite` terminal (no single route is responsible)
+/// must never stamp a provider/model, and must set `no_single_route` so the
+/// outer `build_llm_error_dict` skips its base-route fill instead of fabricating
+/// a route.
+#[test]
+fn composite_terminal_never_fabricates_a_route() {
+    let trace = RoutingTrace {
+        label: "test".to_string(),
+        attempts: vec![
+            failed_attempt(1, "primary-provider", "primary-model"),
+            failed_attempt(2, "backup-provider", "backup-model"),
+        ],
+        selected: None,
+        terminal: Some(TerminalRoute::Composite),
+        session_cost_usd: 0.0,
+    };
+
+    let VmError::Thrown(VmValue::Dict(fields)) = provider_exhausted_routing_error(&trace, None)
+    else {
+        panic!("expected typed provider exhaustion");
+    };
+    assert!(
+        fields.get("provider").is_none(),
+        "composite terminal must not fabricate a provider"
+    );
+    assert!(
+        fields.get("model").is_none(),
+        "composite terminal must not fabricate a model"
+    );
+    assert!(
+        matches!(fields.get("no_single_route"), Some(VmValue::Bool(true))),
+        "composite terminal must set the no_single_route signal"
+    );
 }

@@ -3181,6 +3181,7 @@ dependencies = [
  "image",
  "notify",
  "regex",
+ "regex-automata",
  "rusqlite",
  "security-framework 3.7.0",
  "serde",

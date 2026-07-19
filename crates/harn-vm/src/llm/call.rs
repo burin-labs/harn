@@ -414,10 +414,21 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
         // with the outer requested/base route would misattribute the failure
         // (a routed model that differs from the session's selection would be
         // reported as the base route).
-        dict.entry(crate::value::intern_key("provider"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(provider)));
-        dict.entry(crate::value::intern_key("model"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(model)));
+        //
+        // A `no_single_route` routing failure (e.g. both racers hit the
+        // deadline — no single route is responsible) must NOT be backfilled at
+        // all: fabricating the base route here would name a provider/model that
+        // did not produce the terminal outcome. Absence is the honest signal.
+        let no_single_route = matches!(
+            dict.get(&crate::value::intern_key("no_single_route")),
+            Some(VmValue::Bool(true))
+        );
+        if !no_single_route {
+            dict.entry(crate::value::intern_key("provider"))
+                .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(provider)));
+            dict.entry(crate::value::intern_key("model"))
+                .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(model)));
+        }
         return VmValue::dict(dict);
     }
     let mut dict = std::collections::BTreeMap::new();
@@ -1453,5 +1464,31 @@ mod build_llm_error_dict_tests {
 
         assert_eq!(field(&dict, "provider").as_deref(), Some("base-provider"));
         assert_eq!(field(&dict, "model").as_deref(), Some("base-model"));
+    }
+
+    #[test]
+    fn no_single_route_failure_is_not_backfilled_with_the_base_route() {
+        // A composite routing failure (no single route is responsible — e.g.
+        // both racers hit the deadline) sets `no_single_route`. The wrapper must
+        // NOT fill provider/model: fabricating the base route would name a
+        // provider/model that did not produce the terminal outcome.
+        let thrown = VmError::Thrown(VmValue::dict([
+            (
+                "reason",
+                VmValue::String(arcstr::ArcStr::from("provider_exhausted")),
+            ),
+            ("no_single_route", VmValue::Bool(true)),
+        ]));
+
+        let dict = build_llm_error_dict(&thrown, "base-provider", "base-model");
+
+        assert!(
+            field(&dict, "provider").is_none(),
+            "composite failure must not be backfilled with the base provider"
+        );
+        assert!(
+            field(&dict, "model").is_none(),
+            "composite failure must not be backfilled with the base model"
+        );
     }
 }
