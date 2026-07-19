@@ -200,15 +200,13 @@ fn __render_envelope(report: dict) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_GRAPH_VIEW_JSON", "")
   if raw == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_GRAPH_VIEW_JSON not set by dispatch shim")
+    harness.stdio.eprintln("internal error: HARN_GRAPH_VIEW_JSON not set by dispatch shim")
     return 70
   }
   const report = try {
     json_parse(raw)
   } catch (e) {
-    harness.stdio
-      .eprintln("internal error: failed to parse HARN_GRAPH_VIEW_JSON: " + e.message)
+    harness.stdio.eprintln("internal error: failed to parse HARN_GRAPH_VIEW_JSON: " + e.message)
     return 70
   }
   if type_of(report) != "dict" {

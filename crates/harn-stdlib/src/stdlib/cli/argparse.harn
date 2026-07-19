@@ -339,8 +339,7 @@ fn __argv_failure(code: CliParseCode, arg: string, message: string) -> CliParseF
 fn __schema_failure(failure) -> CliParseFailure {
   let issues: list<CliParseIssue> = []
   for issue in failure?.issues ?? [] {
-    issues = issues
-      .push(
+    issues = issues.push(
       {
         stage: "schema",
         code: issue?.code ?? "schema.validation",
@@ -351,8 +350,7 @@ fn __schema_failure(failure) -> CliParseFailure {
   }
   const message = failure?.message ?? "schema validation failed"
   if len(issues) == 0 {
-    issues = issues
-      .push({stage: "schema", code: "schema.validation", message: message, path: "root"})
+    issues = issues.push({stage: "schema", code: "schema.validation", message: message, path: "root"})
   }
   return {
     kind: "cli_parse_failure",
@@ -413,7 +411,12 @@ fn __decode_value(arg: ArgSpec, value: string) -> Result<unknown, CliParseFailur
   )
 }
 
-fn __record_value(collected: dict, arg: ArgSpec, raw: string, repeated: bool) -> Result<dict, CliParseFailure> {
+fn __record_value(
+  collected: dict,
+  arg: ArgSpec,
+  raw: string,
+  repeated: bool,
+) -> Result<dict, CliParseFailure> {
   const decoded = __decode_value(arg, raw)
   if is_err(decoded) {
     return Err(unwrap_err(decoded))
@@ -529,7 +532,12 @@ fn __accepts_signed_numeric_positional(
   return is_ok(__decode_value(positional, raw))
 }
 
-fn __finish_parse(collected: dict, rest: list<string>, args: list<ArgSpec>, pending: ArgSpec?) -> CliParseResult<dict> {
+fn __finish_parse(
+  collected: dict,
+  rest: list<string>,
+  args: list<ArgSpec>,
+  pending: ArgSpec?,
+) -> CliParseResult<dict> {
   if pending != nil {
     const label = pending.long ?? pending.short ?? pending.name
     return Err(__argv_failure("value_required", label, "flag requires a value"))

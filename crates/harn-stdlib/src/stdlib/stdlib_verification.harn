@@ -1819,7 +1819,11 @@ pub fn verification_snapshot_staleness(bound_snapshot, current_hashes) -> dict {
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_affected_targets(changed_paths: list<string>, adapters = nil, options = nil) -> VerificationAffectedTargetsFact {
+pub fn verification_affected_targets(
+  changed_paths: list<string>,
+  adapters = nil,
+  options = nil,
+) -> VerificationAffectedTargetsFact {
   const opts = __verification_opts(options)
   const paths = __verification_string_list(changed_paths)
   const rows = adapters ?? opts?.adapters ?? []
@@ -2064,7 +2068,11 @@ pub fn verification_hud_text(model_or_state: dict, options = nil) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_diagnostic_delta(previous, current, options = nil) -> VerificationDiagnosticDelta {
+pub fn verification_diagnostic_delta(
+  previous,
+  current,
+  options = nil,
+) -> VerificationDiagnosticDelta {
   const normalization = __verification_delta_normalization(options)
   const previous_info = __verification_delta_info(previous, normalization)
   const current_info = __verification_delta_info(current, normalization)
@@ -2219,7 +2227,12 @@ pub fn verification_diagnostic_delta(previous, current, options = nil) -> Verifi
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_gate_input(previous, current, current_hashes = nil, options = nil) -> VerificationGateInput {
+pub fn verification_gate_input(
+  previous,
+  current,
+  current_hashes = nil,
+  options = nil,
+) -> VerificationGateInput {
   const opts = __verification_opts(options)
   const hashes_available = __verification_gate_hashes_available(current_hashes)
   const hashes = __verification_gate_hashes(current_hashes)
@@ -2268,7 +2281,10 @@ pub fn verification_gate_input(previous, current, current_hashes = nil, options 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_observation_from_command_result(result: dict, options = nil) -> VerificationCheckObservation {
+pub fn verification_observation_from_command_result(
+  result: dict,
+  options = nil,
+) -> VerificationCheckObservation {
   const opts = __verification_opts(options)
   let observation = {warm: __verification_warm(opts)}
   const duration_ms = __verification_duration_ms(result, opts)
@@ -2302,7 +2318,11 @@ pub fn verification_observation_from_command_result(result: dict, options = nil)
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_record_check_result(row_id: string, result: dict, options = nil) -> VerificationRecordedCheck {
+pub fn verification_record_check_result(
+  row_id: string,
+  result: dict,
+  options = nil,
+) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
   const observation = verification_observation_from_command_result(result, opts)
   const row = verification_profile_record_run(row_id, observation, opts?.dir)
@@ -2413,7 +2433,10 @@ pub fn verification_finish_check(started_check: dict, options = nil) -> Verifica
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_toolchain_facts(rows: list<dict>, options = nil) -> list<VerificationToolchainFact> {
+pub fn verification_toolchain_facts(
+  rows: list<dict>,
+  options = nil,
+) -> list<VerificationToolchainFact> {
   const opts = __verification_opts(options)
   let facts = []
   let index = 0
@@ -2469,7 +2492,10 @@ pub fn verification_toolchain_facts(rows: list<dict>, options = nil) -> list<Ver
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_warm_state_facts(rows: list<dict>, options = nil) -> list<VerificationWarmStateFact> {
+pub fn verification_warm_state_facts(
+  rows: list<dict>,
+  options = nil,
+) -> list<VerificationWarmStateFact> {
   const opts = __verification_opts(options)
   let facts = []
   let index = 0
@@ -2531,7 +2557,10 @@ pub fn verification_warm_state_facts(rows: list<dict>, options = nil) -> list<Ve
  * @errors: [backend, invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_start_warm_state(row: dict, options = nil) -> VerificationWarmStateLifecycleReceipt {
+pub fn verification_start_warm_state(
+  row: dict,
+  options = nil,
+) -> VerificationWarmStateLifecycleReceipt {
   const opts = __verification_opts(options)
   const id = __verification_warm_state_id(row, 0)
   const name = __verification_warm_state_name(row, id)
@@ -2606,7 +2635,10 @@ pub fn verification_start_warm_state(row: dict, options = nil) -> VerificationWa
  * @errors: [backend, invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_teardown_warm_state(receipt: dict, options = nil) -> VerificationWarmStateLifecycleReceipt {
+pub fn verification_teardown_warm_state(
+  receipt: dict,
+  options = nil,
+) -> VerificationWarmStateLifecycleReceipt {
   const opts = __verification_opts(options)
   const row = opts?.row ?? receipt?.row ?? {}
   const id = receipt?.id ?? __verification_warm_state_id(row, 0)

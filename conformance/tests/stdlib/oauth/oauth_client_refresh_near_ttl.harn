@@ -24,8 +24,7 @@ pipeline test(task) {
   )
   const now = to_int(harness.clock.timestamp())
   const ttl_seconds = 3600
-  store
-    .set(
+  store.set(
     "mockTTL",
     {
       access_token: "ACCESS-1",

@@ -147,7 +147,9 @@ pub fn agent_loop_default_retry_predicate(envelope) -> bool {
   return __agent_retry_contains(__AGENT_RETRYABLE_HTTP_STATUS, status_code)
 }
 
-fn __agent_loop_retry_with_default_predicate(retry_cfg: AgentLoopRetryOptions) -> AgentLoopRetryOptions {
+fn __agent_loop_retry_with_default_predicate(
+  retry_cfg: AgentLoopRetryOptions,
+) -> AgentLoopRetryOptions {
   if retry_cfg.predicate != nil {
     return retry_cfg
   }

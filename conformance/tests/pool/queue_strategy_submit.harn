@@ -8,8 +8,7 @@ pipeline default() {
   const fifo_pool = pool_create({name: "queue-strategy-fifo", max_concurrent: 1, queue: fifo()})
   const fifo_order = atomic(0)
   const fifo_gate = channel(nil, 1)
-  const fifo_warmup = fifo_pool
-    .submit(
+  const fifo_warmup = fifo_pool.submit(
     { ->
       receive(fifo_gate)
       return atomic_add(fifo_order, 1)
@@ -28,8 +27,7 @@ pipeline default() {
   const lifo_pool = pool_create({name: "queue-strategy-lifo", max_concurrent: 1, queue: lifo()})
   const lifo_order = atomic(0)
   const lifo_gate = channel(nil, 1)
-  const lifo_warmup = lifo_pool
-    .submit(
+  const lifo_warmup = lifo_pool.submit(
     { ->
       receive(lifo_gate)
       return atomic_add(lifo_order, 1)
@@ -48,8 +46,7 @@ pipeline default() {
   const priority_pool = pool_create({name: "queue-strategy-priority", max_concurrent: 1, queue: priority()})
   const priority_order = atomic(0)
   const priority_gate = channel(nil, 1)
-  const priority_warmup = priority_pool
-    .submit(
+  const priority_warmup = priority_pool.submit(
     { ->
       receive(priority_gate)
       return atomic_add(priority_order, 1)
@@ -71,8 +68,7 @@ pipeline default() {
   )
   const fair_order = atomic(0)
   const fair_gate = channel(nil, 1)
-  const fair_warmup = fair_pool
-    .submit(
+  const fair_warmup = fair_pool.submit(
     { ->
       receive(fair_gate)
       return atomic_add(fair_order, 1)

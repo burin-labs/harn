@@ -40,8 +40,7 @@ fn main(harness: Harness) -> int {
     return 70
   }
   if json_mode(harness) && payload?.columns != nil {
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "error: --columns cannot be combined with --json; JSON always returns complete catalog rows",
     )
     return 2

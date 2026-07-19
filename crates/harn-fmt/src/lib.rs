@@ -19,6 +19,13 @@ pub use trailing_comma::{
 /// `line_width` minus the current indent.
 pub const AUTO_SEPARATOR_WIDTH: usize = 0;
 
+/// Maximum line width the formatter targets.
+///
+/// Layout decisions use this shared budget, although unbreakable content and
+/// expression contexts that do not yet track their starting column can still
+/// produce longer lines.
+pub const LINE_WIDTH_DEFAULT: usize = 100;
+
 /// Error returned when formatting cannot proceed.
 #[derive(Debug, Clone)]
 pub struct FormatError {
@@ -66,7 +73,7 @@ pub struct FmtOptions {
 impl Default for FmtOptions {
     fn default() -> Self {
         Self {
-            line_width: 100,
+            line_width: LINE_WIDTH_DEFAULT,
             separator_width: AUTO_SEPARATOR_WIDTH,
         }
     }

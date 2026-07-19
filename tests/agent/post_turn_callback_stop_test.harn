@@ -41,7 +41,9 @@ pipeline test_post_turn_policy_stop_bypasses_completion_verify(task) {
       assert_eq(result?.llm?.iterations, 1)
       assert_eq(shared_snapshot(verify_calls).value, 0)
       assert(
-        json_stringify(transcript_messages(result?.transcript)).contains("Run stopped by host policy."),
+        json_stringify(transcript_messages(result?.transcript)).contains(
+          "Run stopped by host policy.",
+        ),
         "policy stop message should be recorded as runtime feedback",
       )
     },

@@ -72,8 +72,7 @@ fn __eval_append_callback(arm) {
     const iteration_index = info?.iteration ?? 0
     const turn = iteration_index + 1
     const ref_id = "eval:" + arm + ":" + to_string(turn)
-    const refs = (pad?.refs ?? [])
-      .push({id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)})
+    const refs = (pad?.refs ?? []).push({id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)})
     const facts = (pad?.facts ?? []).push({text: fact, source_ref: ref_id})
     agent_session_set_scratchpad(
       info.session_id,

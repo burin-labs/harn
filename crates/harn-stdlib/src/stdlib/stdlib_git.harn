@@ -594,8 +594,7 @@ pub fn git_describe(repo = ".", options: GitDescribeOptions = {}) -> GitDescribe
  */
 pub fn git_ls_remote(remote: string, options: GitLsRemoteOptions = {}) -> GitLsRemoteReceipt {
   const refs = __git_string_list(options.refs, "refs").map({ name -> __git_ref_arg(name, "refs") })
-  return git
-    .ls_remote(
+  return git.ls_remote(
     git_repo_path(options.repo ?? "."),
     __git_ref_arg(remote, "remote"),
     {refs: refs, tags: options.tags ?? false, heads: options.heads ?? false},
@@ -628,9 +627,13 @@ pub fn git_push(remote: string, refspec: string, repo = ".", lease = nil) -> Git
  * @effects: []
  * @errors: []
  */
-pub fn git_worktree_create(branch: string, path: string, repo = ".", options: dict = {}) -> GitReceipt {
-  return git
-    .worktree_create(
+pub fn git_worktree_create(
+  branch: string,
+  path: string,
+  repo = ".",
+  options: dict = {},
+) -> GitReceipt {
+  return git.worktree_create(
     repo,
     __git_ref_arg(branch, "branch"),
     __git_non_empty_string(path, "path"),

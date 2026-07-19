@@ -106,7 +106,11 @@ fn __session_store_verify_report(raw: dict) -> SessionStoreVerifyReport {
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_append(session_id: string, payload, options: SessionStoreOptions? = nil) -> SessionStoreEvent {
+pub fn session_store_append(
+  session_id: string,
+  payload,
+  options: SessionStoreOptions? = nil,
+) -> SessionStoreEvent {
   return __session_store_event(__session_store_append(session_id, payload, options))
 }
 
@@ -116,9 +120,11 @@ pub fn session_store_append(session_id: string, payload, options: SessionStoreOp
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_events(session_id: string, options: SessionStoreOptions? = nil) -> list<SessionStoreEvent> {
-  return __session_store_events(session_id, options)
-    .map({ event -> __session_store_event(event) })
+pub fn session_store_events(
+  session_id: string,
+  options: SessionStoreOptions? = nil,
+) -> list<SessionStoreEvent> {
+  return __session_store_events(session_id, options).map({ event -> __session_store_event(event) })
     .to_list()
 }
 
@@ -128,7 +134,10 @@ pub fn session_store_events(session_id: string, options: SessionStoreOptions? = 
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_payloads(session_id: string, options: SessionStoreOptions? = nil) -> list<any> {
+pub fn session_store_payloads(
+  session_id: string,
+  options: SessionStoreOptions? = nil,
+) -> list<any> {
   let payloads = []
   for event in session_store_events(session_id, options) {
     if event.payload != nil {
@@ -214,7 +223,10 @@ pub fn session_store_project_value(
  * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
  * @errors: [runtime]
  */
-pub fn session_store_verify(session_id: string, options: SessionStoreOptions? = nil) -> SessionStoreVerifyReport {
+pub fn session_store_verify(
+  session_id: string,
+  options: SessionStoreOptions? = nil,
+) -> SessionStoreVerifyReport {
   return __session_store_verify_report(__session_store_verify(session_id, options))
 }
 

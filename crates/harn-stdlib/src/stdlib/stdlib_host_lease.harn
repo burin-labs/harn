@@ -86,7 +86,10 @@ pub type HostLeaseScopeResult<T> = {
  * @effects: [host]
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
-pub fn host_lease_status(host: string, resource_class: HostLeaseResourceClass = "whole-machine") -> HostLeaseStatus {
+pub fn host_lease_status(
+  host: string,
+  resource_class: HostLeaseResourceClass = "whole-machine",
+) -> HostLeaseStatus {
   return hostlib_host_lease_status({host: host, resource_class: resource_class})
 }
 
@@ -116,7 +119,10 @@ fn __host_lease_request(options: HostLeaseOptions, wait_slice_ms: int) -> dict {
  * @effects: [host]
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
-pub fn host_lease_acquire(options: HostLeaseOptions, wait_slice_ms: int = 0) -> HostLeaseAcquireReceipt {
+pub fn host_lease_acquire(
+  options: HostLeaseOptions,
+  wait_slice_ms: int = 0,
+) -> HostLeaseAcquireReceipt {
   return hostlib_host_lease_acquire(__host_lease_request(options, wait_slice_ms))
 }
 

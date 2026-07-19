@@ -787,7 +787,10 @@ fn __catalog_sort_key(row, sort) {
  * @effects: []
  * @errors: []
  */
-pub fn catalog_with_installed_ollama_models(catalog: list, installed_ollama_models: list = []) -> list {
+pub fn catalog_with_installed_ollama_models(
+  catalog: list,
+  installed_ollama_models: list = [],
+) -> list {
   let installed = {}
   for raw_id in installed_ollama_models {
     if type_of(raw_id) == "string" && trim(raw_id) != "" {
@@ -814,8 +817,7 @@ pub fn catalog_with_installed_ollama_models(catalog: list, installed_ollama_mode
     if type_of(raw_id) != "string" || trim(raw_id) == "" || (known_ollama[raw_id] ?? false) {
       continue
     }
-    rows = rows
-      .push(
+    rows = rows.push(
       {
         id: raw_id,
         provider: "ollama",

@@ -15,7 +15,8 @@ Verify that the tree-sitter grammar parses the positive Harn source sweep.
 Options:
   --strict   Fail on any tree-sitter parse divergence
   -h, --help Show this help
-""".trim()
+"""
+    .trim()
 }
 
 pub fn parse_cli_args(args: list<string>) {
@@ -257,8 +258,7 @@ fn main(harness: Harness) -> int {
   defer {
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", scratch_dir]})
   }
-  const result = harness.process
-    .spawn_captured(
+  const result = harness.process.spawn_captured(
     {
       cmd: path_join(dir, "scripts/tree-sitter-cli.sh"),
       args: ["parse", "--quiet", "--lib-path", lib_path, "--lang-name", "harn", "--paths", paths_file],
@@ -268,7 +268,8 @@ fn main(harness: Harness) -> int {
   if !result.success {
     return emit_parse_failure(parsed.strict, result)
   }
-  harness.stdio
-    .println("verified tree-sitter parse coverage across ${paths.count} positive .harn files")
+  harness.stdio.println(
+    "verified tree-sitter parse coverage across ${paths.count} positive .harn files",
+  )
   return 0
 }

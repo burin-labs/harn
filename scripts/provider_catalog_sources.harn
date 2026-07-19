@@ -69,7 +69,13 @@ fn __build_run(
   }
 }
 
-fn __fetch_failure_run(id: string, kind: string, source_owner: string, url: string, response: dict) -> dict {
+fn __fetch_failure_run(
+  id: string,
+  kind: string,
+  source_owner: string,
+  url: string,
+  response: dict,
+) -> dict {
   return __build_run(
     id,
     kind,

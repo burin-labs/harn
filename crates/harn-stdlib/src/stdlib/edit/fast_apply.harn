@@ -257,8 +257,7 @@ pub fn edit_fast_apply(params) {
   if opts?.temperature != nil {
     llm_opts = llm_opts.merge({temperature: opts.temperature})
   }
-  llm_opts = llm_opts
-    .merge(
+  llm_opts = llm_opts.merge(
     {
       model_role: opts?.model_role ?? llm_opts?.model_role ?? "merge",
       output_schema: __edit_fast_apply_schema(),
@@ -378,7 +377,8 @@ pub fn edit_fast_apply(params) {
         },
       ],
       match_options: {allow_empty_old_text: true, allow_noop: true, allow_lazy_placeholders: false},
-    }.merge(edit_lifecycle_forward_options(opts)),
+    }
+      .merge(edit_lifecycle_forward_options(opts)),
   )
   return __edit_fast_apply_result(
     ctx,

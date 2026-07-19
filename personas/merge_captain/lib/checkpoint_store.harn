@@ -76,8 +76,7 @@ pub fn load_checkpoint(handle, repo, number) {
 /** List all checkpoints currently held by the session. */
 pub fn list_all_checkpoints(handle) {
   const keys = agent_state_list(handle)
-  return keys.filter({ k -> k.starts_with("pr/") })
-    .map(
+  return keys.filter({ k -> k.starts_with("pr/") }).map(
     { k ->
       const raw = agent_state_read(handle, k)
       const parsed = try {

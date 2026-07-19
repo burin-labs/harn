@@ -34,8 +34,10 @@ pipeline default(_task) {
   require before.files[0]?.known, "indexed file should be known"
   require before.files[0]?.hash_source == "indexed", "fresh indexed hash should reuse index metadata"
   require before.missing[0] == "src/missing.rs", "missing path should be reported"
-  harness.fs
-    .write_text(path_join(root, "src/app.rs"), "pub fn answer() -> i32 { 43 }\npub fn extra() {}\n")
+  harness.fs.write_text(
+    path_join(root, "src/app.rs"),
+    "pub fn answer() -> i32 { 43 }\npub fn extra() {}\n",
+  )
   harness.fs.write_text(path_join(root, "src/new.rs"), "pub fn new_file() {}\n")
   const after = verification_file_hash_snapshot(["src/app.rs", "src/new.rs", "src/missing.rs"])
   const diagnostic = verification_diagnostic_classify(

@@ -156,8 +156,7 @@ fn __build_meta_prompt(user_prompt, style, target_size, keep, strip) {
   if strip_block != "" {
     lines = lines.push(strip_block)
   }
-  lines = lines
-    .push(
+  lines = lines.push(
     "- Output ONLY the rewritten prompt, then a single line beginning with"
       + " \"DIFF: \" summarizing what changed in <=120 chars.",
   )

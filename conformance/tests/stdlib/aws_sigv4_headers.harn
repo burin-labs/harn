@@ -31,8 +31,7 @@ pipeline test(task) {
     "https://service.us-east-1.amazonaws.com/",
     {status: 200, body: "ok", headers: {}},
   )
-  const response = harness.net
-    .request(
+  const response = harness.net.request(
     "POST",
     "https://service.us-east-1.amazonaws.com/",
     {body: body, headers: signed.headers},

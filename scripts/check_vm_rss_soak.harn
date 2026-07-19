@@ -131,8 +131,9 @@ fn harn_bench_argv() -> list<string> {
   if bin_override != nil && bin_override != "" {
     return [bin_override ?? "", "bench"]
   }
-  const meta = harness.process
-    .spawn_captured({cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]})
+  const meta = harness.process.spawn_captured(
+    {cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
+  )
   if meta.success {
     const parsed = try {
       json_parse(meta.stdout)
@@ -175,8 +176,7 @@ pipeline main(task) {
   /* The runtime sandbox only permits writes inside the workspace root, so
    * the profile JSON lives there (and is removed afterward) rather than
    * under the system temp dir the Python version used. */
-  const mk = harness.process
-    .spawn_captured({cmd: "mktemp", args: ["-d", "harn-vm-rss-soak-XXXXXX"]})
+  const mk = harness.process.spawn_captured({cmd: "mktemp", args: ["-d", "harn-vm-rss-soak-XXXXXX"]})
   if !mk.success {
     __io_eprintln("error: could not create temp directory")
     return 1

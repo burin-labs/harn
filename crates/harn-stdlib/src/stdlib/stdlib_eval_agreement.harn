@@ -125,8 +125,8 @@ fn passing(verdicts: list) -> list {
 }
 
 fn execution_passes(verdicts: list) -> list {
-  return verdicts
-    .filter({ v -> v?.verdict == verdict_pass() && v?.kind == evaluator_kind_execution() }).to_list()
+  return verdicts.filter({ v -> v?.verdict == verdict_pass() && v?.kind == evaluator_kind_execution() })
+    .to_list()
 }
 
 fn ids_of(verdicts: list) -> list<string> {
@@ -176,13 +176,13 @@ pub fn agreement_decision(
   // contradict "the grader can only reinforce, never replace a judge that ran the
   // code".
   const exec_ids = ids_of(exec_passes)
-  const reexec_concurring = exec_passes
-    .filter(
+  const reexec_concurring = exec_passes.filter(
     { v ->
       let id = to_string(v?.id ?? "")
       contains(reexecution_ids, id) || id == required_execution_id
     },
-  ).to_list()
+  )
+    .to_list()
   const has_required_execution = len(reexec_concurring) >= 1
   const passed = enough_concur && has_execution && has_required_execution
   // A bar fires when enough judges agreed but no INDEPENDENT RE-EXECUTION judge

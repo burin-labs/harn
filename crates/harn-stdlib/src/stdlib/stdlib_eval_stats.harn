@@ -993,7 +993,11 @@ pub fn regression_gate(baseline_rows: list, current_rows: list, k: float = 1.0) 
  * @errors: []
  * @example: routing_calibration_report([{name: "a"}], [{name: "a"}], [{name: "a"}])
  */
-pub fn routing_calibration_report(cheap_rows: list, ladder_rows: list, frontier_rows: list) -> dict {
+pub fn routing_calibration_report(
+  cheap_rows: list,
+  ladder_rows: list,
+  frontier_rows: list,
+) -> dict {
   const cheap_index = __rows_by_case(cheap_rows)
   const frontier_index = __rows_by_case(frontier_rows)
   let paired_ladder = []

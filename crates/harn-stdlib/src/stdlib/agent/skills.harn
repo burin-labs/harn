@@ -458,8 +458,7 @@ fn __skill_score_metadata(context, registry) {
       triggers = triggers.push(to_string(path_hits) + " path glob(s) matched")
     }
     if score > 0.0 {
-      scored = scored
-        .push(
+      scored = scored.push(
         {id: id, name: id, score: score, trigger: join(triggers, "; "), reason: join(triggers, "; ")},
       )
     }
@@ -501,7 +500,9 @@ fn __top_active_from_scores(registry, scored, opts) {
     const id = candidate?.id ?? candidate?.name ?? ""
     const entry = __skill_find(registry, id)
     if entry != nil {
-      active = active.push(entry + {id: id, score: score, trigger: candidate?.trigger ?? candidate?.reason ?? ""})
+      active = active.push(
+        entry + {id: id, score: score, trigger: candidate?.trigger ?? candidate?.reason ?? ""},
+      )
     }
   }
   return active

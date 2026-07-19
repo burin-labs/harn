@@ -8,8 +8,7 @@ pipeline default() {
   const sample_path = path_join(root, ".harn", "mcp-file-upload.txt")
   ensure_parent_dir(sample_path)
   harness.fs.write_text(sample_path, "hello upload")
-  const config = harn.mcp
-    .configure(
+  const config = harn.mcp.configure(
     {experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}},
   )
   __io_println(config.experimental.file_upload.enabled)

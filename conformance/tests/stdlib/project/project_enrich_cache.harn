@@ -3,15 +3,13 @@ import "std/project"
 pipeline test(task) {
   const base_dir = path_join(harness.fs.temp_dir(), "harn-project-enrich-cache-" + uuid())
   harness.fs.mkdir(path_join(base_dir, "src"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(base_dir, "Cargo.toml"),
     "[package]\nname = \"project-enrich-cache\"\nversion = \"0.1.0\"\n",
   )
   harness.fs.write_text(path_join(base_dir, "Cargo.lock"), "# lock\n")
   harness.fs.write_text(path_join(base_dir, "README.md"), "```rust\nfn " + "main() {}\n```\n")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(base_dir, "src/lib.rs"),
     "pub struct UserName;\npub fn greet_name() -> &'static str { \"hi\" }\n",
   )

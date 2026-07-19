@@ -218,7 +218,11 @@ pub fn call(method: string, args: dict = {}, options: GitHubCallOptions = {}) {
  * @effects: [net]
  * @errors: []
  */
-pub fn pr_view(repo: string, number: int, options: GitHubCallOptions = {}) -> GitHubPullRequestResponse {
+pub fn pr_view(
+  repo: string,
+  number: int,
+  options: GitHubCallOptions = {},
+) -> GitHubPullRequestResponse {
   return __call("github.pr.view", merge(options, {repo: repo, number: number}))
 }
 
@@ -228,7 +232,11 @@ pub fn pr_view(repo: string, number: int, options: GitHubCallOptions = {}) -> Gi
  * @effects: [net]
  * @errors: []
  */
-pub fn pr_checks(repo: string, number: int, options: GitHubCallOptions = {}) -> GitHubPullRequestChecksResponse {
+pub fn pr_checks(
+  repo: string,
+  number: int,
+  options: GitHubCallOptions = {},
+) -> GitHubPullRequestChecksResponse {
   return __call("github.pr.checks", merge(options, {repo: repo, number: number}))
 }
 
@@ -253,7 +261,11 @@ pub fn pr_edit(
  * @effects: [net]
  * @errors: []
  */
-pub fn release_view(repo: string, tag: string? = nil, options: GitHubCallOptions = {}) -> GitHubRelease {
+pub fn release_view(
+  repo: string,
+  tag: string? = nil,
+  options: GitHubCallOptions = {},
+) -> GitHubRelease {
   return __call("github.release.view", merge(options, {repo: repo, tag: tag}))
 }
 
@@ -777,7 +789,11 @@ pub fn forge_writeback_comment(event, body: string, options: GitHubCallOptions =
   return git_forge_writeback_comment(event, body, options)
 }
 
-fn __github_auto_merge_failed(requested_method, pull_number: int | string, error) -> GitHubAutoMergeResult {
+fn __github_auto_merge_failed(
+  requested_method,
+  pull_number: int | string,
+  error,
+) -> GitHubAutoMergeResult {
   return {
     ok: false,
     state: "failed",
@@ -791,7 +807,11 @@ fn __github_auto_merge_failed(requested_method, pull_number: int | string, error
   }
 }
 
-fn __github_auto_merge_success(result, requested_method, pull_number: int | string) -> GitHubAutoMergeResult {
+fn __github_auto_merge_success(
+  result,
+  requested_method,
+  pull_number: int | string,
+) -> GitHubAutoMergeResult {
   const state = result?.state ?? "enabled"
   const merge_method = result?.requested_method ?? result?.auto_merge?.merge_method
     ?? result?.pull_request?.autoMergeRequest?.mergeMethod
@@ -809,7 +829,13 @@ fn __github_auto_merge_success(result, requested_method, pull_number: int | stri
   }
 }
 
-fn __github_close_pr_envelope(ok, pull_number: int | string, comment_posted, pull_request, error) -> GitHubClosePrResult {
+fn __github_close_pr_envelope(
+  ok,
+  pull_number: int | string,
+  comment_posted,
+  pull_request,
+  error,
+) -> GitHubClosePrResult {
   return {
     ok: ok,
     pull_number: pull_number,
@@ -964,7 +990,11 @@ fn __github_wait_options(options: GitHubWaitOptions, source, condition) {
  * @effects: []
  * @errors: []
  */
-pub fn wait_until_deploy_succeeds(repo: string, deployment_id: any, options: GitHubWaitOptions = {}) {
+pub fn wait_until_deploy_succeeds(
+  repo: string,
+  deployment_id: any,
+  options: GitHubWaitOptions = {},
+) {
   return wait_for(
     __github_wait_options(
       options,

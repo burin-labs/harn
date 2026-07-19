@@ -292,11 +292,11 @@ lint-harn:
 FMT_HARN_SKIP := semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn import_broken_module_lib.harn
 EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn
 STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
-# Extra repo-root directories that contain user-facing .harn fixtures
-# but were historically outside the fmt-harn gate. Keeping them in the
+# Extra directories that contain user-facing .harn fixtures but were
+# historically outside the fmt-harn gate. Keeping them in the
 # gate avoids the "I edited persona X and pre-commit reformatted three
 # unrelated files" surprise from accumulated drift.
-EXTRA_HARN_DIRS := personas tests examples evals
+EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo
 EXTRA_HARN_FIND := find $(EXTRA_HARN_DIRS) -type d -name .harn -prune -o -type f -name '*.harn' -print0 2>/dev/null
 
 fmt-harn-fix:
@@ -323,11 +323,14 @@ fmt-harn:
 		| xargs -0 $(HARN_CMD) fmt --check
 	@find scripts -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
-	@find crates/harn-cli/assets/demo -name '*.harn' -print0 \
-		| xargs -0 $(HARN_CMD) fmt --check
 	@$(EXTRA_HARN_FIND) \
 		| xargs -0 -r $(HARN_CMD) fmt --check
 	@echo "    Harn formatting OK."
+
+# Base-aware semantic audit for formatter PRs that mechanically rewrite the
+# Harn corpus. Override HARN_FMT_AUDIT_BASE when the target branch is not main.
+audit-fmt-harn-tokens:
+	HARN_FMT_AUDIT_BASE="$${HARN_FMT_AUDIT_BASE:-origin/main}" cargo test -p harn-fmt tests::semantic_tokens::merge_base_harn_rewrite_preserves_semantic_tokens -- --exact
 
 # Run the @test pipelines that cover scripts/*.harn against pure-logic
 # fixtures (no filesystem dependency outside the canonical spec mirror

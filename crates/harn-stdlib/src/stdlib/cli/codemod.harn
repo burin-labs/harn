@@ -86,7 +86,9 @@ fn main(harness: Harness) {
   } else {
     let raw = harness.env.get_or("HARN_CODEMOD_PLAN_JSON", "")
     if raw == "" {
-      harness.stdio.eprintln("codemod: internal error — no codemod plan or recipe set by the shim")
+      harness.stdio.eprintln(
+        "codemod: internal error — no codemod plan or recipe set by the shim",
+      )
       exit(70)
     }
     run_codemod(json_parse(raw), apply, allow_unsafe)
@@ -105,8 +107,7 @@ fn main(harness: Harness) {
       if apply {
         harness.stdio.println("rewrote " + f.path + "  [safety=" + f.safety + "]")
       } else {
-        harness.stdio
-          .println(
+        harness.stdio.println(
           "would change "
             + f.path
             + "  [safety="

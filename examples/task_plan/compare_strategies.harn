@@ -865,11 +865,12 @@ fn main(harness: Harness) -> int {
   for task in __TASKS {
     for strategy in strategies {
       for trial in range(1, trials + 1) {
-        harness.stdio.println("[run ] " + task.id + " / " + strategy + " / trial " + to_string(trial))
+        harness.stdio.println(
+          "[run ] " + task.id + " / " + strategy + " / trial " + to_string(trial),
+        )
         const record = __run_cell(strategy, task, trial, model, max_tokens[strategy], opts)
         records = records + [record]
-        harness.stdio
-          .println(
+        harness.stdio.println(
           "[done] " + task.id + " / " + strategy + " / trial " + to_string(trial)
             + " success="
             + to_string(record.success)
@@ -890,8 +891,7 @@ fn main(harness: Harness) -> int {
     harness.stdio.print(body)
   } else {
     harness.fs.write_text(out_path, body)
-    harness.stdio
-      .println("wrote " + to_string(len(records)) + " records to " + out_path)
+    harness.stdio.println("wrote " + to_string(len(records)) + " records to " + out_path)
   }
   return 0
 }

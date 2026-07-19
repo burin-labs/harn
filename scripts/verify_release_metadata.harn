@@ -320,27 +320,24 @@ fn verify_release_notes(version: string) {
  */
 fn verify_tag_state(version: string) {
   const tag = "v" + version
-  const tag_lookup = harness.process
-    .spawn_captured({cmd: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]})
+  const tag_lookup = harness.process.spawn_captured(
+    {cmd: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]},
+  )
   if !tag_lookup.success {
     return
   }
-  const head = harness.process
-    .spawn_captured({cmd: "git", args: ["rev-parse", "HEAD"]}).stdout
-    .trim()
-  const tag_commit = harness.process
-    .spawn_captured({cmd: "git", args: ["rev-list", "-n", "1", tag]}).stdout
-    .trim()
+  const head = harness.process.spawn_captured({cmd: "git", args: ["rev-parse", "HEAD"]}).stdout.trim()
+  const tag_commit = harness.process.spawn_captured({cmd: "git", args: ["rev-list", "-n", "1", tag]}).stdout.trim()
   if head == tag_commit {
     return
   }
-  const is_descendant = harness.process
-    .spawn_captured({cmd: "git", args: ["merge-base", "--is-ancestor", tag_commit, head]})
+  const is_descendant = harness.process.spawn_captured(
+    {cmd: "git", args: ["merge-base", "--is-ancestor", tag_commit, head]},
+  )
   if is_descendant.success {
     return
   }
-  const rebrand = harness.process
-    .spawn_captured(
+  const rebrand = harness.process.spawn_captured(
     {
       cmd: "git",
       args: [

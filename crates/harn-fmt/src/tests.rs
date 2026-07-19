@@ -1,6 +1,8 @@
 mod comments;
+mod layout;
 mod roundtrip;
 mod scoped_blocks;
+mod semantic_tokens;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
@@ -1316,40 +1318,6 @@ fn test_imports_stay_tight_then_blank_before_first_item() {
         result, result2,
         "formatter is not idempotent around imports"
     );
-}
-
-#[test]
-fn test_method_call_args_dont_overcount_multiline_receiver() {
-    // When the receiver of a method call wraps to multiple lines, the
-    // method-call args should be laid out based on the new line's column,
-    // not the receiver's total byte length. With short args, they should
-    // stay on the same line as the `.method(`.
-    let source = r"pipeline default(task) {
-  let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(arg_one, arg_two, arg_three)
-    .map(item)
-}";
-    let result = format_source(source).unwrap();
-    // Short args list (just `item`) must NOT wrap onto its own line just
-    // because the receiver wrapped onto multiple lines above.
-    assert!(
-        result.contains(".map(item)"),
-        "trailing method args wrapped unnecessarily after multi-line receiver:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_optional_method_call_args_dont_overcount_multiline_receiver() {
-    let source = r"pipeline default(task) {
-  let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(arg_one, arg_two, arg_three)
-    ?.map(item)
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("?.map(item)"),
-        "trailing optional method args wrapped unnecessarily after multi-line receiver:\n{result}"
-    );
-    assert_roundtrip(source);
 }
 
 #[test]

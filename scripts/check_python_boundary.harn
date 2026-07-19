@@ -160,8 +160,9 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println("usage: harn run scripts/check_python_boundary.harn -- [--json] [--root PATH]")
+    harness.stdio.println(
+      "usage: harn run scripts/check_python_boundary.harn -- [--json] [--root PATH]",
+    )
     return nil
   }
   const parsed_result = parse(arg_spec(), argv)

@@ -7,8 +7,7 @@ pipeline default() {
       {text: "Visible <think>hidden", stop_reason: "stop"},
     ],
     { ->
-      const chunks = stream
-        .collect(llm_stream_call("stream this", nil, {provider: "mock"}), {max: 4})
+      const chunks = stream.collect(llm_stream_call("stream this", nil, {provider: "mock"}), {max: 4})
       const direct = llm_call("non-stream this", nil, {provider: "mock"})
       let raw = ""
       for chunk in chunks {

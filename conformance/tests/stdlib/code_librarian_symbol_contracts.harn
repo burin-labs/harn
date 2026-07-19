@@ -4,29 +4,28 @@ fn seed_cpp(root: string) {
   harness.fs.mkdir(path_join(root, "include"))
   harness.fs.mkdir(path_join(root, "src"))
   harness.fs.mkdir(path_join(root, "dupe"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "include/sta'tus.hpp"),
     "class StatusOr {\npublic:\n  bool ok() const { return true; }\n  int value() const { return 1; }\n};\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "src/use.cpp"),
     "bool inspect(StatusOr &result) { return result.ok(); }\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "src/use_again.cpp"),
     "bool inspect_again(StatusOr &result) { return result.ok(); }\n",
   )
-  harness.fs
-    .write_text(path_join(root, "src/missing.cpp"), "void check_missing() { phantom(); }\n")
-  harness.fs
-    .write_text(path_join(root, "dupe/a.cpp"), "class Duplicate { public: void same() {} };\n")
-  harness.fs
-    .write_text(path_join(root, "dupe/b.cpp"), "class Duplicate { public: void same() {} };\n")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(path_join(root, "src/missing.cpp"), "void check_missing() { phantom(); }\n")
+  harness.fs.write_text(
+    path_join(root, "dupe/a.cpp"),
+    "class Duplicate { public: void same() {} };\n",
+  )
+  harness.fs.write_text(
+    path_join(root, "dupe/b.cpp"),
+    "class Duplicate { public: void same() {} };\n",
+  )
+  harness.fs.write_text(
     path_join(root, "dupe/use.cpp"),
     "void inspect_duplicate(Duplicate &value) { value.same(); }\n",
   )
@@ -34,13 +33,11 @@ fn seed_cpp(root: string) {
 
 fn seed_scala(root: string) {
   harness.fs.mkdir(path_join(root, "scala"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "scala/Rule.scala"),
     "object Rule {\n  def greaterThan(a: Int, b: Int): Boolean = a > b\n  def equalTo(a: Int, b: Int): Boolean = a == b\n}\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "scala/RuleSpec.scala"),
     "object RuleSpec { def check(): Boolean = Rule.greaterThan(2, 1) }\n",
   )

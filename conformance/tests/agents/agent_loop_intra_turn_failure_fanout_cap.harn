@@ -80,7 +80,9 @@ fn distinct_look_batch(n) {
   let calls = []
   let i = 0
   while i < n {
-    calls = calls.push({id: "l" + to_string(i), name: "look", arguments: {path: "f" + to_string(i) + ".swift"}})
+    calls = calls.push(
+      {id: "l" + to_string(i), name: "look", arguments: {path: "f" + to_string(i) + ".swift"}},
+    )
     i = i + 1
   }
   return calls

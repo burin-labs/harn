@@ -22,8 +22,10 @@ fn trace_by_id(traces, id) {
 pipeline test(task) {
   const root = path_join(harness.fs.temp_dir(), "harn-context-profile-" + uuid_v7())
   harness.fs.mkdir(root)
-  harness.fs
-    .write_text(path_join(root, "Cargo.toml"), "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n")
+  harness.fs.write_text(
+    path_join(root, "Cargo.toml"),
+    "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+  )
   const opts = agent_loop_options(
     {
       provider: "mock",

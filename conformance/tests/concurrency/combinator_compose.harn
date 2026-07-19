@@ -32,7 +32,9 @@ pipeline default() {
       harness.stdio.println("a_value=" + to_string(audits[0].payload.value))
       harness.stdio.println("b_value=" + to_string(audits[1].payload.value))
       harness.stdio.println("c_value=" + to_string(audits[2].payload.value))
-      harness.stdio.println("kind_order=" + audits[0].kind + "," + audits[1].kind + "," + audits[2].kind)
+      harness.stdio.println(
+        "kind_order=" + audits[0].kind + "," + audits[1].kind + "," + audits[2].kind,
+      )
       const empty_chain = compose([])
       harness.stdio.println("empty=" + to_string(empty_chain(harness, 42)))
       return return_value

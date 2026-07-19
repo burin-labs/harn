@@ -539,7 +539,13 @@ pub fn typed_prompt_checkpoint(id, evidence, options = nil, validator = nil) {
 }
 
 /** Checkpoint the next deterministic action for one classified PR. */
-pub fn choose_next_action_checkpoint(classification, policy, dry_run, approval_state, options = nil) {
+pub fn choose_next_action_checkpoint(
+  classification,
+  policy,
+  dry_run,
+  approval_state,
+  options = nil,
+) {
   return typed_prompt_checkpoint(
     "choose_next_action",
     {classification: classification, policy: policy, dry_run: dry_run, approval_gate: approval_state},

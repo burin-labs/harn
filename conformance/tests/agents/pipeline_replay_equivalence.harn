@@ -21,8 +21,7 @@ pipeline default() {
   const cursor = event_log.latest(topic)
   pipeline_on_finish(
     { harness, return_value ->
-      harness
-        .emit_audit(
+      harness.emit_audit(
         "drain_decision",
         {
           pipeline_id: "pipeline-replay",
@@ -31,21 +30,18 @@ pipeline default() {
           reason: "replay determinism",
         },
       )
-      harness
-        .emit_audit(
+      harness.emit_audit(
         "handoff_recorded",
         {target_pipeline: "nightly-drain", envelope_id: "envelope_replay_1"},
       )
       harness.emit_audit("pipeline_finalized", {reason: "replay_complete"})
       const recorded = lifecycle_audit_log_take()
-      const stream = event_log
-        .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "lifecycle_audit"})
+      const stream = event_log.subscribe({topic: topic, from_cursor: cursor, kind_prefix: "lifecycle_audit"})
       const first = stream.next().value
       const second = stream.next().value
       const third = stream.next().value
       harness.stdio.println("recorded_count=" + to_string(len(recorded)))
-      harness.stdio
-        .println(
+      harness.stdio.println(
         "recorded_kinds=" + recorded[0].kind + "," + recorded[1].kind + "," + recorded[2].kind,
       )
       harness.stdio.println("first_kind=" + first.kind)
@@ -55,8 +51,7 @@ pipeline default() {
       harness.stdio.println("second_envelope=" + second.payload.payload.envelope_id)
       harness.stdio.println("third_payload_kind=" + third.payload.kind)
       harness.stdio.println("third_reason=" + third.payload.payload.reason)
-      harness.stdio
-        .println(
+      harness.stdio.println(
         "seq_monotonic="
           + to_string(first.payload.seq < second.payload.seq && second.payload.seq < third.payload.seq),
       )

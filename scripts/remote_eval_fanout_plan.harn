@@ -345,8 +345,7 @@ pub fn remote_eval_fanout_rejoin_receipt(plan, receipts) {
     if __receipt_ingest_ok(receipt) {
       accepted = accepted.push(receipt)
     } else {
-      failed = failed
-        .push({shard_id: shard_id, status: __receipt_status(receipt), receipt: receipt})
+      failed = failed.push({shard_id: shard_id, status: __receipt_status(receipt), receipt: receipt})
     }
   }
   let missing = []

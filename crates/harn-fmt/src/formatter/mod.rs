@@ -11,6 +11,10 @@ use harn_parser::{Node, SNode, TypedParam};
 
 use crate::helpers::*;
 
+/// Width of the ` {` that every `fn` signature call site appends before the
+/// body. The signature's own wrap decision has to budget for it.
+const SIGNATURE_BODY_BRACE_WIDTH: usize = 2;
+
 /// A captured comment with metadata.
 #[derive(Debug, Clone)]
 pub(crate) struct Comment {
@@ -314,6 +318,70 @@ impl<'a> Formatter<'a> {
         self.format_comma_sequence(items.to_vec(), prefix_len, indent)
     }
 
+    /// Whether a chained call moves onto its own line.
+    ///
+    /// Three independent reasons, and no others. In particular NOT "the author
+    /// happened to break this call across source lines" — layout is decided by
+    /// the formatted result, not by incidental newlines in the input.
+    ///
+    /// - the formatted receiver is itself multi-line, so there is no single
+    ///   physical line left to tail;
+    /// - a comment sits between the segments, and only a wrapped chain has a
+    ///   line to host it;
+    /// - the call head (`obj` + `.method(`) already overflows `line_width`, so
+    ///   tailing it cannot fit whatever the arguments do.
+    ///
+    /// `head_len` is the width of `.method(` (or `?.method(`).
+    ///
+    /// The overflow test is a lower bound, not the true column: `last_line_width`
+    /// measures the expression fragment, and the formatter does not track what
+    /// precedes it on the line (`let x = `, `return `, …). So a head can still
+    /// overflow undetected. Widening that is a formatter-wide change — it needs
+    /// the current column threaded through `format_expr` — and is tracked
+    /// separately; counting the indent is strictly closer than counting nothing.
+    pub(super) fn chain_wraps(
+        &self,
+        obj: &str,
+        lead: &str,
+        head_len: usize,
+        indent: usize,
+    ) -> bool {
+        obj.contains('\n')
+            || !lead.is_empty()
+            || indent * 2 + last_line_width(obj) + head_len > self.line_width
+    }
+
+    /// Column the arguments of a chained call start at.
+    ///
+    /// A wrapped chain renders `.method(` at `indent + 1`; an unwrapped one
+    /// tails the receiver's last physical line.
+    pub(super) fn chain_prefix_len(
+        &self,
+        obj: &str,
+        head_len: usize,
+        indent: usize,
+        wraps: bool,
+    ) -> usize {
+        if wraps {
+            (indent + 1) * 2 + head_len
+        } else {
+            indent * 2 + last_line_width(obj) + head_len
+        }
+    }
+
+    /// Depth at which a method call's arguments wrap.
+    ///
+    /// A chain that wrapped renders `.method(` at `indent + 1`, so its arguments
+    /// belong at that depth: an argument must never sit level with — or outdent
+    /// from — the call that owns it.
+    pub(super) fn chain_args_indent(&self, indent: usize, wraps: bool) -> usize {
+        if wraps {
+            indent + 1
+        } else {
+            indent
+        }
+    }
+
     pub(super) fn format_call_args(
         &self,
         args: &[SNode],
@@ -430,7 +498,17 @@ impl<'a> Formatter<'a> {
         };
         let throws_str = format_throws_clause(throws);
         let where_str = format_where_clauses(where_clauses);
-        let prefix_len = indent_level * 2 + pub_prefix.len() + 3 + name.len() + generics.len() + 1;
+        // The wrap decision must budget for the WHOLE line, not just what
+        // precedes the params: the return type, throws/where clauses and the
+        // ` {` every caller appends all consume width. Counting only the prefix
+        // is what let signatures land past `line_width`.
+        //
+        // The closing `)` is NOT counted here — `format_comma_sequence` already
+        // adds it. Counting it twice wraps a signature that fits exactly.
+        let suffix_len =
+            ret.len() + throws_str.len() + where_str.len() + SIGNATURE_BODY_BRACE_WIDTH;
+        let prefix_len =
+            indent_level * 2 + pub_prefix.len() + 3 + name.len() + generics.len() + 1 + suffix_len;
         let params_str = self.format_typed_params_wrapped(params, prefix_len, indent_level);
         format!("{pub_prefix}fn {name}{generics}({params_str}){ret}{throws_str}{where_str}")
     }

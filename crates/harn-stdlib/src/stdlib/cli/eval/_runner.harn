@@ -110,8 +110,7 @@ fn __md_escape(s: string) -> string {
  * captured stderr buffer flushes back to the Rust shim.
  */
 fn main(harness: Harness) -> int {
-  harness.stdio
-    .eprintln(
+  harness.stdio.eprintln(
     "internal error: eval/_runner is a helper module; invoke a sibling eval script instead",
   )
   return 70

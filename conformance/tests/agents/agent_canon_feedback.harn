@@ -41,14 +41,12 @@ fn test_packages_dir(dir, package_name: string) -> string {
   harness.fs.mkdir(packages)
   harness.fs.write_text(path_join(generation_root, "harn.lock"), lock_body)
   harness.fs.write_text(path_join(generation_root, "lease.lock"), "")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(generation_root, "generation.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\nlock_digest = \"sha256:${sha256(lock_body)}\"\n",
   )
   harness.fs.write_text(path_join(dir, ".harn", "package-generation.lock"), "")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(dir, ".harn", "package-current.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\n",
   )
@@ -58,30 +56,28 @@ fn test_packages_dir(dir, package_name: string) -> string {
 fn write_latex_canon_package(dir) {
   const packages = test_packages_dir(dir, "latex-canon")
   harness.fs.mkdir(path_join(packages, "latex-canon/canon/latex"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(packages, "latex-canon/harn.toml"),
     "version = 1\n[package]\nname = \"latex-canon\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nid = \"latex\"\ntitle = \"LaTeX\"\npath = \"canon/latex\"\nextensions = [\"tex\"]\n",
   )
-  harness.fs
-    .write_text(path_join(packages, "latex-canon/canon/latex/invariants.harn"), INVARIANTS)
+  harness.fs.write_text(path_join(packages, "latex-canon/canon/latex/invariants.harn"), INVARIANTS)
 }
 
 fn write_manifest_canon_package(dir) {
   const packages = test_packages_dir(dir, "canon-manifest")
   harness.fs.mkdir(path_join(packages, "canon-manifest/canon/latex"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(packages, "canon-manifest/harn.toml"),
     "version = 1\n[package]\nname = \"canon-manifest\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nmanifest = \"canon/canon-packs.json\"\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(packages, "canon-manifest/canon/canon-packs.json"),
     "{\"schema_version\":1,\"packs\":[{\"id\":\"latex\",\"title\":\"LaTeX\",\"invariants\":\"latex/invariants.harn\",\"extensions\":[\"tex\"]}]}",
   )
-  harness.fs
-    .write_text(path_join(packages, "canon-manifest/canon/latex/invariants.harn"), INVARIANTS)
+  harness.fs.write_text(
+    path_join(packages, "canon-manifest/canon/latex/invariants.harn"),
+    INVARIANTS,
+  )
 }
 
 fn canon_feedback_state_key(session_id: string, suffix: string) -> string {
@@ -307,8 +303,7 @@ pipeline main(task) {
     { dir ->
       write_manifest_canon_package(dir)
       const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
-      harness.fs
-        .write_text(
+      harness.fs.write_text(
         manifest_path,
         "{\"schema_version\":1,\"packs\":[{\"id\":7,\"invariants\":true}]}",
       )
@@ -324,8 +319,7 @@ pipeline main(task) {
     { dir ->
       write_manifest_canon_package(dir)
       const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
-      harness.fs
-        .write_text(
+      harness.fs.write_text(
         manifest_path,
         "{\"schema_version\":2,\"packs\":[{\"id\":\"latex\",\"invariants\":\"latex/invariants.harn\"}]}",
       )

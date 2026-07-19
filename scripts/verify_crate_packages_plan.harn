@@ -31,7 +31,10 @@ pub fn target_directory_from_metadata(meta: dict) -> string {
   return require_string(meta?.target_directory, "target_directory")
 }
 
-pub fn publishable_workspace_packages_from_metadata(meta: dict, root: string) -> list<PublishablePackage> {
+pub fn publishable_workspace_packages_from_metadata(
+  meta: dict,
+  root: string,
+) -> list<PublishablePackage> {
   const members = workspace_member_ids(meta)
   let packages: list<PublishablePackage> = []
   let seen: list<string> = []
@@ -102,8 +105,7 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/verify_crate_packages_plan.harn -- --metadata PATH --root PATH",
     )
     return nil

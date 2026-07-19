@@ -211,8 +211,7 @@ pub fn canon_slice_from_files(files, metadata = nil) -> dict {
   for file in files ?? [] {
     const path = __canon_text(file?.path ?? file?.name)
     if path != "" {
-      normalized = normalized
-        .push({path: path, text: to_string(file?.text ?? file?.content ?? "")})
+      normalized = normalized.push({path: path, text: to_string(file?.text ?? file?.content ?? "")})
     }
   }
   return {files: normalized, metadata: metadata ?? {}}
@@ -303,8 +302,7 @@ fn __canon_append_manifest_packs(packs, base_dir, manifest) {
     if id == "" || invariants == "" {
       continue
     }
-    out = out
-      .push(
+    out = out.push(
       {
         id: id,
         title: __canon_text(pack?.title ?? id),
@@ -385,8 +383,7 @@ fn __canon_manifest_from_installed_packages(project_root_value) -> dict? {
       if id == "" {
         continue
       }
-      packs = packs
-        .push(
+      packs = packs.push(
         {
           id: id,
           title: __canon_text(contribution?.title ?? id),
@@ -552,8 +549,7 @@ pub fn canon_evaluate_slice(slice, options = nil) -> dict {
       },
     )
     ok = ok && (report?.ok ?? false)
-    reports = reports
-      .push(
+    reports = reports.push(
       {
         pack_id: pack.id,
         title: pack.title,
@@ -992,7 +988,11 @@ fn __canon_event_stored_observed_symbols(session_id: string, options = nil) -> l
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_event_record_observed_symbols(session_id: string, event, options = nil) -> list<string> {
+pub fn canon_event_record_observed_symbols(
+  session_id: string,
+  event,
+  options = nil,
+) -> list<string> {
   const sid = __canon_text(session_id)
   const event_symbols = canon_event_observed_symbols(event ?? {})
   if sid == "" {

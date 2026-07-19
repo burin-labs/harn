@@ -12,8 +12,7 @@ pipeline default() {
   const cursor = event_log.latest(topic) ?? 0
   const gate = channel(nil, 1)
   const pool = pool_create({name: "otel-drop-demo", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
-  const warmup = pool
-    .submit(
+  const warmup = pool.submit(
     { ->
       receive(gate)
       return "warmup"

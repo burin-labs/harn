@@ -149,10 +149,14 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
   }
   const errors = ci_sccache_policy_errors(invalid_action, invalid_workflow)
   assert(
-    errors.contains(".github/actions/sccache/action.yml must use exactly one pinned sticky-disk action"),
+    errors.contains(
+      ".github/actions/sccache/action.yml must use exactly one pinned sticky-disk action",
+    ),
   )
   assert(
-    errors.contains("ci.yml:package-audit must retain rust-cache only on the GitHub-hosted fallback"),
+    errors.contains(
+      "ci.yml:package-audit must retain rust-cache only on the GitHub-hosted fallback",
+    ),
   )
   assert(errors.contains("ci.yml:package-audit must cap persistent sccache at 15G"))
   assert(errors.contains("ci.yml:surprise uses persistent sccache without a lane policy"))

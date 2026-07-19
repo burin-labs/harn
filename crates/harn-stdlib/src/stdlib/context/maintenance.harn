@@ -224,15 +224,18 @@ pub fn context_maintenance_receipt(
  * @effects: []
  * @errors: []
  */
-pub fn context_maintenance_queue_receipt(job_id: string, event, options = nil) -> ContextMaintenanceJobReceipt {
+pub fn context_maintenance_queue_receipt(
+  job_id: string,
+  event,
+  options = nil,
+) -> ContextMaintenanceJobReceipt {
   const opts = options ?? {}
   const source_event = event ?? {}
   const status = opts?.status ?? "queued"
   return context_maintenance_receipt(
     job_id,
     status,
-    opts
-      .merge(
+    opts.merge(
       {
         lifecycle_event: opts?.lifecycle_event ?? __cm_event_name(source_event),
         affected_paths: opts?.affected_paths ?? __cm_paths(source_event),
@@ -257,8 +260,7 @@ pub fn context_maintenance_transition(
   return context_maintenance_receipt(
     opts.job_id,
     status,
-    opts
-      .merge(
+    opts.merge(
       {
         dedupe_key: receipt.dedupe_key,
         run_id: receipt.run_id,

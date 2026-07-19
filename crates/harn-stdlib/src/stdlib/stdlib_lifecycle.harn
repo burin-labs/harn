@@ -109,8 +109,7 @@ pub fn summary(state) {
 pub fn on_finish_abandon(harness, return_value) {
   const unsettled = harness.unsettled_state()
   if !is_empty(unsettled) {
-    harness
-      .emit_audit(
+    harness.emit_audit(
       "pipeline_abandoned_unsettled",
       {counts: counts(unsettled), summary: summary(unsettled)},
     )
@@ -162,8 +161,7 @@ pub fn on_finish_block_until_settled(timeout = 30s, fallback = nil) {
   return { harness, return_value ->
     const result = harness.wait_for_any_settlement(timeout)
     if result?.status == "settled" {
-      harness
-        .emit_audit("pipeline_finalized", {reason: "settled_within_timeout", timeout: timeout})
+      harness.emit_audit("pipeline_finalized", {reason: "settled_within_timeout", timeout: timeout})
       return return_value
     }
     harness.emit_audit("settlement_timeout", {timeout: timeout, result: result})
@@ -194,8 +192,7 @@ pub fn on_finish_handoff_to(target_pipeline, options = nil) {
   return { harness, return_value ->
     const unsettled = harness.unsettled_state()
     if is_empty(unsettled) {
-      harness
-        .emit_audit(
+      harness.emit_audit(
         "pipeline_finalized",
         {reason: "no_unsettled", handoff_skipped: target_pipeline},
       )

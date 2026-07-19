@@ -298,8 +298,7 @@ fn main(harness: Harness) {
   const description = harness.env.get_or("HARN_TOOL_DESCRIPTION", "")
   const harn_range = harness.env.get_or("HARN_TOOL_HARN_RANGE", "")
   if name == "" || dest == "" || ident == "" || handler == "" || harn_range == "" {
-    harness.stdio
-      .eprintln("tool new: HARN_TOOL_{NAME,DEST,IDENT,HANDLER,HARN_RANGE} must be set")
+    harness.stdio.eprintln("tool new: HARN_TOOL_{NAME,DEST,IDENT,HANDLER,HARN_RANGE} must be set")
     exit(2)
   }
   __write(harness, dest, "harn.toml", __render_harn_toml(name, description, harn_range))

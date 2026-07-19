@@ -441,7 +441,11 @@ pub fn context_artifact(input = nil, options = nil) -> ContextArtifact {
  * @effects: []
  * @errors: []
  */
-pub fn context_artifact_from_burin_digest(path: string, body: string, options = nil) -> ContextArtifact {
+pub fn context_artifact_from_burin_digest(
+  path: string,
+  body: string,
+  options = nil,
+) -> ContextArtifact {
   const opts = options ?? {}
   const metadata_base = if opts?.metadata == nil {
     {}
@@ -1031,8 +1035,7 @@ fn __context_meta_pairs(artifact, compact = false) {
   }
   if len(artifact?.source_hashes ?? []) > 0 {
     const hash = artifact.source_hashes[0]
-    pairs = pairs
-      .push(
+    pairs = pairs.push(
       if compact {
         "hash=" + hash
       } else {

@@ -262,8 +262,7 @@ pub fn pin_compaction_policy(pins, opts = nil) {
   let pin_preserve = []
   for p in pins ?? [] {
     if type_of(p?.content) == "string" && p.content != "" {
-      pin_preserve = pin_preserve
-        .push(
+      pin_preserve = pin_preserve.push(
         "Preserve the pinned " + to_string(p?.kind ?? "note") + ": "
           + p.content,
       )

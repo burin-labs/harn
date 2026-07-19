@@ -45,10 +45,8 @@ fn __render_human(harness: Harness, report: dict) {
   render_trainer_identity_check(harness, contract["trainer_identity"])
   render_trainer_environment_check(harness, contract["trainer_environment"])
   harness.stdio.println("  eval dataset: " + safe_string(contract["eval_dataset"], ""))
-  harness.stdio
-    .println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
-  harness.stdio
-    .println(
+  harness.stdio.println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
+  harness.stdio.println(
     "  totals: adapter_passed="
       + safe_int_string(totals["adapter_passed"], "0")
       + " adapter_failed="

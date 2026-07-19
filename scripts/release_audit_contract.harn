@@ -427,8 +427,7 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/release_audit_contract.harn -- --contract PATH [--check-ci PATH | --receipt PATH --head-sha SHA]",
     )
     return nil
@@ -444,15 +443,14 @@ fn main(harness: Harness) {
   guard contract != nil else {
     const loaded = read_json_result(contract_path)
     const errors = if is_ok(loaded) {
-      schema_validator(contract_schema())
-        .report(unwrap(loaded)).errors
-        .map({ error -> json_stringify(error) })
+      schema_validator(contract_schema()).report(unwrap(loaded)).errors.map(
+        { error -> json_stringify(error) },
+      )
         .to_list()
     } else {
       [json_stringify(unwrap_err(loaded))]
     }
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       json_stringify({ok: false, reason: "invalid_release_audit_contract", errors: errors}),
     )
     exit(1)
@@ -470,15 +468,16 @@ fn main(harness: Harness) {
   const warm_binary_sha256 = trim(parsed?.warm_binary_sha256 ?? "")
   if receipt_path == "" && expected_sha == "" {
     if ci_path != "" {
-      harness.stdio
-        .println(json_stringify({ok: true, reason: "ci_contract_matches", errors: []}))
+      harness.stdio.println(json_stringify({ok: true, reason: "ci_contract_matches", errors: []}))
       return nil
     }
     harness.stdio.eprintln("--head-sha is required when rendering an audit plan")
     exit(2)
   }
   if receipt_path == "" {
-    harness.stdio.println(json_stringify(release_audit_full_plan(contract, "no_receipt", expected_sha)))
+    harness.stdio.println(
+      json_stringify(release_audit_full_plan(contract, "no_receipt", expected_sha)),
+    )
     return nil
   }
   const loaded = read_json_result(receipt_path)

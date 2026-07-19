@@ -56,8 +56,7 @@ pipeline default() {
   __io_println(proposal_receipt.schema)
   __io_println(proposal_receipt.kind)
   __io_println(proposal_receipt.bulletin.status)
-  const proposal_stream = event_log
-    .subscribe(
+  const proposal_stream = event_log.subscribe(
     {topic: "personas.bulletins.test.proposed", from_cursor: proposal_receipt.event_log_id - 1},
   )
   const proposal_event = proposal_stream.next().value
@@ -76,8 +75,7 @@ pipeline default() {
   __io_println(accept_receipt.decision.action)
   __io_println(accept_receipt.decision.status)
   __io_println(accept_receipt.decision.decided_by)
-  const decision_stream = event_log
-    .subscribe(
+  const decision_stream = event_log.subscribe(
     {topic: "personas.bulletins.test.decisions", from_cursor: accept_receipt.event_log_id - 1},
   )
   const decision_event = decision_stream.next().value

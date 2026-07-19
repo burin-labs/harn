@@ -6,8 +6,7 @@ pipeline default() {
   const root = path_join(harness.fs.temp_dir(), "harn_pack_untrusted_signer_" + uuid_v7())
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "hello.harn"), "__io_println(\"signed\")\n")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "release-key.pem"),
     "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDmsNDO8iZqiMmA/b7I7lwGXNKe68o+gDno6R5riUcDC\n-----END PRIVATE KEY-----\n",
   )
@@ -40,8 +39,7 @@ pipeline default() {
       path_join(signers, signer + ".pub"),
     ).success,
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "trust-policy.json"),
     json_stringify({signer_registry_url: signers, trusted_signers: ["not-the-real-signer"]}),
   )

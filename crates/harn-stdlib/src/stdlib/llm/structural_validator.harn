@@ -543,8 +543,7 @@ fn __sv_tool_schema_violations(payload) {
       }
     }
     if len(missing) > 0 {
-      violations = violations
-        .push(
+      violations = violations.push(
         "Tool '"
           + tool_name
           + "' is missing required parameter(s): "

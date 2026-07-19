@@ -275,7 +275,12 @@ pub fn ui_resource_sandbox_attr(csp: UiResourceCsp) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn ui_resource(uri: string, name: string, html: string, options: UiResourceOptions = nil) -> UiResource {
+pub fn ui_resource(
+  uri: string,
+  name: string,
+  html: string,
+  options: UiResourceOptions = nil,
+) -> UiResource {
   const normalized_uri = __ui_validate_uri(uri)
   const normalized_name = __ui_text(name)
   if normalized_name == "" {
@@ -388,14 +393,20 @@ pub fn ui_text_fallback(content: string) -> UiTextFallback {
  * @effects: []
  * @errors: []
  */
-pub fn ui_structured_fallback(data: dict, options: UiStructuredFallbackOptions = nil) -> UiStructuredFallback {
+pub fn ui_structured_fallback(
+  data: dict,
+  options: UiStructuredFallbackOptions = nil,
+) -> UiStructuredFallback {
   if data == nil {
     throw "std/ui_resource: structured fallback data is required"
   }
   return filter_nil({schema: UI_STRUCTURED_FALLBACK_SCHEMA, data: data, text: __ui_first([options?.text])})
 }
 
-fn __ui_default_text_fallback(resource: UiResource, fallback_options: UiDefaultTextFallbackOptions) {
+fn __ui_default_text_fallback(
+  resource: UiResource,
+  fallback_options: UiDefaultTextFallbackOptions,
+) {
   const html = if resource.contents_encoding == "base64" {
     bytes_to_string(bytes_from_base64(resource.contents))
   } else {
@@ -499,7 +510,10 @@ pub fn ui_host_supports_apps(capabilities: UiHostCapabilityInput = nil) -> bool 
  * @effects: []
  * @errors: []
  */
-pub fn ui_select_for_host(result: UiToolResult, capabilities: UiHostCapabilityInput = nil) -> UiToolResult {
+pub fn ui_select_for_host(
+  result: UiToolResult,
+  capabilities: UiHostCapabilityInput = nil,
+) -> UiToolResult {
   const supports_apps = ui_host_supports_apps(capabilities)
   const resource = result.ui_resource
   const resource_ok = resource != nil && resource.validation.ok
@@ -520,7 +534,11 @@ pub fn ui_select_for_host(result: UiToolResult, capabilities: UiHostCapabilityIn
  * @effects: []
  * @errors: []
  */
-pub fn ui_tool_call_envelope(name: string, params: dict? = nil, options: UiToolCallOptions = nil) -> UiToolCallEnvelope {
+pub fn ui_tool_call_envelope(
+  name: string,
+  params: dict? = nil,
+  options: UiToolCallOptions = nil,
+) -> UiToolCallEnvelope {
   const tool_name = __ui_text(name)
   if tool_name == "" {
     throw "std/ui_resource: tool name is required"
@@ -541,7 +559,11 @@ pub fn ui_tool_call_envelope(name: string, params: dict? = nil, options: UiToolC
  * @effects: []
  * @errors: []
  */
-pub fn ui_context_update_envelope(key: string, value, options: UiContextUpdateOptions = nil) -> UiContextUpdateEnvelope {
+pub fn ui_context_update_envelope(
+  key: string,
+  value,
+  options: UiContextUpdateOptions = nil,
+) -> UiContextUpdateEnvelope {
   const context_key = __ui_text(key)
   if context_key == "" {
     throw "std/ui_resource: context update key is required"
