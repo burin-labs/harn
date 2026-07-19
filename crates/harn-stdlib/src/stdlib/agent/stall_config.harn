@@ -18,6 +18,15 @@ import { verification_gate_input } from "std/verification"
 
 pub const STALL_REPEAT_SAME_OBSERVATION = 4
 
+// same action -> repeated SUCCESS with no intervening mutating action before
+// tripping. Distinct from `repeat_same_observation`: that condition requires a
+// byte-identical observation, which timing jitter in a passing command's output
+// (e.g. "finished in 0.03s") defeats, so a model re-running an already-green
+// verify command loops invisibly to wall-clock timeout. This counts repeated
+// identical successful actions whose observation VARIES, guarded by the absence
+// of any edit between them (a legitimate re-run always has an edit first).
+pub const STALL_REPEAT_SUCCESS = 3
+
 // same action -> same error repeats before tripping.
 pub const STALL_REPEAT_SAME_ERROR = 3
 
@@ -277,6 +286,7 @@ pub fn __agent_stall_default_config() -> AgentStallConfig {
     exempt_tools: [],
     include_arguments: false,
     repeat_same_observation: STALL_REPEAT_SAME_OBSERVATION,
+    repeat_success: STALL_REPEAT_SUCCESS,
     repeat_same_error: STALL_REPEAT_SAME_ERROR,
     no_progress_messages: STALL_NO_PROGRESS_MESSAGES,
     ping_pong_cycles: STALL_PING_PONG_CYCLES,
@@ -358,6 +368,7 @@ pub fn __agent_stall_config(value) -> AgentStallConfig {
       same_observation_default,
       2,
     ),
+    repeat_success: __agent_stall_int(value?.repeat_success, STALL_REPEAT_SUCCESS, 2),
     repeat_same_error: __agent_stall_int(value?.repeat_same_error, STALL_REPEAT_SAME_ERROR, 2),
     no_progress_messages: __agent_stall_int(
       value?.no_progress_messages,
@@ -481,6 +492,7 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     last_observation_signature: "",
     last_outcome_kind: "",
     same_observation_streak: 0,
+    same_success_streak: 0,
     same_error_streak: 0,
     context_window_error_streak: 0,
     no_progress_streak: 0,

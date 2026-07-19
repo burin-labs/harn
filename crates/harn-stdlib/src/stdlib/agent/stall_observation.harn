@@ -4,6 +4,7 @@ import {
   agent_monologue_actuation_observe,
 } from "std/agent/monologue_actuation"
 import "std/agent/stall_config"
+import { __agent_stall_feedback_text } from "std/agent/stall_feedback"
 import {
   AgentStallConfig,
   AgentStallObservation,
@@ -34,6 +35,7 @@ pub fn __agent_stall_reset_action(state: AgentStallState) -> AgentStallState {
     last_observation_signature: "",
     last_outcome_kind: "",
     same_observation_streak: 0,
+    same_success_streak: 0,
     same_error_streak: 0,
     context_window_error_streak: 0,
     ping_pong_a: "",
@@ -455,95 +457,6 @@ pub fn __agent_stall_outcome_for(prev_dispatch, tool_name: string) {
   return nil
 }
 
-pub fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
-  const pattern = warning.pattern
-  const count = to_string(warning.count)
-  // Evidence-aware repair loop: a strategy-shift nudge grounded in the actual
-  // diagnostic, not a blind "you repeated yourself" counter. This fires when
-  // the same failure has survived `stuck_same_diagnostic_after` repair turns
-  // with no intervening successful edit (or with edits that did not change the
-  // failure), so the right move is to change approach, not to retry harder.
-  if pattern == "stuck_same_diagnostic" {
-    const snippet = to_string(warning.diagnostic_snippet ?? "")
-    const evidence = if snippet != "" {
-      " The failing evidence is unchanged:\n" + snippet
-    } else {
-      ""
-    }
-    return "Repair diagnostic: the same failure has persisted across "
-      + count
-      + " repair turns without changing."
-      + evidence
-      + "\nStop retrying the same fix. Re-read the relevant code, form a NEW hypothesis "
-      + "about the root cause, or gather different evidence before editing again. If you "
-      + "cannot make progress, report this specific blocker instead of repeating."
-  }
-  // Delivered-fix trigger (#burin-cutover seam 3): a repair WAS delivered for
-  // this exact failure and it STILL did not land — a stronger stuck signal than
-  // an untouched same-failure repeat, so the nudge is blunter.
-  if pattern == "delivered_fix_not_landing" {
-    const snippet = to_string(warning.diagnostic_snippet ?? "")
-    const evidence = if snippet != "" {
-      " The failing evidence is unchanged:\n" + snippet
-    } else {
-      ""
-    }
-    return "Repair diagnostic: a fix was delivered for this failure but it did NOT land — the same failure has recurred across "
-      + count
-      + " turns despite the attempted remediation."
-      + evidence
-      + "\nThe current approach is not working. Do NOT re-apply the same fix. Re-read the"
-      + " root cause from scratch, form a materially different hypothesis, or report this"
-      + " specific blocker instead of repeating."
-  }
-  // Per-turn action-signal intake (#burin-cutover seam 4): the host flagged THIS
-  // turn as a flailing action (desperation write / truncated read / oscillating
-  // edit) — a strong single-turn stuck signal, so the nudge is direct.
-  if pattern == "flailing_action" {
-    return "Loop detector: this turn performed a flailing action (a desperation write, a"
-      + " truncated/partial read, or an oscillating edit) — a strong single-turn signal that"
-      + " the run is stuck. Stop repeating the current approach. Re-read the relevant code,"
-      + " form a NEW hypothesis about the root cause, or report the specific blocker instead"
-      + " of acting reflexively."
-  }
-  const core = if pattern == "repeated_same_observation" {
-    "the action `" + warning.tool_name + "` produced the same observation " + count
-      + " times in a row"
-  } else if pattern == "repeated_error" {
-    "the action `" + warning.tool_name + "` failed with the same error " + count + " times in a row"
-  } else if pattern == "no_progress_monologue" {
-    count + " consecutive assistant messages made no progress (no tool call)"
-  } else if pattern == "errored_no_tool_call" {
-    "your previous turn ended with a provider error and emitted no tool call ("
-      + count
-      + " in a row) — re-emit the intended tool call"
-  } else if pattern == "no_net_progress_hard_cap" {
-    count
-      + " failing verification turns occurred without a clean passing verify"
-  } else if pattern == "turns_since_clean_verify_floor" {
-    count
-      + " turns elapsed since the last clean verification without a passing verify"
-  } else if pattern == "ping_pong" {
-    "the loop is ping-ponging between two actions (" + count + " cycles)"
-  } else if pattern
-    == "repeated_context_window_error" {
-    "the run hit a context-window error " + count + " times in a row"
-  } else {
-    "the last " + count + " tool calls repeated `" + warning.tool_name
-      + "` with identical arguments"
-  }
-  if warning.hard_stop {
-    return "Loop detector (hard stop): "
-      + core
-      + ". "
-      + to_string(warning.consecutive_trips)
-      + " trips with no recovery — stop and report the blocker instead of repeating."
-  }
-  return "Stall diagnostic: "
-    + core
-    + ". Use different evidence, finish, or explain why repeating is necessary before doing so again."
-}
-
 pub fn __agent_stall_warning_record(
   iteration: int,
   tool_name: string,
@@ -841,6 +754,7 @@ pub fn __agent_stall_process_call(
   call,
   tool_name: string,
   prev_dispatch,
+  turn_made_edit: bool,
 ) -> dict {
   const signature = __agent_tool_call_signature(call)
   const same_action = signature == state.last_signature
@@ -892,6 +806,25 @@ pub fn __agent_stall_process_call(
   } else {
     next_state.same_observation_streak + 1
   }
+  // Repeated-success streak: the same action succeeding again with NO intervening
+  // mutating action. This is the complement of `same_observation_streak` on the
+  // observation axis — it advances precisely when the observation CHANGED (so a
+  // passing verify command whose output jitters, e.g. a timing line, is still
+  // recognized as a stuck re-run), while the byte-identical case stays owned by
+  // `same_observation_streak`. An edit resets it: a legitimate re-run-after-edit
+  // is not a loop. The two counters never advance on the same turn, so existing
+  // byte-identical behavior is unchanged.
+  const new_same_success_streak = if !same_action || outcome_kind != "ok" || turn_made_edit {
+    if outcome_kind == "ok" && !turn_made_edit {
+      1
+    } else {
+      0
+    }
+  } else if !observation_changed {
+    1
+  } else {
+    next_state.same_success_streak + 1
+  }
   // Same-error streak: same action producing the same (or unknown) error.
   // Distinct errors reset, because the agent is making different mistakes.
   const new_same_error_streak = if !same_action || outcome_kind != "error" {
@@ -922,6 +855,7 @@ pub fn __agent_stall_process_call(
       ""
     },
     same_observation_streak: new_same_observation_streak,
+    same_success_streak: new_same_success_streak,
     same_error_streak: new_same_error_streak,
     context_window_error_streak: new_context_streak,
   }
@@ -932,6 +866,7 @@ pub fn __agent_stall_process_call(
       context_streak: new_context_streak,
       same_error_streak: new_same_error_streak,
       same_observation_streak: new_same_observation_streak,
+      same_success_streak: new_same_success_streak,
       outcome_kind: outcome_kind,
       ping_pong_cycles: ping_pong_cycles,
       outcome_present: outcome != nil,
@@ -982,6 +917,19 @@ pub fn __agent_stall_classify_trip(config: AgentStallConfig, s) {
       threshold: config.repeat_same_observation,
     }
   }
+  // Repeated identical SUCCESS with no intervening edit. Orthogonal to the
+  // repair/failure model (which owns repeated FAILURE), so it fires regardless
+  // of `repair_aware`, like ping-pong and context-window. It rides the same
+  // feedback + `consecutive_trips` -> `hard_stop` ladder: a soft "you already
+  // succeeded, conclude or act differently" nudge first, escalating only if the
+  // model keeps re-running the same successful command.
+  if s.outcome_kind == "ok" && s.same_success_streak >= config.repeat_success {
+    return {
+      pattern: "repeated_success",
+      count: s.same_success_streak,
+      threshold: config.repeat_success,
+    }
+  }
   if s.ping_pong_cycles >= config.ping_pong_cycles {
     return {pattern: "ping_pong", count: s.ping_pong_cycles, threshold: config.ping_pong_cycles}
   }
@@ -1019,6 +967,7 @@ pub fn __agent_stall_observe_core(
   turn_text = "",
   had_parse_errors = false,
   turn_stop_reason = "",
+  turn_made_edit = false,
 ) -> AgentStallObservation {
   const config = __agent_stall_config(raw_config)
   if !config.enabled {
@@ -1082,7 +1031,14 @@ pub fn __agent_stall_observe_core(
       next_state = __agent_stall_register_recovery(__agent_stall_reset_action(next_state))
       continue
     }
-    const processed = __agent_stall_process_call(next_state, config, call, tool_name, prev_dispatch)
+    const processed = __agent_stall_process_call(
+      next_state,
+      config,
+      call,
+      tool_name,
+      prev_dispatch,
+      turn_made_edit,
+    )
     next_state = processed.state
     const trip = processed.trip
     if trip != nil {
@@ -1458,6 +1414,7 @@ pub fn agent_stall_observe_tool_calls(
     turn_text,
     had_parse_errors,
     turn_stop_reason,
+    turn_made_edit,
   )
   if !observation.enabled {
     return observation
