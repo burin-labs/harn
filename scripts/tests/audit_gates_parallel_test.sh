@@ -8,23 +8,18 @@ trap 'rm -rf "$tmp_root"' EXIT
 
 fake_bin="$tmp_root/bin"
 record="$tmp_root/make-record.txt"
+conformance_start_fifo_dir="$tmp_root/conformance-started"
 mkdir -p "$fake_bin"
+mkdir -p "$conformance_start_fifo_dir"
+for shard_index in 1 2 3; do
+  mkfifo "$conformance_start_fifo_dir/shard-$shard_index"
+done
 
 fake_harn="$fake_bin/harn"
 cat > "$fake_harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\t%s\n' "$*" "HARN_BIN=$0" >> "$FAKE_CONFORMANCE_RECORD"
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if [[ -f "$FAKE_AUDIT_ROOT/audit.started" ]]; then
-    break
-  fi
-  sleep 0.05
-done
-if [[ ! -f "$FAKE_AUDIT_ROOT/audit.started" ]]; then
-  echo "audit gates were not started before conformance completed" >&2
-  exit 41
-fi
+invocation="$*"
 shard_index=""
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == "--shard-index" ]]; then
@@ -34,6 +29,14 @@ while [[ $# -gt 0 ]]; do
     shift
   fi
 done
+printf '%s\t%s\n' "$invocation" "HARN_BIN=$0" >> "$FAKE_CONFORMANCE_RECORD"
+# Opening the FIFO blocks until the audit fanout has reached its own barrier;
+# this proves ordering without a wall-clock polling loop.
+printf 'conformance-started\n' > "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-$shard_index"
+if [[ ! -f "$FAKE_AUDIT_ROOT/audit.started" ]]; then
+  echo "audit gates were not started before conformance completed" >&2
+  exit 41
+fi
 if [[ -n "${FAKE_CONFORMANCE_FAIL_SHARD-}" && "$shard_index" == "$FAKE_CONFORMANCE_FAIL_SHARD" ]]; then
   echo "fake conformance shard $shard_index failed" >&2
   exit 44
@@ -51,12 +54,20 @@ if [[ "${1-}" == "--help" ]]; then
   exit 0
 fi
 
-printf '%s\t%s\tHARN_BIN=%s\n' "$(date +%s%N)" "$*" "${HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+printf 'invocation\t%s\tHARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
 
 case "$*" in
   -j3\ -k\ -Otarget\ *)
     touch "$FAKE_AUDIT_ROOT/audit.started"
-    sleep 0.1
+    exec 3< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-1"
+    exec 4< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-2"
+    exec 5< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-3"
+    IFS= read -r <&3
+    IFS= read -r <&4
+    IFS= read -r <&5
+    exec 3<&-
+    exec 4<&-
+    exec 5<&-
     if [[ "${FAKE_AUDIT_FAIL-0}" == "1" ]]; then
       # Exactly how GNU make reports a failing target under `-k`, because the
       # failure summary parses these lines to name the gates.
@@ -82,6 +93,7 @@ AUDIT_GATES_CONCURRENCY=3 \
   FAKE_AUDIT_RECORD="$record" \
   FAKE_CONFORMANCE_RECORD="$tmp_root/conformance-record.txt" \
   FAKE_AUDIT_ROOT="$tmp_root" \
+  FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
   PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/audit_gates.sh" > "$tmp_root/audit.out"
 
@@ -127,6 +139,7 @@ if AUDIT_GATES_CONCURRENCY=3 \
   FAKE_AUDIT_RECORD="$record" \
   FAKE_CONFORMANCE_RECORD="$tmp_root/conformance-fail-audit-record.txt" \
   FAKE_AUDIT_ROOT="$tmp_root" \
+  FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
   FAKE_AUDIT_FAIL=1 \
   PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/audit_gates.sh" > "$tmp_root/audit-fail.out" 2>&1; then
@@ -144,6 +157,7 @@ if AUDIT_GATES_CONCURRENCY=3 \
   FAKE_CONFORMANCE_RECORD="$tmp_root/conformance-fail-record.txt" \
   FAKE_CONFORMANCE_FAIL_SHARD=2 \
   FAKE_AUDIT_ROOT="$tmp_root" \
+  FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
   PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/audit_gates.sh" > "$tmp_root/conformance-fail.out" 2>&1; then
   echo "audit_gates masked a failing conformance shard" >&2

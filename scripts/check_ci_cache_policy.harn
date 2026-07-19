@@ -449,6 +449,32 @@ fn persistent_sccache_job_errors(
   return errors
 }
 
+fn shared_behavior_consumer_errors(workflow, job_name: string) -> list<string> {
+  const producer = workflow?.jobs?.["rust-builds"]
+  const consumer = workflow?.jobs?.[job_name]
+  if producer == nil || consumer == nil {
+    return []
+  }
+  let errors: list<string> = []
+  const caches = matching_steps(consumer, SCCACHE_ACTION)
+  if len(caches) != 1
+    || trim(caches[0]?.with?.["cache-key"] ?? "") != "workspace-behavior" {
+    errors = errors + ["ci.yml:${job_name} must reuse the workspace-behavior sccache lane"]
+  }
+  const needs = consumer?.needs ?? []
+  if !needs.contains("rust-builds") {
+    errors = errors + ["ci.yml:${job_name} must wait for rust-builds before reusing its cache"]
+  }
+  if trim(consumer?.env?.RUSTFLAGS ?? "") != trim(producer?.env?.RUSTFLAGS ?? "") {
+    errors = errors + ["ci.yml:${job_name} must match rust-builds RUSTFLAGS"]
+  }
+  const test_step = step_by_name(consumer?.steps ?? [], "Run full environment-neutral test suite")
+  if trim(test_step?.env?.CARGO_BUILD_JOBS ?? "") != "4" {
+    errors = errors + ["ci.yml:${job_name} must keep four-way test fan-out"]
+  }
+  return errors
+}
+
 /** Validate the persistent local sccache action and every authorized heavy CI consumer. */
 pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   let errors: list<string> = []
@@ -490,6 +516,12 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     "matrix.runner",
     "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
   )
+    + persistent_sccache_job_errors(
+    workflow,
+    "rust-test",
+    "blacksmith-8vcpu-ubuntu-2404",
+    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+  )
   const rust_job = workflow?.jobs?.["rust-builds"]
   const rust_sccache = matching_steps(rust_job, SCCACHE_ACTION)
   if len(rust_sccache) == 1 {
@@ -500,22 +532,24 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     }
   }
   const matrix = rust_job?.strategy?.matrix?.include ?? []
+  const kinds = matrix.map({ row -> trim(row?.kind ?? "") }).to_list()
   const runners = matrix.map({ row -> trim(row?.runner ?? "") }).to_list()
   const cache_keys = matrix.map({ row -> trim(row?.cache_key ?? "") }).to_list()
-  if runners
+  if kinds != ["lint", "behavior"]
+    || runners
     != ["blacksmith-4vcpu-ubuntu-2404", "blacksmith-8vcpu-ubuntu-2404"]
     || cache_keys != ["workspace-lint", "workspace-behavior"] {
     errors = errors
       + ["ci.yml:rust-builds must keep compile lanes on distinct policy-sized persistent caches"]
   }
-  for step_name in ["Build portable behavior payload", "Run full environment-neutral test suite"] {
-    const jobs = trim(step_by_name(rust_job?.steps ?? [], step_name)?.env?.CARGO_BUILD_JOBS ?? "")
-    if jobs != "4" {
-      errors = errors
-        + ["ci.yml:rust-builds ${step_name} must keep four-way fan-out on the 8-vCPU producer"]
-    }
+  const build_step = step_by_name(rust_job?.steps ?? [], "Build portable behavior payload")
+  if trim(build_step?.if ?? "") != "matrix.kind == 'behavior'"
+    || trim(build_step?.env?.CARGO_BUILD_JOBS ?? "") != "4" {
+    errors = errors
+      + ["ci.yml:rust-builds behavior build must keep four-way fan-out on the producer"]
   }
-  const allowed = ["package-audit", "rust-builds"]
+  errors = errors + shared_behavior_consumer_errors(workflow, "rust-test")
+  const allowed = ["package-audit", "rust-builds", "rust-test"]
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
     if len(matching_steps(job, SCCACHE_ACTION)) > 0 && !allowed.contains(job_name) {
       errors = errors + ["ci.yml:${job_name} uses persistent sccache without a lane policy"]

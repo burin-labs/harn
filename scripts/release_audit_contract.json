@@ -43,14 +43,27 @@
       ]
     },
     {
-      "name": "Rust test",
+      "name": "Behavior build",
       "job_id": "rust-builds",
-      "matrix_kind": "test",
+      "matrix_kind": "behavior",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-behavior-build",
+          "condition": "matrix.kind == 'behavior'",
+          "run": "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$GITHUB_SHA\""
+        }
+      ]
+    },
+    {
+      "name": "Rust test",
+      "job_id": "rust-test",
+      "matrix_kind": "",
       "proofs": ["rust-audit"],
       "steps": [
         {
           "id": "release-audit-rust-test",
-          "condition": "matrix.kind == 'test'",
+          "condition": "",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
           "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'"
         }
