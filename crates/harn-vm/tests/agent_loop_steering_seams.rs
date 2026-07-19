@@ -35,11 +35,25 @@
 //! LLM-call count and tool_result count and no extra user message and no
 //! mid-turn delivery.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use harn_vm::bridge::HostBridge;
 use harn_vm::value::VmError;
+
+static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Canonical session journals outlive a VM and may be shared by parallel test
+/// processes. Mint a process-local monotonic id for every pipeline invocation
+/// so repeated runs cannot rehydrate an earlier transcript without relying on
+/// wall-clock time or a random source.
+fn fresh_session_id(prefix: &str) -> String {
+    format!(
+        "{prefix}-{}-{}",
+        std::process::id(),
+        SESSION_COUNTER.fetch_add(1, Ordering::Relaxed),
+    )
+}
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
@@ -81,13 +95,6 @@ fn run_with_bridge(source: &str) -> Result<String, String> {
             })
             .await
     })
-}
-
-/// Canonical session journals outlive a VM and are shared by parallel test
-/// processes. Resetting thread-local state therefore cannot make a fixed
-/// session id hermetic; mint a fresh id for every pipeline invocation.
-fn fresh_session_id(label: &str) -> String {
-    format!("{label}-{}", uuid::Uuid::now_v7().simple())
 }
 
 fn out_lines(raw: &str) -> Vec<String> {

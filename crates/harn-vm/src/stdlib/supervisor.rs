@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
 use crate::stdlib::macros::{
@@ -89,6 +89,7 @@ struct SupervisorState {
     suppressed_count: i64,
     escalated_count: i64,
     supervisor_join: Option<tokio::task::JoinHandle<()>>,
+    terminal_notify: Arc<Notify>,
 }
 
 #[derive(Clone)]
@@ -126,6 +127,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &SUPERVISOR_STATE_IMPL_DEF,
     &SUPERVISOR_EVENTS_IMPL_DEF,
     &SUPERVISOR_METRICS_IMPL_DEF,
+    &SUPERVISOR_WAIT_IMPL_DEF,
     &SUPERVISOR_STOP_IMPL_DEF,
 ];
 
@@ -175,6 +177,31 @@ fn supervisor_metrics_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
     let state = supervisor_from_args(args, "supervisor_metrics")?;
     let value = metrics_value(&state.lock());
     Ok(value)
+}
+
+#[harn_builtin(
+    sig_expr = BuiltinSignature::variadic("supervisor_wait", &[Param::new("args", TY_ANY)], TY_DICT),
+    kind = "async",
+    category = "supervisor"
+)]
+async fn supervisor_wait_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let id = supervisor_id_from_args(&args, "supervisor_wait")?;
+    let handle = supervisor_lookup(&id)
+        .ok_or_else(|| VmError::Runtime(format!("supervisor_wait: unknown supervisor '{id}'")))?;
+    let terminal_notify = handle.state.lock().terminal_notify.clone();
+
+    loop {
+        // Register before checking the state so a terminal transition cannot
+        // fall between the check and the await.
+        let notified = terminal_notify.notified();
+        if supervisor_terminal(&handle.state.lock()) {
+            return Ok(supervisor_state_value(&handle.state.lock()));
+        }
+        notified.await;
+    }
 }
 
 #[harn_builtin(
@@ -263,6 +290,7 @@ async fn supervisor_stop_impl(
             "supervisor_stopped",
             Some(if forced { "forced" } else { "drained" }.to_string()),
         );
+        state.terminal_notify.notify_waiters();
     }
 
     if let Some(join) = handle.state.lock().supervisor_join.take() {
@@ -337,6 +365,7 @@ fn start_supervisor(base_vm: Vm, spec_value: &VmValue) -> Result<SupervisorHandl
         suppressed_count: 0,
         escalated_count: 0,
         supervisor_join: None,
+        terminal_notify: Arc::new(Notify::new()),
     }));
 
     let (tx, rx) = mpsc::unbounded_channel();
@@ -410,11 +439,15 @@ async fn supervisor_loop(
         }
 
         if supervisor_terminal(&state.lock()) {
-            let mut state_ref = state.lock();
-            if state_ref.status == "running" {
-                state_ref.status = "completed".to_string();
-                push_event(&mut state_ref, None, "supervisor_completed", None);
-            }
+            let terminal_notify = {
+                let mut state_ref = state.lock();
+                if state_ref.status == "running" {
+                    state_ref.status = "completed".to_string();
+                    push_event(&mut state_ref, None, "supervisor_completed", None);
+                }
+                state_ref.terminal_notify.clone()
+            };
+            terminal_notify.notify_waiters();
             break;
         }
     }

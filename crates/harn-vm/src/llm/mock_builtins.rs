@@ -9,6 +9,8 @@ use super::{helpers, mock};
 const LLM_MOCK_BUILTINS: &[&VmBuiltinDef] = &[
     &LLM_MOCK_BUILTIN_DEF,
     &LLM_MOCK_LOAD_JSONL_BUILTIN_DEF,
+    &LLM_MOCK_SNAPSHOT_BUILTIN_DEF,
+    &LLM_MOCK_KNOWN_SCOPES_BUILTIN_DEF,
     &LLM_MOCK_CALLS_BUILTIN_DEF,
     &LLM_MOCK_RECEIPTS_BUILTIN_DEF,
     &LLM_MOCK_CLEAR_BUILTIN_DEF,
@@ -78,7 +80,37 @@ fn llm_mock_load_jsonl_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
                 .collect(),
         )),
     );
+    result.insert(
+        "warnings".to_string(),
+        VmValue::List(std::sync::Arc::new(
+            receipt
+                .warnings
+                .into_iter()
+                .map(|warning| VmValue::String(arcstr::ArcStr::from(warning)))
+                .collect(),
+        )),
+    );
     Ok(VmValue::dict(result))
+}
+
+/// Return the remaining queue as a pure Harn-owned snapshot. Turn-end Harn
+/// code uses this to checkpoint queue state without reaching into Rust's
+/// mutable fixture storage.
+#[harn_builtin(sig = "llm_mock_snapshot() -> dict", category = "llm.mock")]
+fn llm_mock_snapshot_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(json_to_vm_value(&mock::builtin_llm_mock_snapshot()))
+}
+
+/// Return Harn's advisory purpose vocabulary. Fixture scopes remain open
+/// strings; this list lets Harn callers discover the purposes it assigns.
+#[harn_builtin(sig = "llm_mock_known_scopes() -> list", category = "llm.mock")]
+fn llm_mock_known_scopes_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::List(std::sync::Arc::new(
+        mock::KNOWN_MOCK_SCOPES
+            .iter()
+            .map(|scope| VmValue::String(arcstr::ArcStr::from(*scope)))
+            .collect(),
+    )))
 }
 
 /// Return recorded LLM mock calls.
@@ -89,6 +121,7 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
         .iter()
         .map(|c| {
             let mut dict = std::collections::BTreeMap::new();
+            dict.put_str("mock_scope", c.mock_scope.as_str());
             dict.put_str("api_mode", c.api_mode.as_str());
             let messages: Vec<VmValue> = c.messages.iter().map(json_to_vm_value).collect();
             dict.insert(
@@ -192,8 +225,8 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 /// Return the scope-consumption receipts emitted since the last clear.
-/// Each receipt is `{ scope, matched, entry_id, consume }`, letting a test
-/// assert which scope bucket served each call without reading engine state.
+/// Each receipt records requested/resolved scope, fallback, consumption, and
+/// the post-match remaining count without exposing queue internals.
 #[harn_builtin(sig = "llm_mock_receipts() -> list", category = "llm.mock")]
 fn llm_mock_receipts_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let receipts = mock::get_llm_mock_receipts();
@@ -201,10 +234,19 @@ fn llm_mock_receipts_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmV
         .iter()
         .map(|receipt| {
             let mut dict = std::collections::BTreeMap::new();
-            dict.put_str("scope", receipt.scope.as_str());
+            dict.put_str("requested_scope", receipt.requested_scope.as_str());
+            dict.put_str("resolved_scope", receipt.resolved_scope.as_str());
             dict.insert("matched".to_string(), VmValue::Bool(receipt.matched));
-            dict.put_str("entry_id", receipt.entry_id.as_str());
+            dict.put_str("id", receipt.id.as_str());
             dict.put_str("consume", receipt.consume.as_str());
+            dict.insert(
+                "fell_through".to_string(),
+                VmValue::Bool(receipt.fell_through),
+            );
+            dict.insert(
+                "remaining".to_string(),
+                VmValue::Int(receipt.remaining as i64),
+            );
             VmValue::dict(dict)
         })
         .collect();
@@ -276,7 +318,7 @@ mod tests {
         let receipt = llm_mock_load_jsonl_builtin(
             &[VmValue::String(arcstr::ArcStr::from(
                 "{\"schemaVersion\":1,\"strictScopes\":true}\n\
-                 {\"id\":\"judge-1\",\"scope\":\"judge\",\"consume\":\"sticky\",\"match\":\"*\",\"text\":\"JUDGE\"}\n",
+                 {\"id\":\"judge-1\",\"scope\":\"completion.judge\",\"consume\":\"sticky\",\"match\":\"*\",\"text\":\"JUDGE\"}\n",
             ))],
             &mut out,
         )
@@ -295,7 +337,7 @@ mod tests {
         assert!(matches!(receipt.get("count"), Some(VmValue::Int(1))));
 
         assert_eq!(
-            mock::mock_llm_response(&request(Some("judge")))
+            mock::mock_llm_response(&request(Some("completion.judge")))
                 .expect("scoped fixture")
                 .text,
             "JUDGE"
@@ -303,10 +345,14 @@ mod tests {
         mock::push_llm_mock_scope();
         assert!(mock::pop_llm_mock_scope(), "fixture scope restores");
         assert_eq!(
-            mock::mock_llm_response(&request(Some("judge")))
+            mock::mock_llm_response(&request(Some("completion.judge")))
                 .expect("restored scoped fixture")
                 .text,
             "JUDGE"
+        );
+        assert!(
+            mock::mock_llm_response(&request(None)).is_err(),
+            "strict builtin fixtures must hard-miss instead of using the generated fallback"
         );
 
         let inline = VmValue::dict(std::collections::BTreeMap::from([(
@@ -330,7 +376,7 @@ mod tests {
             ),
             (
                 "scope".to_string(),
-                VmValue::String(arcstr::ArcStr::from("judge")),
+                VmValue::String(arcstr::ArcStr::from("completion.judge")),
             ),
             (
                 "text".to_string(),
@@ -342,11 +388,56 @@ mod tests {
         // v0 ignores the newer scope annotation and retains its historical
         // default-queue behavior.
         assert_eq!(
-            mock::mock_llm_response(&request(Some("judge")))
+            mock::mock_llm_response(&request(Some("completion.judge")))
                 .expect("v0 fallback")
                 .text,
             "V0"
         );
+        mock::reset_llm_mock_state();
+    }
+
+    #[test]
+    fn load_reports_warnings_and_snapshot_preserves_scope_queues() {
+        mock::reset_llm_mock_state();
+        let mut out = String::new();
+        let receipt = llm_mock_load_jsonl_builtin(
+            &[VmValue::String(arcstr::ArcStr::from(
+                "{\"schemaVersion\":1,\"strictScopes\":false}\n\
+                 {\"id\":\"custom-1\",\"scope\":\"custom.review\",\"consume\":\"once\",\"text\":\"CUSTOM\"}\n\
+                 {\"id\":\"main-1\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"MAIN\"}\n",
+            ))],
+            &mut out,
+        )
+        .expect("valid fixture");
+        let VmValue::Dict(receipt) = receipt else {
+            panic!("load receipt must be a dict");
+        };
+        let Some(VmValue::List(warnings)) = receipt.get("warnings") else {
+            panic!("warnings must be returned");
+        };
+        assert_eq!(warnings.len(), 1);
+
+        let VmValue::Dict(snapshot) = llm_mock_snapshot_builtin(&[], &mut out).expect("snapshot")
+        else {
+            panic!("snapshot must be a dict");
+        };
+        assert!(matches!(
+            snapshot.get("schema"),
+            Some(VmValue::String(schema)) if schema.as_str() == "harn.llm_mock_fixture_queue.v1"
+        ));
+        let VmValue::Dict(remaining) = snapshot.get("queue_remaining").expect("queue_remaining")
+        else {
+            panic!("queue_remaining must be a dict");
+        };
+        assert!(matches!(remaining.get("agent.main"), Some(VmValue::Int(1))));
+        let VmValue::List(known_scopes) =
+            llm_mock_known_scopes_builtin(&[], &mut out).expect("known scopes")
+        else {
+            panic!("known scopes must be a list");
+        };
+        assert!(known_scopes.iter().any(
+            |scope| matches!(scope, VmValue::String(scope) if scope.as_str() == "agent.main")
+        ));
         mock::reset_llm_mock_state();
     }
 }

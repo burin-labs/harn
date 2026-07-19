@@ -705,6 +705,16 @@ pub fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
       dispatch_skipped: dispatch_skipped,
     },
   )
+  if kind == "iteration_end" {
+    const mock_queue = llm_mock_snapshot()
+    if mock_queue.schema_version > 0 || len(keys(mock_queue.queue_remaining)) > 0 {
+      agent_emit_event(
+        session_id,
+        "typed_checkpoint",
+        mock_queue + {kind: "llm_mock_queue", iteration: iteration},
+      )
+    }
+  }
   __host_fire_session_hook(
     "loop_checkpoint",
     {

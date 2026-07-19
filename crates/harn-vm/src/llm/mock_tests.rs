@@ -3,7 +3,9 @@
 //! included via `#[path = "mock_tests.rs"] mod tests;`.
 
 use super::*;
+use crate::agent_events::{AgentEvent, AgentEventSink};
 use crate::llm::api::LlmRequestPayload;
+use std::sync::{Arc, Mutex};
 
 fn text_mock(text: &str) -> LlmMock {
     LlmMock {
@@ -121,7 +123,7 @@ fn cli_mock_native_tool_calls_reach_the_live_result() {
     );
 }
 
-// --- Versioned mock-fixture contract (bc#4969) ---
+// --- Versioned mock-fixture contract (#4984) ---
 
 /// Build a request that draws from `scope`, carrying `prompt` as the sole
 /// user message. Installing the fixture first means the `From` impl captures
@@ -131,6 +133,14 @@ fn request_with_scope(prompt: &str, scope: Option<&str>) -> LlmRequestPayload {
     opts.messages = vec![serde_json::json!({"role": "user", "content": prompt})];
     opts.mock_scope = scope.map(str::to_string);
     LlmRequestPayload::from(&opts)
+}
+
+struct EventSink(Arc<Mutex<Vec<AgentEvent>>>);
+
+impl AgentEventSink for EventSink {
+    fn handle_event(&self, event: &AgentEvent) {
+        self.0.lock().expect("event sink lock").push(event.clone());
+    }
 }
 
 /// Assemble an in-memory v1 fixture for queue-matching tests. Parser tests
@@ -162,33 +172,36 @@ fn v1_fixture(strict_scopes: bool, entries: &[serde_json::Value]) -> LlmMockFixt
         schema_version: 1,
         strict_scopes,
         mocks,
+        warnings: Vec::new(),
     }
 }
 
 #[test]
 fn scoped_fixture_serves_main_and_judge_from_their_own_buckets() {
-    // bc#4969: with a shared first-match-wins queue this is unwritable — the
+    // With a shared first-match-wins queue this is unwritable — the
     // judge call would cannibalize the main entry. Scoped buckets keep them
     // apart.
     reset_llm_mock_state();
     install_cli_llm_mock_fixture(v1_fixture(
         false,
         &[
-            serde_json::json!({"scope": "main", "text": "MAIN"}),
-            serde_json::json!({"scope": "judge", "text": "JUDGE"}),
+            serde_json::json!({"scope": "agent.main", "text": "MAIN"}),
+            serde_json::json!({"scope": "completion.judge", "text": "JUDGE"}),
         ],
     ));
 
-    let main = mock_llm_response(&request_with_scope("turn", Some("main"))).expect("main");
+    let main = mock_llm_response(&request_with_scope("turn", Some("agent.main"))).expect("main");
     assert_eq!(main.text, "MAIN");
-    let judge = mock_llm_response(&request_with_scope("verify", Some("judge"))).expect("judge");
+    let judge =
+        mock_llm_response(&request_with_scope("verify", Some("completion.judge"))).expect("judge");
     assert_eq!(judge.text, "JUDGE");
 
     let receipts = get_llm_mock_receipts();
     assert_eq!(receipts.len(), 2);
-    assert_eq!(receipts[0].scope, "main");
+    assert_eq!(receipts[0].id, "test-0");
+    assert_eq!(receipts[0].resolved_scope, "agent.main");
     assert!(receipts[0].matched);
-    assert_eq!(receipts[1].scope, "judge");
+    assert_eq!(receipts[1].resolved_scope, "completion.judge");
     clear_cli_llm_mock_mode();
 }
 
@@ -200,24 +213,25 @@ fn aux_call_falls_through_to_default_never_to_main() {
     install_cli_llm_mock_fixture(v1_fixture(
         false,
         &[
-            serde_json::json!({"scope": "main", "text": "MAIN"}),
+            serde_json::json!({"scope": "agent.main", "text": "MAIN"}),
             serde_json::json!({"scope": "default", "text": "DEFAULT"}),
         ],
     ));
 
-    let judge = mock_llm_response(&request_with_scope("verify", Some("judge"))).expect("judge");
+    let judge =
+        mock_llm_response(&request_with_scope("verify", Some("completion.judge"))).expect("judge");
     assert_eq!(
         judge.text, "DEFAULT",
         "unscoped-aux call must reach default"
     );
 
     // The main entry is untouched: a real main call still gets it.
-    let main = mock_llm_response(&request_with_scope("turn", Some("main"))).expect("main");
+    let main = mock_llm_response(&request_with_scope("turn", Some("agent.main"))).expect("main");
     assert_eq!(main.text, "MAIN");
 
     let receipts = get_llm_mock_receipts();
     assert_eq!(
-        receipts[0].scope, "default",
+        receipts[0].resolved_scope, "default",
         "judge drew from default bucket"
     );
     assert!(receipts[0].matched);
@@ -258,14 +272,14 @@ fn sticky_entry_reused_while_once_entry_is_consumed() {
     install_cli_llm_mock_fixture(v1_fixture(
         false,
         &[
-            serde_json::json!({"scope": "judge", "match": "*", "consume": "sticky", "text": "STICKY"}),
-            serde_json::json!({"scope": "main", "text": "ONCE"}),
+            serde_json::json!({"scope": "completion.judge", "match": "*", "consume": "sticky", "text": "STICKY"}),
+            serde_json::json!({"scope": "agent.main", "text": "ONCE"}),
         ],
     ));
 
     for _ in 0..3 {
         assert_eq!(
-            mock_llm_response(&request_with_scope("q", Some("judge")))
+            mock_llm_response(&request_with_scope("q", Some("completion.judge")))
                 .expect("sticky")
                 .text,
             "STICKY"
@@ -273,7 +287,7 @@ fn sticky_entry_reused_while_once_entry_is_consumed() {
     }
 
     assert_eq!(
-        mock_llm_response(&request_with_scope("t", Some("main")))
+        mock_llm_response(&request_with_scope("t", Some("agent.main")))
             .expect("once")
             .text,
         "ONCE"
@@ -281,7 +295,7 @@ fn sticky_entry_reused_while_once_entry_is_consumed() {
     // The one-shot main entry is gone: a second main call misses (no default
     // bucket to fall to) and, under replay, errors.
     assert!(
-        mock_llm_response(&request_with_scope("t2", Some("main"))).is_err(),
+        mock_llm_response(&request_with_scope("t2", Some("agent.main"))).is_err(),
         "a consumed once-entry must not replay"
     );
     clear_cli_llm_mock_mode();
@@ -297,12 +311,14 @@ fn strict_scopes_makes_unscoped_aux_a_hard_miss() {
 
     // strictScopes forbids the default fall-through, so a judge call misses.
     assert!(
-        mock_llm_response(&request_with_scope("verify", Some("judge"))).is_err(),
+        mock_llm_response(&request_with_scope("verify", Some("completion.judge"))).is_err(),
         "strict scopes must make an unscoped-aux call a hard miss"
     );
     let receipts = get_llm_mock_receipts();
     assert!(
-        receipts.iter().any(|r| r.scope == "judge" && !r.matched),
+        receipts
+            .iter()
+            .any(|r| r.requested_scope == "completion.judge" && !r.matched),
         "the hard miss must be recorded as an unmatched receipt: {receipts:?}"
     );
 
@@ -310,4 +326,36 @@ fn strict_scopes_makes_unscoped_aux_a_hard_miss() {
     let def = mock_llm_response(&request_with_scope("x", None)).expect("default");
     assert_eq!(def.text, "DEFAULT");
     clear_cli_llm_mock_mode();
+}
+
+#[test]
+fn matched_receipt_emits_typed_checkpoint() {
+    reset_llm_mock_state();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let handle = crate::agent_events::register_wildcard_sink(Arc::new(EventSink(events.clone())));
+    let mut opts = crate::llm::api::options::base_opts("fixture");
+    opts.messages = vec![serde_json::json!({"role": "user", "content": "turn"})];
+    opts.session_id = Some("mock-session".to_string());
+    opts.mock_scope = Some("agent.main".to_string());
+    install_cli_llm_mock_fixture(v1_fixture(
+        true,
+        &[serde_json::json!({"scope": "agent.main", "text": "MAIN"})],
+    ));
+
+    let request = LlmRequestPayload::from(&opts);
+    mock_llm_response(&request).expect("scoped response");
+    clear_cli_llm_mock_mode();
+    crate::agent_events::unregister_wildcard_sink(handle);
+
+    let events = events.lock().expect("event sink lock");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::TypedCheckpoint {
+            session_id,
+            checkpoint: receipt,
+        }
+            if session_id == "mock-session"
+                && receipt["schema"] == "harn.llm_mock_fixture_consumption.v1"
+                && receipt["resolved_scope"] == "agent.main"
+    )));
 }

@@ -39,6 +39,7 @@ pub fn parse_llm_mocks_jsonl(text: &str) -> Result<LlmMockFixture, String> {
     let mut header_slot_seen = false;
     let mut entry_index = 0usize;
     let mut v1_entry_ids = std::collections::BTreeSet::new();
+    let mut warned_scopes = std::collections::BTreeSet::new();
     for (idx, raw_line) in text.lines().enumerate() {
         let line_no = idx + 1;
         let line = raw_line.trim();
@@ -68,6 +69,16 @@ pub fn parse_llm_mocks_jsonl(text: &str) -> Result<LlmMockFixture, String> {
             return Err(format!(
                 "duplicate fixture entry id {:?} at line {line_no}",
                 mock.entry_id
+            ));
+        }
+        if fixture.schema_version > 0
+            && !mock::KNOWN_MOCK_SCOPES.contains(&mock.scope.as_str())
+            && warned_scopes.insert(mock.scope.clone())
+        {
+            fixture.warnings.push(format!(
+                "unknown LLM mock scope {:?}; known Harn purposes: {}",
+                mock.scope,
+                mock::KNOWN_MOCK_SCOPES.join(", ")
             ));
         }
         entry_index += 1;
@@ -119,6 +130,12 @@ pub fn parse_llm_mock_value_versioned(
     schema_version: u32,
     entry_index: usize,
 ) -> Result<LlmMock, String> {
+    if schema_version > mock::MAX_MOCK_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported schemaVersion {schema_version}; this build supports 0..={}",
+            mock::MAX_MOCK_SCHEMA_VERSION
+        ));
+    }
     let object = value
         .as_object()
         .ok_or_else(|| "fixture line must be a JSON object".to_string())?;
@@ -978,12 +995,12 @@ mod tests {
     #[test]
     fn v1_parse_reads_scope_consume_and_id() {
         let entry = parse_llm_mock_value_versioned(
-            &serde_json::json!({"scope": "judge", "consume": "sticky", "id": "j1", "text": "Y"}),
+            &serde_json::json!({"scope": "completion.judge", "consume": "sticky", "id": "j1", "text": "Y"}),
             1,
             7,
         )
         .expect("v1 entry");
-        assert_eq!(entry.scope, "judge");
+        assert_eq!(entry.scope, "completion.judge");
         assert!(entry.sticky);
         assert_eq!(entry.entry_id, "j1");
     }
@@ -1156,20 +1173,34 @@ mod tests {
         std::fs::write(
             &path,
             "{\"schemaVersion\": 1, \"strictScopes\": true}\n\
-             {\"id\": \"main-1\", \"scope\": \"main\", \"consume\": \"once\", \"text\": \"MAIN\"}\n\
-             {\"id\": \"judge-1\", \"scope\": \"judge\", \"consume\": \"sticky\", \"match\": \"*\", \"text\": \"JUDGE\"}\n",
+             {\"id\": \"main-1\", \"scope\": \"agent.main\", \"consume\": \"once\", \"text\": \"MAIN\"}\n\
+             {\"id\": \"judge-1\", \"scope\": \"completion.judge\", \"consume\": \"sticky\", \"match\": \"*\", \"text\": \"JUDGE\"}\n",
         )
         .expect("write fixture");
         let fixture = load_llm_mocks_jsonl(&path).expect("load v1");
         assert_eq!(fixture.schema_version, 1);
         assert!(fixture.strict_scopes);
         assert_eq!(fixture.mocks.len(), 2);
-        assert_eq!(fixture.mocks[0].scope, "main");
+        assert_eq!(fixture.mocks[0].scope, "agent.main");
         assert_eq!(fixture.mocks[0].entry_id, "main-1");
         assert!(!fixture.mocks[0].sticky);
-        assert_eq!(fixture.mocks[1].scope, "judge");
+        assert_eq!(fixture.mocks[1].scope, "completion.judge");
         assert_eq!(fixture.mocks[1].entry_id, "judge-1");
         assert!(fixture.mocks[1].sticky);
+        assert!(fixture.warnings.is_empty());
+    }
+
+    #[test]
+    fn v1_unknown_scopes_are_advisory_and_deduplicated() {
+        let fixture = parse_llm_mocks_jsonl(
+            "{\"schemaVersion\":1,\"strictScopes\":false}\n\
+             {\"id\":\"one\",\"scope\":\"custom.review\",\"consume\":\"once\",\"text\":\"ONE\"}\n\
+             {\"id\":\"two\",\"scope\":\"custom.review\",\"consume\":\"once\",\"text\":\"TWO\"}\n",
+        )
+        .expect("open scope strings remain valid");
+        assert_eq!(fixture.warnings.len(), 1);
+        assert!(fixture.warnings[0].contains("custom.review"));
+        assert!(fixture.warnings[0].contains("completion.judge"));
     }
 
     #[test]
@@ -1188,7 +1219,7 @@ mod tests {
     #[test]
     fn text_parser_is_the_file_parser_contract_owner() {
         let text = "{\"schemaVersion\":1,\"strictScopes\":true}\n\
-                    {\"id\":\"main-1\",\"scope\":\"main\",\"consume\":\"once\",\"text\":\"MAIN\"}\n";
+                    {\"id\":\"main-1\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"MAIN\"}\n";
         let from_text = parse_llm_mocks_jsonl(text).expect("parse text");
 
         let dir = tempfile::tempdir().expect("tempdir");

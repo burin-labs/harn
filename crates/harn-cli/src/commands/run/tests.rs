@@ -2,8 +2,9 @@ use super::harnpack::HarnpackRunOptions;
 use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
     eval_source_for_code, execute_explain_cost, execute_run,
-    execute_run_with_harnpack_and_sandbox_options, run_sandbox_attestation, split_eval_header,
-    CliLlmMockMode, RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
+    execute_run_with_harnpack_and_sandbox_options, install_cli_llm_mock_mode,
+    persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header, CliLlmMockMode,
+    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -131,6 +132,24 @@ fn cli_llm_mock_roundtrips_logprobs() {
     let reparsed = harn_vm::llm::parse_llm_mock_value(&value).expect("reparse mock");
     assert_eq!(reparsed.logprobs.len(), 1);
     assert_eq!(reparsed.logprobs[0]["logprob"].as_f64(), Some(0.0));
+}
+
+#[test]
+fn cli_llm_mock_recording_writes_a_parseable_v1_document_atomically() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let path = temp.path().join("recorded.jsonl");
+    let mode = CliLlmMockMode::Record {
+        fixture_path: path.clone(),
+    };
+
+    install_cli_llm_mock_mode(&mode).expect("enable recording");
+    persist_cli_llm_mock_recording(&mode).expect("persist recording");
+
+    let body = std::fs::read_to_string(&path).expect("recorded fixture");
+    let fixture = harn_vm::llm::parse_llm_mocks_jsonl(&body).expect("parse recorded fixture");
+    assert_eq!(fixture.schema_version, 1);
+    assert!(!fixture.strict_scopes);
+    assert!(fixture.mocks.is_empty());
 }
 
 #[test]

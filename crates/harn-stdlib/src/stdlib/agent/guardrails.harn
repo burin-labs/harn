@@ -285,6 +285,7 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
       max_tokens: opts?.max_tokens ?? 256,
       temperature: opts?.temperature ?? 0.0,
       session_id: payload?.session_id ?? "",
+      mock_scope: opts?.mock_scope ?? "agent.input_guardrail",
     }
     if model != "" {
       llm_opts = llm_opts + {model: model}

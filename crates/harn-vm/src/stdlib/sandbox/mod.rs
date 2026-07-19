@@ -47,6 +47,11 @@ use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
+use paths::{
+    is_standard_io_device_for_access, normalize_for_policy, normalize_io_device_path,
+    path_is_within,
+};
+
 #[cfg(target_os = "linux")]
 mod linux;
 mod locked_append;
@@ -54,6 +59,7 @@ mod locked_append;
 mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
+mod paths;
 mod policy;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -2400,103 +2406,6 @@ fn resolve_policy_path(path: &str) -> PathBuf {
 /// is best-effort for nonexistent paths (lexical fallback) and never panics.
 pub fn render_policy_root(path: &str) -> PathBuf {
     normalize_for_policy(&resolve_policy_path(path))
-}
-
-fn normalize_for_policy(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        crate::stdlib::process::execution_root_path().join(path)
-    };
-    let absolute = normalize_lexically(&absolute);
-    if let Ok(canonical) = absolute.canonicalize() {
-        return canonical;
-    }
-
-    let mut existing = absolute.as_path();
-    let mut suffix = Vec::new();
-    while !existing.exists() {
-        let Some(parent) = existing.parent() else {
-            return normalize_lexically(&absolute);
-        };
-        if let Some(name) = existing.file_name() {
-            suffix.push(name.to_os_string());
-        }
-        existing = parent;
-    }
-
-    let mut normalized = existing
-        .canonicalize()
-        .unwrap_or_else(|_| normalize_lexically(existing));
-    for component in suffix.iter().rev() {
-        normalized.push(component);
-    }
-    normalize_lexically(&normalized)
-}
-
-fn normalize_lexically(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    normalized
-}
-
-fn path_is_within(path: &Path, root: &Path) -> bool {
-    path == root || path.starts_with(root)
-}
-
-/// Resolve `path` to an absolute, lexically-normalized form for the standard
-/// I/O device check. Unlike [`normalize_for_policy`] this never calls
-/// `canonicalize`, which on macOS rewrites `/dev/stdout` to a per-process
-/// `/dev/fd/<…>.output` alias that no longer matches a known device file.
-fn normalize_io_device_path(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        crate::stdlib::process::execution_root_path().join(path)
-    };
-    normalize_lexically(&absolute)
-}
-
-/// Whether `path` is one of the standard process I/O device files that the
-/// sandbox treats as a stream rather than a workspace mutation for this access:
-/// stdin is read-only, stdout/stderr/null are read/write, and delete is never a
-/// stream operation. `path` must already be absolute and lexically normalized.
-fn is_standard_io_device_for_access(path: &Path, access: FsAccess) -> bool {
-    match access {
-        FsAccess::Read => {
-            matches!(
-                path.to_str(),
-                Some("/dev/stdin" | "/dev/stdout" | "/dev/stderr" | "/dev/null")
-            ) || is_dev_fd_descriptor(path)
-        }
-        FsAccess::Write => {
-            matches!(
-                path.to_str(),
-                Some("/dev/stdout" | "/dev/stderr" | "/dev/null")
-            ) || is_dev_fd_descriptor(path)
-        }
-        FsAccess::Delete => false,
-    }
-}
-
-/// Whether `path` is exactly `/dev/fd/<N>` for a non-empty run of ASCII
-/// digits (the numeric file-descriptor aliases for the standard streams).
-fn is_dev_fd_descriptor(path: &Path) -> bool {
-    let Some(text) = path.to_str() else {
-        return false;
-    };
-    let Some(fd) = text.strip_prefix("/dev/fd/") else {
-        return false;
-    };
-    !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(any(
