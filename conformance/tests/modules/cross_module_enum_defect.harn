@@ -1,0 +1,14 @@
+// Regression coverage for public enum construction across a module boundary.
+// The imported function constructs the enum using its private payload type;
+// both `harn check` and runtime execution must agree that the public enum is
+// available to importers.
+import { CrossModuleEnum, make_cross_module_enum } from "cross_module_enum_defect_lib"
+
+pipeline default() {
+  const direct = CrossModuleEnum.Other(7)
+  const result = make_cross_module_enum(3)
+  match result {
+    CrossModuleEnum.Made(_inner) -> { __io_println(result.variant + ":" + direct.variant) }
+    _ -> { __io_println("unexpected-variant") }
+  }
+}

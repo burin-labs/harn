@@ -12,6 +12,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
+use harn_modules::{public_declarations, DefKind};
 use serde::{Deserialize, Serialize};
 
 use crate::chunk::{CachedChunk, CachedCompiledFunction};
@@ -40,12 +41,15 @@ pub struct ModuleArtifact {
     pub type_schema_init_chunk: Option<CachedChunk>,
     pub init_chunk: Option<CachedChunk>,
     pub functions: BTreeMap<String, CachedCompiledFunction>,
-    pub public_names: HashSet<String>,
-    /// Names of top-level `pub const` / `pub let` value bindings. Their values
-    /// are not known at compile time (they are produced by replaying
-    /// [`init_chunk`](Self::init_chunk)); the runtime reads each name out of
-    /// the instantiated module env and binds it into importers. Disjoint from
-    /// [`functions`](Self::functions) and [`public_type_names`](Self::public_type_names).
+    /// The public declaration contract shared with `harn-modules`. Each name
+    /// carries its source declaration kind so the loader can choose a closure,
+    /// initialized value, schema, or type-only projection without maintaining
+    /// a second AST export table.
+    pub public_exports: BTreeMap<String, DefKind>,
+    /// Public declarations whose runtime value is produced by replaying
+    /// [`init_chunk`](Self::init_chunk), rather than the precompiled function
+    /// table. This includes bindings, structs, enums, tools, skills, and eval
+    /// packs.
     pub public_value_names: HashSet<String>,
     /// Names of erased public type declarations (`type`, `enum`, and
     /// `interface`). They carry no runtime value of their own, but importers
@@ -90,6 +94,25 @@ pub fn compile_module_artifact(
     program: &[harn_parser::SNode],
     module_source_file: Option<String>,
 ) -> Result<ModuleArtifact, VmError> {
+    let imported_enum_candidates = module_source_file
+        .as_deref()
+        .and_then(|path| {
+            harn_modules::build(&[Path::new(path).to_path_buf()])
+                .imported_names_by_kind_for_file(Path::new(path), DefKind::Enum)
+        })
+        .unwrap_or_default();
+    compile_module_artifact_with_imported_enums(
+        program,
+        module_source_file,
+        &imported_enum_candidates.into_iter().collect::<Vec<_>>(),
+    )
+}
+
+fn compile_module_artifact_with_imported_enums(
+    program: &[harn_parser::SNode],
+    module_source_file: Option<String>,
+    imported_enum_candidates: &[String],
+) -> Result<ModuleArtifact, VmError> {
     let imports = program
         .iter()
         .filter_map(|node| match &node.node {
@@ -120,7 +143,13 @@ pub fn compile_module_artifact(
             };
             matches!(
                 &inner.node,
-                harn_parser::Node::LetBinding { .. } | harn_parser::Node::ConstBinding { .. }
+                harn_parser::Node::LetBinding { .. }
+                    | harn_parser::Node::ConstBinding { .. }
+                    | harn_parser::Node::StructDecl { .. }
+                    | harn_parser::Node::EnumDecl { .. }
+                    | harn_parser::Node::ToolDecl { .. }
+                    | harn_parser::Node::SkillDecl { .. }
+                    | harn_parser::Node::EvalPackDecl { .. }
             )
         })
         .cloned()
@@ -128,86 +157,62 @@ pub fn compile_module_artifact(
     let init_chunk = if init_nodes.is_empty() {
         None
     } else {
-        let mut compiler = crate::Compiler::new();
-        compiler.seed_module_catalog(program);
+        let compiler = crate::Compiler::new();
         Some(
             compiler
-                .compile(&init_nodes)
+                .compile_module_init(program, &init_nodes, imported_enum_candidates)
                 .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?
                 .freeze_for_cache(),
         )
     };
 
+    let public_exports: BTreeMap<String, DefKind> = program
+        .iter()
+        .flat_map(public_declarations)
+        .map(|export| (export.name, export.kind))
+        .collect();
+    let public_value_names = public_exports
+        .iter()
+        .filter(|(_, kind)| {
+            matches!(
+                kind,
+                DefKind::Variable
+                    | DefKind::Struct
+                    | DefKind::Enum
+                    | DefKind::Tool
+                    | DefKind::Skill
+                    | DefKind::EvalPack
+            )
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    let public_type_names = public_exports
+        .iter()
+        .filter(|(_, kind)| !kind.has_runtime_value())
+        .map(|(name, _)| name.clone())
+        .collect();
+
     let mut functions = BTreeMap::new();
-    let mut public_names = HashSet::new();
-    let mut public_value_names = HashSet::new();
-    let mut public_type_names = HashSet::new();
     for node in program {
         let inner = match &node.node {
             harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
             _ => node,
         };
-        match &inner.node {
-            harn_parser::Node::TypeDecl {
-                name, is_pub: true, ..
-            }
-            | harn_parser::Node::EnumDecl {
-                name, is_pub: true, ..
-            }
-            | harn_parser::Node::InterfaceDecl { name, .. } => {
-                public_type_names.insert(name.clone());
-                continue;
-            }
-            harn_parser::Node::StructDecl {
-                name,
-                fields,
-                is_pub,
-                ..
-            } => {
-                let constructor = crate::Compiler::new()
-                    .compile_struct_constructor(name, fields)
-                    .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
-                functions.insert(name.clone(), constructor.freeze_for_cache());
-                if *is_pub {
-                    public_names.insert(name.clone());
-                }
-                continue;
-            }
-            _ => {}
-        }
-        // `pub const` / `pub let`: record the exported value-binding names. The
-        // value itself is produced when the init chunk is replayed at
-        // instantiation time; the runtime reads it out of the module env then.
-        if let harn_parser::Node::ConstBinding {
-            pattern,
-            is_pub: true,
-            ..
-        }
-        | harn_parser::Node::LetBinding {
-            pattern,
-            is_pub: true,
-            ..
-        } = &inner.node
-        {
-            collect_binding_identifier_names(pattern, &mut public_value_names);
-            continue;
-        }
         if let harn_parser::Node::Pipeline {
             name,
             params,
             body,
             extends,
-            is_pub,
             ..
         } = &inner.node
         {
-            let pipeline = crate::Compiler::new()
+            let mut compiler = crate::Compiler::new();
+            compiler.prepare_module_context(program);
+            compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
+            let pipeline = compiler
                 .compile_pipeline_callable(program, name, params, body, extends.as_deref())
                 .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
             functions.insert(name.clone(), pipeline.freeze_for_cache());
-            if *is_pub {
-                public_names.insert(name.clone());
-            }
             continue;
         }
         let harn_parser::Node::FnDecl {
@@ -215,7 +220,6 @@ pub fn compile_module_artifact(
             type_params,
             params,
             body,
-            is_pub,
             ..
         } = &inner.node
         else {
@@ -223,14 +227,12 @@ pub fn compile_module_artifact(
         };
 
         let mut compiler = crate::Compiler::new();
-        compiler.seed_module_catalog(program);
+        compiler.prepare_module_context(program);
+        compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
         let func_chunk = compiler
             .compile_fn_body(type_params, params, body, module_source_file.clone())
             .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
         functions.insert(name.clone(), func_chunk.freeze_for_cache());
-        if *is_pub {
-            public_names.insert(name.clone());
-        }
     }
 
     let type_schema_init_chunk =
@@ -243,39 +245,10 @@ pub fn compile_module_artifact(
         type_schema_init_chunk,
         init_chunk,
         functions,
-        public_names,
+        public_exports,
         public_value_names,
         public_type_names,
     })
-}
-
-/// Collect every plain-identifier name bound by a binding pattern (recursing
-/// into list/dict/pair destructures). Used to enumerate the value names a
-/// `pub const` / `pub let` contributes to a module's public surface.
-fn collect_binding_identifier_names(
-    pattern: &harn_parser::BindingPattern,
-    out: &mut HashSet<String>,
-) {
-    use harn_parser::BindingPattern;
-    match pattern {
-        BindingPattern::Identifier(name) => {
-            out.insert(name.clone());
-        }
-        BindingPattern::Pair(first, second) => {
-            out.insert(first.clone());
-            out.insert(second.clone());
-        }
-        BindingPattern::List(elements) => {
-            for element in elements {
-                out.insert(element.name.clone());
-            }
-        }
-        BindingPattern::Dict(fields) => {
-            for field in fields {
-                out.insert(field.alias.clone().unwrap_or_else(|| field.key.clone()));
-            }
-        }
-    }
 }
 
 /// Lex + parse + [`compile_module_artifact`] in one call. Used when the
@@ -284,6 +257,25 @@ fn collect_binding_identifier_names(
 pub fn compile_module_artifact_from_source(
     source_path: &Path,
     source: &str,
+) -> Result<ModuleArtifact, VmError> {
+    let imported_enum_candidates = harn_modules::build_with_source(source_path, source)
+        .imported_names_by_kind_for_file(source_path, DefKind::Enum)
+        .unwrap_or_default();
+    compile_module_artifact_from_source_with_imported_enums(
+        source_path,
+        source,
+        imported_enum_candidates,
+    )
+}
+
+/// Parse and compile a source-backed module when the caller already has the
+/// module graph's typed enum-import projection. This keeps precompile/pack
+/// from rebuilding the graph separately for the entry chunk and module
+/// artifact.
+pub fn compile_module_artifact_from_source_with_imported_enums(
+    source_path: &Path,
+    source: &str,
+    imported_enum_candidates: impl IntoIterator<Item = String>,
 ) -> Result<ModuleArtifact, VmError> {
     let mut lexer = harn_lexer::Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|e| {
@@ -299,7 +291,12 @@ pub fn compile_module_artifact_from_source(
             source_path.display()
         ))
     })?;
-    compile_module_artifact(&program, Some(source_path.display().to_string()))
+    let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
+    compile_module_artifact_with_imported_enums(
+        &program,
+        Some(source_path.display().to_string()),
+        &imported_enum_candidates,
+    )
 }
 
 #[cfg(test)]

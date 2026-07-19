@@ -124,6 +124,16 @@ private function that a wildcard import would not see. Importing a non-`pub`
 name is an error (`HARN-IMP-002`) at `harn check` time and at load time; the
 message points at the import and suggests marking the symbol `pub`.
 
+Public struct and enum declarations use this same export contract at runtime.
+Importing a public struct binds its constructor; importing a public enum binds
+its variant namespace, whose members construct zero-field or field-bearing
+variants. A private type used as an enum payload does not need to be exported.
+Type-only declarations (interfaces and type aliases) remain valid static
+imports, with schema-capable public aliases also available in schema expression
+positions. The module graph and VM must derive these projections from the same
+declaration-kind table so a checker-approved import cannot fail only when the
+module executes.
+
 **Testing private functions.** A non-`pub` function is visible to any
 `pipeline` or `fn` declared in the **same file**, so co-locate unit tests with
 the code under test (the Rust/Go white-box pattern) rather than importing the

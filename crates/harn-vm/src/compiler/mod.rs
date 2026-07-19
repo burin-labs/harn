@@ -172,6 +172,12 @@ pub struct Compiler {
     /// pattern (`Ok(v)`, `Some(x)`) resolve to its enum without
     /// qualification when the variant name is unambiguous.
     enum_variant_owners: std::collections::HashMap<String, Vec<String>>,
+    /// Names introduced by selective imports. A qualified match pattern such
+    /// as `ImportedEnum.Ready(value)` is enum-shaped even though the imported
+    /// declaration is not present in this module's AST. Keep these candidates
+    /// separate from local enum declarations so ordinary imported namespace
+    /// calls continue to use their runtime value.
+    imported_enum_candidates: std::collections::HashSet<String>,
     /// Source spans of enums predeclared into the module catalog. Re-visiting
     /// those AST nodes during bytecode emission must not replace the final
     /// prepass view with an earlier duplicate declaration.
@@ -705,6 +711,9 @@ impl Compiler {
                 let declaration = (snode.span.start, snode.span.end);
                 if !self.predeclared_enum_declarations.contains(&declaration) {
                     self.register_enum_decl(name, variants);
+                }
+                if self.module_level {
+                    self.compile_enum_decl(name, variants)?;
                 }
             }
             Node::Pipeline { .. }

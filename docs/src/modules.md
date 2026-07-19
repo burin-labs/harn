@@ -1824,6 +1824,42 @@ declaration.
 Plain `import` (without `pub`) remains private — the imported names are
 visible only inside the importing file.
 
+### Public structs and enums
+
+Public structs and enums cross the same import boundary as public functions:
+the checker and runtime use one declaration contract, so a name accepted by
+`harn check` is also available when the importing module executes.
+
+```harn,ignore
+// shapes.harn
+pub struct Point {
+  x: int
+  y: int
+}
+
+pub enum Outcome {
+  Found(point: Point)
+  Missing
+}
+```
+
+```harn,ignore
+import { Outcome, Point } from "./shapes"
+
+pipeline default() {
+  const point = Point {x: 3, y: 4}
+  const outcome = Outcome.Found(point)
+  log(outcome.variant)
+}
+```
+
+An imported public struct binds its constructor. An imported public enum binds
+a namespace whose members construct the corresponding variants, including
+zero-field variants. Private payload types may remain private to the defining
+module; only the enum itself needs to be public. Public type aliases and
+interfaces remain type-only imports, except that schema-capable aliases may
+also be used in schema expression positions.
+
 ## Package-root prompt assets
 
 `render(...)`, `render_prompt(...)`, the `template.render` host

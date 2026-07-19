@@ -7,6 +7,7 @@ use harn_lexer::Span;
 use harn_parser::{BindingPattern, Node, Parser, SNode};
 
 pub mod asset_paths;
+mod declarations;
 pub mod fingerprint;
 pub mod package_execution;
 mod package_imports;
@@ -15,24 +16,10 @@ pub mod personas;
 pub mod project_config;
 mod stdlib;
 
+pub use declarations::{public_declarations, DefKind, PublicDeclaration};
 pub use package_imports::{
     resolve_import_path, resolve_import_path_with_guard, resolve_import_path_with_snapshot,
 };
-
-/// Kind of symbol that can be exported by a module.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DefKind {
-    Function,
-    Pipeline,
-    Tool,
-    Skill,
-    Struct,
-    Enum,
-    Interface,
-    Type,
-    Variable,
-    Parameter,
-}
 
 /// A resolved definition site within a module.
 #[derive(Debug, Clone)]
@@ -83,7 +70,7 @@ struct ModuleInfo {
     /// `build()` after all modules are loaded.
     exports: HashSet<String>,
     /// Names declared locally and exported by this module — i.e. `pub fn`,
-    /// `pub struct`, etc., or every `fn` under the no-`pub fn` fallback.
+    /// `pub struct`, etc.
     own_exports: HashSet<String>,
     /// Selective re-exports introduced by `pub import { name } from "..."`.
     /// Maps the re-exported name to every canonical source module path it
@@ -1019,6 +1006,55 @@ impl ModuleGraph {
         out.dedup();
         out
     }
+
+    /// Return the declaration kind for a name on a module's public surface.
+    /// Explicit and wildcard re-exports are followed so callers can consume
+    /// the same source-owned contract regardless of the import path used.
+    pub fn exported_kind(&self, file: &Path, name: &str) -> Option<DefKind> {
+        self.exported_kind_inner(file, name, &mut HashSet::new())
+    }
+
+    fn exported_kind_inner(
+        &self,
+        file: &Path,
+        name: &str,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Option<DefKind> {
+        let file = normalize_path(file);
+        if !visited.insert(file.clone()) {
+            return None;
+        }
+        let result = self.modules.get(&file).and_then(|module| {
+            if module.own_exports.contains(name) {
+                return module
+                    .declarations
+                    .get(name)
+                    .map(|definition| definition.kind)
+                    .or_else(|| {
+                        stdlib_module_from_path(&file).and_then(|stdlib_module| {
+                            stdlib::builtin_reexports(stdlib_module)
+                                .contains(&name)
+                                .then_some(DefKind::Function)
+                        })
+                    });
+            }
+            if let Some(sources) = module.selective_re_exports.get(name) {
+                for source in sources {
+                    if let Some(kind) = self.exported_kind_inner(source, name, visited) {
+                        return Some(kind);
+                    }
+                }
+            }
+            for source in &module.wildcard_re_export_paths {
+                if let Some(kind) = self.exported_kind_inner(source, name, visited) {
+                    return Some(kind);
+                }
+            }
+            None
+        });
+        visited.remove(&file);
+        result
+    }
 }
 
 /// A duplicate or ambiguous re-export inside a single module. Reported by
@@ -1162,16 +1198,17 @@ fn collect_module_info(
     module: &mut ModuleInfo,
     package_snapshots: &[PackageSnapshot],
 ) {
+    if let Node::AttributedDecl { inner, .. } = &snode.node {
+        collect_module_info(file, inner, module, package_snapshots);
+        return;
+    }
+
+    for public in public_declarations(snode) {
+        module.own_exports.insert(public.name);
+    }
+
     match &snode.node {
-        Node::FnDecl {
-            name,
-            params,
-            is_pub,
-            ..
-        } => {
-            if *is_pub {
-                module.own_exports.insert(name.clone());
-            }
+        Node::FnDecl { name, params, .. } => {
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Function),
@@ -1183,80 +1220,56 @@ fn collect_module_info(
                 );
             }
         }
-        Node::Pipeline { name, is_pub, .. } => {
-            if *is_pub {
-                module.own_exports.insert(name.clone());
-            }
+        Node::Pipeline { name, .. } => {
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Pipeline),
             );
         }
-        Node::ToolDecl { name, is_pub, .. } => {
-            if *is_pub {
-                module.own_exports.insert(name.clone());
-            }
+        Node::ToolDecl { name, .. } => {
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Tool),
             );
         }
-        Node::SkillDecl { name, is_pub, .. } => {
-            if *is_pub {
-                module.own_exports.insert(name.clone());
-            }
+        Node::SkillDecl { name, .. } => {
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Skill),
             );
         }
-        Node::StructDecl { name, is_pub, .. } => {
-            if *is_pub {
-                module.own_exports.insert(name.clone());
-            }
+        Node::EvalPackDecl { binding_name, .. } => {
+            module.declarations.insert(
+                binding_name.clone(),
+                decl_site(file, snode.span, binding_name, DefKind::EvalPack),
+            );
+        }
+        Node::StructDecl { name, .. } => {
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Struct),
             );
         }
-        Node::EnumDecl { name, is_pub, .. } => {
-            if *is_pub {
-                module.own_exports.insert(name.clone());
-            }
+        Node::EnumDecl { name, .. } => {
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Enum),
             );
         }
         Node::InterfaceDecl { name, .. } => {
-            module.own_exports.insert(name.clone());
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Interface),
             );
         }
-        Node::TypeDecl { name, is_pub, .. } => {
-            if *is_pub {
-                module.own_exports.insert(name.clone());
-            }
+        Node::TypeDecl { name, .. } => {
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Type),
             );
         }
-        Node::LetBinding {
-            pattern, is_pub, ..
-        }
-        | Node::ConstBinding {
-            pattern, is_pub, ..
-        } => {
+        Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
             for name in pattern_names(pattern) {
-                // A top-level `pub const`/`pub let` exports its (identifier)
-                // binding as part of the module's public value surface, on the
-                // same footing as `pub fn`.
-                if *is_pub {
-                    module.own_exports.insert(name.clone());
-                }
                 module.declarations.insert(
                     name.clone(),
                     decl_site(file, snode.span, &name, DefKind::Variable),
@@ -1311,9 +1324,6 @@ fn collect_module_info(
                 selective_names: Some(names),
                 import_span: snode.span,
             });
-        }
-        Node::AttributedDecl { inner, .. } => {
-            collect_module_info(file, inner, module, package_snapshots);
         }
         _ => {}
     }

@@ -101,6 +101,47 @@ fn pub_const_and_let_are_exported() {
 }
 
 #[test]
+fn exported_kind_matches_public_declaration_contract() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let library = write_file(
+        root,
+        "library.harn",
+        "pub struct Config { port: int }\n\
+         pub enum State { Ready(value: int) Empty }\n\
+         pub type Label = string\n\
+         pub const ANSWER = 42\n\
+         fn private_helper() { 1 }\n",
+    );
+    let facade = write_file(
+        root,
+        "facade.harn",
+        "pub import { Config, State, Label, ANSWER } from \"./library\"\n",
+    );
+
+    let graph = build(std::slice::from_ref(&facade));
+    assert_eq!(
+        graph.exported_kind(&library, "Config"),
+        Some(DefKind::Struct)
+    );
+    assert_eq!(graph.exported_kind(&library, "State"), Some(DefKind::Enum));
+    assert_eq!(graph.exported_kind(&library, "Label"), Some(DefKind::Type));
+    assert_eq!(
+        graph.exported_kind(&library, "ANSWER"),
+        Some(DefKind::Variable)
+    );
+    assert_eq!(graph.exported_kind(&library, "private_helper"), None);
+
+    // Re-export consumers resolve the declaration kind from the original
+    // source rather than maintaining a second facade-specific table.
+    assert_eq!(
+        graph.exported_kind(&facade, "Config"),
+        Some(DefKind::Struct)
+    );
+    assert_eq!(graph.exported_kind(&facade, "State"), Some(DefKind::Enum));
+}
+
+#[test]
 fn import_compile_failures_point_at_broken_module() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -357,6 +398,11 @@ fn stdlib_builtin_reexports_participate_in_static_resolution() {
     assert_eq!(
         graph.imported_names_for_file(&entry),
         Some(HashSet::from(["assert_eq".to_string()])),
+    );
+    let testing = stdlib::stdlib_virtual_path("testing");
+    assert_eq!(
+        graph.exported_kind(&testing, "assert_eq"),
+        Some(DefKind::Function),
     );
 }
 

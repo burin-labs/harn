@@ -153,6 +153,29 @@ pub(crate) fn planned_artifact_paths(command_id: &str) -> CommandArtifacts {
     }
 }
 
+/// Build the terminal artifact metadata from captured bytes when persistence
+/// is unavailable. The command result still needs a complete, truthful
+/// terminal shape so waiters are not left without a result merely because
+/// artifact storage had a transient failure.
+pub(crate) fn summarize_artifacts(
+    command_id: &str,
+    stdout: &[u8],
+    stderr: &[u8],
+    handle_id: Option<&str>,
+) -> CommandArtifacts {
+    let mut combined = Vec::with_capacity(stdout.len() + stderr.len());
+    combined.extend_from_slice(stdout);
+    combined.extend_from_slice(stderr);
+    let artifacts = CommandArtifacts {
+        line_count: crate::text::count_lines(&combined),
+        byte_count: combined.len() as u64,
+        output_sha256: format!("sha256:{}", hex::encode(Sha256::digest(&combined))),
+        ..planned_artifact_paths(command_id)
+    };
+    register_artifacts(command_id, handle_id, &artifacts);
+    artifacts
+}
+
 pub(crate) fn resolve_output_path(
     command_id: Option<&str>,
     handle_id: Option<&str>,

@@ -29,7 +29,14 @@ impl Compiler {
         extends: Option<&str>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut pipeline_compiler = self.nested_body();
-        pipeline_compiler.seed_module_catalog(program);
+        pipeline_compiler.collect_module_enum_catalog(program);
+        if pipeline_compiler.enum_names.insert("Result".to_string()) {
+            Self::seed_builtin_variant_owners(&mut pipeline_compiler.enum_variant_owners);
+        }
+        pipeline_compiler.collect_imported_enum_candidates(program);
+        Self::collect_struct_layouts(program, &mut pipeline_compiler.struct_layouts);
+        Self::collect_interface_methods(program, &mut pipeline_compiler.interface_methods);
+        pipeline_compiler.collect_type_aliases(program);
         pipeline_compiler.declare_param_slots(params);
         pipeline_compiler.record_param_types(params);
         pipeline_compiler.emit_default_preamble(params)?;

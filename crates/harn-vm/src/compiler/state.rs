@@ -28,6 +28,43 @@ impl Compiler {
         Self::with_options(CompilerOptions::from_env())
     }
 
+    /// Populate every module-level compiler catalog needed by declarations
+    /// compiled outside the entry pipeline. Module artifacts use this same
+    /// preparation as ordinary program compilation so imported functions see
+    /// the enum, struct, interface, and type-alias context of their source
+    /// module.
+    pub(crate) fn prepare_module_context(&mut self, program: &[SNode]) {
+        self.collect_module_enum_catalog(program);
+        if self.enum_names.insert("Result".to_string()) {
+            Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
+        }
+        Self::collect_struct_layouts(program, &mut self.struct_layouts);
+        Self::collect_interface_methods(program, &mut self.interface_methods);
+        self.collect_type_aliases(program);
+        self.collect_imported_enum_candidates(program);
+        // Box module-level mutable `let`s that a top-level or pipeline-body
+        // closure captures (harn#4479). Nested function-like bodies reseed
+        // their own capture set when compiled.
+        self.seed_module_captured_idents(program);
+    }
+
+    /// Compile only the declarations that form a module's initialization
+    /// chunk, using the complete source program for compiler context. The
+    /// caller supplies a filtered list so function and pipeline closures are
+    /// materialized exactly once by the artifact's function table.
+    pub(crate) fn compile_module_init(
+        mut self,
+        context: &[SNode],
+        init_nodes: &[SNode],
+    ) -> Result<Chunk, CompileError> {
+        self.prepare_module_context(context);
+        self.compile_top_level_declarations(init_nodes)?;
+        self.chunk.emit(Op::Nil, self.line);
+        self.chunk.emit(Op::Return, self.line);
+        super::ensure_chunk_addressable(&self.chunk, "the module initialization body", self.line)?;
+        Ok(self.chunk)
+    }
+
     pub fn with_options(options: CompilerOptions) -> Self {
         Self {
             options,
@@ -36,6 +73,7 @@ impl Compiler {
             column: 1,
             enum_names: std::collections::HashSet::new(),
             enum_variant_owners: std::collections::HashMap::new(),
+            imported_enum_candidates: std::collections::HashSet::new(),
             predeclared_enum_declarations: std::collections::HashSet::new(),
             enum_catalog_scopes: Vec::new(),
             struct_layouts: std::collections::HashMap::new(),
@@ -340,12 +378,7 @@ impl Compiler {
     pub fn compile(mut self, program: &[SNode]) -> Result<Chunk, CompileError> {
         // Pre-scan so we can recognize EnumName.Variant as enum construction
         // even when the enum is declared inside a pipeline.
-        self.seed_module_catalog(program);
-        // Box module-level mutable `let`s that a top-level or pipeline-body
-        // closure captures (harn#4479). Nested `fn`/closure/`tool` bodies reseed
-        // their own capture set when compiled, so this only governs the
-        // module-level bindings emitted by `self`.
-        self.seed_module_captured_idents(program);
+        self.prepare_module_context(program);
 
         for sn in program {
             match &sn.node {
@@ -460,18 +493,7 @@ impl Compiler {
         pipeline_name: &str,
         bind_params_from_globals: bool,
     ) -> Result<Chunk, CompileError> {
-        self.collect_module_enum_catalog(program);
-        if self.enum_names.insert("Result".to_string()) {
-            Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
-        }
-        Self::collect_struct_layouts(program, &mut self.struct_layouts);
-        Self::collect_interface_methods(program, &mut self.interface_methods);
-        self.collect_type_aliases(program);
-        // Box module-level mutable `let`s that a top-level or pipeline-body
-        // closure captures (harn#4479). Nested `fn`/closure/`tool` bodies reseed
-        // their own capture set when compiled, so this only governs the
-        // module-level bindings emitted by `self`.
-        self.seed_module_captured_idents(program);
+        self.prepare_module_context(program);
 
         for sn in program {
             if matches!(
@@ -1006,7 +1028,9 @@ impl Compiler {
     pub(super) fn lexical_match_pattern_catalog(
         &self,
     ) -> harn_parser::lexical::MatchPatternCatalog {
-        harn_parser::lexical::MatchPatternCatalog::new(&self.enum_names, &self.enum_variant_owners)
+        let mut enum_names = self.enum_names.clone();
+        enum_names.extend(self.imported_enum_candidates.iter().cloned());
+        harn_parser::lexical::MatchPatternCatalog::new(&enum_names, &self.enum_variant_owners)
     }
 
     pub(super) fn begin_scope(&mut self) {
@@ -1342,6 +1366,7 @@ impl Compiler {
         let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
+        fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();

@@ -729,9 +729,10 @@ fn real_run_command_background_child_survives_interrupt() {
     let pid = require_int(&resp, "pid");
     let handle_id = require_str(&resp, "handle_id");
 
-    // Spawn returns only after the OS has assigned the child a PID. A direct
-    // liveness probe is enough here; sleeping to manufacture an observation
-    // window makes this smoke test sensitive to host load.
+    // The spawn response is the synchronization point: the OS has assigned a
+    // PID and the long-running session store owns the child, not the
+    // interrupted invoking scope. A direct liveness probe avoids a
+    // load-sensitive sleep used only to manufacture an observation window.
     assert!(
         unix_process_exists(pid),
         "background child {pid} must survive scope interrupts"

@@ -616,12 +616,17 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         Some(&context.handle_id),
     ) {
         Ok(artifacts) => artifacts,
-        Err(_) => {
-            let (completion_tx, _result_txs) = take_handle_notifiers(&context.handle_id);
-            if let Some(tx) = completion_tx {
-                let _ = tx.try_send(());
-            }
-            return;
+        Err(error) => {
+            tracing::warn!(
+                "long-running command {} could not persist artifacts: {error}; returning in-memory terminal metadata",
+                context.command_id
+            );
+            proc::summarize_artifacts(
+                &context.command_id,
+                &stdout,
+                &stderr,
+                Some(&context.handle_id),
+            )
         }
     };
     let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
@@ -918,47 +923,41 @@ pub(crate) fn output_feed_for_handle(handle_id: &str) -> Option<Arc<OutputFeed>>
 }
 
 pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions) -> CancelOutcome {
-    let (killer, cancel_state) = {
-        let store = HANDLE_STORE
+    let (killer, cancel_state, result_rx) = {
+        let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
-        let Some(entry) = store.entries.get(handle_id) else {
+        let Some((killer, cancel_state)) = store
+            .entries
+            .get(handle_id)
+            .map(|entry| (entry.killer.clone(), entry.cancel_state.clone()))
+        else {
             return CancelOutcome {
                 cancelled: false,
                 result: None,
             };
         };
-        (entry.killer.clone(), entry.cancel_state.clone())
-    };
-    let mut cancellation = match cancel_state.begin_cancellation(options.timed_out) {
-        Some(cancellation) => cancellation,
-        None => {
-            return CancelOutcome {
-                cancelled: false,
-                result: None,
-            };
-        }
-    };
-    let result_rx = if options.wait_result.is_some() {
-        let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
-        let registered = {
-            let mut store = HANDLE_STORE
-                .lock()
-                .expect("long-running handle store poisoned");
+        let result_rx = options.wait_result.map(|_| {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
             store
                 .entries
                 .get_mut(handle_id)
-                .filter(|entry| Arc::ptr_eq(&entry.cancel_state, &cancel_state))
-                .map(|entry| entry.result_txs.push(tx))
-                .is_some()
+                .expect("handle entry disappeared while store was locked")
+                .result_txs
+                .push(tx);
+            rx
+        });
+        (killer, cancel_state, result_rx)
+    };
+    let cancellation = cancel_state.begin_cancellation(options.timed_out);
+    let Some(mut cancellation) = cancellation else {
+        return CancelOutcome {
+            cancelled: false,
+            result: match (options.wait_result, result_rx) {
+                (Some(timeout), Some(rx)) => rx.recv_timeout(timeout).ok(),
+                _ => None,
+            },
         };
-        if registered {
-            Some(rx)
-        } else {
-            None
-        }
-    } else {
-        None
     };
     kill_and_publish(killer.as_ref(), &mut cancellation);
     drop(cancellation);

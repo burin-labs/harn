@@ -3,6 +3,18 @@ use harn_parser::{Node, SNode};
 use super::{Compiler, EnumCatalogSnapshot};
 
 impl Compiler {
+    pub(super) fn collect_imported_enum_candidates(&mut self, program: &[SNode]) {
+        for node in program {
+            if let Node::SelectiveImport { names, .. } = &node.node {
+                self.imported_enum_candidates.extend(names.iter().cloned());
+            }
+        }
+    }
+
+    pub(super) fn is_known_enum_name(&self, name: &str) -> bool {
+        self.enum_names.contains(name) || self.imported_enum_candidates.contains(name)
+    }
+
     pub(super) fn enum_catalog_snapshot(&self) -> EnumCatalogSnapshot {
         EnumCatalogSnapshot {
             names: self.enum_names.clone(),

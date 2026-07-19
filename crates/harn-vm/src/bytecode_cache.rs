@@ -69,6 +69,8 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// v6: payload encoding replaced with postcard.
 /// v7: exported type schemas moved from eager JSON strings to an initializer
 /// chunk that resolves imported aliases in the module environment.
+/// v7: `ModuleArtifact` replaced split name sets with the typed public export
+/// contract shared by the module graph and runtime.
 pub const SCHEMA_VERSION: u32 = 7;
 
 /// Compile-time Harn release. Cache files written by a different release
@@ -1223,7 +1225,7 @@ mod tests {
 
         assert_eq!(loaded.imports.len(), 1);
         assert_eq!(loaded.imports[0].path, "./dependency");
-        assert!(loaded.public_names.contains("answer"));
+        assert!(loaded.public_exports.contains_key("answer"));
     }
 
     #[test]
