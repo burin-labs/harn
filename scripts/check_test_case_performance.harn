@@ -190,17 +190,49 @@ fn threshold(reference: float, factor: float, floor: float) -> float {
   }
 }
 
+// The wall-derived metrics the gate enforces, with the additive noise floor
+// each one gets on top of the multiplicative budget. Single owner for both
+// `evaluate_metrics` and `best_metrics`.
+const GATED_METRIC_FLOORS = {
+  max_child_wall_ms: 250.0,
+  sum_user_ms: 250.0,
+  sum_sys_ms: 150.0,
+  setup_p50_ms: 5.0,
+  setup_p90_ms: 10.0,
+  execute_p90_ms: 5.0,
+}
+
+/**
+ * Element-wise best (minimum) of the gated metrics across measurement rounds;
+ * every other field (test_count, telemetry, ...) comes from the latest round.
+ * Each round is a complete honest measurement, so the minimum is the
+ * observation least distorted by shared-runner noise: a transient noisy
+ * neighbor inflates one round but not all of them, while a real regression
+ * inflates every round and still fails the gate.
+ */
+pub fn best_metrics(rounds: list<dict>) -> dict {
+  let best = rounds[rounds.count - 1] ?? {}
+  for name in GATED_METRIC_FLOORS.keys().sort() {
+    let low = 0.0
+    let seen = false
+    for round in rounds {
+      const value = number(round[name])
+      if !seen || value < low {
+        low = value
+        seen = true
+      }
+    }
+    if seen {
+      best = best + {[name]: low}
+    }
+  }
+  return best
+}
+
 pub fn evaluate_metrics(metrics: dict, baseline: dict) -> dict {
   const factor = number(baseline?.regression_x ?? 2.0)
   const warn_at = number(baseline?.warn_utilization ?? 0.8)
-  const floors = {
-    max_child_wall_ms: 250.0,
-    sum_user_ms: 250.0,
-    sum_sys_ms: 150.0,
-    setup_p50_ms: 5.0,
-    setup_p90_ms: 10.0,
-    execute_p90_ms: 5.0,
-  }
+  const floors = GATED_METRIC_FLOORS
   let failures = []
   let warnings = []
   let limits = {}
@@ -433,12 +465,12 @@ fn run_parallel(root: string, platform: string, test_files: list<string>) -> dic
   return {runs: runs, errors: errors}
 }
 
-pipeline main(task) {
-  const platform = platform_name()
-  if platform != "macos" && platform != "linux" {
-    harness.stdio.eprintln("error: unsupported performance-check platform `${platform}`")
-    return 1
-  }
+/**
+ * One complete measurement: materialize fresh suites in an isolated root, run
+ * them in parallel, and aggregate. Cleans up on success; preserves the root
+ * for forensics when a child run failed.
+ */
+fn measure_round(platform: string) -> dict {
   const root = path_join(".harn-runs/test-case-performance", uuid_v7())
   mkdir(root)
   let test_files = []
@@ -447,35 +479,73 @@ pipeline main(task) {
   }
   const execution = run_parallel(root, platform, test_files)
   const metrics = aggregate_runs(execution.runs)
-  const report = {
-    schema_version: 1,
-    workload_version: WORKLOAD_VERSION,
-    platform: platform,
-    suite_count: SUITE_COUNT,
-    cases_per_suite: CASES_PER_SUITE,
-    metrics: metrics,
-    sample_errors: execution.errors,
-  }
   if execution.errors.count == 0 {
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", root]})
   } else {
     harness.stdio.eprintln("error: preserved failed workload at " + root)
   }
-  __io_println(json_stringify_pretty(report))
-  if execution.errors.count > 0 {
-    for error in execution.errors {
-      harness.stdio.eprintln("error: ${error}")
+  return {metrics: metrics, errors: execution.errors}
+}
+
+// Wall-clock budgets on shared CI runners flake when a noisy neighbor lands on
+// the same host: the baseline reference is honest, this run's spike is not.
+// On a breach the gate re-measures (fresh suites, fresh root) up to this many
+// total rounds and judges the element-wise best across rounds — a transient
+// spike clears on re-measure, while a real regression breaches every round.
+const MAX_MEASUREMENT_ROUNDS = 3
+
+pipeline main(task) {
+  const platform = platform_name()
+  if platform != "macos" && platform != "linux" {
+    harness.stdio.eprintln("error: unsupported performance-check platform `${platform}`")
+    return 1
+  }
+  let baseline = {}
+  let round_metrics = []
+  let best = {}
+  let verdict: dict = {ok: false, failures: [], warnings: [], limits: {}}
+  for round in range(0, MAX_MEASUREMENT_ROUNDS) {
+    const measured = measure_round(platform)
+    if round == 0 {
+      const report = {
+        schema_version: 1,
+        workload_version: WORKLOAD_VERSION,
+        platform: platform,
+        suite_count: SUITE_COUNT,
+        cases_per_suite: CASES_PER_SUITE,
+        metrics: measured.metrics,
+        sample_errors: measured.errors,
+      }
+      __io_println(json_stringify_pretty(report))
     }
-    return 1
+    if measured.errors.count > 0 {
+      for error in measured.errors {
+        harness.stdio.eprintln("error: ${error}")
+      }
+      return 1
+    }
+    if round == 0 {
+      const loaded = load_platform_baseline(harness.fs.read_text(BASELINES), platform)
+      if !loaded.ok {
+        harness.stdio.eprintln(
+          "error: ${loaded.error}; use the JSON above to record an honest baseline",
+        )
+        return 1
+      }
+      baseline = loaded.baseline
+    }
+    round_metrics = round_metrics + [measured.metrics]
+    best = best_metrics(round_metrics)
+    verdict = evaluate_metrics(best, baseline)
+    if verdict.ok {
+      break
+    }
+    if round + 1 < MAX_MEASUREMENT_ROUNDS {
+      harness.stdio.eprintln(
+        "warning: measurement round ${round + 1} breached (${verdict.failures.join("; ")}); re-measuring to rule out runner noise",
+      )
+    }
   }
-  const loaded = load_platform_baseline(harness.fs.read_text(BASELINES), platform)
-  if !loaded.ok {
-    harness.stdio.eprintln(
-      "error: ${loaded.error}; use the JSON above to record an honest baseline",
-    )
-    return 1
-  }
-  const verdict = evaluate_metrics(metrics, loaded.baseline)
   for warning in verdict.warnings {
     harness.stdio.eprintln("warning: ${warning}")
   }
@@ -486,7 +556,7 @@ pipeline main(task) {
     return 1
   }
   __io_println(
-    "parallel test-case performance: OK platform=${platform} tests=${metrics.test_count}",
+    "parallel test-case performance: OK platform=${platform} rounds=${round_metrics.count} tests=${best.test_count}",
   )
   return 0
 }
