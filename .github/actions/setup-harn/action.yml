@@ -1,0 +1,74 @@
+name: Set up Harn
+description: Install a pinned, checksum-verified Harn release on GitHub-hosted runners.
+
+inputs:
+  version:
+    description: Harn version with or without a leading v. Defaults to version-file.
+    required: false
+    default: ""
+  version-file:
+    description: Repository-relative file containing the pinned Harn version.
+    required: false
+    default: .harn-version
+  repository:
+    description: GitHub repository that publishes Harn release assets.
+    required: false
+    default: burin-labs/harn
+  max-attempts:
+    description: Maximum attempts while release assets are still publishing.
+    required: false
+    default: "12"
+  retry-delay-seconds:
+    description: Delay between bounded release-asset attempts.
+    required: false
+    default: "10"
+
+outputs:
+  version:
+    description: Resolved Harn version without a leading v.
+    value: ${{ steps.install.outputs.version }}
+  path:
+    description: Absolute path to the installed Harn binary.
+    value: ${{ steps.install.outputs.path }}
+  checksum:
+    description: Verified SHA-256 of the downloaded release archive.
+    value: ${{ steps.install.outputs.checksum }}
+  source-url:
+    description: Release archive URL used for the installation.
+    value: ${{ steps.install.outputs.source-url }}
+  cache-hit:
+    description: Whether an existing cached archive passed current published-checksum verification.
+    value: ${{ steps.install.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Harn release
+      id: resolve
+      shell: bash
+      env:
+        HARN_SETUP_MODE: resolve
+        HARN_SETUP_VERSION: ${{ inputs.version }}
+        HARN_SETUP_VERSION_FILE: ${{ inputs.version-file }}
+        HARN_SETUP_REPOSITORY: ${{ inputs.repository }}
+      run: node "$GITHUB_ACTION_PATH/setup-harn.mjs"
+
+    - name: Restore verified-archive candidate
+      id: cache
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: ${{ runner.tool_cache }}/harn-setup/downloads
+        key: setup-harn-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}-${{ steps.resolve.outputs.asset }}
+
+    - name: Verify and install Harn
+      id: install
+      shell: bash
+      env:
+        HARN_SETUP_MODE: install
+        HARN_SETUP_VERSION: ${{ steps.resolve.outputs.version }}
+        HARN_SETUP_REPOSITORY: ${{ inputs.repository }}
+        HARN_SETUP_ASSET: ${{ steps.resolve.outputs.asset }}
+        HARN_SETUP_TARGET: ${{ steps.resolve.outputs.target }}
+        HARN_SETUP_MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        HARN_SETUP_RETRY_DELAY_SECONDS: ${{ inputs.retry-delay-seconds }}
+      run: node "$GITHUB_ACTION_PATH/setup-harn.mjs"

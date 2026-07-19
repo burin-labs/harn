@@ -36,6 +36,31 @@ harn package doctor
 Before publishing, replace local path dependencies with registry or git
 dependencies pinned to a version or rev.
 
+## Set up Harn in GitHub Actions
+
+Keep the required Harn version in `.harn-version`, then use Harn's first-party
+setup action before running native package commands:
+
+```yaml
+steps:
+  - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+  - uses: burin-labs/harn/.github/actions/setup-harn@<full-commit-sha>
+  - run: harn check --strict-types $(git ls-files '*.harn')
+  - run: harn test tests/ --parallel
+  - run: harn package check
+```
+
+Pin the action to the full commit for the Harn release you use. The action reads
+`.harn-version` by default, maps the hosted runner to an official Linux, macOS,
+or Windows asset, verifies that archive against the release's `SHA256SUMS`, and
+then adds the binary to `PATH`. A cached archive is reused only after it matches
+the currently published checksum. The action outputs `version`, `path`,
+`checksum`, `source-url`, and `cache-hit` for audit receipts or job summaries.
+
+This bootstrap is intentionally host-native: Harn cannot execute until the
+verified Harn binary exists. Package behavior, tests, and orchestration should
+remain Harn code after this one installation boundary.
+
 ## Create a tool package
 
 ```bash
