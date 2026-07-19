@@ -507,7 +507,8 @@ impl super::super::Vm {
             | crate::harness::HarnessKind::System
             | crate::harness::HarnessKind::Secrets
             | crate::harness::HarnessKind::Llm
-            | crate::harness::HarnessKind::Obs => false,
+            | crate::harness::HarnessKind::Obs
+            | crate::harness::HarnessKind::Verdict => false,
         };
         cacheable.then_some(MethodCacheTarget::Harness(handle.kind()))
     }

@@ -871,7 +871,7 @@ fn parse_ladder_step_overrides(
 
 /// Convert a catalog `[model_ladders.*]` step's `options` table into the same
 /// per-step override [`DictMap`] that inline `models:` steps produce, running
-/// the identical [`LADDER_STEP_OVERRIDE_KEYS`] whitelist. An unknown key errors
+/// the identical [`LADDER_STEP_OVERRIDE_KEYS`] allowlist. An unknown key errors
 /// loudly here rather than being silently dropped, so catalog and inline
 /// ladders behave the same way.
 fn catalog_step_overrides(
@@ -893,7 +893,7 @@ fn catalog_step_overrides(
         }
         // toml::Value -> serde_json::Value -> VmValue reuses the canonical
         // JSON bridge (numbers/bools/strings map cleanly for the scalar
-        // override whitelist).
+        // override allowlist).
         let json = serde_json::to_value(value).map_err(|e| {
             runtime_error(format!(
                 "model ladder {ladder_name:?} step {idx}: options key {key:?} is not \

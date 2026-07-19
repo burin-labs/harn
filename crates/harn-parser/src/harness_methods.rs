@@ -172,6 +172,21 @@ pub fn harness_obs_ambient(method: &str) -> Option<&'static str> {
     }
 }
 
+/// `harness.verdict.*` — the verdict issuance authority. `issue(result_handle)`
+/// resolves the host-owned record of a real `run_test` execution and mints an
+/// opaque proof-of-execution receipt; there is no caller-constructible positive
+/// path and no caller-authored evidence can earn one.
+pub fn harness_verdict_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "issue" => Some("__harness_verdict_issue"),
+        // Handled VM-side (operates on the opaque receipt, which cannot cross the
+        // hostlib boundary); the mapped name is never dispatched to a builtin,
+        // it only marks the method as known to the typechecker.
+        "same_run" => Some("__harness_verdict_same_run"),
+        _ => None,
+    }
+}
+
 pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'static str> {
     match sub_handle {
         "stdio" => harness_stdio_ambient(method),
@@ -189,6 +204,7 @@ pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'st
         "tenant" => harness_tenant_ambient(method),
         "auth" => harness_auth_ambient(method),
         "obs" => harness_obs_ambient(method),
+        "verdict" => harness_verdict_ambient(method),
         _ => None,
     }
 }
@@ -210,6 +226,7 @@ pub fn harness_type_sub_handle(type_name: &str) -> Option<&'static str> {
         "HarnessTenant" => Some("tenant"),
         "HarnessAuth" => Some("auth"),
         "HarnessObs" => Some("obs"),
+        "HarnessVerdict" => Some("verdict"),
         _ => None,
     }
 }

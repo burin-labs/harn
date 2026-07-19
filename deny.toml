@@ -20,8 +20,6 @@ all-features = true
 ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
     { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
-    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained; transitive, no vuln. bincode 2.x is a breaking rewrite not yet adopted upstream. https://rustsec.org/advisories/RUSTSEC-2025-0141" },
-
     # --- quick-xml DoS advisories: transitive under xcap (screen capture for
     # computer-use), which is at its latest 0.9.6. The fix (>=0.41.0) is
     # semver-incompatible with what xcb/wayland-scanner pin, so it cannot be

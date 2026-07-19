@@ -2,17 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/tools/run_test.request.json",
   "title": "tools.run_test request",
-  "description": "Run a project-defined test command. Resolves the runner from the workspace manifest unless `argv` is provided explicitly.",
+  "description": "Run a project-defined test command. Resolves the runner from the workspace manifest unless `argv` is provided explicitly. Only an unfiltered command discovered at the active workspace root is authoritative for a positive verdict; explicit or filtered runs are diagnostic-only.",
   "type": "object",
   "properties": {
     "argv": {
       "type": "array",
+      "description": "Explicit diagnostic command. An explicit command cannot authorize a positive verdict.",
       "items": { "type": "string" }
     },
     "cwd": { "type": "string" },
     "filter": {
       "type": "string",
-      "description": "Optional test name / path filter passed through to the runner."
+      "description": "Optional test name / path filter passed through to the runner. A filtered partial plan cannot authorize a positive verdict."
     },
     "timeout_ms": { "type": "integer", "minimum": 0 },
     "long_running": { "type": "boolean", "default": false }

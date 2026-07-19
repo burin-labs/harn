@@ -121,6 +121,7 @@ pub fn vm_value_to_json_strict(val: &VmValue, path: &str) -> Result<serde_json::
         | VmValue::Rng(_)
         | VmValue::SyncPermit(_)
         | VmValue::McpClient(_)
+        | VmValue::VerdictReceipt(_)
         | VmValue::Generator(_)
         | VmValue::Stream(_)
         | VmValue::Iter(_)

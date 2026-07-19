@@ -15,6 +15,7 @@
 //! handle namespace before there's a real consumer for one.
 
 use harn_vm::VmDictExt;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,6 +47,53 @@ pub(crate) struct RawArtifacts {
     pub(crate) ecosystem: Option<String>,
     #[allow(dead_code)]
     pub(crate) argv: Vec<String>,
+    /// Present only when the host selected the command from workspace
+    /// discovery. Caller-supplied argv and caller-filtered partial plans remain
+    /// executable but are never proof authority for a positive verdict.
+    pub(crate) authorized_test_plan: Option<AuthorizedTestPlanIdentity>,
+}
+
+/// Host-owned identity of the discovered test plan that was actually
+/// executed. Only `tools/run_test` constructs this, after binding discovery to
+/// the active workspace and before spawning the selected argv.
+#[derive(Debug, Clone)]
+pub(crate) struct AuthorizedTestPlanIdentity {
+    pub(crate) plan_id: String,
+    pub(crate) workspace_hash: String,
+    pub(crate) command_hash: String,
+}
+
+impl AuthorizedTestPlanIdentity {
+    pub(crate) fn discovered(
+        workspace: &std::path::Path,
+        ecosystem: &str,
+        argv: &[String],
+    ) -> Self {
+        fn tagged_hash(parts: &[&[u8]]) -> String {
+            let mut hasher = Sha256::new();
+            for part in parts {
+                hasher.update((part.len() as u64).to_be_bytes());
+                hasher.update(part);
+            }
+            format!("sha256:{}", hex::encode(hasher.finalize()))
+        }
+
+        let workspace_text = workspace.to_string_lossy();
+        let workspace_hash = tagged_hash(&[workspace_text.as_bytes()]);
+        let argv_bytes: Vec<&[u8]> = argv.iter().map(|arg| arg.as_bytes()).collect();
+        let command_hash = tagged_hash(&argv_bytes);
+        let plan_id = tagged_hash(&[
+            b"host-discovered-test-plan-v1",
+            ecosystem.as_bytes(),
+            workspace_hash.as_bytes(),
+            command_hash.as_bytes(),
+        ]);
+        Self {
+            plan_id,
+            workspace_hash,
+            command_hash,
+        }
+    }
 }
 
 /// Three-way summary surfaced inline by `run_test`. Same shape as the
@@ -103,21 +151,88 @@ impl RawArtifacts {
     }
 }
 
+/// The host-owned record of a single `run_test` execution, keyed by an opaque
+/// `result_handle`. Beyond the raw `artifacts` (which `inspect_test_results`
+/// drills into on demand), it freezes — AT EXECUTION TIME, from bytes the host
+/// itself captured — the pass/fail `summary` the host computed and a
+/// `content_hash` of the captured output. Those two frozen fields are the
+/// unforgeable execution provenance the verdict issuance authority
+/// (`crate::verdict`) consumes: a positive verdict is minted only from a real
+/// record here, never from caller-supplied filesystem bytes, and a post-record
+/// artifact swap cannot change the frozen `summary`.
+#[derive(Debug, Clone)]
+pub(crate) struct StoredRun {
+    pub(crate) artifacts: RawArtifacts,
+    /// The host's own pass/fail counts, computed from the real execution's
+    /// output at record time. `None` when nothing parsed — never fabricated.
+    pub(crate) summary: Option<TestSummaryData>,
+    /// `sha256:HEX` of the host-captured output (stdout, plus the JUnit XML the
+    /// runner wrote) snapshotted at record time.
+    pub(crate) content_hash: String,
+    /// The execution-scope owner active when this run was RECORDED — the run
+    /// that actually produced this evidence. Verdict issuance requires the
+    /// active scope to still equal this at mint time, so a handle cannot bless a
+    /// later, different run. `None` when no owning execution was active at
+    /// record time (fail-closed: such a record can never mint a pass).
+    pub(crate) execution_scope: Option<std::sync::Arc<str>>,
+}
+
 #[derive(Default)]
 struct HandleStore {
-    entries: BTreeMap<String, RawArtifacts>,
+    entries: BTreeMap<String, StoredRun>,
 }
 
 static STORE: LazyLock<Mutex<HandleStore>> = LazyLock::new(|| Mutex::new(HandleStore::default()));
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-/// Cache `artifacts` and return the opaque `result_handle` for them.
-pub(crate) fn store_run(artifacts: RawArtifacts) -> String {
+/// Fingerprint the bytes the host captured from a real execution — stdout plus
+/// the JUnit XML the runner wrote (read here, while the host still owns the
+/// freshly-produced file) — so the receipt carries a host-owned content hash.
+fn hash_captured(artifacts: &RawArtifacts) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(artifacts.stdout.as_bytes());
+    if let Some(path) = artifacts.junit_path.as_ref() {
+        if let Ok(bytes) = std::fs::read(path) {
+            hasher.update(&bytes);
+        }
+    }
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+/// Cache a real `run_test` execution's `artifacts` alongside the host-computed
+/// `summary`, and return the opaque `result_handle` for them. The `summary` is
+/// frozen here (passed in by the runner, which computed it from the same live
+/// outcome) so verdict issuance never re-derives disposition from mutable bytes.
+pub(crate) fn store_run(artifacts: RawArtifacts, summary: Option<TestSummaryData>) -> String {
     let id = HANDLE_COUNTER.fetch_add(1, Ordering::SeqCst);
     let handle = format!("htr-{:x}-{id}", std::process::id());
+    let content_hash = hash_captured(&artifacts);
+    // Capture the owning execution AT RECORD TIME — the run that actually
+    // produced this evidence. This is the provenance the verdict authority
+    // binds to; consumption-time identity (e.g. request_id) would let an old
+    // handle bless a later run.
+    let execution_scope = harn_vm::current_execution_scope();
     let mut store = STORE.lock().expect("hostlib test handle store poisoned");
-    store.entries.insert(handle.clone(), artifacts);
+    store.entries.insert(
+        handle.clone(),
+        StoredRun {
+            artifacts,
+            summary,
+            content_hash,
+            execution_scope,
+        },
+    );
     handle
+}
+
+/// Resolve a `result_handle` to the host-owned execution record, or `None` when
+/// no such execution was recorded (a fabricated or stale handle). This is the
+/// provenance gate the verdict issuance authority rides: the store is populated
+/// ONLY by `store_run` (called only from a real `run_test` spawn), so a handle
+/// that resolves here is proof the host itself executed and observed the run.
+pub(crate) fn get_run(handle: &str) -> Option<StoredRun> {
+    let store = STORE.lock().expect("hostlib test handle store poisoned");
+    store.entries.get(handle).cloned()
 }
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -125,18 +240,13 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let handle = require_string(NAME, &map, "result_handle")?;
     let include_passing = optional_bool(NAME, &map, "include_passing")?.unwrap_or(false);
 
-    let artifacts = {
-        let store = STORE.lock().expect("hostlib test handle store poisoned");
-        store
-            .entries
-            .get(&handle)
-            .cloned()
-            .ok_or(HostlibError::InvalidParameter {
-                builtin: NAME,
-                param: "result_handle",
-                message: format!("no test results stored under handle {handle}"),
-            })?
-    };
+    let artifacts = get_run(&handle)
+        .ok_or(HostlibError::InvalidParameter {
+            builtin: NAME,
+            param: "result_handle",
+            message: format!("no test results stored under handle {handle}"),
+        })?
+        .artifacts;
 
     let mut records = artifacts.parse_records();
     if !include_passing {

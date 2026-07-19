@@ -4,7 +4,7 @@
 //! Both tests run with resolved-import checking active (`check_source_with_imports`)
 //! because `HARN-NAM-001` (unresolved value identifier) only fires in that mode —
 //! the same mode `harn check --workspace` uses, which is where the missing
-//! whitelist entry originally surfaced.
+//! allowlist entry originally surfaced.
 
 use super::{check_source_with_imports, DiagnosticSeverity};
 use crate::acp_ambient_globals::AcpAmbientGlobal;
@@ -24,7 +24,7 @@ fn source_referencing(refs: &str) -> String {
 #[test]
 fn acp_session_prompt_globals_resolve() {
     // Reference every ambient global the ACP session executor binds. None may
-    // raise an unresolved-identifier error: the checker whitelist is derived
+    // raise an unresolved-identifier error: the checker allowlist is derived
     // from the same `AcpAmbientGlobal::ALL` the executor binds from, so the two
     // cannot drift.
     let refs = AcpAmbientGlobal::ALL
