@@ -339,6 +339,21 @@ Explicit type arguments are erased at runtime. They are checked statically:
 the number of supplied type arguments must match the function declaration, and
 each explicit binding must remain consistent with the concrete argument types.
 
+Inference descends through transparent generic type aliases, including aliases
+nested inside lists, dictionaries, records, callbacks, nullable types, and
+unions. Concrete candidates from multiple values join under the usual union
+rules. An empty collection contributes no candidate, so callers may use an
+explicit type argument when its element type is otherwise ambiguous:
+
+```harn,ignore
+type Step<T> = {value: T}
+
+fn values<T>(steps: list<Step<T>>) -> list<T> { ... }
+
+const inferred: list<int> = values([int_step()])
+const explicit: list<int> = values<int>([])
+```
+
 ### Structural types (shapes)
 
 Dict shape types describe the expected fields of a dict value. The type checker

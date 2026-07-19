@@ -124,7 +124,9 @@ impl TypeChecker {
     /// binding `dict<string, V>` against a heterogeneous shape literal — V is
     /// the union of every field type, simplified so a homogeneous shape stays
     /// a single named type instead of a one-element union.
-    fn union_of_shape_field_types(fields: &[ShapeField]) -> Option<TypeExpr> {
+    pub(in crate::typechecker) fn union_of_shape_field_types(
+        fields: &[ShapeField],
+    ) -> Option<TypeExpr> {
         let mut members: Vec<TypeExpr> = Vec::new();
         for field in fields {
             if !members.contains(&field.type_expr) {
@@ -766,143 +768,6 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// Recursively extract type parameter bindings from matching param/arg types.
-    /// E.g., param_type=list<T> + arg_type=list<Dog> → binds T=Dog.
-    pub(in crate::typechecker) fn extract_type_bindings(
-        param_type: &TypeExpr,
-        arg_type: &TypeExpr,
-        type_params: &std::collections::BTreeSet<String>,
-        bindings: &mut BTreeMap<String, TypeExpr>,
-    ) -> Result<(), String> {
-        match (param_type, arg_type) {
-            (TypeExpr::Named(param_name), concrete) if type_params.contains(param_name) => {
-                Self::bind_type_param(param_name, concrete, bindings)
-            }
-            (TypeExpr::List(p_inner), TypeExpr::List(a_inner)) => {
-                Self::extract_type_bindings(p_inner, a_inner, type_params, bindings)
-            }
-            (TypeExpr::DictType(pk, pv), TypeExpr::DictType(ak, av)) => {
-                Self::extract_type_bindings(pk, ak, type_params, bindings)?;
-                Self::extract_type_bindings(pv, av, type_params, bindings)
-            }
-            // A shape literal `{a: 1, b: "x"}` flowing into a `dict<string, V>`
-            // parameter is the most common stdlib call pattern — `pick_keys`,
-            // `filter_nil`, `merge`, etc. all advertise a generic dict-shape
-            // contract. Bind V to the union of field types so the projected
-            // result keeps useful element typing instead of collapsing to
-            // `dict`.
-            (TypeExpr::DictType(pk, pv), TypeExpr::Shape(arg_fields))
-            | (
-                TypeExpr::DictType(pk, pv),
-                TypeExpr::OpenShape {
-                    fields: arg_fields, ..
-                },
-            ) => {
-                if matches!(pk.as_ref(), TypeExpr::Named(name) if name == "string") {
-                    let value_union = Self::union_of_shape_field_types(arg_fields)
-                        .unwrap_or_else(|| TypeExpr::Named("nil".into()));
-                    Self::extract_type_bindings(pv, &value_union, type_params, bindings)?;
-                }
-                Ok(())
-            }
-            (
-                TypeExpr::Applied {
-                    name: p_name,
-                    args: p_args,
-                },
-                TypeExpr::Applied {
-                    name: a_name,
-                    args: a_args,
-                },
-            ) if p_name == a_name && p_args.len() == a_args.len() => {
-                for (param, arg) in p_args.iter().zip(a_args.iter()) {
-                    Self::extract_type_bindings(param, arg, type_params, bindings)?;
-                }
-                Ok(())
-            }
-            (TypeExpr::Shape(param_fields), TypeExpr::Shape(arg_fields)) => {
-                for param_field in param_fields {
-                    if let Some(arg_field) = arg_fields
-                        .iter()
-                        .find(|field| field.name == param_field.name)
-                    {
-                        Self::extract_type_bindings(
-                            &param_field.type_expr,
-                            &arg_field.type_expr,
-                            type_params,
-                            bindings,
-                        )?;
-                    }
-                }
-                Ok(())
-            }
-            // Open record parameter `{f: T, ...R}` against an actual record:
-            // bind the explicit fields field-by-field, then bind the single row
-            // variable `R` to the actual's **leftover** fields (one-sided row
-            // matching — the design's core operation; no HM unification). With
-            // no explicit fields (`{...R}`, as in `merge`'s params) R simply
-            // binds to the whole actual record. Multiple row variables can't be
-            // split unambiguously, so they are left for the gradual fallback.
-            (
-                TypeExpr::OpenShape {
-                    fields: pf,
-                    rests: prests,
-                },
-                arg_type,
-            ) => {
-                let af: &[ShapeField] = match arg_type {
-                    TypeExpr::Shape(af) => af,
-                    TypeExpr::OpenShape { fields: af, .. } => af,
-                    _ => return Ok(()),
-                };
-                for pfield in pf {
-                    if let Some(afield) = af.iter().find(|f| f.name == pfield.name) {
-                        Self::extract_type_bindings(
-                            &pfield.type_expr,
-                            &afield.type_expr,
-                            type_params,
-                            bindings,
-                        )?;
-                    }
-                }
-                let row_vars: Vec<&String> = prests
-                    .iter()
-                    .filter_map(|r| match r {
-                        TypeExpr::Named(n) if type_params.contains(n) => Some(n),
-                        _ => None,
-                    })
-                    .collect();
-                if row_vars.len() == 1 {
-                    let explicit: std::collections::BTreeSet<&str> =
-                        pf.iter().map(|f| f.name.as_str()).collect();
-                    let leftover: Vec<ShapeField> = af
-                        .iter()
-                        .filter(|f| !explicit.contains(f.name.as_str()))
-                        .cloned()
-                        .collect();
-                    Self::bind_type_param(row_vars[0], &TypeExpr::Shape(leftover), bindings)?;
-                }
-                Ok(())
-            }
-            (
-                TypeExpr::FnType {
-                    params: p_params,
-                    return_type: p_ret,
-                },
-                TypeExpr::FnType {
-                    params: a_params,
-                    return_type: a_ret,
-                },
-            ) => {
-                for (param, arg) in p_params.iter().zip(a_params.iter()) {
-                    Self::extract_type_bindings(param, arg, type_params, bindings)?;
-                }
-                Self::extract_type_bindings(p_ret, a_ret, type_params, bindings)
-            }
-            _ => Ok(()),
-        }
-    }
-
     /// Bind type parameters by walking a param [`TypeExpr`] against an
     /// argument AST node. Used by the generic-builtin dispatch path for
     /// `llm_call`, `schema_parse`, etc.
@@ -922,6 +787,16 @@ impl TypeChecker {
         bindings: &mut BTreeMap<String, TypeExpr>,
         scope: &TypeScope,
     ) -> Result<(), String> {
+        // Generic aliases are transparent to assignability, so they must be
+        // transparent to inference too. Resolve the parameter before walking
+        // the argument node; otherwise `list<Alias<T>>` is compared with the
+        // argument's already-resolved structural type and `T` is never seen.
+        // Keeping this at the AST-aware boundary also preserves Schema<T>
+        // extraction from inline schema values nested inside record aliases.
+        let resolved_param = self.resolve_alias(param, scope);
+        if resolved_param != *param {
+            return self.bind_from_arg_node(&resolved_param, arg, type_params, bindings, scope);
+        }
         match param {
             TypeExpr::Applied { name, args } if name == "Schema" && args.len() == 1 => {
                 if let TypeExpr::Named(tp) = &args[0] {

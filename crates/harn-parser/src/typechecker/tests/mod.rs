@@ -18,6 +18,7 @@ mod interfaces;
 mod lexical_capture;
 mod main_signature;
 mod narrowing;
+mod nested_generic_alias_inference;
 mod nil_safety;
 mod ownership;
 mod pipeline_typing;
