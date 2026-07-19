@@ -29,6 +29,107 @@ pub type TypedReadFailure = StructuredReadFailure | SchemaValidationFailure
 
 pub type TypedReadResult<T> = Result<T, TypedReadFailure>
 
+pub type EvidenceRoot = {id: string, path: string}
+
+pub type EvidencePattern = {id: string, text: string}
+
+pub type EvidenceHit = {path: string, line: int, column: int, text: string}
+
+pub type PatternEvidence = {id: string, count: int, truncated: bool, hits: list<EvidenceHit>}
+
+pub type RootEvidenceStatus = "complete" | "partial" | "truncated" | "failed" | "cancelled"
+
+pub type RootEvidence = {
+  id: string,
+  status: RootEvidenceStatus,
+  complete: bool,
+  truncated: bool,
+  files_scanned: int,
+  files_skipped: int,
+  match_count: int,
+  error_count: int,
+  error?: string,
+  patterns: list<PatternEvidence>,
+}
+
+pub type EvidenceSearchStatus = "complete" | "partial" | "truncated" | "failed" | "cancelled"
+
+pub type EvidenceReceipt = {
+  schema_version: "harn.fs.evidence.v1",
+  status: EvidenceSearchStatus,
+  complete: bool,
+  truncated: bool,
+  cancelled: bool,
+  root_count: int,
+  failed_root_count: int,
+  files_scanned: int,
+  match_count: int,
+  roots: list<RootEvidence>,
+}
+
+pub type EvidenceOptions = {
+  preset?: "default" | "source" | "all",
+  max_depth?: int,
+  max_filesize?: int,
+  follow_symlinks?: bool,
+  include_hidden?: bool,
+  respect_gitignore?: bool,
+  /** Match ASCII letters without regard to case. */
+  case_insensitive?: bool,
+  include?: list<string>,
+  exclude?: list<string>,
+  max_matches?: int,
+  max_matches_per_root?: int,
+  threads?: int,
+}
+
+pub type EvidenceSearchHandle = {
+  handle_id: string,
+  operation: string,
+  status: "running",
+  started_at: string,
+  ended_at: nil,
+  duration_ms: int,
+  command_or_op_descriptor: string,
+}
+
+/**
+ * Search each labeled root once for every labeled literal and return stable,
+ * path-relative evidence. Root failures settle independently, and match order
+ * does not depend on worker count.
+ *
+ * @effects: [fs.read]
+ * @errors: [invalid_argument]
+ */
+pub fn search_evidence(
+  roots: list<EvidenceRoot>,
+  patterns: list<EvidencePattern>,
+  options: EvidenceOptions = {},
+) -> EvidenceReceipt {
+  return schema_expect(
+    harness.fs.find_evidence(roots, patterns, options),
+    schema_of(EvidenceReceipt),
+  )
+}
+
+/**
+ * Start the same evidence search through the standard cancellable background
+ * operation lifecycle.
+ *
+ * @effects: [fs.read]
+ * @errors: [invalid_argument]
+ */
+pub fn search_evidence_background(
+  roots: list<EvidenceRoot>,
+  patterns: list<EvidencePattern>,
+  options: EvidenceOptions = {},
+) -> EvidenceSearchHandle {
+  return schema_expect(
+    harness.fs.find_evidence(roots, patterns, options + {long_running: true}),
+    schema_of(EvidenceSearchHandle),
+  )
+}
+
 fn __fs_norm(path) -> string {
   return replace(path ?? "", "\\", "/")
 }

@@ -46,6 +46,7 @@ pub struct StdlibEntrypointModule {
 pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, module, [
     "text" => "stdlib/stdlib_text.harn",
     "semver" => "stdlib/stdlib_semver.harn",
+    "changelog" => "stdlib/stdlib_changelog.harn",
     "ansi" => "stdlib/stdlib_ansi.harn",
     "table" => "stdlib/stdlib_table.harn",
     "diff" => "stdlib/stdlib_diff.harn",
@@ -988,6 +989,26 @@ mod tests {
             "version_from_tag",
         ] {
             assert!(exports.contains(name), "std/semver should export {name}");
+        }
+    }
+
+    #[test]
+    fn changelog_stdlib_module_exports_typed_primitives() {
+        let exports = public_functions_for_module("changelog")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for name in [
+            "changelog_validate_categories",
+            "changelog_parse_fragment",
+            "changelog_order_fragments",
+            "changelog_normalize_fragment_body",
+            "changelog_assemble_fragments",
+            "changelog_parse_sections",
+            "changelog_find_section",
+            "changelog_merge_unreleased",
+        ] {
+            assert!(exports.contains(name), "std/changelog should export {name}");
         }
     }
 

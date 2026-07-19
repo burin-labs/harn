@@ -78,7 +78,7 @@ require **no import statement**. You can call them directly from top-level
 code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
-described below (`std/text`, `std/json`, `std/math`, `std/collections`,
+described below (`std/text`, `std/json`, `std/math`, `std/collections`, `std/changelog`,
 `std/ansi`, `std/table`, `std/diff`, `std/path`, `std/fs`, `std/os`,
 `std/slug`, `std/edit`, `std/identity`, `std/disclosure`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
@@ -107,6 +107,7 @@ import "std/agents"
 import "std/agent/user"
 import { retry_predicate_with_backoff } from "std/async"
 import "std/cache"
+import "std/changelog"
 import "std/collections"
 import "std/connectors/shared"
 import "std/context"
@@ -141,6 +142,23 @@ import "std/vision"
 ```harn
 import { provider_catalog } from "std/oauth/providers"
 ```
+
+### std/changelog
+
+Pure typed changelog transformations for release harnesses:
+
+| Function | Description |
+|---|---|
+| `changelog_parse_fragment(filename, body, categories)` | Validate and parse one `<id>.<category>.md` fragment |
+| `changelog_order_fragments(fragments, categories)` | Order fragments by category, natural ID, and filename without integer overflow |
+| `changelog_assemble_fragments(fragments, categories)` | Normalize fragment bodies and render deterministic `###` category sections |
+| `changelog_parse_sections(text)` | Parse exact `##` sections outside fenced code blocks with UTF-8 byte offsets |
+| `changelog_find_section(text, heading)` | Return one named section or a typed missing/duplicate-heading failure |
+| `changelog_merge_unreleased(text, assembled, categories)` | Merge assembled content into `## Unreleased` while preserving authored content and newline style |
+
+The module performs no filesystem, Git, process, versioning, or publication
+work. Callers retain those policies and pass their category definitions
+explicitly.
 
 ### std/async
 
@@ -974,6 +992,10 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | `relative_path(root, path)` | Return a slash-normalized path relative to `root` when possible |
 | `is_file(path)` / `is_dir(path)` | Return type-aware existence checks |
 | `file_size(path)` | Return file size in bytes, or `nil` when unavailable |
+| `search_evidence(roots, patterns, options?)` | Walk each labeled root once, match every labeled literal with one multi-pattern matcher, and return deterministic path-relative hits plus per-root settlement and truncation receipts |
+| `search_evidence_background(roots, patterns, options?)` | Run the same search through the cancellable long-running operation lifecycle |
+
+Evidence search's optional case-insensitive mode folds ASCII letters.
 
 `StructuredReadFailure` contains `{kind, format, path, detail, line?, column?}`. Its closed
 `kind` union is
@@ -992,6 +1014,13 @@ write_json(path, {status: "ok"}, {pretty: true})
 log(read_json(path).status)
 log(relative_path(temp_dir(), path))
 ```
+
+Evidence results expose caller labels rather than root paths, so persisted
+reports can stay stable and avoid machine-local checkout paths. Hits are sorted
+by root ID, pattern ID, relative path, line, and column regardless of `threads`.
+One missing or unreadable root yields a partial receipt without discarding other
+roots. `max_matches` is global; `max_matches_per_root` prevents one root from
+consuming unbounded memory before deterministic global truncation.
 
 ### std/run_artifacts
 
