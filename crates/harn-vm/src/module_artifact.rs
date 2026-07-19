@@ -96,6 +96,7 @@ pub fn compile_module_artifact(
 ) -> Result<ModuleArtifact, VmError> {
     let imported_enum_candidates = module_source_file
         .as_deref()
+        .filter(|_| needs_imported_enum_candidates(program))
         .and_then(|path| {
             harn_modules::build(&[Path::new(path).to_path_buf()])
                 .imported_names_by_kind_for_file(Path::new(path), DefKind::Enum)
@@ -207,7 +208,6 @@ fn compile_module_artifact_with_imported_enums(
         } = &inner.node
         {
             let mut compiler = crate::Compiler::new();
-            compiler.prepare_module_context(program);
             compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
             let pipeline = compiler
                 .compile_pipeline_callable(program, name, params, body, extends.as_deref())
@@ -227,8 +227,8 @@ fn compile_module_artifact_with_imported_enums(
         };
 
         let mut compiler = crate::Compiler::new();
-        compiler.prepare_module_context(program);
         compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
+        compiler.prepare_module_context(program);
         let func_chunk = compiler
             .compile_fn_body(type_params, params, body, module_source_file.clone())
             .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
@@ -258,14 +258,57 @@ pub fn compile_module_artifact_from_source(
     source_path: &Path,
     source: &str,
 ) -> Result<ModuleArtifact, VmError> {
-    let imported_enum_candidates = harn_modules::build_with_source(source_path, source)
-        .imported_names_by_kind_for_file(source_path, DefKind::Enum)
-        .unwrap_or_default();
-    compile_module_artifact_from_source_with_imported_enums(
-        source_path,
-        source,
-        imported_enum_candidates,
+    let program = parse_module_source(source_path, source)?;
+    let imported_enum_candidates =
+        imported_enum_candidates_for_program(source_path, source, &program);
+    compile_module_artifact_with_imported_enums(
+        &program,
+        Some(source_path.display().to_string()),
+        &imported_enum_candidates,
     )
+}
+
+/// Resolve imported enum names only for modules whose syntax can use them.
+/// Most modules never contain a qualified property access; rebuilding a full
+/// module graph for those files needlessly reparses imports and their
+/// dependencies during every uncached module compilation.
+fn imported_enum_candidates_for_program(
+    source_path: &Path,
+    source: &str,
+    program: &[harn_parser::SNode],
+) -> Vec<String> {
+    if !needs_imported_enum_candidates(program) {
+        return Vec::new();
+    }
+    harn_modules::build_with_source(source_path, source)
+        .imported_names_by_kind_for_file(source_path, DefKind::Enum)
+        .unwrap_or_default()
+        .into_iter()
+        .collect()
+}
+
+fn needs_imported_enum_candidates(program: &[harn_parser::SNode]) -> bool {
+    harn_parser::visit::contains_identifier_receiver_access(program)
+}
+
+fn parse_module_source(
+    source_path: &Path,
+    source: &str,
+) -> Result<Vec<harn_parser::SNode>, VmError> {
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let tokens = lexer.tokenize().map_err(|e| {
+        VmError::Runtime(format!(
+            "Import lex error in {}: {e}",
+            source_path.display()
+        ))
+    })?;
+    let mut parser = harn_parser::Parser::new(tokens);
+    parser.parse().map_err(|e| {
+        VmError::Runtime(format!(
+            "Import parse error in {}: {e}",
+            source_path.display()
+        ))
+    })
 }
 
 /// Parse and compile a source-backed module when the caller already has the
@@ -277,20 +320,7 @@ pub fn compile_module_artifact_from_source_with_imported_enums(
     source: &str,
     imported_enum_candidates: impl IntoIterator<Item = String>,
 ) -> Result<ModuleArtifact, VmError> {
-    let mut lexer = harn_lexer::Lexer::new(source);
-    let tokens = lexer.tokenize().map_err(|e| {
-        VmError::Runtime(format!(
-            "Import lex error in {}: {e}",
-            source_path.display()
-        ))
-    })?;
-    let mut parser = harn_parser::Parser::new(tokens);
-    let program = parser.parse().map_err(|e| {
-        VmError::Runtime(format!(
-            "Import parse error in {}: {e}",
-            source_path.display()
-        ))
-    })?;
+    let program = parse_module_source(source_path, source)?;
     let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
     compile_module_artifact_with_imported_enums(
         &program,
@@ -306,7 +336,10 @@ mod tests {
     use harn_lexer::Lexer;
     use harn_parser::Parser;
 
-    use super::{compile_module_artifact, compile_module_artifact_from_source};
+    use super::{
+        compile_module_artifact, compile_module_artifact_from_source,
+        needs_imported_enum_candidates, parse_module_source,
+    };
     use crate::chunk::Constant;
 
     #[test]
@@ -367,5 +400,28 @@ pub type Wrapped = {value: External}
             .constants
             .iter()
             .any(|constant| matches!(constant, Constant::String(value) if value == "External")));
+    }
+
+    #[test]
+    fn imported_enum_graph_lookup_is_lazy_for_plain_modules() {
+        let plain = parse_module_source(
+            Path::new("<test>/plain.harn"),
+            r#"
+import { helper } from "./support"
+pub fn run() -> int { return helper(1) }
+"#,
+        )
+        .expect("plain module parses");
+        assert!(!needs_imported_enum_candidates(&plain));
+
+        let qualified = parse_module_source(
+            Path::new("<test>/qualified.harn"),
+            r#"
+import { Status } from "./status"
+pub fn run() { return Status.Ready() }
+"#,
+        )
+        .expect("qualified module parses");
+        assert!(needs_imported_enum_candidates(&qualified));
     }
 }

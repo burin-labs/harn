@@ -67,6 +67,7 @@ impl Compiler {
         &mut self,
         candidates: impl IntoIterator<Item = String>,
     ) {
+        self.imported_enum_candidates_authoritative = true;
         self.imported_enum_candidates.extend(candidates);
     }
 
@@ -80,8 +81,8 @@ impl Compiler {
         init_nodes: &[SNode],
         imported_enum_candidates: &[String],
     ) -> Result<Chunk, CompileError> {
-        self.prepare_module_context(context);
         self.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
+        self.prepare_module_context(context);
         self.compile_top_level_declarations(init_nodes)?;
         self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);
@@ -98,6 +99,7 @@ impl Compiler {
             enum_names: std::collections::HashSet::new(),
             enum_variant_owners: std::collections::HashMap::new(),
             imported_enum_candidates: std::collections::HashSet::new(),
+            imported_enum_candidates_authoritative: false,
             predeclared_enum_declarations: std::collections::HashSet::new(),
             enum_catalog_scopes: Vec::new(),
             struct_layouts: std::collections::HashMap::new(),
@@ -1052,6 +1054,12 @@ impl Compiler {
     pub(super) fn lexical_match_pattern_catalog(
         &self,
     ) -> harn_parser::lexical::MatchPatternCatalog {
+        if self.imported_enum_candidates.is_empty() {
+            return harn_parser::lexical::MatchPatternCatalog::new(
+                &self.enum_names,
+                &self.enum_variant_owners,
+            );
+        }
         let mut enum_names = self.enum_names.clone();
         enum_names.extend(self.imported_enum_candidates.iter().cloned());
         harn_parser::lexical::MatchPatternCatalog::new(&enum_names, &self.enum_variant_owners)
@@ -1391,6 +1399,8 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
+        fn_compiler.imported_enum_candidates_authoritative =
+            self.imported_enum_candidates_authoritative;
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();

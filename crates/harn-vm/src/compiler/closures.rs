@@ -24,6 +24,8 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
+        fn_compiler.imported_enum_candidates_authoritative =
+            self.imported_enum_candidates_authoritative;
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
@@ -76,6 +78,8 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
+        fn_compiler.imported_enum_candidates_authoritative =
+            self.imported_enum_candidates_authoritative;
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();
@@ -339,6 +343,8 @@ impl Compiler {
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
+        fn_compiler.imported_enum_candidates_authoritative =
+            self.imported_enum_candidates_authoritative;
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();

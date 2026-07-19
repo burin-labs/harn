@@ -31,6 +31,26 @@ pub fn walk_program(program: &[SNode], visitor: &mut impl FnMut(&SNode)) {
     walk_stack(&mut stack, visitor);
 }
 
+/// Return whether a program contains a member access or method call whose
+/// receiver is a bare identifier (`Name.Member`). This is the only syntax
+/// whose lowering needs to distinguish an imported enum namespace from an
+/// ordinary runtime object; callers can use the predicate to avoid resolving
+/// the full import graph for files that cannot contain that ambiguity.
+pub fn contains_identifier_receiver_access(program: &[SNode]) -> bool {
+    let mut found = false;
+    walk_program(program, &mut |node| {
+        let object = match &node.node {
+            Node::PropertyAccess { object, .. }
+            | Node::OptionalPropertyAccess { object, .. }
+            | Node::MethodCall { object, .. }
+            | Node::OptionalMethodCall { object, .. } => object,
+            _ => return,
+        };
+        found |= matches!(&object.node, Node::Identifier(_));
+    });
+    found
+}
+
 /// Visit `node`, then recurse into its children.
 pub fn walk_node(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
     let mut stack = vec![node];
@@ -414,6 +434,22 @@ mod tests {
         });
 
         assert_eq!(seen, vec!["let", "binary", "one", "two"]);
+    }
+
+    #[test]
+    fn identifier_receiver_access_predicate_ignores_function_calls() {
+        let plain = vec![dummy(Node::FunctionCall {
+            name: "helper".to_string(),
+            type_args: Vec::new(),
+            args: Vec::new(),
+        })];
+        assert!(!contains_identifier_receiver_access(&plain));
+
+        let qualified = vec![dummy(Node::PropertyAccess {
+            object: Box::new(dummy(Node::Identifier("Status".to_string()))),
+            property: "Ready".to_string(),
+        })];
+        assert!(contains_identifier_receiver_access(&qualified));
     }
 
     #[test]

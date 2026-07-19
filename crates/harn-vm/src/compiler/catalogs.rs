@@ -1,14 +1,51 @@
+use std::collections::HashSet;
+
 use harn_parser::{Node, SNode};
 
 use super::{Compiler, EnumCatalogSnapshot};
 
 impl Compiler {
     pub(super) fn collect_imported_enum_candidates(&mut self, program: &[SNode]) {
-        for node in program {
-            if let Node::SelectiveImport { names, .. } = &node.node {
-                self.imported_enum_candidates.extend(names.iter().cloned());
-            }
+        if self.imported_enum_candidates_authoritative {
+            return;
         }
+        if !harn_parser::visit::contains_identifier_receiver_access(program) {
+            return;
+        }
+        let imported_names: HashSet<&str> = program
+            .iter()
+            .filter_map(|node| match &node.node {
+                Node::SelectiveImport { names, .. } => Some(names),
+                _ => None,
+            })
+            .flatten()
+            .map(String::as_str)
+            .collect();
+        if imported_names.is_empty() {
+            return;
+        }
+
+        // A selective import is not necessarily an enum. Keep ordinary
+        // imports out of every nested compiler's lexical catalog unless the
+        // source actually uses the syntax whose meaning depends on enum
+        // resolution (`ImportedEnum.Variant`). Wildcard imports are resolved
+        // by the module graph and supplied separately by the artifact path.
+        let mut used_imports = HashSet::new();
+        harn_parser::visit::walk_program(program, &mut |node| {
+            let object = match &node.node {
+                Node::PropertyAccess { object, .. }
+                | Node::OptionalPropertyAccess { object, .. }
+                | Node::MethodCall { object, .. }
+                | Node::OptionalMethodCall { object, .. } => object,
+                _ => return,
+            };
+            if let Node::Identifier(name) = &object.node {
+                if imported_names.contains(name.as_str()) {
+                    used_imports.insert(name.clone());
+                }
+            }
+        });
+        self.imported_enum_candidates.extend(used_imports);
     }
 
     pub(super) fn is_known_enum_name(&self, name: &str) -> bool {

@@ -29,6 +29,9 @@ impl Compiler {
         extends: Option<&str>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut pipeline_compiler = self.nested_body();
+        pipeline_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
+        pipeline_compiler.imported_enum_candidates_authoritative =
+            self.imported_enum_candidates_authoritative;
         pipeline_compiler.collect_module_enum_catalog(program);
         if pipeline_compiler.enum_names.insert("Result".to_string()) {
             Self::seed_builtin_variant_owners(&mut pipeline_compiler.enum_variant_owners);

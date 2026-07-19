@@ -178,6 +178,11 @@ pub struct Compiler {
     /// separate from local enum declarations so ordinary imported namespace
     /// calls continue to use their runtime value.
     imported_enum_candidates: std::collections::HashSet<String>,
+    /// Whether the imported-enum set came from an authoritative module-graph
+    /// projection. Direct `Compiler::new()` callers retain the conservative
+    /// AST fallback; file-backed callers can opt out when the graph found no
+    /// enum exports without paying for another syntax scan.
+    imported_enum_candidates_authoritative: bool,
     /// Source spans of enums predeclared into the module catalog. Re-visiting
     /// those AST nodes during bytecode emission must not replace the final
     /// prepass view with an earlier duplicate declaration.
