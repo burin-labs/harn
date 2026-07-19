@@ -290,10 +290,10 @@ pub fn compile_module_artifact_from_source(
     )
 }
 
-/// Resolve imported enum names only for modules whose syntax can use them.
-/// Most modules never contain a qualified property access; rebuilding a full
-/// module graph for those files needlessly reparses imports and their
-/// dependencies during every uncached module compilation.
+/// Resolve imported enum names only for modules whose match patterns can use
+/// them. Ordinary property access is runtime lookup and does not need a graph
+/// walk; avoiding it keeps uncached module compilation independent of the
+/// size of unrelated import closures.
 fn imported_enum_candidates_for_program(
     source_path: &Path,
     source: &str,
