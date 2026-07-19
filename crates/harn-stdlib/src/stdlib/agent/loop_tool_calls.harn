@@ -819,7 +819,6 @@ pub fn __maybe_inject_parse_error_feedback(
   turn_opts,
   feedback_override = nil,
 ) -> bool {
-  const protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
   const diagnostics = __parse_feedback_diagnostics(parsed, turn_opts)
   const override_summary = to_string(feedback_override?.error_summary ?? "")
   if len(diagnostics) == 0 && override_summary == "" {
@@ -847,20 +846,6 @@ pub fn __maybe_inject_parse_error_feedback(
     turn_opts,
   )
   __inject_feedback_with_tool_repair(session_id, "parse_guidance", feedback)
-  agent_emit_event(
-    session_id,
-    "tool_parse_error_feedback",
-    {
-      parse_error_count: len(parsed?.tool_parse_errors ?? []),
-      protocol_violation_count: len(protocol_violations),
-      diagnostic_count: len(diagnostics),
-      error_summary: error_summary,
-      has_partial_success: has_partial_success,
-      parsed_call_count: parsed_count,
-      recovered_call_count: feedback_override?.recovered_call_count ?? 0,
-      recovered_batch_dropped: feedback_override != nil,
-    },
-  )
   // Only a full parse drop (zero calls dispatched) suppresses the no-progress
   // stall path; a partial-success turn made real progress and stays subject to
   // normal stall accounting.
