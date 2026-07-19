@@ -202,12 +202,14 @@ const GATED_METRIC_FLOORS = {
   execute_p90_ms: 5.0,
 }
 
-// Element-wise best (minimum) of the gated metrics across measurement rounds;
-// every other field (test_count, telemetry, ...) comes from the latest round.
-// Each round is a complete honest measurement, so the minimum is the
-// observation least distorted by shared-runner noise: a transient noisy
-// neighbor inflates one round but not all of them, while a real regression
-// inflates every round and still fails the gate.
+/**
+ * Element-wise best (minimum) of the gated metrics across measurement rounds;
+ * every other field (test_count, telemetry, ...) comes from the latest round.
+ * Each round is a complete honest measurement, so the minimum is the
+ * observation least distorted by shared-runner noise: a transient noisy
+ * neighbor inflates one round but not all of them, while a real regression
+ * inflates every round and still fails the gate.
+ */
 pub fn best_metrics(rounds: list<dict>) -> dict {
   let best = rounds[rounds.count - 1] ?? {}
   for name in GATED_METRIC_FLOORS.keys().sort() {
@@ -463,9 +465,11 @@ fn run_parallel(root: string, platform: string, test_files: list<string>) -> dic
   return {runs: runs, errors: errors}
 }
 
-// One complete measurement: materialize fresh suites in an isolated root, run
-// them in parallel, and aggregate. Cleans up on success; preserves the root
-// for forensics when a child run failed.
+/**
+ * One complete measurement: materialize fresh suites in an isolated root, run
+ * them in parallel, and aggregate. Cleans up on success; preserves the root
+ * for forensics when a child run failed.
+ */
 fn measure_round(platform: string) -> dict {
   const root = path_join(".harn-runs/test-case-performance", uuid_v7())
   mkdir(root)
