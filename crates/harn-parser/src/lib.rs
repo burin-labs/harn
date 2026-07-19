@@ -23,8 +23,8 @@ pub use stdlib_metadata::{
     parse_for_span as parse_stdlib_metadata, synthesize_example, StdlibMetadata,
 };
 pub use typechecker::{
-    block_definitely_exits, format_type, stmt_definitely_exits, DiagnosticDetails,
-    DiagnosticSeverity, InlayHintInfo, TypeChecker, TypeDiagnostic,
+    block_definitely_exits, format_type, stmt_definitely_exits, substitute_type_expr,
+    DiagnosticDetails, DiagnosticSeverity, InlayHintInfo, TypeChecker, TypeDiagnostic,
 };
 
 pub use builtin_signatures::install_builtin_signatures;

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::rc::Rc;
 
 use crate::ast::*;
@@ -19,6 +19,13 @@ mod union;
 
 pub use exits::{block_definitely_exits, stmt_definitely_exits};
 pub use format::{format_type, shape_mismatch_detail};
+
+/// Substitute generic bindings with the same open-row folding used by type
+/// inference. Schema compilation calls this instead of carrying a second type
+/// expression rewriter.
+pub fn substitute_type_expr(ty: &TypeExpr, bindings: &BTreeMap<String, TypeExpr>) -> TypeExpr {
+    TypeChecker::apply_type_bindings(ty, bindings)
+}
 
 use schema_inference::schema_type_expr_from_node;
 use scope::TypeScope;

@@ -154,15 +154,14 @@ impl Compiler {
             return self.compile_value_call(args);
         }
 
-        // Compile-time lowering: `schema_of(TypeAlias)` emits the
-        // alias's JSON-Schema dict as a constant. Falls through to
+        // Schema lowering: `schema_of(TypeAlias)` emits a composable schema
+        // expression. Falls through to
         // the runtime `schema_of(...)` builtin when the argument is
         // not a known type alias (e.g. a string name computed at
         // runtime, or a dict pass-through).
         if name == "schema_of" && args.len() == 1 {
             if let Node::Identifier(alias) = &args[0].node {
-                if let Some(schema) = self.schema_value_for_alias(alias) {
-                    self.emit_vm_value_literal(&schema);
+                if self.emit_schema_for_alias(alias) {
                     return Ok(());
                 }
             }
@@ -175,9 +174,9 @@ impl Compiler {
         // narrowing in `schema_type_expr_from_node`.
         if Self::is_schema_guard(name) && args.len() >= 2 {
             if let Node::Identifier(alias) = &args[1].node {
-                if let Some(schema) = self.schema_value_for_alias(alias) {
+                if let Some(schema) = self.schema_fragment_for_alias(alias) {
                     self.compile_node(&args[0])?;
-                    self.emit_vm_value_literal(&schema);
+                    self.emit_schema_fragment(&schema);
                     for arg in &args[2..] {
                         self.compile_node(arg)?;
                     }
@@ -413,8 +412,7 @@ impl Compiler {
                 // path when the name does not resolve.
                 if Self::entry_key_is(&entry.key, "output_schema") {
                     if let Node::Identifier(alias) = &entry.value.node {
-                        if let Some(schema) = self.schema_value_for_alias(alias) {
-                            self.emit_vm_value_literal(&schema);
+                        if self.emit_schema_for_alias(alias) {
                             continue;
                         }
                     }

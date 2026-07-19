@@ -2,7 +2,7 @@ use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use harn_parser::{Node, SNode, ShapeField, TypeExpr, TypedParam};
+use harn_parser::{substitute_type_expr, Node, SNode, ShapeField, TypeExpr, TypedParam};
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 use crate::value::VmValue;
@@ -104,14 +104,32 @@ impl Compiler {
     /// canonical `TypeExpr`.
     pub(crate) fn collect_type_aliases(&mut self, program: &[SNode]) {
         for sn in program {
-            if let Node::TypeDecl {
-                name,
-                type_expr,
-                type_params: _,
-                is_pub: _,
-            } = peel_node(sn)
-            {
-                self.type_aliases.insert(name.clone(), type_expr.clone());
+            match peel_node(sn) {
+                Node::SelectiveImport { names, .. } => {
+                    for name in names {
+                        self.type_aliases.entry(name.clone()).or_insert_with(|| {
+                            super::TypeAliasDefinition {
+                                type_params: Vec::new(),
+                                body: None,
+                            }
+                        });
+                    }
+                }
+                Node::TypeDecl {
+                    name,
+                    type_expr,
+                    type_params,
+                    is_pub: _,
+                } => {
+                    self.type_aliases.insert(
+                        name.clone(),
+                        super::TypeAliasDefinition {
+                            type_params: type_params.clone(),
+                            body: Some(type_expr.clone()),
+                        },
+                    );
+                }
+                _ => {}
             }
         }
     }
@@ -137,11 +155,15 @@ impl Compiler {
     ) -> TypeExpr {
         match ty {
             TypeExpr::Named(name) => {
-                if let Some(target) = self.type_aliases.get(name) {
+                if let Some(target) = self
+                    .type_aliases
+                    .get(name)
+                    .filter(|alias| alias.type_params.is_empty() && alias.body.is_some())
+                {
                     if !visiting.insert(name.clone()) {
                         return TypeExpr::Named(name.clone());
                     }
-                    let resolved = self.expand_alias_inner(target, visiting);
+                    let resolved = self.expand_alias_inner(target.body.as_ref().unwrap(), visiting);
                     visiting.remove(name);
                     resolved
                 } else {
@@ -208,13 +230,40 @@ impl Compiler {
                     .collect(),
                 return_type: Box::new(self.expand_alias_inner(return_type, visiting)),
             },
-            TypeExpr::Applied { name, args } => TypeExpr::Applied {
-                name: name.clone(),
-                args: args
+            TypeExpr::Applied { name, args } => {
+                let args = args
                     .iter()
-                    .map(|a| self.expand_alias_inner(a, visiting))
-                    .collect(),
-            },
+                    .map(|arg| self.expand_alias_inner(arg, visiting))
+                    .collect::<Vec<_>>();
+                let Some(alias) = self.type_aliases.get(name) else {
+                    return TypeExpr::Applied {
+                        name: name.clone(),
+                        args,
+                    };
+                };
+                let Some(body) = alias.body.as_ref() else {
+                    return TypeExpr::Applied {
+                        name: name.clone(),
+                        args,
+                    };
+                };
+                if alias.type_params.len() != args.len() || !visiting.insert(name.clone()) {
+                    return TypeExpr::Applied {
+                        name: name.clone(),
+                        args,
+                    };
+                }
+                let bindings = alias
+                    .type_params
+                    .iter()
+                    .zip(args.iter().cloned())
+                    .map(|(param, arg)| (param.name.clone(), arg))
+                    .collect();
+                let instantiated = substitute_type_expr(body, &bindings);
+                let resolved = self.expand_alias_inner(&instantiated, visiting);
+                visiting.remove(name);
+                resolved
+            }
             TypeExpr::Never => TypeExpr::Never,
             TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
             TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
@@ -224,38 +273,40 @@ impl Compiler {
         }
     }
 
-    /// Build the JSON-Schema VmValue for a named type alias, or `None` if
-    /// the name is unknown or the alias cannot be lowered to a schema.
-    pub(super) fn schema_value_for_alias(&self, name: &str) -> Option<VmValue> {
-        let ty = self.type_aliases.get(name)?;
-        let expanded = self.expand_alias(ty);
-        Self::type_expr_to_schema_value(&expanded)
-    }
-
-    /// Lower every `pub type` alias in `program` to its JSON-Schema VmValue.
-    /// Used by the module artifact so importers get the same schema value in
-    /// expression position (`output_schema: ImportedAlias`) that a local
-    /// alias would lower to at compile time. Aliases whose bodies cannot be
-    /// expressed as a JSON schema (function types, streams, ...) are omitted:
-    /// they stay importable for annotations, just not as runtime schemas.
-    pub fn lower_public_type_schemas(
+    /// Compile exported type schemas into a tiny module initializer. Running
+    /// this after imports makes referenced imported schemas ordinary lexical
+    /// inputs while keeping the cached artifact immutable and relocatable.
+    pub fn compile_public_type_schema_initializers(
         program: &[SNode],
-    ) -> std::collections::BTreeMap<String, VmValue> {
+        source_file: Option<String>,
+    ) -> Result<Option<Chunk>, CompileError> {
         let mut compiler = Compiler::new();
         compiler.collect_type_aliases(program);
-        let mut schemas = std::collections::BTreeMap::new();
+        compiler.chunk.source_file = source_file;
+        let mut emitted = false;
         for sn in program {
-            let inner = peel_node(sn);
-            if let Node::TypeDecl {
+            let Node::TypeDecl {
                 name, is_pub: true, ..
-            } = inner
-            {
-                if let Some(schema) = compiler.schema_value_for_alias(name) {
-                    schemas.insert(name.clone(), schema);
-                }
+            } = peel_node(sn)
+            else {
+                continue;
+            };
+            if compiler.emit_schema_for_alias(name) {
+                compiler.emit_define_binding(name, false);
+                emitted = true;
             }
         }
-        schemas
+        if !emitted {
+            return Ok(None);
+        }
+        compiler.chunk.emit(Op::Nil, compiler.line);
+        compiler.chunk.emit(Op::Return, compiler.line);
+        super::ensure_chunk_addressable(
+            &compiler.chunk,
+            "the module type-schema initializer",
+            compiler.line,
+        )?;
+        Ok(Some(compiler.chunk))
     }
 
     /// Schema-guard builtins that accept a schema as their second argument.
@@ -607,6 +658,7 @@ impl Compiler {
     pub(crate) fn type_expr_to_schema_value(type_expr: &harn_parser::TypeExpr) -> Option<VmValue> {
         match type_expr {
             harn_parser::TypeExpr::Named(name) => match name.as_str() {
+                "any" | "unknown" => Some(VmValue::dict(BTreeMap::<String, VmValue>::new())),
                 "int" | "float" | "string" | "bool" | "list" | "dict" | "set" | "nil"
                 | "closure" | "bytes" => Some(VmValue::dict(BTreeMap::from([(
                     "type".to_string(),
@@ -614,8 +666,7 @@ impl Compiler {
                 )]))),
                 _ => None,
             },
-            harn_parser::TypeExpr::Shape(fields)
-            | harn_parser::TypeExpr::OpenShape { fields, .. } => {
+            harn_parser::TypeExpr::Shape(fields) => {
                 let mut properties = BTreeMap::new();
                 let mut required = Vec::new();
                 for field in fields {
@@ -648,21 +699,20 @@ impl Compiler {
                 }
                 Some(VmValue::dict(out))
             }
+            harn_parser::TypeExpr::OpenShape { .. } => None,
             harn_parser::TypeExpr::List(inner) => {
                 let mut out = BTreeMap::new();
                 out.put_str("type", "list");
-                if let Some(item_schema) = Self::type_expr_to_schema_value(inner) {
-                    out.insert("items".to_string(), item_schema);
-                }
+                let item_schema = Self::type_expr_to_schema_value(inner)?;
+                out.insert("items".to_string(), item_schema);
                 Some(VmValue::dict(out))
             }
             harn_parser::TypeExpr::DictType(key, value) => {
                 let mut out = BTreeMap::new();
                 out.put_str("type", "dict");
                 if matches!(key.as_ref(), harn_parser::TypeExpr::Named(name) if name == "string") {
-                    if let Some(value_schema) = Self::type_expr_to_schema_value(value) {
-                        out.insert("additional_properties".to_string(), value_schema);
-                    }
+                    let value_schema = Self::type_expr_to_schema_value(value)?;
+                    out.insert("additional_properties".to_string(), value_schema);
                 }
                 Some(VmValue::dict(out))
             }
