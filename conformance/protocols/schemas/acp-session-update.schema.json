@@ -199,7 +199,15 @@
             "agent_loop_protocol_failure",
             "generic_throw"
           ]
-        }
+        },
+        "category": { "type": "string" },
+        "kind": { "type": "string" },
+        "reason": { "type": "string" },
+        "code": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "retryAfterMs": { "type": "integer" },
+        "provider": { "type": "string" },
+        "model": { "type": "string" }
       }
     },
     "SessionUpdateParams": {

@@ -38,6 +38,9 @@ async fn prompt_response(
     panic!("session/prompt {id} did not produce a response")
 }
 
+/// Assert the typed error data for a failure that carries no structured facts
+/// beyond its class (compile/setup/protocol errors): the payload stays exactly
+/// `{schema, terminalClass}` so a non-provider failure names no route.
 fn assert_prompt_error_data(response: &serde_json::Value, code: i64, terminal_class: &str) {
     assert_eq!(response["error"]["code"], code);
     assert_eq!(
@@ -46,6 +49,82 @@ fn assert_prompt_error_data(response: &serde_json::Value, code: i64, terminal_cl
             "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
             "terminalClass": terminal_class,
         })
+    );
+}
+
+/// Assert the typed error data for a failure whose thrown dict carried a
+/// `category` fact, which the projection surfaces onto the envelope.
+fn assert_prompt_error_data_with_category(
+    response: &serde_json::Value,
+    code: i64,
+    terminal_class: &str,
+    category: &str,
+) {
+    assert_eq!(response["error"]["code"], code);
+    assert_eq!(
+        response["error"]["data"],
+        serde_json::json!({
+            "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
+            "terminalClass": terminal_class,
+            "category": category,
+        })
+    );
+}
+
+/// A terminal prompt failure produces exactly one JSON-RPC error and never an
+/// assistant `agent_message_chunk`. Driving the full ACP integration (not a
+/// synthetic render event) is what catches the historical duplicate-frame bug:
+/// a client-side test that only inspects the error response would pass while
+/// the wire still carried a phantom assistant message.
+#[tokio::test(flavor = "current_thread")]
+async fn terminal_failure_emits_one_typed_error_and_no_assistant_chunk() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    let session_id = new_session(&mut server, &mut rx).await;
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "let x ="}],
+            },
+        }))
+        .await;
+
+    let mut assistant_chunks = 0;
+    let mut error_responses = 0;
+    let mut error_data = serde_json::Value::Null;
+    while let Ok(raw) = rx.try_recv() {
+        let message: serde_json::Value = serde_json::from_str(&raw).expect("valid JSON frame");
+        if message["method"] == "session/update"
+            && message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+        {
+            assistant_chunks += 1;
+        }
+        if message["id"] == 2 && message.get("error").is_some() {
+            error_responses += 1;
+            error_data = message["error"]["data"].clone();
+        }
+    }
+
+    assert_eq!(
+        assistant_chunks, 0,
+        "a terminal failure must not emit assistant content"
+    );
+    assert_eq!(error_responses, 1, "expected exactly one terminal error");
+    assert_eq!(error_data["schema"], ACP_PROMPT_ERROR_DATA_SCHEMA);
+    assert_eq!(error_data["terminalClass"], "generic_throw");
+    // A non-provider failure carries no route: absence is the signal.
+    assert!(
+        error_data.get("provider").is_none(),
+        "compile failure must not name a provider"
+    );
+    assert!(
+        error_data.get("model").is_none(),
+        "compile failure must not name a model"
     );
 }
 
@@ -129,7 +208,7 @@ async fn execution_error_preserves_structured_class_over_misleading_prose() {
             }
 
             let response = prompt_response.expect("session/prompt response");
-            assert_prompt_error_data(&response, -32000, "tool_policy_rejected");
+            assert_prompt_error_data_with_category(&response, -32000, "tool_policy_rejected", "tool_rejected");
             drop(request_tx);
             server.await.expect("ACP channel server task");
         })
@@ -178,7 +257,7 @@ async fn execution_error_projects_resource_contention_as_typed_data() {
             }
 
             let response = prompt_response.expect("session/prompt response");
-            assert_prompt_error_data(&response, -32000, "resource_busy");
+            assert_prompt_error_data_with_category(&response, -32000, "resource_busy", "resource_busy");
             drop(request_tx);
             server.await.expect("ACP channel server task");
         })

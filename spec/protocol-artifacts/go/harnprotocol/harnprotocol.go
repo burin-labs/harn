@@ -571,6 +571,14 @@ type ACPError struct {
 type HarnACPPromptErrorData struct {
 	Schema        string             `json:"schema"`
 	TerminalClass AgentTerminalClass `json:"terminalClass"`
+	Category      *string            `json:"category,omitempty"`
+	Kind          *string            `json:"kind,omitempty"`
+	Reason        *string            `json:"reason,omitempty"`
+	Code          *string            `json:"code,omitempty"`
+	Retryable     *bool              `json:"retryable,omitempty"`
+	RetryAfterMs  *int64             `json:"retryAfterMs,omitempty"`
+	Provider      *string            `json:"provider,omitempty"`
+	Model         *string            `json:"model,omitempty"`
 }
 
 // ACPResponse is a JSON-RPC response envelope.

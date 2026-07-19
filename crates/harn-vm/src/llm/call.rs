@@ -408,8 +408,16 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.reason.as_str())));
         dict.entry(crate::value::intern_key("message"))
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(message.as_str())));
-        dict.put_str("provider", provider);
-        dict.put_str("model", model);
+        // Fill provider/model only when the routing failure did not already
+        // record the route that actually failed. A fallback/ladder that failed
+        // on a different provider/model owns its own route here; overwriting it
+        // with the outer requested/base route would misattribute the failure
+        // (a routed model that differs from the session's selection would be
+        // reported as the base route).
+        dict.entry(crate::value::intern_key("provider"))
+            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(provider)));
+        dict.entry(crate::value::intern_key("model"))
+            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(model)));
         return VmValue::dict(dict);
     }
     let mut dict = std::collections::BTreeMap::new();
@@ -1391,5 +1399,59 @@ mod schema_stream_abort_retry_tests {
             "at the ceiling the budget must not grow further"
         );
         assert_eq!(opts.max_tokens, MAX_TOKENS_RETRY_CEILING);
+    }
+}
+
+#[cfg(test)]
+mod build_llm_error_dict_tests {
+    use super::*;
+
+    fn field(dict: &VmValue, key: &str) -> Option<String> {
+        dict.as_dict()
+            .and_then(|map| map.get(key))
+            .map(|value| value.display())
+    }
+
+    #[test]
+    fn preserves_route_recorded_by_a_routing_failure() {
+        // A ladder/fallback that failed on a different provider/model records the
+        // route that actually failed. The outer wrapper must not overwrite it
+        // with the requested/base route.
+        let thrown = VmError::Thrown(VmValue::dict([
+            ("kind", VmValue::String(arcstr::ArcStr::from("terminal"))),
+            (
+                "reason",
+                VmValue::String(arcstr::ArcStr::from("provider_exhausted")),
+            ),
+            (
+                "provider",
+                VmValue::String(arcstr::ArcStr::from("backup-provider")),
+            ),
+            (
+                "model",
+                VmValue::String(arcstr::ArcStr::from("escalated-model")),
+            ),
+        ]));
+
+        let dict = build_llm_error_dict(&thrown, "base-provider", "base-model");
+
+        assert_eq!(field(&dict, "provider").as_deref(), Some("backup-provider"));
+        assert_eq!(field(&dict, "model").as_deref(), Some("escalated-model"));
+    }
+
+    #[test]
+    fn fills_route_when_the_failure_did_not_record_one() {
+        // Provider-exhausted errors omit a top-level route; a plain
+        // (non-dict) failure has none either. When absent, the requested route
+        // is the honest answer for a genuine single-route call.
+        let thrown = VmError::Thrown(VmValue::dict([(
+            "reason",
+            VmValue::String(arcstr::ArcStr::from("timeout")),
+        )]));
+
+        let dict = build_llm_error_dict(&thrown, "base-provider", "base-model");
+
+        assert_eq!(field(&dict, "provider").as_deref(), Some("base-provider"));
+        assert_eq!(field(&dict, "model").as_deref(), Some("base-model"));
     }
 }
