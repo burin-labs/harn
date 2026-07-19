@@ -182,14 +182,41 @@ pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<St
     Some(format!("sandbox active; {}\n", deltas.join("; ")))
 }
 
-/// Normalize each grant path the same way the policy does before rendering it,
-/// so the disclosed path matches the write/read jail the sandbox installed.
+/// Render each grant to the exact path the sandbox jails it to, so the disclosed
+/// string always equals the enforced write/read root.
 fn display_grant_roots(roots: &[PathBuf]) -> String {
     roots
         .iter()
-        .map(|path| normalize_run_workspace_root(path).display().to_string())
+        .map(|path| rendered_jail_root(path).display().to_string())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// The absolute, symlink-canonicalized path the sandbox actually jails a grant
+/// to. `default_run_capability_policy` seeds the policy's workspace roots by
+/// running each grant through `normalize_run_workspace_root`; the runtime then
+/// renders every root to its jail path via `render_policy_root` (lexical
+/// normalize + best-effort canonicalize). Disclosure and attestation reproduce
+/// that full pipeline through the runtime's single owner so a reported path —
+/// symlinks and `..` segments resolved — equals the enforced root and never
+/// diverges from the jail. Canonicalization is best-effort and never panics.
+fn rendered_jail_root(path: &Path) -> PathBuf {
+    harn_vm::process_sandbox::render_policy_root(
+        &normalize_run_workspace_root(path).display().to_string(),
+    )
+}
+
+/// Render a policy's already-configured root strings to their enforced jail
+/// paths through the same single owner the OS backends use.
+fn render_policy_roots(roots: &[String]) -> Vec<String> {
+    roots
+        .iter()
+        .map(|root| {
+            harn_vm::process_sandbox::render_policy_root(root)
+                .display()
+                .to_string()
+        })
+        .collect()
 }
 
 fn plural_suffix(count: usize) -> &'static str {
@@ -264,11 +291,11 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
     let active = active_policy.is_some();
     let workspace_roots = active_policy
         .as_ref()
-        .map(|policy| policy.workspace_roots.clone())
+        .map(|policy| render_policy_roots(&policy.workspace_roots))
         .unwrap_or_default();
     let read_only_roots = active_policy
         .as_ref()
-        .map(|policy| policy.read_only_roots.clone())
+        .map(|policy| render_policy_roots(&policy.read_only_roots))
         .unwrap_or_default();
     let profile = active_policy
         .as_ref()
@@ -291,7 +318,7 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
     let write_roots = sandbox
         .write_roots
         .iter()
-        .map(|path| normalize_run_workspace_root(path).display().to_string())
+        .map(|path| rendered_jail_root(path).display().to_string())
         .collect::<Vec<_>>();
 
     serde_json::json!({
@@ -359,6 +386,55 @@ mod tests {
         assert_eq!(
             sandbox_grant_disclosure(&options).as_deref(),
             Some("sandbox active; subprocess network allowed\n"),
+        );
+    }
+
+    #[test]
+    fn disclosure_names_the_canonical_jail_path_not_the_raw_grant() {
+        // The whole point of the disclosure is precision, so a grant given
+        // through a symlink or with `..` segments must be disclosed as the path
+        // the sandbox actually jails to — the runtime canonicalizes at policy
+        // render time — not the pre-canonical string the caller typed.
+        let temp = tempfile::tempdir().expect("temp dir");
+        let real = temp.path().join("real-state");
+        std::fs::create_dir(&real).expect("create real dir");
+
+        // Symlinked grant resolves to the real target it jails to.
+        #[cfg(unix)]
+        {
+            let link = temp.path().join("link-state");
+            std::os::unix::fs::symlink(&real, &link).expect("symlink");
+            let jailed = rendered_jail_root(&link);
+            assert_eq!(
+                jailed,
+                real.canonicalize().expect("canonical real"),
+                "symlinked grant should jail to the real target"
+            );
+            let line = sandbox_grant_disclosure(
+                &RunSandboxOptions::default().with_write_roots(vec![link.clone()]),
+            )
+            .expect("disclosure");
+            assert!(
+                line.contains(&jailed.display().to_string())
+                    && !line.contains(&link.display().to_string()),
+                "symlinked grant must disclose the canonical jail path: {line}"
+            );
+        }
+
+        // A `..`-containing grant collapses to the same canonical jail path.
+        let dotted = real.join("..").join("real-state");
+        let jailed_dots = rendered_jail_root(&dotted);
+        assert_eq!(
+            jailed_dots,
+            real.canonicalize().expect("canonical real"),
+            "`..` grant should collapse to the real dir"
+        );
+        let dots_line =
+            sandbox_grant_disclosure(&RunSandboxOptions::default().with_write_roots(vec![dotted]))
+                .expect("disclosure");
+        assert!(
+            dots_line.contains(&jailed_dots.display().to_string()) && !dots_line.contains(".."),
+            "`..` grant must disclose the collapsed jail path with no `..`: {dots_line}"
         );
     }
 }

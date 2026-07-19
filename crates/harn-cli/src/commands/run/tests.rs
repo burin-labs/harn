@@ -211,9 +211,17 @@ fn default_run_policy_only_raises_the_requested_side_effect_ceiling() {
 #[test]
 fn run_sandbox_attestation_reports_effective_policy() {
     harn_vm::reset_thread_local_state();
+    // Real dirs so the attestation's canonicalization is deterministic across
+    // platforms (a symlinked `/tmp` on macOS vs a plain `/tmp` on Linux would
+    // make a hardcoded literal non-portable).
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let workspace = temp.path().join("workspace");
+    let shared = temp.path().join("shared");
+    std::fs::create_dir(&workspace).expect("workspace");
+    std::fs::create_dir(&shared).expect("shared");
     let policy = harn_vm::orchestration::CapabilityPolicy {
-        workspace_roots: vec!["/tmp/workspace".to_string()],
-        read_only_roots: vec!["/tmp/shared".to_string()],
+        workspace_roots: vec![workspace.display().to_string()],
+        read_only_roots: vec![shared.display().to_string()],
         sandbox_profile: harn_vm::orchestration::SandboxProfile::OsHardened,
         ..harn_vm::orchestration::CapabilityPolicy::default()
     };
@@ -223,9 +231,21 @@ fn run_sandbox_attestation_reports_effective_policy() {
 
     assert_eq!(metadata["run_default_enabled"], false);
     assert_eq!(metadata["active"], true);
-    assert_eq!(metadata["workspace_roots"][0], "/tmp/workspace");
+    // The attestation reports the enforced jail path (canonicalized through the
+    // runtime's single normalization owner), matching the disclosure surface.
+    assert_eq!(
+        metadata["workspace_roots"][0],
+        harn_vm::process_sandbox::render_policy_root(&workspace.display().to_string())
+            .display()
+            .to_string()
+    );
     assert_eq!(metadata["write_roots"].as_array().unwrap().len(), 0);
-    assert_eq!(metadata["read_only_roots"][0], "/tmp/shared");
+    assert_eq!(
+        metadata["read_only_roots"][0],
+        harn_vm::process_sandbox::render_policy_root(&shared.display().to_string())
+            .display()
+            .to_string()
+    );
     assert_eq!(metadata["profile"], "os_hardened");
     assert_eq!(metadata["process_network_requested"], false);
     assert_eq!(metadata["process_network_enabled"], true);
@@ -412,12 +432,15 @@ pipeline main() {{
     );
     // The grant discloses exactly the delta on one line, and the blanket
     // `--no-sandbox` warning stays suppressed for a scoped, still-sandboxed run.
+    // The disclosure names the enforced jail path (the temp dir canonicalizes
+    // through the runtime's normalization owner), not the raw grant string.
+    let jailed_write_root = write_root.canonicalize().expect("canonical write root");
     assert!(
         outcome.stderr.contains(&format!(
             "sandbox active; extra write root: {}",
-            write_root.display()
+            jailed_write_root.display()
         )),
-        "granted run should disclose the extra write root: {}",
+        "granted run should disclose the canonicalized extra write root: {}",
         outcome.stderr
     );
     assert!(
@@ -461,7 +484,13 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
     assert_eq!(metadata["run_default_enabled"], true);
     assert_eq!(metadata["egress"], "explicit_policy_required");
     assert_eq!(metadata["process_network_requested"], false);
-    assert_eq!(metadata["write_roots"][0], grant.display().to_string());
+    // The receipt reports the enforced jail path, not the raw grant string.
+    assert_eq!(
+        metadata["write_roots"][0],
+        harn_vm::process_sandbox::render_policy_root(&grant.display().to_string())
+            .display()
+            .to_string()
+    );
     harn_vm::reset_thread_local_state();
 }
 
