@@ -49,6 +49,7 @@ fn request(owner: &str) -> HostLeaseRequest {
     HostLeaseRequest {
         host: "mac-local".to_string(),
         resource_class: HostLeaseResourceClass::WholeMachine,
+        domain: DEFAULT_HOST_LEASE_DOMAIN.to_string(),
         execution_context: None,
         owner: owner.to_string(),
         priority_class: HostLeasePriorityClass::Measurement,
@@ -102,7 +103,7 @@ fn immediate_transaction_allows_exactly_one_race_winner() {
             thread::spawn(move || {
                 barrier.wait();
                 store
-                    .try_acquire_at(request(&format!("worker-{index}")), 1_000, None, 0)
+                    .try_acquire(request(&format!("worker-{index}")))
                     .unwrap()
                     .status
             })
@@ -149,6 +150,48 @@ fn resource_classes_are_independently_exclusive() {
         HostLeaseResourceClass::RustHeavy.definition().name,
         "rust-heavy"
     );
+}
+
+#[test]
+fn named_domains_are_independently_exclusive() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let mut first = request("release-owner");
+    first.domain = "release".to_string();
+    let first = store.try_acquire_at(first, 1_000, None, 0).unwrap();
+    assert_eq!(first.status, HostLeaseAcquireStatus::Acquired);
+
+    let mut contended = request("release-contender");
+    contended.domain = "release".to_string();
+    let contended = store.try_acquire_at(contended, 1_001, None, 0).unwrap();
+    assert_eq!(contended.status, HostLeaseAcquireStatus::Deferred);
+    assert_eq!(contended.defer.unwrap().domain, "release");
+
+    let mut build = request("build-owner");
+    build.domain = "build".to_string();
+    let build = store.try_acquire_at(build, 1_002, None, 0).unwrap();
+    assert_eq!(build.status, HostLeaseAcquireStatus::Acquired);
+    assert_eq!(build.handle.unwrap().domain, "build");
+}
+
+#[test]
+fn domains_are_validated_before_registry_access() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    for domain in ["", ".", "..", "release/owner", "release owner"] {
+        let mut invalid = request("invalid-domain");
+        invalid.domain = domain.to_string();
+        assert!(matches!(
+            store.try_acquire_at(invalid, 1_000, None, 0),
+            Err(HostLeaseError::InvalidRequest(_))
+        ));
+    }
+    let mut oversized = request("invalid-domain");
+    oversized.domain = "x".repeat(129);
+    assert!(matches!(
+        store.try_acquire_at(oversized, 1_000, None, 0),
+        Err(HostLeaseError::InvalidRequest(_))
+    ));
 }
 
 #[test]
@@ -200,6 +243,7 @@ fn run_receipts_persist_redacted_context_and_validate_state_edges() {
             HostLeaseResourceKey {
                 machine: "mac-local".to_string(),
                 resource_class: HostLeaseResourceClass::RustHeavy,
+                domain: DEFAULT_HOST_LEASE_DOMAIN.to_string(),
             },
             context,
             30_000,
@@ -319,17 +363,155 @@ fn legacy_table_migrates_to_the_whole_machine_resource() {
 }
 
 #[test]
+fn prior_resource_table_migrates_into_the_default_domain() {
+    let temp = TempDir::new().unwrap();
+    let database = temp.path().join(LEASE_DB_FILE);
+    let connection = Connection::open(database).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE host_leases (
+                host TEXT NOT NULL,
+                resource_class TEXT NOT NULL,
+                lease_id TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                priority_class TEXT NOT NULL,
+                acquired_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                expires_at_ms INTEGER,
+                owner_pid INTEGER,
+                owner_process_identity INTEGER,
+                reason TEXT,
+                metadata_json TEXT NOT NULL,
+                execution_context_json TEXT,
+                PRIMARY KEY (host, resource_class)
+            );
+            INSERT INTO host_leases VALUES (
+                'mac-local', 'rust-heavy', 'v2-token', 'v2-owner', 'measurement',
+                1000, 1000, 61000, NULL, NULL, 'v2 migration', '{\"lane\":\"p7\"}', NULL
+            );",
+        )
+        .unwrap();
+    drop(connection);
+
+    let store = store(&temp);
+    let migrated = store
+        .status_at_domain(
+            "mac-local",
+            HostLeaseResourceClass::RustHeavy,
+            DEFAULT_HOST_LEASE_DOMAIN,
+            1_001,
+        )
+        .unwrap()
+        .active
+        .expect("v2 row remains active");
+    assert_eq!(migrated.domain, DEFAULT_HOST_LEASE_DOMAIN);
+    assert_eq!(migrated.lease_id, "v2-token");
+    assert_eq!(
+        migrated.metadata.get("lane").map(String::as_str),
+        Some("p7")
+    );
+}
+
+#[test]
 fn expiry_is_recovered_inside_the_acquire_transaction() {
     let temp = TempDir::new().unwrap();
     let store = store(&temp);
     let mut short = request("codex-0");
     short.ttl_ms = Some(10);
-    store.try_acquire_at(short, 1_000, None, 0).unwrap();
+    short
+        .metadata
+        .insert("version".to_string(), "1.2.3".to_string());
+    let prior = store
+        .try_acquire_at(short, 1_000, None, 0)
+        .unwrap()
+        .handle
+        .unwrap();
     let next = store
         .try_acquire_at(request("codex-1"), 1_011, None, 0)
         .unwrap();
     assert_eq!(next.status, HostLeaseAcquireStatus::Acquired);
     assert!(next.recovered_stale_lease);
+    assert_eq!(next.recovered, Some(prior));
+}
+
+#[test]
+fn status_returns_the_exact_recovered_handle() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let mut short = request("release-owner");
+    short.domain = "release".to_string();
+    short.ttl_ms = Some(10);
+    short
+        .metadata
+        .insert("version".to_string(), "1.2.3".to_string());
+    let prior = store
+        .try_acquire_at(short, 1_000, None, 0)
+        .unwrap()
+        .handle
+        .unwrap();
+
+    let state = store
+        .status_at_domain(
+            "mac-local",
+            HostLeaseResourceClass::WholeMachine,
+            "release",
+            1_011,
+        )
+        .unwrap();
+    assert!(state.active.is_none());
+    assert!(state.recovered_stale_lease);
+    assert_eq!(state.recovered, Some(prior));
+}
+
+#[test]
+fn renew_and_release_are_domain_qualified() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let mut request = request("release-owner");
+    request.domain = "release".to_string();
+    let handle = store.try_acquire(request).unwrap().handle.unwrap();
+
+    assert!(
+        !store
+            .renew_for_domain(
+                &handle.host,
+                handle.resource_class,
+                "build",
+                &handle.lease_id,
+                120_000,
+            )
+            .unwrap()
+            .renewed
+    );
+    assert!(
+        !store
+            .release_for_domain(
+                &handle.host,
+                handle.resource_class,
+                "build",
+                &handle.lease_id,
+            )
+            .unwrap()
+            .released
+    );
+    assert_eq!(
+        store
+            .status_for_domain(&handle.host, handle.resource_class, "release")
+            .unwrap()
+            .active,
+        Some(handle.clone())
+    );
+    assert!(
+        store
+            .release_for_domain(
+                &handle.host,
+                handle.resource_class,
+                &handle.domain,
+                &handle.lease_id,
+            )
+            .unwrap()
+            .released
+    );
 }
 
 #[test]
@@ -371,6 +553,128 @@ fn renew_requires_the_active_token() {
     assert_eq!(renewed_handle.lease_id, handle.lease_id);
     assert!(renewed_handle.updated_at_ms >= handle.updated_at_ms);
     assert!(renewed_handle.expires_at_ms > Some(renewed_handle.updated_at_ms));
+}
+
+#[test]
+fn metadata_replacement_requires_the_exact_active_authority() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let mut initial = request("release-owner");
+    initial.domain = "release".to_string();
+    initial.metadata = BTreeMap::from([
+        ("discovery".to_string(), "pending".to_string()),
+        ("obsolete".to_string(), "remove-me".to_string()),
+    ]);
+    let handle = store
+        .try_acquire_at(initial, 1_000, None, 0)
+        .unwrap()
+        .handle
+        .unwrap();
+    let replacement = BTreeMap::from([
+        ("discovery".to_string(), "complete".to_string()),
+        ("revision".to_string(), "abc123".to_string()),
+    ]);
+
+    let wrong_token = store
+        .update_metadata_at_domain(
+            &handle.host,
+            handle.resource_class,
+            &handle.domain,
+            "wrong-token",
+            replacement.clone(),
+            1_001,
+        )
+        .unwrap();
+    assert!(!wrong_token.updated);
+    assert!(wrong_token.handle.is_none());
+
+    let wrong_domain = store
+        .update_metadata_at_domain(
+            &handle.host,
+            handle.resource_class,
+            "build",
+            &handle.lease_id,
+            replacement.clone(),
+            1_002,
+        )
+        .unwrap();
+    assert!(!wrong_domain.updated);
+    assert!(wrong_domain.handle.is_none());
+
+    let updated = store
+        .update_metadata_at_domain(
+            &handle.host,
+            handle.resource_class,
+            &handle.domain,
+            &handle.lease_id,
+            replacement.clone(),
+            1_003,
+        )
+        .unwrap();
+    assert!(updated.updated);
+    let updated_handle = updated.handle.unwrap();
+    assert_eq!(updated_handle.updated_at_ms, 1_003);
+    assert_eq!(updated_handle.expires_at_ms, handle.expires_at_ms);
+    assert_eq!(updated_handle.reason, handle.reason);
+    assert_eq!(updated_handle.metadata, replacement);
+    assert!(!updated_handle.metadata.contains_key("obsolete"));
+    assert_eq!(
+        store
+            .status_at_domain(&handle.host, handle.resource_class, &handle.domain, 1_004,)
+            .unwrap()
+            .active,
+        Some(updated_handle)
+    );
+}
+
+#[test]
+fn concurrent_metadata_replacements_never_merge_or_tear() {
+    let temp = TempDir::new().unwrap();
+    let store = Arc::new(store(&temp));
+    let handle = store
+        .try_acquire(request("metadata-owner"))
+        .unwrap()
+        .handle
+        .unwrap();
+    let first = BTreeMap::from([
+        ("writer".to_string(), "first".to_string()),
+        ("first-only".to_string(), "yes".to_string()),
+    ]);
+    let second = BTreeMap::from([
+        ("writer".to_string(), "second".to_string()),
+        ("second-only".to_string(), "yes".to_string()),
+    ]);
+    let barrier = Arc::new(Barrier::new(2));
+    let workers = [first.clone(), second.clone()]
+        .into_iter()
+        .map(|metadata| {
+            let store = Arc::clone(&store);
+            let barrier = Arc::clone(&barrier);
+            let handle = handle.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                store
+                    .update_metadata_for_domain(
+                        &handle.host,
+                        handle.resource_class,
+                        &handle.domain,
+                        &handle.lease_id,
+                        metadata,
+                    )
+                    .unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+    for worker in workers {
+        assert!(worker.join().unwrap().updated);
+    }
+
+    let active = store
+        .status_for_domain(&handle.host, handle.resource_class, &handle.domain)
+        .unwrap()
+        .active
+        .unwrap();
+    assert!(active.metadata == first || active.metadata == second);
 }
 
 #[test]
@@ -428,6 +732,7 @@ fn non_expiring_owner_gets_a_bounded_liveness_wake() {
         schema_version: SCHEMA_VERSION,
         host: active.host,
         resource_class: active.resource_class,
+        domain: active.domain,
         execution_context: active.execution_context,
         lease_id: "lease-1".to_string(),
         owner: active.owner,

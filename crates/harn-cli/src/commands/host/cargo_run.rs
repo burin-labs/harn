@@ -60,6 +60,7 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
         harn_hostlib::HostLeaseResourceKey {
             machine: host,
             resource_class: harn_hostlib::HostLeaseResourceClass::RustHeavy,
+            domain: harn_hostlib::DEFAULT_HOST_LEASE_DOMAIN.to_string(),
         },
         context,
         args.wait_ms,
@@ -258,13 +259,18 @@ fn completed_release_outcome(
     lease_id: &str,
 ) -> Result<harn_hostlib::HostLeaseRunReleaseOutcome, String> {
     let release = store
-        .release_for_resource(&resource.machine, resource.resource_class, lease_id)
+        .release_for_domain(
+            &resource.machine,
+            resource.resource_class,
+            &resource.domain,
+            lease_id,
+        )
         .map_err(|error| error.to_string())?;
     if release.released {
         return Ok(harn_hostlib::HostLeaseRunReleaseOutcome::Released);
     }
     let state = store
-        .status_for_resource(&resource.machine, resource.resource_class)
+        .status_for_domain(&resource.machine, resource.resource_class, &resource.domain)
         .map_err(|error| error.to_string())?;
     if state
         .active
@@ -322,6 +328,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
     let request = harn_hostlib::HostLeaseRequest {
         host: resource.machine,
         resource_class: resource.resource_class,
+        domain: resource.domain,
         execution_context: Some(context),
         owner: pending.owner,
         priority_class: pending.priority_class,
@@ -682,6 +689,7 @@ fn fail_cargo_launch(
         &harn_hostlib::HostLeaseResourceKey {
             machine: handle.host.clone(),
             resource_class: handle.resource_class,
+            domain: handle.domain.clone(),
         },
         &handle.lease_id,
     ) {
@@ -709,7 +717,12 @@ fn fail_acquired_before_running(
     error: harn_hostlib::HostLeaseRunStartFailure,
 ) {
     if let Some(handle) = acquisition.handle.as_ref() {
-        let _ = store.release_for_resource(&handle.host, handle.resource_class, &handle.lease_id);
+        let _ = store.release_for_domain(
+            &handle.host,
+            handle.resource_class,
+            &handle.domain,
+            &handle.lease_id,
+        );
     }
     let _ = store.transition_run(
         run_id,
