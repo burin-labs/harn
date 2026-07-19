@@ -6,6 +6,8 @@
 //! by tests to assert the exposed surface without touching the VM.
 
 use std::collections::BTreeSet;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use harn_vm::{Vm, VmError, VmValue};
@@ -16,6 +18,25 @@ use crate::error::HostlibError;
 /// [`harn_vm::Vm::register_builtin`]; we keep it `Send + Sync` so capability
 /// instances can be shared across threads if an embedder ever wants that.
 pub type SyncHandler = Arc<dyn Fn(&[VmValue]) -> Result<VmValue, HostlibError> + Send + Sync>;
+/// Async hostlib handler used by event-driven operations.
+pub type AsyncHandler = Arc<
+    dyn Fn(Vec<VmValue>) -> Pin<Box<dyn Future<Output = Result<VmValue, HostlibError>> + Send>>
+        + Send
+        + Sync,
+>;
+
+#[derive(Clone)]
+/// One registered async builtin and its schema coordinates.
+pub struct RegisteredAsyncBuiltin {
+    /// Harn-visible builtin name.
+    pub name: &'static str,
+    /// Hostlib schema module.
+    pub module: &'static str,
+    /// Hostlib schema method.
+    pub method: &'static str,
+    /// Async implementation.
+    pub handler: AsyncHandler,
+}
 
 /// One registered builtin. The name is what Harn scripts call (e.g.
 /// `hostlib_ast_parse_file`); `module` and `method` are the canonical
@@ -46,6 +67,7 @@ impl std::fmt::Debug for RegisteredBuiltin {
 #[derive(Default)]
 pub struct BuiltinRegistry {
     builtins: Vec<RegisteredBuiltin>,
+    async_builtins: Vec<RegisteredAsyncBuiltin>,
     command_policy_builtins: BTreeSet<&'static str>,
 }
 
@@ -128,6 +150,43 @@ impl BuiltinRegistry {
         self.command_policy_builtins.insert(name);
     }
 
+    pub(crate) fn register_gated_async_fn<F, Fut>(
+        &mut self,
+        module: &'static str,
+        name: &'static str,
+        method: &'static str,
+        runner: F,
+    ) where
+        F: Fn(Vec<VmValue>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<VmValue, HostlibError>> + Send + 'static,
+    {
+        let runner = Arc::new(runner);
+        let handler: AsyncHandler = Arc::new(move |args| {
+            if !crate::tools::permissions::is_enabled(
+                crate::tools::permissions::FEATURE_TOOLS_DETERMINISTIC,
+            ) {
+                return Box::pin(async move {
+                    Err(HostlibError::Backend {
+                        builtin: name,
+                        message: format!(
+                            "feature `{}` is not enabled in this session — call \
+                             `hostlib_enable(\"{}\")` before invoking this capability",
+                            crate::tools::permissions::FEATURE_TOOLS_DETERMINISTIC,
+                            crate::tools::permissions::FEATURE_TOOLS_DETERMINISTIC,
+                        ),
+                    })
+                });
+            }
+            Box::pin(runner(args))
+        });
+        self.async_builtins.push(RegisteredAsyncBuiltin {
+            name,
+            module,
+            method,
+            handler,
+        });
+    }
+
     fn uses_command_policy(&self, name: &str) -> bool {
         self.command_policy_builtins.contains(name)
     }
@@ -137,19 +196,29 @@ impl BuiltinRegistry {
         self.builtins.iter()
     }
 
+    /// Iterate over every registered async builtin.
+    pub fn iter_async(&self) -> impl Iterator<Item = &RegisteredAsyncBuiltin> {
+        self.async_builtins.iter()
+    }
+
     /// Total count.
     pub fn len(&self) -> usize {
-        self.builtins.len()
+        self.builtins.len() + self.async_builtins.len()
     }
 
     /// True when nothing has been registered yet.
     pub fn is_empty(&self) -> bool {
-        self.builtins.is_empty()
+        self.builtins.is_empty() && self.async_builtins.is_empty()
     }
 
     /// Look up a builtin by its Harn-visible name.
     pub fn find(&self, name: &str) -> Option<&RegisteredBuiltin> {
         self.builtins.iter().find(|b| b.name == name)
+    }
+
+    /// Look up one async builtin by its Harn-visible name.
+    pub fn find_async(&self, name: &str) -> Option<&RegisteredAsyncBuiltin> {
+        self.async_builtins.iter().find(|b| b.name == name)
     }
 }
 
@@ -332,6 +401,34 @@ impl HostlibRegistry {
                     },
                 );
             }
+        }
+        for builtin in self.builtins.async_builtins.iter().cloned() {
+            let module = builtin.module;
+            let method = builtin.method;
+            harn_vm::stdlib::host::register_callable_host_operation(
+                module,
+                method,
+                "Hostlib schema-backed operation registered at runtime.",
+            );
+            let handler = builtin.handler.clone();
+            vm.register_async_builtin(builtin.name, move |_ctx, args| {
+                let handler = handler.clone();
+                async move {
+                    let request =
+                        crate::schemas::validate_request_args(builtin.name, module, method, &args)
+                            .map_err(VmError::from)?;
+                    if let Some(params) = request.as_dict() {
+                        if let Some(mocked) = harn_vm::stdlib::host::dispatch_mock_hostlib_call(
+                            module, method, params,
+                        ) {
+                            return mocked;
+                        }
+                    }
+                    let result = handler(vec![request]).await.map_err(VmError::from)?;
+                    crate::schemas::validate_response(builtin.name, module, method, result)
+                        .map_err(VmError::from)
+                }
+            });
         }
     }
 

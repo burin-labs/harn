@@ -14,6 +14,20 @@ pub type CommandResult = {
   ...rest,
 }
 
+/** One output-match, exit, or timeout event for a background command. */
+pub type CommandOutputMatch = {
+  status: "matched" | "exited" | "timed_out",
+  matched: bool,
+  timed_out: bool,
+  source: "stdout" | "stderr" | "combined",
+  pattern: string,
+  match?: string?,
+  match_start?: int?,
+  match_end?: int?,
+  next_offset?: int?,
+  result: CommandResult,
+}
+
 /** Portable command-step fields suitable for durable receipts. */
 pub type CommandStepReceipt = {
   name: string,
@@ -247,6 +261,26 @@ pub fn command_wait(locator, options = nil) -> CommandResult {
   return __command_normalize_result(
     hostlib_tools_wait_command(__command_wait_request(locator, options)),
   )
+}
+
+/**
+ * command_wait_for_output waits for new background output to match, the process to exit, or a timeout.
+ * @effects: [process]
+ * @errors: []
+ * @example: command_wait_for_output(result, "ready", {timeout_ms: 10000})
+ */
+pub fn command_wait_for_output(locator, pattern: string, options = nil) -> CommandOutputMatch {
+  const opts = __command_options(options)
+  const _ = hostlib_enable("tools:deterministic")
+  let req = {handle_id: __command_handle_id(locator, "command_wait_for_output"), pattern: pattern}
+  for key in ["source", "regex", "from_offset", "timeout_ms", "session_id"] {
+    if opts?.[key] != nil {
+      req = req + {[key]: opts[key]}
+    }
+  }
+  const event = hostlib_tools_wait_command_output(req)
+  const base = type_of(locator) == "dict" ? locator : {handle_id: req.handle_id}
+  return event + {result: __command_normalize_result(base + event.result)}
 }
 
 /**

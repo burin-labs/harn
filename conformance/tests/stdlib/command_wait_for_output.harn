@@ -1,0 +1,67 @@
+import { command_wait_for_output } from "std/command"
+import { assert_host_called, with_host_mocks } from "std/testing"
+
+const REQUEST = {
+  handle_id: "hto-test-1",
+  pattern: "ready\\s+on\\s+\\d+",
+  source: "stderr",
+  regex: true,
+  from_offset: 4,
+  timeout_ms: 1000,
+}
+
+fn test_wait_for_ready() {
+  const event = command_wait_for_output(
+    {handle_id: "hto-test-1", command_id: "cmd-test-1"},
+    REQUEST.pattern,
+    {
+      source: REQUEST.source,
+      regex: REQUEST.regex,
+      from_offset: REQUEST.from_offset,
+      timeout_ms: REQUEST.timeout_ms,
+    },
+  )
+  assert_host_called("tools", "wait_command_output", REQUEST, nil)
+  require event.status == "matched"
+  require event.matched
+  require event.match == "ready on 4312"
+  require event.match_start == 4
+  require event.match_end == 17
+  require event.next_offset == 17
+  require event.result.command_id == "cmd-test-1"
+  require event.result.status == "running"
+}
+
+pipeline default() {
+  with_host_mocks(
+    [
+      {
+        capability: "tools",
+        operation: "wait_command_output",
+        params: REQUEST,
+        result: {
+          status: "matched",
+          handle_id: "hto-test-1",
+          source: "stderr",
+          pattern: "ready\\s+on\\s+\\d+",
+          matched: true,
+          timed_out: false,
+          match_start: 4,
+          match_end: 17,
+          next_offset: 17,
+          match: "ready on 4312",
+          result: {
+            handle_id: "hto-test-1",
+            status: "running",
+            timed_out: false,
+            exit_code: nil,
+            stdout: "",
+            stderr: "xxxxready on 4312",
+          },
+        },
+      },
+    ],
+    test_wait_for_ready,
+  )
+  __io_println("ok")
+}
