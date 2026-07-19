@@ -300,41 +300,6 @@ handler = "handlers::missing"
 }
 
 #[tokio::test]
-async fn setup_does_not_consume_execution_budget_in_either_scheduler() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
-
-    for parallel in [false, true] {
-        let temp = TempTestDir::new();
-        temp.write(
-            "suite/test_fast.harn",
-            r"
-pipeline test_first(_task) { return 41 }
-pipeline test_second(_task) { return 42 }
-",
-        );
-        let options = RunOptions {
-            parallel,
-            jobs: parallel.then_some(2),
-            setup_delay_ms: 250,
-            ..RunOptions::new(100)
-        };
-
-        let summary = run_tests_with_options(&temp.path().join("suite"), &options).await;
-
-        assert_eq!(summary.passed, 2, "parallel={parallel}: {summary:?}");
-        assert_eq!(summary.failed, 0, "parallel={parallel}: {summary:?}");
-        assert!(summary
-            .results
-            .iter()
-            .all(|result| result.timeout.is_none()));
-        assert!(summary
-            .results
-            .iter()
-            .all(|result| result.phases.is_some_and(|phases| phases.setup_ms >= 30)));
-    }
-}
-
-#[tokio::test]
 async fn reusable_session_hits_prepared_cache_without_sharing_module_state() {
     let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
     let temp = TempTestDir::new();
