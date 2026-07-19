@@ -614,7 +614,7 @@ check-connector-matrix:
 # before the Harn script reaches its fixture setup.
 check-provider-catalog-drift:
 	@echo "=== Checking provider catalog refresh workflow ==="
-	@$(HARN_RUST_TEST_ENV) $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
 	@echo "    Provider catalog refresh OK."
 
 # Validate the ready-to-customize trigger example library.
