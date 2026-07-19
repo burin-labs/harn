@@ -1335,7 +1335,7 @@ fn test_default_tool_format_uses_capability_matrix() {
 
     assert_eq!(
         default_tool_format("qwen3.6-35b-a3b-ud-q4-k-xl", "llamacpp"),
-        "json"
+        "native"
     );
     // devstral dropped its stale heredoc `text` pin (it has no reserved-token
     // constraint, so there was no structural reason to stay on heredoc) and

@@ -9189,11 +9189,11 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "text_only",
-        "parity_notes": "2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract.",
+        "preferred_format": "native",
+        "parity": "text_unreliable",
+        "parity_notes": "2026-07-18 evidence, llama.cpp server-cuda launched with --jinja + the model's tool chat template (the 2026-07-17 demotion trace, PR #4981 / commit 44cbe875d, predates confirmation that the serving config applied the tool template; this rule keeps server_parser=none): (a) 5/5 forced-native trials on a 13-action enum edit schema — the demotion's exact concern — selected the correct action per intent (append/replace_range/create/insert_after/rename_symbol) with all required fields (action, path) present, well-formed arguments, and finish_reason=tool_calls in every trial; (b) a live agent session produced ZERO parseable write-shaped calls over the json text channel (done-judge cap exhausted), while forced-native on the same task produced parseable edit + run calls immediately and converged past writes; (c) the mlx and local-vLLM siblings of the same weights/template are already native_tools=true (the mlx note cites the llama.cpp Q4 quant native-validated 2026-06-05, pre-demotion). Operator-authorized promotion (2026-07-18) ahead of the full receipted forced-format family sweep; harn#5162 remains the follow-up for family-wide N>=5 confirmation.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9279,11 +9279,11 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "text_only",
-        "parity_notes": "2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract.",
+        "preferred_format": "native",
+        "parity": "text_unreliable",
+        "parity_notes": "2026-07-18 evidence, llama.cpp server-cuda launched with --jinja + the model's tool chat template (the 2026-07-17 demotion trace, PR #4981 / commit 44cbe875d, predates confirmation that the serving config applied the tool template; this rule keeps server_parser=none): (a) 5/5 forced-native trials on a 13-action enum edit schema — the demotion's exact concern — selected the correct action per intent (append/replace_range/create/insert_after/rename_symbol) with all required fields (action, path) present, well-formed arguments, and finish_reason=tool_calls in every trial; (b) a live agent session produced ZERO parseable write-shaped calls over the json text channel (done-judge cap exhausted), while forced-native on the same task produced parseable edit + run calls immediately and converged past writes; (c) the mlx and local-vLLM siblings of the same weights/template are already native_tools=true (the mlx note cites the llama.cpp Q4 quant native-validated 2026-06-05, pre-demotion). Operator-authorized promotion (2026-07-18) ahead of the full receipted forced-format family sweep; harn#5162 remains the follow-up for family-wide N>=5 confirmation.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9345,11 +9345,11 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "text_only",
-        "parity_notes": "2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract.",
+        "preferred_format": "native",
+        "parity": "text_unreliable",
+        "parity_notes": "2026-07-18 evidence, llama.cpp server-cuda launched with --jinja + the model's tool chat template (the 2026-07-17 demotion trace, PR #4981 / commit 44cbe875d, predates confirmation that the serving config applied the tool template; this rule keeps server_parser=none): (a) 5/5 forced-native trials on a 13-action enum edit schema — the demotion's exact concern — selected the correct action per intent (append/replace_range/create/insert_after/rename_symbol) with all required fields (action, path) present, well-formed arguments, and finish_reason=tool_calls in every trial; (b) a live agent session produced ZERO parseable write-shaped calls over the json text channel (done-judge cap exhausted), while forced-native on the same task produced parseable edit + run calls immediately and converged past writes; (c) the mlx and local-vLLM siblings of the same weights/template are already native_tools=true (the mlx note cites the llama.cpp Q4 quant native-validated 2026-06-05, pre-demotion). Operator-authorized promotion (2026-07-18) ahead of the full receipted forced-format family sweep; harn#5162 remains the follow-up for family-wide N>=5 confirmation.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -23219,7 +23219,6 @@
       "name": "llamacpp-qwen3.6-q4",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "json",
       "tool_calling": {
         "native": "pass",
         "text": "unknown",
@@ -23262,7 +23261,6 @@
       "name": "local-qwen3.6",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "json",
       "tool_calling": {
         "native": "pass",
         "text": "unknown",
@@ -23280,7 +23278,6 @@
       "name": "local-qwen3.6-gguf",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "json",
       "tool_calling": {
         "native": "pass",
         "text": "unknown",
@@ -25249,6 +25246,7 @@
       "label": "Qwen3.6 35B (llama.cpp)",
       "family": "qwen",
       "capabilities": [
+        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
@@ -25266,6 +25264,7 @@
       "label": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
       "family": "qwen",
       "capabilities": [
+        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
@@ -25283,6 +25282,7 @@
       "label": "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)",
       "family": "qwen",
       "capabilities": [
+        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
