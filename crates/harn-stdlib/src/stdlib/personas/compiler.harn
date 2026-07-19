@@ -12,9 +12,15 @@ import { list_providers } from "std/triggers"
 
 const PERSONA_BLUEPRINT_SCHEMA_VERSION: string = "1"
 
-const __PERSONA_TEMPLATE_IDS: list<string> = ["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"]
+const __PERSONA_TEMPLATE_IDS: list<string> = [
+  "deterministic-sweeper",
+  "hybrid-classify-then-act",
+  "frontier-judgment-loop",
+]
 
-pub type PersonaTemplateId = "deterministic-sweeper" | "hybrid-classify-then-act" | "frontier-judgment-loop"
+pub type PersonaTemplateId = "deterministic-sweeper" \
+  | "hybrid-classify-then-act" \
+  | "frontier-judgment-loop"
 
 pub type PersonaBlueprintSourceKind = "cron" | "external"
 
@@ -61,7 +67,10 @@ pub type PersonaBlueprintLowering = {
   triggers: list<PersonaBlueprintTrigger>,
 }
 
-pub type PersonaBlueprintCompileResult = Result<PersonaBlueprintLowering, PersonaBlueprintValidationReport>
+pub type PersonaBlueprintCompileResult = Result<
+  PersonaBlueprintLowering,
+  PersonaBlueprintValidationReport
+>
 
 fn __persona_blueprint_common_schema_fields() -> dict {
   return {
@@ -87,14 +96,26 @@ pub fn persona_blueprint_schema() -> dict {
   return schema_closed_object(
     __persona_blueprint_common_schema_fields()
       + {
-      cron: schema_field(schema_closed_object({cron: schema_string(), timezone: schema_string()}), false),
-      external: schema_field(schema_closed_object({provider: schema_string(), event: schema_string()}), false),
+      cron: schema_field(
+        schema_closed_object({cron: schema_string(), timezone: schema_string()}),
+        false,
+      ),
+      external: schema_field(
+        schema_closed_object({provider: schema_string(), event: schema_string()}),
+        false,
+      ),
     },
   )
 }
 
 fn __persona_blueprint_blank_report(blueprint) -> PersonaBlueprintValidationReport {
-  return {valid: true, schema_version: blueprint?.schema_version, source_kind: nil, errors: [], warnings: []}
+  return {
+    valid: true,
+    schema_version: blueprint?.schema_version,
+    source_kind: nil,
+    errors: [],
+    warnings: [],
+  }
 }
 
 fn __persona_blueprint_error(
@@ -106,7 +127,9 @@ fn __persona_blueprint_error(
   return report + {errors: report.errors + [{code: code, path: path, message: message}]}
 }
 
-fn __persona_blueprint_finalize(report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
+fn __persona_blueprint_finalize(
+  report: PersonaBlueprintValidationReport,
+) -> PersonaBlueprintValidationReport {
   return report + {valid: len(report.errors) == 0}
 }
 
@@ -143,7 +166,11 @@ fn __persona_blueprint_cron_fields(cron) -> list<string> {
   return regex_split(trim(cron ?? ""), "\\s+").filter({ field -> field != "" }).to_list()
 }
 
-fn __persona_blueprint_validate_cron(blueprint, providers, report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
+fn __persona_blueprint_validate_cron(
+  blueprint,
+  providers,
+  report: PersonaBlueprintValidationReport,
+) -> PersonaBlueprintValidationReport {
   let out = report
   const source = blueprint.cron
   if len(__persona_blueprint_cron_fields(source.cron)) != 5 || !is_valid_cron(source.cron) {
@@ -237,7 +264,12 @@ pub fn persona_blueprint_validate(blueprint, providers = nil) -> PersonaBlueprin
   if is_err(shape) {
     const err = unwrap_err(shape)
     for entry in err.errors ?? [] {
-      report = __persona_blueprint_error(report, "shape", entry?.path ?? "", entry?.message ?? to_string(entry))
+      report = __persona_blueprint_error(
+        report,
+        "shape",
+        entry?.path ?? "",
+        entry?.message ?? to_string(entry),
+      )
     }
     return __persona_blueprint_finalize(report)
   }
@@ -276,7 +308,10 @@ pub fn persona_blueprint_validate(blueprint, providers = nil) -> PersonaBlueprin
   if has_cron {
     report = __persona_blueprint_validate_cron(blueprint, catalog, report) + {source_kind: "cron"}
   } else {
-    report = __persona_blueprint_validate_external(blueprint, catalog, report) + {source_kind: "external"}
+    report = __persona_blueprint_validate_external(blueprint, catalog, report)
+      + {
+      source_kind: "external",
+    }
   }
   return __persona_blueprint_finalize(report)
 }

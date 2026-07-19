@@ -50,6 +50,7 @@ pub mod jsonl;
 pub mod local_profiles;
 pub(crate) mod mock;
 mod mock_builtins;
+pub(crate) mod mock_store;
 mod model_test;
 pub(crate) mod permissions;
 pub mod plan;

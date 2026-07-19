@@ -36,13 +36,17 @@ pipeline default() {
   // Disk is untouched in dry-run.
   __io_println(harness.fs.read_text(a) == "fn a() {\n    1\n}\n")
   // 2) Apply for real: dry_run:false writes every changed file.
-  const applied = edit_batch_apply({paths: [a, b], query: query, replacement: "{ 0 }", dry_run: false})
+  const applied = edit_batch_apply(
+    {paths: [a, b], query: query, replacement: "{ 0 }", dry_run: false},
+  )
   __io_println(applied.summary.files_written == 2)
   __io_println(harness.fs.read_text(a) == "fn a() { 0 }\n")
   __io_println(harness.fs.read_text(b) == "fn b() { 0 }\n")
   // 3) Idempotency (A6 hook): re-running the applied codemod still matches
   //    but produces identical bytes, so nothing changes and nothing writes.
-  const again = edit_batch_apply({paths: [a, b], query: query, replacement: "{ 0 }", dry_run: false})
+  const again = edit_batch_apply(
+    {paths: [a, b], query: query, replacement: "{ 0 }", dry_run: false},
+  )
   __io_println(again.summary.files_changed == 0 && again.summary.files_written == 0)
   __io_println(again.files[0].result == "applied" && !again.files[0].changed)
   __io_println(again.files[0].before_sha256 == again.files[0].after_sha256)
@@ -77,7 +81,9 @@ pipeline default() {
   // 8) `validate` (default) rejects an edit that would break the parse and
   //    leaves the file on disk untouched.
   const vfile = write_fixture(root, "validate.rs", "fn v() { 1 }\n")
-  const invalid = edit_batch_apply({paths: [vfile], query: query, replacement: "{ ( }", dry_run: false})
+  const invalid = edit_batch_apply(
+    {paths: [vfile], query: query, replacement: "{ ( }", dry_run: false},
+  )
   __io_println(invalid.files[0].result == "syntax_error")
   __io_println(harness.fs.read_text(vfile) == "fn v() { 1 }\n")
 }

@@ -144,7 +144,12 @@ fn run_cap_scenario(verify_completion) {
             session_id: session,
             done_sentinel: "##DONE##",
             verify_completion: verify_completion,
-            stall_diagnostics: {enabled: true, repair_aware: false, post_edit_reverify: true, stuck_same_diagnostic_after: 3},
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: false,
+              post_edit_reverify: true,
+              stuck_same_diagnostic_after: 3,
+            },
           },
         ) },
       )

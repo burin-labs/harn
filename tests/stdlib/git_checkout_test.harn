@@ -1,0 +1,231 @@
+// Run: harn test tests/stdlib/git_checkout_test.harn
+import {
+  GitCheckoutDirtyPolicy,
+  GitCheckoutOptions,
+  GitCheckoutStep,
+  git_checkout_plan,
+  git_checkout_sync,
+  git_run,
+} from "std/git"
+import { assert_eq } from "std/testing"
+
+type TestConfig = {
+  branch?: string,
+  dirty?: bool,
+  dirty_policy?: GitCheckoutDirtyPolicy,
+  fail_exit_code?: int,
+  fail_kind?: string,
+  final_branch?: string,
+  final_dirty?: bool,
+  local_base?: bool,
+  stash_name?: string,
+}
+
+fn result(success = true, stdout = "", exit_code = nil, stderr = "") {
+  return {
+    success: success,
+    ok: success,
+    status: if success {
+      "completed"
+    } else {
+      "failed"
+    },
+    exit_code: exit_code ?? if success {
+      0
+    } else {
+      2
+    },
+    stdout: stdout,
+    stderr: stderr,
+  }
+}
+
+fn runner(config: TestConfig = {}) -> fn(GitCheckoutStep) -> dict {
+  return fn(step: GitCheckoutStep) -> dict {
+    if step.kind == "status" {
+      if config.dirty ?? false {
+        return result(true, "?? local.txt\n")
+      }
+      return result()
+    }
+    if step.kind == "verify_status" && (config.final_dirty ?? false) {
+      return result(true, "?? unexpected.txt\n")
+    }
+    if step.kind == "current_branch" {
+      return result(true, (config.branch ?? "main") + "\n")
+    }
+    if step.kind == "local_base" {
+      if config.local_base ?? true {
+        return result()
+      }
+      return result(false, "", 1)
+    }
+    if step.kind == "verify_branch" {
+      return result(true, (config.final_branch ?? "main") + "\n")
+    }
+    if step.kind == (config.fail_kind ?? "") {
+      return result(false, "", config.fail_exit_code ?? 2, "fixture failure")
+    }
+    return result()
+  }
+}
+
+fn run(config: TestConfig = {}) {
+  const dirty_policy: GitCheckoutDirtyPolicy = config.dirty_policy ?? "refuse"
+  let options: GitCheckoutOptions = {
+    repo: "/fixture",
+    remote: "upstream",
+    base_branch: "main",
+    dirty_policy: dirty_policy,
+    runner: runner(config),
+  }
+  if config.stash_name != nil {
+    options = options + {stash_name: config.stash_name}
+  }
+  return git_checkout_sync(options)
+}
+
+fn checked_git(repo, args) {
+  const command = git_run(args, {repo: repo})
+  if !command.success {
+    throw "git fixture command failed: " + join(command.argv, " ") + "\n" + command.stderr
+  }
+  return command
+}
+
+pipeline test_checkout_plan_is_canonical(task) {
+  const options: GitCheckoutOptions = {
+    base_branch: "main",
+    remote: "upstream",
+    dirty_policy: "stash",
+    stash_name: "fixture-stash",
+  }
+  const plan = git_checkout_plan(options)
+  assert_eq(
+    plan.find({ step -> step.kind == "fetch" }).argv,
+    [
+      "git",
+      "fetch",
+      "upstream",
+      "--no-tags",
+      "--quiet",
+      "+refs/heads/main:refs/remotes/upstream/main",
+    ],
+  )
+  assert_eq(
+    plan.find({ step -> step.kind == "create" }).argv,
+    ["git", "switch", "-c", "main", "refs/remotes/upstream/main"],
+  )
+}
+
+pipeline test_clean_same_branch_sync(task) {
+  const receipt = run()
+  assert(receipt.success)
+  assert_eq(
+    receipt.steps.map({ step -> step.kind }),
+    ["status", "current_branch", "fetch", "fast_forward", "verify_branch", "verify_status"],
+  )
+  assert_eq(receipt.original_branch, "main")
+  assert_eq(receipt.final_branch, "main")
+}
+
+pipeline test_switches_or_creates_missing_base(task) {
+  const switched = run({branch: "feature"})
+  assert(switched.success)
+  assert(switched.steps.any({ step -> step.kind == "switch" }))
+  const created = run({branch: "feature", local_base: false})
+  assert(created.success)
+  assert(created.steps.any({ step -> step.kind == "create" }))
+  assert(!created.steps.any({ step -> step.kind == "switch" }))
+}
+
+pipeline test_dirty_policies_are_explicit(task) {
+  const refused = run({dirty: true})
+  assert(!refused.success)
+  assert_eq(refused.failure_kind, "dirty_refused")
+  assert_eq(len(refused.steps), 1)
+  const preserved = run({dirty: true, dirty_policy: "preserve"})
+  assert(preserved.success && preserved.skipped)
+  assert_eq(preserved.failure_kind, "dirty_preserved")
+  assert_eq(len(preserved.steps), 1)
+  const stashed = run({dirty: true, dirty_policy: "stash", stash_name: "fixture-stash"})
+  assert(stashed.success && stashed.stashed)
+  assert_eq(stashed.stash_name, "fixture-stash")
+  assert(stashed.steps.any({ step -> step.kind == "stash" }))
+}
+
+pipeline test_failures_are_classified_with_recovery(task) {
+  for fixture in [
+    {fail_kind: "fetch", expected: "fetch_failed"},
+    {branch: "feature", fail_kind: "switch", expected: "switch_failed"},
+    {fail_kind: "fast_forward", expected: "fast_forward_failed"},
+    {
+      dirty: true,
+      dirty_policy: "stash",
+      stash_name: "fixture-stash",
+      fail_kind: "stash",
+      expected: "stash_failed",
+    },
+  ] {
+    const receipt = run(fixture)
+    assert(!receipt.success)
+    assert_eq(receipt.failure_kind, fixture.expected)
+    assert(receipt.recovery != "")
+  }
+}
+
+pipeline test_postconditions_are_verified(task) {
+  const branch = run({final_branch: "other"})
+  assert(!branch.success)
+  assert_eq(branch.failure_kind, "branch_postcondition_failed")
+  assert_eq(branch.final_branch, "other")
+  const status = run({final_dirty: true})
+  assert(!status.success)
+  assert_eq(status.failure_kind, "status_postcondition_failed")
+}
+
+pipeline test_real_checkout_ignores_stale_fetch_configuration(task) {
+  const root = path_join(harness.fs.temp_dir(), "harn-git-checkout-" + uuid())
+  const seed = path_join(root, "seed")
+  const remote = path_join(root, "remote.git")
+  const consumer = path_join(root, "consumer")
+  harness.fs.mkdir(root)
+  harness.fs.mkdir(seed)
+  checked_git(seed, ["init", "-b", "main"])
+  checked_git(seed, ["config", "user.email", "fixture@example.test"])
+  checked_git(seed, ["config", "user.name", "Fixture"])
+  harness.fs.write_text(path_join(seed, "remote.txt"), "remote main\n")
+  checked_git(seed, ["add", "remote.txt"])
+  checked_git(seed, ["commit", "-m", "remote main"])
+  checked_git(root, ["init", "--bare", remote])
+  checked_git(seed, ["remote", "add", "origin", remote])
+  checked_git(seed, ["push", "origin", "main"])
+  const remote_oid = trim(checked_git(seed, ["rev-parse", "HEAD"]).stdout)
+  harness.fs.mkdir(consumer)
+  checked_git(consumer, ["init", "-b", "feature"])
+  checked_git(consumer, ["config", "user.email", "fixture@example.test"])
+  checked_git(consumer, ["config", "user.name", "Fixture"])
+  harness.fs.write_text(path_join(consumer, "local.txt"), "local feature\n")
+  checked_git(consumer, ["add", "local.txt"])
+  checked_git(consumer, ["commit", "-m", "local feature"])
+  checked_git(consumer, ["remote", "add", "origin", remote])
+  checked_git(
+    consumer,
+    ["config", "remote.origin.fetch", "+refs/heads/stale:refs/remotes/origin/stale"],
+  )
+  const options: GitCheckoutOptions = {
+    repo: consumer,
+    remote: "origin",
+    base_branch: "main",
+    dirty_policy: "refuse",
+  }
+  const receipt = git_checkout_sync(options)
+  assert(receipt.success)
+  assert(receipt.steps.any({ step -> step.kind == "create" }))
+  assert_eq(receipt.final_branch, "main")
+  assert_eq(trim(checked_git(consumer, ["rev-parse", "HEAD"]).stdout), remote_oid)
+  assert_eq(
+    trim(checked_git(consumer, ["config", "--get", "remote.origin.fetch"]).stdout),
+    "+refs/heads/stale:refs/remotes/origin/stale",
+  )
+}

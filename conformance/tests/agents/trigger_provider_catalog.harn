@@ -4,26 +4,33 @@ pipeline test(task) {
   const providers: list<ProviderCatalogEntry> = list_providers()
   const builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
   assert(len(builtin) == 9, "expected nine builtin trigger providers")
-  const stream_providers = providers.filter({ provider -> provider.kinds.any({ kind -> kind == "stream" }) })
+  const stream_providers = providers.filter(
+    { provider -> provider.kinds.any({ kind -> kind == "stream" }) },
+  )
   assert(len(stream_providers) == 6, "expected six stream trigger providers")
   assert(
     stream_providers.all({ provider -> provider.schema_name == "StreamEventPayload" }),
     "stream providers should publish the shared stream payload schema",
   )
   assert(
-    stream_providers
-      .all(
+    stream_providers.all(
       { provider -> provider.runtime.kind == "builtin" && provider.runtime.connector == "stream" },
     ),
     "stream providers should use the generic stream ingress connector",
   )
   assert(
     stream_providers.any({ provider -> provider.provider == "kafka" })
-      && stream_providers.any({ provider -> provider.provider == "nats" })
+      && stream_providers.any(
+      { provider -> provider.provider == "nats" },
+    )
       && stream_providers.any({ provider -> provider.provider == "pulsar" })
-      && stream_providers.any({ provider -> provider.provider == "postgres-cdc" })
+      && stream_providers.any(
+      { provider -> provider.provider == "postgres-cdc" },
+    )
       && stream_providers.any({ provider -> provider.provider == "email" })
-      && stream_providers.any({ provider -> provider.provider == "websocket" }),
+      && stream_providers.any(
+      { provider -> provider.provider == "websocket" },
+    ),
     "catalog should include every STREAM-01 provider",
   )
   const cron = builtin.find({ provider -> provider.provider == "cron" })
@@ -70,7 +77,10 @@ pipeline test(task) {
     a2a_push?.signature_verification?.kind == "none",
     "a2a-push should not require catalog-level signature verification",
   )
-  assert(len(a2a_push?.secret_requirements ?? []) == 0, "a2a-push should not require catalog secrets")
+  assert(
+    len(a2a_push?.secret_requirements ?? []) == 0,
+    "a2a-push should not require catalog secrets",
+  )
   assert(
     len(a2a_push?.outbound_methods ?? []) == 0,
     "a2a-push should not publish outbound methods yet",
@@ -188,11 +198,15 @@ pipeline test(task) {
     "linear should publish signing + outbound auth secret requirements",
   )
   assert(
-    linear_secrets.any({ requirement -> requirement.name == "signing_secret" && requirement.required }),
+    linear_secrets.any(
+      { requirement -> requirement.name == "signing_secret" && requirement.required },
+    ),
     "linear should require signing_secret",
   )
   assert(
-    linear_secrets.any({ requirement -> requirement.name == "access_token" && !requirement.required }),
+    linear_secrets.any(
+      { requirement -> requirement.name == "access_token" && !requirement.required },
+    ),
     "linear should optionally document access_token",
   )
   const linear_methods = linear?.outbound_methods ?? []
@@ -222,13 +236,17 @@ pipeline test(task) {
   const notion_secrets = notion?.secret_requirements ?? []
   assert(len(notion_secrets) == 1, "notion should publish its webhook verification secret")
   assert(
-    notion_secrets
-      .any({ secret -> secret.name == "verification_token" && secret.namespace == "notion" }),
+    notion_secrets.any(
+      { secret -> secret.name == "verification_token" && secret.namespace == "notion" },
+    ),
     "notion should require verification_token in the notion namespace",
   )
   const notion_methods = notion?.outbound_methods ?? []
   assert(len(notion_methods) == 7, "notion should publish seven outbound methods")
-  assert(notion_methods.any({ method -> method.name == "get_page" }), "notion should expose get_page")
+  assert(
+    notion_methods.any({ method -> method.name == "get_page" }),
+    "notion should expose get_page",
+  )
   assert(
     notion_methods.any({ method -> method.name == "update_page" }),
     "notion should expose update_page",
@@ -246,6 +264,9 @@ pipeline test(task) {
     notion_methods.any({ method -> method.name == "create_comment" }),
     "notion should expose create_comment",
   )
-  assert(notion_methods.any({ method -> method.name == "api_call" }), "notion should expose api_call")
+  assert(
+    notion_methods.any({ method -> method.name == "api_call" }),
+    "notion should expose api_call",
+  )
   log("trigger_provider_catalog tests passed")
 }

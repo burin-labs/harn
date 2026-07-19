@@ -12,7 +12,9 @@ fn handle_channel(event) {
 
 pipeline test(task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const handle: TriggerHandle = trigger_register(
     {
       id: "channel-basic-" + unique,

@@ -11,6 +11,7 @@ Supported stdlib operations:
 - `glob(pattern, base?, {long_running: true})`
 - `glob(pattern, {base: "...", long_running: true})`
 - `find_text(root, pattern, {long_running: true, ...})`
+- `find_evidence(roots, patterns, {long_running: true, ...})`
 
 Supported host tools:
 

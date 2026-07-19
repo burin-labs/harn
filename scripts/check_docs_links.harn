@@ -94,7 +94,8 @@ pub fn hex_digit(c: string) -> int {
 
 /** Printable-ASCII char (codes 32..126) for `code`, or "" otherwise. */
 pub fn printable_ascii(code: int) -> string {
-  const ascii = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+  const ascii =
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
   if code < 32 || code > 126 {
     return ""
   }
@@ -275,7 +276,11 @@ pub fn join_path(a: string, b: string) -> string {
  * links. Strings may contain `.`/`..`; the caller normalises before use.
  * Mirrors `candidate_paths` branch-for-branch.
  */
-pub fn candidate_rel_paths(source_dir: string, link_path: string, docs_dir: string) -> list<string> {
+pub fn candidate_rel_paths(
+  source_dir: string,
+  link_path: string,
+  docs_dir: string,
+) -> list<string> {
   let primary = ""
   if link_path.starts_with("/") {
     let rest = link_path
@@ -450,7 +455,10 @@ pipeline main(task) {
       if within_repo(repo_root, expected_abs) {
         expected = expected_abs.substring(repo_root.len() + 1, expected_abs.len())
       }
-      failures = failures + [{source: source, line: link.line, target: link.target, expected: expected}]
+      failures = failures
+        + [
+        {source: source, line: link.line, target: link.target, expected: expected},
+      ]
     }
   }
   if failures.count > 0 {

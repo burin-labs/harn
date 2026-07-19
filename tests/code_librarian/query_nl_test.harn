@@ -54,7 +54,9 @@ fn _recall(result, expected, match_key) {
 
 pipeline test_query_pass_through(task) {
   const _ = _ensure_index()
-  const result = code_librarian_query("MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path")
+  const result = code_librarian_query(
+    "MATCH (f:Function {name: 'formatDate'}) RETURN f.path AS path",
+  )
   const rows = result.rows
   assert(len(rows) >= 1)
   assert_eq(_row_value(rows[0], "path"), "src/util.ts")
@@ -175,7 +177,9 @@ pipeline test_query_nl_recall_at_least_80_percent(task) {
   const recall_pct = to_float(total_found) / to_float(total_expected)
   __io_println(
     "[query_nl] recall=" + to_string(recall_pct) + " (" + to_string(total_found) + "/"
-      + to_string(total_expected)
+      + to_string(
+      total_expected,
+    )
       + ")",
   )
   if len(failures) > 0 {

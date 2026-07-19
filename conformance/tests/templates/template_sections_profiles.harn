@@ -11,7 +11,10 @@ pipeline default() {
 """
   const bindings = {
     urgent: true,
-    examples: [{input: "src", output: "src/main.harn"}, {input: "tests", output: "tests/tree.expected"}],
+    examples: [
+      {input: "src", output: "src/main.harn"},
+      {input: "tests", output: "tests/tree.expected"},
+    ],
     output_schema: {type: "object", properties: {tree: {type: "string"}}, required: ["tree"]},
     tool_list: [
       {name: "read_dir", description: "Read directory entries"},

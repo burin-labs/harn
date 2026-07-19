@@ -16,7 +16,12 @@ pipeline test(task) {
     registry,
     "deploy_service",
     "Ship the service",
-    {parameters: {env: {type: "string"}}, defer_loading: true, namespace: "ops", handler: { _ -> "ok" }},
+    {
+      parameters: {env: {type: "string"}},
+      defer_loading: true,
+      namespace: "ops",
+      handler: { _ -> "ok" },
+    },
   )
   with_llm_script(
     [
@@ -40,7 +45,10 @@ pipeline test(task) {
       )
       const calls = llm_mock_calls()
       assert(contains(calls[0].system, "find_a_tool"), "custom synthetic tool name advertised")
-      assert(!contains(calls[0].system, "__harn_tool_search"), "default name not used when overridden")
+      assert(
+        !contains(calls[0].system, "__harn_tool_search"),
+        "default name not used when overridden",
+      )
       const events = transcript_events(result?.transcript)
       let promoted_deploy = false
       for ev in events {
@@ -62,7 +70,8 @@ pipeline test(task) {
     "Always present",
     {parameters: {op: {type: "string"}}, handler: { _ -> "ok" }},
   )
-  const fat_desc = "A very detailed tool whose description is deliberately long enough \\\n+  that its JSON schema runs hundreds of characters, ensuring the \\\n+  token-estimator predicts a real budget impact rather than rounding down \\\n+  to a trivial cost on the budget accounting path."
+  const fat_desc =
+    "A very detailed tool whose description is deliberately long enough \\\n+  that its JSON schema runs hundreds of characters, ensuring the \\\n+  token-estimator predicts a real budget impact rather than rounding down \\\n+  to a trivial cost on the budget accounting path."
   big = tool_define(
     big,
     "alpha",
@@ -83,9 +92,18 @@ pipeline test(task) {
   )
   with_llm_script(
     [
-      {text: "alpha", tool_calls: [{id: "q1", name: "__harn_tool_search", arguments: {query: "alpha"}}]},
-      {text: "beta", tool_calls: [{id: "q2", name: "__harn_tool_search", arguments: {query: "beta"}}]},
-      {text: "gamma", tool_calls: [{id: "q3", name: "__harn_tool_search", arguments: {query: "gamma"}}]},
+      {
+        text: "alpha",
+        tool_calls: [{id: "q1", name: "__harn_tool_search", arguments: {query: "alpha"}}],
+      },
+      {
+        text: "beta",
+        tool_calls: [{id: "q2", name: "__harn_tool_search", arguments: {query: "beta"}}],
+      },
+      {
+        text: "gamma",
+        tool_calls: [{id: "q3", name: "__harn_tool_search", arguments: {query: "gamma"}}],
+      },
       llm_text("<done>##DONE##</done>"),
     ],
     { ->

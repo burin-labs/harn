@@ -14,7 +14,13 @@ pipeline default() {
     { ->
       const proposed = propose_instructions(
         "Base",
-        {provider: "mock", proposal_count: 2, system: "Proposal sys", schema_retries: 0, repair: false},
+        {
+          provider: "mock",
+          proposal_count: 2,
+          system: "Proposal sys",
+          schema_retries: 0,
+          repair: false,
+        },
       )
       __io_println(proposed[0] == "Base")
       __io_println(proposed[1] == "Plan first.")
@@ -23,7 +29,10 @@ pipeline default() {
       const result = optimize_prompt(
         {
           base_prompt: "Answer the question.",
-          eval_set: [{id: "add", input: "2 + 2", expected: "4"}, {id: "mul", input: "3 * 3", expected: "9"}],
+          eval_set: [
+            {id: "add", input: "2 + 2", expected: "4"},
+            {id: "mul", input: "3 * 3", expected: "9"},
+          ],
           metric: { ctx ->
             let score = 0.0
             if contains(lowercase(ctx.prompt), "calculate") {

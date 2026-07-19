@@ -74,8 +74,7 @@ fn __candidate_space(config) {
   let idx = 0
   for instruction in instructions {
     for demos in demo_sets {
-      candidates = candidates
-        .push(
+      candidates = candidates.push(
         {
           index: idx,
           instruction: instruction,
@@ -102,7 +101,11 @@ fn __judge_options(config) {
 fn __trial_limit(config, candidate_count) {
   let limit = __positive_int(config?.trials, candidate_count, "optimize_prompt: trials")
   if config?.budget?.max_trials != nil {
-    const max_trials = __positive_int(config.budget.max_trials, limit, "optimize_prompt: budget.max_trials")
+    const max_trials = __positive_int(
+      config.budget.max_trials,
+      limit,
+      "optimize_prompt: budget.max_trials",
+    )
     if max_trials < limit {
       limit = max_trials
     }

@@ -13,7 +13,9 @@
  */
 pipeline main() {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const dir = path_join(harness.fs.temp_dir(), "harn-daemon-parity-" + unique)
   harness.fs.mkdir(dir)
   const snapshot_path = path_join(dir, "daemon.json")
@@ -31,7 +33,9 @@ pipeline main() {
       compact_threshold: 1,
       compact_keep_last: 1,
       compact_strategy: "custom",
-      compact_callback: { archived -> {summary: "daemon parity summary " + to_string(len(archived))} },
+      compact_callback: { archived ->
+        {summary: "daemon parity summary " + to_string(len(archived))}
+      },
     },
   )
   const saved = json_parse(harness.fs.read_text(snapshot_path))
@@ -46,7 +50,9 @@ pipeline main() {
   __io_println("snap_has_iterations=" + to_string(saved.total_iterations >= 1))
   __io_println(
     "snap_summary_seeded="
-      + to_string(contains(saved.transcript_summary ?? "", "daemon parity summary")),
+      + to_string(
+      contains(saved.transcript_summary ?? "", "daemon parity summary"),
+    ),
   )
   __io_println("snap_has_summary_field=" + to_string(saved.transcript_summary != nil))
   harness.fs.delete(dir)

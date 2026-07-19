@@ -5,19 +5,23 @@
 import { with_coerce } from "std/llm/handlers"
 
 pipeline default() {
-  const synthetic_with_data = { _call -> return {
-    ok: true,
-    value: {
-      text: "{}",
-      model: "mock",
-      provider: "mock",
-      input_tokens: 0,
-      output_tokens: 0,
-      data: {Verdict: "YES", Bullets: ["A", "B"], Nested: {KeyOne: 1}},
-    },
-  } }
+  const synthetic_with_data = { _call ->
+    return {
+      ok: true,
+      value: {
+        text: "{}",
+        model: "mock",
+        provider: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+        data: {Verdict: "YES", Bullets: ["A", "B"], Nested: {KeyOne: 1}},
+      },
+    }
+  }
   const caller_data = with_coerce(synthetic_with_data, {})
-  const env_data = caller_data({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const env_data = caller_data(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(env_data.value.data.verdict)
   __io_println(env_data.value.data.bullets[0])
   __io_println(env_data.value.data.nested.keyone)
@@ -32,17 +36,21 @@ pipeline default() {
   __io_println(failing_env.ok)
   __io_println(failing_env.status)
   // on_text_json parses JSON-shaped value.text into value.data.
-  const synthetic_text = { _call -> return {
-    ok: true,
-    value: {
-      text: "{\"Decision\":\"approve\"}",
-      model: "mock",
-      provider: "mock",
-      input_tokens: 0,
-      output_tokens: 0,
-    },
-  } }
+  const synthetic_text = { _call ->
+    return {
+      ok: true,
+      value: {
+        text: "{\"Decision\":\"approve\"}",
+        model: "mock",
+        provider: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
   const caller_text = with_coerce(synthetic_text, {on_text_json: true})
-  const env_text = caller_text({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const env_text = caller_text(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(env_text.value.data.decision)
 }

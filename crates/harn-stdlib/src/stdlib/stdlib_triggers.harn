@@ -8,7 +8,20 @@
  * start with a small normalized surface plus `raw: dict`; provider tickets can
  * refine these aliases later without changing the top-level TriggerEvent shape.
  */
-type ProviderId = "github" | "slack" | "linear" | "notion" | "cron" | "webhook" | "a2a-push" | "kafka" | "nats" | "pulsar" | "postgres-cdc" | "email" | "websocket" | string
+type ProviderId = "github" \
+  | "slack" \
+  | "linear" \
+  | "notion" \
+  | "cron" \
+  | "webhook" \
+  | "a2a-push" \
+  | "kafka" \
+  | "nats" \
+  | "pulsar" \
+  | "postgres-cdc" \
+  | "email" \
+  | "websocket" \
+  | string
 
 type SignatureVerified = {state: "verified"}
 
@@ -236,7 +249,20 @@ type GitHubOtherEventPayload = {
   raw: dict,
 }
 
-type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPayload | GitHubIssueCommentEventPayload | GitHubPullRequestReviewEventPayload | GitHubPushEventPayload | GitHubWorkflowRunEventPayload | GitHubDeploymentStatusEventPayload | GitHubCheckRunEventPayload | GitHubCheckSuiteEventPayload | GitHubStatusEventPayload | GitHubMergeGroupEventPayload | GitHubInstallationEventPayload | GitHubInstallationRepositoriesEventPayload | GitHubOtherEventPayload
+type GitHubEventPayload = GitHubIssuesEventPayload \
+  | GitHubPullRequestEventPayload \
+  | GitHubIssueCommentEventPayload \
+  | GitHubPullRequestReviewEventPayload \
+  | GitHubPushEventPayload \
+  | GitHubWorkflowRunEventPayload \
+  | GitHubDeploymentStatusEventPayload \
+  | GitHubCheckRunEventPayload \
+  | GitHubCheckSuiteEventPayload \
+  | GitHubStatusEventPayload \
+  | GitHubMergeGroupEventPayload \
+  | GitHubInstallationEventPayload \
+  | GitHubInstallationRepositoriesEventPayload \
+  | GitHubOtherEventPayload
 
 type SlackEventCommon = {
   provider: "slack",
@@ -344,7 +370,12 @@ type SlackOtherEventPayload = {
   raw: dict,
 }
 
-type SlackEventPayload = SlackMessageEventPayload | SlackAppMentionEventPayload | SlackReactionAddedEventPayload | SlackAppHomeOpenedEventPayload | SlackAssistantThreadStartedEventPayload | SlackOtherEventPayload
+type SlackEventPayload = SlackMessageEventPayload \
+  | SlackAppMentionEventPayload \
+  | SlackReactionAddedEventPayload \
+  | SlackAppHomeOpenedEventPayload \
+  | SlackAssistantThreadStartedEventPayload \
+  | SlackOtherEventPayload
 
 type LinearEventCommon = {
   provider: "linear",
@@ -390,7 +421,21 @@ type LinearIssueCompletedAtChange = {field_name: "completed_at", previous: strin
 
 type LinearIssueOtherChange = {field_name: "other", field: string, previous: any}
 
-type LinearIssueChange = LinearIssueTitleChange | LinearIssueDescriptionChange | LinearIssuePriorityChange | LinearIssueEstimateChange | LinearIssueStateIdChange | LinearIssueTeamIdChange | LinearIssueAssigneeIdChange | LinearIssueProjectIdChange | LinearIssueCycleIdChange | LinearIssueDueDateChange | LinearIssueParentIdChange | LinearIssueSortOrderChange | LinearIssueLabelIdsChange | LinearIssueCompletedAtChange | LinearIssueOtherChange
+type LinearIssueChange = LinearIssueTitleChange \
+  | LinearIssueDescriptionChange \
+  | LinearIssuePriorityChange \
+  | LinearIssueEstimateChange \
+  | LinearIssueStateIdChange \
+  | LinearIssueTeamIdChange \
+  | LinearIssueAssigneeIdChange \
+  | LinearIssueProjectIdChange \
+  | LinearIssueCycleIdChange \
+  | LinearIssueDueDateChange \
+  | LinearIssueParentIdChange \
+  | LinearIssueSortOrderChange \
+  | LinearIssueLabelIdsChange \
+  | LinearIssueCompletedAtChange \
+  | LinearIssueOtherChange
 
 type LinearIssueEventPayload = {
   provider: "linear",
@@ -500,7 +545,14 @@ type LinearCustomerRequestEventPayload = {
 
 type LinearOtherEventPayload = LinearEventCommon
 
-type LinearEventPayload = LinearIssueEventPayload | LinearIssueCommentEventPayload | LinearIssueLabelEventPayload | LinearProjectEventPayload | LinearCycleEventPayload | LinearCustomerEventPayload | LinearCustomerRequestEventPayload | LinearOtherEventPayload
+type LinearEventPayload = LinearIssueEventPayload \
+  | LinearIssueCommentEventPayload \
+  | LinearIssueLabelEventPayload \
+  | LinearProjectEventPayload \
+  | LinearCycleEventPayload \
+  | LinearCustomerEventPayload \
+  | LinearCustomerRequestEventPayload \
+  | LinearOtherEventPayload
 
 type NotionPolledChangeEvent = {
   resource: string,
@@ -639,7 +691,13 @@ type NotionOtherEventPayload = {
   raw: dict,
 }
 
-type NotionEventPayload = NotionSubscriptionVerificationEventPayload | NotionPageContentUpdatedEventPayload | NotionPageLockedEventPayload | NotionCommentCreatedEventPayload | NotionDataSourceSchemaUpdatedEventPayload | NotionPolledEventPayload | NotionOtherEventPayload
+type NotionEventPayload = NotionSubscriptionVerificationEventPayload \
+  | NotionPageContentUpdatedEventPayload \
+  | NotionPageLockedEventPayload \
+  | NotionCommentCreatedEventPayload \
+  | NotionDataSourceSchemaUpdatedEventPayload \
+  | NotionPolledEventPayload \
+  | NotionOtherEventPayload
 
 type CronEventPayload = {
   provider: "cron",
@@ -681,7 +739,15 @@ type StreamEventPayload = {
 
 type ExtensionProviderPayload = {provider: string, schema_name: string, raw: dict}
 
-type ProviderPayload = GitHubEventPayload | SlackEventPayload | LinearEventPayload | NotionEventPayload | CronEventPayload | GenericWebhookPayload | A2aPushPayload | StreamEventPayload | ExtensionProviderPayload
+type ProviderPayload = GitHubEventPayload \
+  | SlackEventPayload \
+  | LinearEventPayload \
+  | NotionEventPayload \
+  | CronEventPayload \
+  | GenericWebhookPayload \
+  | A2aPushPayload \
+  | StreamEventPayload \
+  | ExtensionProviderPayload
 
 type ProviderSecretRequirement = {name: string, required: bool, namespace: string}
 
@@ -701,7 +767,8 @@ type ProviderSignatureVerificationHmac = {
   encoding: string,
 }
 
-type ProviderSignatureVerification = ProviderSignatureVerificationNone | ProviderSignatureVerificationHmac
+type ProviderSignatureVerification = ProviderSignatureVerificationNone \
+  | ProviderSignatureVerificationHmac
 
 type ProviderRuntimeBuiltin = {
   kind: "builtin",
@@ -1115,7 +1182,11 @@ pub fn ReminderInject(options: ReminderInjectOptions) -> ReminderInjectHandler {
  * @example: trigger_register({handler: InterruptAndSuspend({target_agents: "all", reason: "build_storm"})})
  */
 pub fn InterruptAndSuspend(options: InterruptAndSuspendOptions) -> InterruptAndSuspendHandler {
-  return {kind: "interrupt_and_suspend", target_agents: options.target_agents, reason: options.reason}
+  return {
+    kind: "interrupt_and_suspend",
+    target_agents: options.target_agents,
+    reason: options.reason,
+  }
 }
 
 /**
@@ -1148,7 +1219,9 @@ pub fn stream_join(source, join: dict? = nil) -> StreamJoinPlan {
   return {kind: "stream.join", source: source, join: join ?? {}}
 }
 
-fn __stream_llm_classify_options(options: StreamLlmClassifyOptions = nil) -> StreamLlmClassifyConfig {
+fn __stream_llm_classify_options(
+  options: StreamLlmClassifyOptions = nil,
+) -> StreamLlmClassifyConfig {
   let config = {}
   if options?.cache != nil {
     config = config + {cache: options?.cache}
@@ -1178,7 +1251,17 @@ pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
  * @effects: []
  * @errors: []
  */
-pub fn llm_classify(input, labels: list<string>, options: StreamLlmClassifyOptions = nil) -> StreamLlmClassifyPlan {
+pub fn llm_classify(
+  input,
+  labels: list<string>,
+  options: StreamLlmClassifyOptions = nil,
+) -> StreamLlmClassifyPlan {
   const config = __stream_llm_classify_options(options)
-  return {kind: "stream.llm_classify", input: input, labels: labels, cache: config.cache, options: config}
+  return {
+    kind: "stream.llm_classify",
+    input: input,
+    labels: labels,
+    cache: config.cache,
+    options: config,
+  }
 }

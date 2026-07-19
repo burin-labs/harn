@@ -81,16 +81,44 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev[n]
 }
 
-/// Find the closest match to `name` among `candidates`, within `max_dist` edits.
+fn has_same_snake_case_segments(a: &str, b: &str) -> bool {
+    if !a.contains('_') || !b.contains('_') {
+        return false;
+    }
+    let mut a_segments: Vec<_> = a.split('_').collect();
+    let mut b_segments: Vec<_> = b.split('_').collect();
+    if a_segments.len() < 2
+        || a_segments.len() != b_segments.len()
+        || a_segments.iter().any(|segment| segment.is_empty())
+        || b_segments.iter().any(|segment| segment.is_empty())
+    {
+        return false;
+    }
+    a_segments.sort_unstable();
+    b_segments.sort_unstable();
+    a_segments == b_segments
+}
+
+/// Find the closest match to `name` among `candidates`, within `max_dist` edits
+/// or by reordering its non-empty underscore-separated segments. Candidates
+/// within the edit-distance threshold rank ahead of reorder-only matches.
 pub fn find_closest_match<'a>(
     name: &str,
     candidates: impl Iterator<Item = &'a str>,
     max_dist: usize,
 ) -> Option<&'a str> {
     candidates
-        .filter(|c| c.len().abs_diff(name.len()) <= max_dist)
-        .min_by_key(|c| edit_distance(name, c))
-        .filter(|c| edit_distance(name, c) <= max_dist && *c != name)
+        .filter(|candidate| *candidate != name)
+        .filter_map(|candidate| {
+            let reordered = has_same_snake_case_segments(name, candidate);
+            if candidate.len().abs_diff(name.len()) > max_dist && !reordered {
+                return None;
+            }
+            let distance = edit_distance(name, candidate);
+            (distance <= max_dist || reordered).then_some((distance, candidate))
+        })
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, candidate)| candidate)
 }
 
 /// Return the replacement for stdlib symbols that were directly renamed.
@@ -759,6 +787,30 @@ mod tests {
         );
         assert!(result.contains("help:"));
         assert!(result.contains("response"));
+    }
+
+    #[test]
+    fn closest_match_suggests_reordered_snake_case_segments() {
+        assert_eq!(
+            find_closest_match("parse_json", ["json_parse"].into_iter(), 2),
+            Some("json_parse")
+        );
+        assert_eq!(
+            find_closest_match("read_file", ["file_read"].into_iter(), 2),
+            Some("file_read")
+        );
+        assert_eq!(
+            find_closest_match("parse_json", ["parse_yaml"].into_iter(), 2),
+            None
+        );
+    }
+
+    #[test]
+    fn closest_match_suggests_plain_typo() {
+        assert_eq!(
+            find_closest_match("json_pars", ["json_parse"].into_iter(), 2),
+            Some("json_parse")
+        );
     }
 
     #[test]

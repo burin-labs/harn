@@ -9,9 +9,10 @@
     "released": {"type": "boolean"},
     "host": {"type": "string", "minLength": 1},
     "resource_class": {"type": "string", "enum": ["whole-machine", "rust-heavy"]},
+    "domain": {"type": "string", "minLength": 1},
     "lease_id": {"type": "string", "minLength": 1},
     "observed_at_ms": {"type": "integer"}
   },
-  "required": ["schema_version", "released", "host", "resource_class", "lease_id", "observed_at_ms"],
+  "required": ["schema_version", "released", "host", "resource_class", "domain", "lease_id", "observed_at_ms"],
   "additionalProperties": false
 }

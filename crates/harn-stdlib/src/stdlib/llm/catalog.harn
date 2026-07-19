@@ -297,11 +297,13 @@ fn __model_matches_identity_filters(model, opts) {
     return false
   }
   if want_equivalence != nil
-    && to_string(model?.equivalence_group ?? "") != to_string(want_equivalence) {
+    && to_string(model?.equivalence_group ?? "")
+    != to_string(want_equivalence) {
     return false
   }
   if want_logical_model != nil
-    && to_string(model?.logical_model ?? "") != to_string(want_logical_model) {
+    && to_string(model?.logical_model ?? "")
+    != to_string(want_logical_model) {
     return false
   }
   if want_api_dialect != nil && to_string(model?.api_dialect ?? "") != to_string(want_api_dialect) {
@@ -496,14 +498,30 @@ pub fn pick_model(opts = nil) {
  * with missing metadata last; provider and id sorts use the model id as a
  * deterministic tie-breaker.
  */
-pub type ModelCatalogSort = "provider" | "id" | "pricing.input" | "pricing.output" | "pricing.cache_read" | "context_window"
+pub type ModelCatalogSort = "provider" \
+  | "id" \
+  | "pricing.input" \
+  | "pricing.output" \
+  | "pricing.cache_read" \
+  | "context_window"
 
 /**
  * Named presentation columns for model catalog queries. These are deliberately
  * an allowlist rather than arbitrary paths so the CLI and script callers share
  * one auditable, typed projection contract.
  */
-pub type ModelCatalogColumn = "id" | "provider" | "tier" | "strengths" | "open_weight" | "installed" | "context_window" | "pricing.input" | "pricing.output" | "pricing.cache_read" | "tool_support.parity" | "tool_support.parity_notes"
+pub type ModelCatalogColumn = "id" \
+  | "provider" \
+  | "tier" \
+  | "strengths" \
+  | "open_weight" \
+  | "installed" \
+  | "context_window" \
+  | "pricing.input" \
+  | "pricing.output" \
+  | "pricing.cache_read" \
+  | "tool_support.parity" \
+  | "tool_support.parity_notes"
 
 /**
  * Reusable model-catalog query. `strengths` uses exact all-of membership;
@@ -526,7 +544,14 @@ const MODEL_CATALOG_QUERY_SCHEMA_VERSION = 1
 
 const MODEL_CATALOG_DEFAULT_COLUMNS = ["provider", "id", "tier", "strengths", "tool_support.parity"]
 
-const MODEL_CATALOG_SORT_FIELDS = ["provider", "id", "pricing.input", "pricing.output", "pricing.cache_read", "context_window"]
+const MODEL_CATALOG_SORT_FIELDS = [
+  "provider",
+  "id",
+  "pricing.input",
+  "pricing.output",
+  "pricing.cache_read",
+  "context_window",
+]
 
 const MODEL_CATALOG_COLUMNS = [
   "id",
@@ -671,7 +696,11 @@ pub fn normalize_model_catalog_query(raw = nil) -> ModelCatalogQuery {
   const input = raw ?? {}
   let query = {}
   if input?.provider != nil {
-    query = __catalog_query_string(query, "provider", __catalog_query_text(input.provider, "provider"))
+    query = __catalog_query_string(
+      query,
+      "provider",
+      __catalog_query_text(input.provider, "provider"),
+    )
   }
   if input?.tier != nil {
     query = __catalog_query_string(query, "tier", __catalog_query_text(input.tier, "tier"))
@@ -732,7 +761,8 @@ fn __catalog_row_matches(row, query) {
   if query?.tier != nil && __catalog_row_string(row, "tier") != query.tier {
     return false
   }
-  if query?.tool_parity != nil && __catalog_row_string(row, "tool_mode_parity") != query.tool_parity {
+  if query?.tool_parity != nil
+    && __catalog_row_string(row, "tool_mode_parity") != query.tool_parity {
     return false
   }
   if query?.open_weight != nil && row?.open_weight != query.open_weight {
@@ -787,7 +817,10 @@ fn __catalog_sort_key(row, sort) {
  * @effects: []
  * @errors: []
  */
-pub fn catalog_with_installed_ollama_models(catalog: list, installed_ollama_models: list = []) -> list {
+pub fn catalog_with_installed_ollama_models(
+  catalog: list,
+  installed_ollama_models: list = [],
+) -> list {
   let installed = {}
   for raw_id in installed_ollama_models {
     if type_of(raw_id) == "string" && trim(raw_id) != "" {
@@ -808,14 +841,15 @@ pub fn catalog_with_installed_ollama_models(catalog: list, installed_ollama_mode
     if provider == "ollama" {
       known_ollama = known_ollama + {[id]: true}
     }
-    rows = rows.push(raw + {installed: provider == "ollama" && (installed[id] ?? false), cataloged: true})
+    rows = rows.push(
+      raw + {installed: provider == "ollama" && (installed[id] ?? false), cataloged: true},
+    )
   }
   for raw_id in installed_ollama_models {
     if type_of(raw_id) != "string" || trim(raw_id) == "" || (known_ollama[raw_id] ?? false) {
       continue
     }
-    rows = rows
-      .push(
+    rows = rows.push(
       {
         id: raw_id,
         provider: "ollama",

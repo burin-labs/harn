@@ -81,7 +81,8 @@ pub fn python_boundary_rule_for(path: string) -> dict {
   return {
     allowed: false,
     category: "forbidden",
-    reason: "Repo orchestration should be Harn unless bootstrap, foreign artifact validation, or a subprocess fixture requires Python.",
+    reason:
+      "Repo orchestration should be Harn unless bootstrap, foreign artifact validation, or a subprocess fixture requires Python.",
   }
 }
 
@@ -160,8 +161,9 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println("usage: harn run scripts/check_python_boundary.harn -- [--json] [--root PATH]")
+    harness.stdio.println(
+      "usage: harn run scripts/check_python_boundary.harn -- [--json] [--root PATH]",
+    )
     return nil
   }
   const parsed_result = parse(arg_spec(), argv)

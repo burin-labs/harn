@@ -14,6 +14,10 @@ use super::{builtins, AcpBridge, AcpRuntimeConfigurator};
 pub(super) struct PromptExecutionError {
     pub message: String,
     pub terminal_class: harn_vm::llm::AgentTerminalClass,
+    /// Machine facts projected from the thrown error dict (provider/model of the
+    /// route that actually failed, kind/reason/category/code, retry hints).
+    /// Empty for compile/setup errors and bare thrown strings.
+    pub facts: super::types::AcpPromptFailureFacts,
 }
 
 impl PromptExecutionError {
@@ -21,7 +25,7 @@ impl PromptExecutionError {
         let message = vm.format_runtime_error(error);
         let thrown = harn_vm::llm::vm_value_to_json(&error.thrown_value());
         let classification_input = if thrown.is_object() {
-            thrown
+            thrown.clone()
         } else {
             serde_json::json!({ "message": message.as_str() })
         };
@@ -31,6 +35,7 @@ impl PromptExecutionError {
         Self {
             message,
             terminal_class,
+            facts: super::types::AcpPromptFailureFacts::from_thrown(&thrown),
         }
     }
 }
@@ -40,6 +45,7 @@ impl From<String> for PromptExecutionError {
         Self {
             message,
             terminal_class: harn_vm::llm::AgentTerminalClass::GenericThrow,
+            facts: super::types::AcpPromptFailureFacts::default(),
         }
     }
 }

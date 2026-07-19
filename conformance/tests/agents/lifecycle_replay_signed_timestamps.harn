@@ -33,7 +33,9 @@ pipeline default() {
   const _ = advance_time(5000)
   const signed_ok = verify_lifecycle_receipt_signature("suspension_receipt", entry.payload)
   __io_println("signed_verified=" + to_string(signed_ok.verified))
-  __io_println("journal_at_ms_stable=" + to_string(entry.payload.suspended_at.at_ms == 1700000002000))
+  __io_println(
+    "journal_at_ms_stable=" + to_string(entry.payload.suspended_at.at_ms == 1700000002000),
+  )
   // Tamper with at_ms — verification fails with HARN-SUS-013.
   const tampered = {
     handle: entry.payload.handle,

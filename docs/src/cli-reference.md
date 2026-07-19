@@ -199,7 +199,12 @@ old unrestricted process behavior; use `--read-only-root` when a script
 needs read access to a sibling or shared directory and should remain in
 the sandboxed profile.
 The CLI emits a warning when `--no-sandbox` is used, and rejects
-`--read-only-root` when `--no-sandbox` is present.
+`--write-root` / `--read-only-root` when `--no-sandbox` is present — a
+scoped grant is meaningless once the whole sandbox is off. When a grant
+is used with the sandbox still active, the CLI prints one line naming
+exactly the delta (for example `sandbox active; extra write root:
+/path`) instead of the blanket `--no-sandbox` banner, so a routine
+grant-scoped run does not spam a filesystem/process/egress warning.
 
 Before starting the VM, `harn run <file>` builds the cross-module
 graph for the entry file. When all imports resolve, unknown call
@@ -801,6 +806,11 @@ not count toward the line width**. This matches `rustfmt`, Prettier, and
 
 There is no separate "line too long" lint — width is a formatter concern, so a
 trailing comment that overflows is never reported as a diagnostic.
+
+After formatting, `harn fmt` verifies the complete emitted output as a final
+guard. If a breakable line still exceeds the configured width, the command
+reports the offending line and leaves the file unchanged; only a single
+unbreakable token or an overflowing comment may remain longer.
 
 ## harn lint
 

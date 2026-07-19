@@ -21,7 +21,12 @@ pipeline test(task) {
       const generic = agent_loop(
         "hey wassup? can you help with this?",
         nil,
-        {provider: "mock", max_iterations: 1, skills: disk_cleanup, skill_match: {strategy: "metadata"}},
+        {
+          provider: "mock",
+          max_iterations: 1,
+          skills: disk_cleanup,
+          skill_match: {strategy: "metadata"},
+        },
       )
       assert(generic?.status == "done", "generic prompt completes")
       assert(
@@ -39,7 +44,10 @@ pipeline test(task) {
         {provider: "mock", max_iterations: 1, skills: ship, skill_match: {strategy: "metadata"}},
       )
       assert(substring?.status == "done", "substring prompt completes")
-      assert(!contains(llm_mock_calls()[0].system, "## Active skills"), "membership does not match ship")
+      assert(
+        !contains(llm_mock_calls()[0].system, "## Active skills"),
+        "membership does not match ship",
+      )
     },
   )
   with_llm_script(
@@ -48,10 +56,18 @@ pipeline test(task) {
       const explicit_id = agent_loop(
         "run disk cleanup",
         nil,
-        {provider: "mock", max_iterations: 1, skills: disk_cleanup, skill_match: {strategy: "metadata"}},
+        {
+          provider: "mock",
+          max_iterations: 1,
+          skills: disk_cleanup,
+          skill_match: {strategy: "metadata"},
+        },
       )
       assert(explicit_id?.status == "done", "explicit skill-id prompt completes")
-      assert(contains(llm_mock_calls()[0].system, "disk_cleanup"), "explicit id tokens activate cleanup")
+      assert(
+        contains(llm_mock_calls()[0].system, "disk_cleanup"),
+        "explicit id tokens activate cleanup",
+      )
       log("skill_lifecycle_exact_metadata tests passed")
     },
   )

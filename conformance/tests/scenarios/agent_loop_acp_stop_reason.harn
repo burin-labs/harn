@@ -40,7 +40,11 @@ pipeline default() {
   with_llm_script(
     [llm_text("still working"), llm_text("still working")],
     { ->
-      const capped = agent_loop("hi", nil, {provider: "mock", loop_until_done: true, max_iterations: 1})
+      const capped = agent_loop(
+        "hi",
+        nil,
+        {provider: "mock", loop_until_done: true, max_iterations: 1},
+      )
       __io_println(capped.acp_stop_reason)
     },
   )

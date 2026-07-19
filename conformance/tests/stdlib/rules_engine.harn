@@ -21,13 +21,15 @@ pipeline default() {
   __io_println(rep.rule_id == "find-calls")
   // 3) A codemod in dry-run previews without writing; the
   //    `behavior-preserving` safety makes it machine-applicable.
-  const codemod = "id = \"rename\"\nlanguage = \"typescript\"\nsafety = \"behavior-preserving\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n"
+  const codemod =
+    "id = \"rename\"\nlanguage = \"typescript\"\nsafety = \"behavior-preserving\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n"
   const ap = rules_apply({rule: codemod, source: "foo();\n", language: "typescript", dry_run: true})
   __io_println(ap.ok && ap.files[0].changed && !ap.files[0].applied)
   __io_println(ap.files[0].preview == "bar();\n")
   __io_println(ap.auto_applicable)
   // 4) A declarative lint rule (a `message`, no `fix`) emits diagnostics.
-  const lint = "id = \"calls\"\nlanguage = \"typescript\"\nmessage = \"function call\"\n[rule]\npattern = \"$FN()\"\n"
+  const lint =
+    "id = \"calls\"\nlanguage = \"typescript\"\nmessage = \"function call\"\n[rule]\npattern = \"$FN()\"\n"
   const decl = rules_diagnostics({rule: lint, source: src, language: "typescript", path: "a.ts"})
   __io_println(decl.ok && decl.diagnostic_count == 2)
   __io_println(decl.diagnostics[0].message == "function call")

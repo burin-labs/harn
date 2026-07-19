@@ -43,7 +43,14 @@ pub import { edit_dry_run, edit_rename_symbol, edit_safe_text_patch } from "std/
  */
 fn __refactor_normalize_lang(name) {
   const n = lowercase(trim(name ?? ""))
-  const alias = {golang: "go", js: "javascript", py: "python", rb: "ruby", rs: "rust", ts: "typescript"}
+  const alias = {
+    golang: "go",
+    js: "javascript",
+    py: "python",
+    rb: "ruby",
+    rs: "rust",
+    ts: "typescript",
+  }
   return alias.get(n, n)
 }
 
@@ -143,7 +150,12 @@ fn __refactor_result(operation, language, fields) {
     details: nil,
     errors: [],
     warnings: [],
-    provenance: {module: "std/edit", helper: "edit_" + operation, operation: operation, language: language},
+    provenance: {
+      module: "std/edit",
+      helper: "edit_" + operation,
+      operation: operation,
+      language: language,
+    },
   }
   return base.merge(fields ?? {})
 }
@@ -160,7 +172,11 @@ fn __refactor_invalid(operation, language, reason) {
   return __refactor_result(
     operation,
     language,
-    {result: "invalid_params", details: reason, errors: [{code: "invalid_params", message: reason}]},
+    {
+      result: "invalid_params",
+      details: reason,
+      errors: [{code: "invalid_params", message: reason}],
+    },
   )
 }
 
@@ -207,7 +223,11 @@ fn __refactor_exec_op(op, session_id, before_map) {
     return {
       ok: res.result == "applied",
       result: res.result,
-      conflict: {code: res.result, message: res.details ?? ("apply_node " + res.result), path: op?.path},
+      conflict: {
+        code: res.result,
+        message: res.details ?? ("apply_node " + res.result),
+        path: op?.path,
+      },
     }
   }
   if kind == "node_insert" {
@@ -215,7 +235,11 @@ fn __refactor_exec_op(op, session_id, before_map) {
     return {
       ok: res.result == "applied",
       result: res.result,
-      conflict: {code: res.result, message: res.details ?? ("insert_at_anchor " + res.result), path: op?.path},
+      conflict: {
+        code: res.result,
+        message: res.details ?? ("insert_at_anchor " + res.result),
+        path: op?.path,
+      },
     }
   }
   return {
@@ -436,7 +460,13 @@ pub fn edit_extract_variable(params) {
     new_lines = new_lines + lines[start_line + 1:]
   }
   const after = join(new_lines, "\n")
-  return __refactor_run("extract_variable", language, [{kind: "content", path: path, after: after}], p, [])
+  return __refactor_run(
+    "extract_variable",
+    language,
+    [{kind: "content", path: path, after: after}],
+    p,
+    [],
+  )
 }
 
 /**
@@ -818,7 +848,11 @@ pub fn edit_add_parameter(params) {
   const fn_name = __refactor_symbol_name(p)
   const param = p?.param
   if path == "" || fn_name == "" || param == nil || param == "" {
-    return __refactor_invalid("add_parameter", language, "`path`, `symbol`/`name`, and `param` are required")
+    return __refactor_invalid(
+      "add_parameter",
+      language,
+      "`path`, `symbol`/`name`, and `param` are required",
+    )
   }
   const probe_session = if p?.dry_run ?? false {
     nil
@@ -1011,7 +1045,9 @@ pub fn edit_change_return_type(params) {
   } else {
     p?.session_id
   }
-  const query = "(" + spec.fn_node + " name: (identifier) @__n " + spec.ret_field + ": " + spec.ret_node
+  const query = "(" + spec.fn_node + " name: (identifier) @__n " + spec.ret_field + ": "
+    + spec
+    .ret_node
     + " @target (#eq? @__n \""
     + fn_name
     + "\"))"
@@ -1075,8 +1111,7 @@ fn __refactor_strip_n(line, n) {
 }
 
 fn __refactor_indent_lines(lines, prefix) {
-  return lines
-    .map(
+  return lines.map(
     { l ->
       if trim(l) == "" {
         ""
@@ -1134,7 +1169,10 @@ fn __refactor_wrap_probe(kind, body_lines) {
   if kind == "ruby" {
     return join(["def __harn_probe__"] + __refactor_indent_lines(body_lines, "  ") + ["end"], "\n")
   }
-  return join(["function __harn_probe__() {"] + __refactor_indent_lines(body_lines, "  ") + ["}"], "\n")
+  return join(
+    ["function __harn_probe__() {"] + __refactor_indent_lines(body_lines, "  ") + ["}"],
+    "\n",
+  )
 }
 
 /**
@@ -1208,18 +1246,24 @@ pub fn edit_extract_function(params) {
       {
         result: "unsupported",
         details: "selected range is not inside a top-level function",
-        errors: [{code: "no_enclosing_function", message: "range is not inside a top-level function"}],
+        errors: [
+          {code: "no_enclosing_function", message: "range is not inside a top-level function"},
+        ],
       },
     )
   }
   const block_undef = __refactor_undef_names(__refactor_wrap_probe(kind, dedented), language)
   const enclosing_lines = lines[enclosing.start_row:enclosing.end_row + 1]
   const enclosing_dedent = __refactor_min_indent(enclosing_lines)
-  const enclosing_src = join(enclosing_lines.map({ l -> __refactor_strip_n(l, enclosing_dedent) }), "\n")
+  const enclosing_src = join(
+    enclosing_lines.map({ l -> __refactor_strip_n(l, enclosing_dedent) }),
+    "\n",
+  )
   const enclosing_undef = __refactor_undef_names(enclosing_src, language)
   let captures = []
   for nm in block_undef {
-    if !__refactor_member(enclosing_undef, nm) && nm != new_name && !__refactor_member(captures, nm) {
+    if !__refactor_member(enclosing_undef, nm) && nm != new_name
+      && !__refactor_member(captures, nm) {
       captures = captures + [nm]
     }
   }
@@ -1261,7 +1305,13 @@ pub fn edit_extract_function(params) {
     replaced[:insert_idx] + [""] + def_lines + suffix
   }
   const after = join(new_lines, "\n")
-  return __refactor_run("extract_function", language, [{kind: "content", path: path, after: after}], p, [])
+  return __refactor_run(
+    "extract_function",
+    language,
+    [{kind: "content", path: path, after: after}],
+    p,
+    [],
+  )
 }
 
 /** --- inline + move_decl ----------------------------------------------------- */
@@ -1328,7 +1378,11 @@ pub fn edit_inline(params) {
   const language = __refactor_detect_language(p)
   const spec = __refactor_lang_spec(language)
   if spec == nil {
-    return __refactor_unsupported("inline", language, "no signature grammar for language `" + language + "`")
+    return __refactor_unsupported(
+      "inline",
+      language,
+      "no signature grammar for language `" + language + "`",
+    )
   }
   const path = p?.path ?? ""
   const fn_name = __refactor_symbol_name(p)
@@ -1341,7 +1395,9 @@ pub fn edit_inline(params) {
     p?.session_id
   }
   const content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
-  const fb = hostlib_ast_function_body({source: content, language: language, function_name: fn_name})
+  const fb = hostlib_ast_function_body(
+    {source: content, language: language, function_name: fn_name},
+  )
   if !(fb?.found ?? false) {
     return __refactor_conflict(
       "inline",
@@ -1375,7 +1431,8 @@ pub fn edit_inline(params) {
         [
           {
             code: "call_has_arguments",
-            message: "call site #" + to_string(i + 1) + " passes arguments to a zero-parameter function",
+            message: "call site #" + to_string(i + 1)
+              + " passes arguments to a zero-parameter function",
             path: path,
           },
         ],
@@ -1383,8 +1440,10 @@ pub fn edit_inline(params) {
     }
     i = i + 1
   }
-  const call_target = "((" + spec.call_node + " function: (identifier) @__f (#eq? @__f \"" + fn_name + "\")) @target)"
-  const def_target = "((" + spec.fn_node + " name: (identifier) @__n (#eq? @__n \"" + fn_name + "\")) @target)"
+  const call_target = "((" + spec.call_node + " function: (identifier) @__f (#eq? @__f \"" + fn_name
+    + "\")) @target)"
+  const def_target = "((" + spec.fn_node + " name: (identifier) @__n (#eq? @__n \"" + fn_name
+    + "\")) @target)"
   let ops = []
   if calls.count > 0 {
     ops = ops
@@ -1431,7 +1490,11 @@ pub fn edit_move_decl(params) {
   const target_path = p?.target_file
   const fn_name = __refactor_symbol_name(p)
   if path == "" || target_path == nil || target_path == "" || fn_name == "" {
-    return __refactor_invalid("move_decl", language, "`path`, `symbol`/`name`, and `target_file` are required")
+    return __refactor_invalid(
+      "move_decl",
+      language,
+      "`path`, `symbol`/`name`, and `target_file` are required",
+    )
   }
   const probe_session = if p?.dry_run ?? false {
     nil
@@ -1439,7 +1502,9 @@ pub fn edit_move_decl(params) {
     p?.session_id
   }
   const src_content = hostlib_fs_read_text({path: path, session_id: probe_session})?.content ?? ""
-  const extracted = hostlib_ast_symbol_extract({symbol_name: fn_name, source: src_content, language: language})
+  const extracted = hostlib_ast_symbol_extract(
+    {symbol_name: fn_name, source: src_content, language: language},
+  )
   if extracted.result == "unsupported_language" {
     return __refactor_unsupported(
       "move_decl",
@@ -1451,10 +1516,18 @@ pub fn edit_move_decl(params) {
     return __refactor_conflict(
       "move_decl",
       language,
-      [{code: extracted.result, message: "cannot extract `" + fn_name + "` from " + path, path: path}],
+      [
+        {
+          code: extracted.result,
+          message: "cannot extract `" + fn_name + "` from " + path,
+          path: path,
+        },
+      ],
     )
   }
-  const deleted = hostlib_ast_symbol_delete({symbol_name: fn_name, source: src_content, language: language})
+  const deleted = hostlib_ast_symbol_delete(
+    {symbol_name: fn_name, source: src_content, language: language},
+  )
   if deleted.result != "removed" {
     return __refactor_conflict(
       "move_decl",
@@ -1463,7 +1536,9 @@ pub fn edit_move_decl(params) {
     )
   }
   const moved = extracted.text
-  const target_content = hostlib_fs_read_text({path: target_path, session_id: probe_session})?.content ?? ""
+  const target_content = hostlib_fs_read_text({path: target_path, session_id: probe_session})
+    ?.content
+    ?? ""
   const position = p?.target_position ?? "end"
   const new_target = if position == "start" {
     moved + "\n\n" + target_content

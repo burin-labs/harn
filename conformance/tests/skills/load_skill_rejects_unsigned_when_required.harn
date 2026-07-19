@@ -6,7 +6,13 @@ pipeline test(task) {
     [
       {
         text: "Load the unsigned instructions.",
-        tool_calls: [{id: "ls1", name: "load_skill", arguments: {name: "unsigned-review", require_signature: true}}],
+        tool_calls: [
+          {
+            id: "ls1",
+            name: "load_skill",
+            arguments: {name: "unsigned-review", require_signature: true},
+          },
+        ],
       },
       llm_text("<done>##DONE##</done>"),
     ],

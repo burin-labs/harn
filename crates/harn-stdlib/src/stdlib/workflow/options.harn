@@ -259,7 +259,10 @@ fn __workflow_non_empty_string(value) {
   return trimmed
 }
 
-fn __workflow_stage_tool_format(model_policy: WorkflowModelPolicy, host: WorkflowStageHostConfig) -> string {
+fn __workflow_stage_tool_format(
+  model_policy: WorkflowModelPolicy,
+  host: WorkflowStageHostConfig,
+) -> string {
   const explicit = __workflow_non_empty_string(model_policy.tool_format)
   if explicit != nil {
     return explicit
@@ -298,7 +301,9 @@ fn __workflow_autonomy_tier(value) -> WorkflowAutonomyTier {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_autonomy_policy(config: WorkflowAutonomyPolicyConfig = {}) -> WorkflowAutonomyPolicy {
+pub fn workflow_autonomy_policy(
+  config: WorkflowAutonomyPolicyConfig = {},
+) -> WorkflowAutonomyPolicy {
   return {
     agent_id: config.agent_id ?? config.agent,
     autonomy_tier: __workflow_autonomy_tier(config.autonomy_tier ?? config.tier),
@@ -314,8 +319,21 @@ fn __workflow_llm_options(
   model_policy: WorkflowModelPolicy,
   tool_format: string,
 ) -> dict {
-  const model_option_keys = ["provider", "model", "model_tier", "temperature", "max_tokens", "thinking", "reasoning_effort"]
-  let options = {tool_format: tool_format} + pick_keys(model_policy, model_option_keys, {drop_nil: true})
+  const model_option_keys = [
+    "provider",
+    "model",
+    "model_tier",
+    "temperature",
+    "max_tokens",
+    "thinking",
+    "reasoning_effort",
+  ]
+  let options = {tool_format: tool_format}
+    + pick_keys(
+    model_policy,
+    model_option_keys,
+    {drop_nil: true},
+  )
   if __workflow_non_empty_string(config.session_id) != nil {
     options = options + {session_id: __workflow_non_empty_string(config.session_id)}
   }
@@ -384,7 +402,9 @@ pub fn workflow_stage_spec(spec: StageSpec = {}) -> StageSpec {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_stage_agent_options(config: WorkflowStageOptionsConfig = {}) -> WorkflowStageAgentOptions {
+pub fn workflow_stage_agent_options(
+  config: WorkflowStageOptionsConfig = {},
+) -> WorkflowStageAgentOptions {
   const model_policy: WorkflowModelPolicy = config.model_policy ?? {}
   const host: WorkflowStageHostConfig = config.host ?? {}
   const tool_format: string = __workflow_stage_tool_format(model_policy, host)

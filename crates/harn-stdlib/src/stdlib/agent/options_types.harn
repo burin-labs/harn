@@ -1,0 +1,373 @@
+// Typed option aliases (the documented way to build agent_loop options).
+// Co-located with the `agent_loop_options` normalizer below so the alias and
+// the normalization/validation logic stay in one file. Rust twins for the
+// workflow-facing policies live in
+// `crates/harn-vm/src/orchestration/policy/types.rs` (`TurnPolicy`) and
+// `crates/harn-vm/src/orchestration/compaction.rs` (`CompactionPolicy`); key
+// parity is pinned by `crates/harn-vm/tests/typed_options_parity.rs`.
+/**
+ * Iteration budget accepted by `agent_loop`'s `iteration_budget:` option.
+ * Normalized by `__normalize_iteration_budget` below.
+ *
+ * Rust twin: none — `ModelPolicy.iteration_budget` in
+ * `crates/harn-vm/src/orchestration/policy/types.rs` deliberately stores a
+ * free-form JSON value so this shape can evolve without runtime churn; this
+ * alias plus the normalizer are the source of truth.
+ */
+pub type IterationBudget = {
+  mode?: "fixed" | "adaptive",
+  initial?: int,
+  max?: int,
+  extend_by?: int,
+  expose_decisions?: bool,
+  wall_clock_ms?: int,
+  total_cost_usd?: float | int,
+  consecutive_failures?: dict,
+}
+
+/**
+ * Turn-shape policy for action stages (`turn_policy:` option).
+ *
+ * Rust twin: `TurnPolicy` in
+ * `crates/harn-vm/src/orchestration/policy/types.rs`.
+ */
+pub type TurnPolicy = {
+  require_action_or_yield?: bool,
+  allow_done_sentinel?: bool,
+  max_prose_chars?: int,
+}
+
+/**
+ * Nested repair-diagnostics config accepted under `stall_diagnostics`.
+ * Callers may also pass these fields flat on `stall_diagnostics`; flat fields
+ * win when both forms are present.
+ */
+pub type RepairDiagnostics = {
+  repair_aware?: bool,
+  stuck_same_diagnostic_after?: int,
+  post_edit_reverify?: bool,
+  no_net_progress_extend_guard?: bool,
+  no_net_progress_extend_after?: int,
+  no_net_progress_hard_cap_after?: int,
+  reserved_terminal_verify?: bool,
+  reserved_terminal_verify_iterations?: int,
+  zero_write_terminal_verify?: bool,
+}
+
+/**
+ * Caller-facing `stall_diagnostics:` config. Normalized into the internal
+ * `AgentStallConfig` shape by `std/agent/stall`.
+ *
+ * Rust twin: none — stall diagnostics are implemented entirely in the
+ * stdlib (`std/agent/stall`); `AgentStallConfig` there is the normalized
+ * counterpart of this input shape.
+ */
+pub type StallDiagnostics = {
+  enabled?: bool,
+  threshold?: int,
+  inject_feedback?: bool,
+  max_feedback?: int,
+  exempt_tools?: list<string>,
+  allow_repeated_tools?: list<string>,
+  include_arguments?: bool,
+  repeat_same_observation?: int,
+  repeat_same_error?: int,
+  no_progress_messages?: int,
+  ping_pong_cycles?: int,
+  repeat_context_window_error?: int,
+  hard_stop_after_trips?: int,
+  repair_diagnostics?: RepairDiagnostics,
+  repair_aware?: bool,
+  stuck_same_diagnostic_after?: int,
+  post_edit_reverify?: bool,
+  no_net_progress_extend_guard?: bool,
+  no_net_progress_extend_after?: int,
+  no_net_progress_hard_cap_after?: int,
+  reserved_terminal_verify?: bool,
+  reserved_terminal_verify_iterations?: int,
+  zero_write_terminal_verify?: bool,
+  monologue_actuation?: bool | MonologueActuationOptions,
+}
+
+/**
+ * First-class compaction instructions accepted by compaction option
+ * surfaces (`auto_compact.policy`; built with the `compaction_policy(...)`
+ * helpers in `std/agent/autocompact`). `pub` because it is exported for
+ * annotation rather than referenced by a local signature.
+ *
+ * Rust twin: `CompactionPolicy` in
+ * `crates/harn-vm/src/orchestration/compaction.rs`.
+ */
+pub type CompactionPolicy = {
+  instructions?: string,
+  mode?: string,
+  scope?: string,
+  preserve?: list<string>,
+  drop?: list<string>,
+  extend_default_instructions?: bool,
+  author?: string,
+}
+
+/**
+ * Structured judge config accepted by `done_judge:` and
+ * `verify_completion_judge:`. Validated by the judge option validators
+ * below; judge execution lives in `std/agent/judge`.
+ *
+ * Rust twin: none — judges are stdlib-owned.
+ */
+pub type JudgeConfig = {
+  enabled?: bool,
+  provider?: string,
+  model?: string,
+  system?: string,
+  feedback_fallback?: string,
+  max_invocations?: int,
+  max_feedback?: int,
+  cadence?: {every?: int, when?: any, max_invocations?: int, min_iterations_before_first?: int},
+}
+
+/**
+ * The public `agent_loop` options surface: everything `llm_call` accepts
+ * plus the loop-control keys from the options table in
+ * `docs/src/llm/agent_loop.md`, plus the caller-facing keys consumed by the
+ * `agent_loop_options` normalizer below.
+ *
+ * The `llm_call` keys are inlined so consumers can import this alias alone and
+ * retain structural checking. The parity test pins it as a superset of
+ * `LlmCallOptions`.
+ *
+ * NOTE ON `output_schema`: unlike on `llm_call`, this is a TERMINAL-answer
+ * contract, not a per-turn one. The loop deliberately does NOT force each
+ * mid-loop turn into structured mode (that fights tool-calling); instead it
+ * validates the FINAL answer against this JSON Schema at finalize, re-asks
+ * ONCE through the `llm_caller` seam if the answer is off-shape, and surfaces
+ * the parsed value on `run.output` with `run.output_valid` recording whether
+ * validation passed. See `docs/src/llm/agent_loop.md` and
+ * `__agent_loop_apply_output_schema` in `agent/loop.harn`. For strict
+ * one-shot structured extraction, use `llm_call_structured` directly.
+ */
+pub type AgentLoopOptions = {
+  provider?: string,
+  model?: string,
+  model_role?: string,
+  model_tier?: string,
+  route_policy?: string,
+  prefer?: string | list<string>,
+  fallback_chain?: list<string>,
+  fallback_strategy?: string,
+  strategy?: string,
+  equivalent_failover?: bool | {enabled?: bool, max_routes?: int, on_no_dispatch?: bool},
+  models?: list<string \
+    | {
+    provider?: string,
+    model?: string,
+    options?: dict,
+    label?: string,
+    family?: string,
+    capabilities?: list,
+  }>,
+  ladder?: string,
+  api_mode?: string,
+  max_tokens?: int,
+  temperature?: float,
+  top_p?: float,
+  top_k?: int,
+  stop?: list<string>,
+  seed?: int,
+  frequency_penalty?: float,
+  presence_penalty?: float,
+  logprobs?: bool,
+  top_logprobs?: int,
+  response_format?: string,
+  output_format?: string | dict,
+  schema?: any,
+  json_schema?: any,
+  output_schema?: any,
+  output_validation?: string,
+  schema_retries?: int,
+  schema_stream_abort?: bool,
+  retries?: int,
+  repair?: bool | dict,
+  schema_recover?: any,
+  reasoning_policy?: string | bool,
+  thinking_policy?: string | bool,
+  reasoning_scale?: string,
+  problem_scale?: string,
+  reasoning_task?: string,
+  reasoning_effort?: string,
+  thinking?: bool | dict,
+  interleaved_thinking?: bool,
+  anthropic_beta_features?: string | list<string>,
+  vision?: bool,
+  tools?: any,
+  tool_choice?: string | dict,
+  tool_search?: bool | string | dict,
+  tool_format?: string,
+  provider_tools?: list,
+  hosted_tools?: list,
+  max_tool_calls?: int,
+  previous_response_id?: string,
+  response_store?: bool,
+  responses_store?: bool,
+  store?: any,
+  background?: bool,
+  truncation?: string,
+  compact?: bool,
+  include?: list,
+  budget?: {
+    max_cost_usd?: float,
+    max_input_tokens?: int,
+    max_output_tokens?: int,
+    total_budget_usd?: float,
+  },
+  cache?: bool,
+  prompt_cache_ttl?: "5m" | "1h",
+  fast?: bool,
+  speed?: string,
+  stream?: bool,
+  timeout?: int,
+  timeout_ms?: int,
+  messages?: list,
+  prefill?: string,
+  history?: list,
+  transcript?: dict,
+  session_id?: string,
+  mock_scope?: string,
+  system?: string,
+  system_preamble?: string,
+  system_prefix?: string,
+  system_context?: string,
+  system_prompt_parts?: list,
+  system_appendix?: string,
+  system_suffix?: string,
+  structural_experiment?: any,
+  metadata?: dict,
+  profile?: string,
+  loop_until_done?: bool,
+  done_sentinel?: string,
+  max_iterations?: int,
+  iteration_budget?: string | IterationBudget,
+  loop_control?: any,
+  max_nudges?: int,
+  nudge?: string,
+  turn_policy?: TurnPolicy,
+  native_tool_fallback?: string,
+  stop_after_successful_tools?: list<string>,
+  require_successful_tools?: list,
+  exit_when_verified?: bool,
+  deadline_ms?: int,
+  verify_completion?: any,
+  verify_completion_judge?: bool | JudgeConfig,
+  done_judge?: bool | JudgeConfig,
+  step_judge?: dict,
+  retry?: bool | AgentLoopRetryOptions,
+  llm_retry?: AgentLoopRetryOptions,
+  llm_caller?: any,
+  llm_caller_transport?: LlmCallerTransport,
+  tool_caller?: any,
+  structural_validator?: any,
+  input_guardrail?: any,
+  pre_turn_scope_classifier?: any,
+  context_callback?: any,
+  context_filter?: any,
+  message_decorator?: any,
+  post_turn_callback?: any,
+  terminal_callback?: any,
+  tool_retries?: int,
+  tool_backoff_ms?: int,
+  max_concurrent_tools?: int,
+  intra_turn_resource_fail_fast?: bool,
+  prefetch_next_turn?: bool,
+  tool_surface_narrowing?: bool | dict,
+  tool_format_override_reason?: string,
+  missing_tool_call_recovery?: bool | dict,
+  read_only_stance?: bool | dict,
+  progress_tool?: bool | dict,
+  policy?: dict,
+  permissions?: dict,
+  approval_policy?: any,
+  autonomy_budget?: dict,
+  subagents?: bool,
+  subagent_tools?: bool,
+  mcp_servers?: list,
+  stall_diagnostics?: bool | StallDiagnostics,
+  daemon?: bool,
+  persist_path?: string,
+  resume_path?: string,
+  wake_interval_ms?: int,
+  watch_paths?: string | list<string>,
+  consolidate_on_idle?: bool,
+  idle_watchdog_attempts?: int,
+  compaction?: string | bool | dict,
+  compact_threshold?: int,
+  compact_keep_first?: int,
+  compact_keep_last?: int,
+  compact_strategy?: string,
+  compact_callback?: any,
+  auto_compact?: bool | dict,
+  transcript_projection?: string | dict,
+  scratchpad?: bool | dict,
+  timestamp_messages?: bool,
+  prompts?: dict,
+  prompt_overrides?: dict,
+  reminders?: dict | list,
+  auto_context_profile?: bool,
+  context_profile_root?: string,
+  context_profile_options?: dict,
+  root_task?: string,
+  deliverables?: list,
+  task_ledger?: dict,
+  skills?: any,
+  skill_match?: dict,
+  working_files?: string | list<string>,
+  llm_transcript_dir?: string,
+  on_delta?: any,
+}
+
+// llm_call surface (kept in lockstep with LlmCallOptions in
+// std/llm/options by typed_options_parity.rs).
+// Loop shape and completion.
+// Completion gates and judges.
+// Composable seams.
+// Tool dispatch.
+// Stall detection.
+// Daemon lifecycle.
+// Context window management.
+// Prompts, reminders, and context profiles.
+// Task ledger shorthand.
+// Skills.
+// Observability.
+/**
+ * Overrides accepted by `agent_preset(kind, overrides)` and the captain
+ * presets in `std/agent/presets`: any agent_loop option, plus the opt-in
+ * captain layer dependencies, the `retry` transport-retry control
+ * (`false` to opt out of the baked default, or a `with_retry` config
+ * dict), and `model_ladder` (overrides the kind's fill-nil model ladder).
+ *
+ * Rust twin: none — presets are stdlib-owned option packs.
+ */
+pub type AgentPresetOptions = AgentLoopOptions \
+  & {
+  consent?: any,
+  audit_sink?: any,
+  telemetry?: any,
+  rate_limit?: bool | dict,
+  dry_run?: bool | dict,
+  handoff_sink?: any,
+  cheap_caller?: any,
+  frontier_caller?: any,
+  escalate_predicate?: any,
+  logging_sink?: any,
+  logging_options?: dict,
+  llm_options?: dict,
+  persona?: any,
+  task_kind?: string,
+  judge?: bool | JudgeConfig,
+  model_ladder?: list<string>,
+}
+
+import { LlmCallerTransport } from "std/agent/caller_transport"
+
+import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
+
+import { AgentLoopRetryOptions } from "std/agent/retry"

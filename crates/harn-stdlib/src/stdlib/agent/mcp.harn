@@ -66,7 +66,11 @@ pub fn agent_mcp_admit_bootstrap(opts, result) {
 fn __mcp_bootstrap_and_admit(session, opts, specs) {
   const result = __host_mcp_bootstrap(session.session_id, specs)
   const prior_info = opts?._mcp_server_info ?? []
-  const out = opts + {_mcp_bootstrap: result, _mcp_server_info: prior_info + (result?.server_info ?? [])}
+  const out = opts
+    + {
+    _mcp_bootstrap: result,
+    _mcp_server_info: prior_info + (result?.server_info ?? []),
+  }
   return __mcp_admit_tools(out, result)
 }
 

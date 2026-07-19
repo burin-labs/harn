@@ -30,7 +30,9 @@ pipeline test_secret_findings_set_blocking(task) {
   const receipt = build_review_receipt(
     {
       request: _request(),
-      secret_findings: [{detector: "aws-access-key-id", title: "AWS access key id", line: 4, fingerprint: "abc123"}],
+      secret_findings: [
+        {detector: "aws-access-key-id", title: "AWS access key id", line: 4, fingerprint: "abc123"},
+      ],
       llm_findings: [],
       llm_summary: "",
       llm_rounds: 0,
@@ -78,7 +80,14 @@ pipeline test_dedupe_drops_duplicate_ids(task) {
       request: _request(),
       secret_findings: [],
       llm_findings: [
-        {id: "warn1", severity: "warning", category: "x", title: "t", detail: "d", source: "self_review"},
+        {
+          id: "warn1",
+          severity: "warning",
+          category: "x",
+          title: "t",
+          detail: "d",
+          source: "self_review",
+        },
         {
           id: "warn1",
           severity: "warning",
@@ -98,7 +107,12 @@ pipeline test_dedupe_drops_duplicate_ids(task) {
 }
 
 pipeline test_dry_run_envelope_skips_llm(task) {
-  const receipt = envelope_for_dry_run(_request(), [], ["sources/foo.swift"], ["scripts/release.sh"])
+  const receipt = envelope_for_dry_run(
+    _request(),
+    [],
+    ["sources/foo.swift"],
+    ["scripts/release.sh"],
+  )
   assert_eq(receipt.self_review_skipped_reason, "dry_run")
   assert_eq(receipt.rounds, 0)
   assert_eq(receipt.verdict, "needs_follow_up")

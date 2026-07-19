@@ -6,7 +6,12 @@ fn __as_candidate(value, index) {
   const instruction = value?.instruction ?? value?.prompt ?? ""
   const prompt = value?.prompt ?? instruction
   return value
-    + {index: value?.index ?? index, prompt: prompt, instruction: instruction, demos: value?.demos ?? []}
+    + {
+    index: value?.index ?? index,
+    prompt: prompt,
+    instruction: instruction,
+    demos: value?.demos ?? [],
+  }
 }
 
 fn __candidate_rows(candidates) {
@@ -119,11 +124,12 @@ pub fn parallel_judge(candidates, eval_set, metric, options = nil) {
   let scored = []
   for row in candidate_rows {
     const candidate = row.candidate
-    const case_scores = parallel each case_rows with { max_concurrent: _max_concurrent } { case_row ->
+    const case_scores = parallel each case_rows with {
+      max_concurrent: _max_concurrent,
+    } { case_row ->
       __score_case(candidate, case_row.case, case_row.index, row.index, metric)
     }
-    scored = scored
-      .push(
+    scored = scored.push(
       {
         index: row.index,
         candidate: candidate,

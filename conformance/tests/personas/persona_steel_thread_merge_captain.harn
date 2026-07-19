@@ -26,8 +26,7 @@ fn pr_variants() {
   let prs = []
   let n = 1
   while n <= 50 {
-    prs = prs
-      .push(
+    prs = prs.push(
       {
         number: n,
         draft: n % 5 == 0,
@@ -125,7 +124,9 @@ pipeline test() {
   assert_receipt_field(assert_step_emitted("admin_merge").output.receipt, "/status", "success")
   assert_eq(happy.merged, [42])
   step_assertions_begin("merge_captain")
-  const conflicted = merge_captain({prs: [{number: 43, draft: false, checks: "green", conflict: true}]})
+  const conflicted = merge_captain(
+    {prs: [{number: 43, draft: false, checks: "green", conflict: true}]},
+  )
   assert_steps_ran(
     ["fetch_open_prs", "classify_pr", "semantic_conflict_ticket", "finalize_merge_sweep"],
   )

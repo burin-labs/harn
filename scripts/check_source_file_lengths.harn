@@ -31,7 +31,13 @@ pub type InvalidBaselineCount = {
 
 pub type BaselineCount = ValidBaselineCount | InvalidBaselineCount
 
-pub type SourceLengthFindingKind = "malformed_baseline" | "orphan_baseline" | "invalid_baseline" | "obsolete_baseline" | "new_oversized_source" | "growth" | "stale_baseline"
+pub type SourceLengthFindingKind = "malformed_baseline" \
+  | "orphan_baseline" \
+  | "invalid_baseline" \
+  | "obsolete_baseline" \
+  | "new_oversized_source" \
+  | "growth" \
+  | "stale_baseline"
 
 pub type SourceLengthFinding = {
   kind: SourceLengthFindingKind,
@@ -136,9 +142,9 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
     return []
   }
   let paths: list<string> = []
-  const entries = harness.fs
-    .walk_dir(dir, {max_depth: 1, follow_symlinks: false})
-    .filter({ entry -> entry.depth == 1 })
+  const entries = harness.fs.walk_dir(dir, {max_depth: 1, follow_symlinks: false}).filter(
+    { entry -> entry.depth == 1 },
+  )
     .to_list()
     .sort_by({ entry -> entry.path })
   for entry in entries {
@@ -180,8 +186,7 @@ pub fn source_files(root: string = "") -> list<string> {
   } else {
     path_normalize(root)
   }
-  let paths = files_below(resolved_root, "", ".rs")
-    .filter({ path -> !is_generated_source(path) })
+  let paths = files_below(resolved_root, "", ".rs").filter({ path -> !is_generated_source(path) })
     .to_list()
   for path in files_below(resolved_root, "crates/harn-stdlib/src/stdlib", ".harn") {
     paths = paths.push(path)
@@ -197,8 +202,7 @@ pub fn source_inventory(root: string = "") -> list<SourceCount> {
   }
   let sources: list<SourceCount> = []
   for path in source_files(resolved_root) {
-    sources = sources
-      .push(
+    sources = sources.push(
       {path: path, lines: logical_line_count(harness.fs.read_text(path_join(resolved_root, path)))},
     )
   }
@@ -237,8 +241,9 @@ pub fn baseline_inventory(root: string = "") -> list<BaselineCount> {
   }
   let baselines: list<BaselineCount> = []
   for shard_path in files_below(resolved_root, BASELINE_DIR, BASELINE_SUFFIX) {
-    baselines = baselines
-      .push(parse_baseline(shard_path, harness.fs.read_text(path_join(resolved_root, shard_path))))
+    baselines = baselines.push(
+      parse_baseline(shard_path, harness.fs.read_text(path_join(resolved_root, shard_path))),
+    )
   }
   return baselines
 }
@@ -288,15 +293,13 @@ pub fn evaluate_inventory(
     const source = sources_by_path[path]
     const baseline = baselines_by_path[path]
     if baseline != nil && baseline.kind == "invalid" {
-      findings = findings
-        .push(
+      findings = findings.push(
         {kind: "malformed_baseline", path: path, actual: source?.lines, message: baseline.error},
       )
       continue
     }
     if source == nil {
-      findings = findings
-        .push(
+      findings = findings.push(
         {
           kind: "orphan_baseline",
           path: path,
@@ -307,8 +310,7 @@ pub fn evaluate_inventory(
       continue
     }
     if baseline != nil && baseline.kind == "valid" && baseline.lines <= max_lines {
-      findings = findings
-        .push(
+      findings = findings.push(
         {
           kind: "invalid_baseline",
           path: path,
@@ -321,8 +323,7 @@ pub fn evaluate_inventory(
     }
     if source.lines <= max_lines {
       if baseline != nil {
-        findings = findings
-          .push(
+        findings = findings.push(
           {
             kind: "obsolete_baseline",
             path: path,
@@ -335,8 +336,7 @@ pub fn evaluate_inventory(
       continue
     }
     if baseline == nil {
-      findings = findings
-        .push(
+      findings = findings.push(
         {
           kind: "new_oversized_source",
           path: path,
@@ -348,8 +348,7 @@ pub fn evaluate_inventory(
     }
     const recorded = baseline.lines
     if source.lines > recorded {
-      findings = findings
-        .push(
+      findings = findings.push(
         {
           kind: "growth",
           path: path,
@@ -359,8 +358,7 @@ pub fn evaluate_inventory(
         },
       )
     } else if source.lines < recorded {
-      findings = findings
-        .push(
+      findings = findings.push(
         {
           kind: "stale_baseline",
           path: path,
@@ -387,8 +385,7 @@ pub fn plan_baseline_update(
     const baseline = baselines_by_path[source.path]
     if source.lines > max_lines {
       if baseline != nil && baseline.kind == "valid" && source.lines < baseline.lines {
-        edits = edits
-          .push(
+        edits = edits.push(
           {
             kind: "write",
             shard_path: baseline_path_for(source.path),
@@ -398,12 +395,16 @@ pub fn plan_baseline_update(
         )
       }
     } else if baseline != nil {
-      edits = edits.push({kind: "delete", shard_path: baseline.shard_path, source_path: source.path})
+      edits = edits.push(
+        {kind: "delete", shard_path: baseline.shard_path, source_path: source.path},
+      )
     }
   }
   for baseline in baselines {
     if sources_by_path[baseline.source_path] == nil {
-      edits = edits.push({kind: "delete", shard_path: baseline.shard_path, source_path: baseline.source_path})
+      edits = edits.push(
+        {kind: "delete", shard_path: baseline.shard_path, source_path: baseline.source_path},
+      )
     }
   }
   return edits.sort_by({ edit -> edit.shard_path })
@@ -492,8 +493,7 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/check_source_file_lengths.harn -- [--json] [--root PATH] [--update]",
     )
     return nil
@@ -510,7 +510,10 @@ fn main(harness: Harness) {
     path_normalize(to_string(parsed.root))
   }
   if parsed?.update ?? false {
-    const edits = plan_baseline_update(source_inventory(resolved_root), baseline_inventory(resolved_root))
+    const edits = plan_baseline_update(
+      source_inventory(resolved_root),
+      baseline_inventory(resolved_root),
+    )
     apply_baseline_edits(resolved_root, edits)
     harness.stdio.println("updated ${edits.count} source file-length baseline shard(s)")
   }

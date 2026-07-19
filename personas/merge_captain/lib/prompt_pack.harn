@@ -100,10 +100,19 @@ pub fn schema_for(id) {
       {
         category: {
           type: "string",
-          enum: ["deterministic_failure", "flaky_test", "infra_failure", "missing_context", "unknown"],
+          enum: [
+            "deterministic_failure",
+            "flaky_test",
+            "infra_failure",
+            "missing_context",
+            "unknown",
+          ],
         },
         selected_log_span_ids: _string_array_schema(),
-        likely_owner: {type: "string", enum: ["merge_captain", "repair_worker", "human", "ci_provider", "unknown"]},
+        likely_owner: {
+          type: "string",
+          enum: ["merge_captain", "repair_worker", "human", "ci_provider", "unknown"],
+        },
         next_inspection_commands: _string_array_schema(),
         confidence: {type: "number"},
         reason: _string_schema(),
@@ -114,7 +123,10 @@ pub fn schema_for(id) {
     return _strict(
       ["status", "user_summary", "tests", "changed_files", "residual_risk", "follow_up"],
       {
-        status: {type: "string", enum: ["completed", "validators_failed", "blocked", "needs_more_context"]},
+        status: {
+          type: "string",
+          enum: ["completed", "validators_failed", "blocked", "needs_more_context"],
+        },
         user_summary: _string_schema(),
         tests: _string_array_schema(),
         changed_files: _string_array_schema(),
@@ -249,7 +261,13 @@ pub fn context_budget_for(id) {
       max_input_tokens: 1600,
       reserved_output_tokens: 500,
       max_commits: 30,
-      include: ["git_log_summary", "changelog_excerpt", "release_metadata", "shell_observations", "tool_errors"],
+      include: [
+        "git_log_summary",
+        "changelog_excerpt",
+        "release_metadata",
+        "shell_observations",
+        "tool_errors",
+      ],
       exclude: ["raw_logs", "full_diff", "full_thread"],
       raw_logs_allowed: false,
     }
@@ -372,7 +390,9 @@ fn _next_action_errors(output) {
     errors = errors + ["non-wait actions must cite deterministic_inputs"]
   }
   if output.approval_required
-    && !["run_repair_worker", "escalate_human", "comment"].contains(output.action) {
+    && !["run_repair_worker", "escalate_human", "comment"].contains(
+    output.action,
+  ) {
     errors = errors + ["approval_required is only valid for mutating or human-escalation actions"]
   }
   return errors
@@ -382,7 +402,10 @@ fn _ci_category_errors(context, output) {
   let errors = []
   const allowed_spans = _ids(context.selected_log_spans)
   if ["deterministic_failure", "flaky_test", "infra_failure"].contains(output.category)
-    && len(output.selected_log_span_ids ?? []) == 0 {
+    && len(
+    output.selected_log_span_ids ?? [],
+  )
+    == 0 {
     errors = errors + ["CI diagnoses must cite selected_log_span_ids unless context is missing"]
   }
   for span_id in output.selected_log_span_ids ?? [] {
@@ -475,7 +498,9 @@ fn _checkpoint_validator(id, context, extra_validator) {
       } else if type_of(extra) == "dict" {
         if !(extra?.ok ?? false) {
           const extra_errors = extra?.errors ?? extra?.validation_errors
-            ?? [extra?.message ?? "custom validator rejected output"]
+            ?? [
+            extra?.message ?? "custom validator rejected output",
+          ]
           errors = errors + extra_errors
         }
       } else if type_of(extra) == "list" {
@@ -539,10 +564,21 @@ pub fn typed_prompt_checkpoint(id, evidence, options = nil, validator = nil) {
 }
 
 /** Checkpoint the next deterministic action for one classified PR. */
-pub fn choose_next_action_checkpoint(classification, policy, dry_run, approval_state, options = nil) {
+pub fn choose_next_action_checkpoint(
+  classification,
+  policy,
+  dry_run,
+  approval_state,
+  options = nil,
+) {
   return typed_prompt_checkpoint(
     "choose_next_action",
-    {classification: classification, policy: policy, dry_run: dry_run, approval_gate: approval_state},
+    {
+      classification: classification,
+      policy: policy,
+      dry_run: dry_run,
+      approval_gate: approval_state,
+    },
     options,
   )
 }
@@ -562,7 +598,9 @@ pub fn classify_flake_checkpoint(evidence, options = nil) {
       if output.category != "flaky_test" && output.category != "missing_context" {
         return {
           ok: false,
-          errors: ["flake classification must return category flaky_test or request missing_context"],
+          errors: [
+            "flake classification must return category flaky_test or request missing_context",
+          ],
         }
       }
       return {ok: true, errors: []}
@@ -582,8 +620,12 @@ pub fn known_failure_modes() {
       artifact: "examples/personas/merge_captain/transcripts/release_harness_crystallization.jsonl",
       gate: "transcript_oracle",
       status: "failing_fixture",
-      findings: ["github_pull_request_create before approval_gate", "intake state observed after later steps"],
-      recovery_expectation: "shell/tool observations and approval errors must stay in the active transcript so the model can recover from evidence, not hidden retries",
+      findings: [
+        "github_pull_request_create before approval_gate",
+        "intake state observed after later steps",
+      ],
+      recovery_expectation:
+        "shell/tool observations and approval errors must stay in the active transcript so the model can recover from evidence, not hidden retries",
     },
   ]
 }
@@ -620,7 +662,10 @@ pub fn golden_examples_for(id) {
   if id == "diagnose_ci_category" {
     return [
       {
-        input: {failing_checks: ["ci / rust"], selected_log_spans: [{id: "span-1", text: "cargo test failed"}]},
+        input: {
+          failing_checks: ["ci / rust"],
+          selected_log_spans: [{id: "span-1", text: "cargo test failed"}],
+        },
         output: {
           category: "deterministic_failure",
           selected_log_span_ids: ["span-1"],
@@ -674,9 +719,11 @@ pub fn golden_examples_for(id) {
           rewrite_sections: [
             {
               section: "Unreleased / Added",
-              after: "Added release metadata verification so release candidates surface missing tag and changelog evidence before publish.",
+              after:
+                "Added release metadata verification so release candidates surface missing tag and changelog evidence before publish.",
               evidence_commit_shas: ["abc"],
-              uncertainty: "git log command failed once; retry evidence should be inspected before finalizing",
+              uncertainty:
+                "git log command failed once; retry evidence should be inspected before finalizing",
             },
           ],
           blockers: ["rerun git log with a valid range"],

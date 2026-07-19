@@ -24,8 +24,7 @@ pipeline test(task) {
   )
   const now = to_int(harness.clock.timestamp())
   const ttl_seconds = 3600
-  store
-    .set(
+  store.set(
     "mockTTL",
     {
       access_token: "ACCESS-1",
@@ -35,14 +34,18 @@ pipeline test(task) {
       token_type: "Bearer",
     },
   )
-  const cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
+  const cli = client(
+    provider,
+    {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store},
+  )
   http_mock_clear()
   http_mock(
     "POST",
     "https://idp.example/token",
     {
       status: 200,
-      body: "{\"access_token\":\"ACCESS-2\",\"refresh_token\":\"REFRESH-2\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
+      body:
+        "{\"access_token\":\"ACCESS-2\",\"refresh_token\":\"REFRESH-2\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
       headers: {"content-type": "application/json"},
     },
   )

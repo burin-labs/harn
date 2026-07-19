@@ -118,10 +118,6 @@ pub struct RunOptions {
     /// teardown) to stderr. Also honored via `HARN_TEST_DIAGNOSE=1` so
     /// users can flip the flag without restarting their shell.
     pub diagnose: bool,
-    /// Test-only setup delay used to prove timeout phase boundaries without
-    /// process-global hooks that could leak across concurrent suites.
-    #[cfg(test)]
-    pub(crate) setup_delay_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -223,8 +219,6 @@ pub async fn run_tests(
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress: None,
         diagnose: diagnose_enabled_via_env(),
-        #[cfg(test)]
-        setup_delay_ms: 0,
     };
     run_tests_with_options(path, &options).await
 }
@@ -250,8 +244,6 @@ pub async fn run_tests_with_progress(
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress,
         diagnose: diagnose_enabled_via_env(),
-        #[cfg(test)]
-        setup_delay_ms: 0,
     };
     run_tests_with_options(path, &options).await
 }
@@ -479,8 +471,6 @@ async fn run_test_file_with_session_impl(
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
-                #[cfg(test)]
-                0,
             )
             .await,
         );
@@ -1070,8 +1060,6 @@ async fn execute_cases(
                 loaded_skills,
                 &prepared_module_cache,
                 session.stdio_available(),
-                #[cfg(test)]
-                options.setup_delay_ms,
             )
             .await;
             let result = enforce_case_budgets(result, options.max_test_ms, options.max_execute_ms);
@@ -1109,8 +1097,6 @@ async fn execute_cases(
         let infrastructure_errors = Arc::clone(&infrastructure_errors);
         let completed = Arc::clone(&completed);
         let timeout_ms = options.timeout_ms;
-        #[cfg(test)]
-        let setup_delay_ms = options.setup_delay_ms;
         let max_test_ms = options.max_test_ms;
         let max_execute_ms = options.max_execute_ms;
         let progress = options.progress.clone();
@@ -1169,8 +1155,6 @@ async fn execute_cases(
                         loaded_skills,
                         &prepared_module_cache,
                         stdio_available,
-                        #[cfg(test)]
-                        setup_delay_ms,
                     ));
                     let result = enforce_case_budgets(result, max_test_ms, max_execute_ms);
                     if fail_fast && !result.passed {

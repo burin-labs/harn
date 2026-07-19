@@ -159,7 +159,8 @@ pipeline test_dir_of(task) {
 
 @test
 pipeline test_collect_links_inline_reference_html(task) {
-  const text = "[a](one.md) and ![img](two.png)\n[ref]: three.md\n<a href=\"four.md\">x</a> <img src='five.png'>"
+  const text =
+    "[a](one.md) and ![img](two.png)\n[ref]: three.md\n<a href=\"four.md\">x</a> <img src='five.png'>"
   const links = collect_links(text)
   assert_eq(links.count, 5)
   // Source order is preserved by start offset.

@@ -50,7 +50,10 @@ pipeline test(task) {
       assert(activated == 0, "disable-model-invocation hides the skill from the matcher")
       assert(matched_events >= 1, "skill_matched event fires even with zero candidates")
       const calls = llm_mock_calls()
-      assert(!contains(calls[0].system, "## Active skills"), "no active-skill section when no match")
+      assert(
+        !contains(calls[0].system, "## Active skills"),
+        "no active-skill section when no match",
+      )
       log("skill_lifecycle_flags tests passed")
     },
   )

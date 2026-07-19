@@ -22,8 +22,7 @@ pub fn normalize_version(version: string) -> string {
 /** Escape regex metacharacters so a version string matches literally. */
 pub fn escape_regex(text: string) -> string {
   const specials = [".", "\\", "+", "*", "?", "(", ")", "[", "]", "{", "}", "^", "$", "|"]
-  return text.split("")
-    .map(
+  return text.split("").map(
     fn(ch) {
       if specials.contains(ch) {
         "\\" + ch
@@ -31,7 +30,9 @@ pub fn escape_regex(text: string) -> string {
         ch
       }
     },
-  ).to_list().join("")
+  )
+    .to_list()
+    .join("")
 }
 
 /** Collect every `## vX.Y.Z` heading version, top to bottom. */
@@ -91,7 +92,15 @@ pub fn parse_remote(url: string) -> string? {
  * trimmed section, the install block, and an optional compare link.
  */
 pub fn render_notes(section: string, repo: string?, prev: string?, version: string) -> string {
-  const base = [section.trim(), "", "## Install / Upgrade", "", "```bash", "cargo install harn-cli", "```"]
+  const base = [
+    section.trim(),
+    "",
+    "## Install / Upgrade",
+    "",
+    "```bash",
+    "cargo install harn-cli",
+    "```",
+  ]
   const parts = if repo != nil && prev != nil {
     base + ["", "**Full Changelog**: https://github.com/${repo}/compare/v${prev}...v${version}"]
   } else {
@@ -121,7 +130,9 @@ pub fn flag_value(args: list<string>, name: string) -> string? {
 pipeline main(task) {
   const raw_version = flag_value(argv, "--version")
   if raw_version == nil {
-    __io_eprintln("usage: render_release_notes.harn --version VERSION [--output OUTPUT] [--repo REPO]")
+    __io_eprintln(
+      "usage: render_release_notes.harn --version VERSION [--output OUTPUT] [--repo REPO]",
+    )
     __io_eprintln("error: the following arguments are required: --version")
     return 2
   }

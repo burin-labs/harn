@@ -11,9 +11,10 @@ pipeline default() {
   const topic = "lifecycle.pool.audit"
   const cursor = event_log.latest(topic) ?? 0
   const gate = channel(nil, 1)
-  const pool = pool_create({name: "otel-drop-demo", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
-  const warmup = pool
-    .submit(
+  const pool = pool_create(
+    {name: "otel-drop-demo", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")},
+  )
+  const warmup = pool.submit(
     { ->
       receive(gate)
       return "warmup"
@@ -23,7 +24,9 @@ pipeline default() {
   const dropped = pool.submit({ -> "dropped" })
   // The drop_newest policy rejects the third submission immediately.
   send(gate, "go")
-  const drops = event_log.read({topic: topic, from_cursor: cursor, kind_prefix: "pool_drop", limit: 10})
+  const drops = event_log.read(
+    {topic: topic, from_cursor: cursor, kind_prefix: "pool_drop", limit: 10},
+  )
   require len(drops) == 1
   const drop_receipt = drops[0]
   __io_println(drop_receipt.kind)

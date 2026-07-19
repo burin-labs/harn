@@ -36,7 +36,13 @@ pipeline main() {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "park_input", name: "agent_await_resumption", arguments: {reason: "needs operator brief"}}],
+        tool_calls: [
+          {
+            id: "park_input",
+            name: "agent_await_resumption",
+            arguments: {reason: "needs operator brief"},
+          },
+        ],
         input_tokens: 7,
         output_tokens: 3,
       },
@@ -71,14 +77,20 @@ pipeline main() {
         "input_in_reminder="
           + to_string(contains(resumed_tail, "operator brief: ship the patch")),
       )
-      __io_println("reason_in_reminder=" + to_string(contains(resumed_tail, "needs operator brief")))
+      __io_println(
+        "reason_in_reminder=" + to_string(contains(resumed_tail, "needs operator brief")),
+      )
       __io_println(
         "reminder_present_on_resumed_turn="
-          + to_string(contains(resumed_tail, "You were suspended at turn")),
+          + to_string(
+          contains(resumed_tail, "You were suspended at turn"),
+        ),
       )
       __io_println(
         "reminder_consumed_after_one_turn="
-          + to_string(!contains(next_tail, "You were suspended at turn")),
+          + to_string(
+          !contains(next_tail, "You were suspended at turn"),
+        ),
       )
     },
   )

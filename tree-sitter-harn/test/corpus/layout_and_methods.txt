@@ -149,3 +149,41 @@ fn greet(self) {
               object: (identifier)
               property: (identifier)))
           (string_delimiter))))))
+
+==================
+Formatter-produced multiline values
+==================
+
+fn layout() {
+  const value =
+    {
+      message:
+        "long",
+    }
+  require value == true,
+    "long"
+}
+
+---
+
+(source_file
+  (fn_declaration
+    (identifier)
+    (block
+      (const_binding
+        (identifier)
+        (dict_literal
+          (dict_entry
+            (identifier)
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))))
+      (require_statement
+        (binary_expression
+          (identifier)
+          (true))
+        (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter))))))

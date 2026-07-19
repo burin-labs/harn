@@ -20,7 +20,9 @@ pipeline default() {
   enable_tracing(true)
   const stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const _ = trigger_register(
     {
       id: "channel-otel-batch-" + unique,
@@ -59,13 +61,15 @@ pipeline default() {
   __io_println(len(fourth.payload.batch.constituent_event_ids))
   // Span check: match span must multi-link to every emit span.
   const spans = trace_spans()
-  const emit_spans = spans
-    .filter(
-    { s -> s.kind == "channel_emit" && s.metadata.name_resolved == "tenant:default:ch.otel.batch.input" },
+  const emit_spans = spans.filter(
+    { s ->
+      s.kind == "channel_emit" && s.metadata.name_resolved == "tenant:default:ch.otel.batch.input"
+    },
   )
-  const match_spans = spans
-    .filter(
-    { s -> s.kind == "channel_match" && s.name == "channel.match tenant:default:ch.otel.batch.input" },
+  const match_spans = spans.filter(
+    { s ->
+      s.kind == "channel_match" && s.name == "channel.match tenant:default:ch.otel.batch.input"
+    },
   )
   __io_println(len(emit_spans) >= 3)
   __io_println(len(match_spans) >= 1)

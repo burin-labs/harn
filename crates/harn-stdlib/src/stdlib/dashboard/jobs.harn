@@ -9,9 +9,35 @@ import { filter_nil } from "std/collections"
  * cards from normalized fields while raw local or cloud runtime payloads remain
  * separate for audit and replay.
  */
-type DashboardJobEventKind = "scheduled_job.created" | "scheduled_job.updated" | "scheduled_job.canceled" | "run.queued" | "run.started" | "run.progress" | "run.succeeded" | "run.failed" | "approval.requested" | "approval.approved" | "approval.denied" | "approval.expired" | "receipt.available" | "replay_fixture.available" | "dlq.created" | "dlq.replayed" | "dlq.dismissed" | string
+type DashboardJobEventKind = "scheduled_job.created" \
+  | "scheduled_job.updated" \
+  | "scheduled_job.canceled" \
+  | "run.queued" \
+  | "run.started" \
+  | "run.progress" \
+  | "run.succeeded" \
+  | "run.failed" \
+  | "approval.requested" \
+  | "approval.approved" \
+  | "approval.denied" \
+  | "approval.expired" \
+  | "receipt.available" \
+  | "replay_fixture.available" \
+  | "dlq.created" \
+  | "dlq.replayed" \
+  | "dlq.dismissed" \
+  | string
 
-type DashboardJobStatus = "scheduled" | "queued" | "running" | "waiting_approval" | "succeeded" | "failed" | "dlq" | "canceled" | "unknown" | string
+type DashboardJobStatus = "scheduled" \
+  | "queued" \
+  | "running" \
+  | "waiting_approval" \
+  | "succeeded" \
+  | "failed" \
+  | "dlq" \
+  | "canceled" \
+  | "unknown" \
+  | string
 
 type DashboardJobRef = {kind: string, label?: string, id?: string, url?: string}
 
@@ -259,9 +285,12 @@ fn __job_source(input, payload, options) {
   return filter_nil(
     {
       runtime: __job_first([options?.runtime, input?.runtime, payload?.runtime]) ?? "harn",
-      environment: __job_first([options?.environment, input?.environment, payload?.environment]) ?? "local",
+      environment: __job_first([options?.environment, input?.environment, payload?.environment])
+        ?? "local",
       id: __job_first([options?.source_id, input?.source_id, payload?.source_id]),
-      url: __job_first([options?.source_url, input?.source_url, input?.status_url, payload?.source_url]),
+      url: __job_first(
+        [options?.source_url, input?.source_url, input?.status_url, payload?.source_url],
+      ),
       region: __job_first([options?.region, input?.region, payload?.region]),
     },
   )
@@ -335,7 +364,9 @@ fn __job_related_refs(input, payload, options) {
   if refs != nil {
     return __job_refs(refs)
   }
-  const source_url = __job_first([options?.source_url, input?.source_url, input?.status_url, payload?.source_url])
+  const source_url = __job_first(
+    [options?.source_url, input?.source_url, input?.status_url, payload?.source_url],
+  )
   if source_url != nil {
     return [{kind: "source", label: "Source", url: source_url}]
   }
@@ -363,7 +394,9 @@ fn __job_replay_refs(input, payload, options) {
   const replay_id = __job_first([options?.replay_id, input?.replay_id, payload?.replay_id])
   const replay_url = __job_first([options?.replay_url, input?.replay_url, payload?.replay_url])
   if replay_id != nil || replay_url != nil {
-    return [filter_nil({kind: "replay_fixture", label: "Replay fixture", id: replay_id, url: replay_url})]
+    return [
+      filter_nil({kind: "replay_fixture", label: "Replay fixture", id: replay_id, url: replay_url}),
+    ]
   }
   return []
 }
@@ -396,7 +429,8 @@ fn __job_approval(input, payload, options) {
   return filter_nil(
     {
       request_id: request_id,
-      status: __job_first([raw?.status, options?.approval_status, input?.approval_status]) ?? "requested",
+      status: __job_first([raw?.status, options?.approval_status, input?.approval_status])
+        ?? "requested",
       requested_at: __job_first([raw?.requested_at, input?.requested_at, payload?.requested_at]),
       decided_at: __job_first([raw?.decided_at, input?.decided_at, payload?.decided_at]),
       reviewer: __job_first([raw?.reviewer, input?.reviewer, payload?.reviewer]),
@@ -418,8 +452,12 @@ fn __job_dlq(input, payload, options) {
       state: __job_first([raw?.state, input?.dlq_state, payload?.dlq_state]) ?? "pending",
       attempts: raw?.attempts ?? input?.attempts ?? payload?.attempts,
       error_class: __job_first([raw?.error_class, input?.error_class, payload?.error_class]),
-      final_error: __job_first([raw?.final_error, input?.final_error, input?.error, payload?.final_error]),
-      replay_of_event_id: __job_first([raw?.replay_of_event_id, input?.replay_of_event_id, payload?.replay_of_event_id]),
+      final_error: __job_first(
+        [raw?.final_error, input?.final_error, input?.error, payload?.final_error],
+      ),
+      replay_of_event_id: __job_first(
+        [raw?.replay_of_event_id, input?.replay_of_event_id, payload?.replay_of_event_id],
+      ),
     },
   )
 }
@@ -436,8 +474,7 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
     },
   ]
   if len(receipt_refs) > 0 {
-    out = out
-      .push(
+    out = out.push(
       {
         kind: "open_receipt",
         label: "Open receipt",
@@ -448,8 +485,7 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
     )
   }
   if len(replay_refs) > 0 {
-    out = out
-      .push(
+    out = out.push(
       {
         kind: "open_replay_fixture",
         label: "Open replay fixture",
@@ -460,8 +496,7 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
     )
   }
   if approval != nil && kind == "approval.requested" {
-    out = out
-      .push(
+    out = out.push(
       {
         kind: "review_approval",
         label: "Review approval",
@@ -472,8 +507,7 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
     )
   }
   if dlq != nil && kind == "dlq.created" {
-    out = out
-      .push(
+    out = out.push(
       {
         kind: "replay_dlq",
         label: "Replay DLQ item",
@@ -483,14 +517,14 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
       },
     )
       .push(
-      {
-        kind: "dismiss_dlq",
-        label: "Dismiss DLQ item",
-        target: target.merge({dlq_id: dlq.dlq_id}),
-        effect: "orchestrator_dlq_state",
-        requires_approval: true,
-      },
-    )
+        {
+          kind: "dismiss_dlq",
+          label: "Dismiss DLQ item",
+          target: target.merge({dlq_id: dlq.dlq_id}),
+          effect: "orchestrator_dlq_state",
+          requires_approval: true,
+        },
+      )
   }
   return out
 }
@@ -502,7 +536,13 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
  * @errors: []
  * @api_stability: experimental
  */
-pub fn dashboard_job_dedupe_key(kind, job_id, run_id = nil, timestamp = nil, source_id = nil) -> string {
+pub fn dashboard_job_dedupe_key(
+  kind,
+  job_id,
+  run_id = nil,
+  timestamp = nil,
+  source_id = nil,
+) -> string {
   const seed = __job_text(kind)
     + "\n"
     + __job_text(job_id)
@@ -570,7 +610,8 @@ fn __job_validate_action_intents(event) {
       throw "std/dashboard/jobs: action intent target must be a dict"
     }
     if effect != "navigation" && effect != "read" && !(intent.requires_approval ?? false) {
-      throw "std/dashboard/jobs: action intent `" + __job_text(intent.kind) + "` must require approval"
+      throw "std/dashboard/jobs: action intent `" + __job_text(intent.kind)
+        + "` must require approval"
     }
   }
 }
@@ -615,10 +656,17 @@ pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEven
   const dlq = __job_dlq(input, payload, opts)
   const privacy = __job_privacy(input, opts)
   const dedupe_key = opts.dedupe_key ?? input?.dedupe_key
-    ?? dashboard_job_dedupe_key(resolved_kind, job_id, run_id, timestamp, source.id)
+    ?? dashboard_job_dedupe_key(
+    resolved_kind,
+    job_id,
+    run_id,
+    timestamp,
+    source.id,
+  )
   const event = {
     schema: DASHBOARD_JOB_EVENT_SCHEMA,
-    id: opts.id ?? input?.dashboard_event_id ?? ("dash_job_evt_" + substring(sha256(dedupe_key), 0, 24)),
+    id: opts.id ?? input?.dashboard_event_id
+      ?? ("dash_job_evt_" + substring(sha256(dedupe_key), 0, 24)),
     dedupe_key: dedupe_key,
     kind: resolved_kind,
     source: source,
@@ -638,7 +686,11 @@ pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEven
     )
       ?? job_id,
     summary: __job_first([opts.summary, input?.summary, payload?.summary])
-      ?? (__job_status_for_kind(resolved_kind) + ": " + job_id),
+      ?? (__job_status_for_kind(
+      resolved_kind,
+    )
+      + ": "
+      + job_id),
     priority: __job_first([opts.priority, input?.priority, payload?.priority]),
     queue_depth: opts.queue_depth ?? input?.queue_depth ?? payload?.queue_depth,
     attempt: opts.attempt ?? input?.attempt ?? payload?.attempt,
@@ -651,7 +703,15 @@ pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEven
     replay_refs: replay_refs,
     related_refs: __job_related_refs(input, payload, opts),
     action_intents: opts.action_intents ?? input?.action_intents
-      ?? __job_default_actions(resolved_kind, job_id, run_id, approval, dlq, receipt_refs, replay_refs),
+      ?? __job_default_actions(
+      resolved_kind,
+      job_id,
+      run_id,
+      approval,
+      dlq,
+      receipt_refs,
+      replay_refs,
+    ),
     privacy: privacy,
     raw_payload: privacy.raw_payload_retained ? payload : {},
   }
@@ -669,8 +729,7 @@ pub fn dashboard_job_emit(input: DashboardJobEvent, options = nil) -> DashboardJ
   const opts = options ?? {}
   const event = dashboard_job_validate(input)
   const topic = opts.topic ?? DASHBOARD_JOB_EVENT_TOPIC
-  const event_log_id = event_log
-    .emit(
+  const event_log_id = event_log.emit(
     topic,
     DASHBOARD_JOB_EVENT_KIND,
     event,
@@ -718,7 +777,10 @@ fn __job_append_refs(existing, refs) {
     const key = __job_text(ref.kind) + ":" + __job_text(ref.id) + ":" + __job_text(ref.url)
     let found = false
     for current in out {
-      const current_key = __job_text(current.kind) + ":" + __job_text(current.id) + ":" + __job_text(current.url)
+      const current_key = __job_text(current.kind) + ":" + __job_text(current.id) + ":"
+        + __job_text(
+        current.url,
+      )
       if current_key == key {
         found = true
       }
@@ -777,10 +839,10 @@ fn __job_card_from_event(event) {
 }
 
 fn __job_merge_card(card, event) {
-  const status_neutral = event.kind == "receipt.available" || event.kind == "replay_fixture.available"
+  const status_neutral = event.kind == "receipt.available"
+    || event.kind == "replay_fixture.available"
   return filter_nil(
-    card
-      .merge(
+    card.merge(
       {
         title: status_neutral ? card.title : event.title,
         status: status_neutral ? card.status : event.status,
@@ -800,7 +862,10 @@ fn __job_merge_card(card, event) {
         receipt_refs: __job_append_refs(card.receipt_refs, event.receipt_refs),
         replay_refs: __job_append_refs(card.replay_refs, event.replay_refs),
         related_refs: __job_append_refs(card.related_refs, event.related_refs),
-        action_intents: status_neutral ? __job_append_actions(card.action_intents, event.action_intents) : event.action_intents,
+        action_intents: status_neutral ? __job_append_actions(
+          card.action_intents,
+          event.action_intents,
+        ) : event.action_intents,
       },
     ),
   )
@@ -847,7 +912,9 @@ pub fn dashboard_jobs_view(events: list, options = nil) {
   let receipts = []
   if opts.emit ?? false {
     for event in unique {
-      receipts = receipts.push(dashboard_job_emit(event, {topic: opts.topic ?? DASHBOARD_JOB_EVENT_TOPIC}))
+      receipts = receipts.push(
+        dashboard_job_emit(event, {topic: opts.topic ?? DASHBOARD_JOB_EVENT_TOPIC}),
+      )
     }
   }
   const snapshot = dashboard_jobs_snapshot(unique, opts)

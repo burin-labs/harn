@@ -214,6 +214,7 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         | "render_prompt"
         | "render_with_provenance"
         | "find_text"
+        | "find_evidence"
         | "read_lines"
         | "list_dir"
         | "walk_dir"

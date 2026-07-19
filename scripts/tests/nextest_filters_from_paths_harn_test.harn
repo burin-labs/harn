@@ -1,7 +1,10 @@
 import { with_temp_dir } from "std/testing"
 import "../nextest_filters_from_paths.harn"
 
-const PACKAGES = [{dir: "crates/harn-cli", name: "harn-cli"}, {dir: "crates/harn-vm", name: "harn-vm"}]
+const PACKAGES = [
+  {dir: "crates/harn-cli", name: "harn-cli"},
+  {dir: "crates/harn-vm", name: "harn-vm"},
+]
 
 fn mkdirs(path: string) -> nil {
   const parts = split(path_normalize(path), "/")

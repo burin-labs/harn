@@ -25,7 +25,8 @@ const DEMO_DIR = "docs/fixtures/connect-demo"
 
 // Pinned digest in the docs page — bump both together if the canonical
 // graph encoding intentionally changes.
-const EXPECTED_MIN_DIGEST = "sha256:d89f161d9fe0739394db76ee48c4e0887b2bc2abba43060cb22826c388b90c2e"
+const EXPECTED_MIN_DIGEST =
+  "sha256:d89f161d9fe0739394db76ee48c4e0887b2bc2abba43060cb22826c388b90c2e"
 
 /**
  * Navigate a dotted JSON path with optional `[idx]` suffixes (the shape
@@ -92,8 +93,9 @@ fn resolve_harn_bin() -> string {
     return env_bin
   }
   let target_dir = ""
-  const meta = harness.process
-    .spawn_captured({cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]})
+  const meta = harness.process.spawn_captured(
+    {cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
+  )
   if meta.success {
     const parsed = try {
       json_parse(meta.stdout)
@@ -111,8 +113,9 @@ fn resolve_harn_bin() -> string {
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process
-      .spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
+    const build = harness.process.spawn_captured(
+      {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
+    )
     if !build.success {
       __io_eprint(build.stderr)
       throw "cargo build -p harn-cli failed"
@@ -144,7 +147,11 @@ pipeline main(task) {
   const harn_bin = resolve_harn_bin()
   __io_println("=== Checking workflow quickstart fixtures ===")
   // --- 1. Minimal bundle ---
-  let validate = harn_json(harn_bin, ["workflow", "validate", "--bundle", MIN_BUNDLE, "--json"], nil)
+  let validate = harn_json(
+    harn_bin,
+    ["workflow", "validate", "--bundle", MIN_BUNDLE, "--json"],
+    nil,
+  )
   expect_json_path("minimal validate.valid", validate, "valid", "true")
   expect_json_path("minimal validate.bundle_id", validate, "bundle_id", "\"quickstart-minimal\"")
   expect_json_path(
@@ -164,7 +171,12 @@ pipeline main(task) {
     "\"bundle_run_quickstart_minimal_fixture\"",
   )
   expect_json_path("minimal run.trigger_id", run, "trigger_id", "\"manual-start\"")
-  expect_json_path("minimal run.executed_nodes[0]", run, "executed_nodes[0].node_id", "\"summarize\"")
+  expect_json_path(
+    "minimal run.executed_nodes[0]",
+    run,
+    "executed_nodes[0].node_id",
+    "\"summarize\"",
+  )
   expect_json_path("minimal run.executed_nodes[1]", run, "executed_nodes[1].node_id", "\"notify\"")
   expect_json_path("minimal run.graph_digest", run, "graph_digest", "\"${min_digest}\"")
   if min_digest != EXPECTED_MIN_DIGEST {
@@ -172,7 +184,9 @@ pipeline main(task) {
     __io_eprintln("      docs/src/workflow-authoring-quickstart.md")
     __io_eprintln("  expected: ${EXPECTED_MIN_DIGEST}")
     __io_eprintln("  actual:   ${min_digest}")
-    __io_eprintln("  fix:      update both the docs page and this script if the change is intentional")
+    __io_eprintln(
+      "  fix:      update both the docs page and this script if the change is intentional",
+    )
     return 1
   }
   // --- 2. Agentic bundle ---
@@ -211,7 +225,11 @@ pipeline main(task) {
     "connectors[0].auth_type",
     "\"api-key\"",
   )
-  const plan = harn_json(harn_bin, ["connect", "setup-plan", "--connector", "demo", "--json"], DEMO_DIR)
+  const plan = harn_json(
+    harn_bin,
+    ["connect", "setup-plan", "--connector", "demo", "--json"],
+    DEMO_DIR,
+  )
   expect_json_path("demo setup-plan.connector", plan, "connector", "\"demo\"")
   expect_json_path("demo setup-plan.auth_type", plan, "auth_type", "\"api-key\"")
   expect_json_path("demo setup-plan.steps[0].id", plan, "steps[0].id", "\"authorize\"")

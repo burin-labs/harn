@@ -3,20 +3,23 @@ import "std/project"
 pipeline test(task) {
   const base_dir = path_join(harness.fs.temp_dir(), "harn-project-enrich-budget-" + uuid())
   harness.fs.mkdir(path_join(base_dir, "src"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(base_dir, "Cargo.toml"),
     "[package]\nname = \"project-enrich-budget\"\nversion = \"0.1.0\"\n",
   )
   harness.fs.write_text(path_join(base_dir, "Cargo.lock"), "# lock\n")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(base_dir, "src/lib.rs"),
     "pub struct UserName;\npub fn greet_name() -> &'static str { \"hi\" }\n",
   )
   const base = project_scan(base_dir, {tiers: ["ambient", "config"]})
-  const prompt = "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
-  const schema = {type: "object", required: ["framework"], properties: {framework: {type: "string"}}}
+  const prompt =
+    "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
+  const schema = {
+    type: "object",
+    required: ["framework"],
+    properties: {framework: {type: "string"}},
+  }
   const result = project_enrich(
     base_dir,
     {

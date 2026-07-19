@@ -1,0 +1,1052 @@
+import "std/agent/loop_foundation"
+import "std/agent/loop_result_status"
+import "std/agent/loop_support"
+import "std/agent/loop_tool_calls"
+
+pub fn __resolve_max_concurrent_tools(turn_opts) {
+  const raw = turn_opts?.max_concurrent_tools
+  if type_of(raw) == "int" && raw > 1 {
+    return raw
+  }
+  return 1
+}
+
+/**
+ * Resolve the intra-turn failing-fan-out cap K (#A4). When a single model
+ * response fans out a large batch of byte-identical FAILING tool calls, every
+ * call is dispatched synchronously with no LLM call or progress check between
+ * them, so the cross-turn loop-detector / no-progress terminator fire a whole
+ * turn too late — after all N drain, having burned turn/wall budget and flooded
+ * context with N identical errors (observed: 127 identical `edit` rejections in
+ * ~2.7s on swift-feat). This cap is the intra-turn analog of the cross-turn
+ * no-progress terminator: after the Kth consecutive byte-identical failing
+ * result within ONE batch, the remaining identical calls are skipped and
+ * collapsed into a single synthetic result.
+ *
+ * Default OFF: returns `0` (no cap) unless `intra_turn_failure_fanout_cap` is
+ * set to a positive int. A value of e.g. `3` collapses after 3 identical
+ * failures. Reachability is exercised by the `agent_loop_intra_turn_*`
+ * conformance tests, which prove that flipping the flag changes dispatch
+ * behavior end-to-end.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __resolve_intra_turn_failure_fanout_cap(turn_opts) {
+  const raw = turn_opts?.intra_turn_failure_fanout_cap
+  if type_of(raw) == "int" && raw > 0 {
+    return raw
+  }
+  return 0
+}
+
+pub fn __resolve_intra_turn_resource_fail_fast(turn_opts) -> bool {
+  const raw = turn_opts?.intra_turn_resource_fail_fast
+  if type_of(raw) == "bool" {
+    return raw
+  }
+  return true
+}
+
+/**
+ * Stable signature of a FAILING dispatch result, used to detect a fan-out of
+ * byte-identical failing calls within one batch. Keyed on (tool_name,
+ * args_hash, normalized failure text) so it is polyglot — it never inspects
+ * language-specific content, only the tool identity, the exact arguments, and
+ * the exact error/observation the tool returned. Returns `nil` for a successful
+ * (or non-result) entry so successes never count toward the cap.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __intra_turn_failure_signature(result) {
+  if type_of(result) != "dict" {
+    return nil
+  }
+  if __tool_result_ok(result) {
+    return nil
+  }
+  const name = to_string(result?.tool_name ?? result?.name ?? "")
+  const args = result?.arguments ?? {}
+  const failure_text = to_string(
+    result?.error ?? result?.observation ?? result?.rendered_result ?? result?.result ?? "",
+  )
+  return sha256(json_stringify({name: name, args: args, failure: failure_text}))
+}
+
+/**
+ * Stable signature of a tool CALL (before dispatch), keyed on (tool_name,
+ * args). Used to skip the tail of a fan-out: once a streak of byte-identical
+ * failing results trips the cap, every remaining call with this same call
+ * signature is collapsed rather than executed. Polyglot — never inspects
+ * language-specific content, only tool identity and exact arguments.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __intra_turn_call_signature(call) {
+  if type_of(call) != "dict" {
+    return nil
+  }
+  const name = to_string(call?.name ?? call?.tool_name ?? "")
+  const args = call?.arguments ?? {}
+  return sha256(json_stringify({name: name, args: args}))
+}
+
+pub const __INTRA_TURN_RESOURCE_MUTATING_KINDS = [
+  "edit",
+  "write",
+  "scaffold",
+  "delete",
+  "move",
+  "mutation",
+  "mutate",
+]
+
+pub fn __intra_turn_call_args(call) {
+  const raw = call?.arguments ?? call?.tool_args
+  if type_of(raw) == "dict" {
+    return raw
+  }
+  return {}
+}
+
+pub fn __intra_turn_annotation_text(value) -> string {
+  return lowercase(trim(to_string(value ?? "")))
+}
+
+pub fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
+  if type_of(annotations) != "dict" {
+    return false
+  }
+  const kind = __intra_turn_annotation_text(
+    annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind,
+  )
+  if contains(__INTRA_TURN_RESOURCE_MUTATING_KINDS, kind) {
+    return true
+  }
+  const side_effect = __intra_turn_annotation_text(
+    annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
+      ?? annotations
+      ?.sideEffect,
+  )
+  if side_effect == "workspace_write" {
+    return true
+  }
+  const mutation = __intra_turn_annotation_text(
+    annotations?.mutation_classification ?? annotations?.mutationClassification
+      ?? annotations
+      ?.mutation,
+  )
+  return mutation == "workspace_write"
+}
+
+pub fn __intra_turn_annotation_path_params(annotations) {
+  if type_of(annotations) != "dict" {
+    return []
+  }
+  const direct = annotations?.path_params ?? annotations?.pathParams
+    ?? annotations
+    ?.resource_path_params
+    ?? annotations?.resourcePathParams
+  if type_of(direct) == "list" {
+    return direct
+  }
+  if type_of(direct) == "string" {
+    return [direct]
+  }
+  const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
+  const params = schema?.path_params ?? schema?.pathParams ?? []
+  if type_of(params) == "list" {
+    return params
+  }
+  if type_of(params) == "string" {
+    return [params]
+  }
+  return []
+}
+
+pub fn __intra_turn_annotation_dependency_key_params(annotations) {
+  if type_of(annotations) != "dict" {
+    return []
+  }
+  const direct = annotations?.dependency_key_params ?? annotations?.dependencyKeyParams
+    ?? annotations
+    ?.resource_dependency_params
+    ?? annotations?.resourceDependencyParams
+    ?? annotations?.resource_key_params
+    ?? annotations?.resourceKeyParams
+  if type_of(direct) == "list" {
+    return direct
+  }
+  if type_of(direct) == "string" {
+    return [direct]
+  }
+  const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
+  const params = schema?.dependency_key_params ?? schema?.dependencyKeyParams
+    ?? schema
+    ?.resource_dependency_params
+    ?? schema?.resourceDependencyParams
+    ?? schema?.resource_key_params
+    ?? schema?.resourceKeyParams
+    ?? []
+  if type_of(params) == "list" {
+    return params
+  }
+  if type_of(params) == "string" {
+    return [params]
+  }
+  return []
+}
+
+pub fn __intra_turn_annotation_dependency_range_params(annotations) {
+  if type_of(annotations) != "dict" {
+    return []
+  }
+  const direct = annotations?.dependency_range_params ?? annotations?.dependencyRangeParams
+    ?? annotations
+    ?.resource_dependency_ranges
+    ?? annotations?.resourceDependencyRanges
+    ?? annotations?.resource_range_params
+    ?? annotations?.resourceRangeParams
+  if type_of(direct) == "list" {
+    return direct
+  }
+  if type_of(direct) == "dict" {
+    return [direct]
+  }
+  const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
+  const params = schema?.dependency_range_params ?? schema?.dependencyRangeParams
+    ?? schema
+    ?.resource_dependency_ranges
+    ?? schema?.resourceDependencyRanges
+    ?? schema?.resource_range_params
+    ?? schema?.resourceRangeParams
+    ?? []
+  if type_of(params) == "list" {
+    return params
+  }
+  if type_of(params) == "dict" {
+    return [params]
+  }
+  return []
+}
+
+pub fn __intra_turn_annotation_arg_aliases(annotations) {
+  if type_of(annotations) != "dict" {
+    return {}
+  }
+  const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
+  const aliases = schema?.arg_aliases ?? schema?.argAliases ?? annotations?.arg_aliases
+    ?? annotations
+    ?.argAliases
+    ?? {}
+  if type_of(aliases) == "dict" {
+    return aliases
+  }
+  return {}
+}
+
+pub fn __intra_turn_normalize_resource_path(raw) -> string {
+  let path = trim(to_string(raw ?? ""))
+  while starts_with(path, "./") {
+    path = substring(path, 2)
+  }
+  return path
+}
+
+pub fn __intra_turn_push_resource_key(keys, value) {
+  let path = __intra_turn_normalize_resource_path(value)
+  if path == "" {
+    return keys
+  }
+  const key = "workspace_path:" + path
+  if contains(keys, key) {
+    return keys
+  }
+  return keys.push(key)
+}
+
+pub fn __intra_turn_push_resource_value(keys, value) {
+  if type_of(value) == "list" {
+    let out = keys
+    for item in value {
+      out = __intra_turn_push_resource_key(out, item)
+    }
+    return out
+  }
+  return __intra_turn_push_resource_key(keys, value)
+}
+
+pub const __INTRA_TURN_FALLBACK_PATH_ARGS = [
+  "path",
+  "paths",
+  "file",
+  "files",
+  "filepath",
+  "file_path",
+  "target_path",
+  "source_path",
+  "folder",
+  "dir",
+  "directory",
+]
+
+pub fn __intra_turn_fallback_resource_keys(args) {
+  let keys = []
+  for name in __INTRA_TURN_FALLBACK_PATH_ARGS {
+    if args[name] != nil {
+      keys = __intra_turn_push_resource_value(keys, args[name])
+    }
+  }
+  return keys
+}
+
+pub fn __intra_turn_dependency_range_param_names(spec) {
+  if type_of(spec) != "dict" {
+    return nil
+  }
+  const start_name = trim(
+    to_string(
+      spec?.start ?? spec?.start_param ?? spec?.startParam ?? spec?.from ?? spec?.begin ?? "",
+    ),
+  )
+  const end_name = trim(
+    to_string(
+      spec?.end ?? spec?.end_param ?? spec?.endParam ?? spec?.to ?? spec?.stop ?? start_name,
+    ),
+  )
+  if start_name == "" {
+    return nil
+  }
+  return {
+    start: start_name,
+    end: if end_name == "" {
+      start_name
+    } else {
+      end_name
+    },
+  }
+}
+
+pub fn __intra_turn_arg_value(args, aliases, name) {
+  const raw_name = to_string(name ?? "")
+  if raw_name == "" {
+    return nil
+  }
+  if args[raw_name] != nil {
+    return args[raw_name]
+  }
+  if type_of(aliases) == "dict" {
+    for alias in aliases.keys().sort() {
+      if to_string(aliases[alias]) == raw_name && args[alias] != nil {
+        return args[alias]
+      }
+    }
+  }
+  return nil
+}
+
+pub fn __intra_turn_dependency_range_from_args(args, aliases, spec) {
+  const names = __intra_turn_dependency_range_param_names(spec)
+  if names == nil {
+    return nil
+  }
+  const start_raw = __intra_turn_arg_value(args, aliases, names.start)
+  const end_raw = __intra_turn_arg_value(args, aliases, names.end)
+  const end_source = if end_raw == nil {
+    start_raw
+  } else {
+    end_raw
+  }
+  const start = to_int(start_raw)
+  const end = to_int(end_source)
+  if start == nil || end == nil {
+    return nil
+  }
+  let lo = start
+  let hi = end
+  if hi < lo {
+    const tmp = lo
+    lo = hi
+    hi = tmp
+  }
+  return {start: lo, end: hi}
+}
+
+pub fn __intra_turn_dependency_target_ranges(resource_keys, args, annotations) {
+  if len(resource_keys) == 0 {
+    return []
+  }
+  const aliases = __intra_turn_annotation_arg_aliases(annotations)
+  let ranges = []
+  for spec in __intra_turn_annotation_dependency_range_params(annotations) {
+    const range = __intra_turn_dependency_range_from_args(args, aliases, spec)
+    if range == nil {
+      continue
+    }
+    for key in resource_keys {
+      ranges = ranges.push({resource_key: key, start: range.start, end: range.end})
+    }
+  }
+  return ranges
+}
+
+pub fn __intra_turn_dependency_key_components(args, annotations) {
+  const aliases = __intra_turn_annotation_arg_aliases(annotations)
+  let components = []
+  for param in __intra_turn_annotation_dependency_key_params(annotations) {
+    const name = to_string(param)
+    const value = __intra_turn_arg_value(args, aliases, name)
+    if name != "" && value != nil {
+      if type_of(value) == "string" && trim(value) == "" {
+        continue
+      }
+      components = components.push({name: name, value: value})
+    }
+  }
+  return components
+}
+
+pub fn __intra_turn_dependency_target_keys(resource_keys, args, annotations) {
+  let components = __intra_turn_dependency_key_components(args, annotations)
+  if len(resource_keys) == 0 || len(components) == 0 {
+    return []
+  }
+  const digest = substring(sha256(json_stringify(components)), 0, 24)
+  let keys = []
+  for key in resource_keys {
+    keys = keys.push(key + "#target:" + digest)
+  }
+  return keys
+}
+
+pub fn __intra_turn_resource_keys(call, tools, options = {}) {
+  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const entry = __tool_registry_entry(tools, tool_name)
+  const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
+  if !__intra_turn_annotations_mutate_resource(annotations) {
+    return []
+  }
+  const args = __intra_turn_call_args(call)
+  let keys = []
+  for param in __intra_turn_annotation_path_params(annotations) {
+    const name = to_string(param)
+    if name != "" && args[name] != nil {
+      keys = __intra_turn_push_resource_value(keys, args[name])
+    }
+  }
+  if len(keys) == 0 {
+    keys = __intra_turn_fallback_resource_keys(args)
+  }
+  return keys
+}
+
+pub fn __intra_turn_resource_guard(call, tools, options = {}) {
+  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const entry = __tool_registry_entry(tools, tool_name)
+  const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
+  if !__intra_turn_annotations_mutate_resource(annotations) {
+    return nil
+  }
+  const args = __intra_turn_call_args(call)
+  let resource_keys = []
+  for param in __intra_turn_annotation_path_params(annotations) {
+    const name = to_string(param)
+    if name != "" && args[name] != nil {
+      resource_keys = __intra_turn_push_resource_value(resource_keys, args[name])
+    }
+  }
+  if len(resource_keys) == 0 {
+    resource_keys = __intra_turn_fallback_resource_keys(args)
+  }
+  if len(resource_keys) == 0 {
+    return nil
+  }
+  return {
+    resource_keys: resource_keys,
+    target_keys: __intra_turn_dependency_target_keys(resource_keys, args, annotations),
+    target_ranges: __intra_turn_dependency_target_ranges(resource_keys, args, annotations),
+  }
+}
+
+pub fn __intra_turn_intersects(keys, failed_keys) -> bool {
+  for key in keys {
+    if contains(failed_keys, key) {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn __intra_turn_ranges_overlap(current, failed) -> bool {
+  return to_string(current?.resource_key ?? "") == to_string(failed?.resource_key ?? "")
+    && (to_int(
+    current?.start,
+  )
+    ?? 0)
+    <= (to_int(failed?.end) ?? -1)
+    && (to_int(failed?.start) ?? 0) <= (to_int(current?.end) ?? -1)
+}
+
+pub fn __intra_turn_range_intersects(current_ranges, failed_ranges) -> bool {
+  for current in current_ranges {
+    for failed in failed_ranges {
+      if __intra_turn_ranges_overlap(current, failed) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+pub fn __intra_turn_guard_intersects(current_guard, failed_guard) -> bool {
+  if !__intra_turn_intersects(
+    current_guard?.resource_keys ?? [],
+    failed_guard?.resource_keys ?? [],
+  ) {
+    return false
+  }
+  const target_ranges = current_guard?.target_ranges ?? []
+  const failed_target_ranges = failed_guard?.target_ranges ?? []
+  if len(target_ranges) > 0 && len(failed_target_ranges) > 0 {
+    return __intra_turn_range_intersects(target_ranges, failed_target_ranges)
+  }
+  const target_keys = current_guard?.target_keys ?? []
+  const failed_target_keys = failed_guard?.target_keys ?? []
+  if len(target_keys) > 0 && len(failed_target_keys) > 0 {
+    return __intra_turn_intersects(target_keys, failed_target_keys)
+  }
+  return true
+}
+
+pub fn __intra_turn_first_blocking_guard(current_guard, failed_guards) {
+  if current_guard == nil {
+    return nil
+  }
+  for failed_guard in failed_guards {
+    if __intra_turn_guard_intersects(current_guard, failed_guard) {
+      return failed_guard
+    }
+  }
+  return nil
+}
+
+pub fn __intra_turn_guard_render_keys(resource_guard) {
+  let resource_keys = resource_guard?.resource_keys ?? []
+  if len(resource_keys) > 0 {
+    return resource_keys
+  }
+  return resource_guard?.target_keys ?? []
+}
+
+pub fn __intra_turn_failed_guard_record(call, index, resource_guard, result) {
+  return resource_guard
+    + {
+    failed_call_index: index,
+    failed_tool_name: to_string(call?.name ?? call?.tool_name ?? ""),
+    failed_tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+    failed_mutation_status: __intra_turn_result_mutation_status(result),
+  }
+}
+
+pub fn __intra_turn_dependent_suffix_count(
+  tool_calls,
+  tools,
+  options,
+  index,
+  blocking_guard,
+) -> number {
+  let count = 0
+  for (candidate_index, candidate_call) in iter(tool_calls).enumerate() {
+    if candidate_index < index {
+      continue
+    }
+    const candidate_guard = __intra_turn_resource_guard(candidate_call, tools, options)
+    if candidate_guard != nil && __intra_turn_guard_intersects(candidate_guard, blocking_guard) {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+pub fn __intra_turn_partial_apply_receipt(
+  call,
+  current_guard,
+  blocking_guard,
+  index,
+  skipped_suffix_count,
+) {
+  return {
+    kind: "intra_turn_same_resource_partial_apply",
+    resource_keys: __intra_turn_guard_render_keys(blocking_guard),
+    current_resource_keys: __intra_turn_guard_render_keys(current_guard),
+    target_keys: blocking_guard?.target_keys ?? [],
+    current_target_keys: current_guard?.target_keys ?? [],
+    target_ranges: blocking_guard?.target_ranges ?? [],
+    current_target_ranges: current_guard?.target_ranges ?? [],
+    executed_prefix_count: index,
+    skipped_suffix_count: skipped_suffix_count,
+    skipped_call_index: index,
+    skipped_tool_name: to_string(call?.name ?? call?.tool_name ?? ""),
+    skipped_tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+    blocking_prior_call_index: blocking_guard?.failed_call_index,
+    blocking_prior_tool_name: to_string(blocking_guard?.failed_tool_name ?? ""),
+    blocking_prior_tool_call_id: to_string(blocking_guard?.failed_tool_call_id ?? ""),
+    blocking_prior_mutation_status: to_string(blocking_guard?.failed_mutation_status ?? "unknown"),
+    stop_reason: "prior_same_resource_failure_may_have_mutated",
+    next_expected_action: "read_current_resource_then_issue_one_reanchored_call",
+  }
+}
+
+/**
+ * Read the execution boundary's typed mutation verdict. Rendered output is never
+ * inspected: an absent or invalid verdict remains `unknown`, which conservatively
+ * poisons a same-resource sibling rather than guessing from locale-dependent text.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __intra_turn_result_mutation_status(result) -> string {
+  if type_of(result) != "dict" {
+    return "unknown"
+  }
+  return to_string(agent_tool_mutation_status(result?.mutation_status))
+}
+
+pub fn __intra_turn_result_mutated(result) {
+  const status = __intra_turn_result_mutation_status(result)
+  if status == "not_applied" {
+    return false
+  }
+  if status == "applied" {
+    return true
+  }
+  return nil
+}
+
+/**
+ * True when a failing same-resource call must POISON the resource for later
+ * siblings — i.e. we cannot rule out that the failure left the resource mutated.
+ * Preserves the safety property: poison unless the failure is an affirmatively
+ * pre-apply (no-mutation) rejection.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __intra_turn_failure_poisons_resource(result) -> bool {
+  // Poison on `nil` (unknown — cannot rule out a mutation) and on any verdict
+  // other than an affirmative `false`. Only a host-confirmed pre-apply rejection
+  // (view unchanged) skips poisoning. Guards the safety property: unknown stays
+  // conservative, exactly like today.
+  const mutated = __intra_turn_result_mutated(result)
+  if type_of(mutated) == "bool" && !mutated {
+    return false
+  }
+  return true
+}
+
+pub fn __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options = {}) -> bool {
+  for call in tool_calls {
+    if len(__intra_turn_resource_keys(call, tools, options)) > 0 {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Synthetic collapsed result that stands in for the identical failing calls
+ * skipped after the fan-out cap tripped. Mirrors the failing-result shape so
+ * downstream rollups (rejected-tool tracking, history) treat it as one failed
+ * call rather than executing N more.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __intra_turn_collapsed_result(call, sample_result) {
+  const name = to_string(call?.name ?? sample_result?.tool_name ?? "")
+  const observation = "[collapsed remaining identical failing `" + name + "` call(s) "
+    + "from this turn]\n"
+    + "These calls had byte-identical arguments and produced the byte-identical "
+    + "error already shown above, so they were NOT executed. Repeating the same "
+    + "failing call cannot make progress — issue edits one at a time and inspect "
+    + "each result, or change your approach (re-read the file / fix the argument "
+    + "that was rejected) before retrying."
+  return {
+    ok: false,
+    status: "collapsed_identical_failure",
+    tool_name: name,
+    tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+    arguments: call?.arguments ?? {},
+    result: nil,
+    rendered_result: observation,
+    observation: observation,
+    error: observation,
+    error_category: "intra_turn_failure_fanout_collapsed",
+    executor: nil,
+  }
+}
+
+pub fn __intra_turn_resource_blocked_result(
+  call,
+  current_guard,
+  blocking_guard,
+  index,
+  skipped_suffix_count,
+) {
+  const name = to_string(call?.name ?? call?.tool_name ?? "")
+  const receipt = __intra_turn_partial_apply_receipt(
+    call,
+    current_guard,
+    blocking_guard,
+    index,
+    skipped_suffix_count,
+  )
+  const keys = receipt.resource_keys
+  const rendered_keys = join(keys, ", ")
+  const observation = "[skipped dependent `" + name + "` call from this turn]\n"
+    + "[partial same-resource batch halted]\n"
+    + "Executed prefix: "
+    + to_string(receipt.executed_prefix_count)
+    + " call(s). Skipped suffix: "
+    + to_string(receipt.skipped_suffix_count)
+    + " call(s), starting at call index "
+    + to_string(receipt.skipped_call_index)
+    + ".\nA previous mutating `"
+    + receipt.blocking_prior_tool_name
+    + "` call at index "
+    + to_string(receipt.blocking_prior_call_index)
+    + " failed with mutation_status="
+    + receipt.blocking_prior_mutation_status
+    + " for the same workspace resource ("
+    + rendered_keys
+    + "). This same-resource sibling was NOT executed for stale-anchor safety.\n"
+    + "Recover in ONE next turn: read the current file or the earlier failure "
+    + "feedback if needed, then issue exactly ONE `"
+    + name
+    + "` call re-anchored against the resource's CURRENT contents. Do not replay "
+    + "a same-file edit batch, and do not re-send the call that already failed "
+    + "unchanged."
+  return {
+    ok: false,
+    status: "blocked_by_prior_same_resource_failure",
+    tool_name: name,
+    tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+    arguments: call?.arguments ?? {},
+    result: {
+      message: observation,
+      partial_apply: receipt,
+      next_expected_action: receipt.next_expected_action,
+    },
+    receipt_kind: "intra_turn_same_resource_partial_apply",
+    partial_apply: receipt,
+    next_expected_action: receipt.next_expected_action,
+    rendered_result: observation,
+    observation: observation,
+    error: observation,
+    error_category: "intra_turn_resource_fail_fast",
+    executor: nil,
+  }
+}
+
+pub fn __callable(value) {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+pub fn __audit_flushes_from_result(result) {
+  let flushes = []
+  const single = result?._audit_flush
+  if __callable(single) {
+    flushes = flushes.push(single)
+  }
+  const many = result?._audit_flushes
+  if type_of(many) == "list" {
+    for flush in many {
+      if __callable(flush) {
+        flushes = flushes.push(flush)
+      }
+    }
+  }
+  return flushes
+}
+
+pub fn __collect_audit_flushes(dispatch) {
+  let flushes = []
+  for result in __dispatch_results_list(dispatch) {
+    for flush in __audit_flushes_from_result(result) {
+      flushes = flushes.push(flush)
+    }
+  }
+  return flushes
+}
+
+pub fn __strip_internal_tool_result(result) {
+  if type_of(result) != "dict" {
+    return result
+  }
+  let clean = {}
+  for key in result.keys() {
+    if !starts_with(key, "_") {
+      clean = clean + {[key]: result[key]}
+    }
+  }
+  return clean
+}
+
+pub fn __strip_internal_dispatch(dispatch) {
+  if type_of(dispatch) == "list" {
+    let clean_results = []
+    for result in dispatch {
+      clean_results = clean_results.push(__strip_internal_tool_result(result))
+    }
+    return clean_results
+  }
+  if type_of(dispatch) != "dict" {
+    return dispatch
+  }
+  let clean_dispatch = {}
+  for key in dispatch.keys() {
+    if !starts_with(key, "_") {
+      clean_dispatch = clean_dispatch + {[key]: dispatch[key]}
+    }
+  }
+  if type_of(dispatch?.results) == "list" {
+    let clean_results = []
+    for result in dispatch.results {
+      clean_results = clean_results.push(__strip_internal_tool_result(result))
+    }
+    clean_dispatch = clean_dispatch + {results: clean_results}
+  }
+  return clean_dispatch
+}
+
+pub fn __spawn_audit_flushes(tasks, flushes) {
+  let out = tasks
+  for flush in flushes {
+    const task = spawn {
+      let _ = try {
+        flush()
+      }
+    }
+    out = out.push(task)
+  }
+  return out
+}
+
+pub fn __drain_audit_flushes(tasks) {
+  for task in tasks {
+    let _ = try {
+      await(task)
+    }
+  }
+}
+
+pub fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
+  if len(tool_calls) == 0 {
+    return {dispatch: nil, turn_opts: turn_opts, audit_flushes: []}
+  }
+  agent_tool_search_emit_queries(session_id, tool_calls, turn_opts)
+  const tools = turn_opts?.tools
+  let cap = __resolve_max_concurrent_tools(turn_opts)
+  // `_stop_reason` is the turn's provider stop reason
+  // (`stop`/`length`/`tool_calls`/...). The dispatch host primitive uses it
+  // to cause-name empty-args tool calls: finish_reason=length means the
+  // arguments were TRUNCATED by the output cap, anything else means the
+  // provider dropped them (an IDE host bug report).
+  const dispatch_options = {
+    session_id: session_id,
+    tool_format: turn_opts.tool_format,
+    policy: turn_opts?.policy,
+    approval_policy: turn_opts?.approval_policy,
+    command_policy: turn_opts?.command_policy,
+    permissions: turn_opts?.permissions,
+    reminders: turn_opts?.reminders,
+    _iteration: turn_opts?._iteration ?? 0,
+    _tool_caller: turn_opts?._tool_caller,
+    _max_concurrent_tools: cap,
+    _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
+    _stop_reason: turn_opts?._stop_reason ?? "",
+    _intra_turn_failure_fanout_cap: __resolve_intra_turn_failure_fanout_cap(turn_opts),
+    _intra_turn_resource_fail_fast: __resolve_intra_turn_resource_fail_fast(turn_opts),
+  }
+  const caller = turn_opts?._tool_caller
+  const raw_dispatch = __dispatch_tool_calls_with_middleware(
+    tool_calls,
+    tools,
+    dispatch_options,
+    cap,
+  )
+  const audit_flushes = __collect_audit_flushes(raw_dispatch)
+  const dispatch = __strip_internal_dispatch(raw_dispatch)
+  agent_session_record_tool_results(session_id, dispatch)
+  return {
+    dispatch: dispatch,
+    turn_opts: agent_tool_search_record_results(session_id, tool_calls, dispatch, turn_opts),
+    audit_flushes: audit_flushes,
+  }
+}
+
+pub fn __invoke_tool_with_index(call, index, tools, options) {
+  return __invoke_tool(call, tools, options + {_tool_call_index: index})
+}
+
+pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
+  // Middleware-enabled path. Each call invokes its own caller chain
+  // inside a fresh closure scope, so `audit.layers` histories stay
+  // independent across siblings. When `max_concurrent_tools > 1`,
+  // dispatch siblings concurrently via `parallel settle` with the
+  // requested cap; results come back in source order regardless of
+  // completion order so text tool-call parsers that key on
+  // declaration order still match.
+  const resource_fail_fast = options?._intra_turn_resource_fail_fast ?? true
+  const keyed_mutating_batch = resource_fail_fast
+    && __intra_turn_has_keyed_mutating_calls(
+    tool_calls,
+    tools,
+    options,
+  )
+  if cap <= 1 || len(tool_calls) <= 1 || keyed_mutating_batch {
+    // Intra-turn failing-fan-out cap (#A4). Dispatch serially; track the count
+    // of consecutive byte-identical FAILING results. Once that streak reaches
+    // the configured cap K, skip the remaining calls whose (tool_name, args)
+    // signature matches the capped one — they would produce the same failure —
+    // and substitute a single synthetic "collapsed" result. This is the
+    // intra-turn analog of the cross-turn no-progress terminator. Default OFF
+    // (`fanout_cap == 0`): the legacy "dispatch every call" behavior is
+    // unchanged unless the flag is set. A success, or any failure/call with a
+    // DIFFERENT signature, resets the streak, so a batch of distinct or
+    // non-failing calls is never capped.
+    const fanout_cap = options?._intra_turn_failure_fanout_cap ?? 0
+    let results = []
+    let streak_signature = nil
+    let streak_count = 0
+    let capped_call_signature = nil
+    let capped_sample = nil
+    let collapsed_emitted = false
+    let failed_resource_guards = []
+    for (index, call) in iter(tool_calls).enumerate() {
+      const resource_guard = if resource_fail_fast {
+        __intra_turn_resource_guard(call, tools, options)
+      } else {
+        nil
+      }
+      const blocking_guard = __intra_turn_first_blocking_guard(
+        resource_guard,
+        failed_resource_guards,
+      )
+      if blocking_guard != nil {
+        const skipped_suffix_count = __intra_turn_dependent_suffix_count(
+          tool_calls,
+          tools,
+          options,
+          index,
+          blocking_guard,
+        )
+        const blocked = __intra_turn_resource_blocked_result(
+          call,
+          resource_guard,
+          blocking_guard,
+          index,
+          skipped_suffix_count,
+        )
+        __emit_synthetic_tool_lifecycle_finish(call, blocked, tools, options)
+        results = results.push(blocked)
+        continue
+      }
+      if fanout_cap > 0 && capped_call_signature != nil
+        && __intra_turn_call_signature(call)
+        == capped_call_signature {
+        // Same failing call as the one that tripped the cap — skip dispatch.
+        if !collapsed_emitted {
+          const collapsed = __intra_turn_collapsed_result(call, capped_sample)
+          __emit_synthetic_tool_lifecycle_finish(call, collapsed, tools, options)
+          results = results.push(collapsed)
+          collapsed_emitted = true
+        }
+        continue
+      }
+      const result = __invoke_tool_with_index(call, index, tools, options)
+      results = results.push(result)
+      // Poison this resource for later same-resource siblings only when the
+      // execution boundary cannot prove the failure was a no-op. A structured
+      // `mutation_status: "not_applied"` leaves the view byte-identical, so an
+      // independent later edit to the same file is NOT stale and may run.
+      // Unknown still poisons, preserving today's conservative behavior.
+      if resource_guard != nil && !__tool_result_ok(result)
+        && __intra_turn_failure_poisons_resource(
+        result,
+      ) {
+        failed_resource_guards = failed_resource_guards.push(
+          __intra_turn_failed_guard_record(call, index, resource_guard, result),
+        )
+      }
+      if fanout_cap > 0 {
+        const signature = __intra_turn_failure_signature(result)
+        if signature == nil {
+          streak_signature = nil
+          streak_count = 0
+        } else if signature == streak_signature {
+          streak_count = streak_count + 1
+          if streak_count >= fanout_cap {
+            const new_capped = __intra_turn_call_signature(call)
+            // A DISTINCT fan-out group tripped the cap: reset the
+            // collapse-emitted latch so this group gets its OWN single
+            // synthetic "collapsed" result. Without this reset the latch
+            // (set by an earlier group) suppresses every collapse marker
+            // after the first, silently dropping the tail of later groups
+            // from `results` with no entry at all.
+            if new_capped != capped_call_signature {
+              collapsed_emitted = false
+            }
+            capped_call_signature = new_capped
+            capped_sample = result
+          }
+        } else {
+          streak_signature = signature
+          streak_count = 1
+        }
+      }
+    }
+    return results
+  }
+  let indexed = []
+  for (index, call) in iter(tool_calls).enumerate() {
+    indexed = indexed.push({index: index, call: call})
+  }
+  const settled = parallel settle indexed with { max_concurrent: cap } { entry ->
+    __invoke_tool_with_index(entry.call, entry.index, tools, options)
+  }
+  let results = []
+  for r in settled.results {
+    if is_ok(r) {
+      results = results.push(unwrap(r))
+    } else {
+      // `__invoke_tool` traps its own middleware exceptions, so a thrown
+      // value here is a VM-level bug (e.g. parallel-task plumbing). Surface a
+      // recoverable one as a synthetic error result rather than tear down the
+      // loop — but a cancellation or an internal engine bug must propagate.
+      const err = unwrap_err(r)
+      if __agent_error_must_propagate(err) {
+        throw err
+      }
+      results = results.push(
+        {
+          ok: false,
+          status: "error",
+          tool_name: "",
+          tool_call_id: "",
+          arguments: {},
+          result: nil,
+          rendered_result: to_string(err),
+          observation: to_string(err),
+          error: to_string(err),
+          error_category: "tool_parallel_dispatch_exception",
+          executor: nil,
+        },
+      )
+    }
+  }
+  return results
+}

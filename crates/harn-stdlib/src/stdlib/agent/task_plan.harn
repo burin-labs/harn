@@ -52,7 +52,13 @@ const __TASK_PLAN_NODE_KINDS: list<string> = [
 
 const __TASK_PLAN_WRITE_KINDS = ["agent_loop", "sub_agent", "deterministic_command", "workflow_map"]
 
-const __TASK_PLAN_DEFAULT_BUDGETS = {max_nodes: 32, max_depth: 8, max_tool_calls: 128, max_model_calls: 64, max_steps: 32}
+const __TASK_PLAN_DEFAULT_BUDGETS = {
+  max_nodes: 32,
+  max_depth: 8,
+  max_tool_calls: 128,
+  max_model_calls: 64,
+  max_steps: 32,
+}
 
 fn __task_plan_optional_dict(fields) {
   return schema_field(schema_object(fields, {additional_properties: schema_any()}), false)
@@ -113,7 +119,9 @@ fn __task_plan_node_schema() {
           skippable: schema_field(schema_bool(), false),
         },
       ),
-      command: __task_plan_optional_dict({tool: schema_string(), args: schema_field(schema_any(), false)}),
+      command: __task_plan_optional_dict(
+        {tool: schema_string(), args: schema_field(schema_any(), false)},
+      ),
       compact: __task_plan_optional_dict(
         {
           threshold_tokens: schema_field(schema_int(), false),
@@ -372,7 +380,9 @@ fn __task_plan_validate_kind_fields(plan, report) {
     }
     if kind == "workflow_map"
       && (node?.map == nil
-      || (node.map?.items == nil && node.map?.item_artifact_kind == nil)) {
+      || (node.map?.items == nil
+      && node.map?.item_artifact_kind
+      == nil)) {
       out = __task_plan_push_error(
         out,
         "map_missing_inputs",
@@ -436,7 +446,9 @@ fn __task_plan_validate_write_capability_budget(plan, write_kinds_seen, report) 
 fn __task_plan_validate_scalar_loop_budgets(explicit, report) {
   let out = report
   if explicit?.wall_clock_ms != nil
-    && (type_of(explicit.wall_clock_ms) != "int" || explicit.wall_clock_ms < 1) {
+    && (type_of(explicit.wall_clock_ms) != "int"
+    || explicit.wall_clock_ms
+    < 1) {
     out = __task_plan_push_error(
       out,
       "budget_wall_clock_ms",
@@ -447,7 +459,10 @@ fn __task_plan_validate_scalar_loop_budgets(explicit, report) {
   const total_cost_kind = type_of(explicit?.total_cost_usd)
   if explicit?.total_cost_usd != nil
     && ((total_cost_kind != "float" && total_cost_kind != "int")
-    || to_float(explicit.total_cost_usd) <= 0.0) {
+    || to_float(
+    explicit.total_cost_usd,
+  )
+    <= 0.0) {
     out = __task_plan_push_error(
       out,
       "budget_total_cost_usd",
@@ -512,7 +527,9 @@ fn __task_plan_validate_consecutive_failure_budget(explicit, report) {
   }
   out = __task_plan_validate_failure_kind_items(__task_plan_failure_kinds(failures), out)
   if failures?.paused_for_ms != nil
-    && (type_of(failures.paused_for_ms) != "int" || failures.paused_for_ms < 0) {
+    && (type_of(failures.paused_for_ms) != "int"
+    || failures.paused_for_ms
+    < 0) {
     out = __task_plan_push_error(
       out,
       "budget_consecutive_failures_pause",
@@ -591,7 +608,12 @@ fn __task_plan_validate_reachability(plan, report) {
   let out = report
   const reach = __task_plan_reachability(plan)
   for id in reach.unreachable {
-    out = __task_plan_push_warning(out, "node_unreachable", "nodes." + id, "node is unreachable from entry")
+    out = __task_plan_push_warning(
+      out,
+      "node_unreachable",
+      "nodes." + id,
+      "node is unreachable from entry",
+    )
   }
   return out
     + {
@@ -637,7 +659,12 @@ pub fn task_plan_validate(plan) {
   if is_err(shape) {
     const err = unwrap_err(shape)
     for entry in err.errors ?? [] {
-      report = __task_plan_push_error(report, "shape", entry?.path ?? "", entry?.message ?? to_string(entry))
+      report = __task_plan_push_error(
+        report,
+        "shape",
+        entry?.path ?? "",
+        entry?.message ?? to_string(entry),
+      )
     }
     return __task_plan_finalize(report)
   }
@@ -840,12 +867,21 @@ fn __task_plan_kind_fields(node) {
 
 fn __task_plan_compile_node(node_id, node, budget_policy) {
   const mode = __task_plan_workflow_mode(node)
-  const model_policy = __task_plan_model_policy(node, __task_plan_mode_budget_policy(mode, budget_policy))
+  const model_policy = __task_plan_model_policy(
+    node,
+    __task_plan_mode_budget_policy(mode, budget_policy),
+  )
   const capability_policy = __task_plan_capability_policy(node)
   const base_meta = {task_plan_kind: node?.kind, task_plan_purpose: node?.purpose ?? ""}
-    + (node?.metadata ?? {})
+    + (node
+    ?.metadata
+    ?? {})
     + __task_plan_kind_metadata(node)
-  let workflow_node = {id: node_id, kind: __task_plan_workflow_kind(node?.kind), metadata: base_meta}
+  let workflow_node = {
+    id: node_id,
+    kind: __task_plan_workflow_kind(node?.kind),
+    metadata: base_meta,
+  }
   if mode != nil {
     workflow_node = workflow_node + {mode: mode}
   }
@@ -872,7 +908,10 @@ fn __task_plan_compile_nodes(plan) {
   let compiled = {}
   const budget_policy = __task_plan_loop_budget_policy(plan)
   for entry in plan?.nodes ?? {} {
-    compiled = compiled + {[entry.key]: __task_plan_compile_node(entry.key, entry.value, budget_policy)}
+    compiled = compiled
+      + {
+      [entry.key]: __task_plan_compile_node(entry.key, entry.value, budget_policy),
+    }
   }
   return compiled
 }
@@ -921,7 +960,11 @@ fn __task_plan_metadata(plan, validation) {
       compaction_policy: plan?.compaction_policy ?? {},
       promotion_policy: plan?.promotion_policy ?? {},
       budgets: validation?.budget_summary ?? {},
-      validation: {valid: validation?.valid, errors: validation?.errors ?? [], warnings: validation?.warnings ?? []},
+      validation: {
+        valid: validation?.valid,
+        errors: validation?.errors ?? [],
+        warnings: validation?.warnings ?? [],
+      },
     },
   }
     + (plan?.metadata ?? {})

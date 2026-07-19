@@ -25,7 +25,10 @@ pipeline test(task) {
     cacheIdentity: {SERVER_HOME: ".synthetic-server"},
     timings: {warmMs: {p95: 100}, coldMs: {p95: 5000}},
   }
-  const started = verification_start_warm_state(row, {command_options: {capture: {max_inline_bytes: 4096}}})
+  const started = verification_start_warm_state(
+    row,
+    {command_options: {capture: {max_inline_bytes: 4096}}},
+  )
   assert_eq(started.id, "svc/lifecycle")
   assert_eq(started.reused, false)
   assert_eq(started.status, "starting")

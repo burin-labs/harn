@@ -253,7 +253,10 @@ fn __agent_lifecycle_has_subagent_capability(registry, opts) {
     return true
   }
   return __agent_tool_registry_has(registry, "sub_agent_run")
-    || __agent_tool_registry_has(registry, "spawn_agent")
+    || __agent_tool_registry_has(
+    registry,
+    "spawn_agent",
+  )
 }
 
 fn __agent_lifecycle_await_enabled(opts) {
@@ -318,7 +321,11 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
         handler: __subagent_resume_tool,
         parameters: {
           handle: {type: "string", description: "Worker id or worker handle to resume."},
-          input: {type: "any", required: false, description: "Optional input for the resumed turn."},
+          input: {
+            type: "any",
+            required: false,
+            description: "Optional input for the resumed turn.",
+          },
           continue_transcript: {
             type: "boolean",
             required: false,
@@ -393,7 +400,11 @@ fn __worker_workflow_config(config) {
   const options = __worker_resume_options(__worker_dict(config?.options))
   return filter_nil(
     config
-      + {graph: workflow_graph(config.graph), artifacts: __worker_list(config?.artifacts), options: options},
+      + {
+      graph: workflow_graph(config.graph),
+      artifacts: __worker_list(config?.artifacts),
+      options: options,
+    },
   )
 }
 
@@ -465,12 +476,20 @@ pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
  * @api_stability: experimental
  * @example: agent_await_resumption("waiting on review", {timeout: {duration_minutes: 5}})
  */
-pub fn agent_await_resumption(reason, conditions = nil, resume_by = nil) -> AgentAwaitResumptionRequest {
+pub fn agent_await_resumption(
+  reason,
+  conditions = nil,
+  resume_by = nil,
+) -> AgentAwaitResumptionRequest {
   const normalized_reason = trim(to_string(reason ?? ""))
   if normalized_reason == "" {
     throw "HARN-SUS-005: agent_await_resumption reason is required"
   }
-  return {reason: normalized_reason, conditions: parse_resume_conditions(conditions), resume_by: resume_by}
+  return {
+    reason: normalized_reason,
+    conditions: parse_resume_conditions(conditions),
+    resume_by: resume_by,
+  }
 }
 
 /**
@@ -904,7 +923,10 @@ pub fn agent_fanout(requests, options = nil) {
     let outcomes = []
     for request in wave {
       const outcome = try {
-        let handle = sub_agent_run(request.task, request.options + {background: true, name: request.label})
+        let handle = sub_agent_run(
+          request.task,
+          request.options + {background: true, name: request.label},
+        )
         {spawned: true, handle: handle}
       } catch (spawn_error) {
         {spawned: false, error: spawn_error}

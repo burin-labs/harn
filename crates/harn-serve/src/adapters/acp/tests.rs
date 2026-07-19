@@ -1,14 +1,13 @@
 use super::builtins::normalize_host_capability_manifest;
 use super::*;
 use super::{
-    acp_agent_capabilities, configured_llm_route_for_capabilities, sanitize_visible_assistant_text,
-    AcpBridge, AcpOutput, AcpServer, AcpServerConfig, SessionCancellation, ACP_AUTH_REQUIRED_CODE,
-    ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
-    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    acp_agent_capabilities, configured_llm_route_for_capabilities, AcpBridge, AcpOutput, AcpServer,
+    AcpServerConfig, SessionCancellation, ACP_AUTH_REQUIRED_CODE, ACP_SCHEMA_COMPATIBILITY,
+    HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use crate::{ApiKeyAuthConfig, AuthMethodConfig, AuthPolicy};
-use harn_vm::visible_text::VisibleTextState;
+use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use harn_vm::VmValue;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};

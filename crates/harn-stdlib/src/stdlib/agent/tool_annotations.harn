@@ -81,11 +81,14 @@ pub fn agent_tool_is_read_only(entry, policy = nil, tool_name = "") -> bool {
   if annotations?.destructiveHint == true {
     return false
   }
-  const kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
+  const kind = lowercase(
+    to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""),
+  )
   const level = lowercase(
     to_string(
       annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-        ?? annotations?.sideEffect
+        ?? annotations
+        ?.sideEffect
         ?? "",
     ),
   )

@@ -330,7 +330,8 @@ fn __local_provider(provider) -> bool {
 
 fn __prompt_chars(context) -> int {
   const ctx = __dict(context)
-  return len(__text(ctx?.prefix)) + len(__text(ctx?.suffix)) + len(json_stringify(ctx?.metadata ?? {}))
+  return len(__text(ctx?.prefix)) + len(__text(ctx?.suffix))
+    + len(json_stringify(ctx?.metadata ?? {}))
 }
 
 fn __range(raw) {
@@ -406,19 +407,27 @@ pub fn completion_policy(input = {}) -> CompletionPolicy {
   return {
     schema: "harn.completion.policy.v1",
     enabled: __bool(raw?.enabled, true),
-    allowed_languages: __string_list(raw?.allowed_languages ?? raw?.allowedLanguages ?? languages?.allow),
+    allowed_languages: __string_list(
+      raw?.allowed_languages ?? raw?.allowedLanguages ?? languages?.allow,
+    ),
     denied_languages: __string_list(
       raw?.denied_languages ?? raw?.deniedLanguages ?? raw?.disabled_languages
-        ?? raw?.disabledLanguages
+        ?? raw
+        ?.disabledLanguages
         ?? languages?.deny,
     ),
-    allowed_providers: __string_list(raw?.allowed_providers ?? raw?.allowedProviders ?? providers?.allow),
-    denied_providers: __string_list(raw?.denied_providers ?? raw?.deniedProviders ?? providers?.deny),
+    allowed_providers: __string_list(
+      raw?.allowed_providers ?? raw?.allowedProviders ?? providers?.allow,
+    ),
+    denied_providers: __string_list(
+      raw?.denied_providers ?? raw?.deniedProviders ?? providers?.deny,
+    ),
     allowed_models: __string_list(raw?.allowed_models ?? raw?.allowedModels ?? models?.allow),
     denied_models: __string_list(raw?.denied_models ?? raw?.deniedModels ?? models?.deny),
     remote_models_allowed: __bool(
       raw?.remote_models_allowed ?? raw?.remoteModelsAllowed ?? raw?.allow_remote_models
-        ?? raw?.allowRemoteModels,
+        ?? raw
+        ?.allowRemoteModels,
       true,
     ),
     codebase_context_allowed: __bool(
@@ -432,14 +441,22 @@ pub fn completion_policy(input = {}) -> CompletionPolicy {
       raw?.max_latency_ms ?? raw?.maxLatencyMs ?? raw?.latency_budget_ms ?? raw?.latencyBudgetMs,
       200,
     ),
-    max_cost_per_1k_usd: __float_or_nil(raw?.max_cost_per_1k_usd ?? raw?.maxCostPer1kUSD ?? raw?.max_cost_usd_per_1k),
+    max_cost_per_1k_usd: __float_or_nil(
+      raw?.max_cost_per_1k_usd ?? raw?.maxCostPer1kUSD ?? raw?.max_cost_usd_per_1k,
+    ),
     max_prompt_chars: __int_or(raw?.max_prompt_chars ?? raw?.maxPromptChars, 32000),
     prompt_recording: __recording_mode(
       raw?.prompt_recording ?? raw?.promptRecording ?? raw?.record_prompts ?? raw?.recordPrompts
-        ?? raw?.replay_mode,
+        ?? raw
+        ?.replay_mode,
     ),
-    emit_trust_events: __bool(raw?.emit_trust_events ?? raw?.emitTrustEvents ?? raw?.trust_events_enabled, true),
-    min_confidence: __float_or_nil(raw?.min_confidence ?? raw?.minConfidence ?? raw?.min_acceptance_confidence),
+    emit_trust_events: __bool(
+      raw?.emit_trust_events ?? raw?.emitTrustEvents ?? raw?.trust_events_enabled,
+      true,
+    ),
+    min_confidence: __float_or_nil(
+      raw?.min_confidence ?? raw?.minConfidence ?? raw?.min_acceptance_confidence,
+    ),
     retention_days: __int_or(raw?.retention_days ?? raw?.retentionDays, 30),
     metadata: __dict(raw?.metadata),
   }
@@ -455,17 +472,29 @@ pub fn completion_policy(input = {}) -> CompletionPolicy {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_policy_decision(context = {}, route = {}, policy = {}) -> CompletionPolicyDecision {
+pub fn completion_policy_decision(
+  context = {},
+  route = {},
+  policy = {},
+) -> CompletionPolicyDecision {
   const ctx = completion_context(context)
   const r = __dict(route)
   const p = completion_policy(policy)
   const provider = __text(r?.provider)
   const model = __text(r?.model_id ?? r?.modelID ?? r?.model ?? r?.id)
   if !p.enabled {
-    return {allowed: false, reason_code: "disabled", reason: "Suggestions are turned off.", policy: p}
+    return {
+      allowed: false,
+      reason_code: "disabled",
+      reason: "Suggestions are turned off.",
+      policy: p,
+    }
   }
   if __contains_ci(p.denied_languages, ctx.language)
-    || !__allow_list_allows(p.allowed_languages, ctx.language) {
+    || !__allow_list_allows(
+    p.allowed_languages,
+    ctx.language,
+  ) {
     return {
       allowed: false,
       reason_code: "language_blocked",
@@ -474,7 +503,11 @@ pub fn completion_policy_decision(context = {}, route = {}, policy = {}) -> Comp
     }
   }
   if provider != ""
-    && (__contains_ci(p.denied_providers, provider) || !__allow_list_allows(p.allowed_providers, provider)) {
+    && (__contains_ci(p.denied_providers, provider)
+    || !__allow_list_allows(
+    p.allowed_providers,
+    provider,
+  )) {
     return {
       allowed: false,
       reason_code: "provider_blocked",
@@ -483,7 +516,8 @@ pub fn completion_policy_decision(context = {}, route = {}, policy = {}) -> Comp
     }
   }
   if model != ""
-    && (__contains_ci(p.denied_models, model) || !__allow_list_allows(p.allowed_models, model)) {
+    && (__contains_ci(p.denied_models, model)
+    || !__allow_list_allows(p.allowed_models, model)) {
     return {
       allowed: false,
       reason_code: "model_blocked",
@@ -680,7 +714,9 @@ fn __event_timestamp(opts) -> string {
 fn __usage_from(proposal, usage) {
   const u = completion_usage(usage)
   return u
-    + filter_nil({provider: u.provider ?? proposal.provider, model_id: u.model_id ?? proposal.model_id})
+    + filter_nil(
+    {provider: u.provider ?? proposal.provider, model_id: u.model_id ?? proposal.model_id},
+  )
 }
 
 /**
@@ -693,14 +729,22 @@ fn __usage_from(proposal, usage) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_shown_event(proposal = {}, context = {}, usage = {}, opts = {}) -> CompletionEvent {
+pub fn completion_shown_event(
+  proposal = {},
+  context = {},
+  usage = {},
+  opts = {},
+) -> CompletionEvent {
   const prop = completion_proposal(proposal)
   const ctx = completion_context(context)
   const options = __dict(opts)
   const policy = completion_policy(options?.policy)
   const timestamp = __event_timestamp(options)
   const record_id = __text_or_nil(options?.record_id ?? prop.id)
-    ?? __completion_id("record", {proposal: prop, context: ctx})
+    ?? __completion_id(
+    "record",
+    {proposal: prop, context: ctx},
+  )
   const route = {provider: prop.provider, model_id: prop.model_id}
   const u = __usage_from(prop, usage)
   let event = filter_nil(
@@ -716,7 +760,11 @@ pub fn completion_shown_event(proposal = {}, context = {}, usage = {}, opts = {}
       provider: prop.provider,
       model_id: prop.model_id,
       local: prop.local,
-      context_hash: options?.context_hash ?? options?.contextHash ?? completion_context_hash(ctx, route),
+      context_hash: options?.context_hash ?? options?.contextHash
+        ?? completion_context_hash(
+        ctx,
+        route,
+      ),
       proposal: prop,
       context: ctx,
       usage: u,
@@ -752,18 +800,26 @@ pub fn completion_shown_event(proposal = {}, context = {}, usage = {}, opts = {}
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_decision_event(shown_event = {}, decision = "rejected", opts = {}) -> CompletionEvent {
+pub fn completion_decision_event(
+  shown_event = {},
+  decision = "rejected",
+  opts = {},
+) -> CompletionEvent {
   const shown = __dict(shown_event)
   const options = __dict(opts)
   const timestamp = __event_timestamp(options)
   const normalized = __decision(decision)
   const record_id = __text_or_nil(options?.record_id ?? options?.recordID ?? shown?.record_id)
-    ?? __completion_id("record", shown)
+    ?? __completion_id(
+    "record",
+    shown,
+  )
   return filter_nil(
     {
       schema: "harn.completion.event.v1",
       event: "decision",
-      id: __text_or_nil(options?.id) ?? __event_id("decision", record_id + ":" + normalized, timestamp),
+      id: __text_or_nil(options?.id)
+        ?? __event_id("decision", record_id + ":" + normalized, timestamp),
       record_id: record_id,
       shown_event_id: __text_or_nil(shown?.id),
       session_id: __text_or_nil(options?.session_id ?? options?.sessionID ?? shown?.session_id),
@@ -772,7 +828,9 @@ pub fn completion_decision_event(shown_event = {}, decision = "rejected", opts =
       completion_kind: __completion_kind(options?.completion_kind ?? shown?.completion_kind),
       provider: __text_or_nil(options?.provider ?? shown?.provider),
       model_id: __text_or_nil(options?.model_id ?? options?.modelID ?? shown?.model_id),
-      context_hash: __text_or_nil(options?.context_hash ?? options?.contextHash ?? shown?.context_hash),
+      context_hash: __text_or_nil(
+        options?.context_hash ?? options?.contextHash ?? shown?.context_hash,
+      ),
       decision: normalized,
       accepted: normalized == "accepted",
       decision_latency_ms: options?.decision_latency_ms ?? options?.decisionLatencyMs,
@@ -825,7 +883,8 @@ pub fn completion_trust_record(event = {}, opts = {}) -> CompletionTrustRecord {
           },
         ),
       ],
-      trace_id: __text_or_nil(row?.record_id ?? row?.id ?? options?.trace_id ?? options?.traceID) ?? uuid_v7(),
+      trace_id: __text_or_nil(row?.record_id ?? row?.id ?? options?.trace_id ?? options?.traceID)
+        ?? uuid_v7(),
       timestamp: __text_or_nil(row?.timestamp ?? options?.timestamp) ?? date_now_iso(),
       autonomy_tier_at_time: __text_or_nil(options?.autonomy_tier) ?? "suggest",
     },

@@ -45,7 +45,8 @@ pipeline default() {
   const py_result = edit_apply_node(
     {
       path: py_path,
-      query: "(function_definition name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
+      query:
+        "(function_definition name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
       replacement: "return f'hi {name}!'",
       dry_run: true,
     },

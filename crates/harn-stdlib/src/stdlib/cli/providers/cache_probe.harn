@@ -80,7 +80,10 @@ fn __render_human(report: dict) -> string {
     }
     const usage = __safe_dict(run["usage"])
     out = out + "  run " + to_string(__safe_int(run["run_index"], 0)) + ": "
-      + __safe_string(run["classification"], "")
+      + __safe_string(
+      run["classification"],
+      "",
+    )
       + " input="
       + to_string(__safe_int(usage["input_tokens"], 0))
       + " fresh="
@@ -97,8 +100,9 @@ fn __render_human(report: dict) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON", "")
   if raw == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON not set by dispatch shim")
+    harness.stdio.eprintln(
+      "internal error: HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON not set by dispatch shim",
+    )
     return 70
   }
   const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
@@ -109,8 +113,9 @@ fn main(harness: Harness) -> int {
     const report = try {
       json_parse(raw)
     } catch (e) {
-      harness.stdio
-        .eprintln("internal error: failed to parse provider-cache-probe payload: " + e.message)
+      harness.stdio.eprintln(
+        "internal error: failed to parse provider-cache-probe payload: " + e.message,
+      )
       return 70
     }
     const text = __render_human(report)

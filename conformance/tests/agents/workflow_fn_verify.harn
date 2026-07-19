@@ -30,11 +30,15 @@ pipeline default() {
   )
   __io_println(join(v3.findings, "|"))
   // 4. The verifier actually inspects the attempt result.
-  const inspector = { r -> return {ok: contains(to_string(r?.visible_text), "GOOD"), findings: ["missing GOOD marker"]} }
+  const inspector = { r ->
+    return {ok: contains(to_string(r?.visible_text), "GOOD"), findings: ["missing GOOD marker"]}
+  }
   __io_println(
     workflow_evaluate_verification({verify: inspector, result: {visible_text: "all GOOD"}}).ok,
   )
-  __io_println(workflow_evaluate_verification({verify: inspector, result: {visible_text: "bad"}}).ok)
+  __io_println(
+    workflow_evaluate_verification({verify: inspector, result: {visible_text: "bad"}}).ok,
+  )
   // --- Live-shape: fn-verify FIRES end-to-end through workflow_execute and its
   //     findings reach attempt 2's repair prompt. The mock provider echoes the
   //     (feedback-threaded) prompt back as its output, and the verifier passes
@@ -42,7 +46,9 @@ pipeline default() {
   //     on attempt 2 PROVES the finding was threaded into attempt 2's prompt. A
   //     findings-less (blind) repair would loop to exhaustion and fail here. ---
   const token = "GOTOKEN"
-  const verifier = { r -> return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]} }
+  const verifier = { r ->
+    return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]}
+  }
   const flow = workflow_graph(
     {
       name: "fn-verify-live",

@@ -76,7 +76,9 @@ fn ci_job_schema() {
             condition: schema_string(),
             run: schema_string() + {min_len: 1},
             required_env: schema_field(
-              schema_closed_object({HARN_LLM_CALLS_DISABLED: schema_field(schema_literal("1"), false)}),
+              schema_closed_object(
+                {HARN_LLM_CALLS_DISABLED: schema_field(schema_literal("1"), false)},
+              ),
               false,
             ),
           },
@@ -102,7 +104,9 @@ fn receipt_job_schema() {
       id: schema_int() + {minimum: 1},
       name: schema_string() + {min_len: 1},
       url: schema_string()
-        + {pattern: "^https://github[.]com/burin-labs/harn/actions/runs/[0-9]+/job/[0-9]+$"},
+        + {
+        pattern: "^https://github[.]com/burin-labs/harn/actions/runs/[0-9]+/job/[0-9]+$",
+      },
       status: schema_literal("completed"),
       conclusion: schema_literal("success"),
     },
@@ -130,7 +134,9 @@ fn merge_group_receipt_schema() {
         {
           id: schema_int() + {minimum: 1},
           url: schema_string()
-            + {pattern: "^https://github[.]com/burin-labs/harn/actions/runs/[0-9]+$"},
+            + {
+            pattern: "^https://github[.]com/burin-labs/harn/actions/runs/[0-9]+$",
+          },
           event: schema_literal("merge_group"),
           workflow: schema_literal("CI"),
           head_sha: sha_schema(),
@@ -170,11 +176,24 @@ fn contract_from_validated(value) -> ReleaseAuditContract {
     let steps: list<ReleaseAuditCiStep> = []
     for step in job.steps {
       steps = steps
-        + [{id: step.id, condition: step.condition, run: step.run, required_env: step.required_env ?? {}}]
+        + [
+        {
+          id: step.id,
+          condition: step.condition,
+          run: step.run,
+          required_env: step.required_env ?? {},
+        },
+      ]
     }
     jobs = jobs
       + [
-      {name: job.name, job_id: job.job_id, matrix_kind: job.matrix_kind, proofs: job.proofs, steps: steps},
+      {
+        name: job.name,
+        job_id: job.job_id,
+        matrix_kind: job.matrix_kind,
+        proofs: job.proofs,
+        steps: steps,
+      },
     ]
   }
   return {schema_version: "harn.release_audit_contract.v1", lanes: lanes, merge_group_jobs: jobs}
@@ -190,9 +209,12 @@ pub fn release_audit_contract_parse(value) -> ReleaseAuditContract? {
   const lane_names = contract.lanes.map({ lane -> lane.name }).to_list()
   const lane_runners = contract.lanes.map({ lane -> lane.runner }).to_list()
   const job_names = contract.merge_group_jobs.map({ job -> job.name }).to_list()
-  const job_keys = contract.merge_group_jobs.map({ job -> job.job_id + ":" + job.matrix_kind }).to_list()
+  const job_keys = contract.merge_group_jobs.map({ job -> job.job_id + ":" + job.matrix_kind })
+    .to_list()
   if !unique_strings(lane_names) || !unique_strings(lane_runners) || !unique_strings(job_names)
-    || !unique_strings(job_keys) {
+    || !unique_strings(
+    job_keys,
+  ) {
     return nil
   }
   if len(contract.lanes.filter({ lane -> lane.proof == "residual" }).to_list()) == 0 {
@@ -201,7 +223,9 @@ pub fn release_audit_contract_parse(value) -> ReleaseAuditContract? {
   for job in contract.merge_group_jobs {
     const step_ids = job.steps.map({ step -> step.id }).to_list()
     if len(job.proofs) == 0 || !unique_strings(job.proofs) || len(job.steps) == 0
-      || !unique_strings(step_ids) {
+      || !unique_strings(
+      step_ids,
+    ) {
       return nil
     }
     for proof in job.proofs {
@@ -232,7 +256,9 @@ fn exact_rows(observed: list<string>, required: list<string>) -> dict {
   const unknown = observed.filter({ name -> !required.contains(name) }).to_list()
   return {
     ok: len(observed) == len(required) && len(missing) == 0 && len(unknown) == 0
-      && unique_strings(observed),
+      && unique_strings(
+      observed,
+    ),
     missing: missing,
     unknown: unknown,
   }
@@ -270,7 +296,14 @@ pub fn release_audit_full_plan(
   expected_head_sha: string = "",
   errors: list<string> = [],
 ) -> ReleaseAuditPlan {
-  return audit_plan(contract.lanes, false, reason, "full_local", lowercase(trim(expected_head_sha)), errors)
+  return audit_plan(
+    contract.lanes,
+    false,
+    reason,
+    "full_local",
+    lowercase(trim(expected_head_sha)),
+    errors,
+  )
 }
 
 /** Validate one closed proof receipt and return the only audit plan it may authorize. */
@@ -427,8 +460,7 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/release_audit_contract.harn -- --contract PATH [--check-ci PATH | --receipt PATH --head-sha SHA]",
     )
     return nil
@@ -444,15 +476,14 @@ fn main(harness: Harness) {
   guard contract != nil else {
     const loaded = read_json_result(contract_path)
     const errors = if is_ok(loaded) {
-      schema_validator(contract_schema())
-        .report(unwrap(loaded)).errors
-        .map({ error -> json_stringify(error) })
+      schema_validator(contract_schema()).report(unwrap(loaded)).errors.map(
+        { error -> json_stringify(error) },
+      )
         .to_list()
     } else {
       [json_stringify(unwrap_err(loaded))]
     }
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       json_stringify({ok: false, reason: "invalid_release_audit_contract", errors: errors}),
     )
     exit(1)
@@ -470,15 +501,16 @@ fn main(harness: Harness) {
   const warm_binary_sha256 = trim(parsed?.warm_binary_sha256 ?? "")
   if receipt_path == "" && expected_sha == "" {
     if ci_path != "" {
-      harness.stdio
-        .println(json_stringify({ok: true, reason: "ci_contract_matches", errors: []}))
+      harness.stdio.println(json_stringify({ok: true, reason: "ci_contract_matches", errors: []}))
       return nil
     }
     harness.stdio.eprintln("--head-sha is required when rendering an audit plan")
     exit(2)
   }
   if receipt_path == "" {
-    harness.stdio.println(json_stringify(release_audit_full_plan(contract, "no_receipt", expected_sha)))
+    harness.stdio.println(
+      json_stringify(release_audit_full_plan(contract, "no_receipt", expected_sha)),
+    )
     return nil
   }
   const loaded = read_json_result(receipt_path)

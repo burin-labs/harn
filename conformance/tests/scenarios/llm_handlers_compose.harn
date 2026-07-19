@@ -3,24 +3,30 @@
 import { compose } from "std/llm/handlers"
 
 fn make_tagger(tag) {
-  return { next -> return { call ->
-    const env = next(call)
-    const txt = env.value.text + ":" + tag
-    return env + {value: env.value + {text: txt}}
-  } }
+  return { next ->
+    return { call ->
+      const env = next(call)
+      const txt = env.value.text + ":" + tag
+      return env + {value: env.value + {text: txt}}
+    }
+  }
 }
 
 pipeline default() {
-  const base = { _call -> {
-    ok: true,
-    value: {text: "base", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
-  } }
+  const base = { _call ->
+    {
+      ok: true,
+      value: {text: "base", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
   const a = make_tagger("a")
   const b = make_tagger("b")
   const c = make_tagger("c")
   const factory = compose([a, b, c])
   const composed = factory(base)
-  const env = composed({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const env = composed(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   // Order: c is innermost, runs first, then b, then a appends last.
   __io_println(env.value.text)
 }

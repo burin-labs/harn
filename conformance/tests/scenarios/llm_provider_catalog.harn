@@ -39,18 +39,24 @@ pipeline test(task) {
   assert_eq(mid.catalog.family, "qwen")
   assert(mid.capabilities.native_tools != nil, "capability lookup is present")
   const mid_route_model = mid.catalog?.wire_model ?? mid.id
-  const mid_routes = catalog.routing_routes
-    .filter({ route -> route.provider == mid.provider && route.model == mid_route_model })
+  const mid_routes = catalog.routing_routes.filter(
+    { route -> route.provider == mid.provider && route.model == mid_route_model },
+  )
   assert_eq(len(mid_routes), 1)
   assert_eq(mid_routes[0].family, mid.family)
   assert(
     mid_routes[0].capabilities.contains("text_tools"),
     "routing route exposes tool envelope capability",
   )
-  const reviewer = llm_complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
+  const reviewer = llm_complementary_reviewer(
+    {author_model: "claude-sonnet-4-6", intent: "plan_review"},
+  )
   assert_eq(reviewer.fallback, false)
   assert(reviewer.reviewer.family != reviewer.author.family, "reviewer uses a different family")
-  assert(reviewer.estimated_incremental_cost.total_per_mtok > 0.0, "reviewer exposes estimated cost")
+  assert(
+    reviewer.estimated_incremental_cost.total_per_mtok > 0.0,
+    "reviewer exposes estimated cost",
+  )
   const capped = llm_complementary_reviewer(
     {author_model: "gpt-4o-mini", intent: "review", max_price_multiplier: 0.01},
   )

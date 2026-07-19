@@ -37,7 +37,10 @@ pipeline test(task) {
   // List case: the TS playground example verbatim. A heterogeneous
   // list of container instances assigns into `list<ActionContainer<Action>>`
   // because the element type distributes.
-  const containers: list<ActionContainer<Action>> = [{action: "create", process_action: process_create}, {action: "edit", process_action: process_edit}]
+  const containers: list<ActionContainer<Action>> = [
+    {action: "create", process_action: process_create},
+    {action: "edit", process_action: process_edit},
+  ]
   for c in containers {
     c.process_action(c.action)
   }

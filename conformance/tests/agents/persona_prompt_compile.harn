@@ -32,8 +32,7 @@ const PROVIDERS = [
   },
 ]
 
-const PROVIDERS_WITH_ROTATED_SLACK_SECRET = PROVIDERS
-  .map(
+const PROVIDERS_WITH_ROTATED_SLACK_SECRET = PROVIDERS.map(
   { provider ->
     if provider.provider == "slack" {
       provider + {secret_requirements: [{name: "bot_token", required: true, namespace: "slack"}]}
@@ -86,18 +85,28 @@ pipeline test_persona_prompt_compile(_task) {
             name: {type: "string"},
             description: {type: "string"},
             goal: {type: "string"},
-            template: {enum: ["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"]},
+            template: {
+              enum: ["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"],
+            },
             source: {
               oneOf: [
                 {
                   type: "object",
-                  properties: {kind: {const: "cron"}, cron: {type: "string"}, timezone: {type: "string"}},
+                  properties: {
+                    kind: {const: "cron"},
+                    cron: {type: "string"},
+                    timezone: {type: "string"},
+                  },
                   required: ["cron", "kind", "timezone"],
                   additionalProperties: false,
                 },
                 {
                   type: "object",
-                  properties: {kind: {const: "external"}, provider: {type: "string"}, event: {type: "string"}},
+                  properties: {
+                    kind: {const: "external"},
+                    provider: {type: "string"},
+                    event: {type: "string"},
+                  },
                   required: ["event", "kind", "provider"],
                   additionalProperties: false,
                 },
@@ -160,7 +169,11 @@ pipeline test_persona_prompt_compile(_task) {
         throw "Digest lowering has no trigger"
       }
       assert_eq(digest_trigger.schedule, "0 */4 * * *")
-      const rejected = persona_compile_prompt("Route a mismatched event.", {provider: "mock"}, PROVIDERS)
+      const rejected = persona_compile_prompt(
+        "Route a mismatched event.",
+        {provider: "mock"},
+        PROVIDERS,
+      )
       assert_eq(rejected.ok, false)
       assert_eq(rejected.checkpoint.status, "validator_rejected")
       assert_eq(rejected.checkpoint.attempts, 1)
@@ -169,13 +182,21 @@ pipeline test_persona_prompt_compile(_task) {
         throw "Rejected prompt has no diagnostic"
       }
       assert_eq(rejected_error.code, "event_namespace_mismatch")
-      const mixed_source = persona_compile_prompt("Compile a mixed source.", {provider: "mock"}, PROVIDERS)
+      const mixed_source = persona_compile_prompt(
+        "Compile a mixed source.",
+        {provider: "mock"},
+        PROVIDERS,
+      )
       assert_eq(mixed_source.ok, false)
       assert_eq(mixed_source.checkpoint.status, "schema_rejected")
       assert_eq(mixed_source.checkpoint.attempts, 1)
       assert_eq(mixed_source.blueprint, nil)
       assert_eq(len(llm_mock_calls()), 5)
-      const over_budget = persona_compile_prompt("Compile me.", {provider: "mock", max_tokens: 1201}, PROVIDERS)
+      const over_budget = persona_compile_prompt(
+        "Compile me.",
+        {provider: "mock", max_tokens: 1201},
+        PROVIDERS,
+      )
       assert_eq(over_budget.ok, false)
       assert_eq(over_budget.checkpoint.status, "not_attempted")
       const over_budget_error = over_budget.error
@@ -185,7 +206,11 @@ pipeline test_persona_prompt_compile(_task) {
       assert_eq(over_budget_error.code, "max_tokens_out_of_range")
       assert_eq(len(llm_mock_calls()), 5)
       const baseline_catalog = persona_compile_prompt("", {provider: "mock"}, PROVIDERS)
-      const rotated_catalog = persona_compile_prompt("", {provider: "mock"}, PROVIDERS_WITH_ROTATED_SLACK_SECRET)
+      const rotated_catalog = persona_compile_prompt(
+        "",
+        {provider: "mock"},
+        PROVIDERS_WITH_ROTATED_SLACK_SECRET,
+      )
       assert_eq(baseline_catalog.catalog_digest == rotated_catalog.catalog_digest, false)
       assert_eq(len(llm_mock_calls()), 5)
       log("persona prompt compiler ok")

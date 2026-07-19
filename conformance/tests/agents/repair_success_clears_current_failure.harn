@@ -104,7 +104,12 @@ fn scenario_stuck() {
           max_iterations: 8,
           session_id: session,
           done_sentinel: "##DONE##",
-          stall_diagnostics: {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 2, hard_stop_after_trips: 1},
+          stall_diagnostics: {
+            enabled: true,
+            repair_aware: true,
+            stuck_same_diagnostic_after: 2,
+            hard_stop_after_trips: 1,
+          },
         },
       )
       const cf = result?.current_failure

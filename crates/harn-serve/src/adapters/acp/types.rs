@@ -197,18 +197,112 @@ pub enum AcpPromptErrorSchema {
     V1,
 }
 
+/// Machine-branchable facts projected from a terminal prompt failure.
+///
+/// Every field is optional and omitted when unknown, so the payload stays
+/// additive on the `harn.acp.prompt_error.v1` envelope: a host that only reads
+/// `schema` + `terminalClass` keeps working, while a routing-aware host reads
+/// the authoritative provider/model of the route that actually failed instead
+/// of inferring it from the session's UI model selection or parsing prose.
+///
+/// A non-provider failure (compile, setup, protocol) carries the same shape
+/// with `provider`/`model` absent — the absence is itself the signal that no
+/// route is responsible. These names mirror the structured error dict
+/// `llm_call` throws (`category`/`kind`/`reason`/`code`/`retryAfterMs`/
+/// `provider`/`model`), so the projection never invents a parallel vocabulary.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPromptFailureFacts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+impl AcpPromptFailureFacts {
+    /// Project the structured error dict `llm_call`/routing throws into the
+    /// stable failure facts. Non-object input (a bare thrown string, or a
+    /// compile/setup error) yields empty facts, so provider/model are absent
+    /// rather than fabricated.
+    pub fn from_thrown(thrown: &serde_json::Value) -> Self {
+        let Some(object) = thrown.as_object() else {
+            return Self::default();
+        };
+        let string_field = |key: &str| {
+            object
+                .get(key)
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        };
+        let kind = string_field("kind");
+        let retry_after_ms = object
+            .get("retry_after_ms")
+            .and_then(serde_json::Value::as_i64);
+        // `retryable` is only asserted when the producer gave us a signal for
+        // it: an explicit `transient`/`terminal` kind, or a `retry-after` hint.
+        // Otherwise it stays absent — we do not guess a boolean.
+        let retryable = match kind.as_deref() {
+            Some("transient") => Some(true),
+            Some("terminal") => Some(false),
+            _ => retry_after_ms.map(|_| true),
+        };
+        Self {
+            category: string_field("category"),
+            kind,
+            reason: string_field("reason"),
+            code: string_field("code"),
+            retryable,
+            retry_after_ms,
+            provider: string_field("provider"),
+            model: string_field("model"),
+        }
+    }
+}
+
+/// Harn-owned typed `error.data` for a failed `session/prompt` response.
+///
+/// One terminal failure produces exactly one JSON-RPC error carrying this
+/// payload and never an assistant `agent_message_chunk`; `message` remains
+/// lossless human diagnostics on the JSON-RPC error itself, while this data is
+/// the stable machine contract hosts branch on. Fields beyond `terminalClass`
+/// are flattened onto the envelope and additive, so the complementary
+/// success-path terminal outcome (harn#4834) can later reuse the same
+/// `terminalClass`/`reason` spine on the success frame without another breaking
+/// change to this shape.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpPromptErrorData {
     pub schema: AcpPromptErrorSchema,
     pub terminal_class: harn_vm::llm::AgentTerminalClass,
+    #[serde(flatten)]
+    pub facts: AcpPromptFailureFacts,
 }
 
 impl AcpPromptErrorData {
     pub fn new(terminal_class: harn_vm::llm::AgentTerminalClass) -> Self {
+        Self::with_facts(terminal_class, AcpPromptFailureFacts::default())
+    }
+
+    pub fn with_facts(
+        terminal_class: harn_vm::llm::AgentTerminalClass,
+        facts: AcpPromptFailureFacts,
+    ) -> Self {
         Self {
             schema: AcpPromptErrorSchema::V1,
             terminal_class,
+            facts,
         }
     }
 }
@@ -718,6 +812,94 @@ mod tests {
             serde_json::json!({
                 "type": "resource_link",
                 "uri": "file:///tmp/report.md",
+            })
+        );
+    }
+
+    #[test]
+    fn prompt_failure_facts_project_the_routed_provider_and_model() {
+        let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+            "category": "generic",
+            "kind": "transient",
+            "reason": "rate_limit",
+            "code": "provider_exhausted",
+            "message": "429 from the backup route",
+            "retry_after_ms": 1200,
+            // The route that actually failed after a ladder advance — distinct
+            // from any base/requested route the session selected.
+            "provider": "backup-provider",
+            "model": "escalated-model",
+        }));
+
+        assert_eq!(facts.category.as_deref(), Some("generic"));
+        assert_eq!(facts.kind.as_deref(), Some("transient"));
+        assert_eq!(facts.reason.as_deref(), Some("rate_limit"));
+        assert_eq!(facts.code.as_deref(), Some("provider_exhausted"));
+        assert_eq!(facts.retryable, Some(true));
+        assert_eq!(facts.retry_after_ms, Some(1200));
+        assert_eq!(facts.provider.as_deref(), Some("backup-provider"));
+        assert_eq!(facts.model.as_deref(), Some("escalated-model"));
+    }
+
+    #[test]
+    fn prompt_failure_facts_are_empty_for_non_object_throws() {
+        let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!("bare string throw"));
+        assert_eq!(facts, AcpPromptFailureFacts::default());
+    }
+
+    #[test]
+    fn terminal_kind_marks_failure_not_retryable() {
+        let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+            "kind": "terminal",
+            "reason": "provider_exhausted",
+        }));
+        assert_eq!(facts.retryable, Some(false));
+    }
+
+    #[test]
+    fn prompt_error_data_round_trips_through_the_flattened_envelope() {
+        let data = AcpPromptErrorData::with_facts(
+            harn_vm::llm::AgentTerminalClass::RateLimited,
+            AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+                "kind": "transient",
+                "reason": "rate_limit",
+                "provider": "acme",
+                "model": "acme-large",
+            })),
+        );
+
+        let wire = serde_json::to_value(&data).expect("serialize");
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
+                "terminalClass": "rate_limited",
+                "kind": "transient",
+                "reason": "rate_limit",
+                "retryable": true,
+                "provider": "acme",
+                "model": "acme-large",
+            })
+        );
+
+        let restored: AcpPromptErrorData = serde_json::from_value(wire).expect("deserialize");
+        assert_eq!(restored, data);
+    }
+
+    #[test]
+    fn minimal_prompt_error_data_omits_absent_facts() {
+        let wire = serde_json::to_value(AcpPromptErrorData::new(
+            harn_vm::llm::AgentTerminalClass::GenericThrow,
+        ))
+        .expect("serialize");
+
+        // A bare failure stays byte-for-byte compatible with the pre-enrichment
+        // `{schema, terminalClass}` shape so v1 consumers keep parsing.
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "schema": ACP_PROMPT_ERROR_DATA_SCHEMA,
+                "terminalClass": "generic_throw",
             })
         );
     }

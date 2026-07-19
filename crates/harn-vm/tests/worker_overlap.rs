@@ -40,6 +40,7 @@ fn run_with_bridge(
     source: &str,
     register: impl FnOnce(&mut harn_vm::Vm) + 'static,
     peak: Arc<AtomicUsize>,
+    progress: Arc<tokio::sync::Notify>,
 ) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
     let chunk = harn_vm::compile_source(source)?;
@@ -52,7 +53,7 @@ fn run_with_bridge(
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let vm_task = tokio::task::spawn_local(async move {
+                let mut vm_task = tokio::task::spawn_local(async move {
                     let bridge = Arc::new(HostBridge::from_parts(
                         Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                         Arc::new(AtomicBool::new(false)),
@@ -72,19 +73,19 @@ fn run_with_bridge(
                     result.map(|_| output)
                 });
 
-                for _ in 0..1_000 {
-                    if peak.load(Ordering::SeqCst) >= WORKER_COUNT || vm_task.is_finished() {
-                        break;
+                let wait_for_peak = async {
+                    loop {
+                        if peak.load(Ordering::SeqCst) >= WORKER_COUNT {
+                            break;
+                        }
+                        progress.notified().await;
                     }
-                    tokio::task::yield_now().await;
-                }
-
-                if peak.load(Ordering::SeqCst) < WORKER_COUNT {
-                    vm_task.abort();
-                    return Err(format!(
-                        "background workers never all parked before virtual-time advance; peak={}",
-                        peak.load(Ordering::SeqCst)
-                    ));
+                };
+                tokio::select! {
+                    _ = wait_for_peak => {}
+                    result = &mut vm_task => {
+                        return result.map_err(|e| e.to_string())?;
+                    }
                 }
 
                 tokio::time::advance(Duration::from_millis(STALL_MS)).await;
@@ -177,14 +178,17 @@ pipeline main(task) {{
     // builtins the Harn stub calls around its sleep.
     let in_flight = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
+    let progress = Arc::new(tokio::sync::Notify::new());
     let register = {
         let enter_in_flight = in_flight.clone();
         let enter_peak = peak.clone();
         let exit_in_flight = in_flight.clone();
+        let enter_progress = progress.clone();
         move |vm: &mut harn_vm::Vm| {
             vm.register_builtin("__overlap_enter", move |_args, _out| {
                 let now = enter_in_flight.fetch_add(1, Ordering::SeqCst) + 1;
                 enter_peak.fetch_max(now, Ordering::SeqCst);
+                enter_progress.notify_one();
                 Ok(VmValue::Int(now as i64))
             });
             vm.register_builtin("__overlap_exit", move |_args, _out| {
@@ -194,7 +198,8 @@ pipeline main(task) {{
         }
     };
 
-    let raw = run_with_bridge(&source, register, peak.clone()).expect("overlap pipeline must run");
+    let raw = run_with_bridge(&source, register, peak.clone(), progress)
+        .expect("overlap pipeline must run");
     let lines = out_lines(&raw);
 
     eprintln!("--- harn output ---");

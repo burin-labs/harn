@@ -2064,6 +2064,8 @@ suppressed child is eligible to restart again. Child status includes `running`,
 - `supervisor_events(handle_or_id)` returns lifecycle events for child started,
   stopped, failed, restarted, suppressed, escalated, and supervisor shutdown.
 - `supervisor_metrics(handle_or_id)` returns lifecycle counters.
+- `supervisor_wait(handle_or_id)` awaits the terminal lifecycle transition and
+  returns the final supervisor state.
 - `supervisor_stop(handle_or_id, timeout?)` requests cooperative child
   cancellation, waits for drain, then force-aborts any remaining children.
 

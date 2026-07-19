@@ -68,7 +68,11 @@ pipeline test(task) {
   // Closures should have been stripped for serialization safety.
   assert(!contains(keys(listed[0]), "on_activate"), "skill_list strips closure hooks")
   // Test 7: skill_select filters by name
-  const multi = skill_define(skill_define(skill_registry(), "a", {description: "A"}), "b", {description: "B"})
+  const multi = skill_define(
+    skill_define(skill_registry(), "a", {description: "A"}),
+    "b",
+    {description: "B"},
+  )
   assert(skill_count(multi) == 2, "multi registry has 2 skills")
   const only_a = skill_select(multi, ["a"])
   assert(skill_count(only_a) == 1, "skill_select filters to 1")

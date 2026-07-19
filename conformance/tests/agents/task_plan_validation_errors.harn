@@ -11,7 +11,12 @@ fn codes_of(report) {
 pipeline main() {
   // Wrong schema version triggers a structured error rather than a throw.
   const bad_version = task_plan_validate(
-    {schema_version: "0", objective: "x", entry: "a", nodes: {a: {kind: "agent_loop", prompt: "go"}}},
+    {
+      schema_version: "0",
+      objective: "x",
+      entry: "a",
+      nodes: {a: {kind: "agent_loop", prompt: "go"}},
+    },
   )
   __io_println(bad_version.valid)
   __io_println(contains(codes_of(bad_version), "schema_version_mismatch"))

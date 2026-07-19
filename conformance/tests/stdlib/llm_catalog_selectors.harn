@@ -32,7 +32,9 @@ pipeline test(task) {
   const elite = models_with({min_benchmark: {swe_bench_verified: 70.0}})
   __io_println(len(elite) > 0)
   // Impossibly strict filter returns an empty list.
-  const nothing = models_with({tier: "frontier", strengths: ["coding"], min_benchmark: {swe_bench_verified: 999.0}})
+  const nothing = models_with(
+    {tier: "frontier", strengths: ["coding"], min_benchmark: {swe_bench_verified: 999.0}},
+  )
   __io_println(len(nothing) == 0)
   // best_available_models relaxes constraints until something matches.
   const relaxed = best_available_models(

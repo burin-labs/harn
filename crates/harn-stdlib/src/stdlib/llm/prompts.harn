@@ -260,7 +260,11 @@ pub fn structured_output_preface(schema, opts) {
   const options = opts ?? {}
   const template = options?.template
   if template != nil {
-    const bindings = {schema: schema, schema_json: json_stringify(schema), prompt: options?.prompt ?? ""}
+    const bindings = {
+      schema: schema,
+      schema_json: json_stringify(schema),
+      prompt: options?.prompt ?? "",
+    }
     return render_prompt(to_string(template), bindings)
   }
   const required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {

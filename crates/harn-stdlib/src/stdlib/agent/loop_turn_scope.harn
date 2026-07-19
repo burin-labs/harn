@@ -1,0 +1,936 @@
+import "std/agent/loop_call_resolution"
+import "std/agent/loop_foundation"
+import "std/agent/loop_resource_dispatch"
+import "std/agent/loop_support"
+import "std/agent/loop_tool_calls"
+import "std/agent/loop_turn_options"
+
+pub fn __scope_classifier_recent_context(messages, limit) {
+  if type_of(messages) != "list" {
+    return []
+  }
+  let cap = if type_of(limit) == "int" && limit > 0 {
+    limit
+  } else {
+    3
+  }
+  const total = len(messages)
+  let start = total - cap
+  if start < 0 {
+    start = 0
+  }
+  let out = []
+  let i = start
+  while i < total {
+    const msg = messages[i]
+    out = out.push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
+    i = i + 1
+  }
+  return out
+}
+
+pub fn __scope_classifier_confidence(value, fallback) {
+  const parsed = to_float(value ?? fallback)
+  if parsed == nil {
+    return fallback
+  }
+  if parsed < 0.0 {
+    return 0.0
+  }
+  if parsed > 1.0 {
+    return 1.0
+  }
+  return parsed
+}
+
+pub fn __scope_classifier_label(value) {
+  const label = lowercase(trim(to_string(value ?? "")))
+  if label == "in_scope" || label == "inscope" || label == "in-scope" {
+    return "in_scope"
+  }
+  if label == "out_of_scope" || label == "outscope" || label == "out-of-scope" {
+    return "out_of_scope"
+  }
+  if label == "escalate" || label == "ambiguous" || label == "uncertain" {
+    return "escalate"
+  }
+  return "escalate"
+}
+
+pub fn __scope_classifier_normalize(raw, session_id, iteration) {
+  if raw == nil {
+    return nil
+  }
+  if type_of(raw) != "dict" {
+    return {
+      label: "escalate",
+      original_label: "invalid",
+      confidence: 0.0,
+      confidence_threshold: 0.65,
+      evidence: "scope classifier returned " + type_of(raw) + ", not a dict",
+      session_id: session_id,
+      iteration: iteration,
+      skip_main_turn: false,
+    }
+  }
+  const threshold = __scope_classifier_confidence(raw?.confidence_threshold ?? raw?.threshold, 0.65)
+  const original_label = __scope_classifier_label(raw?.original_label ?? raw?.label)
+  const confidence = __scope_classifier_confidence(raw?.confidence, 0.0)
+  const label = if original_label != "escalate" && confidence < threshold {
+    "escalate"
+  } else {
+    original_label
+  }
+  const evidence = trim(to_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning ?? ""))
+  return raw
+    + {
+    label: label,
+    original_label: original_label,
+    confidence: confidence,
+    confidence_threshold: threshold,
+    evidence: if evidence == "" {
+      "no evidence provided"
+    } else {
+      evidence
+    },
+    session_id: session_id,
+    iteration: iteration,
+    skip_main_turn: raw?.skip_main_turn ?? true,
+  }
+}
+
+pub fn __scope_classifier_fail_open(session_id, iteration, err) {
+  return {
+    label: "escalate",
+    original_label: "error",
+    confidence: 0.0,
+    confidence_threshold: 0.65,
+    evidence: "scope classifier failed: " + to_string(err),
+    error: to_string(err),
+    session_id: session_id,
+    iteration: iteration,
+    skip_main_turn: false,
+  }
+}
+
+pub fn __run_input_guardrail(guardrail, session, message, turn_opts, iteration_index) {
+  if guardrail == nil || iteration_index != 0 {
+    return nil
+  }
+  let iteration = iteration_index + 1
+  const messages = agent_session_messages(session.session_id)
+  const payload = {
+    session_id: session.session_id,
+    session: {id: session.session_id},
+    iteration: iteration,
+    user_message: message,
+    task: session?.task ?? message,
+    messages: messages,
+    recent_context: __scope_classifier_recent_context(messages, 3),
+    provider: turn_opts?.provider ?? "",
+    model: turn_opts?.model ?? "",
+  }
+  const outcome = try {
+    guardrail(payload)
+  }
+  const verdict = if is_err(outcome) {
+    const err = unwrap_err(outcome)
+    if __agent_error_must_propagate(err) {
+      throw err
+    }
+    __agent_input_guardrail_fail_open(
+      err,
+      nil,
+      {session_id: session.session_id, iteration: iteration},
+    )
+  } else {
+    __agent_input_guardrail_normalize(
+      unwrap(outcome),
+      nil,
+      {session_id: session.session_id, iteration: iteration},
+    )
+  }
+  agent_emit_event(session.session_id, "input_guardrail_verdict", verdict)
+  return verdict
+}
+
+pub fn __input_guardrail_assistant_text(verdict) {
+  const reason = trim(to_string(verdict?.reason ?? ""))
+  if reason == "" {
+    return "Input guardrail stopped this request before the agent loop."
+  }
+  return "Input guardrail stopped this request before the agent loop: " + reason
+}
+
+pub fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
+  let text = __input_guardrail_assistant_text(verdict)
+  agent_session_record_assistant(
+    session.session_id,
+    {
+      text: text,
+      visible_text: text,
+      provider: "harn",
+      model: "input_guardrail",
+      input_tokens: 0,
+      output_tokens: 0,
+      input_guardrail_verdict: verdict,
+    },
+  )
+  agent_emit_event(
+    session.session_id,
+    "iteration_end",
+    {
+      iteration: iteration_index + 1,
+      iteration_info: __iteration_info_payload(
+        {
+          text: text,
+          visible_text: text,
+          provider: "harn",
+          model: "input_guardrail",
+          input_tokens: 0,
+          output_tokens: 0,
+        },
+        0,
+        text,
+      )
+        + {
+        dispatch_skipped: true,
+        skip_reason: "input_guardrail_tripwire",
+        input_guardrail_verdict: verdict,
+      },
+    },
+  )
+  let _ = __agent_loop_checkpoint(
+    session.session_id,
+    "iteration_end",
+    {iteration: iteration_index + 1},
+  )
+  return text
+}
+
+pub fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iteration_index) {
+  if classifier == nil {
+    return nil
+  }
+  let iteration = iteration_index + 1
+  const messages = agent_session_messages(session.session_id)
+  const anchor = agent_session_workspace_anchor(session.session_id)
+  const payload = {
+    session_id: session.session_id,
+    session: {id: session.session_id},
+    iteration: iteration,
+    user_message: message,
+    task: session?.task ?? message,
+    messages: messages,
+    recent_context: __scope_classifier_recent_context(messages, 3),
+    workspace_anchor: anchor,
+    provider: turn_opts?.provider ?? "",
+    model: turn_opts?.model ?? "",
+  }
+  const outcome = try {
+    classifier(payload)
+  }
+  const verdict = if is_err(outcome) {
+    const err = unwrap_err(outcome)
+    if __agent_error_must_propagate(err) {
+      throw err
+    }
+    __scope_classifier_fail_open(session.session_id, iteration, err)
+  } else {
+    __scope_classifier_normalize(unwrap(outcome), session.session_id, iteration)
+  }
+  if verdict != nil {
+    agent_emit_event(session.session_id, "scope_classifier_verdict", verdict)
+  }
+  return verdict
+}
+
+/**
+ * Cancellation and internal engine bugs propagate; only a genuine
+ * classifier failure fails open (never let a mis-wired builtin quietly
+ * disable the scope gate).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __scope_classifier_mounted_roots(anchor) {
+  const roots = anchor?.additional_roots ?? []
+  if type_of(roots) != "list" || len(roots) == 0 {
+    return "  (none)"
+  }
+  let lines = []
+  for root in roots {
+    lines = lines.push(
+      "  - " + to_string(root?.path ?? root?.root ?? "")
+        + " (mount_mode: "
+        + to_string(root?.mount_mode ?? "")
+        + ")",
+    )
+  }
+  return join(lines, "\n")
+}
+
+pub fn __scope_classifier_alert_body(verdict, session) {
+  const anchor = verdict?.workspace_anchor ?? agent_session_workspace_anchor(session.session_id)
+  const primary = to_string(anchor?.primary ?? "(none)")
+  return "<scope-alert>\nThe latest user turn appears outside the current workspace anchor. "
+    + to_string(
+    verdict?.evidence ?? "",
+  )
+    + "\n\nCurrent anchor: "
+    + primary
+    + "\nMounted roots:\n"
+    + __scope_classifier_mounted_roots(anchor)
+    + "\n\nThree options:\n"
+    + "  - add_root: mount the target repo into this session with `agent_session_add_root(session_id, root, {mount_mode})`\n"
+    + "  - reanchor: switch the session primary anchor with `agent_session_reanchor(session_id, new_anchor)`\n"
+    + "  - fork: spawn a sub-agent against the target repo with `spawn_agent({anchor: new_anchor, ...})`\n\n"
+    + "Ask the user which handoff they prefer before doing workspace-mutating work.\n</scope-alert>"
+}
+
+pub fn __scope_classifier_assistant_text(verdict) {
+  const evidence = trim(to_string(verdict?.evidence ?? ""))
+  const suffix = if evidence == "" {
+    ""
+  } else {
+    " " + evidence
+  }
+  return "This task appears to be outside the current workspace anchor."
+    + suffix
+    + " Options: 1) Add Root, 2) Re-anchor, 3) Fork to a new session. Which would you prefer?"
+}
+
+pub fn __scope_classifier_skip_main(verdict) {
+  return verdict != nil && verdict?.label == "out_of_scope" && (verdict?.skip_main_turn ?? true)
+}
+
+pub fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
+  let text = __scope_classifier_assistant_text(verdict)
+  agent_session_record_assistant(
+    session.session_id,
+    {
+      text: text,
+      visible_text: text,
+      provider: "harn",
+      model: "scope_classifier",
+      input_tokens: 0,
+      output_tokens: 0,
+      scope_classifier_verdict: verdict,
+    },
+  )
+  agent_session_inject(
+    session.session_id,
+    transcript_reminder_event(
+      {
+        body: __scope_classifier_alert_body(verdict, session),
+        source: "in_pipeline",
+        tags: ["scope_alert", "pre_turn_scope_classifier"],
+        dedupe_key: "scope_alert:pre_turn:" + substring(sha256(session.session_id + text), 0, 16),
+        ttl_turns: 3,
+        fired_at_turn: iteration_index + 1,
+      },
+    ),
+  )
+  agent_emit_event(
+    session.session_id,
+    "iteration_end",
+    {
+      iteration: iteration_index + 1,
+      iteration_info: __iteration_info_payload(
+        {
+          text: text,
+          visible_text: text,
+          provider: "harn",
+          model: "scope_classifier",
+          input_tokens: 0,
+          output_tokens: 0,
+        },
+        0,
+        text,
+      )
+        + {
+        dispatch_skipped: true,
+        skip_reason: "scope_classifier_out_of_scope",
+        scope_classifier_verdict: verdict,
+      },
+    },
+  )
+  let _ = __agent_loop_checkpoint(
+    session.session_id,
+    "iteration_end",
+    {iteration: iteration_index + 1},
+  )
+  return text
+}
+
+pub fn __agent_loop_pop_structural_veto_turn(session_id) {
+  const messages = agent_session_messages(session_id)
+  if len(messages) == 0 {
+    return false
+  }
+  const last = messages[len(messages) - 1]
+  if last?.role != "assistant" {
+    return false
+  }
+  return agent_session_pop_last_assistant(session_id)
+}
+
+/**
+ * Build the one-shot directive injected as a final system fragment when the
+ * loop terminates mid-tool-use. It tells the model the turn/budget is spent,
+ * that no more tool calls are possible, and how to wrap up — honoring the
+ * configured `done_sentinel` when present.
+ */
+/**
+ * The response-protocol tail every wrap-up directive ends with, so the reply
+ * parses as a terminal turn (a bare `<user_response>` when no done-sentinel is
+ * configured, or the `<user_response>` + `<done>SENTINEL</done>` pair when one
+ * is). Factored out so the default directive and a host-supplied directive share
+ * one source of truth for the protocol shape.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_wrapup_response_protocol_tail(opts) {
+  const sentinel = opts?.done_sentinel
+  if sentinel == nil || to_string(sentinel) == "" {
+    return " End with a concise `<user_response>...</user_response>` containing the final answer."
+  }
+  const tag = to_string(sentinel)
+  return " Emit a concise `<user_response>...</user_response>` with the final answer, then end with "
+    + "`<done>"
+    + tag
+    + "</done>` exactly, as instructed by the response protocol."
+}
+
+/**
+ * Outcome-authority constraint appended to a HOST-supplied wrap-up directive.
+ *
+ * The terminal outcome (budget/turn exhaustion, stuck, verify-capped) is decided
+ * by the loop and stated to the model as fact; the wrap-up narrates it, it does
+ * NOT re-adjudicate it. A host directive may forget to say so, so the loop always
+ * appends this — a wrap-up that claims "I completed the task" on a failed run is
+ * the exact failure this guards against.
+ */
+pub const __AGENT_LOOP_WRAPUP_OUTCOME_AUTHORITY: string =
+  "The run's terminal outcome is already decided and is stated as fact in this instruction and the context above; narrate it truthfully and do NOT re-judge it or claim success on a run that did not succeed."
+
+/**
+ * The wrap-up directive for a terminal turn.
+ *
+ * Default (no `opts.wrapup_directive`): today's generic budget/turn-limit
+ * summary directive, byte-identical to before, injected into the wrap-up SYSTEM
+ * prompt by the caller.
+ *
+ * Host-supplied (`opts.wrapup_directive` non-empty): the host owns the wording
+ * (product-specific sad-path narration, few-shot, language-generic framing). The
+ * loop composes it with the outcome-authority constraint and the shared
+ * response-protocol tail. The caller renders THIS variant as a trailing user
+ * message (keeping the system prompt byte-identical for prefix-cache reuse),
+ * never into the system prompt.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_wrapup_directive(opts) {
+  const host_directive = trim(to_string(opts?.wrapup_directive ?? ""))
+  const tail = __agent_loop_wrapup_response_protocol_tail(opts)
+  if host_directive != "" {
+    return host_directive + " " + __AGENT_LOOP_WRAPUP_OUTCOME_AUTHORITY + tail
+  }
+  const base = "You have reached your turn/budget limit and cannot call any more tools. "
+    + "Provide your final answer now: briefly summarize what you accomplished and what you "
+    + "verified. Do not emit any tool call."
+  return base + tail
+}
+
+/**
+ * True when the host opted into a product-supplied terminal wrap-up by passing a
+ * non-empty `opts.wrapup_directive`. Gates the trailing-message rendering path,
+ * the structured-context block, and the tools==0 eligibility broadening.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_has_host_wrapup_directive(opts) {
+  return trim(to_string(opts?.wrapup_directive ?? "")) != ""
+}
+
+/**
+ * The effective wrap-up context: the host's structured `opts.wrapup_context`
+ * (product facts such as files touched with line counts, verification receipts,
+ * veto context) with the loop's own terminal facts merged on top so they are
+ * AUTHORITATIVE — a host context can never override the real terminal kind or
+ * stop reason (the outcome-authority contract). Terminal facts are always
+ * present on the host path even when the host supplies no context, so the model
+ * always learns which terminal it is narrating.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_effective_wrapup_context(opts, final_status, stop_reason) {
+  const host_context = if type_of(opts?.wrapup_context) == "dict" {
+    opts.wrapup_context
+  } else {
+    {}
+  }
+  return host_context
+    + {
+    terminal_kind: final_status,
+    final_status: final_status,
+    stop_reason: stop_reason ?? "",
+  }
+}
+
+/**
+ * Render an effective wrap-up context dict into a compact, labeled,
+ * language-generic facts block appended after the directive in the trailing
+ * wrap-up message. The loop stays agnostic to the host's key names — it emits
+ * the dict as deterministic JSON so any host's terminal facts reach the model
+ * verbatim while the host's directive explains how to read them. Returns "" only
+ * when serialization fails.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_render_wrapup_context(context) {
+  if context == nil || type_of(context) != "dict" || len(keys(context)) == 0 {
+    return ""
+  }
+  const rendered = try {
+    json_stringify(context)
+  } catch (e) {
+    ""
+  }
+  if trim(to_string(rendered)) == "" {
+    return ""
+  }
+  return "\n\nTerminal context (authoritative facts):\n" + to_string(rendered)
+}
+
+/**
+ * True when the loop's terminal status is an exhaustion/cap (not a clean
+ * `done`, a suspension, a scope alert, or a hard provider/terminal error).
+ * These are the states where the model never produced a clean terminal
+ * response and a wrap-up turn is warranted.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_wrapup_eligible_status(final_status) {
+  return final_status == "budget_exhausted"
+    || final_status == "verify_capped"
+    || final_status == "verify_exhausted"
+    || final_status == "stuck"
+}
+
+pub fn __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
+  if final_status == "stuck" {
+    return true
+  }
+  return final_status == "budget_exhausted" && (stop_reason ?? "") == "max_iterations"
+}
+
+pub fn __agent_loop_terminal_callback_extend_by(budget) {
+  const by = budget?.extend_by ?? 0
+  if type_of(by) == "int" && by > 0 {
+    return by
+  }
+  return 1
+}
+
+pub fn __agent_loop_tool_call_names(tool_calls) {
+  let names = []
+  for call in tool_calls ?? [] {
+    const name = __tool_call_name(call)
+    if name != "" && !contains(names, name) {
+      names = names.push(name)
+    }
+  }
+  return names
+}
+
+pub fn __agent_loop_repeated_observation_recovery_feedback(warning) {
+  const tool_name = to_string(warning?.tool_name ?? "")
+  const action = if tool_name != "" {
+    "`" + tool_name + "`"
+  } else {
+    "the same tool"
+  }
+  const signature = trim(to_string(warning?.signature ?? ""))
+  const signature_line = if signature != "" {
+    "\nRepeated call signature: " + signature
+  } else {
+    ""
+  }
+  return "Repeated identical " + action + " calls are not making progress. "
+    + "Do not issue that same call again. Change strategy with a targeted action "
+    + "that changes evidence, such as reading the exact file or symbol named by "
+    + "the task, then edit only once you have the needed facts."
+    + signature_line
+}
+
+pub fn __agent_loop_monologue_recovery_feedback(visible_text) {
+  let intent = trim(to_string(visible_text ?? ""))
+  if len(intent) > 900 {
+    intent = intent[0:900] + "..."
+  }
+  const intent_block = if intent != "" {
+    "\nYour stated intent was:\n" + intent
+  } else {
+    ""
+  }
+  return "You are describing the next action instead of taking it. On the next turn, "
+    + "emit exactly one concrete tool call as the first action; do not continue in prose. "
+    + "Use the available tool that matches your stated intent, with explicit arguments."
+    + intent_block
+}
+
+pub fn __agent_loop_thrash_recovery_allowed(warning, tool_calls) {
+  if !(warning?.hard_stop ?? false) {
+    return false
+  }
+  const pattern = to_string(warning?.pattern ?? "")
+  if pattern == "repeated_same_observation" {
+    return len(tool_calls ?? []) > 0
+  }
+  return pattern == "no_progress_monologue" && len(tool_calls ?? []) == 0
+}
+
+pub fn __agent_loop_thrash_recovery_reason(warning) -> string {
+  if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
+    return "monologue_recovery_continue"
+  }
+  return "thrash_recovery_continue"
+}
+
+pub fn __agent_loop_thrash_recovery_feedback(warning, visible_text) -> string {
+  if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
+    return __agent_loop_monologue_recovery_feedback(visible_text)
+  }
+  return __agent_loop_repeated_observation_recovery_feedback(warning)
+}
+
+pub fn __agent_loop_thrash_recovery_key(warning) -> string {
+  if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
+    return "monologue_recovery"
+  }
+  return "thrash_recovery"
+}
+
+pub fn __agent_loop_thrash_recovery_skip_reason(warning) -> string {
+  if to_string(warning?.pattern ?? "") == "no_progress_monologue" {
+    return "monologue_recovery"
+  }
+  return "thrash_recovery"
+}
+
+pub fn __agent_loop_thrash_recovery_skip_outcome(warning, tool_calls, stall_hard_stop_rescues) {
+  const pattern = to_string(warning?.pattern ?? "")
+  if pattern != "repeated_same_observation" && pattern != "no_progress_monologue" {
+    return "no_rung_for_pattern"
+  }
+  if pattern == "repeated_same_observation" && len(tool_calls ?? []) == 0 {
+    return "no_tool_calls"
+  }
+  if pattern == "no_progress_monologue" && len(tool_calls ?? []) > 0 {
+    return "unexpected_tool_calls"
+  }
+  if stall_hard_stop_rescues > 0 {
+    return "rung_limit_exhausted"
+  }
+  return "recovery_not_allowed"
+}
+
+pub fn __agent_loop_stall_warning_receipt(warning) {
+  return {
+    pattern: to_string(warning?.pattern ?? ""),
+    tool_name: to_string(warning?.tool_name ?? ""),
+    repeat_count: to_int(warning?.repeat_count ?? warning?.count ?? 0) ?? 0,
+    threshold: to_int(warning?.threshold ?? 0) ?? 0,
+    consecutive_trips: to_int(warning?.consecutive_trips ?? 0) ?? 0,
+    hard_stop: warning?.hard_stop ?? false,
+    arguments_digest: to_string(warning?.arguments_digest ?? ""),
+    signature_digest: to_string(warning?.signature_digest ?? ""),
+    signature: to_string(warning?.signature ?? ""),
+  }
+}
+
+pub fn __agent_loop_emit_thrash_recovery_checkpoint(
+  session_id,
+  iteration,
+  tool_calls,
+  warning,
+  old_limit,
+  new_limit,
+  status = "fired",
+  action = "extend",
+  reason = "thrash_recovery_continue",
+  outcome = nil,
+) {
+  let checkpoint = {
+    schema: "harn.agent_loop_recovery_receipt.v1",
+    kind: "thrash_hard_stop_recovery",
+    receipt_kind: "thrash_hard_stop_recovery",
+    status: status,
+    action: action,
+    reason: reason,
+    iteration: iteration,
+    old_limit: old_limit,
+    new_limit: new_limit,
+    tool_count: len(tool_calls ?? []),
+    tool_names: __agent_loop_tool_call_names(tool_calls),
+    warning: __agent_loop_stall_warning_receipt(warning),
+  }
+  if outcome != nil {
+    checkpoint = checkpoint + {outcome: outcome}
+  }
+  agent_emit_event(session_id, "typed_checkpoint", checkpoint)
+}
+
+/**
+ * Forced terminal wrap-up turn. When the loop exits on exhaustion/cap while the
+ * last turn still called tools, the surfaced final text would otherwise be a
+ * dangling tool-call turn with no clean `<user_response>`/sentinel. This runs
+ * exactly one extra LLM call with tools requested off to elicit the model's
+ * final user-facing answer + completion sentinel, records it as the final
+ * assistant turn so `agent_session_finalize` surfaces it, and never mutates
+ * `final_status`/`stop_reason`. Provider/tool-format leaks can still yield
+ * tool calls on this turn, so the loop records explicit skipped receipts before
+ * falling back. Defensive: any error falls back to existing behavior. Returns
+ * true when a wrap-up response was recorded.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, iteration) {
+  const directive = __agent_loop_wrapup_directive(opts)
+  // Disable tools for this turn so the model cannot dispatch: empty tool
+  // surface + a system directive forbidding tool calls. Carry the tool format
+  // forward so the response protocol still matches what the model was trained
+  // on this run.
+  const wrapup_opts = opts
+    + {
+    tools: nil,
+    active_skills: nil,
+    skill_catalog_prompt: "",
+    _progress_tool_system_prompt_nudge: "",
+    transcript_projection: opts?.transcript_projection,
+  }
+  const turn_prompt = __agent_loop_build_turn_prompt(session, wrapup_opts, iteration)
+  const host_wrapup = __agent_loop_has_host_wrapup_directive(wrapup_opts)
+  // System prompt + message array. A host-supplied directive is delivered as a
+  // trailing user message and the system prompt is left byte-identical to the
+  // loop's turns, so the whole system+history prefix is reused verbatim by the
+  // provider prompt cache / local KV cache — the wrap-up pays only for the one
+  // appended instruction. The default (no host directive) keeps today's exact
+  // behavior: the generic directive rides in the system prompt.
+  const base_system = if trim(turn_prompt.system ?? "") != "" {
+    turn_prompt.system
+  } else {
+    ""
+  }
+  const turn_system = if host_wrapup {
+    base_system
+  } else {
+    let parts = []
+    if base_system != "" {
+      parts = parts.push(base_system)
+    }
+    parts = parts.push(directive)
+    join(parts, "\n\n")
+  }
+  const wrapup_context = __agent_loop_effective_wrapup_context(
+    wrapup_opts,
+    final_status,
+    stop_reason,
+  )
+  const turn_messages = if host_wrapup {
+    turn_prompt.messages.push(
+      {role: "user", content: directive + __agent_loop_render_wrapup_context(wrapup_context)},
+    )
+  } else {
+    turn_prompt.messages
+  }
+  const llm_opts = __agent_loop_effective_llm_options(wrapup_opts)
+    + {
+    messages: turn_messages,
+    session_id: session.session_id,
+    tool_format: wrapup_opts?.tool_format,
+    tools: nil,
+    _iteration: iteration + 1,
+    _final_wrapup: true,
+  }
+  let call = agent_invoke_llm(message, turn_system, llm_opts)
+  if !call.ok {
+    return false
+  }
+  const llm_result = call.value
+  const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
+  const parsed = agent_parse_tool_calls(raw_text, nil, wrapup_opts?.tool_format)
+  const wrapup_tool_calls = __resolve_tool_calls(llm_result, parsed)
+  if len(wrapup_tool_calls) > 0 {
+    agent_session_record_undispatched_tool_results(
+      session.session_id,
+      wrapup_tool_calls,
+      "skipped",
+      "not dispatched: final wrap-up turns cannot call tools",
+    )
+    agent_emit_event(
+      session.session_id,
+      "typed_checkpoint",
+      {
+        schema: "harn.agent_loop_final_wrapup_receipt.v1",
+        kind: "final_wrapup_tool_calls_skipped",
+        receipt_kind: "final_wrapup_tool_calls_skipped",
+        status: "skipped",
+        final_status: final_status,
+        stop_reason: stop_reason ?? "",
+        iteration: iteration,
+        tool_count: len(wrapup_tool_calls),
+        tool_names: __agent_loop_tool_call_names(wrapup_tool_calls),
+        host_directive: host_wrapup,
+        terminal_kind: final_status,
+      },
+    )
+  }
+  const visible_text = __visible_text(parsed, raw_text)
+  if to_string(visible_text) == "" {
+    return false
+  }
+  const normalized = llm_result + {text: visible_text, visible_text: visible_text}
+  agent_session_record_assistant(session.session_id, normalized)
+  let _ = try {
+    agent_emit_event(
+      session.session_id,
+      "final_wrapup",
+      {
+        final_status: final_status,
+        stop_reason: stop_reason ?? "",
+        iteration: iteration,
+        host_directive: host_wrapup,
+        terminal_kind: final_status,
+      },
+    )
+  }
+  return true
+}
+
+/**
+ * Flatten the MCP server specs declared by the currently active skills.
+ *
+ * Drives the per-turn mid-conversation MCP mount (gated by the default-off
+ * `mid_conversation_mcp_mount` opt): the loop feeds the result to
+ * `agent_mcp_mount_additional`, which mounts only the servers not already
+ * active so a mid-conversation skill's tools become visible AND callable
+ * without re-mounting live servers. Empty when no active skill declares MCP
+ * servers, which keeps the flag-off path untouched.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_active_skill_mcp_specs(active_skills) {
+  let specs = []
+  for active_skill in active_skills ?? [] {
+    for spec in active_skill?.mcp ?? [] {
+      specs = specs + [spec]
+    }
+  }
+  return specs
+}
+
+/**
+ * Validate `text` against `schema` (a JSON Schema dict, the same shape
+ * `output_schema` carries elsewhere). Reuses the language's own schema
+ * validator — `json_extract` (tolerant text→JSON) + `schema_is`
+ * (canonicalize + validate, the machinery `llm_call_structured` also uses) —
+ * so validation is never reimplemented here. Returns `{ok, value}`: `ok`
+ * true only when the extracted value validates; `value` is the best parsed
+ * value (nil when nothing parseable was found).
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_output_schema_value(text, schema) {
+  const parsed = try {
+    json_extract(text)
+  }
+  if is_err(parsed) {
+    return {ok: false, value: nil}
+  }
+  const value = unwrap(parsed)
+  const valid = try {
+    schema_is(value, schema)
+  }
+  if is_err(valid) || !unwrap(valid) {
+    return {ok: false, value: value}
+  }
+  return {ok: true, value: value}
+}
+
+pub fn __agent_loop_output_schema_repair_prompt(schema, text) {
+  return "Your previous final answer did not satisfy the required output schema.\n"
+    + "Reply with ONLY a JSON value that validates against this JSON Schema:\n\n"
+    + json_stringify_pretty(
+    schema,
+  )
+    + "\n\nYour previous final answer was:\n\n"
+    + text
+}
+
+/**
+ * Terminal output-schema gate for `agent_loop`.
+ *
+ * `output_schema` promises the loop's FINAL answer parses against a schema.
+ * The loop deliberately does NOT force every mid-loop turn into structured
+ * mode (that fights tool-calling; see `__agent_loop_effective_llm_options`).
+ * Instead the terminal answer is validated here. If it already satisfies the
+ * schema it is surfaced as-is; otherwise the loop re-asks ONCE — through the
+ * same `llm_caller` seam ordinary turns use, so custom callers and test mocks
+ * intercept it — for a schema-shaped value, mirroring the repair-once
+ * behavior `llm_call_structured` implements. The parsed value lands on
+ * `run.output`; `run.output_valid` records whether validation ultimately
+ * passed (never throws — a persistently off-shape answer yields
+ * `output_valid: false`, not a crash). When the repair turn produces the
+ * terminal answer, surface that repaired text so `visible_text` and `output`
+ * describe the same final payload.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_apply_output_schema(final_result, opts, session, message, iteration) {
+  const schema = opts?.output_schema
+  let text = to_string(final_result?.visible_text ?? final_result?.text ?? "")
+  const direct = __agent_loop_output_schema_value(text, schema)
+  if direct.ok {
+    return final_result + {output: direct.value, output_valid: true}
+  }
+  const repair_opts = __agent_loop_effective_llm_options(opts + {_output_schema_repair: true})
+    + {
+    session_id: session.session_id,
+    tools: nil,
+    tool_choice: nil,
+    tool_format: opts?.tool_format,
+    _iteration: iteration + 1,
+    _output_schema_repair: true,
+  }
+  const repair = try {
+    agent_invoke_llm(__agent_loop_output_schema_repair_prompt(schema, text), nil, repair_opts)
+  }
+  if is_err(repair) {
+    return final_result + {output: direct.value, output_valid: false}
+  }
+  let call = unwrap(repair)
+  if !(call?.ok ?? false) {
+    return final_result + {output: direct.value, output_valid: false}
+  }
+  const repaired_text = to_string(call?.value?.visible_text ?? call?.value?.text ?? "")
+  const second = __agent_loop_output_schema_value(repaired_text, schema)
+  return final_result
+    + {
+    text: repaired_text,
+    visible_text: repaired_text,
+    output: second.value,
+    output_valid: second.ok,
+  }
+}

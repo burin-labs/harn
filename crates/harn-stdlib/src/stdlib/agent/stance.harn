@@ -129,7 +129,10 @@ pub fn agent_stance_default_consent_check(justification, session_id, options = n
     + " is not consent."
   const schema = {
     type: "object",
-    properties: {consent: {type: "string", enum: ["express", "implied", "none"]}, reasoning: {type: "string"}},
+    properties: {
+      consent: {type: "string", enum: ["express", "implied", "none"]},
+      reasoning: {type: "string"},
+    },
     required: ["consent", "reasoning"],
   }
   const llm_options = (options ?? {}) + {schema: schema, temperature: 0}
@@ -172,7 +175,11 @@ fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
       } else {
         "stance_write_access_denied"
       },
-      {justification: justification, consent: verdict?.consent ?? "none", reason: verdict?.reason ?? ""},
+      {
+        justification: justification,
+        consent: verdict?.consent ?? "none",
+        reason: verdict?.reason ?? "",
+      },
     )
     if granted {
       atomic_set(grant_flag, 1)
@@ -199,7 +206,8 @@ fn __stance_register_escape_tool(opts, cfg, session_id, grant_flag) {
       parameters: {
         justification: {
           type: "string",
-          description: "Why write access is needed now, citing the user's express or implied consent.",
+          description:
+            "Why write access is needed now, citing the user's express or implied consent.",
         },
       },
       annotations: {kind: "think", side_effect_level: "read_only"},
@@ -260,7 +268,11 @@ pub fn agent_stance_prepare(session, message, opts) {
   )
   return opts
     + policy_patch
-    + {tools: tools, _read_only_stance_tools: allowed, _read_only_stance_grant: grant_flag}
+    + {
+    tools: tools,
+    _read_only_stance_tools: allowed,
+    _read_only_stance_grant: grant_flag,
+  }
 }
 
 /**

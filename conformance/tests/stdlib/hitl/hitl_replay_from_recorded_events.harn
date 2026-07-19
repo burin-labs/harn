@@ -4,7 +4,13 @@ import "std/triggers"
 
 pub fn hitl_handler(event: TriggerEvent) -> dict {
   const answer = ask_user("Should we continue handling " + event.kind + "?")
-  const approval: {approved: bool, reviewers: list<string>, approved_at: string, reason: string?, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval("approve " + event.kind, {quorum: 2, reviewers: ["alice", "bob", "carol"]})
+  const approval: {
+    approved: bool,
+    reviewers: list<string>,
+    approved_at: string,
+    reason: string?,
+    signatures: list<{reviewer: string, signed_at: string, signature: string}>,
+  } = request_approval("approve " + event.kind, {quorum: 2, reviewers: ["alice", "bob", "carol"]})
   return {
     verdict: answer.verdict,
     event_id: event.id,
@@ -26,7 +32,9 @@ pipeline test(task) {
     ],
   )
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const handle: TriggerHandle = trigger_register(
     {
       id: "hitl-replay-" + unique,

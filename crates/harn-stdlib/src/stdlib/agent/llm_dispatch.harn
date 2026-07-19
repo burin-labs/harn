@@ -103,7 +103,12 @@ fn __dispatch_default(message, turn_system, llm_opts) {
     ""
   }
   if reason == "budget_exceeded" {
-    return {ok: false, status: "budget_exhausted", stop_reason: "budget_exhausted", error: normalized}
+    return {
+      ok: false,
+      status: "budget_exhausted",
+      stop_reason: "budget_exhausted",
+      error: normalized,
+    }
   }
   return {ok: false, status: "provider_error", stop_reason: "provider_error", error: normalized}
 }
@@ -131,7 +136,11 @@ pub fn agent_invoke_llm(message, turn_system, llm_opts) -> dict {
           prompt: message,
           system: turn_system,
           opts: llm_opts,
-          turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
+          turn: {
+            iteration: llm_opts?._iteration ?? 0,
+            session_id: llm_opts?.session_id ?? "",
+            attempt: 1,
+          },
         },
       )
     }
@@ -141,7 +150,11 @@ pub fn agent_invoke_llm(message, turn_system, llm_opts) -> dict {
     prompt: message,
     system: turn_system,
     opts: llm_opts,
-    turn: {iteration: llm_opts?._iteration ?? 0, session_id: llm_opts?.session_id ?? "", attempt: 1},
+    turn: {
+      iteration: llm_opts?._iteration ?? 0,
+      session_id: llm_opts?.session_id ?? "",
+      attempt: 1,
+    },
   }
   const invoked = try {
     caller(call)

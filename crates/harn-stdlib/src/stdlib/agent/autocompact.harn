@@ -19,7 +19,8 @@ fn __compaction_engine_strategy(label) {
     return "truncate"
   }
   if label == "summarize_all" || label == "summarize_middle" || label == "summarize"
-    || label == "hybrid"
+    || label
+    == "hybrid"
     || label == "llm" {
     return "llm"
   }
@@ -47,7 +48,10 @@ fn __has_compaction_policy(policy) {
     || policy?.mode != nil
     || policy?.scope != nil
     || len(__compaction_policy_list(policy?.preserve)) > 0
-    || len(__compaction_policy_list(policy?.drop)) > 0
+    || len(
+    __compaction_policy_list(policy?.drop),
+  )
+    > 0
     || policy?.extend_default_instructions != nil
     || policy?.author != nil
 }
@@ -114,7 +118,8 @@ fn __compaction_instruction_mode(policy) {
     return "default"
   }
   const has_directives = policy?.instructions != nil
-    || len(__compaction_policy_list(policy?.preserve)) > 0
+    || len(__compaction_policy_list(policy?.preserve))
+    > 0
     || len(__compaction_policy_list(policy?.drop)) > 0
   if !has_directives {
     return "default"
@@ -188,7 +193,9 @@ fn __compact_options(opts, engine_strategy, keep_last) {
     compact_opts = compact_opts + {model: opts.model}
   }
   const policy = __compaction_policy_from_options(compact_opts)
-    ?? __compaction_policy_from_options({policy: opts?.compaction_policy})
+    ?? __compaction_policy_from_options(
+    {policy: opts?.compaction_policy},
+  )
     ?? __compaction_policy_from_options({policy: opts?.compaction?.policy})
   if policy != nil && !contains(compact_opts.keys(), "policy") {
     compact_opts = compact_opts + {policy: policy}
@@ -278,7 +285,13 @@ pub fn compact_for_bug_fix_resumption(opts = nil) {
       + {
       mode: base?.mode ?? "bug_fix_resumption",
       preserve: base?.preserve
-        ?? ["root cause", "changed files", "test failures", "verification commands", "next action"],
+        ?? [
+        "root cause",
+        "changed files",
+        "test failures",
+        "verification commands",
+        "next action",
+      ],
     },
   )
 }
@@ -308,7 +321,13 @@ pub fn compact_preserving_test_failures(opts = nil) {
       + {
       mode: base?.mode ?? "preserve_test_failures",
       preserve: base?.preserve
-        ?? ["failing test names", "commands", "error messages", "stack traces", "exit codes"],
+        ?? [
+        "failing test names",
+        "commands",
+        "error messages",
+        "stack traces",
+        "exit codes",
+      ],
       drop: base?.drop ?? ["repetitive build output"],
     },
   )
@@ -490,7 +509,11 @@ pub fn agent_emergency_compact(session, opts, attempt) {
   } else {
     ceiling
   }
-  const compact_opts = {compact_strategy: "observation_mask", compact_threshold: 1, keep_last: keep_last}
+  const compact_opts = {
+    compact_strategy: "observation_mask",
+    compact_threshold: 1,
+    keep_last: keep_last,
+  }
   const pre_payload = {
     session: {id: session.session_id},
     reason: "context_overflow",

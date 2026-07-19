@@ -96,12 +96,21 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   if !safe_bool(account["ok"], false) {
-    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(account["error"], "")]}
+    return {
+      ok: false,
+      job: base_job + {status: "failed"},
+      errors: [safe_string(account["error"], "")],
+    }
   }
   const account_id = safe_string(account["value"], "")
   const input_dataset_id = __fireworks_dataset_id(job, "input")
   const output_dataset_id = __fireworks_dataset_id(job, "output")
-  const input_dataset = __fireworks_create_dataset(harness, account_id, input_dataset_id, safe_string(auth["value"], ""))
+  const input_dataset = __fireworks_create_dataset(
+    harness,
+    account_id,
+    input_dataset_id,
+    safe_string(auth["value"], ""),
+  )
   if !safe_bool(input_dataset["ok"], false) {
     return {
       ok: false,
@@ -137,7 +146,10 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
       "/accounts/" + account_id + "/batchInferenceJobs?batchInferenceJobId=" + batch_job_id,
     ),
     {
-      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        Authorization: "Bearer " + safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       body: json_stringify(create_body),
       timeout_ms: 120000,
       max_response_bytes: 1048576,
@@ -198,7 +210,12 @@ fn __openai_compatible_batch_body(provider: string, body: dict) -> dict {
   return body
 }
 
-fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provider: string) -> dict {
+fn __submit_openai_compatible(
+  harness: Harness,
+  job: dict,
+  payload: dict,
+  provider: string,
+) -> dict {
   const auth = __api_key_for_job(harness, provider)
   const base = __provider_base_url(harness, provider)
   const base_job = __submission_job_base(harness, job, payload, false)
@@ -230,7 +247,10 @@ fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provid
     "POST",
     __join_url(base, "/batches"),
     {
-      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        Authorization: "Bearer " + safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       body: json_stringify(create_body),
       timeout_ms: 120000,
       max_response_bytes: 1048576,
@@ -242,7 +262,12 @@ fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provid
     return {
       ok: false,
       job: base_job
-        + {status: "failed", upload: upload, response_status: response["status"], response: body},
+        + {
+        status: "failed",
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
       errors: [provider + " batch create failed for job " + safe_string(job["id"], "")],
     }
   }
@@ -297,7 +322,10 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
     "POST",
     __join_url(base, "/batch/jobs"),
     {
-      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        Authorization: "Bearer " + safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       body: json_stringify(create_body),
       timeout_ms: 120000,
       max_response_bytes: 1048576,
@@ -308,7 +336,12 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
     return {
       ok: false,
       job: base_job
-        + {status: "failed", upload: upload, response_status: response["status"], response: body},
+        + {
+        status: "failed",
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
       errors: ["mistral batch job create failed for job " + safe_string(job["id"], "")],
     }
   }
@@ -336,7 +369,11 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
-  const upload = __upload_xai_jsonl_file(harness, safe_string(payload["path"], ""), safe_string(auth["value"], ""))
+  const upload = __upload_xai_jsonl_file(
+    harness,
+    safe_string(payload["path"], ""),
+    safe_string(auth["value"], ""),
+  )
   if !safe_bool(upload["ok"], false) {
     return {
       ok: false,
@@ -344,13 +381,19 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
       errors: [safe_string(upload["error"], "")],
     }
   }
-  const create_body = {name: safe_string(job["id"], "harn-batch"), input_file_id: safe_string(upload["file_id"], "")}
+  const create_body = {
+    name: safe_string(job["id"], "harn-batch"),
+    input_file_id: safe_string(upload["file_id"], ""),
+  }
   const response = __http_result(
     harness,
     "POST",
     __join_url(__provider_base_url(harness, "xai"), "/batches"),
     {
-      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        Authorization: "Bearer " + safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       body: json_stringify(create_body),
       timeout_ms: 120000,
       max_response_bytes: 1048576,
@@ -361,7 +404,12 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
     return {
       ok: false,
       job: base_job
-        + {status: "failed", upload: upload, response_status: response["status"], response: body},
+        + {
+        status: "failed",
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
       errors: ["xai batch create failed for job " + safe_string(job["id"], "")],
     }
   }
@@ -417,7 +465,10 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
       "/v1beta/" + __gemini_model_path(safe_string(job["model"], "")) + ":batchGenerateContent",
     ),
     {
-      headers: {"x-goog-api-key": safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        "x-goog-api-key": safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       body: json_stringify(create_body),
       timeout_ms: 120000,
       max_response_bytes: 1048576,
@@ -428,7 +479,12 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
     return {
       ok: false,
       job: base_job
-        + {status: "failed", upload: upload, response_status: response["status"], response: body},
+        + {
+        status: "failed",
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
       errors: ["gemini batch create failed for job " + safe_string(job["id"], "")],
     }
   }

@@ -5,7 +5,11 @@ pipeline default() {
   // seed it, then pass the same session_id to the follow-up so the
   // agent loop automatically loads prior messages as prefix.
   const s = agent_session_open()
-  const _first = agent_loop("hello world", nil, {provider: "mock", session_id: s, max_iterations: 1})
+  const _first = agent_loop(
+    "hello world",
+    nil,
+    {provider: "mock", session_id: s, max_iterations: 1},
+  )
   const resumed = agent_loop("follow up", nil, {provider: "mock", session_id: s, max_iterations: 1})
   __io_println(len(transcript_messages(resumed?.transcript)))
   const compacted = transcript_compact(resumed?.transcript, {keep_last: 1, summary: "summary"})

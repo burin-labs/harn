@@ -7,6 +7,7 @@ pub type HostLeaseHandle = {
   schema_version: int,
   host: string,
   resource_class: HostLeaseResourceClass,
+  domain: string,
   lease_id: string,
   owner: string,
   priority_class: HostLeasePriorityClass,
@@ -23,15 +24,18 @@ pub type HostLeaseStatus = {
   schema_version: int,
   host: string,
   resource_class: HostLeaseResourceClass,
+  domain: string,
   observed_at_ms: int,
   active?: HostLeaseHandle,
   recovered_stale_lease: bool,
+  recovered?: HostLeaseHandle,
 }
 
 pub type HostLeaseOptions = {
   host?: string,
   owner: string,
   resource_class?: HostLeaseResourceClass,
+  domain?: string,
   priority_class?: HostLeasePriorityClass,
   ttl_ms?: int,
   wait_timeout_ms?: int,
@@ -43,6 +47,7 @@ pub type HostLeaseOptions = {
 pub type HostLeaseDeferReceipt = {
   host: string,
   resource_class: HostLeaseResourceClass,
+  domain: string,
   deferred_reason: string,
   observed_at_ms: int,
   next_wake_at_ms?: int,
@@ -59,6 +64,7 @@ pub type HostLeaseAcquireReceipt = {
   defer?: HostLeaseDeferReceipt,
   guard?: unknown,
   recovered_stale_lease: bool,
+  recovered?: HostLeaseHandle,
 }
 
 pub type HostLeaseReleaseReceipt = {
@@ -66,8 +72,16 @@ pub type HostLeaseReleaseReceipt = {
   released: bool,
   host: string,
   resource_class: HostLeaseResourceClass,
+  domain: string,
   lease_id: string,
   observed_at_ms: int,
+}
+
+pub type HostLeaseMetadataUpdateReceipt = {
+  schema_version: int,
+  updated: bool,
+  observed_at_ms: int,
+  handle?: HostLeaseHandle,
 }
 
 pub type HostLeaseScopeResult<T> = {
@@ -86,8 +100,12 @@ pub type HostLeaseScopeResult<T> = {
  * @effects: [host]
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
-pub fn host_lease_status(host: string, resource_class: HostLeaseResourceClass = "whole-machine") -> HostLeaseStatus {
-  return hostlib_host_lease_status({host: host, resource_class: resource_class})
+pub fn host_lease_status(
+  host: string,
+  resource_class: HostLeaseResourceClass = "whole-machine",
+  domain: string = "default",
+) -> HostLeaseStatus {
+  return hostlib_host_lease_status({host: host, resource_class: resource_class, domain: domain})
 }
 
 fn __host_lease_is_callable(value) -> bool {
@@ -100,6 +118,7 @@ fn __host_lease_request(options: HostLeaseOptions, wait_slice_ms: int) -> dict {
     host: options.host,
     owner: options.owner,
     resource_class: options.resource_class ?? "whole-machine",
+    domain: options.domain ?? "default",
     priority_class: options.priority_class ?? "deferrable",
     ttl_ms: options.ttl_ms,
     wait_slice_ms: wait_slice_ms,
@@ -116,8 +135,34 @@ fn __host_lease_request(options: HostLeaseOptions, wait_slice_ms: int) -> dict {
  * @effects: [host]
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
-pub fn host_lease_acquire(options: HostLeaseOptions, wait_slice_ms: int = 0) -> HostLeaseAcquireReceipt {
+pub fn host_lease_acquire(
+  options: HostLeaseOptions,
+  wait_slice_ms: int = 0,
+) -> HostLeaseAcquireReceipt {
   return hostlib_host_lease_acquire(__host_lease_request(options, wait_slice_ms))
+}
+
+/**
+ * Atomically replace all metadata on the active lease named by `handle`.
+ * Missing keys are removed; no implicit merge is performed. The cleanup guard
+ * remains owned by the acquire receipt or enclosing `with_host_lease` scope.
+ *
+ * @effects: [host]
+ * @errors: [backend_error, invalid_parameter, missing_parameter]
+ */
+pub fn host_lease_update_metadata(
+  handle: HostLeaseHandle,
+  metadata: dict<string, string>,
+) -> HostLeaseMetadataUpdateReceipt {
+  return hostlib_host_lease_update_metadata(
+    {
+      host: handle.host,
+      resource_class: handle.resource_class,
+      domain: handle.domain,
+      lease_id: handle.lease_id,
+      metadata: metadata,
+    },
+  )
 }
 
 /**

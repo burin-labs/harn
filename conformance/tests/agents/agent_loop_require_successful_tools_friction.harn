@@ -27,7 +27,10 @@ fn tools() {
 pipeline main() {
   friction_clear()
   with_llm_script(
-    [{tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]}, llm_text("Finished.")],
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]},
+      llm_text("Finished."),
+    ],
     { ->
       const failed = agent_loop(
         "Use one tool.",

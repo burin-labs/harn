@@ -24,7 +24,10 @@ pipeline test_agent_await_resumption_can_be_disabled(task) {
 }
 
 pipeline test_agent_await_resumption_opt_out_keeps_parent_subagent_tools(task) {
-  const tools = agent_lifecycle_tools(tool_registry(), {agent_await_resumption_enabled: false, subagents: true})
+  const tools = agent_lifecycle_tools(
+    tool_registry(),
+    {agent_await_resumption_enabled: false, subagents: true},
+  )
   assert(!_has_tool(tools, "agent_await_resumption"))
   assert(_has_tool(tools, "subagent_pause"))
   assert(_has_tool(tools, "subagent_resume"))

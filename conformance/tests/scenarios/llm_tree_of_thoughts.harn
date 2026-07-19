@@ -6,9 +6,7 @@ fn grid_expand(state, k) {
     {name: "up", x: state.x, y: state.y + 1},
     {name: "left", x: state.x - 1, y: state.y},
   ]
-  return moves
-    .filter({ move -> move.x >= 0 && move.x <= 2 && move.y >= 0 && move.y <= 2 })
-    .take(k)
+  return moves.filter({ move -> move.x >= 0 && move.x <= 2 && move.y >= 0 && move.y <= 2 }).take(k)
 }
 
 fn grid_score(state) {

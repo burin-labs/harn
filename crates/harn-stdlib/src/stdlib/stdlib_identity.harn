@@ -59,7 +59,9 @@ fn __scope_claims(node: dict, path: string) -> dict {
   if node?.scopes != nil {
     if type_of(node.scopes) != "list" {
       issues = issues
-        + [__issue("actor_chain.scopes_type", path + ".scopes", "scopes must be a list of strings")]
+        + [
+        __issue("actor_chain.scopes_type", path + ".scopes", "scopes must be a list of strings"),
+      ]
     } else {
       for {index, value} in node.scopes.enumerate() {
         if type_of(value) != "string" {
@@ -80,7 +82,13 @@ fn __scope_claims(node: dict, path: string) -> dict {
   if node?.scope != nil {
     if type_of(node.scope) != "string" {
       issues = issues
-        + [__issue("actor_chain.scope_type", path + ".scope", "scope must be a whitespace-delimited string")]
+        + [
+        __issue(
+          "actor_chain.scope_type",
+          path + ".scope",
+          "scope must be a whitespace-delimited string",
+        ),
+      ]
     } else {
       for value in split(node.scope, " ") {
         scopes = __append_unique(scopes, value)
@@ -107,7 +115,13 @@ fn __entry(node, path: string) -> dict {
   const parts = __subject_parts(subject)
   return {
     issues: issues,
-    entry: {subject: subject, kind: parts.kind, id: parts.id, path: path + ".sub", scopes: scope_result.scopes},
+    entry: {
+      subject: subject,
+      kind: parts.kind,
+      id: parts.id,
+      path: path + ".sub",
+      scopes: scope_result.scopes,
+    },
   }
 }
 
@@ -117,13 +131,21 @@ fn __may_act(chain: dict) -> dict {
   }
   if type_of(chain.may_act) != "dict" {
     return {
-      issues: [__issue("actor_chain.may_act_type", "may_act", "may_act must be a dict with a sub string")],
+      issues: [
+        __issue("actor_chain.may_act_type", "may_act", "may_act must be a dict with a sub string"),
+      ],
       value: nil,
     }
   }
   if type_of(chain.may_act?.sub) != "string" || trim(chain.may_act.sub) == "" {
     return {
-      issues: [__issue("actor_chain.may_act_sub_type", "may_act.sub", "may_act.sub must be a non-empty string")],
+      issues: [
+        __issue(
+          "actor_chain.may_act_sub_type",
+          "may_act.sub",
+          "may_act.sub must be a non-empty string",
+        ),
+      ],
       value: nil,
     }
   }

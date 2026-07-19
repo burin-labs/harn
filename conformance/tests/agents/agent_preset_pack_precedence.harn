@@ -16,7 +16,12 @@ pipeline default() {
   // Caller input wins over the pack at every key.
   const overridden = agent_preset(
     "audit",
-    {provider: "mock", timeout_ms: 42, budget: {total_budget_usd: 9.5}, model_ladder: ["only-mine"]},
+    {
+      provider: "mock",
+      timeout_ms: 42,
+      budget: {total_budget_usd: 9.5},
+      model_ladder: ["only-mine"],
+    },
   )
   __io_println(overridden.provider)
   __io_println(overridden.timeout_ms)
@@ -34,7 +39,10 @@ pipeline default() {
   const configured_pair = agent_preset("audit", {provider: "llamacpp", model: "gemma4-local"})
   __io_println(configured_pair.model_ladder[0].provider)
   __io_println(configured_pair.model_ladder[0].model)
-  const nested_route = agent_preset("audit", {llm_options: {provider: "llamacpp", model: "gemma4-local"}})
+  const nested_route = agent_preset(
+    "audit",
+    {llm_options: {provider: "llamacpp", model: "gemma4-local"}},
+  )
   __io_println(nested_route?.provider == nil)
   __io_println(nested_route?.model_ladder == nil)
   // User-defined route pack rows move as the same group.

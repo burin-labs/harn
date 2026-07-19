@@ -15,7 +15,10 @@ pipeline test(task) {
       {
         id: "zig/unit",
         name: "zig",
-        versionProbe: {spec: {mode: "shell", command: "echo 0.16.0"}, versionPattern: "([0-9]+\\.[0-9]+\\.[0-9]+)"},
+        versionProbe: {
+          spec: {mode: "shell", command: "echo 0.16.0"},
+          versionPattern: "([0-9]+\\.[0-9]+\\.[0-9]+)",
+        },
         cacheIdentity: {ZIG_LOCAL_CACHE_DIR: "/tmp/harn-zig-cache"},
       },
       {

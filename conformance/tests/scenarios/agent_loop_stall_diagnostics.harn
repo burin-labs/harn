@@ -47,7 +47,10 @@ pipeline default() {
           stall_diagnostics: true,
         },
       )
-      const warning_events = transcript_events_by_kind(stalled.transcript, "agent_loop_stall_warning")
+      const warning_events = transcript_events_by_kind(
+        stalled.transcript,
+        "agent_loop_stall_warning",
+      )
       __io_println(stalled.status)
       __io_println(stalled.repeated_tool_calls)
       __io_println(stalled.suspected_loop)

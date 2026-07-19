@@ -23,9 +23,11 @@
  */
 pub fn rules_search(params) -> dict {
   const payload = hostlib_rules_search(params ?? {}) ?? {}
-  return payload
-    .merge(
-    {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_search"}},
+  return payload.merge(
+    {
+      ok: (payload?.result ?? "") == "ok",
+      provenance: {module: "std/rules", helper: "rules_search"},
+    },
   )
 }
 
@@ -58,8 +60,7 @@ pub fn rules_report(params) -> dict {
  */
 pub fn rules_diagnostics(params) -> dict {
   const payload = hostlib_rules_diagnostics(params ?? {}) ?? {}
-  return payload
-    .merge(
+  return payload.merge(
     {
       ok: (payload?.result ?? "") == "ok",
       provenance: {module: "std/rules", helper: "rules_diagnostics"},
@@ -93,8 +94,7 @@ pub fn rules_diagnostics(params) -> dict {
  */
 pub fn rules_visit(params) -> dict {
   const payload = hostlib_rules_visit(params ?? {}) ?? {}
-  return payload
-    .merge(
+  return payload.merge(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_visit"}},
   )
 }
@@ -115,8 +115,7 @@ pub fn rules_visit(params) -> dict {
  */
 pub fn rules_apply(params) -> dict {
   const payload = hostlib_rules_apply(params ?? {}) ?? {}
-  return payload
-    .merge(
+  return payload.merge(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_apply"}},
   )
 }
@@ -135,8 +134,7 @@ pub fn rules_apply(params) -> dict {
  */
 pub fn rules_fold(params) -> dict {
   const payload = hostlib_rules_fold(params ?? {}) ?? {}
-  return payload
-    .merge(
+  return payload.merge(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/rules", helper: "rules_fold"}},
   )
 }

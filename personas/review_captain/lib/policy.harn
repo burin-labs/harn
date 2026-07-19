@@ -16,7 +16,10 @@ pub fn load_policy_json(raw) {
   }
   const risky_paths = parsed.risky_paths ?? []
   const test_globs = parsed.test_globs ?? _default_test_globs()
-  return {ok: true, policy: {repo: parsed.repo ?? "", risky_paths: risky_paths, test_globs: test_globs}}
+  return {
+    ok: true,
+    policy: {repo: parsed.repo ?? "", risky_paths: risky_paths, test_globs: test_globs},
+  }
 }
 
 /**

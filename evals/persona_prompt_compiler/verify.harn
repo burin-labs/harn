@@ -25,7 +25,9 @@ fn main(harness: Harness) -> int {
     return 1
   }
   const manifest_path = path_join(source_dir(), "harn.eval.toml")
-  const eval_manifest = eval_pack_manifest(toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: source_dir()})
+  const eval_manifest = eval_pack_manifest(
+    toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: source_dir()},
+  )
   const eval_case = eval_manifest.cases.find({ entry -> entry.id == case_id })
   guard eval_case != nil else {
     harness.stdio.eprintln("persona prompt eval case is not in the frozen manifest")
@@ -46,7 +48,8 @@ fn main(harness: Harness) -> int {
     "harn.toml",
   )
   const materialized = if artifact.materialization.manifest_path == expected_manifest_path
-    && artifact.materialization.result.success
+    && artifact
+    .materialization.result.success
     && harness.fs.exists(expected_manifest_path) {
     persona_prompt_materialized_verdict(
       toml_parse(harness.fs.read_text(expected_manifest_path)),
@@ -60,7 +63,11 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("persona prompt eval lowering trigger is missing")
     return 1
   }
-  const fired = persona_prompt_fire_verdict(artifact.daemon_fire.result, lowering.persona.name, trigger.id)
+  const fired = persona_prompt_fire_verdict(
+    artifact.daemon_fire.result,
+    lowering.persona.name,
+    trigger.id,
+  )
   const valid = artifact.case_id == case_id
     && artifact.expected == expected
     && artifact.pass
@@ -68,7 +75,9 @@ fn main(harness: Harness) -> int {
     && materialized.pass
     && fired.pass
   if !valid {
-    harness.stdio.eprintln("persona prompt eval artifact did not prove the full compile-to-fire path")
+    harness.stdio.eprintln(
+      "persona prompt eval artifact did not prove the full compile-to-fire path",
+    )
     return 1
   }
   return 0

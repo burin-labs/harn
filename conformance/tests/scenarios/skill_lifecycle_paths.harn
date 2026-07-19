@@ -17,7 +17,11 @@ pipeline test(task) {
     description "Documentation polish"
     paths ["docs/**/*.md"]
   }
-  const registry = skill_define(infra_touch, "docs_touch", skill_find(docs_touch, "docs_touch") ?? {})
+  const registry = skill_define(
+    infra_touch,
+    "docs_touch",
+    skill_find(docs_touch, "docs_touch") ?? {},
+  )
   with_llm_script(
     [llm_text("All done.")],
     { ->

@@ -4,7 +4,10 @@ pipeline test(task) {
     "https://api.example.com/retry-after",
     {responses: [{status: 429, headers: {"retry-after": "0"}}, {status: 200, body: "ok"}]},
   )
-  const resp = harness.net.get("https://api.example.com/retry-after", {retry: {max: 1, backoff_ms: 0}})
+  const resp = harness.net.get(
+    "https://api.example.com/retry-after",
+    {retry: {max: 1, backoff_ms: 0}},
+  )
   const calls = http_mock_calls()
   assert_eq(resp.status, 200)
   assert_eq(len(calls), 2)

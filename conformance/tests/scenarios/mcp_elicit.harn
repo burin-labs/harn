@@ -12,13 +12,18 @@ pipeline test(task) {
     mcp_elicit(
       {
         message: "Pick one",
-        requestedSchema: {type: "object", properties: {choice: {type: "string"}}, required: ["choice"]},
+        requestedSchema: {
+          type: "object",
+          properties: {choice: {type: "string"}},
+          required: ["choice"],
+        },
       },
     )
     log("BUG: mcp_elicit returned without an active MCP connection")
   } catch (e) {
     const message = e
-    const ok = contains(message, "mcp_elicit") && contains(message, "no active MCP client connection")
+    const ok = contains(message, "mcp_elicit")
+      && contains(message, "no active MCP client connection")
     assert(ok, "expected 'no active MCP client connection' error, got: " + message)
     log("mcp_elicit: outside-tool-handler call raised expected error")
   }

@@ -314,7 +314,9 @@ fn __probe_store_fact(kind, observed, outcome, evidence, opts) {
     kind: "observation",
     claim: __probe_claim(kind, outcome, evidence?.snippet ?? ""),
     confidence: __probe_confidence(outcome),
-    evidence: [{kind: "tool_output", ref: evidence.trace_id, snippet: __probe_truncate(observed, 1024)}],
+    evidence: [
+      {kind: "tool_output", ref: evidence.trace_id, snippet: __probe_truncate(observed, 1024)},
+    ],
     provenance: provenance,
   }
   let fact_opts = {}

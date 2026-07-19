@@ -8,7 +8,11 @@ import "std/postgres"
 pipeline default() {
   const db = pg_mock_pool(
     [
-      {sql: "SELECT pg_notify($1, $2)", params: ["receipts_updated", "{\"id\":\"r1\"}"], rows_affected: 0},
+      {
+        sql: "SELECT pg_notify($1, $2)",
+        params: ["receipts_updated", "{\"id\":\"r1\"}"],
+        rows_affected: 0,
+      },
       {sql: "SELECT pg_notify($1, $2)", params: ["greetings", "hello"], rows_affected: 0},
     ],
   )

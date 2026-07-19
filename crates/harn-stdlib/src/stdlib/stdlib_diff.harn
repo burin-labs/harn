@@ -144,7 +144,10 @@ fn __diff_color_line(line, options) {
     return ansi_info(line, color_opts)
   }
   if starts_with(line, "+++") || starts_with(line, "---") || starts_with(line, "diff ")
-    || starts_with(line, "index ") {
+    || starts_with(
+    line,
+    "index ",
+  ) {
     return ansi_dim(line, color_opts)
   }
   if starts_with(line, "+") {
@@ -256,9 +259,9 @@ pub fn structural_diff(path_a: string, path_b: string, options = nil) -> dict {
   } else {
     options ?? {}
   }
-  const payload = hostlib_ast_structural_diff((opts ?? {}).merge({path_a: path_a, path_b: path_b})) ?? {}
-  return payload
-    .merge(
+  const payload = hostlib_ast_structural_diff((opts ?? {}).merge({path_a: path_a, path_b: path_b}))
+    ?? {}
+  return payload.merge(
     {
       ok: (payload?.result ?? "") == "ok" || (payload?.result ?? "") == "fallback",
       structural: (payload?.mode ?? "") == "structural",
@@ -281,8 +284,7 @@ pub fn render_diff_stat(entries: list, options = {}) -> string {
     } else {
       entry
     }
-    rows = rows
-      .push(
+    rows = rows.push(
       {
         path: entry?.path ?? entry?.file ?? "(text)",
         insertions: stat?.insertions ?? 0,

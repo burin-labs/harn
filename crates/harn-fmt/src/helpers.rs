@@ -10,7 +10,7 @@ use crate::{Formatter, AUTO_SEPARATOR_WIDTH};
 /// Format a default-value expression in a destructuring pattern.
 fn format_default_expr(node: &SNode) -> String {
     let fmt = Formatter::new("", BTreeMap::new(), 100, AUTO_SEPARATOR_WIDTH);
-    fmt.format_expr(node, 0)
+    fmt.format_expr(node, 0, 0)
 }
 
 /// Format a single attribute as `@name` or `@name(arg, key: value)`.
@@ -313,11 +313,18 @@ pub(crate) fn format_catch_param(
     }
 }
 
-pub(crate) fn format_type_ann(type_ann: &Option<TypeExpr>) -> String {
-    if let Some(te) = type_ann {
-        format!(": {}", format_type_expr(te))
-    } else {
-        String::new()
+pub(crate) fn format_type_ann_wrapped(
+    type_ann: &Option<TypeExpr>,
+    indent: usize,
+    type_col: usize,
+    line_width: usize,
+) -> String {
+    match type_ann {
+        Some(te) => format!(
+            ": {}",
+            format_type_expr_wrapped(te, indent, type_col, line_width)
+        ),
+        None => String::new(),
     }
 }
 
@@ -417,42 +424,178 @@ fn format_shape_inline(fields: &[harn_parser::ShapeField]) -> String {
     format!("{{{items}}}")
 }
 
-/// Like [`format_type_expr`] but wraps top-level shape fields onto
-/// multiple lines when the inline rendering, prefixed with
-/// `prefix_len` columns and aligned to `indent` levels, would exceed
-/// `line_width`. Mirrors the parser's preference for one-field-per-
-/// line shapes in source — collapsing a 10-field options shape to a
-/// single line on `harn fmt` was the source of repeated round-trip
-/// noise in `stdlib_hitl.harn`, the example workflows, etc.
+/// Like [`format_type_expr`], but wraps breakable nested structures when the
+/// inline rendering, prefixed with `prefix_len` columns and aligned to
+/// `indent` levels, would exceed `line_width`. Shapes use one field per line;
+/// generic arguments and union/intersection arms use continuation lines.
 pub(crate) fn format_type_expr_wrapped(
     te: &TypeExpr,
     indent: usize,
     prefix_len: usize,
     line_width: usize,
 ) -> String {
+    format_type_expr_wrapped_with_suffix(te, indent, prefix_len, line_width, 0)
+}
+
+/// Wrap a type while reserving columns appended to its final physical line.
+pub(crate) fn format_type_expr_wrapped_with_suffix(
+    te: &TypeExpr,
+    indent: usize,
+    prefix_len: usize,
+    line_width: usize,
+    suffix_width: usize,
+) -> String {
     let inline = format_type_expr(te);
-    if prefix_len + inline.len() <= line_width {
+    if prefix_len + text_width(&inline) + suffix_width <= line_width {
         return inline;
     }
     match te {
         TypeExpr::Shape(fields) => format_shape_wrapped(fields, indent, line_width),
+        TypeExpr::OpenShape { fields, rests } => {
+            format_open_shape_wrapped(fields, rests, indent, line_width)
+        }
+        TypeExpr::List(inner) => format!(
+            "list<{}>",
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 6,
+                line_width,
+                suffix_width + 1,
+            )
+        ),
+        TypeExpr::Iter(inner) => format!(
+            "iter<{}>",
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 6,
+                line_width,
+                suffix_width + 1,
+            )
+        ),
+        TypeExpr::Generator(inner) => format!(
+            "Generator<{}>",
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 11,
+                line_width,
+                suffix_width + 1,
+            )
+        ),
+        TypeExpr::Stream(inner) => format!(
+            "Stream<{}>",
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 8,
+                line_width,
+                suffix_width + 1,
+            )
+        ),
+        TypeExpr::DictType(key, value) => {
+            format_applied_type_wrapped("dict", &[key.as_ref(), value.as_ref()], indent, line_width)
+        }
+        TypeExpr::Applied { name, args } => {
+            let args = args.iter().collect::<Vec<_>>();
+            format_applied_type_wrapped(name, &args, indent, line_width)
+        }
+        TypeExpr::Owned(inner) => format!(
+            "owned<{}>",
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 7,
+                line_width,
+                suffix_width + 1,
+            )
+        ),
         TypeExpr::Union(types) => {
             if let Some(inner) = optional_sugar_inner(types) {
                 // The wrapped variant follows the inline form for `T?`;
                 // the inner type may still wrap if it is itself a shape.
-                let inner_str = format_type_expr_wrapped(inner, indent, prefix_len, line_width);
+                let inner_str = format_type_expr_wrapped_with_suffix(
+                    inner,
+                    indent,
+                    prefix_len,
+                    line_width,
+                    suffix_width + 1,
+                );
                 return format!("{inner_str}?");
             }
-            // Wrap each union arm; if any arm is itself a Shape it can
-            // recurse and emit its own multi-line form.
-            let arms: Vec<String> = types
-                .iter()
-                .map(|arm| format_type_expr_wrapped(arm, indent, prefix_len, line_width))
-                .collect();
-            arms.join(" | ")
+            format_type_union_wrapped(types, "|", indent, prefix_len, line_width, suffix_width)
+        }
+        TypeExpr::Intersection(types) => {
+            format_type_union_wrapped(types, "&", indent, prefix_len, line_width, suffix_width)
         }
         _ => inline,
     }
+}
+
+fn format_applied_type_wrapped(
+    name: &str,
+    args: &[&TypeExpr],
+    indent: usize,
+    line_width: usize,
+) -> String {
+    let item_indent = "  ".repeat(indent + 1);
+    let close_indent = "  ".repeat(indent);
+    let wrapped_args = args
+        .iter()
+        .enumerate()
+        .map(|(index, arg)| {
+            let has_comma = index + 1 < args.len();
+            let value = format_type_expr_wrapped_with_suffix(
+                arg,
+                indent + 1,
+                text_width(&item_indent),
+                line_width,
+                usize::from(has_comma),
+            );
+            let comma = if has_comma { "," } else { "" };
+            format!("{item_indent}{value}{comma}")
+        })
+        .collect::<Vec<_>>();
+    format!("{name}<\n{}\n{close_indent}>", wrapped_args.join("\n"))
+}
+
+fn format_type_union_wrapped(
+    types: &[TypeExpr],
+    separator: &str,
+    indent: usize,
+    prefix_len: usize,
+    line_width: usize,
+    suffix_width: usize,
+) -> String {
+    let mut rendered = types.iter().enumerate().map(|(index, arm)| {
+        let arm_prefix = if index == 0 {
+            prefix_len
+        } else {
+            (indent + 1) * 2 + separator.chars().count() + 1
+        };
+        let arm_suffix = if index + 1 < types.len() {
+            2 // ` \\` continuation marker
+        } else {
+            suffix_width
+        };
+        format_type_expr_wrapped_with_suffix(arm, indent, arm_prefix, line_width, arm_suffix)
+    });
+    let Some(first) = rendered.next() else {
+        return String::new();
+    };
+    rendered.fold(first, |mut output, arm| {
+        // Type declarations are newline-terminated, so a bare leading `|` or
+        // `&` would start a new statement. A lexical continuation keeps the
+        // type expression intact while making each arm independently visible.
+        output.push_str(" \\");
+        output.push('\n');
+        output.push_str(&"  ".repeat(indent + 1));
+        output.push_str(separator);
+        output.push(' ');
+        output.push_str(&arm);
+        output
+    })
 }
 
 /// If `types` is exactly two members and one is `nil`, return the
@@ -494,11 +637,55 @@ fn format_shape_wrapped(
             let opt = if f.optional { "?" } else { "" };
             // Recurse so nested shape fields wrap relative to their
             // own indent, not the outer one.
-            let prefix_len = pad_inner.len() + f.name.len() + opt.len() + 2;
-            let value = format_type_expr_wrapped(&f.type_expr, indent + 1, prefix_len, line_width);
+            let prefix_len =
+                text_width(&pad_inner) + text_width(f.name.as_str()) + text_width(opt) + 2;
+            let value = format_type_expr_wrapped_with_suffix(
+                &f.type_expr,
+                indent + 1,
+                prefix_len,
+                line_width,
+                1,
+            );
             format!("{pad_inner}{}{opt}: {value},", f.name)
         })
         .collect();
+    format!("{{\n{}\n{pad_close}}}", lines.join("\n"))
+}
+
+fn format_open_shape_wrapped(
+    fields: &[harn_parser::ShapeField],
+    rests: &[TypeExpr],
+    indent: usize,
+    line_width: usize,
+) -> String {
+    let pad_inner = "  ".repeat(indent + 1);
+    let pad_close = "  ".repeat(indent);
+    let mut lines = fields
+        .iter()
+        .map(|f| {
+            let opt = if f.optional { "?" } else { "" };
+            let prefix_len =
+                text_width(&pad_inner) + text_width(f.name.as_str()) + text_width(opt) + 2;
+            let value = format_type_expr_wrapped_with_suffix(
+                &f.type_expr,
+                indent + 1,
+                prefix_len,
+                line_width,
+                1,
+            );
+            format!("{pad_inner}{}{opt}: {value},", f.name)
+        })
+        .collect::<Vec<_>>();
+    lines.extend(rests.iter().map(|rest| {
+        let value = format_type_expr_wrapped_with_suffix(
+            rest,
+            indent + 1,
+            text_width(&pad_inner) + 3,
+            line_width,
+            1,
+        );
+        format!("{pad_inner}...{value},")
+    }));
     format!("{{\n{}\n{pad_close}}}", lines.join("\n"))
 }
 
@@ -544,7 +731,7 @@ pub(crate) fn format_throws_clause(throws: &Option<TypeExpr>) -> String {
 /// Format an expression inline for use in parameter defaults.
 pub(crate) fn format_inline_expr(node: &SNode) -> String {
     let fmt = Formatter::new("", BTreeMap::new(), 100, AUTO_SEPARATOR_WIDTH);
-    fmt.format_expr(node, 0)
+    fmt.format_expr(node, 0, 0)
 }
 
 /// Render typed params to individual strings (without joining).
@@ -607,6 +794,29 @@ pub(crate) fn last_line_width(s: &str) -> usize {
         Some(idx) => s[idx + 1..].chars().count(),
         None => s.chars().count(),
     }
+}
+
+/// Count the columns occupied by formatter text. Harn indentation and source
+/// identifiers are Unicode-safe at the character level; byte length is not a
+/// line-width measurement when a literal contains non-ASCII text.
+pub(crate) fn text_width(s: &str) -> usize {
+    s.chars().count()
+}
+
+/// Return the column immediately after `s` when it starts at `column`.
+/// Newlines reset the column to the width of the rendered final line.
+pub(crate) fn column_after(column: usize, s: &str) -> usize {
+    if s.contains('\n') {
+        last_line_width(s)
+    } else {
+        column + text_width(s)
+    }
+}
+
+/// Column used while rendering a comma-sequence item. The extra column
+/// reserves the separator that the enclosing sequence appends after it.
+pub(crate) fn wrapped_item_column(indent: usize) -> usize {
+    (indent + 1) * 2 + 1
 }
 
 pub(crate) fn is_identifier(s: &str) -> bool {

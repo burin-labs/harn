@@ -2,7 +2,12 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
   let registry = tool_registry()
-  registry = tool_define(registry, "anchor", "Always visible", {parameters: {}, handler: { _ -> "ok" }})
+  registry = tool_define(
+    registry,
+    "anchor",
+    "Always visible",
+    {parameters: {}, handler: { _ -> "ok" }},
+  )
   registry = tool_define(
     registry,
     "run_command",
@@ -27,7 +32,13 @@ pipeline test(task) {
       const result = agent_loop(
         "run a command",
         nil,
-        {provider: "mock", tools: registry, tool_search: "hybrid", loop_until_done: true, max_iterations: 3},
+        {
+          provider: "mock",
+          tools: registry,
+          tool_search: "hybrid",
+          loop_until_done: true,
+          max_iterations: 3,
+        },
       )
       const events = transcript_events(result?.transcript)
       let saw_hybrid = false
@@ -37,7 +48,9 @@ pipeline test(task) {
           saw_hybrid = ev.metadata?.strategy == "hybrid"
         }
         if ev.kind == "tool_search_result" {
-          promoted_run = len(ev.metadata?.promoted ?? []) > 0 && ev.metadata.promoted[0] == "run_command"
+          promoted_run = len(ev.metadata?.promoted ?? []) > 0
+            && ev.metadata.promoted[0]
+            == "run_command"
         }
       }
       assert(saw_hybrid, "query event records hybrid strategy")

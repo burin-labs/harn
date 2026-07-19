@@ -95,7 +95,10 @@ pipeline test() {
     {
       persona: "deploy_captain",
       events: [
-        {step: "wait_for_pr_merged", payload: {wait_source: "github.pull_request_merged", polls: 2}},
+        {
+          step: "wait_for_pr_merged",
+          payload: {wait_source: "github.pull_request_merged", polls: 2},
+        },
         {step: "deploy_to_staging", payload: {environment: "staging"}},
         {step: "promote_production", payload: {environment: "production", promoted: true}},
       ],

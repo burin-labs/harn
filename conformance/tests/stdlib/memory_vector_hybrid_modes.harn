@@ -6,7 +6,8 @@ pipeline default() {
   // Give distinct unit vectors per record by matching on the
   // record-key line that searchable_text emits first. The mocks are
   // checked newest-first so the more specific one wins.
-  const alice_text = "alice\nAlice prefers Rust examples\nprofile rust\n\"Alice prefers Rust examples\""
+  const alice_text =
+    "alice\nAlice prefers Rust examples\nprofile rust\n\"Alice prefers Rust examples\""
   const bob_text = "bob\nBob prefers TypeScript\nprofile typescript\n\"Bob prefers TypeScript\""
   host_mock("memory", "embed", {result: {vector: [0.5, 0.5], dim: 2, model: "fake"}})
   host_mock(
@@ -61,7 +62,12 @@ pipeline default() {
   __io_println(rust_hits[0].score >= 0.999)
   // Semantic override picks the same record regardless of namespace
   // hybrid config.
-  const semantic_only = memory_recall("agent/hybrid", "typescript", 5, {root: root, mode: "semantic"})
+  const semantic_only = memory_recall(
+    "agent/hybrid",
+    "typescript",
+    5,
+    {root: root, mode: "semantic"},
+  )
   __io_println(semantic_only[0].key)
   // Lexical override drops cosine entirely; BM25 on "rust" matches alice
   // by tag boost.

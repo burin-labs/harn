@@ -29,6 +29,107 @@ pub type TypedReadFailure = StructuredReadFailure | SchemaValidationFailure
 
 pub type TypedReadResult<T> = Result<T, TypedReadFailure>
 
+pub type EvidenceRoot = {id: string, path: string}
+
+pub type EvidencePattern = {id: string, text: string}
+
+pub type EvidenceHit = {path: string, line: int, column: int, text: string}
+
+pub type PatternEvidence = {id: string, count: int, truncated: bool, hits: list<EvidenceHit>}
+
+pub type RootEvidenceStatus = "complete" | "partial" | "truncated" | "failed" | "cancelled"
+
+pub type RootEvidence = {
+  id: string,
+  status: RootEvidenceStatus,
+  complete: bool,
+  truncated: bool,
+  files_scanned: int,
+  files_skipped: int,
+  match_count: int,
+  error_count: int,
+  error?: string,
+  patterns: list<PatternEvidence>,
+}
+
+pub type EvidenceSearchStatus = "complete" | "partial" | "truncated" | "failed" | "cancelled"
+
+pub type EvidenceReceipt = {
+  schema_version: "harn.fs.evidence.v1",
+  status: EvidenceSearchStatus,
+  complete: bool,
+  truncated: bool,
+  cancelled: bool,
+  root_count: int,
+  failed_root_count: int,
+  files_scanned: int,
+  match_count: int,
+  roots: list<RootEvidence>,
+}
+
+pub type EvidenceOptions = {
+  preset?: "default" | "source" | "all",
+  max_depth?: int,
+  max_filesize?: int,
+  follow_symlinks?: bool,
+  include_hidden?: bool,
+  respect_gitignore?: bool,
+  /** Match ASCII letters without regard to case. */
+  case_insensitive?: bool,
+  include?: list<string>,
+  exclude?: list<string>,
+  max_matches?: int,
+  max_matches_per_root?: int,
+  threads?: int,
+}
+
+pub type EvidenceSearchHandle = {
+  handle_id: string,
+  operation: string,
+  status: "running",
+  started_at: string,
+  ended_at: nil,
+  duration_ms: int,
+  command_or_op_descriptor: string,
+}
+
+/**
+ * Search each labeled root once for every labeled literal and return stable,
+ * path-relative evidence. Root failures settle independently, and match order
+ * does not depend on worker count.
+ *
+ * @effects: [fs.read]
+ * @errors: [invalid_argument]
+ */
+pub fn search_evidence(
+  roots: list<EvidenceRoot>,
+  patterns: list<EvidencePattern>,
+  options: EvidenceOptions = {},
+) -> EvidenceReceipt {
+  return schema_expect(
+    harness.fs.find_evidence(roots, patterns, options),
+    schema_of(EvidenceReceipt),
+  )
+}
+
+/**
+ * Start the same evidence search through the standard cancellable background
+ * operation lifecycle.
+ *
+ * @effects: [fs.read]
+ * @errors: [invalid_argument]
+ */
+pub fn search_evidence_background(
+  roots: list<EvidenceRoot>,
+  patterns: list<EvidencePattern>,
+  options: EvidenceOptions = {},
+) -> EvidenceSearchHandle {
+  return schema_expect(
+    harness.fs.find_evidence(roots, patterns, options + {long_running: true}),
+    schema_of(EvidenceSearchHandle),
+  )
+}
+
 fn __fs_norm(path) -> string {
   return replace(path ?? "", "\\", "/")
 }
@@ -72,7 +173,10 @@ fn __fs_structured_failure(
   return failure
 }
 
-fn __fs_read_structured_result(path: string, format: StructuredDataFormat) -> Result<unknown, StructuredReadFailure> {
+fn __fs_read_structured_result(
+  path: string,
+  format: StructuredDataFormat,
+) -> Result<unknown, StructuredReadFailure> {
   const read = harness.fs.read_text_result(path)
   if !is_ok(read) {
     const failure = unwrap_err(read)
@@ -91,7 +195,14 @@ fn __fs_read_structured_result(path: string, format: StructuredDataFormat) -> Re
   }
   const failure = unwrap_err(parsed)
   return Err(
-    __fs_structured_failure(failure.kind, format, path, failure.message, failure.line, failure.column),
+    __fs_structured_failure(
+      failure.kind,
+      format,
+      path,
+      failure.message,
+      failure.line,
+      failure.column,
+    ),
   )
 }
 
@@ -170,7 +281,11 @@ pub fn read_json_result(path: string) -> Result<unknown, StructuredReadFailure> 
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_json_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> TypedReadResult<T> {
+pub fn read_json_typed_result<T>(
+  path: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> TypedReadResult<T> {
   return __fs_read_structured_typed_result(path, "json", schema, apply_defaults)
 }
 
@@ -233,7 +348,11 @@ pub fn read_yaml_result(path: string) -> Result<unknown, StructuredReadFailure> 
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_yaml_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> TypedReadResult<T> {
+pub fn read_yaml_typed_result<T>(
+  path: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> TypedReadResult<T> {
   return __fs_read_structured_typed_result(path, "yaml", schema, apply_defaults)
 }
 
@@ -258,8 +377,10 @@ pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  harness.fs
-    .write_text(path, __fs_with_newline(yaml_stringify(value), opts.trailing_newline ?? true))
+  harness.fs.write_text(
+    path,
+    __fs_with_newline(yaml_stringify(value), opts.trailing_newline ?? true),
+  )
 }
 
 /**
@@ -292,7 +413,11 @@ pub fn read_toml_result(path: string) -> Result<unknown, StructuredReadFailure> 
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_toml_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> TypedReadResult<T> {
+pub fn read_toml_typed_result<T>(
+  path: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> TypedReadResult<T> {
   return __fs_read_structured_typed_result(path, "toml", schema, apply_defaults)
 }
 
@@ -317,8 +442,10 @@ pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  harness.fs
-    .write_text(path, __fs_with_newline(toml_stringify(value), opts.trailing_newline ?? true))
+  harness.fs.write_text(
+    path,
+    __fs_with_newline(toml_stringify(value), opts.trailing_newline ?? true),
+  )
 }
 
 /**
@@ -332,8 +459,10 @@ pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions 
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  harness.fs
-    .write_text(path, __fs_with_newline(join(lines ?? [], "\n"), opts.trailing_newline ?? true))
+  harness.fs.write_text(
+    path,
+    __fs_with_newline(join(lines ?? [], "\n"), opts.trailing_newline ?? true),
+  )
 }
 
 /**
@@ -367,7 +496,10 @@ pub fn touch(path: string) {
  * @errors: []
  */
 pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
-  const matches = harness.fs.glob(pattern, {base: root, long_running: options?.long_running ?? false})
+  const matches = harness.fs.glob(
+    pattern,
+    {base: root, long_running: options?.long_running ?? false},
+  )
   if options?.relative ?? false {
     return matches.map({ path -> relative_path(root, path) }).to_list()
   }
@@ -483,7 +615,9 @@ fn __fs_snapshot_session(opts) -> string {
 pub fn fs_snapshot(paths: list<string> = [], opts = {}) -> dict {
   const session = __fs_snapshot_session(opts)
   const scope = opts?.snapshot_id ?? ("snapshot-" + uuid_v7())
-  return hostlib_fs_snapshot({session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root})
+  return hostlib_fs_snapshot(
+    {session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root},
+  )
 }
 
 /**

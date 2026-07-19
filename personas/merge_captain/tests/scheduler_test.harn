@@ -10,7 +10,12 @@ import { sweep } from "../lib/scheduler"
 
 fn _policy_for(repo, queue_enabled) {
   return with_defaults(
-    {repo: repo, merge_queue_enabled: queue_enabled, required_checks: ["ci"], required_review_count: 1},
+    {
+      repo: repo,
+      merge_queue_enabled: queue_enabled,
+      required_checks: ["ci"],
+      required_review_count: 1,
+    },
   )
 }
 
@@ -79,7 +84,10 @@ pipeline test_sweep_classifies_clean_pr(task) {
 }
 
 pipeline test_sweep_persists_checkpoints(task) {
-  const snapshot = _snapshot([_pr(1, {behind_by: 2, mergeable_state: "behind"})], {"1": _ok_check()})
+  const snapshot = _snapshot(
+    [_pr(1, {behind_by: 2, mergeable_state: "behind"})],
+    {"1": _ok_check()},
+  )
   const adapter = fixture_adapter(snapshot)
   const handle = _open_handle("persist")
   sweep(
@@ -191,12 +199,14 @@ pipeline test_failing_ci_with_local_verify_runs_dry(task) {
 }
 
 fn _stub_repair_executor(output) {
-  return { _bundle, _options -> {
-    ok: true,
-    output: output,
-    raw: "stub",
-    agent_loop: {status: "completed", iterations: 1, input_tokens: 50, output_tokens: 25},
-  } }
+  return { _bundle, _options ->
+    {
+      ok: true,
+      output: output,
+      raw: "stub",
+      agent_loop: {status: "completed", iterations: 1, input_tokens: 50, output_tokens: 25},
+    }
+  }
 }
 
 fn _ok_repair_output() {
@@ -268,7 +278,11 @@ pipeline test_repair_worker_blocked_when_human_required(task) {
       merge_queue_enabled: true,
       required_checks: ["ci"],
       local_verification: [{name: "tests", command: "true"}],
-      repair_worker: {enabled: true, handles_kinds: ["ci_failure"], require_human_for: ["semantic_repair"]},
+      repair_worker: {
+        enabled: true,
+        handles_kinds: ["ci_failure"],
+        require_human_for: ["semantic_repair"],
+      },
     },
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
@@ -341,7 +355,10 @@ pipeline test_repair_worker_validators_fail_writes_outside_scope(task) {
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
   const handle = _open_handle("repair-worker-violations")
-  const bad_output = _ok_repair_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
+  const bad_output = _ok_repair_output()
+    + {
+    files_changed: [{path: "secrets/key.pem", action: "created"}],
+  }
   const summary = sweep(
     {
       adapter: fixture_adapter(snapshot),

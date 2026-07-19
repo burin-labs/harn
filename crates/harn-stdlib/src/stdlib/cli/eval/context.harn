@@ -221,8 +221,7 @@ fn __render_summary_line(report: dict) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_EVAL_CONTEXT_REPORT_JSON", "")
   if raw == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_EVAL_CONTEXT_REPORT_JSON not set by dispatch shim")
+    harness.stdio.eprintln("internal error: HARN_EVAL_CONTEXT_REPORT_JSON not set by dispatch shim")
     return 70
   }
   const report = try {

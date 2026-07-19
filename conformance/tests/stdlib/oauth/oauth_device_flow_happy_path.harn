@@ -34,7 +34,8 @@ pipeline test(task) {
     "https://idp.example/device",
     {
       status: 200,
-      body: "{\"device_code\":\"DEV-XYZ\",\"user_code\":\"USER-123\",\"verification_uri\":\"https://idp.example/activate\",\"verification_uri_complete\":\"https://idp.example/activate?user_code=USER-123\",\"interval\":1,\"expires_in\":900}",
+      body:
+        "{\"device_code\":\"DEV-XYZ\",\"user_code\":\"USER-123\",\"verification_uri\":\"https://idp.example/activate\",\"verification_uri_complete\":\"https://idp.example/activate?user_code=USER-123\",\"interval\":1,\"expires_in\":900}",
       headers: {"content-type": "application/json"},
     },
   )
@@ -43,15 +44,15 @@ pipeline test(task) {
     "https://idp.example/token",
     {
       status: 200,
-      body: "{\"access_token\":\"AAA\",\"refresh_token\":\"RRR\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
+      body:
+        "{\"access_token\":\"AAA\",\"refresh_token\":\"RRR\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
       headers: {"content-type": "application/json"},
     },
   )
   const handler_topic = "oauth.device_flow.test.handler"
   const handler_cursor = event_log.latest(handler_topic) ?? 0
   const on_user_code = { user_code, verification_uri ->
-    let _ = event_log
-      .emit(
+    let _ = event_log.emit(
       handler_topic,
       "called",
       {user_code: user_code, verification_uri: verification_uri},

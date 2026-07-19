@@ -69,7 +69,13 @@ fn __build_run(
   }
 }
 
-fn __fetch_failure_run(id: string, kind: string, source_owner: string, url: string, response: dict) -> dict {
+fn __fetch_failure_run(
+  id: string,
+  kind: string,
+  source_owner: string,
+  url: string,
+  response: dict,
+) -> dict {
   return __build_run(
     id,
     kind,
@@ -98,7 +104,10 @@ fn __env_with_auth_header(env: dict, config: dict, secret: dict) -> dict {
   const auth_prefix = config?.auth_prefix ?? "Bearer "
   const auth_value = auth_prefix + secret.value
   const headers = base_headers + (config?.extra_headers ?? {})
-    + {Accept: "application/json", [auth_header]: auth_value}
+    + {
+    Accept: "application/json",
+    [auth_header]: auth_value,
+  }
   return env + {http_options: base_options + {headers: headers}}
 }
 
@@ -118,7 +127,10 @@ pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
   const url = config.source_url
   const response = web_fetch(url, env?.http_options ?? {})
   if !response.ok {
-    return {run: __fetch_failure_run(config.id, "html", "provider", url, response), observations: []}
+    return {
+      run: __fetch_failure_run(config.id, "html", "provider", url, response),
+      observations: [],
+    }
   }
   const parsed = web_parse_html(response.body, response.final_url)
   const tables = parsed?.tables ?? []
@@ -154,7 +166,14 @@ pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
   const model_idx = indices?.model_id
   if model_idx == nil {
     return {
-      run: __build_run(config.id, "html", "provider", url, "error", {reason: "table missing model_id column"}),
+      run: __build_run(
+        config.id,
+        "html",
+        "provider",
+        url,
+        "error",
+        {reason: "table missing model_id column"},
+      ),
       observations: [],
     }
   }
@@ -232,7 +251,13 @@ pub fn json_api_adapter(env: dict, config: dict) -> dict {
   const response = web_fetch(url, env?.http_options ?? {})
   if !response.ok {
     return {
-      run: __fetch_failure_run(config.id, "json", config?.source_owner ?? "aggregator", url, response),
+      run: __fetch_failure_run(
+        config.id,
+        "json",
+        config?.source_owner ?? "aggregator",
+        url,
+        response,
+      ),
       observations: [],
     }
   }
@@ -298,7 +323,11 @@ pub fn key_required_adapter(env: dict, config: dict) -> dict {
         config?.source_owner ?? "provider",
         config?.source_url,
         "skipped",
-        {requires_key: true, key_envs: key_envs, reason: "no API key in env (" + join(key_envs, ", ") + ")"},
+        {
+          requires_key: true,
+          key_envs: key_envs,
+          reason: "no API key in env (" + join(key_envs, ", ") + ")",
+        },
       ),
       observations: [],
     }
@@ -335,7 +364,10 @@ pub fn artificialanalysis_adapter(env: dict, config: dict) -> dict {
   const url = config.source_url
   const response = web_fetch(url, env?.http_options ?? {})
   if !response.ok {
-    return {run: __fetch_failure_run(config.id, "html", "aggregator", url, response), observations: []}
+    return {
+      run: __fetch_failure_run(config.id, "html", "aggregator", url, response),
+      observations: [],
+    }
   }
   const doc = web_parse_html(response.body ?? "")
   const benchmarks = __aa_extract_benchmarks(doc)

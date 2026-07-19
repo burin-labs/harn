@@ -15,7 +15,13 @@ fn wall_clock_case() {
     advance_time(1500)
     return {
       ok: true,
-      value: {text: "still working", provider: "mock", model: "mock", input_tokens: 0, output_tokens: 0},
+      value: {
+        text: "still working",
+        provider: "mock",
+        model: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
     }
   }
   const session = "budget-wall-" + uuid()
@@ -48,16 +54,18 @@ fn wall_clock_case() {
 }
 
 fn total_cost_case() {
-  const caller = { _call -> return {
-    ok: true,
-    value: {
-      text: "still working",
-      provider: "openai",
-      model: "gpt-4o-mini",
-      input_tokens: 100000,
-      output_tokens: 100000,
-    },
-  } }
+  const caller = { _call ->
+    return {
+      ok: true,
+      value: {
+        text: "still working",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        input_tokens: 100000,
+        output_tokens: 100000,
+      },
+    }
+  }
   const session = "budget-cost-" + uuid()
   const captured = agent_capture_events(
     session,
@@ -81,17 +89,21 @@ fn total_cost_case() {
   __io_println("cost_reason=" + captured.result.stop_reason)
   __io_println("cost_kind=" + budget_event.kind)
   __io_println("cost_event_positive=" + to_string(budget_event.cost_usd > 0.0))
-  __io_println("cost_iteration_positive=" + to_string(iteration_event.iteration_info.cost_usd > 0.0))
+  __io_println(
+    "cost_iteration_positive=" + to_string(iteration_event.iteration_info.cost_usd > 0.0),
+  )
 }
 
 fn circuit_case() {
   mock_time(0)
-  const caller = { _call -> return {
-    ok: false,
-    status: "provider_error",
-    stop_reason: "provider_error",
-    error: {status: 503, message: "provider unavailable"},
-  } }
+  const caller = { _call ->
+    return {
+      ok: false,
+      status: "provider_error",
+      stop_reason: "provider_error",
+      error: {status: 503, message: "provider unavailable"},
+    }
+  }
   const session = "budget-circuit-" + uuid()
   const captured = agent_capture_events(
     session,
@@ -102,7 +114,11 @@ fn circuit_case() {
         session_id: session,
         provider: "mock",
         llm_caller: caller,
-        iteration_budget: {mode: "fixed", max: 5, consecutive_failures: {max: 2, paused_for_ms: 2500}},
+        iteration_budget: {
+          mode: "fixed",
+          max: 5,
+          consecutive_failures: {max: 2, paused_for_ms: 2500},
+        },
       },
     ) },
   )

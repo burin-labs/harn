@@ -16,9 +16,21 @@ pub type AgentLoopRetryOptions = {
 
 pub type AgentDefaultRetryApplyOptions = {wrap_existing?: bool}
 
-type AgentRetryOptionBag = {retry?: bool | AgentLoopRetryOptions, llm_retry?: AgentLoopRetryOptions, llm_caller?: any, ...rest}
+type AgentRetryOptionBag = {
+  retry?: bool | AgentLoopRetryOptions,
+  llm_retry?: AgentLoopRetryOptions,
+  llm_caller?: any,
+  ...rest,
+}
 
-const __AGENT_RETRYABLE_STATUSES = ["rate_limited", "timeout", "network", "transient", "provider_5xx", "stream_interrupt"]
+const __AGENT_RETRYABLE_STATUSES = [
+  "rate_limited",
+  "timeout",
+  "network",
+  "transient",
+  "provider_5xx",
+  "stream_interrupt",
+]
 
 const __AGENT_NEVER_RETRY_STATUSES = [
   "budget_exhausted",
@@ -46,7 +58,13 @@ const __AGENT_NEVER_RETRY_ERROR_TAGS = [
   "circuit_open",
 ]
 
-const __AGENT_RETRYABLE_CATEGORIES = ["rate_limit", "rate_limited", "timeout", "overloaded", "transient_network"]
+const __AGENT_RETRYABLE_CATEGORIES = [
+  "rate_limit",
+  "rate_limited",
+  "timeout",
+  "overloaded",
+  "transient_network",
+]
 
 const __AGENT_RETRYABLE_REASONS = [
   "rate_limit",
@@ -81,7 +99,9 @@ fn __validate_agent_loop_retry(opts: AgentRetryOptionBag) {
       && type_of(requested_retry) != "bool"
       && type_of(requested_retry) != "dict" {
       throw "agent_loop: `retry` must be false, a retry config dict, or nil; got "
-        + type_of(requested_retry)
+        + type_of(
+        requested_retry,
+      )
     }
   }
   if __retry_has_key(opts, "llm_retry")
@@ -131,7 +151,10 @@ pub fn agent_loop_default_retry_predicate(envelope) -> bool {
   const kind = __agent_retry_text(err?.kind)
   if category == "generic"
     || __agent_retry_contains(__AGENT_NEVER_RETRY_ERROR_TAGS, category)
-    || __agent_retry_contains(__AGENT_NEVER_RETRY_ERROR_TAGS, reason)
+    || __agent_retry_contains(
+    __AGENT_NEVER_RETRY_ERROR_TAGS,
+    reason,
+  )
     || __agent_retry_contains(__AGENT_NEVER_RETRY_ERROR_TAGS, kind) {
     return false
   }
@@ -139,7 +162,10 @@ pub fn agent_loop_default_retry_predicate(envelope) -> bool {
     return true
   }
   if __agent_retry_contains(__AGENT_RETRYABLE_CATEGORIES, category)
-    || __agent_retry_contains(__AGENT_RETRYABLE_REASONS, reason)
+    || __agent_retry_contains(
+    __AGENT_RETRYABLE_REASONS,
+    reason,
+  )
     || __agent_retry_contains(__AGENT_RETRYABLE_KINDS, kind) {
     return true
   }
@@ -147,7 +173,9 @@ pub fn agent_loop_default_retry_predicate(envelope) -> bool {
   return __agent_retry_contains(__AGENT_RETRYABLE_HTTP_STATUS, status_code)
 }
 
-fn __agent_loop_retry_with_default_predicate(retry_cfg: AgentLoopRetryOptions) -> AgentLoopRetryOptions {
+fn __agent_loop_retry_with_default_predicate(
+  retry_cfg: AgentLoopRetryOptions,
+) -> AgentLoopRetryOptions {
   if retry_cfg.predicate != nil {
     return retry_cfg
   }

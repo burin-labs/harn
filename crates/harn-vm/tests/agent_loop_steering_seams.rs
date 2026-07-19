@@ -35,15 +35,39 @@
 //! LLM-call count and tool_result count and no extra user message and no
 //! mid-turn delivery.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use harn_vm::bridge::HostBridge;
 use harn_vm::value::VmError;
 
+static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Canonical session journals outlive a VM and may be shared by parallel test
+/// processes. Mint a process-local monotonic id for every pipeline invocation
+/// so repeated runs cannot rehydrate an earlier transcript without relying on
+/// wall-clock time or a random source.
+fn fresh_session_id(prefix: &str) -> String {
+    format!(
+        "{prefix}-{}-{}",
+        std::process::id(),
+        SESSION_COUNTER.fetch_add(1, Ordering::Relaxed),
+    )
+}
+
 fn run_with_bridge(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
+    let session_store_root = tempfile::tempdir().map_err(|e| e.to_string())?;
+    // The scenarios intentionally reuse readable session IDs across tests;
+    // isolate their durable journal so repeated local runs cannot rehydrate
+    // an earlier transcript and change the message counts under test.
+    let session_store_root_path = session_store_root
+        .path()
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let source = source.replace("__HARN_TEST_SESSION_STORE_ROOT__", &session_store_root_path);
+    let chunk = harn_vm::compile_source(&source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -147,6 +171,7 @@ pipeline main(task) {{
       provider: "mock",
       tools: tools,
       tool_format: "native",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
       max_iterations: 4,
       loop_until_done: true,
       session_id: "{session_id}",
@@ -183,8 +208,11 @@ pipeline main(task) {{
 
 #[test]
 fn pre_tool_dispatch_skips_when_interrupt_immediate_queued_mid_turn() {
-    let raw = run_with_bridge(&race_window_pipeline("race-window-stops-dispatch", true))
-        .expect("script must run");
+    let raw = run_with_bridge(&race_window_pipeline(
+        &fresh_session_id("race-window-stops-dispatch"),
+        true,
+    ))
+    .expect("script must run");
     let lines = out_lines(&raw);
     // Status: done (model returned `##DONE##` on the second iteration).
     assert_eq!(lines[0], "done", "lines: {lines:?}");
@@ -217,8 +245,11 @@ fn pre_tool_dispatch_skips_when_interrupt_immediate_queued_mid_turn() {
 
 #[test]
 fn pre_tool_dispatch_dispatches_when_no_injection_queued() {
-    let raw = run_with_bridge(&race_window_pipeline("race-window-no-stop", false))
-        .expect("script must run");
+    let raw = run_with_bridge(&race_window_pipeline(
+        &fresh_session_id("race-window-no-stop"),
+        false,
+    ))
+    .expect("script must run");
     let lines = out_lines(&raw);
     // Status: done.
     assert_eq!(lines[0], "done", "lines: {lines:?}");
@@ -291,6 +322,7 @@ pipeline main(task) {{
     nil,
     {{
       provider: "mock",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
       max_iterations: 2,
       loop_until_done: true,
       session_id: "{session_id}",
@@ -322,8 +354,11 @@ pipeline main(task) {{
 
 #[test]
 fn audit_only_reminder_lands_in_transcript_but_model_never_sees_it() {
-    let raw =
-        run_with_bridge(&audit_only_pipeline("audit-only-records", true)).expect("script must run");
+    let raw = run_with_bridge(&audit_only_pipeline(
+        &fresh_session_id("audit-only-records"),
+        true,
+    ))
+    .expect("script must run");
     let lines = out_lines(&raw);
     assert_eq!(lines[0], "done", "lines: {lines:?}");
     // Exactly one LLM call: the stub fires once, returns ##DONE##, the
@@ -347,8 +382,11 @@ fn audit_only_reminder_lands_in_transcript_but_model_never_sees_it() {
 
 #[test]
 fn audit_only_control_run_records_no_audit_reminder() {
-    let raw = run_with_bridge(&audit_only_pipeline("audit-only-control", false))
-        .expect("script must run");
+    let raw = run_with_bridge(&audit_only_pipeline(
+        &fresh_session_id("audit-only-control"),
+        false,
+    ))
+    .expect("script must run");
     let lines = out_lines(&raw);
     assert_eq!(lines[0], "done", "lines: {lines:?}");
     // Same single LLM call as the audit_only variant — confirming the
@@ -451,6 +489,7 @@ pipeline main(task) {{
       provider: "mock",
       tools: tools,
       tool_format: "native",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
       max_iterations: 4,
       loop_until_done: true,
       session_id: "{session_id}",
@@ -517,7 +556,8 @@ pipeline main(task) {{
 
 #[test]
 fn steer_user_message_delivered_mid_turn_at_tool_boundary() {
-    let raw = run_with_bridge(&steer_pipeline("steer-mid-turn", true)).expect("script must run");
+    let raw = run_with_bridge(&steer_pipeline(&fresh_session_id("steer-mid-turn"), true))
+        .expect("script must run");
     let lines = out_lines(&raw);
     // Status: done (model returned `##DONE##` on the second iteration).
     assert_eq!(lines[0], "done", "lines: {lines:?}");
@@ -560,7 +600,8 @@ fn steer_user_message_delivered_mid_turn_at_tool_boundary() {
 
 #[test]
 fn steer_control_run_without_inject_is_eval_safe() {
-    let raw = run_with_bridge(&steer_pipeline("steer-control", false)).expect("script must run");
+    let raw = run_with_bridge(&steer_pipeline(&fresh_session_id("steer-control"), false))
+        .expect("script must run");
     let lines = out_lines(&raw);
     // (c) NO-INJECT PATH UNCHANGED: same status, same LLM-call count, and
     // same tool_result count as the steer variant — the no-inject path is

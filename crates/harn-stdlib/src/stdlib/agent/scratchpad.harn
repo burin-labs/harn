@@ -84,8 +84,16 @@ pub fn agent_scratchpad_options(opts = nil) {
       raw?.reorganize_every ?? raw?.reorg_every ?? raw?.periodic_reorg_every,
       3,
     ),
-    max_recent_messages: __scratchpad_nonnegative_int("scratchpad.max_recent_messages", raw?.max_recent_messages, 8),
-    schema_retries: __scratchpad_nonnegative_int("scratchpad.schema_retries", raw?.schema_retries ?? raw?.retries, 1),
+    max_recent_messages: __scratchpad_nonnegative_int(
+      "scratchpad.max_recent_messages",
+      raw?.max_recent_messages,
+      8,
+    ),
+    schema_retries: __scratchpad_nonnegative_int(
+      "scratchpad.schema_retries",
+      raw?.schema_retries ?? raw?.retries,
+      1,
+    ),
     initial: raw?.initial,
     reorganizer: __scratchpad_dict(
       "scratchpad.reorganizer",
@@ -297,7 +305,12 @@ pub fn agent_scratchpad_recitation_fragment(session, opts) {
   if pad == nil {
     return nil
   }
-  return {id: "primary:agent_scratchpad", source: "primary", bucket: "after", body: __scratchpad_render(pad)}
+  return {
+    id: "primary:agent_scratchpad",
+    source: "primary",
+    bucket: "after",
+    body: __scratchpad_render(pad),
+  }
 }
 
 fn __scratchpad_message_refs(messages, limit) {
@@ -320,9 +333,12 @@ fn __scratchpad_message_refs(messages, limit) {
     const msg = values[index]
     const excerpt = __scratchpad_excerpt(msg?.content ?? msg?.text ?? "", 200)
     if excerpt != "" {
-      refs = refs
-        .push(
-        {id: "turn:" + to_string(index + 1), kind: to_string(msg?.role ?? "message"), label: excerpt},
+      refs = refs.push(
+        {
+          id: "turn:" + to_string(index + 1),
+          kind: to_string(msg?.role ?? "message"),
+          label: excerpt,
+        },
       )
     }
     index = index + 1
@@ -401,7 +417,12 @@ fn __scratchpad_schema() {
           type: "object",
           required: ["id", "kind"],
           additionalProperties: true,
-          properties: {id: {type: "string"}, kind: {type: "string"}, label: {type: "string"}, excerpt: {type: "string"}},
+          properties: {
+            id: {type: "string"},
+            kind: {type: "string"},
+            label: {type: "string"},
+            excerpt: {type: "string"},
+          },
         },
       },
       dropped: {type: "array", items: {type: "string"}},
@@ -416,7 +437,9 @@ fn __scratchpad_allowed_ref_lines(refs) {
     if id == "" {
       continue
     }
-    lines = lines.push("- " + id + ": " + __scratchpad_excerpt(ref?.label ?? ref?.excerpt ?? "", 180))
+    lines = lines.push(
+      "- " + id + ": " + __scratchpad_excerpt(ref?.label ?? ref?.excerpt ?? "", 180),
+    )
   }
   return join(lines, "\n")
 }
@@ -527,7 +550,10 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
     __scratchpad_emit_reorganization(session.session_id, iteration, "missing_scratchpad")
     return {ok: false, status: "missing_scratchpad"}
   }
-  const message_refs = __scratchpad_message_refs(agent_session_messages(session.session_id), cfg.max_recent_messages)
+  const message_refs = __scratchpad_message_refs(
+    agent_session_messages(session.session_id),
+    cfg.max_recent_messages,
+  )
   const allowed_refs = __scratchpad_merge_refs(current?.refs, message_refs)
   const envelope = llm_call_structured_result(
     __scratchpad_reorganize_prompt(current, allowed_refs, context),
@@ -581,7 +607,12 @@ pub fn agent_scratchpad_reorganize(session, opts, iteration, context = nil) {
   }
   if is_err(set_result) {
     const store_error = to_string(unwrap_err(set_result))
-    __scratchpad_emit_reorganization(session.session_id, iteration, "store_error", {error: store_error})
+    __scratchpad_emit_reorganization(
+      session.session_id,
+      iteration,
+      "store_error",
+      {error: store_error},
+    )
     return {ok: false, status: "store_error", error: store_error}
   }
   const stored = unwrap(set_result)
@@ -624,7 +655,12 @@ pub fn agent_scratchpad_reorganize_if_due(session, opts, iteration_index, contex
   }
   const turn = iteration_index + 1
   if turn % cadence != 0 {
-    return {ok: true, status: "skipped", reason: "cadence", next_due: turn + (cadence - turn % cadence)}
+    return {
+      ok: true,
+      status: "skipped",
+      reason: "cadence",
+      next_due: turn + (cadence - turn % cadence),
+    }
   }
   return agent_scratchpad_reorganize(session, opts, turn, context ?? {reason: "iteration_end"})
 }

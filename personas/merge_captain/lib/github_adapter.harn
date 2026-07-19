@@ -55,7 +55,10 @@ pub fn get_pr_details(adapter, repo, number) {
     return {pr: found, checks: checks_for}
   }
   const parts = repo.split("/")
-  const pr = _gh("api_call", {path: "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}", method: "GET"})
+  const pr = _gh(
+    "api_call",
+    {path: "/repos/${parts[0]}/${parts[1]}/pulls/${to_string(number)}", method: "GET"},
+  )
   const checks_envelope = _gh(
     "api_call",
     {path: "/repos/${parts[0]}/${parts[1]}/commits/${pr.head.sha}/check-runs", method: "GET"},

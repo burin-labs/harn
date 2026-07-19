@@ -19,7 +19,11 @@ pipeline main(task) {
     {session_id: sid, provider: "mock", max_iterations: 2},
   )
   log("turn 1 status=${first.status} len=${agent_session_length(sid)}")
-  const second = agent_loop("What did I just tell you?", nil, {session_id: sid, provider: "mock", max_iterations: 2})
+  const second = agent_loop(
+    "What did I just tell you?",
+    nil,
+    {session_id: sid, provider: "mock", max_iterations: 2},
+  )
   log("turn 2 status=${second.status} len=${agent_session_length(sid)}")
   const snap = agent_session_snapshot(sid)
   log("final transcript has ${len(snap["messages"])} messages")

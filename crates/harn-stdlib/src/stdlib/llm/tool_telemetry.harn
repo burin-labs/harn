@@ -82,7 +82,10 @@ fn __tt_child_spans(audit) {
     if type_of(layer) != "dict" {
       continue
     }
-    let span = {name: "tool_call." + to_string(layer?.name ?? "layer"), status: to_string(layer?.status ?? "ok")}
+    let span = {
+      name: "tool_call." + to_string(layer?.name ?? "layer"),
+      status: to_string(layer?.status ?? "ok"),
+    }
     if layer?.started_at != nil {
       span = span + {started_at: layer.started_at}
     }
@@ -123,8 +126,7 @@ fn __tt_events(result, start_ms, end_ms) {
   ]
   const category = to_string(result?.error_category ?? "")
   if category == "scope_violation" || category == "policy_blocked" {
-    events = events
-      .push(
+    events = events.push(
       {
         name: "tool_call.scope_violation",
         time_ms: end_ms,
@@ -271,8 +273,7 @@ pub fn langfuse_sink(opts = nil) {
     const endpoint = __tt_langfuse_endpoint(base_url)
     const auth = "Basic " + base64_encode(public_key + ":" + secret_key)
     const response_outcome = try {
-      harness.net
-        .request(
+      harness.net.request(
         "POST",
         endpoint,
         {
@@ -291,7 +292,9 @@ pub fn langfuse_sink(opts = nil) {
       __tt_report_error(
         on_error,
         "langfuse_sink HTTP " + to_string(response?.status ?? 0) + ": "
-          + to_string(response?.body ?? ""),
+          + to_string(
+          response?.body ?? "",
+        ),
         span,
       )
     }
@@ -452,7 +455,10 @@ pub fn resolve_telemetry_sink(value) {
     return __tt_named_sink(value, {})
   }
   if type_of(value) != "dict" {
-    throw "tool_telemetry: with_telemetry config must be callable, string, or dict; got " + type_of(value)
+    throw "tool_telemetry: with_telemetry config must be callable, string, or dict; got "
+      + type_of(
+      value,
+    )
   }
   const cfg = value
   if type_of(cfg?.sinks) == "list" {
@@ -580,7 +586,10 @@ fn __tt_otel_events(events) {
     if type_of(event) != "dict" {
       continue
     }
-    let record = {name: to_string(event?.name ?? ""), time_unix_nano: __tt_ms_to_nano(event?.time_ms ?? 0)}
+    let record = {
+      name: to_string(event?.name ?? ""),
+      time_unix_nano: __tt_ms_to_nano(event?.time_ms ?? 0),
+    }
     if type_of(event?.attributes) == "dict" {
       record = record + {attributes: event.attributes}
     }

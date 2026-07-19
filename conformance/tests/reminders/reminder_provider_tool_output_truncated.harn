@@ -47,9 +47,15 @@ pipeline main() {
     truncating_tools(),
     {session_id: dispatch_session, _iteration: 1},
   )
-  const dispatch_reminders = transcript_events_by_kind(agent_session_snapshot(dispatch_session), "system_reminder")
+  const dispatch_reminders = transcript_events_by_kind(
+    agent_session_snapshot(dispatch_session),
+    "system_reminder",
+  )
   const same_turn_ttl = agent_session_apply_reminder_post_turn(dispatch_session, 0)
-  const same_turn_reminders = transcript_events_by_kind(agent_session_snapshot(dispatch_session), "system_reminder")
+  const same_turn_reminders = transcript_events_by_kind(
+    agent_session_snapshot(dispatch_session),
+    "system_reminder",
+  )
   __io_println(dispatch.tool_output_truncated)
   __io_println(dispatch.reminder_provider_report.fired_count)
   __io_println(len(dispatch_reminders))
@@ -76,7 +82,10 @@ pipeline main() {
           session_id: "reminder-provider-tool-output-loop-enabled",
         },
       )
-      const loop_enabled_reminders = transcript_events_by_kind(loop_enabled.transcript, "system_reminder")
+      const loop_enabled_reminders = transcript_events_by_kind(
+        loop_enabled.transcript,
+        "system_reminder",
+      )
       const loop_disabled = agent_loop(
         "call a large tool",
         nil,
@@ -90,7 +99,10 @@ pipeline main() {
           reminders: {providers: ["-tool_output_truncated"]},
         },
       )
-      const loop_disabled_reminders = transcript_events_by_kind(loop_disabled.transcript, "system_reminder")
+      const loop_disabled_reminders = transcript_events_by_kind(
+        loop_disabled.transcript,
+        "system_reminder",
+      )
       __io_println(len(loop_enabled_reminders))
       __io_println(loop_enabled_reminders[0].reminder.tags[0])
       __io_println(len(loop_disabled_reminders))

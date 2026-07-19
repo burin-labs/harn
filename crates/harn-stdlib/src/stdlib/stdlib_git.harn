@@ -1,3 +1,12 @@
+pub import {
+  GitCheckoutDirtyPolicy,
+  GitCheckoutOptions,
+  GitCheckoutReceipt,
+  GitCheckoutStep,
+  GitCheckoutStepReceipt,
+  git_checkout_plan,
+} from "std/git/checkout"
+import { git_checkout_run } from "std/git/checkout"
 /**
  * std/git — typed local git operations with audit receipts.
  *
@@ -211,7 +220,20 @@ type GitPullOptions = {
 
 type GitToolGroup = "read" | "mutation"
 
-type GitToolOperation = "status" | "current_branch" | "log" | "diff" | "branch_list" | "remote_list" | "show" | "discover" | "conflicts" | "merge_base" | "fetch" | "switch" | "pull_ff_only" | "rebase"
+type GitToolOperation = "status" \
+  | "current_branch" \
+  | "log" \
+  | "diff" \
+  | "branch_list" \
+  | "remote_list" \
+  | "show" \
+  | "discover" \
+  | "conflicts" \
+  | "merge_base" \
+  | "fetch" \
+  | "switch" \
+  | "pull_ff_only" \
+  | "rebase"
 
 type GitToolCatalogOptions = {
   include_mutations?: bool,
@@ -330,7 +352,12 @@ pub fn git_env_remove() -> list<string> {
  * @errors: []
  */
 pub fn git_noninteractive_env() -> dict {
-  return {GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "", GIT_SSH_COMMAND: "ssh -oBatchMode=yes"}
+  return {
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "",
+    SSH_ASKPASS: "",
+    GIT_SSH_COMMAND: "ssh -oBatchMode=yes",
+  }
 }
 
 fn __git_non_empty_string(value, label) -> string {
@@ -437,7 +464,7 @@ fn __git_run_options(repo, options) -> dict {
  * fast instead of hanging a TTY-less runtime. Caller `env` keys win,
  * and `env_mode: "merge"` keeps inherited PATH/HOME/credentials.
  */
-fn __git_with_repo(repo, options) -> dict {
+fn __git_with_repo(repo, options) -> GitRunOptions {
   const opts = options ?? {}
   return opts + {repo: repo}
 }
@@ -594,8 +621,7 @@ pub fn git_describe(repo = ".", options: GitDescribeOptions = {}) -> GitDescribe
  */
 pub fn git_ls_remote(remote: string, options: GitLsRemoteOptions = {}) -> GitLsRemoteReceipt {
   const refs = __git_string_list(options.refs, "refs").map({ name -> __git_ref_arg(name, "refs") })
-  return git
-    .ls_remote(
+  return git.ls_remote(
     git_repo_path(options.repo ?? "."),
     __git_ref_arg(remote, "remote"),
     {refs: refs, tags: options.tags ?? false, heads: options.heads ?? false},
@@ -628,9 +654,13 @@ pub fn git_push(remote: string, refspec: string, repo = ".", lease = nil) -> Git
  * @effects: []
  * @errors: []
  */
-pub fn git_worktree_create(branch: string, path: string, repo = ".", options: dict = {}) -> GitReceipt {
-  return git
-    .worktree_create(
+pub fn git_worktree_create(
+  branch: string,
+  path: string,
+  repo = ".",
+  options: dict = {},
+) -> GitReceipt {
+  return git.worktree_create(
     repo,
     __git_ref_arg(branch, "branch"),
     __git_non_empty_string(path, "path"),
@@ -807,6 +837,21 @@ pub fn git_fetch(remote = "origin", repo = ".", refspecs: list<string> = []) -> 
   return git.fetch(repo, __git_ref_arg(remote, "remote"), __git_string_list(refspecs, "refspecs"))
 }
 
+/**
+ * Synchronize a checkout to an exact remote base ref and return every decision
+ * and command as a typed receipt. An injected runner receives the same
+ * `GitCheckoutStep` values production executes, so fixtures cannot drift from
+ * the canonical argv plan.
+ *
+ * @effects: [process]
+ * @errors: [ValueError]
+ */
+pub fn git_checkout_sync(options: GitCheckoutOptions) -> GitCheckoutReceipt {
+  const repo = git_repo_path(options.repo ?? ".")
+  const runner = options.runner ?? fn(step) { return git_run(step.argv.slice(1), {repo: repo}) }
+  return git_checkout_run(options + {repo: repo, runner: runner})
+}
+
 fn __git_list_contains(values, needle) -> bool {
   if type_of(values) == "string" {
     return values == needle
@@ -920,7 +965,11 @@ fn __git_catalog_all() {
       group: "read",
       description: "Find the merge-base OID for two refs.",
       keywords: ["merge-base", "merge", "base", "ancestor", "refs"],
-      parameters: {repo: {type: "string", required: false}, left: {type: "string"}, right: {type: "string"}},
+      parameters: {
+        repo: {type: "string", required: false},
+        left: {type: "string"},
+        right: {type: "string"},
+      },
       side_effect_level: "read_only",
     },
     {
@@ -992,11 +1041,15 @@ pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCata
       continue
     }
     if enabled != nil && !__git_list_contains(enabled, "all")
-      && !__git_list_contains(enabled, entry.operation)
+      && !__git_list_contains(
+      enabled,
+      entry.operation,
+    )
       && !__git_list_contains(enabled, entry.group) {
       continue
     }
-    if __git_list_contains(disabled, entry.operation) || __git_list_contains(disabled, entry.group) {
+    if __git_list_contains(disabled, entry.operation)
+      || __git_list_contains(disabled, entry.group) {
       continue
     }
     out = out.push(entry)
@@ -1108,7 +1161,7 @@ pub fn git_run_tool(
   operation: GitToolOperation,
   args: GitToolRunArgs = {},
   options: GitToolCatalogOptions = {},
-) {
+) -> unknown {
   const opts = options
   const request = args
   const op = __git_non_empty_string(operation, "operation")
@@ -1179,13 +1232,23 @@ pub fn git_run_tool(
 fn __git_tool_enabled(options, key, group) -> bool {
   const opts = options ?? {}
   const enabled = opts?.enabled_tools
-    ?? ["git_status", "git_current_branch", "git_log", "git_diff", "git_branch_list", "git_remote_list"]
+    ?? [
+    "git_status",
+    "git_current_branch",
+    "git_log",
+    "git_diff",
+    "git_branch_list",
+    "git_remote_list",
+  ]
   const disabled = opts?.disabled_tools ?? []
   if __git_list_contains(disabled, key) || __git_list_contains(disabled, group) {
     return false
   }
   return __git_list_contains(enabled, "all") || __git_list_contains(enabled, key)
-    || __git_list_contains(enabled, group)
+    || __git_list_contains(
+    enabled,
+    group,
+  )
 }
 
 fn __git_tool_name(options, key) -> string {
@@ -1289,7 +1352,10 @@ fn __git_toolbox_enabled(options, key) -> bool {
     return false
   }
   return __git_list_contains(enabled, "all") || __git_list_contains(enabled, "toolbox")
-    || __git_list_contains(enabled, key)
+    || __git_list_contains(
+    enabled,
+    key,
+  )
 }
 
 fn __git_toolbox_find_options(opts, args) {
@@ -1336,7 +1402,11 @@ pub fn git_toolbox_tools(registry = nil, options: GitToolRegistryOptions = {}) {
         {
           parameters: {query: {type: "string"}, max_results: {type: "integer", required: false}},
           returns: {type: "object"},
-          annotations: __git_tool_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
+          annotations: __git_tool_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
           handler: { args -> git_find_tool(args.query, __git_toolbox_find_options(opts, args)) },
         },
       ),

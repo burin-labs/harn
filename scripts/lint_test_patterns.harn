@@ -71,7 +71,10 @@ const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
 // SystemTime::now() in test files — use injected clock / MockClock instead.
 // Remaining entries: legitimate fixture-setup uses against real OS time
 // (httpdate Retry-After parsing, real-mtime touch fixtures).
-const SYSTEM_TIME_ALLOWLIST: list<string> = ["crates/harn-vm/src/http/tests.rs", "crates/harn-hostlib/tests/scanner_e2e.rs"]
+const SYSTEM_TIME_ALLOWLIST: list<string> = [
+  "crates/harn-vm/src/http/tests.rs",
+  "crates/harn-hostlib/tests/scanner_e2e.rs",
+]
 
 // recv_timeout with an explicit sub-second Duration literal.
 // Named-constant variants are not caught here because the constant value
@@ -146,6 +149,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/orchestrator_cli_e2e.rs",
   "crates/harn-cli/tests/orchestrator_cli_e2e/support.rs",
   "crates/harn-cli/tests/persona_activation_cli_e2e.rs",
+  // Cross-process package lease coverage must exercise two real commands
+  // against the same installed generation.
+  "crates/harn-cli/tests/package_generation_concurrency_cli_e2e.rs",
   "crates/harn-cli/tests/persona_cli.rs",
   "crates/harn-cli/tests/test_worker_cli_e2e.rs",
   "crates/harn-cli/tests/run_eval_cleanup_e2e.rs",
@@ -308,6 +314,11 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/http/client.rs",
   "crates/harn-vm/src/http/streaming/websocket.rs",
   "crates/harn-vm/src/llm/agent_observe.rs",
+  // Split children preserve the parent observability contracts: transcript
+  // timestamps and streamed tool-call coalescing use host time as the source
+  // of truth, rather than VM-scheduled time.
+  "crates/harn-vm/src/llm/agent_observe/transcript_observability.rs",
+  "crates/harn-vm/src/llm/api/transport/sse.rs",
   // Agent host primitive tool dispatch records actual host monotonic
   // elapsed time for transcript / portal execution telemetry.
   "crates/harn-vm/src/llm/agent_host_primitives.rs",
@@ -669,7 +680,12 @@ pub fn has_mock_time(text: string) -> bool {
  * file for which `skip(rel)` is true. Prints each hit as `  <n>:<line>`
  * followed by the pre-formatted `hint_lines`; returns the violation count.
  */
-fn report_pattern(files: list, skip: fn(string) -> bool, pattern: string, hint_lines: list<string>) -> int {
+fn report_pattern(
+  files: list,
+  skip: fn(string) -> bool,
+  pattern: string,
+  hint_lines: list<string>,
+) -> int {
   let count = 0
   for f in files {
     if skip(f.rel) {
@@ -738,7 +754,9 @@ pipeline main(task) {
     test_files,
     { rel -> TOKIO_SLEEP_ALLOWLIST.contains(rel) },
     tokio_sleep_pattern(),
-    ["    hint: Use tokio::time::pause() + advance() in a #[tokio::test(start_paused = true)] context."],
+    [
+      "    hint: Use tokio::time::pause() + advance() in a #[tokio::test(start_paused = true)] context.",
+    ],
   )
   __io_println("--- Instant::now() deadline comparison (wall-clock poll) ---")
   // Catches `Instant::now() < deadline`, `>= deadline`, etc. — the smell is
@@ -789,13 +807,16 @@ pipeline main(task) {
   }
   for f in test_files {
     if !f.rel.starts_with("crates/harn-cli/tests/")
-      || f.rel == "crates/harn-cli/tests/test_util/process.rs" {
+      || f.rel
+      == "crates/harn-cli/tests/test_util/process.rs" {
       continue
     }
     const actual = find_hits(f.text, direct_harn_binary_pattern()).count
     const expected = direct_harn_binary_baseline(f.rel)
     if actual != expected {
-      __io_println("  " + f.rel + ": expected " + to_string(expected) + ", found " + to_string(actual))
+      __io_println(
+        "  " + f.rel + ": expected " + to_string(expected) + ", found " + to_string(actual),
+      )
       __io_println(
         "    hint: route real CLI subprocesses through crates/harn-cli/tests/test_util/process.rs",
       )

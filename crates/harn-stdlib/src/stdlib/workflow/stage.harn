@@ -263,7 +263,9 @@ fn __stage_prepare_join() {
 }
 
 fn __stage_prepare_condition(node, artifacts) {
-  const condition = workflow_evaluate_condition({metadata: node?.metadata ?? {}, artifacts: artifacts})
+  const condition = workflow_evaluate_condition(
+    {metadata: node?.metadata ?? {}, artifacts: artifacts},
+  )
   return {
     handled: true,
     result: {
@@ -321,7 +323,11 @@ fn __stage_prepare_escalation(node_id, node, consumed_artifact_ids) {
         node_id,
         output_kind,
         0,
-        {queue: node?.escalation_policy?.queue, level: node?.escalation_policy?.level, reason: reason},
+        {
+          queue: node?.escalation_policy?.queue,
+          level: node?.escalation_policy?.level,
+          reason: reason,
+        },
         consumed_artifact_ids,
         "escalation " + node_id,
       ),
@@ -360,7 +366,11 @@ fn __stage_prepare_manual_gate(node_id, node, artifacts) {
     const skipped = skippable && category == "timeout"
     const branch = if skipped {
       "skipped"
-    } else if category == "approval_denied" || contains(__stage_error_message(error), "denied") {
+    } else if category == "approval_denied"
+      || contains(
+      __stage_error_message(error),
+      "denied",
+    ) {
       "denied"
     } else {
       "failed"
@@ -406,7 +416,12 @@ fn __stage_prepare_manual_gate(node_id, node, artifacts) {
   } else {
     "denied"
   }
-  const data = {approval_id: approval_id, approved: approved, skipped: !approved && skippable, approval: approval}
+  const data = {
+    approval_id: approval_id,
+    approved: approved,
+    skipped: !approved && skippable,
+    approval: approval,
+  }
   const output_kind = __stage_first_string(node?.output_contract?.output_kinds, "approval")
   return {
     handled: true,
@@ -459,7 +474,12 @@ fn __stage_prepare_command(node_id, node, consumed_artifact_ids) {
     "failed"
   }
   const result = command_result
-    + {status: status, text: text, visible_text: text, exit_status: command_result?.exit_code}
+    + {
+    status: status,
+    text: text,
+    visible_text: text,
+    exit_status: command_result?.exit_code,
+  }
   return {
     handled: true,
     result: result,
@@ -613,14 +633,16 @@ pub fn workflow_evaluate_verification(config = nil) {
   const exit_status = __stage_exit_status(result)
   let checks = []
   if type_of(verify?.assert_text) == "string" {
-    checks = checks
-      .push(
-      {kind: "assert_text", ok: contains(visible_text, verify.assert_text), expected: verify.assert_text},
+    checks = checks.push(
+      {
+        kind: "assert_text",
+        ok: contains(visible_text, verify.assert_text),
+        expected: verify.assert_text,
+      },
     )
   }
   if type_of(verify?.expect_status) == "int" {
-    checks = checks
-      .push(
+    checks = checks.push(
       {
         kind: "expect_status",
         ok: exit_status == verify.expect_status,
@@ -820,7 +842,9 @@ fn __stage_verification_findings(verification) {
   for check in __stage_list(verification?.checks) {
     if !__stage_bool(check?.ok, true) {
       const kind = __stage_string(check?.kind, "check")
-      out = out.push(kind + ": expected " + to_string(check?.expected) + ", got " + to_string(check?.actual))
+      out = out.push(
+        kind + ": expected " + to_string(check?.expected) + ", got " + to_string(check?.actual),
+      )
     }
   }
   return out
@@ -1060,7 +1084,15 @@ pub fn workflow_execute_stage_attempts(
     const raw_settled = if __stage_is_callable(node_dict?.executor) {
       __stage_run_executor(node_dict, attempt_task, attempt, prior, selected, transcript)
     } else {
-      __host_stage_execute_once(node_id, node_dict, attempt_task, attempt, arts, selected, transcript)
+      __host_stage_execute_once(
+        node_id,
+        node_dict,
+        attempt_task,
+        attempt,
+        arts,
+        selected,
+        transcript,
+      )
     }
     // fn-verify mode: a callable `verify` gates the settled attempt (any stage
     // kind) and threads its findings forward. The dict/command verify path is
@@ -1080,7 +1112,14 @@ pub fn workflow_execute_stage_attempts(
       }
       attempts = __host_stage_record_attempt(
         attempts,
-        __stage_attempt_record(attempt, status, settled?.outcome, branch, nil, settled?.verification),
+        __stage_attempt_record(
+          attempt,
+          status,
+          settled?.outcome,
+          branch,
+          nil,
+          settled?.verification,
+        ),
       )
       if success || attempt == max_attempts {
         return {
@@ -1275,7 +1314,10 @@ pub fn workflow_flatten_agent_loop_options(config = nil) {
   options = options + {policy: cfg?.policy ?? {}, approval_policy: cfg?.approval_policy}
   // 7. Session + tool format.
   options = options
-    + {session_id: __stage_string(cfg?.session_id, ""), tool_format: __stage_string(cfg?.tool_format, "")}
+    + {
+    session_id: __stage_string(cfg?.session_id, ""),
+    tool_format: __stage_string(cfg?.tool_format, ""),
+  }
   // 8. Nested-execution attribution.
   options = options
     + {

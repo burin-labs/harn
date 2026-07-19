@@ -3,7 +3,10 @@ import { assert_eq } from "std/testing"
 
 pipeline test(task) {
   const spec = parser(
-    {name: "demo", args: [{name: "model", kind: "flag", short: "-m", long: "--model", multi: true}]},
+    {
+      name: "demo",
+      args: [{name: "model", kind: "flag", short: "-m", long: "--model", multi: true}],
+    },
   )
   const result = parse(spec, ["-m", "a", "--model", "b", "--model=c"])
   assert_eq(result, Ok({options: {model: ["a", "b", "c"]}, rest: []}))

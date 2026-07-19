@@ -6,7 +6,11 @@ fn handler(event: TriggerEvent) -> dict {
 }
 
 fn classify(event: TriggerEvent) -> bool {
-  const result = llm_call("predicate breaker " + event.kind, nil, {provider: "mock", model: "gpt-4o-mini"})
+  const result = llm_call(
+    "predicate breaker " + event.kind,
+    nil,
+    {provider: "mock", model: "gpt-4o-mini"},
+  )
   return contains(result.text, "yes")
 }
 
@@ -19,7 +23,9 @@ pipeline test(task) {
     ],
     { ->
       const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-        + to_string(harness.random.gen_range(100000, 999999))
+        + to_string(
+        harness.random.gen_range(100000, 999999),
+      )
       const handle: TriggerHandle = trigger_register(
         {
           id: "llm-predicate-breaker-" + unique,
@@ -40,22 +46,39 @@ pipeline test(task) {
       )
       const first: DispatchHandle = trigger_fire(
         handle,
-        {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-1-" + unique}},
+        {
+          provider: "github",
+          kind: "issue.opened",
+          headers: {x_delivery: "evt-breaker-1-" + unique},
+        },
       )
       const second: DispatchHandle = trigger_fire(
         handle,
-        {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-2-" + unique}},
+        {
+          provider: "github",
+          kind: "issue.opened",
+          headers: {x_delivery: "evt-breaker-2-" + unique},
+        },
       )
       const third: DispatchHandle = trigger_fire(
         handle,
-        {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-3-" + unique}},
+        {
+          provider: "github",
+          kind: "issue.opened",
+          headers: {x_delivery: "evt-breaker-3-" + unique},
+        },
       )
       const fourth: DispatchHandle = trigger_fire(
         handle,
-        {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-4-" + unique}},
+        {
+          provider: "github",
+          kind: "issue.opened",
+          headers: {x_delivery: "evt-breaker-4-" + unique},
+        },
       )
-      const evaluated = trigger_inspect_lifecycle("predicate.evaluated")
-        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
+      const evaluated = trigger_inspect_lifecycle("predicate.evaluated").filter(
+        { entry -> entry?.headers?.trigger_id == handle.id },
+      )
       const last = evaluated[len(evaluated) - 1]
       __io_println(len(llm_mock_calls()) == 3)
       __io_println(contains(json_stringify(first.result ?? {}), "\"skipped\":true"))

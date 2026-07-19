@@ -37,8 +37,12 @@ pub fn backends() -> dict {
     auto: __backend("auto"),
     pretty_stderr: __backend("pretty_stderr"),
     otel: { endpoint = nil, id = "otel" -> __backend("otel", {endpoint: endpoint, id: id}) },
-    splunk_hec: { endpoint = nil, token = nil, id = "splunk" -> __backend("splunk_hec", {endpoint: endpoint, token: token, id: id}) },
-    honeycomb: { api_key = nil, dataset = nil, id = "honeycomb" -> __backend("honeycomb", {api_key: api_key, dataset: dataset, id: id}) },
+    splunk_hec: { endpoint = nil, token = nil, id = "splunk" ->
+      __backend("splunk_hec", {endpoint: endpoint, token: token, id: id})
+    },
+    honeycomb: { api_key = nil, dataset = nil, id = "honeycomb" ->
+      __backend("honeycomb", {api_key: api_key, dataset: dataset, id: id})
+    },
     compose: { items, id = "compose" -> __backend("compose", {backends: items, id: id}) },
     test: { id = "test" -> __backend("test", {id: id}) },
   }
@@ -301,7 +305,9 @@ pub fn obs() -> dict {
     end_span: { handle -> end_span(handle) },
     span: { name, attrs = {}, callback = nil -> span(name, attrs, callback) },
     log: { message, level = "info", fields = {} -> log(message, level, fields) },
-    log_in_span: { handle, message, level = "info", fields = {} -> log_in_span(handle, message, level, fields) },
+    log_in_span: { handle, message, level = "info", fields = {} ->
+      log_in_span(handle, message, level, fields)
+    },
     metric: { name, value, fields = {} -> metric(name, value, fields) },
     counter: { name, value = 1, attrs = {} -> counter(name, value, attrs) },
     histogram: { name, value, attrs = {} -> histogram(name, value, attrs) },

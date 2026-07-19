@@ -1,0 +1,134 @@
+// Run: harn test tests/stdlib/changelog_test.harn
+import {
+  ChangelogCategory,
+  ChangelogFragment,
+  changelog_assemble_fragments,
+  changelog_find_section,
+  changelog_merge_unreleased,
+  changelog_normalize_fragment_body,
+  changelog_order_fragments,
+  changelog_parse_fragment,
+  changelog_parse_sections,
+  changelog_validate_categories,
+} from "std/changelog"
+import { assert_eq } from "std/testing"
+
+fn categories() -> list<ChangelogCategory> {
+  return [
+    {slug: "added", heading: "Added"},
+    {slug: "changed", heading: "Changed"},
+    {slug: "fixed", heading: "Fixed"},
+  ]
+}
+
+fn fragment(id: string, category: string, body: string) -> ChangelogFragment {
+  return {id: id, category: category, body: body, file: id + "." + category + ".md"}
+}
+
+pipeline test_category_and_fragment_failures_are_typed(task) {
+  const duplicate_slug = changelog_validate_categories(
+    [{slug: "fixed", heading: "Fixed"}, {slug: "fixed", heading: "Repairs"}],
+  )
+  assert(is_err(duplicate_slug))
+  assert_eq(unwrap_err(duplicate_slug).kind, "duplicate_category")
+  const duplicate_heading = changelog_validate_categories(
+    [{slug: "fixed", heading: "Changed"}, {slug: "changed", heading: "Changed"}],
+  )
+  assert_eq(unwrap_err(duplicate_heading).kind, "duplicate_category")
+  const malformed = changelog_parse_fragment("README.md", "body", categories())
+  assert_eq(unwrap_err(malformed).kind, "malformed_filename")
+  const unknown = changelog_parse_fragment("12.security.md", "body", categories())
+  assert_eq(unwrap_err(unknown).kind, "unknown_category")
+  const empty = changelog_parse_fragment("12.fixed.md", " \n", categories())
+  assert_eq(unwrap_err(empty).kind, "empty_body")
+  const invalid_direct = changelog_order_fragments([fragment("", "fixed", "body")], categories())
+  assert_eq(unwrap_err(invalid_direct).kind, "invalid_fragment")
+}
+
+pipeline test_fragment_order_is_natural_and_permutation_invariant(task) {
+  const huge = "99999999999999999999999999999999999999999999999999"
+  const forward = [
+    fragment("alpha", "added", "alpha"),
+    fragment("10", "added", "ten"),
+    fragment(huge, "added", "huge"),
+    fragment("2", "added", "two"),
+    fragment("01", "added", "one"),
+    fragment("7", "fixed", "fixed"),
+  ]
+  const reverse = [
+    fragment("7", "fixed", "fixed"),
+    fragment("01", "added", "one"),
+    fragment("2", "added", "two"),
+    fragment(huge, "added", "huge"),
+    fragment("10", "added", "ten"),
+    fragment("alpha", "added", "alpha"),
+  ]
+  const ordered = unwrap(changelog_order_fragments(forward, categories()))
+  assert_eq(ordered.map({ item -> item.id }), ["01", "2", "10", huge, "alpha", "7"])
+  const assembled = unwrap(changelog_assemble_fragments(forward, categories()))
+  assert_eq(changelog_assemble_fragments(reverse, categories()), Ok(assembled))
+  assert_eq(assembled, "### Added\n\n- one\n- two\n- ten\n- huge\n- alpha\n\n### Fixed\n\n- fixed")
+  const duplicate = changelog_order_fragments(
+    [fragment("7", "fixed", "first"), fragment("7", "fixed", "second")],
+    categories(),
+  )
+  assert_eq(unwrap_err(duplicate).kind, "duplicate_fragment")
+}
+
+pipeline test_fragment_bullets_preserve_authored_markdown(task) {
+  assert_eq(
+    changelog_normalize_fragment_body("Unicode café\ncontinues here"),
+    Ok("- Unicode café\n  continues here"),
+  )
+  const authored = "- First\n  continuation\n\n* Second"
+  assert_eq(changelog_normalize_fragment_body(authored), Ok(authored))
+}
+
+pipeline test_sections_use_utf8_byte_offsets_and_ignore_fences(task) {
+  const text = "# Ω\n\n## Unreleased\n\n- café\n\n```md\n## hidden\n```\n\n## v1.0.0\n\n- old"
+  const parsed = changelog_parse_sections(text)
+  assert(is_ok(parsed))
+  const sections = unwrap(parsed)
+  assert_eq(sections.map({ section -> section.heading }), ["## Unreleased", "## v1.0.0"])
+  const first_prefix = "# Ω\n\n"
+  const second_prefix = "# Ω\n\n## Unreleased\n\n- café\n\n```md\n## hidden\n```\n\n"
+  assert_eq(sections[0].start, bytes_len(bytes_from_string(first_prefix)))
+  assert_eq(sections[0].end, bytes_len(bytes_from_string(second_prefix)))
+  assert_eq(sections[0].body, "- café\n\n```md\n## hidden\n```")
+  assert_eq(unwrap(changelog_find_section(text, "v1.0.0")).body, "- old")
+  assert_eq(unwrap_err(changelog_find_section(text, "v2.0.0")).kind, "missing_section")
+  assert_eq(changelog_parse_sections(""), Ok([]))
+  const repeated = changelog_parse_sections("## Unreleased\n\na\n\n## Unreleased\n\nb")
+  assert_eq(unwrap_err(repeated).kind, "duplicate_heading")
+}
+
+pipeline test_merge_preserves_content_newlines_and_terminal_semantics(task) {
+  const fragments = unwrap(
+    changelog_assemble_fragments(
+      [fragment("2", "fixed", "new fix"), fragment("1", "added", "new tool")],
+      categories(),
+    ),
+  )
+  const existing =
+    "# Changelog\r\n\r\n## Unreleased\r\n\r\nOperator preface.\r\n\r\n### Added\r\n\r\n- Authored.\r\n\r\n## v1.0.0\r\n\r\n- Old.\r\n"
+  const merged = unwrap(changelog_merge_unreleased(existing, fragments, categories()))
+  assert(merged.changed)
+  assert(contains(merged.text, "Operator preface.\r\n\r\n### Added"))
+  assert(contains(merged.text, "- Authored.\r\n\r\n- new tool"))
+  assert(contains(merged.text, "### Fixed\r\n\r\n- new fix"))
+  assert(ends_with(merged.text, "\r\n"))
+  assert(!contains(replace(merged.text, "\r\n", ""), "\n"))
+  const twice = unwrap(changelog_merge_unreleased(merged.text, fragments, categories()))
+  assert_eq(twice, {text: merged.text, changed: false})
+  const substring_existing = "## Unreleased\n\n### Fixed\n\n- new fix with more detail"
+  const substring_merge = unwrap(
+    changelog_merge_unreleased(substring_existing, "### Fixed\n\n- new fix", categories()),
+  )
+  assert(contains(substring_merge.text, "- new fix with more detail\n\n- new fix"))
+  const created = unwrap(changelog_merge_unreleased("# Changelog", fragments, categories()))
+  assert_eq(
+    created.text,
+    "# Changelog\n\n## Unreleased\n\n### Added\n\n- new tool\n\n### Fixed\n\n- new fix",
+  )
+  assert(!ends_with(created.text, "\n"))
+}

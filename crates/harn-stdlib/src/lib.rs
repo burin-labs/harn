@@ -46,6 +46,7 @@ pub struct StdlibEntrypointModule {
 pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, module, [
     "text" => "stdlib/stdlib_text.harn",
     "semver" => "stdlib/stdlib_semver.harn",
+    "changelog" => "stdlib/stdlib_changelog.harn",
     "ansi" => "stdlib/stdlib_ansi.harn",
     "table" => "stdlib/stdlib_table.harn",
     "diff" => "stdlib/stdlib_diff.harn",
@@ -95,6 +96,11 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "io" => "stdlib/stdlib_io.harn",
     "net" => "stdlib/stdlib_net.harn",
     "command" => "stdlib/stdlib_command.harn",
+    "verification_types" => "stdlib/verification_types.harn",
+    "verification_core" => "stdlib/verification_core.harn",
+    "verification_targets" => "stdlib/verification_targets.harn",
+    "verification_ladder" => "stdlib/verification_ladder.harn",
+    "verification_public" => "stdlib/verification_public.harn",
     "signal" => "stdlib/stdlib_signal.harn",
     "net_policy" => "stdlib/stdlib_net_policy.harn",
     "review" => "stdlib/stdlib_review.harn",
@@ -105,6 +111,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "poll" => "stdlib/stdlib_poll.harn",
     "coerce" => "stdlib/stdlib_coerce.harn",
     "settled" => "stdlib/stdlib_settled.harn",
+    "cli" => "stdlib/stdlib_cli.harn",
     "cli/argparse" => "stdlib/cli/argparse.harn",
     "cli/render" => "stdlib/cli/render.harn",
     "cli/models/batch_artifacts" => "stdlib/cli/models/batch_artifacts.harn",
@@ -148,6 +155,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/reasoning" => "stdlib/agent/reasoning.harn",
     "agent/caller_transport" => "stdlib/agent/caller_transport.harn",
     "agent/options" => "stdlib/agent/options.harn",
+    "agent/options_types" => "stdlib/agent/options_types.harn",
+    "agent/options_formats" => "stdlib/agent/options_formats.harn",
+    "agent/options_validation" => "stdlib/agent/options_validation.harn",
+    "agent/options_public" => "stdlib/agent/options_public.harn",
     "agent/llm_dispatch" => "stdlib/agent/llm_dispatch.harn",
     "agent/prefill" => "stdlib/agent/prefill.harn",
     "agent/retry" => "stdlib/agent/retry.harn",
@@ -164,12 +175,28 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/monologue_actuation_types" => "stdlib/agent/monologue_actuation_types.harn",
     "agent/stall_types" => "stdlib/agent/stall_types.harn",
     "agent/stall" => "stdlib/agent/stall.harn",
+    "agent/stall_config" => "stdlib/agent/stall_config.harn",
+    "agent/stall_observation" => "stdlib/agent/stall_observation.harn",
+    "agent/stall_verification" => "stdlib/agent/stall_verification.harn",
+    "agent/stall_detectors" => "stdlib/agent/stall_detectors.harn",
     "agent/governors" => "stdlib/agent/governors.harn",
     "agent/control" => "stdlib/agent/control.harn",
     "agent/action_graph" => "stdlib/agent/action_graph.harn",
     "agent/result_text" => "stdlib/agent/result_text.harn",
     "agent/best_of_n" => "stdlib/agent/best_of_n.harn",
     "agent/loop" => "stdlib/agent/loop.harn",
+    "agent/loop_support" => "stdlib/agent/loop_support.harn",
+    "agent/loop_call_resolution" => "stdlib/agent/loop_call_resolution.harn",
+    "agent/loop_result_status" => "stdlib/agent/loop_result_status.harn",
+    "agent/loop_foundation" => "stdlib/agent/loop_foundation.harn",
+    "agent/loop_tool_calls" => "stdlib/agent/loop_tool_calls.harn",
+    "agent/loop_resource_dispatch" => "stdlib/agent/loop_resource_dispatch.harn",
+    "agent/loop_turn_options" => "stdlib/agent/loop_turn_options.harn",
+    "agent/loop_turn_scope" => "stdlib/agent/loop_turn_scope.harn",
+    "agent/loop_internal" => "stdlib/agent/loop_internal.harn",
+    "agent/loop_run" => "stdlib/agent/loop_run.harn",
+    "agent/loop_finalize" => "stdlib/agent/loop_finalize.harn",
+    "agent/loop_terminal" => "stdlib/agent/loop_terminal.harn",
     "agent/chat" => "stdlib/agent/chat.harn",
     "agent/user" => "stdlib/agent/user.harn",
     "agent/tool_search" => "stdlib/agent/tool_search.harn",
@@ -224,6 +251,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "host" => "stdlib/stdlib_host.harn",
     "host_lease" => "stdlib/stdlib_host_lease.harn",
     "git" => "stdlib/stdlib_git.harn",
+    "git/checkout" => "stdlib/git/checkout.harn",
     "hitl" => "stdlib/stdlib_hitl.harn",
     "trust" => "stdlib/stdlib_trust.harn",
     "corrections" => "stdlib/stdlib_corrections.harn",
@@ -736,6 +764,7 @@ mod tests {
             "agent/user",
             "agent/governors",
             "agent/guardrails",
+            "cli",
             "cli/models/batch_artifacts",
             "cli/models/batch_cancel",
             "cli/models/batch_download",
@@ -985,6 +1014,26 @@ mod tests {
             "version_from_tag",
         ] {
             assert!(exports.contains(name), "std/semver should export {name}");
+        }
+    }
+
+    #[test]
+    fn changelog_stdlib_module_exports_typed_primitives() {
+        let exports = public_functions_for_module("changelog")
+            .into_iter()
+            .map(|function| function.name)
+            .collect::<BTreeSet<_>>();
+        for name in [
+            "changelog_validate_categories",
+            "changelog_parse_fragment",
+            "changelog_order_fragments",
+            "changelog_normalize_fragment_body",
+            "changelog_assemble_fragments",
+            "changelog_parse_sections",
+            "changelog_find_section",
+            "changelog_merge_unreleased",
+        ] {
+            assert!(exports.contains(name), "std/changelog should export {name}");
         }
     }
 

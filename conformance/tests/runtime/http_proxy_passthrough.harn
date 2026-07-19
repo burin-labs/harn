@@ -1,15 +1,6 @@
 import { process_shell } from "std/runtime"
 import { shell_quote } from "std/runtime"
-import { resolve_harn_bin } from "../_common.harn"
-
-fn wait_for_file(harness: Harness, path, attempts) {
-  let remaining = attempts
-  while !harness.fs.exists(path) && remaining > 0 {
-    sleep(50ms)
-    remaining = remaining - 1
-  }
-  require harness.fs.exists(path), "timed out waiting for " + path
-}
+import { resolve_harn_bin, wait_for_file_content } from "../_common.harn"
 
 pipeline default() {
   const root = project_root() ?? cwd()
@@ -30,16 +21,43 @@ pipeline default() {
       + shell_quote(pid_path),
   )
   require start?.success, "proxy server started"
-  wait_for_file(harness, port_path, 100)
-  const proxy = "http://127.0.0.1:" + harness.fs.read_text(port_path).trim()
-  const response = harness.net
-    .get(
+  // Wait for the port file to hold a non-empty value, not merely to exist:
+  // the server creates it before flushing the port number.
+  const port = wait_for_file_content(
+    harness,
+    port_path,
+    { text ->
+      const trimmed = trim(text)
+      if trimmed != "" {
+        return trimmed
+      }
+      return nil
+    },
+  )
+  require port != nil, "timed out waiting for proxy server to publish its port"
+  const proxy = "http://127.0.0.1:" + port
+  const response = harness.net.get(
     "http://example.invalid/proxy-check",
     {proxy: proxy, proxy_auth: {user: "user", pass: "pass"}, timeout_ms: 1000},
   )
-  wait_for_file(harness, state_path, 100)
+  // Wait until the recorded request state parses as a complete JSON object,
+  // not merely until the file exists: it is written after the proxied request
+  // and a bare existence wait can observe a half-written document.
+  const state = wait_for_file_content(
+    harness,
+    state_path,
+    { text ->
+      const parsed = try {
+        json_parse(text)
+      }
+      if is_ok(parsed) {
+        return unwrap(parsed)
+      }
+      return nil
+    },
+  )
+  require state != nil, "timed out waiting for proxy server to record the request state"
   process_shell("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
-  const state = json_parse(harness.fs.read_text(state_path))
   __io_println(response.body)
   __io_println(state.method)
   __io_println(state.target)

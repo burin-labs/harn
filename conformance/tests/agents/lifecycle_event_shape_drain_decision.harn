@@ -2,7 +2,11 @@ pipeline main() {
   const evt = transcript_drain_decision_event(
     {
       pipeline_id: "pipeline-1",
-      item: {category: "suspended_subagent", id: "worker://triage/42", summary: "worker is suspended"},
+      item: {
+        category: "suspended_subagent",
+        id: "worker://triage/42",
+        summary: "worker is suspended",
+      },
       action: "resume",
       reason: "settlement agent selected continuation",
       decided_at_turn: 7,

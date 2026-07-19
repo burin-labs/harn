@@ -91,7 +91,8 @@ pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request
       messages: [
         {
           role: "user",
-          content: "<tool_result name=\"edit\">wrote a.go</tool_result><tool_result name=\"run\">Error: exit 1</tool_result>",
+          content:
+            "<tool_result name=\"edit\">wrote a.go</tool_result><tool_result name=\"run\">Error: exit 1</tool_result>",
         },
       ],
     },
@@ -117,7 +118,11 @@ pipeline test_agent_transcript_helpers_cover_provider_variants(_task) {
     "content parts join",
   )
   const openai = agent_transcript_tool_call(
-    {id: "call-1", type: "function", function: {name: "search", arguments: "{\"query\":\"needle\"}"}},
+    {
+      id: "call-1",
+      type: "function",
+      function: {name: "search", arguments: "{\"query\":\"needle\"}"},
+    },
   )
   assert(openai.name == "search", "OpenAI function name")
   assert(openai.args.query == "needle", "OpenAI JSON args")
@@ -194,9 +199,21 @@ pipeline test_agent_transcript_report_surfaces_malformed_records(_task) {
     [
       42,
       {type: "unknown_envelope", role: "observer", content: "side channel"},
-      {type: "message", role: "assistant", message: {tool_calls: [{arguments: "{\"path\":\"a\"}"}]}},
-      {type: "message", role: "assistant", message: {tool_calls: [{name: "run", arguments: "{bad"}]}},
-      {type: "message", role: "assistant", message: {tool_calls: [{name: "edit", args: ["not", "dict"]}]}},
+      {
+        type: "message",
+        role: "assistant",
+        message: {tool_calls: [{arguments: "{\"path\":\"a\"}"}]},
+      },
+      {
+        type: "message",
+        role: "assistant",
+        message: {tool_calls: [{name: "run", arguments: "{bad"}]},
+      },
+      {
+        type: "message",
+        role: "assistant",
+        message: {tool_calls: [{name: "edit", args: ["not", "dict"]}]},
+      },
     ],
   )
   let issue_text = json_stringify(report.issues)

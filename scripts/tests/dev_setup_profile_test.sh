@@ -43,6 +43,9 @@ run_setup() {
   local cargo_record="$4"
 
   mkdir -p "$tmp_root/tmp-$profile"
+  HARN_DEV_SETUP_STORAGE_ROOT= \
+  HARN_DEV_TARGET_DIR= \
+  HARN_DEV_BUILD_DIR= \
   PATH="$repo/bin:/usr/bin:/bin" \
     HOME="$tmp_root/home-$profile" \
     XDG_CACHE_HOME="$tmp_root/cache-$profile" \
@@ -123,6 +126,9 @@ fi
 
 add_available_cargo_tools "$rust_repo"
 mkdir -p "$tmp_root/tmp-profile-switch"
+HARN_DEV_SETUP_STORAGE_ROOT= \
+HARN_DEV_TARGET_DIR= \
+HARN_DEV_BUILD_DIR= \
 PATH="$rust_repo/bin:/usr/bin:/bin" \
   HOME="$tmp_root/home-profile-switch" \
   TMPDIR="$tmp_root/tmp-profile-switch" \
@@ -165,6 +171,9 @@ mkdir -p "$user_repo/.cargo"
 printf '%s\n' '[build]' 'target-dir = "/mnt/team/harn-target/release"' 'build-dir = "/mnt/team/cargo-build-shared"' > "$user_repo/.cargo/config.toml"
 add_available_cargo_tools "$user_repo"
 mkdir -p "$tmp_root/tmp-user-config"
+HARN_DEV_SETUP_STORAGE_ROOT= \
+HARN_DEV_TARGET_DIR= \
+HARN_DEV_BUILD_DIR= \
 PATH="$user_repo/bin:/usr/bin:/bin" \
   HOME="$tmp_root/home-user-config" \
   TMPDIR="$tmp_root/tmp-user-config" \
@@ -187,6 +196,9 @@ mkdir -p "$legacy_repo/.cargo"
 printf '%s\n' '[build]' 'target-dir = "/tmp/harn-target/legacy"' 'build-dir = "/tmp/cargo-build-shared"' > "$legacy_repo/.cargo/config.toml"
 add_available_cargo_tools "$legacy_repo"
 mkdir -p "$tmp_root/tmp-legacy-config"
+HARN_DEV_SETUP_STORAGE_ROOT= \
+HARN_DEV_TARGET_DIR= \
+HARN_DEV_BUILD_DIR= \
 PATH="$legacy_repo/bin:/usr/bin:/bin" \
   HOME="$tmp_root/home-legacy-config" \
   TMPDIR="$tmp_root/tmp-legacy-config" \

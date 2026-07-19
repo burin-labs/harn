@@ -333,11 +333,7 @@ fn __render_json(report) -> string {
 fn __html_escape(s: string) -> string {
   // The ampersand replace must run first to avoid double-encoding the
   // ampersands that the other replacements introduce.
-  return s
-    .replace("&", "&amp;")
-    .replace("<", "&lt;")
-    .replace(">", "&gt;")
-    .replace("\"", "&quot;")
+  return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
     .replace("'", "&#39;")
 }
 
@@ -383,9 +379,11 @@ fn __html_render_card(render, runs) -> string {
 fn __render_html(report) -> string {
   let out = "<!doctype html><html><head><meta charset=\"utf-8\"><title>"
     + "harn eval prompt report</title>"
-  out = out + "<style>body{font-family:system-ui,sans-serif;margin:2rem;color:#222}h1{margin-bottom:0}"
+  out = out
+    + "<style>body{font-family:system-ui,sans-serif;margin:2rem;color:#222}h1{margin-bottom:0}"
   out = out + ".meta{color:#666;font-size:0.9rem;margin-bottom:1.5rem}"
-  out = out + ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(28rem,1fr));gap:1rem}"
+  out = out
+    + ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(28rem,1fr));gap:1rem}"
   out = out + ".card{border:1px solid #ddd;border-radius:6px;padding:1rem;background:#fafafa}"
   out = out + ".card h2{margin-top:0;font-size:1rem}"
   out = out
@@ -393,7 +391,9 @@ fn __render_html(report) -> string {
   out = out + ".err{color:#b00}.skip{color:#888;font-style:italic}"
   out = out + "</style></head><body>"
   out = out + "<h1>harn eval prompt</h1><div class=\"meta\">"
-    + __html_escape(__safe_string(report["template_path"], ""))
+    + __html_escape(
+    __safe_string(report["template_path"], ""),
+  )
     + " · mode: "
     + __safe_string(report["mode"], "")
     + "</div>"
@@ -456,8 +456,7 @@ fn __render_html(report) -> string {
 fn main(harness: Harness) {
   const raw = harness.env.get_or("HARN_EVAL_PROMPT_REPORT_JSON", "")
   if raw == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_EVAL_PROMPT_REPORT_JSON not set by dispatch shim")
+    harness.stdio.eprintln("internal error: HARN_EVAL_PROMPT_REPORT_JSON not set by dispatch shim")
     exit(70)
   }
   const report = try {

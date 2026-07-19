@@ -13,7 +13,9 @@ fn constant(value) {
 
 fn drop_oldest_case(bp) {
   const gate = channel(nil, 1)
-  const pool = pool_create({name: "bp-drop-oldest", max_concurrent: 1, backpressure: bp.queue(1, "drop_oldest")})
+  const pool = pool_create(
+    {name: "bp-drop-oldest", max_concurrent: 1, backpressure: bp.queue(1, "drop_oldest")},
+  )
   const warmup = pool.submit(gated(gate, "warmup"))
   const old = pool.submit(constant("old"))
   const newest = pool.submit(constant("newest"))
@@ -31,7 +33,9 @@ fn drop_oldest_case(bp) {
 
 fn drop_newest_case(bp) {
   const gate = channel(nil, 1)
-  const pool = pool_create({name: "bp-drop-newest", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
+  const pool = pool_create(
+    {name: "bp-drop-newest", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")},
+  )
   const warmup = pool.submit(gated(gate, "warmup"))
   const old = pool.submit(constant("old"))
   const newest = pool.submit(constant("newest"))
@@ -49,7 +53,9 @@ fn drop_newest_case(bp) {
 
 fn ring_buffer_case(bp) {
   const gate = channel(nil, 1)
-  const pool = pool_create({name: "bp-ring-buffer", max_concurrent: 1, backpressure: bp.ring_buffer(1)})
+  const pool = pool_create(
+    {name: "bp-ring-buffer", max_concurrent: 1, backpressure: bp.ring_buffer(1)},
+  )
   const warmup = pool.submit(gated(gate, "warmup"))
   const old = pool.submit(constant("old"))
   const newest = pool.submit(constant("newest"))
@@ -102,7 +108,9 @@ fn block_submitter_case(bp) {
   const gate = channel(nil, 1)
   const started = channel(nil, 1)
   const returned = channel(nil, 1)
-  const pool = pool_create({name: "bp-block-submitter", max_concurrent: 1, backpressure: bp.queue(1)})
+  const pool = pool_create(
+    {name: "bp-block-submitter", max_concurrent: 1, backpressure: bp.queue(1)},
+  )
   const warmup = pool.submit(gated(gate, "warmup"))
   const queued = pool.submit(constant("queued"))
   const submitter = spawn {
@@ -125,8 +133,7 @@ fn block_submitter_case(bp) {
 fn audit_case() {
   // Filter to drop receipts so the assertion ignores the `pool_submit`
   // and `pool_dequeue` receipts emitted on the same topic by PL-06.
-  const stream = event_log
-    .subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
+  const stream = event_log.subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
   const first = stream.next().value
   const second = stream.next().value
   const third = stream.next().value

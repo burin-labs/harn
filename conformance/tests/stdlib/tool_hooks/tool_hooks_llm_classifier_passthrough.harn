@@ -27,7 +27,12 @@ pipeline default() {
       const inner = { args -> {ok: true, ran: args.command} }
       const wrapper = preset_run_command(
         {
-          llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8, cache: {ttl_ms: 60000}},
+          llm_classifier: {
+            model: "haiku",
+            provider: "mock",
+            threshold: 0.8,
+            cache: {ttl_ms: 60000},
+          },
           inner: inner,
         },
       )

@@ -97,7 +97,8 @@ pub fn update_issue(id, changes, options = nil) {
 }
 
 pub fn create_comment(issue_id, body, options = nil) {
-  return execute(__create_comment_operation(), {input: {issueId: issue_id, body: body}}, options).result
+  return execute(__create_comment_operation(), {input: {issueId: issue_id, body: body}}, options)
+    .result
 }
 
 pub fn search(query, options = nil) {
@@ -169,7 +170,10 @@ pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
       return event?.provider == "linear"
         && event?.kind == "issue"
         && __linear_issue_matches(payload, issue_id)
-        && __linear_state_matches(payload?.issue, target_state)
+        && __linear_state_matches(
+        payload?.issue,
+        target_state,
+      )
     },
   }
 }
@@ -184,7 +188,10 @@ pub fn wait_until_issue_state(issue_id, target_state, options = nil) {
   return wait_for(
     merge(
       options ?? {},
-      {source: issue_state_source(issue_id, target_state, options), condition: { state -> state.matched }},
+      {
+        source: issue_state_source(issue_id, target_state, options),
+        condition: { state -> state.matched },
+      },
     ),
   )
 }

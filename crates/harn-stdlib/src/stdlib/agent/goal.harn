@@ -81,8 +81,7 @@ fn __normalize_criteria(value) {
         + "` has a `check` that must be a callable or nil; got "
         + type_of(entry.check)
     }
-    out = out
-      .push(
+    out = out.push(
       {check: entry?.check, description: description, id: entry?.id ?? ("sc_" + to_string(index))},
     )
     index = index + 1
@@ -271,7 +270,8 @@ pub fn goal_judge(g, opts = nil) {
   return {
     enabled: true,
     fail_open: o?.fail_open ?? false,
-    feedback_fallback: o?.feedback_fallback ?? "The goal is not yet met; keep working toward the success criteria.",
+    feedback_fallback: o?.feedback_fallback
+      ?? "The goal is not yet met; keep working toward the success criteria.",
     max_invocations: o?.max_invocations ?? __GOAL_MAX_RELOOPS,
     model: o?.model,
     provider: o?.provider,

@@ -19,7 +19,8 @@ fn __feedback_contents(captured, kind: string) -> list<string> {
 
 pipeline test_fenced_completion_judge_uses_typed_checkpoint(task) {
   const judge_response = {
-    text: "```json\n{\"verdict\":\"continue\",\"reasoning\":\"The verifier has not run.\",\"next_step\":\"Run `harn test tests/agent/judge_runtime_test.harn` now.\",\"specific_gaps\":[\"Run the narrow verifier.\"]}\n```",
+    text:
+      "```json\n{\"verdict\":\"continue\",\"reasoning\":\"The verifier has not run.\",\"next_step\":\"Run `harn test tests/agent/judge_runtime_test.harn` now.\",\"specific_gaps\":[\"Run the narrow verifier.\"]}\n```",
   }
   with_llm_script(
     [llm_done(), judge_response, llm_text("Addressed the gap. ##DONE##")],

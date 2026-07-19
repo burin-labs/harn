@@ -31,7 +31,8 @@ fn overflow_turn() {
     error: {
       status: 400,
       reason: "context_overflow",
-      message: "fireworks HTTP 400 [context_overflow]: prompt is too long: 197467 tokens exceeds maximum context length of 131071",
+      message:
+        "fireworks HTTP 400 [context_overflow]: prompt is too long: 197467 tokens exceeds maximum context length of 131071",
     },
   }
 }

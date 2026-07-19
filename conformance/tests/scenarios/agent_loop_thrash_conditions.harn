@@ -69,7 +69,8 @@ pipeline default() {
       {calls: call("read", {path: "a"}), prev: ok_dispatch("read", "X")},
     ],
   )
-  require same_obs.pattern == "repeated_same_observation", "byte-identical observation must trip at threshold"
+  require same_obs.pattern == "repeated_same_observation",
+    "byte-identical observation must trip at threshold"
   __io_println("same_obs=" + same_obs.pattern)
   // Polling exemption: same action, CHANGING observation each turn -> no trip.
   const polling = run_actions(
@@ -140,7 +141,9 @@ pipeline default() {
     } else {
       "B"
     }
-    pingpong_steps = pingpong_steps.push({calls: call(name, {}), prev: ok_dispatch(name, "obs-" + to_string(i))})
+    pingpong_steps = pingpong_steps.push(
+      {calls: call(name, {}), prev: ok_dispatch(name, "obs-" + to_string(i))},
+    )
   }
   const pingpong = run_actions(cfg, pingpong_steps)
   __io_println("pingpong=" + pingpong.pattern)
@@ -205,7 +208,10 @@ pipeline default() {
     },
   )
   with_llm_script(
-    [{text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]}, llm_text("Done. ##DONE##")],
+    [
+      {text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]},
+      llm_text("Done. ##DONE##"),
+    ],
     { ->
       const session = "thrash-judge-gate-" + uuid()
       const captured = agent_capture_events(

@@ -22,7 +22,9 @@ pipeline test(task) {
   const session = {session_id: "prompt-fragments-decompose"}
   const opts = {
     system: "You are a careful operator.",
-    active_skills: [{id: "disk_cleanup", description: "Free up disk space", when_to_use: "when low"}],
+    active_skills: [
+      {id: "disk_cleanup", description: "Free up disk space", when_to_use: "when low"},
+    ],
     skill_catalog_prompt: "## Skills\nUse skills wisely.",
     loop_until_done: true,
     done_sentinel: "STOP",
@@ -64,7 +66,12 @@ pipeline test(task) {
       const res = agent_loop(
         "run disk cleanup please",
         "You are a careful operator.",
-        {provider: "mock", max_iterations: 1, skills: disk_cleanup, skill_match: {strategy: "metadata"}},
+        {
+          provider: "mock",
+          max_iterations: 1,
+          skills: disk_cleanup,
+          skill_match: {strategy: "metadata"},
+        },
       )
       assert(res?.status == "done", "live loop completes")
       const recorded = llm_mock_calls()[0].system

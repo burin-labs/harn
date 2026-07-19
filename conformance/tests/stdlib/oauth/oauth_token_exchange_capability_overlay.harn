@@ -56,8 +56,9 @@ pipeline test(task) {
     "ID-JAG requested token type pinned",
   )
   assert(
-    catalog["id-jag"].provider_metadata_fields
-      .contains("identity_chaining_requested_token_types_supported"),
+    catalog["id-jag"].provider_metadata_fields.contains(
+      "identity_chaining_requested_token_types_supported",
+    ),
     "ID-JAG metadata detection field recorded",
   )
   assert_eq(
@@ -104,10 +105,16 @@ pipeline test(task) {
   const bare_cli = client(bare_provider, {client_id: "cli-id", storage: memory()})
   catches_message(
     "unsupported provider should fail closed",
-    { -> token_exchange(
-      bare_cli,
-      {subject_token: "subject", subject_token_type: subject_type, requested_token_type: requested_type},
-    ) },
+    { ->
+      token_exchange(
+        bare_cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
     "not supported",
   )
   const incomplete_provider = custom(
@@ -122,10 +129,16 @@ pipeline test(task) {
   const incomplete_cli = client(incomplete_provider, {client_id: "cli-id", storage: memory()})
   catches_message(
     "capability rows without token types fail closed",
-    { -> token_exchange(
-      incomplete_cli,
-      {subject_token: "subject", subject_token_type: subject_type, requested_token_type: requested_type},
-    ) },
+    { ->
+      token_exchange(
+        incomplete_cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
     "subject_token_type",
   )
   const provider = custom(
@@ -140,23 +153,31 @@ pipeline test(task) {
   const cli = client(provider, {client_id: "cli-id", storage: memory()})
   catches_message(
     "overlay can disable impersonation",
-    { -> token_exchange(
-      cli,
-      {subject_token: "subject", subject_token_type: subject_type, requested_token_type: requested_type},
-    ) },
+    { ->
+      token_exchange(
+        cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
     "impersonation",
   )
   catches_message(
     "actor_token_type without actor_token is rejected",
-    { -> token_exchange(
-      cli,
-      {
-        subject_token: "subject",
-        subject_token_type: subject_type,
-        actor_token_type: actor_type,
-        requested_token_type: requested_type,
-      },
-    ) },
+    { ->
+      token_exchange(
+        cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          actor_token_type: actor_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
     "without actor_token",
   )
   http_mock_clear()
@@ -165,22 +186,25 @@ pipeline test(task) {
     "https://idp.example/exchange",
     {
       status: 200,
-      body: "{\"access_token\":\"bad-issued\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_type\":\"Bearer\",\"expires_in\":60}",
+      body:
+        "{\"access_token\":\"bad-issued\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_type\":\"Bearer\",\"expires_in\":60}",
       headers: {"content-type": "application/json"},
     },
   )
   catches_message(
     "overlay constrains issued token type",
-    { -> token_exchange(
-      cli,
-      {
-        subject_token: "subject",
-        subject_token_type: subject_type,
-        actor_token: "actor",
-        actor_token_type: actor_type,
-        requested_token_type: requested_type,
-      },
-    ) },
+    { ->
+      token_exchange(
+        cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          actor_token: "actor",
+          actor_token_type: actor_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
     "issued_token_type",
   )
   http_mock_clear()
@@ -189,7 +213,8 @@ pipeline test(task) {
     "https://idp.example/exchange",
     {
       status: 200,
-      body: "{\"access_token\":\"delegated-access\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:access_token\",\"token_type\":\"Bearer\",\"expires_in\":60}",
+      body:
+        "{\"access_token\":\"delegated-access\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:access_token\",\"token_type\":\"Bearer\",\"expires_in\":60}",
       headers: {"content-type": "application/json"},
     },
   )

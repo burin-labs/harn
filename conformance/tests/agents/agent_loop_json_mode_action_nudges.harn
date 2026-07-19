@@ -39,13 +39,15 @@ fn injected_in(calls, idx, marker) {
 
 fn edit_missing_tool_call_recovery() {
   return {
-    classifier: { _payload -> return {
-      action: "tool_call_intended",
-      tool_name: "edit",
-      confidence: 0.96,
-      evidence: "fixture classifier found a tool action",
-      language: "fixture",
-    } },
+    classifier: { _payload ->
+      return {
+        action: "tool_call_intended",
+        tool_name: "edit",
+        confidence: 0.96,
+        evidence: "fixture classifier found a tool action",
+        language: "fixture",
+      }
+    },
   }
 }
 
@@ -100,7 +102,9 @@ pipeline default() {
       __io_println("fenced.nudge=" + to_string(injected_in(calls, 1, "fenced_call_attempt")))
       __io_println(
         "fenced.vocab_json="
-          + to_string(injected_in(calls, 1, "Emit the call as a ```tool JSON block")),
+          + to_string(
+          injected_in(calls, 1, "Emit the call as a ```tool JSON block"),
+        ),
       )
       __io_println("fenced.no_tag=" + to_string(!injected_in(calls, 1, "bare inside <tool_call>")))
     },
@@ -130,7 +134,9 @@ pipeline default() {
       const calls = llm_mock_calls()
       __io_println("missing.status=" + r.status)
       __io_println("missing.nudge=" + to_string(injected_in(calls, 1, "missing_tool_call")))
-      __io_println("missing.vocab_json=" + to_string(injected_in(calls, 1, "Emit the call now: ```tool")))
+      __io_println(
+        "missing.vocab_json=" + to_string(injected_in(calls, 1, "Emit the call now: ```tool")),
+      )
       __io_println(
         "missing.no_tag=" + to_string(!injected_in(calls, 1, "Emit the call now: <tool_call>")),
       )

@@ -256,43 +256,46 @@ fn __candidate(entry: dict, workload: string) -> BatchCandidate {
   } else {
     typed_turnaround
   }
-  const wire_format = safe_string(batch_entry["wire_format"], safe_string(entry["batch_wire_format"], ""))
-  const input_mode = safe_string(batch_entry["input_mode"], safe_string(entry["batch_input_mode"], ""))
+  const wire_format = safe_string(
+    batch_entry["wire_format"],
+    safe_string(entry["batch_wire_format"], ""),
+  )
+  const input_mode = safe_string(
+    batch_entry["input_mode"],
+    safe_string(entry["batch_input_mode"], ""),
+  )
   const live_adapter = __live_batch_adapter(provider, wire_format)
   const recommended = discount != nil && discount > 0 && (turnaround == nil || turnaround <= 24)
   let constraints: list<string> = []
   if wire_format == "" {
-    constraints = constraints.push("Provider catalog omits batch wire format; submission must probe before enqueue.")
+    constraints = constraints.push(
+      "Provider catalog omits batch wire format; submission must probe before enqueue.",
+    )
   }
   if input_mode == "" {
-    constraints = constraints
-      .push(
+    constraints = constraints.push(
       "Provider catalog omits batch input mode; submission must choose a provider-native packer.",
     )
   }
   if discount == nil {
-    constraints = constraints
-      .push(
+    constraints = constraints.push(
       "Provider catalog does not publish a discount; cost planner must price from live usage tables.",
     )
   }
   if turnaround == nil {
-    constraints = constraints
-      .push(
+    constraints = constraints.push(
       "Provider catalog does not publish a turnaround bound; schedule as best-effort offline work.",
     )
   }
   if !safe_bool(live_adapter["submit"], false)
     || !safe_bool(live_adapter["status"], false)
     || !safe_bool(live_adapter["download"], false) {
-    constraints = constraints
-      .push(
+    constraints = constraints.push(
       "Harn can prepare this provider's batch request files, but live submit/status/download is not implemented; use --dry-run or add a provider adapter.",
     )
   }
   if !safe_bool(live_adapter["cancel"], false) {
-    constraints = constraints
-      .push(
+    constraints = constraints.push(
       "Harn cannot live-cancel this provider's batch jobs; use provider tooling if cancellation is required.",
     )
   }
@@ -431,7 +434,8 @@ fn __resolve_candidate(
   if len(matches) == 0 {
     return {
       ok: false,
-      error: "no batch-capable model matches provider='" + provider_filter + "' model='" + model_filter
+      error: "no batch-capable model matches provider='" + provider_filter + "' model='"
+        + model_filter
         + "'",
     }
   }
@@ -471,7 +475,13 @@ fn __request_entry(row: dict, line_no: int, id_prefix: string) -> BatchRequestEn
   }
 }
 
-fn __group_key(provider: string, model: string, batch: dict, tool_format: string, endpoint: string) -> string {
+fn __group_key(
+  provider: string,
+  model: string,
+  batch: dict,
+  tool_format: string,
+  endpoint: string,
+) -> string {
   return provider
     + "\t"
     + model
@@ -575,7 +585,10 @@ fn __batch_endpoint(group: dict) -> string {
 
 fn __prepare_file_stem(group: dict) -> string {
   const seed = safe_string(group["id"], "") + ":" + safe_string(group["provider"], "") + ":"
-    + safe_string(group["model"], "")
+    + safe_string(
+    group["model"],
+    "",
+  )
   return "batch_group_" + substring(sha256(seed), 0, 16)
 }
 
@@ -647,9 +660,13 @@ fn __submit_contract(group: dict, request_path: string, endpoint: string) -> dic
         upload_dataset: "POST /v1/accounts/{account_id}/datasets/{dataset_id}:upload",
         file: request_path,
       },
-      create_batch: {input_dataset_id: "<input-dataset-id>", output_dataset_id: "<output-dataset-id>"},
+      create_batch: {
+        input_dataset_id: "<input-dataset-id>",
+        output_dataset_id: "<output-dataset-id>",
+      },
       request_line_shape: "{custom_id, body}",
-      result_stream: "GET /v1/accounts/{account_id}/datasets/{output_dataset_id}:getDownloadEndpoint",
+      result_stream:
+        "GET /v1/accounts/{account_id}/datasets/{output_dataset_id}:getDownloadEndpoint",
     }
   }
   if wire == "mistral" {
@@ -681,7 +698,11 @@ fn __submit_contract(group: dict, request_path: string, endpoint: string) -> dic
     provider: provider,
     operation: "POST /v1/batches",
     upload: {purpose: "batch", file: request_path},
-    create_batch: {endpoint: endpoint, completion_window: "24h", input_file_id: "<uploaded-file-id>"},
+    create_batch: {
+      endpoint: endpoint,
+      completion_window: "24h",
+      input_file_id: "<uploaded-file-id>",
+    },
   }
 }
 
@@ -784,8 +805,7 @@ fn __build_manifest(
     }
     const resolved = __resolve_candidate(catalog, provider, model, workload)
     if !safe_bool(resolved["ok"], false) {
-      errors = errors
-        .push(
+      errors = errors.push(
         "line " + to_string(line_no) + ": " + safe_string(resolved["error"], "unresolved model"),
       )
       continue
@@ -794,12 +814,14 @@ fn __build_manifest(
     const batch = safe_dict(candidate["batch"])
     const discount = __safe_int(batch["discount_percent"])
     if min_discount != nil && (discount == nil || discount < min_discount) {
-      errors = errors
-        .push(
+      errors = errors.push(
         "line "
           + to_string(line_no)
           + ": model discount below --min-discount-percent for "
-          + safe_string(candidate["provider"], "")
+          + safe_string(
+          candidate["provider"],
+          "",
+        )
           + "/"
           + safe_string(candidate["id"], ""),
       )
@@ -807,19 +829,25 @@ fn __build_manifest(
     }
     const turnaround = __safe_int(batch["turnaround_hours"])
     if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
-      errors = errors
-        .push(
+      errors = errors.push(
         "line "
           + to_string(line_no)
           + ": model turnaround exceeds --max-turnaround-hours for "
-          + safe_string(candidate["provider"], "")
+          + safe_string(
+          candidate["provider"],
+          "",
+        )
           + "/"
           + safe_string(candidate["id"], ""),
       )
       continue
     }
     const tool_format = __row_string(row, "tool_format", default_tool_format)
-    const endpoint = __row_string(row, "endpoint", safe_string(batch["wire_format"], "provider_default"))
+    const endpoint = __row_string(
+      row,
+      "endpoint",
+      safe_string(batch["wire_format"], "provider_default"),
+    )
     const request = __request_entry(row, line_no, id_prefix)
     const wire = safe_string(batch["wire_format"], "")
     const body = __body_from_row_for_batch_wire(row, safe_string(candidate["id"], ""), wire)
@@ -900,8 +928,7 @@ fn __render_manifest_human(harness: Harness, report: dict) {
   harness.stdio.println("  manifest sha256: " + safe_string(report["manifest_sha256"], ""))
   for group in safe_list(report["groups"]) {
     const g = safe_dict(group)
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "  "
         + safe_string(g["id"], "")
         + " "
@@ -1015,8 +1042,7 @@ fn __render_prepare_human(harness: Harness, report: dict) {
   harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
   for job in safe_list(report["jobs"]) {
     const j = safe_dict(job)
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "  "
         + safe_string(j["id"], "")
         + " "
@@ -1148,10 +1174,21 @@ fn main(harness: Harness) -> int {
   const model_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_MODEL", ""))
   const workload_raw = trim(harness.env.get_or("HARN_MODELS_BATCH_WORKLOAD", "eval"))
   const workload = __normalize_workload(workload_raw)
-  const min_discount = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", ""))
-  const max_turnaround = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", ""))
+  const min_discount = __filter_int(
+    harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", ""),
+  )
+  const max_turnaround = __filter_int(
+    harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", ""),
+  )
   const catalog = harness.llm.catalog()
-  const models = __collect(catalog, provider_filter, model_filter, workload, min_discount, max_turnaround)
+  const models = __collect(
+    catalog,
+    provider_filter,
+    model_filter,
+    workload,
+    min_discount,
+    max_turnaround,
+  )
   let warnings = []
   if workload != workload_raw && workload_raw != "" {
     warnings = warnings.push("unknown workload '" + workload_raw + "'; using generic policy")
@@ -1159,7 +1196,8 @@ fn main(harness: Harness) -> int {
   if min_discount == nil && harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", "") != "" {
     warnings = warnings.push("ignored non-integer --min-discount-percent")
   }
-  if max_turnaround == nil && harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", "") != "" {
+  if max_turnaround == nil
+    && harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", "") != "" {
     warnings = warnings.push("ignored non-integer --max-turnaround-hours")
   }
   const mode = harness.env.get_or("HARN_MODELS_BATCH_MODE", "plan")

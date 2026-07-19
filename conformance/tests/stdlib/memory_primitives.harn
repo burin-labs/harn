@@ -27,7 +27,11 @@ pipeline default() {
   __io_println(summary._type)
   __io_println(summary.count)
   __io_println(contains(summary.text, "Alice prefers Rust examples"))
-  const forgotten = memory_forget(namespace, {tag: "profile"}, {root: root, now: "2026-04-29T00:00:02Z"})
+  const forgotten = memory_forget(
+    namespace,
+    {tag: "profile"},
+    {root: root, now: "2026-04-29T00:00:02Z"},
+  )
   __io_println(forgotten.forgotten)
   __io_println(len(memory_recall(namespace, "rust", 5, {root: root})))
   harness.fs.delete(root)

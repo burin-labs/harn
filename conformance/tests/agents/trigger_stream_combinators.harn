@@ -18,7 +18,11 @@ pipeline test(task) {
   assert(windowed.kind == "stream.window", "window_by should tag plans")
   assert(windowed.window.mode == "sliding", "window_by should preserve window mode")
   assert(windowed.window.every == "1m", "window_by should preserve slide interval")
-  const classified: StreamLlmClassifyPlan = llm_classify(events[0], ["ignore", "review"], {cache: "stream:risk:v1", model: "fast"})
+  const classified: StreamLlmClassifyPlan = llm_classify(
+    events[0],
+    ["ignore", "review"],
+    {cache: "stream:risk:v1", model: "fast"},
+  )
   assert(classified.kind == "stream.llm_classify", "llm_classify should tag plans")
   assert(classified.cache == "stream:risk:v1", "llm_classify should preserve cache key")
   assert(classified.options.model == "fast", "llm_classify should preserve options")

@@ -53,7 +53,9 @@ fn lookup_call(tool_format = "text", narration = "", path = "app.txt") {
     return llm_tool_call("lookup", {path: path})
   }
   if tool_format == "json" {
-    return llm_text(narration + "```tool\n{\"name\":\"lookup\",\"args\":{\"path\":\"" + path + "\"}}\n```")
+    return llm_text(
+      narration + "```tool\n{\"name\":\"lookup\",\"args\":{\"path\":\"" + path + "\"}}\n```",
+    )
   }
   return llm_text(narration + "<tool_call>lookup({ path: \"" + path + "\" })</tool_call>")
 }
@@ -75,9 +77,9 @@ fn read_loop_script(tool_format = "text") {
 }
 
 fn actuation_receipts(events) {
-  return events
-    .filter({ event -> event.type == "typed_checkpoint" })
-    .filter({ event -> event.checkpoint?.schema == "harn.agent_loop_monologue_actuation.v1" })
+  return events.filter({ event -> event.type == "typed_checkpoint" }).filter(
+    { event -> event.checkpoint?.schema == "harn.agent_loop_monologue_actuation.v1" },
+  )
 }
 
 fn options(session, actuation = nil, tool_format = "text", extra = nil) {
@@ -105,16 +107,25 @@ fn options(session, actuation = nil, tool_format = "text", extra = nil) {
 fn run_case(script, session, actuation = nil, tool_format = "text", extra = nil) {
   return with_llm_script(
     script,
-    { -> return agent_capture_events(
-      session,
-      fn() { return agent_loop("Inspect app.txt.", nil, options(session, actuation, tool_format, extra)) },
-    )
-      + {calls: llm_mock_calls()} },
+    { ->
+      return agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Inspect app.txt.",
+          nil,
+          options(session, actuation, tool_format, extra),
+        ) },
+      )
+        + {calls: llm_mock_calls()}
+    },
   )
 }
 
 fn prefill_capable_caller_options() {
-  return {llm_caller: default_llm_caller(), llm_caller_transport: {forwards_assistant_prefill: true}}
+  return {
+    llm_caller: default_llm_caller(),
+    llm_caller_transport: {forwards_assistant_prefill: true},
+  }
 }
 
 pipeline default() {

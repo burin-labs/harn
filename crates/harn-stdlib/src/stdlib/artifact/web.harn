@@ -68,7 +68,13 @@ fn __web_unique_codes(items) {
 }
 
 fn __web_error(code, message, fragment = nil, matches = nil) {
-  return {severity: "error", code: code, message: message, fragment: fragment, matches: matches ?? []}
+  return {
+    severity: "error",
+    code: code,
+    message: message,
+    fragment: fragment,
+    matches: matches ?? [],
+  }
 }
 
 fn __web_warning(code, message, fragment = nil) {
@@ -178,7 +184,11 @@ pub fn web_artifact_extract(html) {
     body_attributes: body_attributes,
     errors: errors,
     warnings: [],
-    provenance: {module: "std/artifact/web", helper: "web_artifact_extract", source_sha256: __web_sha256(source)},
+    provenance: {
+      module: "std/artifact/web",
+      helper: "web_artifact_extract",
+      source_sha256: __web_sha256(source),
+    },
   }
 }
 
@@ -193,10 +203,7 @@ pub fn web_artifact_text_fallback(html, options = nil) {
   const without_styles = regex_replace("(?is)<style\\b[^>]*>.*?</style>", " ", without_scripts)
   const without_head = regex_replace("(?is)<head\\b[^>]*>.*?</head>", " ", without_styles)
   const without_tags = regex_replace("(?is)<[^>]+>", " ", without_head)
-  const decoded = without_tags
-    .replace("&nbsp;", " ")
-    .replace("&amp;", "&")
-    .replace("&lt;", "<")
+  const decoded = without_tags.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<")
     .replace("&gt;", ">")
     .replace("&quot;", "\"")
     .replace("&#39;", "'")
@@ -276,7 +283,8 @@ pub fn web_artifact_validate(html, options = nil) {
         {
           code: "network_call",
           fragment: "html",
-          regex: "(?is)<(?:script|link|img|iframe)\\b[^>]*(?:src|href)\\s*=\\s*['\"]?(?:https?://|//)",
+          regex:
+            "(?is)<(?:script|link|img|iframe)\\b[^>]*(?:src|href)\\s*=\\s*['\"]?(?:https?://|//)",
           message: "artifact references an external network resource",
         },
       ],
@@ -376,10 +384,16 @@ pub fn web_artifact_validate(html, options = nil) {
   )
   errors = errors + __web_secret_errors(source)
   if len(extracted.scripts) == 0 {
-    warnings = warnings + [__web_warning("no_script_fragment", "artifact has no <script> fragment", "script")]
+    warnings = warnings
+      + [
+      __web_warning("no_script_fragment", "artifact has no <script> fragment", "script"),
+    ]
   }
   if len(extracted.styles) == 0 {
-    warnings = warnings + [__web_warning("no_style_fragment", "artifact has no <style> fragment", "style")]
+    warnings = warnings
+      + [
+      __web_warning("no_style_fragment", "artifact has no <style> fragment", "style"),
+    ]
   }
   const error_codes = __web_unique_codes(errors)
   const warning_codes = __web_unique_codes(warnings)
@@ -397,7 +411,11 @@ pub fn web_artifact_validate(html, options = nil) {
     error_codes: error_codes,
     warning_codes: warning_codes,
     text_fallback: web_artifact_text_fallback(source, opts?.fallback ?? {}),
-    provenance: {module: "std/artifact/web", helper: "web_artifact_validate", source_sha256: __web_sha256(source)},
+    provenance: {
+      module: "std/artifact/web",
+      helper: "web_artifact_validate",
+      source_sha256: __web_sha256(source),
+    },
   }
 }
 
@@ -436,7 +454,12 @@ pub fn web_artifact_apply_patch(html, old_text, new_text, options = nil) {
   }
   const validation = web_artifact_validate(patch.patched, opts?.validation ?? opts)
   const expected = patch.expected_region.merge({kind: __web_fragment_kind(source, old_text ?? "")})
-  const region_report = edit_validate_changed_regions(source, patch.patched, [expected], {provenance: opts?.provenance})
+  const region_report = edit_validate_changed_regions(
+    source,
+    patch.patched,
+    [expected],
+    {provenance: opts?.provenance},
+  )
   let errors = validation.errors
   if !region_report.ok {
     errors = errors + region_report.errors

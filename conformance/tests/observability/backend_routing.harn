@@ -3,8 +3,7 @@ import { obs } from "std/observability"
 pipeline default() {
   const o = obs()
   o.reset()
-  o
-    .configure(
+  o.configure(
     {
       backends: {
         otel: o.Backend.otel("http://collector.example"),
@@ -12,8 +11,14 @@ pipeline default() {
         honeycomb: o.Backend.honeycomb("key", "dataset"),
         pretty: o.Backend.pretty_stderr,
       },
-      backend: o.Backend.compose([o.Backend.otel("http://collector.example"), o.Backend.pretty_stderr]),
-      routes: [{level: "error", backend: "splunk"}, {kind: "metric", backend: "honeycomb"}, {default: "otel"}],
+      backend: o.Backend.compose(
+        [o.Backend.otel("http://collector.example"), o.Backend.pretty_stderr],
+      ),
+      routes: [
+        {level: "error", backend: "splunk"},
+        {kind: "metric", backend: "honeycomb"},
+        {default: "otel"},
+      ],
     },
   )
   o.log("normal", "info", {component: "router"})

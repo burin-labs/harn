@@ -12,12 +12,14 @@ fn env_remove_probe_command() {
 
 pipeline default() {
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
   const root = path_join(harness.fs.temp_dir(), "harn-command-env-remove-" + uuid_v7())
   const script = path_join(root, "child.harn")
   harness.fs.mkdir(root)
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     script,
     "import { command_run } from \"std/command\"\n\n"
       + "fn env_remove_probe_command() {\n"
@@ -58,6 +60,7 @@ pipeline default() {
     {env: {HARN_KEEP_ME: "kept"}, env_remove: ["HARN_REMOVE_ME"], capture: {max_inline_bytes: 64}},
   )
   require direct.success, "env_remove should be accepted by stdlib command wrappers"
-  require trim(direct.stdout) == "ok", "direct probe should pass when the variable is already absent"
+  require trim(direct.stdout) == "ok",
+    "direct probe should pass when the variable is already absent"
   __io_println("ok")
 }

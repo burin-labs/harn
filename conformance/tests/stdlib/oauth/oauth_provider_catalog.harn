@@ -68,8 +68,7 @@ fn mock_flow_for_provider(harness: Harness, name) {
     },
   )
   http_mock("POST", revoke_url, {status: 200, body: "{\"revoked\":true}", headers: {}})
-  const token_resp = harness.net
-    .post(
+  const token_resp = harness.net.post(
     record.token_url,
     "grant_type=authorization_code&code=code-" + name
       + "&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback",
@@ -78,12 +77,14 @@ fn mock_flow_for_provider(harness: Harness, name) {
   require token_resp.status == 200, name + " token response"
   const token = json_parse(token_resp.body)
   require token.access_token == "access-" + name, name + " access token"
-  const profile_resp = harness.net.get(userinfo_url, {headers: {Authorization: "Bearer " + token.access_token}})
+  const profile_resp = harness.net.get(
+    userinfo_url,
+    {headers: {Authorization: "Bearer " + token.access_token}},
+  )
   require profile_resp.status == 200, name + " userinfo response"
   const profile = json_parse(profile_resp.body)
   require profile.provider == name, name + " profile provider"
-  const revoke_resp = harness.net
-    .post(
+  const revoke_resp = harness.net.post(
     revoke_url,
     "token=" + token.access_token,
     {headers: {"Content-Type": "application/x-www-form-urlencoded"}},

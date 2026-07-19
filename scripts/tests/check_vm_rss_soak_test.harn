@@ -75,7 +75,11 @@ pipeline test_list_min(task) {
 @test
 pipeline test_extract_rss_samples_basic(task) {
   const report = {
-    iterations: [{iteration: 1, rss_bytes: 100}, {iteration: 2, rss_bytes: 200}, {iteration: 3, rss_bytes: 300}],
+    iterations: [
+      {iteration: 1, rss_bytes: 100},
+      {iteration: 2, rss_bytes: 200},
+      {iteration: 3, rss_bytes: 300},
+    ],
   }
   assert_eq(extract_rss_samples(report).join(","), "100,200,300")
 }

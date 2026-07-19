@@ -32,7 +32,11 @@ pipeline default() {
     references: [],
     rewrite: { command, _ctx -> command + " --target-dir target-shared" },
   }
-  const rewrite_result = tool_hooks_mode_rewrite_with_audit(rewrite_rule, {command: "cargo build --release"}, echo)
+  const rewrite_result = tool_hooks_mode_rewrite_with_audit(
+    rewrite_rule,
+    {command: "cargo build --release"},
+    echo,
+  )
   __io_println(rewrite_result.action)
   __io_println(rewrite_result.command)
   __io_println(rewrite_result.original_command)
@@ -57,7 +61,11 @@ pipeline default() {
     references: [],
     rewrite: nil,
   }
-  const deny_result = tool_hooks_mode_deny_with_explanation(deny_rule, {command: "git push origin main --force"}, echo)
+  const deny_result = tool_hooks_mode_deny_with_explanation(
+    deny_rule,
+    {command: "git push origin main --force"},
+    echo,
+  )
   __io_println(deny_result.action)
   __io_println(deny_result.rule_id)
   /* Deny must not call `inner` — the echo executor's `ran` field
@@ -77,7 +85,11 @@ pipeline default() {
     references: [],
     rewrite: nil,
   }
-  const warn_result = tool_hooks_mode_passthrough_only_audit(warn_rule, {command: "find . -name foo"}, echo)
+  const warn_result = tool_hooks_mode_passthrough_only_audit(
+    warn_rule,
+    {command: "find . -name foo"},
+    echo,
+  )
   __io_println(warn_result.action)
   __io_println(warn_result.command)
   __io_println(warn_result.result.ran)

@@ -17,23 +17,25 @@ fn edit_tools() {
 
 fn intended_edit_classifier() {
   return {
-    classifier: { payload -> return if (payload?.iteration ?? 0) == 0 {
-      {
-        action: "tool_call_intended",
-        tool_name: "edit",
-        confidence: 0.96,
-        evidence: "fixture classifier found a tool action",
-        language: "fixture",
+    classifier: { payload ->
+      return if (payload?.iteration ?? 0) == 0 {
+        {
+          action: "tool_call_intended",
+          tool_name: "edit",
+          confidence: 0.96,
+          evidence: "fixture classifier found a tool action",
+          language: "fixture",
+        }
+      } else {
+        {
+          action: "no_tool_call_intended",
+          tool_name: "",
+          confidence: 0.96,
+          evidence: "fixture classifier found a final answer",
+          language: "fixture",
+        }
       }
-    } else {
-      {
-        action: "no_tool_call_intended",
-        tool_name: "",
-        confidence: 0.96,
-        evidence: "fixture classifier found a final answer",
-        language: "fixture",
-      }
-    } },
+    },
   }
 }
 
@@ -68,7 +70,9 @@ pipeline default() {
       const calls = llm_mock_calls()
       __io_println("status=" + result.status)
       __io_println("nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
-      __io_println("native_instruction=" + to_string(injected_kind_in(calls, 1, "native tool interface")))
+      __io_println(
+        "native_instruction=" + to_string(injected_kind_in(calls, 1, "native tool interface")),
+      )
       __io_println("successful=" + json_stringify(result.tools.successful))
     },
   )

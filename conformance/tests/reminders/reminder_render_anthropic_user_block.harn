@@ -7,7 +7,9 @@ pipeline main() {
     {
       id: "render_anthropic_user",
       subscribes_to: ["session_idle"],
-      evaluate: { _ctx -> return {reminder: {body: "anthropic user block reminder", role_hint: "user_block"}} },
+      evaluate: { _ctx ->
+        return {reminder: {body: "anthropic user block reminder", role_hint: "user_block"}}
+      },
     },
   )
   const session = agent_session_open("reminder-render-anthropic-user-block")

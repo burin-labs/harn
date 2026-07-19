@@ -23,7 +23,11 @@ fn flaky_tool() {
     tools,
     "run",
     "Run a step.",
-    {handler: handler, parameters: {step: {type: "string", required: true}}, returns: {type: "string"}},
+    {
+      handler: handler,
+      parameters: {step: {type: "string", required: true}},
+      returns: {type: "string"},
+    },
   )
   return tools
 }
@@ -89,13 +93,17 @@ pipeline default() {
       const raw_messages = transcript_messages(result.transcript)
       const raw_text = json_stringify(raw_messages)
       require atomic_get(flaky_calls) == 2, "flaky tool was invoked twice"
-      require len(split(raw_text, "tool error: first try")) - 1 == 1, "first tool call failed exactly once"
-      require contains(raw_text, "[result of run]\\nok\\n[end of run result]"), "second tool call succeeded"
+      require len(split(raw_text, "tool error: first try")) - 1 == 1,
+        "first tool call failed exactly once"
+      require contains(raw_text, "[result of run]\\nok\\n[end of run result]"),
+        "second tool call succeeded"
       __io_println("raw_message_count:" + to_string(len(raw_messages)))
       const events = transcript_events_by_kind(result.transcript, "transcript.projection")
       __io_println("projection_events:" + to_string(len(events) > 0))
       __io_println("projection_policy:" + events[0].metadata.policy)
-      __io_println("projection_safety_blocked:" + to_string(events[0].metadata.provider_safety_blocked))
+      __io_println(
+        "projection_safety_blocked:" + to_string(events[0].metadata.provider_safety_blocked),
+      )
     },
   )
   with_llm_script(
@@ -133,7 +141,12 @@ pipeline default() {
           max_iterations: 3,
           loop_until_done: true,
           done_sentinel: "##DONE##",
-          transcript_projection: {policy: "reachability_gc", root_window: 1, min_chars: 100, require_write_barrier: true},
+          transcript_projection: {
+            policy: "reachability_gc",
+            root_window: 1,
+            min_chars: 100,
+            require_write_barrier: true,
+          },
           scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
         },
       )
@@ -146,15 +159,21 @@ pipeline default() {
       __io_println("gc_scratchpad_barrier:" + to_string(gc_projection.metadata.redacted_count > 0))
       __io_println(
         "gc_has_scratchpad_root:"
-          + to_string(gc_projection.metadata.roots_consulted.contains("scratchpad")),
+          + to_string(
+          gc_projection.metadata.roots_consulted.contains("scratchpad"),
+        ),
       )
       __io_println(
         "gc_has_write_barrier:"
-          + to_string(gc_projection.metadata.roots_consulted.contains("write_barrier")),
+          + to_string(
+          gc_projection.metadata.roots_consulted.contains("write_barrier"),
+        ),
       )
       __io_println(
         "gc_projected_reclaimed:"
-          + to_string(contains(projected_stale_body, "reclaimed by reachability_gc")),
+          + to_string(
+          contains(projected_stale_body, "reclaimed by reachability_gc"),
+        ),
       )
       __io_println("gc_live_preserved:" + to_string(contains(projected_live_body, "LIVE_SENTINEL")))
     },

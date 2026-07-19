@@ -810,7 +810,10 @@ jobs:
         with:
           # Restore the latest full-suite nightly cache. PR refs stay
           # restore-only; windows-nightly.yml owns the default-branch writer.
+          # Fingerprint Rust and embedded sources so restored target artifacts
+          # cannot carry include_str! bytes from a different revision.
           shared-key: workspace-windows
+          source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
           cache-on-failure: true
           cache-bin: false
       - name: Install cargo-nextest

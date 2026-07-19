@@ -139,8 +139,7 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/check_burin_protocol_bindings.harn -- [--burin-root PATH] [--required]",
     )
     return nil
@@ -151,25 +150,28 @@ fn main(harness: Harness) {
     exit(2)
   }
   const parsed = unwrap(parsed_result).options
-  const report = check_burin_protocol_bindings(to_string(parsed?.burin_root ?? ""), parsed?.required ?? false)
+  const report = check_burin_protocol_bindings(
+    to_string(parsed?.burin_root ?? ""),
+    parsed?.required ?? false,
+  )
   if report.status == "missing_root" {
     if parsed?.required ?? false {
       harness.stdio.eprintln("error: Burin Code checkout not found")
       exit(1)
     }
-    harness.stdio.println("skipping Burin protocol binding drift check (no Burin Code checkout found)")
+    harness.stdio.println(
+      "skipping Burin protocol binding drift check (no Burin Code checkout found)",
+    )
     return nil
   }
   if report.stale_count > 0 {
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "error: Burin Code protocol bindings diverge from " + to_string(report.artifacts) + ":",
     )
     for path in report.stale {
       harness.stdio.eprintln("  " + to_string(path))
     }
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "hint: regenerate Burin's vendored bindings from this Harn checkout or the matching Harn release.",
     )
     exit(1)

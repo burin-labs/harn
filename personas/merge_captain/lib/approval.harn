@@ -78,7 +78,11 @@ pub fn gate(repair_policy, bundle, dry_run) {
     return {allowed: true, blocking_actions: [], approval_state: "dry_run"}
   }
   if !policy.enabled {
-    return {allowed: false, blocking_actions: bundle.approval_required_for, approval_state: "needs_human"}
+    return {
+      allowed: false,
+      blocking_actions: bundle.approval_required_for,
+      approval_state: "needs_human",
+    }
   }
   if policy.pre_approved {
     return {allowed: true, blocking_actions: [], approval_state: "pre_approved"}

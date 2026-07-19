@@ -64,8 +64,12 @@ pipeline default() {
       __io_println("text.status=" + text_result.status)
       __io_println("text.has_streak=" + to_string(contains(text_retry, "no_progress_streak")))
       __io_println("text.has_tool_call_tag=" + to_string(contains(text_retry, "<tool_call>")))
-      __io_println("text.has_user_response_tag=" + to_string(contains(text_retry, "<user_response>")))
-      __io_println("text.no_native_final=" + to_string(!contains(text_retry, "concise assistant text")))
+      __io_println(
+        "text.has_user_response_tag=" + to_string(contains(text_retry, "<user_response>")),
+      )
+      __io_println(
+        "text.no_native_final=" + to_string(!contains(text_retry, "concise assistant text")),
+      )
     },
   )
   with_llm_script(
@@ -97,7 +101,9 @@ pipeline default() {
       )
       __io_println("native.has_native_tool=" + to_string(contains(native_retry, "native tool")))
       __io_println("native.no_tool_call_tag=" + to_string(!contains(native_retry, "<tool_call>")))
-      __io_println("native.no_user_response_tag=" + to_string(!contains(native_retry, "<user_response>")))
+      __io_println(
+        "native.no_user_response_tag=" + to_string(!contains(native_retry, "<user_response>")),
+      )
     },
   )
   with_llm_script(
@@ -126,7 +132,9 @@ pipeline default() {
       __io_println("json.has_streak=" + to_string(contains(json_retry, "no_progress_streak")))
       __io_println("json.has_tool_fence=" + to_string(contains(json_retry, "```tool")))
       __io_println("json.no_tool_call_tag=" + to_string(!contains(json_retry, "<tool_call>")))
-      __io_println("json.no_user_response_tag=" + to_string(!contains(json_retry, "<user_response>")))
+      __io_println(
+        "json.no_user_response_tag=" + to_string(!contains(json_retry, "<user_response>")),
+      )
     },
   )
   with_llm_script(
@@ -155,7 +163,9 @@ pipeline default() {
       __io_println(
         "rejected.has_failure=" + to_string(contains(rejected_retry, "boom from tool handler")),
       )
-      __io_println("rejected.no_streak=" + to_string(!contains(rejected_retry, "no_progress_streak")))
+      __io_println(
+        "rejected.no_streak=" + to_string(!contains(rejected_retry, "no_progress_streak")),
+      )
     },
   )
 }

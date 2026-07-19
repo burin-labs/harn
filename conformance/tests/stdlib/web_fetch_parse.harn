@@ -38,7 +38,10 @@ pipeline test(task) {
     },
   )
   const store = mem_cache({namespace: "web-fetch-parse"})
-  const fetched = web_fetch("https://example.com/article", {store: store, fetched_at: "fixture-time"})
+  const fetched = web_fetch(
+    "https://example.com/article",
+    {store: store, fetched_at: "fixture-time"},
+  )
   assert_eq(fetched.status, 200)
   assert_eq(fetched.cache_status, "miss")
   assert_eq(fetched.final_url, "https://example.com/article")

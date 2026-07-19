@@ -18,6 +18,10 @@ pub fn on_market_event(event: TriggerEvent) -> dict {
       max_items: 5000,
     },
   )
-  const classified = llm_classify(event.provider_payload.raw, ["ignore", "review"], {cache: "market-fan-in:v1"})
+  const classified = llm_classify(
+    event.provider_payload.raw,
+    ["ignore", "review"],
+    {cache: "market-fan-in:v1"},
+  )
   return {provider: event.provider, kind: event.kind, windowed: windowed, classified: classified}
 }

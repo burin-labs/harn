@@ -4,7 +4,12 @@ const META = {
   target_directory: "/repo/target",
   workspace_members: ["id-cli", "id-vm", "id-private"],
   packages: [
-    {id: "id-vm", name: "harn-vm", version: "1.2.3", manifest_path: "/repo/crates/harn-vm/Cargo.toml"},
+    {
+      id: "id-vm",
+      name: "harn-vm",
+      version: "1.2.3",
+      manifest_path: "/repo/crates/harn-vm/Cargo.toml",
+    },
     {
       id: "id-private",
       name: "private-helper",
@@ -18,7 +23,12 @@ const META = {
       version: "1.2.3",
       manifest_path: "/repo/crates/harn-cli/Cargo.toml",
     },
-    {id: "id-nonmember", name: "external", version: "9.9.9", manifest_path: "/repo/external/Cargo.toml"},
+    {
+      id: "id-nonmember",
+      name: "external",
+      version: "9.9.9",
+      manifest_path: "/repo/external/Cargo.toml",
+    },
   ],
 }
 
@@ -30,7 +40,9 @@ fn assert_throws_contains(body, fragment: string) -> nil {
     error_text = to_string(e)
   }
   require error_text != "", "expected closure to throw"
-  require error_text.contains(fragment), "expected error to contain " + fragment + ", got: " + error_text
+  require error_text.contains(fragment),
+    "expected error to contain " + fragment + ", got: "
+    + error_text
   return nil
 }
 

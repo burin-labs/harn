@@ -79,7 +79,10 @@ pipeline main() {
       __io_println(worker_provenance(second)?.worker_id == loop?.id)
       const closed = close_agent(loop)
       __io_println(closed?.status == "cancelled")
-      const final_snapshot_path = path_join(harness.fs.temp_dir(), "worker-final-" + closed?.id + ".json")
+      const final_snapshot_path = path_join(
+        harness.fs.temp_dir(),
+        "worker-final-" + closed?.id + ".json",
+      )
       harness.fs.copy(closed?.snapshot_path, final_snapshot_path)
       const final_snapshot_text = harness.fs.read_text(final_snapshot_path)
       __io_println(len(final_snapshot_text) > len(first_snapshot_text))

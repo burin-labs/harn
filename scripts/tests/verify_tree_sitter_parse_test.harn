@@ -71,8 +71,14 @@ pipeline test_positive_harn_files_skips_error_fixtures_and_other_roots(task) {
       write_file(root, "tests/bridge/bridge.harn", "let z = 3\n")
       write_file(root, "other/ignored.harn", "let q = 4\n")
       const files = positive_harn_files(root).map({ path -> path_normalize(path) }).to_list()
-      assert_eq(files.contains(path_normalize(path_join(root, "conformance/tests/good.harn"))), true)
-      assert_eq(files.contains(path_normalize(path_join(root, "conformance/tests/bad.harn"))), false)
+      assert_eq(
+        files.contains(path_normalize(path_join(root, "conformance/tests/good.harn"))),
+        true,
+      )
+      assert_eq(
+        files.contains(path_normalize(path_join(root, "conformance/tests/bad.harn"))),
+        false,
+      )
       assert_eq(files.contains(path_normalize(path_join(root, "examples/demo/main.harn"))), true)
       assert_eq(files.contains(path_normalize(path_join(root, "tests/bridge/bridge.harn"))), true)
       assert_eq(files.contains(path_normalize(path_join(root, "other/ignored.harn"))), false)

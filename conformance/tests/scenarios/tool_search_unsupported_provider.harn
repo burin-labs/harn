@@ -37,7 +37,12 @@ pipeline test(task) {
     llm_call(
       "hello",
       nil,
-      {provider: "mock", model: "gpt-4o", tools: registry, tool_search: {variant: "bm25", mode: "native"}},
+      {
+        provider: "mock",
+        model: "gpt-4o",
+        tools: registry,
+        tool_search: {variant: "bm25", mode: "native"},
+      },
     )
     nil
   } catch (e) {

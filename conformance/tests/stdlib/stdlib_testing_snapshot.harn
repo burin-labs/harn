@@ -18,14 +18,20 @@ pipeline test_snapshot(task) {
       let opts = {dir: dir}
       let update_opts = {dir: dir, update: true}
       let content = "alpha\nbeta\n"
-      let missing_err = assert_error_contains({ -> assert_snapshot("case", content, opts) }, "does not exist")
+      let missing_err = assert_error_contains(
+        { -> assert_snapshot("case", content, opts) },
+        "does not exist",
+      )
       assert(contains(missing_err, "HARN_UPDATE_SNAPSHOTS=1"))
       assert_eq(harness.fs.exists(dir + "/case.harn.snap"), false)
       assert_eq(assert_snapshot("case", content, update_opts), content)
       assert(harness.fs.exists(dir + "/case.harn.snap"))
       assert_eq(harness.fs.read_text(dir + "/case.harn.snap"), content)
       assert_eq(assert_snapshot("case", content, opts), content)
-      let drift_err = assert_error_contains({ -> assert_snapshot("case", "alpha\nCHANGED\n", opts) }, "mismatch")
+      let drift_err = assert_error_contains(
+        { -> assert_snapshot("case", "alpha\nCHANGED\n", opts) },
+        "mismatch",
+      )
       assert(contains(drift_err, "snapshot (case)"))
       assert(contains(drift_err, "CHANGED"))
       assert_eq(assert_snapshot("case", "alpha\nCHANGED\n", update_opts), "alpha\nCHANGED\n")

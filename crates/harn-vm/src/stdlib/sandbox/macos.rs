@@ -154,6 +154,14 @@ fn render_profile_with_extra_read_roots(
     package_manager_read_roots: &[std::path::PathBuf],
     developer_toolchain_cache_roots: &[std::path::PathBuf],
 ) -> String {
+    // Callers may provide roots outside the normal policy-root builders (for
+    // example, an isolated toolchain cache in a test or an embedder-owned
+    // cache). Normalize them here as well so macOS aliases such as
+    // `/var/folders` and `/private/var/folders` cannot make a broad preset
+    // allow miss a narrower read-only deny.
+    let developer_toolchain_read_roots = normalize_profile_roots(developer_toolchain_read_roots);
+    let package_manager_read_roots = normalize_profile_roots(package_manager_read_roots);
+    let developer_toolchain_cache_roots = normalize_profile_roots(developer_toolchain_cache_roots);
     let roots = process_sandbox_roots(policy);
     let read_only_roots = process_sandbox_readonly_roots(policy);
     let policy_read_roots = process_sandbox_policy_read_roots(policy);
@@ -239,16 +247,25 @@ fn render_profile_with_extra_read_roots(
             .iter()
             .chain(package_manager_read_roots.iter())
         {
-            profile.push_str(&format!(
-                "(deny file-write* (subpath \"{}\"))\n",
-                sandbox_profile_escape(&root.display().to_string())
-            ));
+            for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+                profile.push_str(&format!(
+                    "(deny file-write* (subpath \"{}\"))\n",
+                    sandbox_profile_escape(&path)
+                ));
+            }
         }
     }
     if policy_allows_network(policy) {
         profile.push_str("(allow network*)\n");
     }
     profile
+}
+
+fn normalize_profile_roots(roots: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    roots
+        .iter()
+        .map(|root| super::normalize_for_policy(root))
+        .collect()
 }
 
 fn preset_read_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
@@ -296,6 +313,25 @@ fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
 
 fn sandbox_profile_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// macOS exposes `/tmp` and parts of `/var` through both logical and
+/// `/private` paths. Seatbelt evaluates those spellings independently, so a
+/// writable alias can bypass a deny rule emitted for only one spelling.
+fn sandbox_profile_path_aliases(path: &str) -> Vec<String> {
+    let mut aliases = vec![path.to_string()];
+    if path == "/tmp" || path.starts_with("/tmp/") || path == "/var" || path.starts_with("/var/") {
+        aliases.push(format!("/private{path}"));
+    } else if path == "/private/tmp"
+        || path.starts_with("/private/tmp/")
+        || path == "/private/var"
+        || path.starts_with("/private/var/")
+    {
+        aliases.push(path.replacen("/private", "", 1));
+    }
+    aliases.sort_unstable();
+    aliases.dedup();
+    aliases
 }
 
 fn standard_device_profile_rules() -> &'static str {
@@ -488,102 +524,63 @@ mod tests {
         );
     }
 
-    /// End-to-end regression: `cargo build --offline` of a crate with a
-    /// dependency must unpack that dependency's sources into CARGO_HOME under
-    /// the sandbox. Before the fix the package-manager preset held
-    /// `.cargo/registry` read-only, so unpack failed with "failed to create
-    /// directory .../registry/src/...: Operation not permitted"; after, the
-    /// toolchain cache preset grants the write. Uses an isolated CARGO_HOME with
-    /// pre-fetched crates (sources removed to force re-extraction), so it never
-    /// touches the developer's real `~/.cargo`. Skips where cargo is missing or
-    /// the crate is not already cached (no network in the sandbox test).
+    /// The toolchain-cache roots must be writable while package configuration
+    /// stays read-only. A direct filesystem probe proves the policy boundary
+    /// without nesting Cargo, consulting a registry, or compiling a fixture.
     #[test]
-    fn sandbox_exec_profile_allows_cargo_build_to_unpack_registry() {
+    fn sandbox_exec_profile_scopes_toolchain_cache_writes() {
         if !Path::new(SANDBOX_EXEC_PATH).exists() {
             return;
         }
-        let Some(cargo) = ["/opt/homebrew/bin/cargo", "/usr/local/bin/cargo"]
-            .into_iter()
-            .map(std::path::PathBuf::from)
-            .chain(
-                std::env::var_os("HOME")
-                    .map(|home| std::path::PathBuf::from(home).join(".cargo/bin/cargo")),
-            )
-            .find(|path| path.exists())
-        else {
-            return;
-        };
-
-        let project = tempfile::TempDir::new().expect("temp cargo project");
-        std::fs::write(
-            project.path().join("Cargo.toml"),
-            "[package]\nname = \"reprocrate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
-             [dependencies]\ncfg-if = \"1\"\n",
-        )
-        .expect("write Cargo.toml");
-        std::fs::create_dir_all(project.path().join("src")).expect("src dir");
-        std::fs::write(project.path().join("src/main.rs"), "fn main() {}\n").expect("write main");
-
-        // Populate an isolated CARGO_HOME unsandboxed; if the crate is not
-        // cacheable offline (no network), skip rather than flake.
         let cargo_home = tempfile::TempDir::new().expect("temp CARGO_HOME");
-        let fetched = Command::new(&cargo)
-            .args(["fetch", "--manifest-path"])
-            .arg(project.path().join("Cargo.toml"))
-            .env("CARGO_HOME", cargo_home.path())
-            .output()
-            .expect("run cargo fetch");
-        if !fetched.status.success() {
-            return;
-        }
-        // Force re-extraction so the build must WRITE registry/src.
-        let _ = std::fs::remove_dir_all(cargo_home.path().join("registry/src"));
+        // macOS resolves /var/folders through /private/var/folders. Use the
+        // canonical spelling for every rule and disable the broad UserTemp
+        // grant so only the explicit toolchain-cache root can authorize writes.
+        let cargo_home_path =
+            std::fs::canonicalize(cargo_home.path()).expect("canonical CARGO_HOME");
+        let registry = cargo_home_path.join("registry");
+        std::fs::create_dir_all(&registry).expect("registry dir");
+        let config = cargo_home_path.join("config.toml");
+        std::fs::write(&config, "[net]\noffline = true\n").expect("cargo config");
 
-        // Default presets: CARGO_HOME here is an arbitrary temp dir, so model it
-        // as the developer-toolchain cache write root (registry/git) the real
-        // preset grants for `~/.cargo`, and keep the CARGO_HOME root config
-        // read-only via the package-manager slot.
         let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
-        policy.workspace_roots = vec![project.path().to_string_lossy().into_owned()];
-        // The real DeveloperToolchains read roots (so the rustup shim can read
-        // ~/.rustup and ~/.cargo/bin), PLUS the temp CARGO_HOME so cargo can read
-        // its registry cache/index. The temp CARGO_HOME's registry/git are the
-        // cache-write roots the real preset grants for ~/.cargo.
-        let home = std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"));
-        let mut toolchain_read = super::super::developer_toolchain_read_roots_for_home(&home);
-        toolchain_read.push(cargo_home.path().to_path_buf());
-        let cache_roots = vec![
-            cargo_home.path().join("registry"),
-            cargo_home.path().join("git"),
-            cargo_home.path().join(".package-cache"),
-        ];
-        let package_roots = vec![cargo_home.path().join("config.toml")];
+        policy.workspace_roots.clear();
+        policy.process_sandbox.presets = Some(
+            ProcessSandboxPreset::default_presets()
+                .iter()
+                .copied()
+                .filter(|preset| *preset != ProcessSandboxPreset::UserTemp)
+                .collect(),
+        );
         let profile = render_profile_with_extra_read_roots(
             &policy,
-            &toolchain_read,
-            &package_roots,
-            &cache_roots,
+            &[cargo_home_path],
+            &[config.clone()],
+            std::slice::from_ref(&registry),
         );
 
-        let output = Command::new(SANDBOX_EXEC_PATH)
+        let cache_probe = registry.join("write-probe");
+        let cache_output = Command::new(SANDBOX_EXEC_PATH)
             .args(["-p", &profile, "--"])
-            .arg(&cargo)
-            .args(["build", "--offline"])
-            // Run inside the project (a workspace root): cargo needs an
-            // accessible cwd, and inheriting the test's repo cwd is outside the
-            // jail.
-            .current_dir(project.path())
-            .env("CARGO_HOME", cargo_home.path())
+            .arg("/usr/bin/touch")
+            .arg(&cache_probe)
             .output()
-            .expect("run sandboxed cargo build");
-        let stderr = String::from_utf8_lossy(&output.stderr);
+            .expect("run cache write probe");
         assert!(
-            output.status.success(),
-            "cargo build must unpack registry sources under the sandbox\nstderr:\n{stderr}"
+            cache_output.status.success(),
+            "toolchain cache must be writable: {}",
+            String::from_utf8_lossy(&cache_output.stderr)
         );
+
+        let config_output = Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", &profile, "--"])
+            .arg("/usr/bin/touch")
+            .arg(&config)
+            .output()
+            .expect("run config write probe");
         assert!(
-            !stderr.contains("Operation not permitted"),
-            "cargo build must not be denied writing its registry cache: {stderr}"
+            !config_output.status.success(),
+            "package configuration must stay read-only"
         );
     }
 
@@ -1070,6 +1067,44 @@ mod tests {
             vendor_deny > write_allow,
             "deny for the nested read-only root must come after the broad write allow \
              so last-match-wins keeps it unwritable: {profile}"
+        );
+    }
+
+    #[test]
+    fn extra_write_root_grant_survives_last_match_wins_deny_block() {
+        // A caller-declared out-of-jail write grant (`harn run --write-root
+        // <dir>`) arrives as an extra workspace root beyond the primary. It must
+        // get its own file-write allow that the trailing read-only deny block
+        // never cancels: the deny block iterates ONLY read-only and
+        // package-manager roots, so a write grant that leaked into either list
+        // would be silently un-granted under sandbox-exec's last-match-wins.
+        let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+        policy.workspace_roots = vec!["/ws".to_string(), "/out/coordination".to_string()];
+        // A disjoint read-only root that DOES earn a trailing deny — the control
+        // proving the deny block still fires without touching the write grant.
+        policy.read_only_roots = vec!["/ref/shared".to_string()];
+        let profile = render_profile(&policy);
+
+        assert!(
+            profile.contains("(allow file-write* (subpath \"/out/coordination\"))"),
+            "extra write-root grant should get its own write allow: {profile}"
+        );
+        assert!(
+            !profile.contains("(deny file-write* (subpath \"/out/coordination\"))"),
+            "extra write-root grant must never be re-denied by the deny block: {profile}"
+        );
+        let grant_allow = profile
+            .lines()
+            .position(|line| line == "(allow file-write* (subpath \"/out/coordination\"))")
+            .expect("write allow for the grant");
+        let readonly_deny = profile
+            .lines()
+            .position(|line| line == "(deny file-write* (subpath \"/ref/shared\"))")
+            .expect("deny for the disjoint read-only root");
+        assert!(
+            readonly_deny > grant_allow,
+            "read-only deny must still land after the write allows so the grant \
+             stays writable while the read-only root stays hermetic: {profile}"
         );
     }
 

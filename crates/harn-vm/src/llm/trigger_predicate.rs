@@ -93,6 +93,7 @@ pub(crate) fn request_hash(request: &LlmRequestPayload) -> String {
         "stream": request.stream,
         "provider_overrides": request.provider_overrides,
         "prefill": request.prefill,
+        "mock_scope": request.mock_scope,
     });
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     serde_json::to_string(&canonical)

@@ -2,7 +2,10 @@ import { append_git_trailers, git_trailers } from "std/disclosure"
 
 pipeline default() {
   const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
-  const nested_chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain", act: {sub: "agent:burin"}}}
+  const nested_chain = {
+    sub: "user:kenneth",
+    act: {sub: "agent:merge-captain", act: {sub: "agent:burin"}},
+  }
   const config = {
     identities: {
       "user:kenneth": {name: "Kenneth Sinder", email: "kenneth@example.com"},
@@ -12,20 +15,28 @@ pipeline default() {
     surfaces: {
       git: {
         kind: "text",
-        template: "Co-Authored-By: {{ current.name }} <{{ current.email }}>\nSigned-off-by: Human Merge Captain <{{ origin.email }}>\nSigned-off-by: {{ current.name }} <{{ current.email }}>\nSigned-off-by: {{ origin.name }} <{{ origin.email }}>",
+        template:
+          "Co-Authored-By: {{ current.name }} <{{ current.email }}>\nSigned-off-by: Human Merge Captain <{{ origin.email }}>\nSigned-off-by: {{ current.name }} <{{ current.email }}>\nSigned-off-by: {{ origin.name }} <{{ origin.email }}>",
       },
     },
   }
   const options = {project: false, env: false, config: config}
   const trailers = git_trailers(chain, options)
-  require !contains(trailers, "Signed-off-by: Merge Captain"), "agent actor must not receive DCO sign-off"
-  require contains(trailers, "Signed-off-by: Human Merge Captain"), "human sign-off must not be filtered by name substring"
+  require !contains(trailers, "Signed-off-by: Merge Captain"),
+    "agent actor must not receive DCO sign-off"
+  require contains(trailers, "Signed-off-by: Human Merge Captain"),
+    "human sign-off must not be filtered by name substring"
   const suppressed_message = "Fix identity trailers\n"
-  require append_git_trailers(suppressed_message, chain, options + {enabled: false}) == suppressed_message, "suppressed append must preserve the original message"
+  require append_git_trailers(suppressed_message, chain, options + {enabled: false})
+    == suppressed_message,
+    "suppressed append must preserve the original message"
   __io_println(trailers)
   __io_println("--- default ---")
   __io_println(
-    git_trailers(nested_chain, {project: false, env: false, config: {identities: config.identities}}),
+    git_trailers(
+      nested_chain,
+      {project: false, env: false, config: {identities: config.identities}},
+    ),
   )
   __io_println("--- assembled ---")
   __io_println(append_git_trailers("Fix identity trailers\n\nUse the actor chain.", chain, options))

@@ -1,0 +1,46 @@
+pub fn __as_string_list(value) -> list<string> {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    let out: list<string> = []
+    for item in value {
+      out = out + [to_string(item)]
+    }
+    return out
+  }
+  return [to_string(value)]
+}
+
+pub fn __increment_key(counts: dict, key: string) -> dict {
+  return counts + {[key]: (counts[key] ?? 0) + 1}
+}
+
+pub fn __campaign_slice_selects_unit(ordinal: int, shard_count: int, shard_index: int) -> bool {
+  if shard_count <= 1 {
+    return true
+  }
+  return ordinal % shard_count == shard_index
+}
+
+pub fn __campaign_slice_receipt(
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+  probe_units_total: int,
+  probe_units_selected: int,
+  executable_units_selected: int,
+  probe_units_excluded_by_shard: int,
+  probe_units_excluded_by_cap: int,
+) -> dict {
+  return {
+    shard_count: shard_count,
+    shard_index: shard_index,
+    max_probes: max_probes,
+    probe_units_total: probe_units_total,
+    probe_units_selected: probe_units_selected,
+    executable_units_selected: executable_units_selected,
+    probe_units_excluded_by_shard: probe_units_excluded_by_shard,
+    probe_units_excluded_by_cap: probe_units_excluded_by_cap,
+  }
+}

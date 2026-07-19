@@ -38,7 +38,9 @@ fn assert_throws_contains(body, fragment: string) -> nil {
     error_text = to_string(e)
   }
   require error_text != "", "expected closure to throw"
-  require error_text.contains(fragment), "expected error to contain " + fragment + ", got: " + error_text
+  require error_text.contains(fragment),
+    "expected error to contain " + fragment + ", got: "
+    + error_text
   return nil
 }
 

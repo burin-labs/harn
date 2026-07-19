@@ -12,7 +12,10 @@ pipeline default() {
   __io_println(contains(kinds, "release_captain"))
   __io_println(len(kinds))
   // Register a user kind through the same path; it becomes first-class.
-  const registered = agent_preset_register("triage", {family: "captain", pack: {provider: "openai", timeout_ms: 90000}})
+  const registered = agent_preset_register(
+    "triage",
+    {family: "captain", pack: {provider: "openai", timeout_ms: 90000}},
+  )
   __io_println(registered)
   __io_println(contains(agent_preset_kinds(), "triage"))
   const triage = agent_preset("triage")

@@ -3,7 +3,11 @@ pipeline main(task) {
   agent_session_reset(session)
   const observer = agent_session_attach(session, "client-observer", {mode: "observer"})
   require observer.active_controller_id == nil, "observer attach does not claim control"
-  const controller = agent_session_attach(session, "client-a", {mode: "controller", metadata: {surface: "test"}})
+  const controller = agent_session_attach(
+    session,
+    "client-a",
+    {mode: "controller", metadata: {surface: "test"}},
+  )
   require controller.active_controller_id == "client-a", "controller attach claims control"
   const blocked_controller = try {
     agent_session_attach(session, "client-b", {mode: "controller"})
@@ -12,7 +16,11 @@ pipeline main(task) {
     "blocked"
   }
   require blocked_controller == "blocked", "second controller requires takeover"
-  const takeover = agent_session_takeover(session, "client-b", {metadata: {reason: "operator-takeover"}})
+  const takeover = agent_session_takeover(
+    session,
+    "client-b",
+    {metadata: {reason: "operator-takeover"}},
+  )
   require takeover.previous_controller_id == "client-a", "takeover records previous controller"
   require takeover.active_controller_id == "client-b", "takeover changes controller"
   const observer_prompt = try {
@@ -30,8 +38,10 @@ pipeline main(task) {
   )
   const after_prompt = agent_session_snapshot(session)
   require len(after_prompt.messages) == 1, "controller prompt is appended once"
-  require after_prompt.messages[0].content == "continue from attached client", "prompt content survives"
-  require after_prompt.messages[0].metadata.live_session.client_id == "client-b", "prompt keeps client audit"
+  require after_prompt.messages[0].content == "continue from attached client",
+    "prompt content survives"
+  require after_prompt.messages[0].metadata.live_session.client_id == "client-b",
+    "prompt keeps client audit"
   const routed = agent_session_route_permission(
     session,
     "client-b",
@@ -53,7 +63,9 @@ pipeline main(task) {
   const final_snapshot = agent_session_snapshot(session)
   require final_snapshot.live_controller_id == nil, "snapshot exposes released controller"
   require len(final_snapshot.live_clients) == 2, "snapshot exposes remaining clients"
-  require len(transcript_events_by_kind(final_snapshot, "live_session_client")) >= 5, "lifecycle is audited"
-  require len(transcript_events_by_kind(final_snapshot, "live_session_permission_route")) == 1, "permission route is audited"
+  require len(transcript_events_by_kind(final_snapshot, "live_session_client")) >= 5,
+    "lifecycle is audited"
+  require len(transcript_events_by_kind(final_snapshot, "live_session_permission_route")) == 1,
+    "permission route is audited"
   log("live session lifecycle tests passed")
 }

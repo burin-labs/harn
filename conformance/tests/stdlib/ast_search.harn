@@ -21,7 +21,8 @@ pipeline default() {
     {
       source: "const a = cfg?.timeout ?? 30;\nconst b = opts?.retries ?? 3;\n",
       language: "typescript",
-      query: "(binary_expression left: (member_expression object: (_) @obj (optional_chain) property: (property_identifier) @prop) right: (_) @fallback) @match",
+      query:
+        "(binary_expression left: (member_expression object: (_) @obj (optional_chain) property: (property_identifier) @prop) right: (_) @fallback) @match",
     },
   )
   __io_println(ts.ok && ts.result == "ok")
@@ -75,17 +76,25 @@ pipeline default() {
     "harn_ast_search_" + to_string(harness.random.gen_range(100000, 999999)),
   )
   harness.fs.mkdir(root)
-  const go_path = write_fixture(root, "lib.go", "package main\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n")
+  const go_path = write_fixture(
+    root,
+    "lib.go",
+    "package main\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n",
+  )
   const go = ast_search({path: go_path, query: "(function_declaration name: (identifier) @fn)"})
   __io_println(go.ok && go.language == "go")
   __io_println(go.matches[0].captures.fn.text == "Add")
   // 6) Empty result set is `ok`, not an error.
-  const empty = ast_search({source: "fn main() {}\n", language: "rust", query: "(integer_literal) @lit"})
+  const empty = ast_search(
+    {source: "fn main() {}\n", language: "rust", query: "(integer_literal) @lit"},
+  )
   __io_println(empty.ok && empty.match_count == 0 && len(empty.matches) == 0)
   // 7) Invalid query and unknown grammar surface structured errors.
   const bad = ast_search({source: "fn main() {}\n", language: "rust", query: "(((("})
   __io_println(!bad.ok && bad.result == "invalid_query")
-  const no_caps = ast_search({source: "fn main() {}\n", language: "rust", query: "(integer_literal)"})
+  const no_caps = ast_search(
+    {source: "fn main() {}\n", language: "rust", query: "(integer_literal)"},
+  )
   __io_println(no_caps.result == "invalid_query" && contains(no_caps.details, "no captures"))
   const unknown = ast_search({source: "whatever", query: "(x) @y"})
   __io_println(unknown.result == "unsupported_language")

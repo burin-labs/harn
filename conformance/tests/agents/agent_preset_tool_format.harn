@@ -15,7 +15,10 @@ pipeline default() {
   // "option `tools` is not supported by ...". (Heredoc `text` is no longer
   // auto-derived; it is the reverse safety valve, reached only via a pin or an
   // explicit request — see `forced_text` below.)
-  const text_audit = agent_preset("audit", {provider: "ollama", model: "qwen3.6:35b-a3b-coding-nvfp4"})
+  const text_audit = agent_preset(
+    "audit",
+    {provider: "ollama", model: "qwen3.6:35b-a3b-coding-nvfp4"},
+  )
   __io_println(text_audit.tool_format)
   // Caller explicit `tool_format` wins over the derived default — even if the
   // capability matrix disagrees. An explicit `text` still yields heredoc (the

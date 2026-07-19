@@ -2,7 +2,10 @@ import "std/git"
 import "std/triggers"
 
 fn run_git(cwd, argv) {
-  const result: {success: bool, stderr?: string, stdout?: string} = host_call("process.exec", {mode: "argv", argv: argv, cwd: cwd})
+  const result: {success: bool, stderr?: string, stdout?: string} = host_call(
+    "process.exec",
+    {mode: "argv", argv: argv, cwd: cwd},
+  )
   if !result.success {
     throw "git command failed: " + (result.stderr ?? result.stdout ?? "")
   }
@@ -53,7 +56,10 @@ pipeline default() {
   }
   __io_println(
     is_err(invalid_sort)
-      && contains(to_string(unwrap_err(invalid_sort)), "sort must not contain newlines"),
+      && contains(
+      to_string(unwrap_err(invalid_sort)),
+      "sort must not contain newlines",
+    ),
   )
   const described: GitDescribeReceipt = git_describe(root, {tags: true, match: "v*"})
   __io_println(
@@ -75,13 +81,18 @@ pipeline default() {
   run_git(root, ["git", "remote", "add", "origin", remote])
   run_git(root, ["git", "push", "-u", "origin", "main"])
   run_git(root, ["git", "push", "origin", "v1.0.0"])
-  const remote_refs: GitLsRemoteReceipt = git_ls_remote("origin", {repo: root, tags: true, refs: ["refs/tags/v*"]})
+  const remote_refs: GitLsRemoteReceipt = git_ls_remote(
+    "origin",
+    {repo: root, tags: true, refs: ["refs/tags/v*"]},
+  )
   const remote_ref: GitRemoteRef = remote_refs.data.refs[0]
   __io_println(
     remote_refs.success
       && remote_refs.data.remote == "origin"
       && remote_ref.name == "refs/tags/v1.0.0"
-      && remote_refs.data.refs.any({ row -> row.ref == "refs/tags/v1.0.0" }),
+      && remote_refs.data.refs.any(
+      { row -> row.ref == "refs/tags/v1.0.0" },
+    ),
   )
   const pull = git_pull_ff_only(root, "origin", "main", {quiet: true})
   __io_println(pull.success)
@@ -89,9 +100,14 @@ pipeline default() {
     nil,
     {repo: root, enabled_tools: ["git_status", "git_log"], names: {git_log: "release_git_log"}},
   )
-  const read_surface = tool_surface_validate({tools: read_tools, policy: {side_effect_level: "read_only"}})
+  const read_surface = tool_surface_validate(
+    {tools: read_tools, policy: {side_effect_level: "read_only"}},
+  )
   __io_println(read_surface.valid)
-  const status_call = agent_dispatch_tool_call({id: "status", name: "git_status", arguments: {}}, read_tools)
+  const status_call = agent_dispatch_tool_call(
+    {id: "status", name: "git_status", arguments: {}},
+    read_tools,
+  )
   __io_println(status_call.ok)
   const log_call = agent_dispatch_tool_call(
     {id: "log", name: "release_git_log", arguments: {max_count: 1}},
@@ -99,9 +115,14 @@ pipeline default() {
   )
   __io_println(log_call.ok)
   const switch_tools = git_tools(nil, {repo: root, enabled_tools: ["git_switch"]})
-  const switch_surface = tool_surface_validate({tools: switch_tools, policy: {side_effect_level: "process_exec"}})
+  const switch_surface = tool_surface_validate(
+    {tools: switch_tools, policy: {side_effect_level: "process_exec"}},
+  )
   __io_println(switch_surface.valid)
-  const deferred_tools = git_tools(nil, {repo: root, defer_loading: true, tool_config: {git_status: {defer_loading: false}}})
+  const deferred_tools = git_tools(
+    nil,
+    {repo: root, defer_loading: true, tool_config: {git_status: {defer_loading: false}}},
+  )
   __io_println(tool_find(deferred_tools, "git_log").defer_loading)
   __io_println(!tool_find(deferred_tools, "git_status").defer_loading)
   const found = git_find_tool("recent commits", {})
@@ -111,7 +132,9 @@ pipeline default() {
   }
   __io_println(is_err(blocked_switch))
   const toolbox = git_toolbox_tools(nil, {repo: root, include_mutations: true})
-  const toolbox_surface = tool_surface_validate({tools: toolbox, policy: {side_effect_level: "process_exec"}})
+  const toolbox_surface = tool_surface_validate(
+    {tools: toolbox, policy: {side_effect_level: "process_exec"}},
+  )
   __io_println(toolbox_surface.valid)
   const find_call = agent_dispatch_tool_call(
     {id: "find", name: "find_git_tool", arguments: {query: "what branch am I on"}},

@@ -1,7 +1,11 @@
 import { stream_object } from "std/json"
 
 pipeline default() {
-  const schema = {type: "dict", required: ["name", "age"], properties: {name: {type: "string"}, age: {type: "int"}}}
+  const schema = {
+    type: "dict",
+    required: ["name", "age"],
+    properties: {name: {type: "string"}, age: {type: "int"}},
+  }
   let emitted = []
   for obj in stream_object(["{\"name\":\"Ada\",\"age\":\"not-an-int\"}"], schema) {
     emitted = emitted.push(obj)

@@ -17,17 +17,18 @@ import {
 pub fn render_peft_save_policy(harness: Harness, policy: dict) {
   const modules_to_save = safe_list(policy["modules_to_save"])
   if len(modules_to_save) > 0 {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "  modules to save: " + join(modules_to_save.map({ item -> safe_string(item, "") }), ", "),
     )
   } else {
     harness.stdio.println("  modules to save: none")
   }
-  harness.stdio
-    .println("  embedding save policy: " + safe_string(policy["save_embedding_layers"], ""))
-  harness.stdio
-    .println("  weight tying policy: " + safe_string(policy["tied_embedding_policy"], ""))
+  harness.stdio.println(
+    "  embedding save policy: " + safe_string(policy["save_embedding_layers"], ""),
+  )
+  harness.stdio.println(
+    "  weight tying policy: " + safe_string(policy["tied_embedding_policy"], ""),
+  )
   print_list(harness, "PEFT save notes", safe_list(policy["notes"]))
 }
 
@@ -51,12 +52,11 @@ pub fn render_tool_catalog_contract(harness: Harness, contract: dict) {
   if catalog_hash != "" {
     harness.stdio.println("  tool catalog hash: " + catalog_hash)
   }
-  harness.stdio
-    .println("  training catalog: " + safe_string(contract["training_catalog"], ""))
-  harness.stdio
-    .println("  inference catalog: " + safe_string(contract["inference_catalog"], ""))
-  harness.stdio
-    .println("  prompt catalog: " + safe_string(contract["prompt_catalog_requirement"], ""))
+  harness.stdio.println("  training catalog: " + safe_string(contract["training_catalog"], ""))
+  harness.stdio.println("  inference catalog: " + safe_string(contract["inference_catalog"], ""))
+  harness.stdio.println(
+    "  prompt catalog: " + safe_string(contract["prompt_catalog_requirement"], ""),
+  )
   print_list(harness, "tool catalog notes", safe_list(contract["notes"]))
   print_list(harness, "tool catalog gates", safe_list(contract["promotion_gates"]))
 }
