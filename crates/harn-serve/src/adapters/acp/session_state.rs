@@ -163,6 +163,15 @@ impl AcpServer {
             return;
         };
 
+        if let Err(error) = flush_session_sinks(&session_id).await {
+            self.send_error(
+                id,
+                -32000,
+                &format!("Failed to persist session {session_id} before replay: {error}"),
+            );
+            return;
+        }
+
         // Replay events are the durable source of truth for the in-process
         // path, so load them before deciding whether the session is
         // restorable. This mirrors the WebSocket hub's persisted fallback in

@@ -20,17 +20,15 @@ pipeline main() {
           reminders: {providers: ["compass_ast_edits"]},
         },
       )
-      const on = transcript_events_by_kind(opted_in.transcript, "system_reminder").filter(
-        { e -> e.reminder.tags[0] == "compass_ast_edits" },
-      )
+      const on = transcript_events_by_kind(opted_in.transcript, "system_reminder")
+        .filter({ e -> e.reminder.tags[0] == "compass_ast_edits" })
       const default_off = agent_loop(
         "compass default off",
         nil,
         {provider: "mock", model: "mock", session_id: "reminder-compass-default-off"},
       )
-      const off = transcript_events_by_kind(default_off.transcript, "system_reminder").filter(
-        { e -> e.reminder.tags[0] == "compass_ast_edits" },
-      )
+      const off = transcript_events_by_kind(default_off.transcript, "system_reminder")
+        .filter({ e -> e.reminder.tags[0] == "compass_ast_edits" })
       __io_println(len(on))
       __io_println(on[0].reminder.tags[0])
       __io_println(on[0].reminder.source)

@@ -43,9 +43,8 @@ pipeline main() {
       __io_println("resume_status=" + resumed.status)
       __io_println("final_status=" + done.status)
       __io_println("has_transcript=" + to_string(done.has_transcript))
-      const continuity = transcript_events_by_kind(done.transcript, "system_reminder").filter(
-        { event -> event.reminder.dedupe_key == "resume_continuity" },
-      )
+      const continuity = transcript_events_by_kind(done.transcript, "system_reminder")
+        .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
       __io_println("continuity_left=" + to_string(len(continuity)))
     },
   )

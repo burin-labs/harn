@@ -24,6 +24,17 @@ pub fn agent_session_finalize(session_id, status) {
 }
 
 /**
+ * Persist the session's queued canonical transcript mutations.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_session_flush(session_id) -> nil {
+  return __host_agent_session_flush(session_id)
+}
+
+/**
  * agent_session_messages.
  *
  * @effects: [host]

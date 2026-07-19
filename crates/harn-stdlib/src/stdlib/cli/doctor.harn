@@ -262,7 +262,8 @@ fn __render_human(report: dict) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_DOCTOR_REPORT_JSON", "")
   if raw == "" {
-    harness.stdio.eprintln("internal error: HARN_DOCTOR_REPORT_JSON not set by dispatch shim")
+    harness.stdio
+      .eprintln("internal error: HARN_DOCTOR_REPORT_JSON not set by dispatch shim")
     return 70
   }
   const report = try {
@@ -283,7 +284,8 @@ fn main(harness: Harness) -> int {
     // `json_stringify_pretty` here would alphabetise the keys.
     const envelope_raw = harness.env.get_or("HARN_DOCTOR_REPORT_ENVELOPE_JSON", "")
     if envelope_raw == "" {
-      harness.stdio.eprintln("internal error: HARN_DOCTOR_REPORT_ENVELOPE_JSON not set by dispatch shim")
+      harness.stdio
+        .eprintln("internal error: HARN_DOCTOR_REPORT_ENVELOPE_JSON not set by dispatch shim")
       return 70
     }
     harness.stdio.println(envelope_raw)

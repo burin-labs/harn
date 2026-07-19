@@ -92,17 +92,14 @@ impl TypeChecker {
                 } => {
                     let root_scope = Rc::clone(&self.scope);
                     let mut child = TypeScope::child_of(&self.scope);
-                    for p in params {
-                        child.define_var(p, None);
-                        child.clear_nil_widenable(p);
-                    }
+                    self.check_and_define_declared_parameters(params, &mut child);
                     self.fn_depth += 1;
                     Self::mark_closure_mutated_captures(&mut child, body);
                     self.expected_return_types.push(return_type.clone());
                     self.check_block_with_expected_tail(body, return_type.as_ref(), &mut child);
                     self.expected_return_types.pop();
                     if let Some(declared) = throws {
-                        self.check_declared_throws_untyped_params(
+                        self.check_declared_throws(
                             declared,
                             params,
                             body,
@@ -290,7 +287,7 @@ impl TypeChecker {
     }
 
     /// Pre-populate placeholder signatures for every
-    /// `fn`/`pipeline`/`tool`/`let`/`var` name reachable from the
+    /// `fn`/`pipeline`/`tool`/`let`/`const` name reachable from the
     /// program (including names defined inside pipeline or fn bodies)
     /// so the strict cross-module undefined-call check can resolve
     /// forward references and recursive calls whose own scope does not
@@ -313,8 +310,18 @@ impl TypeChecker {
                     scope.define_fn(name, sig);
                     walk_all(scope, body);
                 }
-                Node::Pipeline { name, body, .. } => {
-                    let sig = TypeChecker::empty_callable_signature(Some(inner.span));
+                Node::Pipeline {
+                    name,
+                    params,
+                    return_type,
+                    body,
+                    ..
+                } => {
+                    let sig = TypeChecker::nongeneric_signature_from_params(
+                        params,
+                        return_type.clone(),
+                        Some(inner.span),
+                    );
                     scope.define_fn(name, sig);
                     walk_all(scope, body);
                 }
@@ -375,7 +382,20 @@ impl TypeChecker {
                         .expect("matched FnDecl");
                     scope.define_fn(name, sig);
                 }
-                Node::Pipeline { name, .. } | Node::ToolDecl { name, .. } => {
+                Node::Pipeline {
+                    name,
+                    params,
+                    return_type,
+                    ..
+                } => {
+                    let sig = TypeChecker::nongeneric_signature_from_params(
+                        params,
+                        return_type.clone(),
+                        None,
+                    );
+                    scope.define_fn(name, sig);
+                }
+                Node::ToolDecl { name, .. } => {
                     let sig = TypeChecker::empty_callable_signature(None);
                     scope.define_fn(name, sig);
                 }

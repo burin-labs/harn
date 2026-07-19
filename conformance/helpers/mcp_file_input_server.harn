@@ -19,7 +19,8 @@ fn decode_data_uri(value: string) -> dict {
 }
 
 pipeline default() {
-  harn.mcp.configure(
+  harn.mcp
+    .configure(
     {experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}},
   )
   mcp_server_metadata({name: "test-file-input-server", version: "1.0.0"})
@@ -29,7 +30,10 @@ pipeline default() {
     "inspect_upload",
     "Inspect an inline MCP file input.",
     {
-      parameters: {upload: harn.mcp.file_input({accept: ["text/*"], max_size: 64})},
+      parameters: {
+        upload: harn.mcp
+          .file_input({accept: ["text/*"], max_size: 64}),
+      },
       handler: { args ->
         let decoded = decode_data_uri(args.upload)
         return decoded.media_type + ":" + to_string(decoded.size) + ":" + decoded.text

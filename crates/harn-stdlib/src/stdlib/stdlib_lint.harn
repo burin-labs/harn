@@ -21,7 +21,8 @@
  */
 pub fn lint_run(params) -> dict {
   const payload = hostlib_lint_run(params ?? {}) ?? {}
-  return payload.merge(
+  return payload
+    .merge(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/lint", helper: "lint_run"}},
   )
 }

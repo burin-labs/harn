@@ -208,7 +208,10 @@ fn __optional_bool_mark(value) -> string {
  * The label gets its `|` characters escaped for the table cell.
  */
 fn __markdown_link(label: string, target: string) -> string {
-  const target_encoded = target.replace(" ", "%20").replace("(", "%28").replace(")", "%29")
+  const target_encoded = target
+    .replace(" ", "%20")
+    .replace("(", "%28")
+    .replace(")", "%29")
   return "[" + __md_escape(label) + "](" + target_encoded + ")"
 }
 
@@ -550,16 +553,16 @@ fn __render_summary_line(summary: dict) -> string {
 /**
  * Entrypoint. Returns an integer exit code rather than calling
  * `exit()` so the dispatch wedge's captured stdout/stderr buffers
- * flush back to the Rust shim — `exit()` in the embedded `harn run`
- * pipeline calls `std::process::exit` which terminates the host
- * binary mid-render and drops the captured streams.
+ * flush back to the Rust shim on the normal render path — `exit()` in
+ * the embedded `harn run` pipeline raises `VmError::ProcessExit`
+ * (since #4963 it no longer calls `std::process::exit`), unwinding the
+ * pipeline mid-render instead of returning through the shim.
  */
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_EVAL_CODING_AGENT_SUMMARY_JSON", "")
   if raw == "" {
-    harness.stdio.eprintln(
-      "internal error: HARN_EVAL_CODING_AGENT_SUMMARY_JSON not set by dispatch shim",
-    )
+    harness.stdio
+      .eprintln("internal error: HARN_EVAL_CODING_AGENT_SUMMARY_JSON not set by dispatch shim")
     return 70
   }
   const summary = try {

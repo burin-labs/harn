@@ -86,7 +86,8 @@ pipeline test(task) {
       dedup: "none",
       strategy: "relevance",
       query: "parser",
-      ranker_callback: { _q, chunks -> chunks.map(
+      ranker_callback: { _q, chunks -> chunks
+        .map(
         { c ->
           if c.artifact_id == "short_b" {
             0.99

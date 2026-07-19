@@ -61,8 +61,9 @@ These bit the implementing agents and will bite users:
 
 1. **`with_retry` does not mutate `call.turn.attempt` between retries.**
    The original `call` dict is passed through unchanged. If you need
-   per-attempt counting inside a custom caller, use an `atomic`. This
-   is deliberate (Harn closures capture by value).
+   per-attempt counting inside a custom caller, use an `atomic` — it stays
+   correct even when the caller runs inside `parallel`/`spawn`, where
+   concurrent branches share one captured cell (see HARN-LNT-064).
 2. **`compose` takes a single list, not varargs.**
    `compose([with_logging({}), with_retry({})])(base)`, not
    `compose(a, b, c)(base)`.
@@ -542,6 +543,7 @@ shadow the builtins.
 | Function | Signature | Description |
 |---|---|---|
 | `model_info(selector)` | `(string) -> dict` | Wraps `llm_model_info`. Always returns a dict; `catalog` field is nil for unknown models. |
+| `execution_contract(selector)` | `(string) -> dict` | Wraps `llm_execution_contract`. Returns the resolved route facts safe for durable receipts; `generation_defaults` includes only Harn-validated fields, never arbitrary operator overlays. |
 | `resolved_options(opts)` | `(dict) -> dict` | Wraps `llm_resolved_options`. Required: `opts.model`. |
 | `has_capability(model, capability)` | `(string, string) -> bool` | Capability ∈ `{"thinking", "tool_search", "interleaved_thinking", "prompt_caching", "vision", "audio", "pdf", "files_api", "reasoning_effort", "native_tools"}`. |
 | `family_of(model_id)` | `(string) -> string` | Returns the normalized review-diversity family such as `"anthropic-claude"`, `"openai-gpt"`, `"google-gemini"`, or `"qwen"`. Hosted aliases keep the underlying model family. |

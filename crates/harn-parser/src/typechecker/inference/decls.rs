@@ -232,7 +232,7 @@ impl TypeChecker {
         out: &mut Vec<TypeExpr>,
     ) -> bool {
         for stmt in body {
-            // Thread local `let`/`var`/`const` bindings into the scope *before*
+            // Thread local `let`/`const` bindings into the scope *before*
             // inferring later returns, mirroring `check_block`'s scoping. Without
             // this, a `return localVar` resolves the name against the outer scope
             // (e.g. to a function of the same name), mis-typing the return.

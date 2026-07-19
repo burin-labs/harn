@@ -61,7 +61,7 @@ thread_local! {
 
 /// Is a settlement agent currently running on this thread?
 ///
-/// Constrained-surface harness methods use this to reject non-whitelisted
+/// Constrained-surface harness methods use this to reject non-allowlisted
 /// tool calls with `HARN-DRN-002` so the settlement agent cannot wander
 /// outside the allowed tool set.
 pub fn settlement_agent_active() -> bool {

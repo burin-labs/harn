@@ -11,10 +11,7 @@ type AgentRequiredToolsEnvelope = {
   iterations: int,
 }
 
-fn __agent_required_tool_satisfied(
-  requirement: AgentRequiredToolRequirement,
-  successful: list,
-) -> bool {
+fn __agent_required_tool_satisfied(requirement: AgentRequiredToolRequirement, successful: list) -> bool {
   if type_of(requirement) == "list" {
     for candidate in requirement {
       if contains(successful, candidate) {
@@ -26,10 +23,7 @@ fn __agent_required_tool_satisfied(
   return contains(successful, requirement)
 }
 
-fn __agent_required_tool_missing(
-  requirement: AgentRequiredToolRequirement,
-  successful: list,
-) -> bool {
+fn __agent_required_tool_missing(requirement: AgentRequiredToolRequirement, successful: list) -> bool {
   return !__agent_required_tool_satisfied(requirement, successful)
 }
 
@@ -77,10 +71,7 @@ pub fn agent_required_tools_missing_from_result(result: dict, opts) -> list<stri
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_required_tools_missing_from_session(
-  opts,
-  successful_tools_seen: list,
-) -> list<string> {
+pub fn agent_required_tools_missing_from_session(opts, successful_tools_seen: list) -> list<string> {
   const required = __agent_required_tools_from_options(opts)
   if len(required) == 0 {
     return []
@@ -121,11 +112,7 @@ fn __agent_required_tools_friction_event(result: dict, opts, missing: list<strin
   }
 }
 
-fn __agent_required_tools_envelope(
-  result: dict,
-  missing: list<string>,
-  iterations: int,
-) -> AgentRequiredToolsEnvelope {
+fn __agent_required_tools_envelope(result: dict, missing: list<string>, iterations: int) -> AgentRequiredToolsEnvelope {
   return {
     schema_version: 1,
     kind: "missing_required_tools",

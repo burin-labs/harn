@@ -13,7 +13,8 @@ use wait_timeout::ChildExt;
 
 use super::{
     current_journal_mode, initialization_lock_path, initialize_file, initialize_transient,
-    require_file_initialized, require_file_initialized_impl, InitializationError, SchemaVersion,
+    require_file_initialized, require_file_initialized_impl, sqlite_contention,
+    InitializationError, SchemaVersion, SqliteContention,
 };
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -320,6 +321,10 @@ fn temporary_schema_cannot_shadow_the_durable_marker() {
 fn sqlite_callback_contention_remains_retryable() {
     let busy =
         rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), None);
+    let locked = rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_LOCKED),
+        None,
+    );
     let constraint = rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
         None,
@@ -327,10 +332,19 @@ fn sqlite_callback_contention_remains_retryable() {
 
     assert_eq!(
         (
+            sqlite_contention(&busy),
+            sqlite_contention(&locked),
+            sqlite_contention(&constraint),
             InitializationError::Initialize(busy).is_busy_or_locked(),
             InitializationError::Initialize(constraint).is_busy_or_locked(),
         ),
-        (true, false)
+        (
+            Some(SqliteContention::Busy),
+            Some(SqliteContention::Locked),
+            None,
+            true,
+            false,
+        )
     );
 }
 

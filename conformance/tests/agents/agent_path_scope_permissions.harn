@@ -63,9 +63,8 @@ fn main(harness: Harness) {
   const denied_events = transcript_events_by_kind(denied?.transcript, "PermissionDeny")
   assert(len(denied_events) == 1, "outside path is denied")
   assert(
-    json_stringify(denied_events).contains(
-      "path '" + path_join(outside_path, "file.txt") + "' is outside anchor " + primary,
-    ),
+    json_stringify(denied_events)
+      .contains("path '" + path_join(outside_path, "file.txt") + "' is outside anchor " + primary),
     "denial reason names the path and anchor",
   )
   const extended = agent_session_open(

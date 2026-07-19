@@ -20,6 +20,7 @@ mod main_signature;
 mod narrowing;
 mod nil_safety;
 mod ownership;
+mod pipeline_typing;
 mod reachability;
 mod repair;
 mod row_merge;

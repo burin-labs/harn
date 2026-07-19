@@ -157,9 +157,9 @@ pub(crate) use models::{
     ModelInfoArgs, ModelRecommendArgs, ModelsArgs, ModelsBatchArgs, ModelsBatchCancelArgs,
     ModelsBatchCommand, ModelsBatchDownloadArgs, ModelsBatchManifestArgs, ModelsBatchPlanArgs,
     ModelsBatchPrepareArgs, ModelsBatchStatusArgs, ModelsBatchSubmitArgs, ModelsCommand,
-    ModelsInstallArgs, ModelsListArgs, ModelsLoraArgs, ModelsLoraCommand, ModelsLoraExportArgs,
-    ModelsLoraInspectArgs, ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs,
-    ModelsLoraPromoteArgs, ModelsLoraTrainArgs, ModelsTestArgs,
+    ModelsInstallArgs, ModelsListArgs, ModelsListSort, ModelsLoraArgs, ModelsLoraCommand,
+    ModelsLoraExportArgs, ModelsLoraInspectArgs, ModelsLoraManifestArgs, ModelsLoraPlanArgs,
+    ModelsLoraPreflightArgs, ModelsLoraPromoteArgs, ModelsLoraTrainArgs, ModelsTestArgs,
 };
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,

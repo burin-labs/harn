@@ -461,7 +461,8 @@ fn run_scripted(calls, opts = {}) {
 }
 
 fn has_tool_update(events, status: string, category: string, text: string) -> bool {
-  return events.find(
+  return events
+    .find(
     { event -> return event.type == "tool_call_update"
       && to_string(event.tool_call_id ?? "") != ""
       && event.status == status

@@ -262,7 +262,8 @@ pub fn github_commit_pulls(owner, repo, sha, github_token, api_base_url = nil) {
       + "/pulls",
   )
   const response_result = try {
-    harness.net.request(
+    harness.net
+      .request(
       "GET",
       url,
       {

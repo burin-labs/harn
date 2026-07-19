@@ -1,5 +1,5 @@
 //! Native tool-call surfacing tests, split out of `agent_session_host_tests.rs`
-//! so this coverage lands in a fresh file instead of growing that grandfathered
+//! so this coverage lands in a fresh file instead of growing that existing
 //! source past its exact source-file-length baseline (harn#4798). Declared as a
 //! child of the `tests` module, so `super::super` still reaches the private
 //! `agent_session_host` helpers these tests exercise.

@@ -327,7 +327,8 @@ pipeline test_release_audit_ci_contract_drift(task) {
           ...ci.jobs,
           "rust-builds": {
             ...ci.jobs["rust-builds"],
-            steps: ci.jobs["rust-builds"].steps.map(
+            steps: ci.jobs["rust-builds"].steps
+              .map(
               { step ->
                 if step.id == "release-audit-rust-test" {
                   {...step, run: "make test-affected"}
@@ -335,8 +336,7 @@ pipeline test_release_audit_ci_contract_drift(task) {
                   step
                 }
               },
-            )
-              .to_list(),
+            ).to_list(),
           },
         },
       },
@@ -352,7 +352,8 @@ pipeline test_release_audit_ci_contract_drift(task) {
           ...ci.jobs,
           "rust-builds": {
             ...ci.jobs["rust-builds"],
-            steps: ci.jobs["rust-builds"].steps.map(
+            steps: ci.jobs["rust-builds"].steps
+              .map(
               { step ->
                 if step.id == "release-audit-rust-test" {
                   {...step, env: {}}
@@ -360,8 +361,7 @@ pipeline test_release_audit_ci_contract_drift(task) {
                   step
                 }
               },
-            )
-              .to_list(),
+            ).to_list(),
           },
         },
       },

@@ -200,6 +200,24 @@ pub struct VerifyFailure {
     pub reason: String,
 }
 
+/// Typed transient contention returned by a persistent backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreContention {
+    /// Another SQLite connection owns the database write lock.
+    DatabaseBusy,
+    /// A shared-cache SQLite table lock blocks the operation.
+    DatabaseLocked,
+}
+
+impl std::fmt::Display for StoreContention {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DatabaseBusy => f.write_str("database_busy"),
+            Self::DatabaseLocked => f.write_str("database_locked"),
+        }
+    }
+}
+
 /// Errors returned by every backend.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
@@ -208,6 +226,13 @@ pub enum StoreError {
     Conflict(String),
     InvalidInput(String),
     Tenant(String),
+    /// SQLite could not acquire a lock after applying its busy policy.
+    Contention {
+        /// Machine-readable lock-contention reason.
+        kind: StoreContention,
+        /// Backend diagnostic retained for operators.
+        message: String,
+    },
     Backend(String),
 }
 
@@ -219,6 +244,9 @@ impl std::fmt::Display for StoreError {
             Self::Conflict(message) => write!(f, "conflict: {message}"),
             Self::InvalidInput(message) => write!(f, "invalid input: {message}"),
             Self::Tenant(message) => write!(f, "tenant: {message}"),
+            Self::Contention { kind, message } => {
+                write!(f, "retryable backend contention ({kind}): {message}")
+            }
             Self::Backend(message) => write!(f, "backend error: {message}"),
         }
     }

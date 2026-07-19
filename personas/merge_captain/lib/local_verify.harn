@@ -8,7 +8,8 @@ import { process_shell } from "std/runtime"
 /** Run all local verification commands for a repo. */
 pub fn run_local_verify(commands, dry_run) {
   const timeout_ms = 600000
-  return commands.map(
+  return commands
+    .map(
     { cmd ->
       if dry_run {
         {

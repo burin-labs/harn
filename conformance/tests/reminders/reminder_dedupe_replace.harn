@@ -1,10 +1,12 @@
 pipeline main() {
   const base = transcript()
-  const first = transcript.inject_reminder(
+  const first = transcript
+    .inject_reminder(
     base,
     {body: "old reminder", tags: ["context"], dedupe_key: "context-slot", ttl_turns: 2},
   )
-  const second = transcript.inject_reminder(
+  const second = transcript
+    .inject_reminder(
     first.transcript,
     {
       body: "new reminder",

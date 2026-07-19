@@ -323,7 +323,8 @@ pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
   const auth = options?.auth ?? options?.authorization
   const headers = graphql_auth_headers(auth, options?.headers)
   const body = graphql_request_body(query, variables, options)
-  const response = harness.net.request(
+  const response = harness.net
+    .request(
     "POST",
     endpoint,
     filter_nil(

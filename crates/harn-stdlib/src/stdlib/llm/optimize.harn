@@ -74,7 +74,8 @@ fn __candidate_space(config) {
   let idx = 0
   for instruction in instructions {
     for demos in demo_sets {
-      candidates = candidates.push(
+      candidates = candidates
+        .push(
         {
           index: idx,
           instruction: instruction,

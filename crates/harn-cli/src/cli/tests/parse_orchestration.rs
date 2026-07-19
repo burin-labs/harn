@@ -782,6 +782,8 @@ fn test_parses_persona_materialize_flags() {
     assert!(materialize.compile_receipt.is_none());
     assert_eq!(materialize.output_root, PathBuf::from("generated-personas"));
     assert!(materialize.force);
+    assert!(!materialize.activate);
+    assert!(!materialize.json);
 }
 
 #[test]
@@ -805,6 +807,72 @@ fn test_parses_persona_materialize_compile_receipt() {
         materialize.compile_receipt,
         Some(PathBuf::from("reviewed-receipt.json"))
     );
+    assert!(!materialize.activate);
+    assert!(!materialize.json);
+}
+
+#[test]
+fn test_parses_persona_materialize_apply() {
+    let cli = Cli::parse_from([
+        "harn",
+        "persona",
+        "materialize",
+        "--compile-receipt",
+        "reviewed-receipt.json",
+        "--manifest",
+        "project/harn.toml",
+        "--activate",
+        "--json",
+    ]);
+
+    let Command::Persona(args) = cli.command.unwrap() else {
+        panic!("expected persona command");
+    };
+    assert_eq!(args.manifest, Some(PathBuf::from("project/harn.toml")));
+    let PersonaCommand::Materialize(materialize) = args.command else {
+        panic!("expected persona materialize command");
+    };
+    assert!(materialize.activate);
+    assert!(materialize.json);
+}
+
+#[test]
+fn test_persona_materialize_apply_requires_manifest_and_json() {
+    for (missing, args) in [
+        (
+            "--manifest",
+            vec![
+                "harn",
+                "persona",
+                "materialize",
+                "--compile-receipt",
+                "reviewed-receipt.json",
+                "--activate",
+                "--json",
+            ],
+        ),
+        (
+            "--json",
+            vec![
+                "harn",
+                "persona",
+                "materialize",
+                "--compile-receipt",
+                "reviewed-receipt.json",
+                "--manifest",
+                "project/harn.toml",
+                "--activate",
+            ],
+        ),
+    ] {
+        let error = Cli::try_parse_from(args).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument,
+            "missing {missing} must fail during argument parsing"
+        );
+        assert!(error.to_string().contains(missing));
+    }
 }
 
 #[test]
@@ -826,6 +894,34 @@ fn test_persona_materialize_requires_exactly_one_input() {
     ])
     .unwrap_err();
     assert_eq!(both.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+    let blueprint_apply = Cli::try_parse_from([
+        "harn",
+        "persona",
+        "materialize",
+        "--blueprint",
+        "blueprint.json",
+        "--activate",
+    ])
+    .unwrap_err();
+    assert_eq!(
+        blueprint_apply.kind(),
+        clap::error::ErrorKind::ArgumentConflict
+    );
+
+    let json_without_apply = Cli::try_parse_from([
+        "harn",
+        "persona",
+        "materialize",
+        "--compile-receipt",
+        "receipt.json",
+        "--json",
+    ])
+    .unwrap_err();
+    assert_eq!(
+        json_without_apply.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument
+    );
 }
 
 #[test]

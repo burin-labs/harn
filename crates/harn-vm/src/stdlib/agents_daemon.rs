@@ -279,18 +279,63 @@ async fn daemon_stop_builtin(
         .ok_or_else(|| VmError::Runtime("daemon_stop: missing daemon handle".to_string()))?;
     let daemon_id = daemon_id_from_value(target)?;
     let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
-    {
+    let start_cleanup = {
         let mut daemon = state.lock();
-        if daemon.status == "stopped" {
+        if daemon.status == "stopped" && !daemon.stop_requested {
             return daemon_summary(&daemon);
         }
-        daemon.stop_requested = true;
-        if let Some(handle) = daemon.monitor_handle.take() {
-            handle.abort();
+        if daemon.stop_requested {
+            false
+        } else {
+            // Persist first: once ownership is published below, cleanup must
+            // have an infallible path to its detached task.
+            persist_daemon_meta(&daemon)?;
+            daemon.stop_requested = true;
+            if let Some(handle) = daemon.monitor_handle.take() {
+                handle.abort();
+            }
+            true
         }
-        persist_daemon_meta(&daemon)?;
+    };
+    if start_cleanup {
+        let cleanup_state = state.clone();
+        let cleanup = tokio::task::spawn_local(async move {
+            if let Err(error) = finish_daemon_stop(cleanup_state.clone()).await {
+                let mut daemon = cleanup_state.lock();
+                // Distinguish an incomplete stop from a naturally failed
+                // daemon. Retrying daemon_stop is safe; daemon_resume is not.
+                daemon.status = "stop_failed".to_string();
+                daemon.last_error = Some(error.to_string());
+                daemon.stop_requested = false;
+                let _ = persist_daemon_meta(&daemon);
+            }
+        });
+        drop(cleanup);
     }
 
+    // Cleanup is detached from this caller so cancellation cannot strand the
+    // ownership bit. Every concurrent caller observes the same completed
+    // transition instead of racing a second abort/finalize sequence.
+    loop {
+        {
+            let daemon = state.lock();
+            if !daemon.stop_requested {
+                if daemon.status == "stopped" {
+                    return daemon_summary(&daemon);
+                }
+                return Err(VmError::Runtime(
+                    daemon
+                        .last_error
+                        .clone()
+                        .unwrap_or_else(|| "daemon_stop: cleanup failed".to_string()),
+                ));
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+}
+
+async fn finish_daemon_stop(state: Arc<parking_lot::Mutex<DaemonState>>) -> Result<(), VmError> {
     let started = std::time::Instant::now();
     while (started.elapsed().as_millis() as u64) < DAEMON_STOP_WAIT_MS {
         {
@@ -302,14 +347,23 @@ async fn daemon_stop_builtin(
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
 
-    let summary = {
+    let (cancelled_handle, session_id) = {
         let mut daemon = state.lock();
         refresh_snapshot(&mut daemon)?;
         reconcile_inflight_event(&mut daemon)?;
         requeue_inflight_event(&mut daemon)?;
-        if let Some(handle) = daemon.handle.take() {
+        let handle = daemon.handle.take();
+        if let Some(handle) = handle.as_ref() {
             handle.abort();
         }
+        (handle, daemon.session_id.clone())
+    };
+    if let Some(handle) = cancelled_handle {
+        let _ = handle.await;
+    }
+    crate::llm::agent_session_host::cancellation::abandon_agent_session(&session_id).await?;
+    {
+        let mut daemon = state.lock();
         daemon.status = "stopped".to_string();
         daemon.last_error = None;
         daemon.stop_requested = false;
@@ -322,9 +376,8 @@ async fn daemon_stop_builtin(
             &daemon.persist_root,
             summarize_snapshot(daemon.last_snapshot.as_ref()),
         );
-        daemon_summary(&daemon)?
-    };
-    Ok(summary)
+    }
+    Ok(())
 }
 
 #[harn_builtin(
@@ -384,9 +437,13 @@ async fn daemon_resume_builtin(
     )?;
 
     if let Some(state) = find_daemon_by_root(&persist_root) {
-        if state.lock().status == "running" {
+        let cannot_resume = {
+            let daemon = state.lock();
+            daemon.status == "running" || daemon.status == "stop_failed" || daemon.stop_requested
+        };
+        if cannot_resume {
             return Err(VmError::Runtime(format!(
-                "daemon_resume: daemon '{persist_root}' is already running"
+                "daemon_resume: daemon '{persist_root}' is running or stop cleanup is incomplete"
             )));
         }
         let bridge = new_daemon_bridge(&ctx).await?;
@@ -1101,8 +1158,12 @@ pipeline test(task) {
     wake_interval_ms: 1000,
   })
   daemon_trigger(daemon, {kind: "trigger", payload: {path: "alpha.txt"}})
-  const stopped = daemon_stop(daemon)
-  __io_println(stopped?.queued_event_count == 1)
+  const cancelled_stop = spawn { daemon_stop(daemon) }
+  sleep(10ms)
+  cancel(cancelled_stop)
+  const stopped = parallel(2) { daemon_stop(daemon) }
+  __io_println(stopped[0]?.status == "stopped" && stopped[1]?.status == "stopped")
+  __io_println(stopped[0]?.queued_event_count == 1 && stopped[1]?.queued_event_count == 1)
   const resumed = daemon_resume(root)
   const final_snap = wait_for_iterations(resumed, 2)
   __io_println(contains(json_stringify(final_snap?.recorded_messages ?? []), "alpha.txt"))
@@ -1118,6 +1179,6 @@ pipeline test(task) {
             .map(str::trim)
             .filter(|line| !line.is_empty())
             .collect();
-        assert_eq!(lines, vec!["true", "true", "true"]);
+        assert_eq!(lines, vec!["true", "true", "true", "true"]);
     }
 }

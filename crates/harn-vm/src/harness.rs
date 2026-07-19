@@ -61,6 +61,11 @@ pub enum HarnessKind {
     /// [`crate::observability::request_id`] and
     /// [`crate::observability::vocabulary`].
     Obs,
+    /// Verdict issuance sub-handle: `harness.verdict.issue(evidence_ref)` mints
+    /// a host-validated proof-of-execution receipt (the payload of a positive
+    /// `Verdict`). The caller cannot assert a pass — issuance authority lives
+    /// here, at the host boundary. See PR2.
+    Verdict,
 }
 
 impl HarnessKind {
@@ -85,6 +90,7 @@ impl HarnessKind {
             HarnessKind::Tenant => "HarnessTenant",
             HarnessKind::Auth => "HarnessAuth",
             HarnessKind::Obs => "HarnessObs",
+            HarnessKind::Verdict => "HarnessVerdict",
         }
     }
 
@@ -108,6 +114,7 @@ impl HarnessKind {
             HarnessKind::Tenant => Some("tenant"),
             HarnessKind::Auth => Some("auth"),
             HarnessKind::Obs => Some("obs"),
+            HarnessKind::Verdict => Some("verdict"),
         }
     }
 
@@ -129,6 +136,7 @@ impl HarnessKind {
             "tenant" => Some(HarnessKind::Tenant),
             "auth" => Some(HarnessKind::Auth),
             "obs" => Some(HarnessKind::Obs),
+            "verdict" => Some(HarnessKind::Verdict),
             _ => None,
         }
     }
@@ -150,6 +158,7 @@ impl HarnessKind {
         HarnessKind::Tenant,
         HarnessKind::Auth,
         HarnessKind::Obs,
+        HarnessKind::Verdict,
     ];
 
     /// Every kind a Harn-script type annotation may reference.
@@ -170,6 +179,7 @@ impl HarnessKind {
         HarnessKind::Tenant,
         HarnessKind::Auth,
         HarnessKind::Obs,
+        HarnessKind::Verdict,
     ];
 }
 

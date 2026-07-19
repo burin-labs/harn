@@ -16,12 +16,99 @@ pub struct HealthcheckDef {
     pub body: Option<String>,
 }
 
+/// How Harn interacts with a catalog-declared local provider runtime.
+///
+/// The snake-case wire values are part of the checked-in provider catalog.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalRuntimeKind {
+    /// A runtime with its own resident daemon that Harn can warm through an API.
+    DaemonApi,
+    /// A server process Harn starts and tracks by PID.
+    ManagedProcess,
+    /// A user-managed endpoint Harn can inspect and select but never owns.
+    External,
+}
+
+/// How Harn can safely stop a catalog-declared local provider runtime.
+///
+/// This remains distinct from [`LocalRuntimeKind`]: a future daemon API may
+/// acquire a different stop protocol without changing process ownership.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalRuntimeStop {
+    /// Ask a daemon API to unload its resident model without killing a process.
+    KeepAliveZero,
+    /// Stop only the PID Harn recorded when it launched the process.
+    Pid,
+    /// Leave the runtime entirely under user or host management.
+    External,
+}
+
+/// Request and lifecycle protocol exposed by a catalog-declared local runtime.
+///
+/// Provider identity is not a protocol contract: several providers can expose
+/// the same server API, while one provider may evolve independently. Local
+/// lifecycle code therefore dispatches through this closed catalog value.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalRuntimeWireProtocol {
+    /// Ollama's `/api/*` lifecycle endpoints and request shapes.
+    OllamaApi,
+    /// The OpenAI-compatible `/v1/models` readiness surface.
+    OpenAiCompatible,
+}
+
+/// A complete, coherent local-runtime lifecycle contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalRuntimeLifecycle {
+    pub kind: LocalRuntimeKind,
+    pub stop: LocalRuntimeStop,
+    pub wire_protocol: LocalRuntimeWireProtocol,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalRuntimeLifecycleError {
+    MissingKind,
+    MissingStop,
+    MissingWireProtocol,
+    Incoherent {
+        kind: LocalRuntimeKind,
+        stop: LocalRuntimeStop,
+        wire_protocol: LocalRuntimeWireProtocol,
+    },
+}
+
+impl std::fmt::Display for LocalRuntimeLifecycleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingKind => f.write_str("local_runtime.kind cannot be empty"),
+            Self::MissingStop => f.write_str("local_runtime.stop cannot be empty"),
+            Self::MissingWireProtocol => {
+                f.write_str("local_runtime.wire_protocol cannot be empty")
+            }
+            Self::Incoherent {
+                kind,
+                stop,
+                wire_protocol,
+            } => write!(
+                f,
+                "local_runtime kind={kind:?}, stop={stop:?}, wire_protocol={wire_protocol:?} is incoherent"
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LocalRuntimeDef {
     /// Lifecycle style: `daemon_api` for runtimes with their own resident
-    /// daemon (Ollama), `managed_process` for Harn-spawned servers.
+    /// daemon (Ollama), `managed_process` for Harn-spawned servers, or
+    /// `external` for a user-managed endpoint Harn can inspect and select.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
+    pub kind: Option<LocalRuntimeKind>,
+    /// API wire contract used for lifecycle requests and readiness probes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_protocol: Option<LocalRuntimeWireProtocol>,
     /// Command Harn should execute for managed-process runtimes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -77,7 +164,7 @@ pub struct LocalRuntimeDef {
     pub default_args: Vec<String>,
     /// Stop strategy: `keep_alive_zero`, `pid`, or `external`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stop: Option<String>,
+    pub stop: Option<LocalRuntimeStop>,
     /// Official docs/source URL for the lifecycle contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>,
@@ -87,6 +174,47 @@ pub struct LocalRuntimeDef {
     /// Short operational note surfaced by CLI docs/help.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+}
+
+impl LocalRuntimeDef {
+    /// Return the lifecycle contract only when its ownership, stop, and wire
+    /// semantics agree. Consumers call this once at their boundary instead of
+    /// re-encoding provider-name conditionals at every operation.
+    pub fn lifecycle(&self) -> Result<LocalRuntimeLifecycle, LocalRuntimeLifecycleError> {
+        let kind = self.kind.ok_or(LocalRuntimeLifecycleError::MissingKind)?;
+        let stop = self.stop.ok_or(LocalRuntimeLifecycleError::MissingStop)?;
+        let wire_protocol = self
+            .wire_protocol
+            .ok_or(LocalRuntimeLifecycleError::MissingWireProtocol)?;
+        let coherent = matches!(
+            (kind, stop, wire_protocol),
+            (
+                LocalRuntimeKind::DaemonApi,
+                LocalRuntimeStop::KeepAliveZero,
+                LocalRuntimeWireProtocol::OllamaApi,
+            ) | (
+                LocalRuntimeKind::ManagedProcess,
+                LocalRuntimeStop::Pid,
+                LocalRuntimeWireProtocol::OpenAiCompatible,
+            ) | (
+                LocalRuntimeKind::External,
+                LocalRuntimeStop::External,
+                LocalRuntimeWireProtocol::OpenAiCompatible,
+            )
+        );
+        if !coherent {
+            return Err(LocalRuntimeLifecycleError::Incoherent {
+                kind,
+                stop,
+                wire_protocol,
+            });
+        }
+        Ok(LocalRuntimeLifecycle {
+            kind,
+            stop,
+            wire_protocol,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -516,7 +644,7 @@ pub struct ModelLadderDef {
 /// optional: when omitted it is inferred from the model id (or the call's base
 /// provider) at lowering time.
 ///
-/// `options` carries per-step sampling/timeout overrides (same whitelist as
+/// `options` carries per-step sampling/timeout overrides (same allowlist as
 /// inline `models:` steps); catalog ladders honor them identically instead of
 /// silently dropping them. `when`, `family`, and `capabilities` are
 /// informational to Harn's own ladder lowering (they do not affect transport
@@ -536,7 +664,7 @@ pub struct ModelLadderStepDef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<String>,
     /// Per-step sampling/timeout overrides (temperature, max_tokens, top_p,
-    /// seed, timeout_ms, fast, ...), same whitelist as inline `models:` steps.
+    /// seed, timeout_ms, fast, ...), same allowlist as inline `models:` steps.
     /// Absent from serialized output when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<BTreeMap<String, toml::Value>>,

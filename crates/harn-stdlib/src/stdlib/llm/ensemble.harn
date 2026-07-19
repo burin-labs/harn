@@ -733,7 +733,8 @@ fn __debate_system(opts, debater) {
   if type_of(debater) == "dict" && type_of(debater?.system) == "string" && trim(debater.system) != "" {
     parts = parts.push(trim(debater.system))
   }
-  parts = parts.push(
+  parts = parts
+    .push(
     "You are participating in a multi-agent debate. Answer from your assigned perspective, revise when prior rounds change your view, and keep the response concise.",
   )
   return join(parts, "\n\n")
@@ -904,7 +905,8 @@ fn __round_stability(previous_round, current_round, threshold) {
 }
 
 fn __emit_stability_short_circuit(opts, stability) {
-  return event_log.emit(
+  return event_log
+    .emit(
     "llm.ensemble.debate",
     "debate_stability_short_circuit",
     {

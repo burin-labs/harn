@@ -160,9 +160,10 @@ fn __join(items: list, sep: string) -> string {
 }
 
 /**
- * Render the human-readable table. Mirrors `print_text_report` in
- * `crates/harn-cli/src/commands/routes.rs` byte-for-byte (column
- * widths and ordering).
+ * Render the human-readable routes table. This script owns rendering: the
+ * Rust `harn routes` command (`crates/harn-cli/src/commands/routes.rs`)
+ * extracts the route inventory and delegates the text/JSON view to this
+ * script, so the column widths and ordering below are authoritative.
  */
 fn __render_text(report: dict) -> string {
   let out = __pad_right("id", 28)
@@ -285,13 +286,15 @@ fn __render_envelope(report: dict) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_ROUTES_VIEW_JSON", "")
   if raw == "" {
-    harness.stdio.eprintln("internal error: HARN_ROUTES_VIEW_JSON not set by dispatch shim")
+    harness.stdio
+      .eprintln("internal error: HARN_ROUTES_VIEW_JSON not set by dispatch shim")
     return 70
   }
   const report = try {
     json_parse(raw)
   } catch (e) {
-    harness.stdio.eprintln("internal error: failed to parse HARN_ROUTES_VIEW_JSON: " + e.message)
+    harness.stdio
+      .eprintln("internal error: failed to parse HARN_ROUTES_VIEW_JSON: " + e.message)
     return 70
   }
   if type_of(report) != "dict" {

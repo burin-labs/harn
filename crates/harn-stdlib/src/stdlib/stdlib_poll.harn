@@ -87,12 +87,7 @@ pub fn poll_until(check, options: PollOptions = {}) -> any {
  * @effects: []
  * @errors: []
  */
-pub fn wait_for_status(
-  probe,
-  terminal: list<string>,
-  options: PollOptions = {},
-  extractor = nil,
-) -> any {
+pub fn wait_for_status(probe, terminal: list<string>, options: PollOptions = {}, extractor = nil) -> any {
   const resolved = __poll_options(options)
   const terminal_set = set(terminal ?? [])
   if resolved.initial_delay_ms > 0 {

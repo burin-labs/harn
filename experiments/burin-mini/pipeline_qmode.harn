@@ -26,7 +26,8 @@ fn provider_name(harness: Harness) {
 }
 
 fn generator_model(harness: Harness) {
-  return harness.env.get_or(
+  return harness.env
+    .get_or(
     "BURIN_MINI_GENERATOR_MODEL",
     harness.env.get_or("HARN_LLM_MODEL", "devstral-small-2:24b"),
   )
@@ -428,8 +429,7 @@ ${profile_block}
 </profile>
 
 Reminder: no free-form prose answers. Every step ends with one tool call to ask_question or exit_plan_mode.
-"""
-    .trim()
+""".trim()
 }
 
 /**
@@ -585,7 +585,8 @@ pipeline default() {
     if task_text.trim() == "" {
       throw "[qmode] no task text supplied. Pass --task '...' on first invocation."
     }
-    harness.fs.write_text(
+    harness.fs
+      .write_text(
       task_meta_path(task_id),
       json_stringify({task: task_text, workspace_root: workspace_root(), started_at: date_iso()}),
     )
@@ -640,7 +641,8 @@ pipeline default() {
   } else {
     build_first_turn_prompt(harness, effective_task)
   }
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(dir, "last-prompt.txt"),
     "===SYSTEM===\n${sys_prompt}\n===USER===\n${user_prompt}\n===RESUME-MODE===\n${resume_mode}\n",
   )
@@ -685,7 +687,8 @@ pipeline default() {
   harness.fs.write_text(path_join(dir, "step.txt"), outcome)
   harness.fs.write_text(path_join(dir, "diag.json"), json_stringify(diag))
   // Dump the full transcript for offline inspection.
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(dir, "step-transcript.json"),
     json_stringify({transcript: result?.transcript, task_ledger: result?.task_ledger}),
   )

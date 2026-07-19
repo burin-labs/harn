@@ -123,7 +123,8 @@ fn __tt_events(result, start_ms, end_ms) {
   ]
   const category = to_string(result?.error_category ?? "")
   if category == "scope_violation" || category == "policy_blocked" {
-    events = events.push(
+    events = events
+      .push(
       {
         name: "tool_call.scope_violation",
         time_ms: end_ms,
@@ -270,7 +271,8 @@ pub fn langfuse_sink(opts = nil) {
     const endpoint = __tt_langfuse_endpoint(base_url)
     const auth = "Basic " + base64_encode(public_key + ":" + secret_key)
     const response_outcome = try {
-      harness.net.request(
+      harness.net
+        .request(
         "POST",
         endpoint,
         {

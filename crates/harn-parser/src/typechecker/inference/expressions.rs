@@ -250,25 +250,6 @@ impl TypeChecker {
         }
     }
 
-    /// Untyped-parameter variant of [`Self::check_declared_throws`] for
-    /// pipelines, whose params are bare names (`Vec<String>`) with no declared
-    /// types. The names are bound as untyped so a thrown expression that
-    /// references one still resolves to a binding rather than an unknown.
-    pub(in crate::typechecker) fn check_declared_throws_untyped_params(
-        &mut self,
-        declared: &TypeExpr,
-        param_names: &[String],
-        body: &[SNode],
-        throws_span: Span,
-        enclosing_scope: &TypeScope,
-    ) {
-        let params: Vec<TypedParam> = param_names
-            .iter()
-            .map(|name| TypedParam::untyped(name.as_str()))
-            .collect();
-        self.check_declared_throws(declared, &params, body, throws_span, enclosing_scope);
-    }
-
     pub(in crate::typechecker) fn infer_list_literal_type(
         &self,
         items: &[SNode],
@@ -584,14 +565,8 @@ impl TypeChecker {
                     let val_type = self
                         .infer_type(&entry.value, scope)
                         .unwrap_or_else(Self::wildcard_type);
-                    fields = merge_shape_fields(
-                        &fields,
-                        &[ShapeField {
-                            name: key,
-                            type_expr: val_type,
-                            optional: false,
-                        }],
-                    );
+                    fields =
+                        merge_shape_fields(&fields, &[ShapeField::synthetic(key, val_type, false)]);
                 }
                 // A dict literal has statically known fields, so it is a
                 // precise closed record — the empty literal `{}` is the empty

@@ -408,7 +408,8 @@ fn main(harness: Harness) -> int {
   harness.fs.write_text(path_join(resolved_output, "summary.json"), json_stringify_pretty(report))
   harness.fs.write_text(path_join(resolved_output, "per_case.jsonl"), __jsonl(reports))
   harness.fs.write_text(path_join(resolved_output, "summary.md"), __markdown(report))
-  harness.stdio.eprintln(
+  harness.stdio
+    .eprintln(
     "wrote "
       + path_join(resolved_output, "summary.json")
       + ", "

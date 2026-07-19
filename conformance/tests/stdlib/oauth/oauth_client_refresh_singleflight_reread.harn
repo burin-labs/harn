@@ -39,7 +39,8 @@ fn exercise_fresh_token_no_lock(harness: Harness) {
   const _ = mock_time(1700000000000)
   const now = to_int(harness.clock.timestamp())
   const inner = memory()
-  inner.set(
+  inner
+    .set(
     "freshNoLock",
     {
       access_token: "ACCESS-FRESH",
@@ -88,7 +89,8 @@ fn exercise_ttl_threshold(harness: Harness) {
   const _ = mock_time(1700000000000)
   const now = to_int(harness.clock.timestamp())
   const inner = memory()
-  inner.set(
+  inner
+    .set(
     "ttlReread",
     {
       access_token: "ACCESS-STALE",
@@ -132,7 +134,8 @@ fn exercise_post_401(harness: Harness) {
   const _ = mock_time(1700000000000)
   const now = to_int(harness.clock.timestamp())
   const inner = memory()
-  inner.set(
+  inner
+    .set(
     "post401Reread",
     {
       access_token: "ACCESS-OLD",
@@ -186,7 +189,8 @@ fn exercise_forced_refresh(harness: Harness) {
   const _ = mock_time(1700000000000)
   const now = to_int(harness.clock.timestamp())
   const inner = memory()
-  inner.set(
+  inner
+    .set(
     "forcedReread",
     {
       access_token: "ACCESS-OLD",

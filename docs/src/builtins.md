@@ -1,6 +1,9 @@
 # Builtin functions
 
-Complete reference for all built-in functions available in Harn.
+Reference notes for commonly used Harn built-in functions. This page is a
+curated subset, not an exhaustive list. The complete, authoritative builtin
+registry — every function registered via `#[harn_builtin]` — is emitted by
+`harn contracts builtins`.
 
 ## Output
 
@@ -17,7 +20,7 @@ Complete reference for all built-in functions available in Harn.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `type_of(value)` | value: any | string | Returns type name: `"int"`, `"float"`, `"decimal"`, `"string"`, `"bool"`, `"nil"`, `"list"`, `"dict"`, `"closure"`, `"taskHandle"`, `"duration"`, `"enum"`, `"struct"` |
+| `type_of(value)` | value: any | string | Returns the runtime type tag: one of `"string"`, `"bytes"`, `"int"`, `"float"`, `"decimal"`, `"bool"`, `"nil"`, `"list"`, `"dict"`, `"closure"`, `"builtin"`, `"duration"`, `"enum"`, `"struct"`, `"task_handle"`, `"channel"`, `"atomic"`, `"rng"`, `"sync_permit"`, `"mcp_client"`, `"set"`, `"generator"`, `"stream"`, `"range"`, `"iter"`, `"pair"` (harness objects return their own names). The canonical list is `runtime_type_tags::ALL` |
 | `to_string(value)` | value: any | string | Convert to string representation |
 | `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats and decimals truncate, bools become 0/1; non-finite or out-of-range values return `nil` |
 | `to_float(value)` | value: any | float or nil | Parse/convert to float (a decimal converts lossily) |
@@ -1867,6 +1870,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `runtime_introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `llm_call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier, family, lineage}` via providers.toml |
+| `llm_execution_contract(selector)` | selector: string | dict | Return secret-free resolved route facts for durable receipts: `{schema, selector, model_id, provider, wire_model, tool_format, tier, family, lineage, generation_defaults}`. Only Harn-validated generation defaults are included; arbitrary operator route overlays are omitted. |
 | `llm_model_info(model)` | model: string | dict | Return resolved model/provider metadata plus normalized `family`/`lineage`, catalog entry, capabilities, API-key availability, and QC default |
 | `llm_pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
 | `llm_complementary_reviewer(options)` | options: `{author_model, author_provider?, intent?, max_price_multiplier?}` | dict | Pick a different-family reviewer model for `review`, `critique`, or `plan_review`, returning the selected model, fallback reason when needed, and estimated incremental cost |
@@ -1894,7 +1898,8 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |
 | `tiktoken_tokenizer_info(model)` | model: string | dict | Return `{model, model_family, source, exact, known_model_family, encoder}` for the encoder or heuristic fallback used by a model ID |
-| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `scope` (fixture bucket this entry serves; defaults to `default`), `consume` (`once`\|`sticky`), `id` (stable receipt id), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}` (short-circuits the call and surfaces the same structured error dict as live provider failures — useful for testing `llm_call_safe` envelopes and retry loops) |
+| `llm_mock(config)` | config: dict | nil | Queue one legacy v0 mock response. Supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}`. v0 entries always use the shared default scope. |
+| `llm_mock_load_jsonl(text)` | text: string | dict | Parse and atomically replace the deterministic fixture store from a complete JSONL document. Returns `{schema_version, strict_scopes, count, scopes}`. The caller owns filesystem reads; malformed text leaves the active fixture unchanged. |
 | `llm_mock_calls()` | — | list | Return list of `{messages, system, tools}` for all calls made to the mock provider |
 | `llm_mock_receipts()` | — | list | Return the scope-consumption receipts `{scope, matched, entry_id, consume}`, one per mock-provider dispatch while a fixture is active |
 | `llm_mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
@@ -1942,6 +1947,16 @@ llm_mock({text: "step 2", match: "*planner*", consume_match: true})
 // it the same way they would a live provider failure.
 llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
 llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+
+// A v1 fixture is one complete document, installed atomically. Scopes isolate
+// concurrent main/judge calls; strictScopes forbids default fallback.
+const fixture = """
+{"schemaVersion":1,"strictScopes":true}
+{"id":"main-1","scope":"main","consume":"once","text":"Implement the change."}
+{"id":"judge-1","scope":"judge","consume":"sticky","match":"*","text":"PASS"}
+"""
+const loaded = llm_mock_load_jsonl(fixture)
+assert_eq(loaded.count, 2)
 
 // Inspect what was sent
 const calls = llm_mock_calls()
@@ -2149,6 +2164,7 @@ distinguish new failure modes.
 | `overloaded` | Upstream provider is shedding load (HTTP 503 / 529). Distinct from `rate_limit`: no quota was exceeded and the provider recovers on its own |
 | `server_error` | Provider-side 5xx (500, 502) that is not specifically overload |
 | `transient_network` | Network-level transient failure — connection reset, DNS hiccup, partial stream. Retryable but not provider-status-coded |
+| `resource_busy` | A shared local resource is temporarily unavailable, such as a contended database write lock |
 | `schema_validation` | LLM output failed schema validation. Retryable via `schema_retries` |
 | `schema_stream_aborted` | A streaming response was aborted because the partial content could not satisfy `output_schema`. Consumes one `schema_retries` slot; see `schema_stream_abort` |
 | `tool_error` | Tool execution failed |
@@ -2160,6 +2176,7 @@ distinguish new failure modes.
 | `circuit_open` | The circuit breaker is open |
 | `budget_exceeded` | An LLM cost or token budget would be exceeded |
 | `internal` | An engine or wiring bug — an undefined builtin, corrupt bytecode, a violated VM invariant. Retrying and rewording the prompt cannot fix it, so the agent loop re-raises rather than folding it into a tool observation |
+| `environment` | A host environment or infrastructure gap, not the workload's code — a developer-toolchain root or cache outside the sandbox profile, a missing system binary, or another provisioning problem. The fix is to widen the sandbox/config or provision the host; embedders branch on this to avoid blaming the model for an environment gap |
 | `generic` | Unclassified |
 
 Example:

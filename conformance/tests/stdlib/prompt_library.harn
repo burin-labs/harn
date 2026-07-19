@@ -5,7 +5,8 @@ pipeline test(task) {
   harness.fs.mkdir(root)
   const catalog_path = path_join(root, "prompt_library_catalog.toml")
   const front_path = path_join(root, "prompt_library_front.harn.prompt")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     catalog_path,
     "[[prompt_fragments]]\n"
       + "id = \"rust-repo-conventions-v1\"\n"
@@ -15,7 +16,8 @@ pipeline test(task) {
       + "cache_ttl = \"5m\"\n"
       + "body = \"Use nextest for {{crate}} and keep sccache warm.\"\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     front_path,
     "---\n"
       + "id = \"ops-prefix\"\n"

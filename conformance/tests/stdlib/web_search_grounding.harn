@@ -82,22 +82,26 @@ pipeline test(task) {
   assert(contains(calls[0].url, "q=harn"), "web_search forwarded query")
   const root = path_join(harness.fs.temp_dir(), "harn-web-grounding-" + uuid_v7())
   harness.fs.mkdir(root)
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "package.json"),
     "{\"dependencies\":{\"react\":\"19.0.0\",\"react-dom\":\"19.0.0\"}}\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "Cargo.toml"),
     "[package]\nname=\"grounding-demo\"\nversion=\"0.1.0\"\n[dependencies]\nserde=\"1\"\n",
   )
   const app_py = path_join(root, "app.py")
   const ui_ts = path_join(root, "ui.ts")
   const lib_rs = path_join(root, "lib.rs")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     app_py,
     "import requests\nfrom fastapi import FastAPI, NopeSymbol\nimport madeup_package_zz\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     ui_ts,
     "import React from 'react'\nimport { createRoot } from 'react-dom/client'\nimport nope from 'fresh-slop'\n",
   )

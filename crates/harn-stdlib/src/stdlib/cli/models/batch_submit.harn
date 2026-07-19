@@ -198,12 +198,7 @@ fn __openai_compatible_batch_body(provider: string, body: dict) -> dict {
   return body
 }
 
-fn __submit_openai_compatible(
-  harness: Harness,
-  job: dict,
-  payload: dict,
-  provider: string,
-) -> dict {
+fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provider: string) -> dict {
   const auth = __api_key_for_job(harness, provider)
   const base = __provider_base_url(harness, provider)
   const base_job = __submission_job_base(harness, job, payload, false)

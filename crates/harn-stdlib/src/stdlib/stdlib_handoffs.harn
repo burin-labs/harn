@@ -244,13 +244,15 @@ pub fn handoff_dispatch(handoff_payload, decision = nil, options = nil) {
     tenant_id: options?.tenant_id,
     audit: {scope: __handoff_dispatch_audit_scope(handoff_value)},
   }
-  const decision_event_id = event_log.emit(
+  const decision_event_id = event_log
+    .emit(
     "handoff.dispatch.decisions",
     "handoff_route_selected",
     payload,
     {handoff_id: handoff_value.id, handoff_kind: handoff_value.kind, target: selected.target},
   )
-  const enqueue_event_id = event_log.emit(
+  const enqueue_event_id = event_log
+    .emit(
     __handoff_dispatch_topic(selected),
     "handoff_dispatch_enqueued",
     payload + {decision_event_id: decision_event_id},

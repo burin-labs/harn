@@ -3,11 +3,13 @@ import "../_common"
 pipeline test(task) {
   const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-auth-" + uuid())
   harness.fs.mkdir(root)
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "harn.toml"),
     "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\npath = \"/a2a/review\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  log(event.kind)\n}\n",
   )
@@ -30,7 +32,8 @@ pipeline test(task) {
   const unauth = harness.net.request("POST", url + "/a2a/review", {body: body, headers: json_headers})
   __io_println(unauth.status == 401)
   const ts = to_string(to_int(harness.clock.timestamp()))
-  const wrong_hmac = harness.net.request(
+  const wrong_hmac = harness.net
+    .request(
     "POST",
     url + "/a2a/review",
     {
@@ -42,7 +45,8 @@ pipeline test(task) {
     },
   )
   __io_println(wrong_hmac.status == 401)
-  const bearer = harness.net.request(
+  const bearer = harness.net
+    .request(
     "POST",
     url + "/a2a/review",
     {body: body, headers: {"Content-Type": "application/json", Authorization: "Bearer test-key-2"}},

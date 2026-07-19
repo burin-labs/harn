@@ -15,6 +15,9 @@ pub struct ToolScorecardSummary {
     pub pass: usize,
     pub warn: usize,
     pub fail: usize,
+    pub trusted: usize,
+    pub needs_review: usize,
+    pub quarantined: usize,
     pub best_route: Option<ToolScorecardRouteKey>,
 }
 
@@ -61,6 +64,8 @@ pub struct ToolScorecardRoute {
     pub actionless_rate: f64,
     pub quality_score: u16,
     pub status: &'static str,
+    pub trust_status: &'static str,
+    pub trust_reasons: Vec<&'static str>,
     pub evidence_status: &'static str,
     pub probe_evidence_status: &'static str,
     pub request_evidence_status: &'static str,
@@ -124,9 +129,15 @@ pub struct ToolScorecardPlan {
     pub kind: &'static str,
     pub catalog: ToolScorecardCatalogProvenance,
     pub route_count: usize,
+    pub readiness_command_count: usize,
     pub unscorecardable_provider_count: usize,
     pub case_count: usize,
     pub required_case_count: usize,
+    pub executable_case_count: usize,
+    pub live_tool_probe_case_count: usize,
+    pub offline_request_case_count: usize,
+    pub not_applicable_case_count: usize,
+    pub provider_summaries: Vec<ToolScorecardPlanProviderSummary>,
     pub batch_manifest_request_count: usize,
     pub routes: Vec<ToolScorecardPlanRoute>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -143,11 +154,39 @@ pub struct ToolScorecardCatalogProvenance {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardPlanProviderSummary {
+    pub provider: String,
+    pub route_count: usize,
+    pub case_count: usize,
+    pub required_case_count: usize,
+    pub executable_case_count: usize,
+    pub live_tool_probe_case_count: usize,
+    pub offline_request_case_count: usize,
+    pub readiness_command_count: usize,
+    pub batch_manifest_request_count: usize,
+    pub not_applicable_case_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ToolScorecardPlanRoute {
     pub provider: String,
     pub model: String,
+    pub trust_status: &'static str,
+    pub trust_reasons: Vec<&'static str>,
+    pub readiness: ToolScorecardReadinessPlan,
     pub catalog_claim: ToolScorecardCatalogClaim,
     pub cases: Vec<ToolScorecardPlanCase>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolScorecardReadinessPlan {
+    pub status: &'static str,
+    pub runner: &'static str,
+    pub reason: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

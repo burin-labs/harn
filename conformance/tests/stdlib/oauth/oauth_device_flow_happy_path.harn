@@ -50,7 +50,8 @@ pipeline test(task) {
   const handler_topic = "oauth.device_flow.test.handler"
   const handler_cursor = event_log.latest(handler_topic) ?? 0
   const on_user_code = { user_code, verification_uri ->
-    let _ = event_log.emit(
+    let _ = event_log
+      .emit(
       handler_topic,
       "called",
       {user_code: user_code, verification_uri: verification_uri},

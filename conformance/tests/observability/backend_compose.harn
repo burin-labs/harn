@@ -3,9 +3,11 @@ import { obs } from "std/observability"
 pipeline default() {
   const o = obs()
   o.reset()
-  o.configure(
+  o
+    .configure(
     {
-      backend: o.Backend.compose(
+      backend: o.Backend
+        .compose(
         [o.Backend.otel("http://collector.example"), o.Backend.honeycomb("key", "dataset")],
       ),
     },

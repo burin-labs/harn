@@ -1075,7 +1075,8 @@ fn __refactor_strip_n(line, n) {
 }
 
 fn __refactor_indent_lines(lines, prefix) {
-  return lines.map(
+  return lines
+    .map(
     { l ->
       if trim(l) == "" {
         ""

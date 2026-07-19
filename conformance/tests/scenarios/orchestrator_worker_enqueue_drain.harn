@@ -10,15 +10,18 @@ pipeline default(task) {
   harness.fs.mkdir(producer_dir)
   harness.fs.mkdir(consumer_dir)
   harness.fs.mkdir(state_dir)
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(producer_dir, "harn.toml"),
     "[package]\nname = \"worker-producer\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"worker://triage\"\npriority = \"high\"\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(consumer_dir, "harn.toml"),
     "[package]\nname = \"worker-consumer\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(consumer_dir, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, kind: event.kind, event_id: event.id}\n}\n",
   )

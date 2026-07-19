@@ -129,7 +129,8 @@ pub fn host_calls() {
  * @errors: []
  */
 pub fn host_calls_for(cap: string, op: string) {
-  return host_mock_calls().filter({ call -> return call?.capability == cap && call?.operation == op })
+  return host_mock_calls()
+    .filter({ call -> return call?.capability == cap && call?.operation == op })
 }
 
 /**
@@ -965,8 +966,7 @@ fn __testing_fs_content(value) -> string {
  * @example: with_temp_dir({ dir -> harness.fs.write_text(dir + "/x", "1") })
  */
 pub fn with_temp_dir(body) -> any {
-  const dir = harness.fs.temp_dir() + "/harn-test-" + uuid_v7()
-  harness.fs.mkdir(dir)
+  const dir = harness.fs.mkdtemp_in_workspace("harn-test-")
   try {
     const result = body(dir)
     harness.fs.delete(dir)

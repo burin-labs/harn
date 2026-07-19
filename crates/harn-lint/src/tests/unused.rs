@@ -306,7 +306,7 @@ fn test_fix_unused_variable_simple_let_binding() {
 #[test]
 fn test_fix_unused_variable_simple_let_binding_with_type() {
     // Type annotation between the name and `=` must not confuse the scan.
-    // We use `let` (not `var`) so the `mutable-never-reassigned` autofix
+    // We use `const` (not `let`) so the `mutable-never-reassigned` autofix
     // doesn't also fire and combine with this one.
     let source = "pipeline default(task) {\n  const leftover: int = 3\n  log(\"hi\")\n}";
     let diags = lint_source(source);

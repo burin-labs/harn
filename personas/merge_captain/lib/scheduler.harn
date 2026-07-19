@@ -311,9 +311,8 @@ pub fn reconcile_disappeared(args) {
   const dry_run = args.dry_run
   const observed_numbers = args.observed_numbers
   let receipts = []
-  const stale = list_all_checkpoints(checkpoint_handle).filter(
-    { env -> env.repo == policy.repo && !observed_numbers.contains(env.number) },
-  )
+  const stale = list_all_checkpoints(checkpoint_handle)
+    .filter({ env -> env.repo == policy.repo && !observed_numbers.contains(env.number) })
   for env in stale {
     const detail = get_pr_details(adapter, env.repo, env.number)
     const final_obs = if detail != nil {

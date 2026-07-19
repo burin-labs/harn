@@ -73,7 +73,8 @@ fn __pack_summary(result: dict) -> list {
   let summaries = []
   for pack in safe_list(result["packs"]) {
     const report = safe_dict(pack["report"])
-    summaries = summaries.push(
+    summaries = summaries
+      .push(
       {
         pack_id: safe_string(pack["pack_id"], ""),
         title: safe_string(pack["title"], ""),
@@ -111,12 +112,14 @@ fn __report(plan: dict, result: dict, feedback: string) -> dict {
 fn __render_json(harness: Harness, report: dict) {
   const ok = safe_bool(report["ok"], false) || safe_bool(report["advisory"], false)
   if ok {
-    harness.stdio.println(
+    harness.stdio
+      .println(
       json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report})),
     )
     return
   }
-  harness.stdio.println(
+  harness.stdio
+    .println(
     json_stringify_pretty(
       cli_json_envelope(
         {
@@ -148,9 +151,8 @@ fn __render_human(harness: Harness, report: dict) {
     harness.stdio.println(feedback)
   } else if safe_string(report["status"], "") == "no_packs" {
     harness.stdio.println("")
-    harness.stdio.println(
-      "No harn-canon packs selected. Pass --pack or configure canon-packs.json routing.",
-    )
+    harness.stdio
+      .println("No harn-canon packs selected. Pass --pack or configure canon-packs.json routing.")
   } else {
     harness.stdio.println("")
     harness.stdio.println("No harn-canon findings.")

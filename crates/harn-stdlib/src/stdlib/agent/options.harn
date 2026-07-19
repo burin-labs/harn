@@ -1,3 +1,8 @@
+import {
+  LlmCallerTransport,
+  __normalize_llm_caller_transport,
+  __validate_llm_caller,
+} from "std/agent/caller_transport"
 import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
@@ -140,10 +145,9 @@ pub type JudgeConfig = {
  * `docs/src/llm/agent_loop.md`, plus the caller-facing keys consumed by the
  * `agent_loop_options` normalizer below.
  *
- * The `llm_call` keys are inlined (rather than composed as
- * `LlmCallOptions & {...}`) so consumers can import this alias alone and
- * still get structural checking; the parity test pins this copy as a
- * superset of `LlmCallOptions`.
+ * The `llm_call` keys are inlined so consumers can import this alias alone and
+ * retain structural checking. The parity test pins it as a superset of
+ * `LlmCallOptions`.
  *
  * NOTE ON `output_schema`: unlike on `llm_call`, this is a TERMINAL-answer
  * contract, not a per-turn one. The loop deliberately does NOT force each
@@ -233,6 +237,7 @@ pub type AgentLoopOptions = {
   history?: list,
   transcript?: dict,
   session_id?: string,
+  mock_scope?: string,
   system?: string,
   system_preamble?: string,
   system_prefix?: string,
@@ -263,6 +268,7 @@ pub type AgentLoopOptions = {
   retry?: bool | AgentLoopRetryOptions,
   llm_retry?: AgentLoopRetryOptions,
   llm_caller?: any,
+  llm_caller_transport?: LlmCallerTransport,
   tool_caller?: any,
   structural_validator?: any,
   input_guardrail?: any,
@@ -864,9 +870,8 @@ fn __task_ledger_from_shorthand(opts) {
     for (index, item) in iter(shorthand).enumerate() {
       const text = __task_ledger_deliverable_text(item)
       if text != "" {
-        deliverables = deliverables.push(
-          {id: "deliverable-" + to_string(index + 1), text: text, status: "open", note: nil},
-        )
+        deliverables = deliverables
+          .push({id: "deliverable-" + to_string(index + 1), text: text, status: "open", note: nil})
       }
     }
   }
@@ -1108,15 +1113,6 @@ fn __validate_terminal_callback(value) {
   }
   if type_of(value) != "closure" {
     throw "agent_loop: `terminal_callback` must be a closure or nil; got " + type_of(value)
-  }
-}
-
-fn __validate_llm_caller(value) {
-  if value == nil {
-    return
-  }
-  if type_of(value) != "closure" {
-    throw "agent_loop: `llm_caller` must be a closure or nil; got " + type_of(value)
   }
 }
 
@@ -1546,7 +1542,10 @@ fn __auto_tool_format_source(value) {
 }
 
 fn __clear_tool_format_resolution(opts) {
-  return opts.remove("tool_format").remove("_tool_format_source").remove("_tool_format_capability_gap")
+  return opts
+    .remove("tool_format")
+    .remove("_tool_format_source")
+    .remove("_tool_format_capability_gap")
     .remove("_tool_format_override")
 }
 
@@ -1756,6 +1755,7 @@ pub fn agent_loop_options(options = nil) {
   opts = defaults + opts
   opts = agent_apply_default_retry(opts)
   const llm_caller = opts?.llm_caller
+  const llm_caller_transport = __normalize_llm_caller_transport(opts?.llm_caller_transport)
   const llm_retry = opts?._llm_retry
   const on_delta = opts?.on_delta
   const tool_caller = opts?.tool_caller
@@ -1812,6 +1812,7 @@ pub fn agent_loop_options(options = nil) {
   opts = opts
     + {
     _llm_caller: llm_caller,
+    _llm_caller_transport: llm_caller_transport,
     _llm_retry: llm_retry,
     _on_delta: on_delta,
     _tool_caller: tool_caller,

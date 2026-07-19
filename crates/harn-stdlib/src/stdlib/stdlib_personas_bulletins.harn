@@ -434,7 +434,8 @@ pub fn bulletin_emit(input, options = nil) -> BulletinProposeReceipt {
   const raw = input?.schema == BULLETIN_SCHEMA ? bulletin_validate(input) : bulletin_propose(input, opts)
   const bulletin = raw + {status: "proposed"}
   const topic = opts?.topic ?? BULLETIN_PROPOSAL_TOPIC
-  const event_log_id = event_log.emit(
+  const event_log_id = event_log
+    .emit(
     topic,
     BULLETIN_PROPOSED_KIND,
     bulletin,
@@ -460,11 +461,7 @@ pub fn bulletin_emit(input, options = nil) -> BulletinProposeReceipt {
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_decide(
-  bulletin: ProfileBulletin,
-  action,
-  options = nil,
-) -> ProfileBulletinDecision {
+pub fn bulletin_decide(bulletin: ProfileBulletin, action, options = nil) -> ProfileBulletinDecision {
   const opts = options ?? {}
   const resolved_action = __bulletin_resolve_action(action)
   const status = __bulletin_status_for_action(resolved_action)
@@ -502,10 +499,7 @@ pub fn bulletin_decide(
  * @effects: [transcript.write]
  * @errors: []
  */
-pub fn bulletin_emit_decision(
-  decision: ProfileBulletinDecision,
-  options = nil,
-) -> BulletinDecisionReceipt {
+pub fn bulletin_emit_decision(decision: ProfileBulletinDecision, options = nil) -> BulletinDecisionReceipt {
   const opts = options ?? {}
   if decision.schema != BULLETIN_DECISION_SCHEMA {
     throw "std/personas/bulletins: unsupported decision schema " + __bulletin_text(decision.schema)
@@ -514,7 +508,8 @@ pub fn bulletin_emit_decision(
     throw "std/personas/bulletins: decision bulletin_id is required"
   }
   const topic = opts?.topic ?? BULLETIN_DECISION_TOPIC
-  const event_log_id = event_log.emit(
+  const event_log_id = event_log
+    .emit(
     topic,
     BULLETIN_DECISION_KIND,
     decision,
@@ -621,11 +616,7 @@ pub fn bulletin_expire(bulletin: ProfileBulletin, options = nil) -> BulletinDeci
  * @effects: []
  * @errors: []
  */
-pub fn bulletin_supersede(
-  bulletin: ProfileBulletin,
-  supersedes: list<string>,
-  options = nil,
-) -> BulletinDecisionReceipt {
+pub fn bulletin_supersede(bulletin: ProfileBulletin, supersedes: list<string>, options = nil) -> BulletinDecisionReceipt {
   const merged = (options ?? {}) + {supersedes: supersedes}
   return bulletin_emit_decision(bulletin_decide(bulletin, "supersede", merged), merged)
 }

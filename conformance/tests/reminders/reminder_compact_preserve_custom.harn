@@ -7,11 +7,13 @@ pipeline main() {
       {role: "assistant", content: "four"},
     ],
   )
-  const durable = transcript.inject_reminder(
+  const durable = transcript
+    .inject_reminder(
     base,
     {body: "durable", dedupe_key: "durable", ttl_turns: 2, preserve_on_compact: true},
   ).transcript
-  const mixed = transcript.inject_reminder(
+  const mixed = transcript
+    .inject_reminder(
     durable,
     {body: "compactable", dedupe_key: "compactable", ttl_turns: 2, preserve_on_compact: false},
   ).transcript

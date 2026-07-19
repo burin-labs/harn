@@ -5,7 +5,8 @@ pipeline default() {
   harness.fs.mkdir(root)
   const script_path = path_join(root, "sigterm.harn")
   const log_path = path_join(root, "sigterm.log")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     script_path,
     "import \"std/signal\"\n\npipeline default() {\n  on_interrupt({ -> __io_println(\"term\") }, {signals: [\"SIGTERM\"], once: false})\n  __io_println(\"ready\")\n  try {\n    sleep(duration_seconds(30))\n  } catch (e) {\n    __io_println(\"caught\")\n  }\n  __io_println(interrupted())\n}\n",
   )

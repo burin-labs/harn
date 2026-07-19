@@ -147,6 +147,7 @@ fn matches_type_with_generics(
             "rng" => matches!(value, VmValue::Rng(_)),
             "sync_permit" => matches!(value, VmValue::SyncPermit(_)),
             "mcp_client" => matches!(value, VmValue::McpClient(_)),
+            "verdict_receipt" => matches!(value, VmValue::VerdictReceipt(_)),
             "pair" => matches!(value, VmValue::Pair(_)),
             "enum" => matches!(value, VmValue::EnumVariant(_)),
             "struct" => matches!(value, VmValue::StructInstance(_)),
@@ -549,11 +550,11 @@ mod tests {
 
     #[test]
     fn shape_validates_required_fields() {
-        let shape = TypeExpr::Shape(vec![harn_parser::ShapeField {
-            name: "x".into(),
-            type_expr: ty_int(),
-            optional: false,
-        }]);
+        let shape = TypeExpr::Shape(vec![harn_parser::ShapeField::synthetic(
+            "x",
+            ty_int(),
+            false,
+        )]);
         let mut good = std::collections::BTreeMap::new();
         good.insert("x".to_string(), vm_int(7));
         assert!(matches_type(&VmValue::dict(good), &shape));

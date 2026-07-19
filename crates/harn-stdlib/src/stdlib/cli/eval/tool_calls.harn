@@ -207,16 +207,18 @@ fn __render_regression(envelope: dict) -> dict {
 /**
  * Entrypoint. Returns an integer exit code rather than calling
  * `exit()` so the dispatch wedge's captured stdout/stderr buffers
- * flush back to the Rust shim — `exit()` in the embedded `harn run`
- * pipeline calls `std::process::exit` which would terminate the host
- * binary mid-render and drop the captured streams. The Rust shim
- * reads the returned Int via `exit_code_from_return_value` and
+ * flush back to the Rust shim on the normal render path — `exit()` in
+ * the embedded `harn run` pipeline raises `VmError::ProcessExit`
+ * (since #4963 it no longer calls `std::process::exit`), unwinding the
+ * pipeline mid-render instead of returning through the shim. The Rust
+ * shim reads the returned Int via `exit_code_from_return_value` and
  * forwards it.
  */
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON", "")
   if raw == "" {
-    harness.stdio.eprintln("internal error: HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON not set by dispatch shim")
+    harness.stdio
+      .eprintln("internal error: HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON not set by dispatch shim")
     return 70
   }
   const envelope = try {

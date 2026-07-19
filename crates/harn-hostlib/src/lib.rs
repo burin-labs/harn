@@ -40,6 +40,7 @@ pub mod fs_snapshot;
 pub mod fs_watch;
 pub mod host_env_custody;
 pub mod host_lease;
+pub mod host_lease_capability;
 pub mod process;
 mod process_liveness;
 pub mod sandbox;
@@ -49,6 +50,7 @@ pub mod secret_store;
 #[cfg(feature = "terminal-session")]
 pub mod terminal_session;
 pub mod tools;
+pub mod verdict;
 
 mod json;
 mod registry;
@@ -94,7 +96,9 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(fs_snapshot::FsSnapshotCapability)
         .with(fs_watch::FsWatchCapability)
         .with(tools::ToolsCapability)
-        .with(secret_store::SecretStoreCapability);
+        .with(secret_store::SecretStoreCapability)
+        .with(verdict::VerdictCapability)
+        .with(host_lease_capability::HostLeaseCapability);
     #[cfg(feature = "terminal-session")]
     {
         registry = registry.with(terminal_session::TerminalSessionCapability::new());

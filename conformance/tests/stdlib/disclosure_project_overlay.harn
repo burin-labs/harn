@@ -3,7 +3,8 @@ import { render } from "std/disclosure"
 pipeline default() {
   const root = path_join(harness.fs.temp_dir(), "harn-disclosure-project-" + uuid())
   harness.fs.mkdir(root)
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "harn.toml"),
     "[disclosure.surfaces.slack]\n"
       + "kind = \"text\"\n"
@@ -17,7 +18,8 @@ pipeline default() {
   __io_println(render(chain, "slack", {project_root: root, env: false}))
   const unrelated_root = path_join(harness.fs.temp_dir(), "harn-disclosure-unrelated-" + uuid())
   harness.fs.mkdir(unrelated_root)
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(unrelated_root, "harn.toml"),
     "[surfaces.slack]\n"
       + "kind = \"text\"\n"

@@ -95,7 +95,8 @@ fn __missing_tool_call_candidate_tools(payload) -> list<MissingToolCallTool> {
       continue
     }
     names = names.push(name)
-    out = out.push(
+    out = out
+      .push(
       {
         name: name,
         description: __missing_tool_call_string(entry?.description ?? entry?.function?.description),
@@ -178,11 +179,7 @@ fn __missing_tool_call_action(value) -> MissingToolCallAction {
   return "ambiguous"
 }
 
-fn __missing_tool_call_normalize(
-  raw,
-  candidate_tools: list<MissingToolCallTool>,
-  threshold: float,
-) -> MissingToolCallVerdict {
+fn __missing_tool_call_normalize(raw, candidate_tools: list<MissingToolCallTool>, threshold: float) -> MissingToolCallVerdict {
   if type_of(raw) != "dict" {
     return {
       action: "ambiguous",

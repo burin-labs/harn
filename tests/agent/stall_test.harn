@@ -1057,7 +1057,8 @@ fn _parity_drive(cfg) {
   for step in seq {
     const o = agent_stall_observe_tool_calls("parity", _run_call(), 1, cfg, s, true, step[0], "", false, step[1])
     s = o.state
-    out = out.push(
+    out = out
+      .push(
       {
         pattern: o.warning?.pattern,
         hard_stop: o.hard_stop,

@@ -99,7 +99,8 @@ pub fn workspace_canonicalize_existing(path: string, workspace_root: string? = n
  */
 pub fn list_files(dir) {
   const entries = harness.fs.list_dir(dir)
-  return entries.filter(
+  return entries
+    .filter(
     { name ->
       const full = path_join(dir, name)
       const info = harness.fs.stat(full)
@@ -117,7 +118,8 @@ pub fn list_files(dir) {
  */
 pub fn list_dirs(dir) {
   const entries = harness.fs.list_dir(dir)
-  return entries.filter(
+  return entries
+    .filter(
     { name ->
       const full = path_join(dir, name)
       const info = harness.fs.stat(full)

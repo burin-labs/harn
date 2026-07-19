@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 
 const DEFAULT_MODEL = "default"
 
@@ -42,34 +42,39 @@ fn usage() -> string {
   )
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "catalog", flags: ["--catalog"], parse: "string", default: ""},
-    {kind: "option", name: "cells", flags: ["--cells"], parse: "string", default: ""},
-    {kind: "option", name: "trials", flags: ["--trials"], parse: "int", default: DEFAULT_TRIALS},
-    {kind: "option", name: "k", flags: ["--k"], parse: "int", default: DEFAULT_K},
+fn arg_spec() {
+  return parser(
     {
-      kind: "option",
-      name: "max_concurrency",
-      flags: ["--max-concurrency"],
-      parse: "int",
-      default: DEFAULT_MAX_CONCURRENCY,
+      name: "remote_eval_fanout_plan",
+      args: [
+        {kind: "flag", name: "catalog", long: "--catalog", parse: "string", default: ""},
+        {kind: "flag", name: "cells", long: "--cells", parse: "string", default: ""},
+        {kind: "flag", name: "trials", long: "--trials", parse: "int", default: DEFAULT_TRIALS},
+        {kind: "flag", name: "k", long: "--k", parse: "int", default: DEFAULT_K},
+        {
+          kind: "flag",
+          name: "max_concurrency",
+          long: "--max-concurrency",
+          parse: "int",
+          default: DEFAULT_MAX_CONCURRENCY,
+        },
+        {
+          kind: "flag",
+          name: "max_escalating",
+          long: "--max-escalating",
+          parse: "int",
+          default: DEFAULT_MAX_ESCALATING,
+        },
+        {kind: "flag", name: "model", long: "--model", parse: "string", default: DEFAULT_MODEL},
+        {kind: "flag", name: "split", long: "--split", parse: "string", default: DEFAULT_SPLIT},
+        {kind: "flag", name: "runner", long: "--runner", parse: "string", default: DEFAULT_RUNNER},
+        {kind: "flag", name: "backend", long: "--backend", parse: "string", default: DEFAULT_BACKEND},
+        {kind: "flag", name: "flag", long: "--flag", parse: "string", multi: true, default: []},
+        {kind: "flag", name: "out", long: "--out", parse: "string", default: ""},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
     },
-    {
-      kind: "option",
-      name: "max_escalating",
-      flags: ["--max-escalating"],
-      parse: "int",
-      default: DEFAULT_MAX_ESCALATING,
-    },
-    {kind: "option", name: "model", flags: ["--model"], parse: "string", default: DEFAULT_MODEL},
-    {kind: "option", name: "split", flags: ["--split"], parse: "string", default: DEFAULT_SPLIT},
-    {kind: "option", name: "runner", flags: ["--runner"], parse: "string", default: DEFAULT_RUNNER},
-    {kind: "option", name: "backend", flags: ["--backend"], parse: "string", default: DEFAULT_BACKEND},
-    {kind: "option", name: "flag", flags: ["--flag"], parse: "string", multi: true, default: []},
-    {kind: "option", name: "out", flags: ["--out"], parse: "string", default: ""},
-    {kind: "flag", name: "json", flags: ["--json"], default: false},
-  ]
+  )
 }
 
 fn require_positive_int(name: string, value) -> int {
@@ -340,7 +345,8 @@ pub fn remote_eval_fanout_rejoin_receipt(plan, receipts) {
     if __receipt_ingest_ok(receipt) {
       accepted = accepted.push(receipt)
     } else {
-      failed = failed.push({shard_id: shard_id, status: __receipt_status(receipt), receipt: receipt})
+      failed = failed
+        .push({shard_id: shard_id, status: __receipt_status(receipt), receipt: receipt})
     }
   }
   let missing = []
@@ -401,18 +407,18 @@ fn load_catalog(path: string) {
 }
 
 pipeline default(args) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio.println(usage())
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     harness.stdio.eprintln("")
     harness.stdio.eprintln(usage())
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const catalog = load_catalog(to_string(parsed?.catalog ?? ""))
   const plan = try {
     remote_eval_fanout_plan(

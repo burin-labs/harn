@@ -26,7 +26,8 @@ fn pr_variants() {
   let prs = []
   let n = 1
   while n <= 50 {
-    prs = prs.push(
+    prs = prs
+      .push(
       {
         number: n,
         draft: n % 5 == 0,

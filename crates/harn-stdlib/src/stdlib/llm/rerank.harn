@@ -16,7 +16,8 @@ fn __rerank_records(candidates) {
 fn __rerank_initial_scores(candidates) {
   let scores = []
   for (index, candidate) in iter(candidates).enumerate() {
-    scores = scores.push(
+    scores = scores
+      .push(
       {
         index: index,
         candidate: candidate,
@@ -188,7 +189,8 @@ fn __rerank_llm_options(opts) {
 fn __rerank_compare(left, right, opts) {
   if opts?.compare != nil {
     return __rerank_normalize_decision(
-      opts.compare(
+      opts
+        .compare(
         left.candidate,
         right.candidate,
         {left_index: left.index, right_index: right.index, task: opts?.task},
@@ -243,7 +245,8 @@ fn __rerank_sort(records, opts, state) {
 fn __rerank_strip_internal_score_fields(scores) {
   let out = []
   for score in scores {
-    out = out.push(
+    out = out
+      .push(
       {
         index: score.index,
         candidate: score.candidate,

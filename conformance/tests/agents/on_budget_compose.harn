@@ -14,7 +14,8 @@ pipeline default() {
   pipeline_on_finish(
     { harness, return_value ->
       const custom = { h, state ->
-        h.emit_audit(
+        h
+          .emit_audit(
           "custom_after_warn",
           {observed_kind: state.kind, observed_threshold: state.threshold_pct},
         )

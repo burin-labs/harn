@@ -9,7 +9,8 @@ pipeline main() {
       {role: "assistant", content: "four"},
     ],
   )
-  const with_reminder = transcript.inject_reminder(
+  const with_reminder = transcript
+    .inject_reminder(
     base,
     {body: "expire now", dedupe_key: "ttl", ttl_turns: 1, preserve_on_compact: true},
   ).transcript

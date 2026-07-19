@@ -658,7 +658,8 @@ fn __captain_tool_layers(kind, opts) {
   }
   const handoff_sink = __captain_layer_value(opts, "handoff_sink", nil)
   if handoff_sink != nil {
-    layers = layers.push(with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}))
+    layers = layers
+      .push(with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}))
   }
   return layers
 }

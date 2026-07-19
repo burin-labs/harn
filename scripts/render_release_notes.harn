@@ -22,7 +22,8 @@ pub fn normalize_version(version: string) -> string {
 /** Escape regex metacharacters so a version string matches literally. */
 pub fn escape_regex(text: string) -> string {
   const specials = [".", "\\", "+", "*", "?", "(", ")", "[", "]", "{", "}", "^", "$", "|"]
-  return text.split("").map(
+  return text.split("")
+    .map(
     fn(ch) {
       if specials.contains(ch) {
         "\\" + ch
@@ -30,9 +31,7 @@ pub fn escape_regex(text: string) -> string {
         ch
       }
     },
-  )
-    .to_list()
-    .join("")
+  ).to_list().join("")
 }
 
 /** Collect every `## vX.Y.Z` heading version, top to bottom. */

@@ -11,7 +11,8 @@ pipeline test(task) {
   harness.fs.write_text(path_join(root, "src", "other.txt"), "SECRET_TOKEN = 2\n")
   harness.fs.write_text(path_join(root, "docs", "note.md"), "secret_token docs\n")
   harness.fs.write_text(path_join(root, "node_modules", "ignored.harn"), "secret_token ignored\n")
-  const hits = harness.fs.find_text(
+  const hits = harness.fs
+    .find_text(
     root,
     "secret_token",
     {include: "**/*.harn", case_insensitive: true, preset: "source"},
@@ -25,7 +26,8 @@ pipeline test(task) {
   log(len(limited))
   log(harness.fs.find_text(root, "secret_token", {mode: "exists", parallel: true}))
   log(
-    harness.fs.find_text(
+    harness.fs
+      .find_text(
       root,
       "secret_token",
       {mode: "count", preset: "source", case_insensitive: true, parallel: true},

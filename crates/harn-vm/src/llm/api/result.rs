@@ -129,6 +129,18 @@ pub(crate) struct LlmResult {
 }
 
 impl LlmResult {
+    /// Price this exact provider result without collapsing unknown pricing to
+    /// zero. VM-return and provider-observability projections use this contract
+    /// so their usage costs cannot disagree.
+    pub(crate) fn priced_cost_usd(&self) -> Option<f64> {
+        crate::llm::cost::pricing_aware_call_cost(
+            &self.provider,
+            &self.model,
+            self.input_tokens,
+            self.output_tokens,
+        )
+    }
+
     /// True when the completion carries nothing the agent loop can act on: no
     /// visible text (whitespace-only counts as empty), no tool calls, and no
     /// thinking. This is the single definition of "committed nothing usable"
@@ -167,6 +179,12 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
     usage.insert(
         crate::value::intern_key("output_tokens"),
         VmValue::Int(result.output_tokens),
+    );
+    usage.insert(
+        crate::value::intern_key("cost_usd"),
+        result
+            .priced_cost_usd()
+            .map_or(VmValue::Nil, VmValue::Float),
     );
     usage.insert(
         crate::value::intern_key("cache_read_tokens"),
@@ -627,6 +645,66 @@ mod cache_supported_serde_tests {
         );
         let back: LlmResult = serde_json::from_value(json).expect("deserialize");
         assert!(!back.cache_supported);
+    }
+
+    #[test]
+    fn usage_cost_preserves_priced_and_unpriced_results() {
+        let _guard = crate::llm::env_guard();
+        crate::llm_config::clear_user_overrides();
+
+        let mut priced = mock_completion_response("hi", None);
+        priced.provider = "anthropic".to_string();
+        priced.model = "claude-sonnet-4-20250514".to_string();
+        priced.input_tokens = 1_000;
+        priced.output_tokens = 1_000;
+        let expected_cost = priced.priced_cost_usd().expect("catalog-priced result");
+        let priced_value = vm_build_llm_result(&priced, None, None, None);
+        let priced_dict = priced_value.as_dict().expect("result dict");
+        let Some(VmValue::Dict(priced_usage)) = priced_dict.get("usage") else {
+            panic!("missing usage dict: {priced_dict:?}");
+        };
+        let priced_usage_json = crate::llm::vm_value_to_json(&VmValue::Dict(priced_usage.clone()));
+        assert_eq!(
+            priced_usage_json["cost_usd"],
+            serde_json::json!(expected_cost)
+        );
+        assert_eq!(priced_usage_json["input_tokens"], serde_json::json!(1_000));
+        assert_eq!(priced_usage_json["output_tokens"], serde_json::json!(1_000));
+
+        let mut unpriced = priced;
+        unpriced.provider = "nonexistent_provider".to_string();
+        unpriced.model = "ghost-model".to_string();
+        assert_eq!(unpriced.priced_cost_usd(), None);
+        let unpriced_value = vm_build_llm_result(&unpriced, None, None, None);
+        let unpriced_dict = unpriced_value.as_dict().expect("result dict");
+        let Some(VmValue::Dict(unpriced_usage)) = unpriced_dict.get("usage") else {
+            panic!("missing usage dict: {unpriced_dict:?}");
+        };
+        let unpriced_usage_json =
+            crate::llm::vm_value_to_json(&VmValue::Dict(unpriced_usage.clone()));
+        assert_eq!(
+            unpriced_usage_json
+                .as_object()
+                .and_then(|usage| usage.get("cost_usd")),
+            Some(&serde_json::Value::Null)
+        );
+        assert_eq!(
+            unpriced_usage_json["cache_savings_usd"],
+            serde_json::json!(0.0)
+        );
+
+        let mut zero_priced = unpriced;
+        zero_priced.provider = "local".to_string();
+        zero_priced.model = "no-such-local-model".to_string();
+        assert_eq!(zero_priced.priced_cost_usd(), Some(0.0));
+        let zero_priced_value = vm_build_llm_result(&zero_priced, None, None, None);
+        let zero_priced_dict = zero_priced_value.as_dict().expect("result dict");
+        let Some(VmValue::Dict(zero_priced_usage)) = zero_priced_dict.get("usage") else {
+            panic!("missing usage dict: {zero_priced_dict:?}");
+        };
+        let zero_priced_usage_json =
+            crate::llm::vm_value_to_json(&VmValue::Dict(zero_priced_usage.clone()));
+        assert_eq!(zero_priced_usage_json["cost_usd"], serde_json::json!(0.0));
     }
 
     #[test]

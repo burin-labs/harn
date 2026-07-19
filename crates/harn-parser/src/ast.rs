@@ -98,7 +98,7 @@ pub enum Node {
     },
     Pipeline {
         name: String,
-        params: Vec<String>,
+        params: Vec<TypedParam>,
         return_type: Option<TypeExpr>,
         /// Declared exception channel: `throws E` / `throws (E1 | E2)`, parsed
         /// as a single [`TypeExpr`] (a `throws (E1 | E2)` clause is a
@@ -132,7 +132,7 @@ pub enum Node {
     /// (reassignment is rejected). When the initializer falls in the pure,
     /// bounded const-eval subset (literal arithmetic, string concat, literal
     /// lists/dicts, ternaries, reads of earlier `const` identifiers, and a
-    /// whitelist of pure builtins) it is **folded at compile time** via
+    /// allowlist of pure builtins) it is **folded at compile time** via
     /// `harn_parser::const_eval`; otherwise it is an ordinary immutable
     /// runtime binding. Unlike the pre-re-platform `const`, an impure
     /// initializer is *not* an error (it simply is not folded), and a
@@ -723,11 +723,69 @@ pub enum TypeExpr {
 }
 
 /// A field in a dict shape type.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ShapeField {
     pub name: String,
     pub type_expr: TypeExpr,
     pub optional: bool,
+    /// Source extent of this field. This is formatter/LSP provenance, not part
+    /// of a shape's semantic identity or serialized type contract.
+    #[serde(skip, default = "Span::dummy")]
+    pub span: Span,
+}
+
+impl ShapeField {
+    /// Construct a field synthesized by inference or generated metadata.
+    pub fn synthetic(name: impl Into<String>, type_expr: TypeExpr, optional: bool) -> Self {
+        Self {
+            name: name.into(),
+            type_expr,
+            optional,
+            span: Span::dummy(),
+        }
+    }
+}
+
+impl PartialEq for ShapeField {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.type_expr == other.type_expr
+            && self.optional == other.optional
+    }
+}
+
+#[cfg(test)]
+mod shape_field_tests {
+    use super::*;
+
+    #[test]
+    fn source_provenance_does_not_change_shape_field_equality() {
+        let synthetic = ShapeField::synthetic("retries", TypeExpr::Named("int".into()), false);
+        let parsed = ShapeField {
+            span: Span::with_offsets(12, 24, 3, 3),
+            ..synthetic.clone()
+        };
+
+        assert_eq!(synthetic, parsed);
+    }
+
+    #[test]
+    fn source_provenance_is_not_part_of_the_serialized_type_contract() {
+        let field = ShapeField {
+            span: Span::with_offsets(12, 24, 3, 3),
+            ..ShapeField::synthetic("retries", TypeExpr::Named("int".into()), false)
+        };
+
+        let encoded = serde_json::to_string(&field).expect("shape fields serialize");
+        let decoded: ShapeField = serde_json::from_str(&encoded).expect("shape fields deserialize");
+
+        assert!(
+            !encoded.contains("span"),
+            "source provenance leaked: {encoded}"
+        );
+        assert_eq!(decoded, field);
+        assert_eq!(decoded.span, Span::dummy());
+    }
 }
 
 /// A binding pattern for destructuring in let/var/for-in.
@@ -744,7 +802,7 @@ pub enum BindingPattern {
     Pair(String, String),
 }
 
-/// `_` is the discard binding name in `let`/`var`/destructuring positions.
+/// `_` is the discard binding name in `let`/`const`/destructuring positions.
 pub fn is_discard_name(name: &str) -> bool {
     name == "_"
 }

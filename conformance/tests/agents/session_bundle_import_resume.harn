@@ -42,7 +42,8 @@ pipeline main() {
   harness.fs.mkdir(source_root)
   harness.fs.mkdir(dest_root)
   const script = path_join(source_root, "bundle_suspend.harn")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     script,
     """
 pipeline main() {

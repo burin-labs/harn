@@ -42,16 +42,16 @@ pipeline default(_task) {
   // 1. Declare the policy. `summarize-then-prune` is the default
   //    strategy choice for IDE-style hosts; we override at run time to
   //    a `custom` strategy so the demo can finish without an LLM call.
-  const policy = compaction.policy(
-    {session_id: session, strategy: "summarize-then-prune", max_turns: 2, keep_last: 1},
-  )
+  const policy = compaction
+    .policy({session_id: session, strategy: "summarize-then-prune", max_turns: 2, keep_last: 1})
   // 2. Cheap per-turn check. No mutation; safe to call before every
   //    LLM round-trip.
   const pre_decision = compaction.check(session)
   // 3. Run the compaction through the canonical lifecycle. The plan
   //    overrides the policy's strategy because the demo has no LLM in
   //    its tape; production callers usually pass `nil` here.
-  const outcome = compaction.run(
+  const outcome = compaction
+    .run(
     session,
     {
       strategy: "custom",

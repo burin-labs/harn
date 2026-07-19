@@ -208,6 +208,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "provider_unavailable",
     "rate_limited",
     "timeout",
+    "resource_busy",
     "tool_policy_rejected",
     "host_bridge_unimplemented",
     "agent_loop_protocol_failure",
@@ -301,6 +302,7 @@ HARN_TOOL_CALL_ERROR_CATEGORIES: tuple = (
     "parse_aborted",
     "timeout",
     "network",
+    "resource_busy",
     "cancelled",
     "abandoned_at_loop_exit",
     "unknown",
@@ -527,6 +529,7 @@ class AgentTerminalClass(str, Enum):
     PROVIDER_UNAVAILABLE = "provider_unavailable"
     RATE_LIMITED = "rate_limited"
     TIMEOUT = "timeout"
+    RESOURCE_BUSY = "resource_busy"
     TOOL_POLICY_REJECTED = "tool_policy_rejected"
     HOST_BRIDGE_UNIMPLEMENTED = "host_bridge_unimplemented"
     AGENT_LOOP_PROTOCOL_FAILURE = "agent_loop_protocol_failure"
@@ -566,6 +569,7 @@ class HarnToolCallErrorCategory(str, Enum):
     PARSE_ABORTED = "parse_aborted"
     TIMEOUT = "timeout"
     NETWORK = "network"
+    RESOURCE_BUSY = "resource_busy"
     CANCELLED = "cancelled"
     ABANDONED_AT_LOOP_EXIT = "abandoned_at_loop_exit"
     UNKNOWN = "unknown"

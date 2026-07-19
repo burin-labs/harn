@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 
 const MAX_LINES = 1500
 
@@ -136,9 +136,9 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
     return []
   }
   let paths: list<string> = []
-  const entries = harness.fs.walk_dir(dir, {max_depth: 1, follow_symlinks: false}).filter(
-    { entry -> entry.depth == 1 },
-  )
+  const entries = harness.fs
+    .walk_dir(dir, {max_depth: 1, follow_symlinks: false})
+    .filter({ entry -> entry.depth == 1 })
     .to_list()
     .sort_by({ entry -> entry.path })
   for entry in entries {
@@ -154,12 +154,14 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
       },
     )
     if entry.is_file && rel.ends_with(suffix) {
-      paths = paths + [rel]
+      paths = paths.push(rel)
     } else if entry.is_dir {
-      paths = paths + files_below(root, rel, suffix)
+      for child in files_below(root, rel, suffix) {
+        paths = paths.push(child)
+      }
     }
   }
-  return paths.sort()
+  return paths
 }
 
 fn is_generated_source(path: string) -> bool {
@@ -178,11 +180,11 @@ pub fn source_files(root: string = "") -> list<string> {
   } else {
     path_normalize(root)
   }
-  let paths = files_below(resolved_root, "", ".rs").filter({ path -> !is_generated_source(path) }).to_list()
+  let paths = files_below(resolved_root, "", ".rs")
+    .filter({ path -> !is_generated_source(path) })
+    .to_list()
   for path in files_below(resolved_root, "crates/harn-stdlib/src/stdlib", ".harn") {
-    if !paths.contains(path) {
-      paths = paths + [path]
-    }
+    paths = paths.push(path)
   }
   return paths.sort()
 }
@@ -196,7 +198,9 @@ pub fn source_inventory(root: string = "") -> list<SourceCount> {
   let sources: list<SourceCount> = []
   for path in source_files(resolved_root) {
     sources = sources
-      + [{path: path, lines: logical_line_count(harness.fs.read_text(path_join(resolved_root, path)))}]
+      .push(
+      {path: path, lines: logical_line_count(harness.fs.read_text(path_join(resolved_root, path)))},
+    )
   }
   return sources
 }
@@ -234,27 +238,29 @@ pub fn baseline_inventory(root: string = "") -> list<BaselineCount> {
   let baselines: list<BaselineCount> = []
   for shard_path in files_below(resolved_root, BASELINE_DIR, BASELINE_SUFFIX) {
     baselines = baselines
-      + [parse_baseline(shard_path, harness.fs.read_text(path_join(resolved_root, shard_path)))]
+      .push(parse_baseline(shard_path, harness.fs.read_text(path_join(resolved_root, shard_path))))
   }
   return baselines
 }
 
-fn source_for(path: string, sources: list<SourceCount>) -> SourceCount? {
+fn source_index(sources: list<SourceCount>) -> dict<string, SourceCount> {
+  let index: dict<string, SourceCount> = {}
   for source in sources {
-    if source.path == path {
-      return source
+    if index[source.path] == nil {
+      index[source.path] = source
     }
   }
-  return nil
+  return index
 }
 
-fn baseline_for(path: string, baselines: list<BaselineCount>) -> BaselineCount? {
+fn baseline_index(baselines: list<BaselineCount>) -> dict<string, BaselineCount> {
+  let index: dict<string, BaselineCount> = {}
   for baseline in baselines {
-    if baseline.source_path == path {
-      return baseline
+    if index[baseline.source_path] == nil {
+      index[baseline.source_path] = baseline
     }
   }
-  return nil
+  return index
 }
 
 /**
@@ -266,55 +272,57 @@ pub fn evaluate_inventory(
   baselines: list<BaselineCount>,
   max_lines: int = MAX_LINES,
 ) -> list<SourceLengthFinding> {
-  let paths: list<string> = []
+  const sources_by_path = source_index(sources)
+  const baselines_by_path = baseline_index(baselines)
+  let paths: dict<string, bool> = {}
   for source in sources {
-    if !paths.contains(source.path) {
-      paths = paths + [source.path]
-    }
+    paths[source.path] = true
   }
   for baseline in baselines {
-    if baseline.source_path != "" && !paths.contains(baseline.source_path) {
-      paths = paths + [baseline.source_path]
+    if baseline.source_path != "" {
+      paths[baseline.source_path] = true
     }
   }
   let findings: list<SourceLengthFinding> = []
-  for path in paths.sort() {
-    const source = source_for(path, sources)
-    const baseline = baseline_for(path, baselines)
+  for path in paths.keys().sort() {
+    const source = sources_by_path[path]
+    const baseline = baselines_by_path[path]
     if baseline != nil && baseline.kind == "invalid" {
       findings = findings
-        + [{kind: "malformed_baseline", path: path, actual: source?.lines, message: baseline.error}]
+        .push(
+        {kind: "malformed_baseline", path: path, actual: source?.lines, message: baseline.error},
+      )
       continue
     }
     if source == nil {
       findings = findings
-        + [
+        .push(
         {
           kind: "orphan_baseline",
           path: path,
           baseline: baseline?.lines,
           message: "baseline shard remains for a missing or renamed source",
         },
-      ]
+      )
       continue
     }
     if baseline != nil && baseline.kind == "valid" && baseline.lines <= max_lines {
       findings = findings
-        + [
+        .push(
         {
           kind: "invalid_baseline",
           path: path,
           actual: source.lines,
           baseline: baseline.lines,
-          message: "only files above ${max_lines} lines may be grandfathered",
+          message: "only files above ${max_lines} lines may have an existing baseline",
         },
-      ]
+      )
       continue
     }
     if source.lines <= max_lines {
       if baseline != nil {
         findings = findings
-          + [
+          .push(
           {
             kind: "obsolete_baseline",
             path: path,
@@ -322,37 +330,37 @@ pub fn evaluate_inventory(
             baseline: baseline.lines,
             message: "source is at or below the cap; delete its baseline shard",
           },
-        ]
+        )
       }
       continue
     }
     if baseline == nil {
       findings = findings
-        + [
+        .push(
         {
           kind: "new_oversized_source",
           path: path,
           actual: source.lines,
           message: "new source exceeds the ${max_lines}-line cap",
         },
-      ]
+      )
       continue
     }
     const recorded = baseline.lines
     if source.lines > recorded {
       findings = findings
-        + [
+        .push(
         {
           kind: "growth",
           path: path,
           actual: source.lines,
           baseline: recorded,
-          message: "grandfathered source grew beyond its exact baseline",
+          message: "existing source grew beyond its exact baseline",
         },
-      ]
+      )
     } else if source.lines < recorded {
       findings = findings
-        + [
+        .push(
         {
           kind: "stale_baseline",
           path: path,
@@ -360,7 +368,7 @@ pub fn evaluate_inventory(
           baseline: recorded,
           message: "source shrank; tighten its baseline shard",
         },
-      ]
+      )
     }
   }
   return findings
@@ -372,28 +380,30 @@ pub fn plan_baseline_update(
   baselines: list<BaselineCount>,
   max_lines: int = MAX_LINES,
 ) -> list<BaselineEdit> {
+  const sources_by_path = source_index(sources)
+  const baselines_by_path = baseline_index(baselines)
   let edits: list<BaselineEdit> = []
   for source in sources {
-    const baseline = baseline_for(source.path, baselines)
+    const baseline = baselines_by_path[source.path]
     if source.lines > max_lines {
       if baseline != nil && baseline.kind == "valid" && source.lines < baseline.lines {
         edits = edits
-          + [
+          .push(
           {
             kind: "write",
             shard_path: baseline_path_for(source.path),
             source_path: source.path,
             lines: source.lines,
           },
-        ]
+        )
       }
     } else if baseline != nil {
-      edits = edits + [{kind: "delete", shard_path: baseline.shard_path, source_path: source.path}]
+      edits = edits.push({kind: "delete", shard_path: baseline.shard_path, source_path: source.path})
     }
   }
   for baseline in baselines {
-    if source_for(baseline.source_path, sources) == nil {
-      edits = edits + [{kind: "delete", shard_path: baseline.shard_path, source_path: baseline.source_path}]
+    if sources_by_path[baseline.source_path] == nil {
+      edits = edits.push({kind: "delete", shard_path: baseline.shard_path, source_path: baseline.source_path})
     }
   }
   return edits.sort_by({ edit -> edit.shard_path })
@@ -445,7 +455,7 @@ pub fn check_source_file_lengths(root: string = "") -> SourceLengthReport {
 fn render_report(report: SourceLengthReport) -> string {
   if report.findings.count == 0 {
     return "source file-length ratchet passed: ${report.source_count} source file(s), "
-      + "${report.oversized_count} exact grandfathered file(s), ${report.max_lines}-line cap"
+      + "${report.oversized_count} exact existing file(s), ${report.max_lines}-line cap"
   }
   let lines = ["source file-length ratchet failed: ${report.findings.count} violation(s)", ""]
   for finding in report.findings {
@@ -462,31 +472,38 @@ fn render_report(report: SourceLengthReport) -> string {
     + [
     "",
     "Split oversized files. After a shrink, run `make update-source-file-length-baseline`.",
-    "New oversized files are never auto-grandfathered; an intentional baseline increase must be reviewed directly.",
+    "New oversized files never automatically become existing entries; an intentional baseline increase must be reviewed directly.",
   ]
   return join(lines, "\n")
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "root", flags: ["--root"], parse: "string", default: ""},
-    {kind: "flag", name: "json", flags: ["--json"], default: false},
-    {kind: "flag", name: "update", flags: ["--update"], default: false},
-  ]
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_source_file_lengths",
+      args: [
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+        {kind: "switch", name: "json", long: "--json", default: false},
+        {kind: "switch", name: "update", long: "--update", default: false},
+      ],
+    },
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
-    harness.stdio.println(
+  if help_requested(argv) {
+    harness.stdio
+      .println(
       "usage: harn run scripts/check_source_file_lengths.harn -- [--json] [--root PATH] [--update]",
     )
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    harness.stdio.eprintln(join((parsed?._errors ?? []) + (parsed?._extras ?? []), "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const resolved_root = if to_string(parsed?.root ?? "") == "" {
     repo_root()
   } else {

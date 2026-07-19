@@ -6,7 +6,8 @@ pipeline test(task) {
     + to_string(harness.random.gen_range(100000, 999999))
   const root = path_join(harness.fs.temp_dir(), "harn-a2a-dispatch-" + unique)
   harness.fs.mkdir(root)
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "receiver.harn"),
     "pipeline default(task) {\n  let envelope = json_parse(task)\n  __io_println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )

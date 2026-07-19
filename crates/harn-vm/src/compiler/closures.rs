@@ -38,7 +38,7 @@ impl Compiler {
         fn_compiler.chunk.emit(Op::Nil, self.line);
         fn_compiler.chunk.emit(Op::Return, self.line);
 
-        let param_slots = crate::chunk::ParamSlot::vec_from_typed(params);
+        let param_slots = fn_compiler.compile_param_slots(params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         super::ensure_chunk_addressable(&fn_compiler.chunk, &format!("fn `{name}`"), self.line)?;
@@ -87,7 +87,7 @@ impl Compiler {
         fn_compiler.drain_finallys_to_floor(0)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
 
-        let param_slots = crate::chunk::ParamSlot::vec_from_typed(params);
+        let param_slots = fn_compiler.compile_param_slots(params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         super::ensure_chunk_addressable(&fn_compiler.chunk, &format!("fn `{name}`"), self.line)?;
@@ -350,7 +350,7 @@ impl Compiler {
         fn_compiler.drain_finallys_to_floor(0)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
 
-        let param_slots = crate::chunk::ParamSlot::vec_from_typed(params);
+        let param_slots = fn_compiler.compile_param_slots(params);
         let has_runtime_type_checks =
             CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         super::ensure_chunk_addressable(&fn_compiler.chunk, "closure", self.line)?;

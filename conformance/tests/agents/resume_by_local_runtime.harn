@@ -15,7 +15,8 @@ pipeline default() {
   const RB = ResumeBy()
   pipeline_on_finish(
     { harness, return_value ->
-      const with_conditions = RB.local_runtime(
+      const with_conditions = RB
+        .local_runtime(
         harness,
         {
           handle: "worker://triage/local",
@@ -27,10 +28,10 @@ pipeline default() {
       harness.stdio.println("with_handled=" + to_string(with_conditions.handled))
       harness.stdio.println("with_mechanism=" + with_conditions.mechanism)
       harness.stdio.println("with_audit_kind=" + audits_with[0].kind)
-      harness.stdio.println(
-        "with_audit_has_conditions=" + to_string(audits_with[0].payload.conditions != nil),
-      )
-      const without_conditions = RB.local_runtime(harness, {handle: "worker://triage/no-cond", reason: "no conditions"})
+      harness.stdio
+        .println("with_audit_has_conditions=" + to_string(audits_with[0].payload.conditions != nil))
+      const without_conditions = RB
+        .local_runtime(harness, {handle: "worker://triage/no-cond", reason: "no conditions"})
       const audits_without = lifecycle_audit_log_take()
       harness.stdio.println("without_handled=" + to_string(without_conditions.handled))
       harness.stdio.println("without_reason=" + without_conditions.reason)

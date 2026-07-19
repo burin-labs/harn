@@ -110,7 +110,8 @@ fn __render_loaded_lines(models: list) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PROVIDER_PROBE_PAYLOAD_JSON", "")
   if raw == "" {
-    harness.stdio.eprintln("internal error: HARN_PROVIDER_PROBE_PAYLOAD_JSON not set by dispatch shim")
+    harness.stdio
+      .eprintln("internal error: HARN_PROVIDER_PROBE_PAYLOAD_JSON not set by dispatch shim")
     return 70
   }
   // JSON-mode and human-mode need different things. JSON mode forwards
@@ -142,7 +143,8 @@ fn main(harness: Harness) -> int {
   const payload = try {
     json_parse(raw)
   } catch (e) {
-    harness.stdio.eprintln("internal error: failed to parse provider-probe payload: " + e.message)
+    harness.stdio
+      .eprintln("internal error: failed to parse provider-probe payload: " + e.message)
     return 70
   }
   const readiness = __safe_dict(payload["readiness"])

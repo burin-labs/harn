@@ -30,9 +30,8 @@ pipeline default() {
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)
       harness.stdio.println("audit_strategy=" + audits[0].payload.strategy)
-      harness.stdio.println(
-        "audit_consumed=" + to_string(audits[0].payload.budget_state.consumed_cost_usd),
-      )
+      harness.stdio
+        .println("audit_consumed=" + to_string(audits[0].payload.budget_state.consumed_cost_usd))
       return return_value
     },
   )

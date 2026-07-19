@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn test_parses_public_api_type_lint_override() {
+    let cli = Cli::parse_from([
+        "harn",
+        "lint",
+        "--require-public-api-types",
+        "--json",
+        "api.harn",
+    ]);
+    let Command::Lint(args) = cli.command.unwrap() else {
+        panic!("expected lint command");
+    };
+    assert!(args.require_public_api_types);
+    assert!(args.json);
+    assert_eq!(args.targets, ["api.harn"]);
+}
+
+#[test]
+fn check_parses_independent_fixture_mode() {
+    let cli = Cli::parse_from(["harn", "check", "--json", "--independent", "fixtures"]);
+    let Command::Check(args) = cli.command.unwrap() else {
+        panic!("expected check command");
+    };
+    assert!(args.json);
+    assert!(args.independent);
+    assert_eq!(args.targets, ["fixtures"]);
+}
+
+#[test]
 fn test_parses_conformance_target_selection() {
     let cli = Cli::parse_from([
         "harn",

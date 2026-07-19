@@ -58,7 +58,8 @@ chmod +x "$fake_harn"
 
 record="$tmp_root/harn-record.txt"
 env_record="$tmp_root/harn-env-record.txt"
-HARN_RELEASE_ROOT="$release_root" \
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+  HARN_RELEASE_ROOT="$release_root" \
   HARN_BIN="$fake_harn" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \
@@ -86,7 +87,8 @@ if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$expected_build" "$env_record"; then
   exit 1
 fi
 
-HARN_RELEASE_ROOT="$release_root" \
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+  HARN_RELEASE_ROOT="$release_root" \
   HARN_BIN="$fake_harn" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \
@@ -176,7 +178,8 @@ if grep -q "cargo run .*harn" "$tmp_root/make-dry-run.txt"; then
   exit 1
 fi
 
-"$repo_root/scripts/tests/hook_harn_build_env_test.sh"
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+  "$repo_root/scripts/tests/hook_harn_build_env_test.sh"
 
 audit_root="$tmp_root/audit-root"
 mkdir -p \
@@ -371,7 +374,8 @@ run_audit() {
     HARN_BIN="$fake_audit_harn" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    "$release_gate" audit "$@" > "$tmp_root/audit-$label.txt" 2>&1 || {
+    env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+      "$release_gate" audit "$@" > "$tmp_root/audit-$label.txt" 2>&1 || {
     cat "$tmp_root/audit-$label.txt" >&2
     exit 1
   }
@@ -496,7 +500,8 @@ assert_residual_prerequisite_fails() {
     HARN_BIN="$fake_audit_harn" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    "$release_gate" audit --receipt "$receipt" \
+    env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+      "$release_gate" audit --receipt "$receipt" \
       > "$tmp_root/audit-$label.txt" 2>&1; then
     echo "residual audit passed without required prerequisite: $label" >&2
     exit 1
@@ -540,7 +545,7 @@ assert_residual_lane_failure() {
   local assignment="$2"
   local expected_call="$3"
   : > "$audit_record"
-  if env "$assignment" \
+  if env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR "$assignment" \
     PATH="$fake_tools:$PATH" \
     HARN_RELEASE_ROOT="$audit_root" \
     HARN_BIN="$fake_audit_harn" \
@@ -573,7 +578,8 @@ assert_arg_fails_before_work() {
   local expected="$2"
   shift 2
   : > "$audit_record"
-  if PATH="$fake_tools:$PATH" \
+  if env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+    PATH="$fake_tools:$PATH" \
     HARN_RELEASE_ROOT="$audit_root" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
@@ -629,7 +635,8 @@ PATH="$fake_tools:$PATH" \
   HARN_PUBLISH_SCRIPT="$fake_publish" \
   TMPDIR="$tmp_root" \
   FAKE_AUDIT_RECORD="$audit_record" \
-  "$release_gate" full --bump patch --dry-run > "$tmp_root/full.txt" 2>&1 || {
+  env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+    "$release_gate" full --bump patch --dry-run > "$tmp_root/full.txt" 2>&1 || {
   cat "$tmp_root/full.txt" >&2
   exit 1
 }
@@ -679,7 +686,8 @@ if PATH="$fake_tools:$PATH" \
   TMPDIR="$tmp_root" \
   FAKE_AUDIT_RECORD="$audit_record" \
   FAIL_FULL_PREPARE=1 \
-  "$release_gate" full --bump patch --dry-run > "$tmp_root/full-failure.txt" 2>&1; then
+  env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+    "$release_gate" full --bump patch --dry-run > "$tmp_root/full-failure.txt" 2>&1; then
   echo "release_gate full ignored the injected prepare failure" >&2
   exit 1
 fi

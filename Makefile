@@ -1,4 +1,4 @@
-.PHONY: setup setup-rust clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy
+.PHONY: setup setup-rust clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint gen-openapi-snapshot check-openapi-snapshot test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy
 .PHONY: test-pr-gate-post-warm-integrations
 
 HARN_BIN ?=
@@ -17,7 +17,7 @@ HARN_PROTOCOL_ARTIFACT_CHECK_ARGS = $(if $(strip $(HARN_PROTOCOL_ARTIFACT_VERSIO
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-grammar-keywords check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
 
 check: all
 
@@ -229,10 +229,24 @@ loadgen-postgres:
 lint-md:
 	npx markdownlint-cli2 "**/*.md"
 
-# Validate the Harn Agents Protocol OpenAPI artifact and its public path/schema snapshot.
+# Lint the Harn Agents Protocol OpenAPI source contract with Redocly. The
+# generated public path/schema snapshot (spec/openapi.snapshot) and the
+# embedded server copy (crates/harn-serve/openapi.yaml) are guarded separately
+# by `check-openapi-snapshot`, registered in scripts/generated_artifacts.toml.
 spec-lint:
 	./node_modules/.bin/redocly lint spec/openapi.yaml
-	$(HARN_CMD) run scripts/check_openapi_snapshot.harn
+
+# Regenerate the OpenAPI public-surface snapshot and the embedded server copy
+# from spec/openapi.yaml after an intentional surface change.
+gen-openapi-snapshot:
+	$(HARN_CMD) run scripts/check_openapi_snapshot.harn -- --update
+
+# Drift guard: fail if spec/openapi.snapshot or the embedded
+# crates/harn-serve/openapi.yaml copy no longer matches spec/openapi.yaml.
+check-openapi-snapshot:
+	@echo "=== Checking OpenAPI surface snapshot is up to date ==="
+	@$(HARN_CMD) run scripts/check_openapi_snapshot.harn
+	@echo "    OpenAPI snapshot OK."
 
 # Lint GitHub Actions workflows.
 lint-actions:
@@ -377,6 +391,7 @@ test-pr-gate-post-warm-integrations:
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/embedded_asset_rebuild_test.sh
 
@@ -711,7 +726,7 @@ check-ported-handler-loc:
 	@$(HARN_CMD) run scripts/check_ported_handler_loc.harn
 
 # Repo-wide 1500-line ceiling for Rust and stdlib Harn. Existing debt is
-# grandfathered at exact per-source counts so unrelated refactors cannot
+# pinned at exact per-source counts so unrelated refactors cannot
 # conflict in a central baseline. Regeneration only tightens existing debt.
 check-source-file-lengths:
 	@$(HARN_NO_BUILD_CMD) run scripts/check_source_file_lengths.harn
@@ -772,3 +787,31 @@ check-release-audit-contract:
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
 	@$(HARN_CMD) run scripts/check_ci_cache_policy.harn
+
+# Fast "before you declare clean" drift preflight. The member set is DERIVED
+# from the [preflight.dispatch] table in scripts/generated_artifacts.toml (the
+# single source of truth), tier = source: audits that read committed files at
+# interpret time, so they are trustworthy the instant you save a file — no
+# rebuild needed. `make check-generated-registry` guarantees every check-*
+# target is classified there, so this set can never silently omit a guard.
+# `make all` remains the full slow gate; this is the seconds-scale local gate.
+# For guards whose verdict depends on current binary semantics (generated
+# output, parser, checker, or linter), run `check-drift-binary` after a rebuild
+# or with a fresh HARN_BIN; stale executable bytes can false-pass those guards.
+check-drift:
+	@echo "=== Fast drift preflight (source-reading tier) ==="
+	@harn_bin="$$(HARN_BIN_NO_BUILD=1 $(HARN_BIN_PRINT_CMD))" || exit 1; \
+	members="$$($$harn_bin run scripts/drift_preflight_members.harn -- --tier source)" || exit 1; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" $$members
+	@echo "    Drift preflight (source) OK."
+
+# Binary-semantics drift tier: each member's verdict depends on current
+# executable behavior, so a stale binary can false-pass. Run this only with a
+# binary built from current source (after `make build` / with a fresh HARN_BIN);
+# CI is safe because CI's HARN_BIN is freshly built.
+check-drift-binary:
+	@echo "=== Drift preflight (binary-semantics tier; needs a fresh HARN_BIN) ==="
+	@harn_bin="$$(HARN_BIN_NO_BUILD=1 $(HARN_BIN_PRINT_CMD))" || exit 1; \
+	members="$$($$harn_bin run scripts/drift_preflight_members.harn -- --tier binary)" || exit 1; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" $$members
+	@echo "    Drift preflight (binary) OK."

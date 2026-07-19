@@ -21,10 +21,6 @@ type UnixSocketJsonResult = {
  * @errors: []
  * @example: unix_socket_json_request(path, {id: "ping", method: "ping"})
  */
-pub fn unix_socket_json_request(
-  path: string,
-  request,
-  options: UnixSocketJsonOptions = {},
-) -> UnixSocketJsonResult {
+pub fn unix_socket_json_request(path: string, request, options: UnixSocketJsonOptions = {}) -> UnixSocketJsonResult {
   return __net_unix_socket_json_request(path, request, options ?? {})
 }

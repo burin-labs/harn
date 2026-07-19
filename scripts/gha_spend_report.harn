@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 import { render_table } from "std/table"
 
 const DEFAULT_ORG = "burin-labs"
@@ -9,19 +9,24 @@ const DEFAULT_RUNS_PER_REPO = 50
 
 const PRICE_PER_MINUTE = {UBUNTU: 0.008, WINDOWS: 0.016, MACOS: 0.08}
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "org", flags: ["--org"], parse: "string", default: DEFAULT_ORG},
-    {kind: "option", name: "repo", flags: ["--repo"], parse: "string", multi: true, default: []},
+fn arg_spec() {
+  return parser(
     {
-      kind: "option",
-      name: "runs_per_repo",
-      flags: ["--runs-per-repo"],
-      parse: "int",
-      default: DEFAULT_RUNS_PER_REPO,
+      name: "gha_spend_report",
+      args: [
+        {kind: "flag", name: "org", long: "--org", parse: "string", default: DEFAULT_ORG},
+        {kind: "flag", name: "repo", long: "--repo", parse: "string", multi: true, default: []},
+        {
+          kind: "flag",
+          name: "runs_per_repo",
+          long: "--runs-per-repo",
+          parse: "int",
+          default: DEFAULT_RUNS_PER_REPO,
+        },
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
     },
-    {kind: "flag", name: "json", flags: ["--json"], default: false},
-  ]
+  )
 }
 
 fn usage() -> string {
@@ -176,7 +181,8 @@ pub fn run_timing_rows(samples: list) -> list {
 fn table_rows(rows: list) -> list {
   let out = []
   for row in rows ?? [] {
-    out = out.push(
+    out = out
+      .push(
       {
         workflow: row.label,
         minutes: format_float_2(row.minutes),
@@ -243,18 +249,18 @@ fn collect_run_timing_rows(org: string, repos: list<string>, runs_per_repo: int)
 }
 
 fn main(_harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio.println(usage())
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     harness.stdio.eprintln("")
     harness.stdio.eprintln(usage())
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const org = to_string(parsed?.org ?? DEFAULT_ORG)
   const requested_repos: list<string> = parsed?.repo ?? []
   const repos: list<string> = if len(requested_repos) == 0 {
@@ -270,7 +276,8 @@ fn main(_harness: Harness) {
     if has_billing_usage_items(billing) {
       harness.stdio.println(json_stringify_pretty(billing))
     } else {
-      harness.stdio.println(
+      harness.stdio
+        .println(
         json_stringify(
           {
             error: "billing usage endpoint unavailable; rerun without --json for the run-timing fallback table",
@@ -281,13 +288,13 @@ fn main(_harness: Harness) {
     return nil
   }
   if has_billing_usage_items(billing) {
-    harness.stdio.println(
-      "GitHub Actions spend report for org \"${org}\" (source: billing usage report)",
-    )
+    harness.stdio
+      .println("GitHub Actions spend report for org \"${org}\" (source: billing usage report)")
     harness.stdio.println(render_spend_table(billing_usage_rows(billing, requested_repos)))
   } else {
     harness.stdio.println("GitHub Actions spend report for org \"${org}\"")
-    harness.stdio.eprintln(
+    harness.stdio
+      .eprintln(
       "(billing usage endpoint unavailable or unauthorized; falling back to run /timing minutes)",
     )
     harness.stdio.println(render_spend_table(collect_run_timing_rows(org, repos, runs_per_repo)))

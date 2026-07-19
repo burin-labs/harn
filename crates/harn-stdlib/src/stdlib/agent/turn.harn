@@ -60,7 +60,8 @@ fn __agent_turn_judge_decisions(events) {
   let out = []
   for event in events {
     if event?.type == "judge_decision" {
-      out = out.push(
+      out = out
+        .push(
         {
           iteration: event.iteration,
           verdict: event.verdict,

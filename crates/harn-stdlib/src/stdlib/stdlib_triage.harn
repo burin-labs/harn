@@ -503,7 +503,8 @@ fn __triage_related_refs(source_url, input, payload, options) -> list<TriageRela
   let refs = [{kind: "source", label: "Source", url: source_url}]
   const repo_url = __triage_first([payload?.repository?.html_url, payload?.repo?.html_url])
   if repo_url != nil && repo_url != source_url {
-    refs = refs.push(
+    refs = refs
+      .push(
       {
         kind: "repository",
         label: payload?.repository?.full_name ?? payload?.repo?.full_name,
@@ -661,7 +662,8 @@ pub fn triage_emit(input, options = nil) -> TriageEmitReceipt {
   const opts = options ?? {}
   const event = input?.schema == TRIAGE_EVENT_SCHEMA ? triage_validate(input) : triage_normalize(input, opts)
   const topic = opts.topic ?? TRIAGE_EVENT_TOPIC
-  const event_log_id = event_log.emit(
+  const event_log_id = event_log
+    .emit(
     topic,
     TRIAGE_EVENT_KIND,
     event,

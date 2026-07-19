@@ -32,6 +32,7 @@ use crate::{
 
 const TY_BOOL_OR_DICT: Ty = Ty::Union(&[TY_BOOL, TY_DICT]);
 const TY_BOOL_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_BOOL, TY_DICT, TY_NIL]);
+const TY_FLOAT_OR_NIL: Ty = Ty::Union(&[TY_FLOAT, TY_NIL]);
 const TY_INT_OR_FLOAT_OR_DICT: Ty = Ty::Union(&[TY_INT, TY_FLOAT, TY_DICT]);
 const TY_LIST_OR_STRING: Ty = Ty::Union(&[TY_LIST, TY_STRING]);
 const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
@@ -151,6 +152,7 @@ pub const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("max_nudges", TY_INT),
     ShapeFieldDescriptor::optional("nudge", TY_STRING),
     ShapeFieldDescriptor::optional("llm_caller", TY_ANY),
+    ShapeFieldDescriptor::optional("llm_caller_transport", TY_DICT),
     ShapeFieldDescriptor::optional("tool_caller", TY_ANY),
     ShapeFieldDescriptor::optional("reasoning_policy", TY_ANY),
     ShapeFieldDescriptor::optional("thinking_policy", TY_ANY),
@@ -287,6 +289,7 @@ pub const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("system", TY_STRING),
     ShapeFieldDescriptor::optional("messages", TY_LIST),
     ShapeFieldDescriptor::optional("session_id", TY_STRING),
+    ShapeFieldDescriptor::optional("mock_scope", TY_STRING),
     ShapeFieldDescriptor::optional("system_preamble", TY_ANY),
     ShapeFieldDescriptor::optional("system_prefix", TY_ANY),
     ShapeFieldDescriptor::optional("system_context", TY_ANY),
@@ -497,6 +500,7 @@ pub const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
 pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("input_tokens", TY_INT),
     ShapeFieldDescriptor::new("output_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cost_usd", TY_FLOAT_OR_NIL),
     ShapeFieldDescriptor::new("cache_read_tokens", TY_INT),
     ShapeFieldDescriptor::new("cache_write_tokens", TY_INT),
     ShapeFieldDescriptor::new("cache_creation_input_tokens", TY_INT),

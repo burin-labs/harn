@@ -137,6 +137,8 @@ harn persona new --from-prompt \
   "Every four hours, digest what I need to reply to." --name reply_digest
 harn persona materialize --blueprint incident_triager.blueprint.json
 harn persona materialize --compile-receipt reviewed-prompt-receipt.json
+harn persona materialize --manifest /project/harn.toml \
+  --compile-receipt reviewed-prompt-receipt.json --activate --json
 harn persona list
 harn persona list --json
 harn persona check personas/ship_captain/harn.toml
@@ -185,6 +187,27 @@ catalog and requires the freshly derived lowering to exactly match the reviewed
 lowering before entering that same transaction. Replay makes no model call;
 stale, failed, incomplete, or edited receipts publish nothing. The two input
 flags are mutually exclusive.
+
+Adding `--activate` composes that reviewed-receipt materialization with Harn's
+local package installer and project activation ledger. It requires an explicit
+`--manifest`, resolves a relative output root from that project rather than the
+caller's working directory, rejects relative traversal and symlink escapes,
+chooses a deterministic collision-safe dependency alias, and activates only the
+generated `suggest` policy. Its versioned JSON receipt distinguishes
+materialization, installation, package doctor, activation, and runtime
+verification failures. Materialization publishes its generated package
+independently. The subsequent install, activation, and verification stages hold
+one project mutation lock. A failure removes only the dependency edge introduced
+by that apply, republishes packages from the current manifest, and restores the
+activation record it replaced. Rollback deliberately does not restore historical
+lockfile or package-generation pointer bytes, because doing so could erase a
+concurrent package refresh; a previously lockless project may therefore retain
+an empty lockfile and package generation. Concurrent persona applies and manual
+activation mutations are serialized, and a rollback failure is reported
+explicitly instead of claiming atomicity. Repeating the same accepted receipt
+reuses identical package bytes, dependency alias, and activation record.
+Burin and other hosts own review and approval UX; Harn owns this apply
+transaction and its receipts.
 
 `--manifest` accepts a `harn.toml` path or a directory containing one. Without
 it, Harn walks up from the current directory to the nearest `harn.toml`, stopping
@@ -239,13 +262,18 @@ activation layer does not itself enforce.
 Runtime extension loading includes root personas plus dependency personas whose
 activation still matches the installed package content and exported policy.
 Package or policy drift fails closed with a reactivation diagnostic; installing
-or inspecting a package alone never registers its triggers. Activated personas
-keep their qualified identity in trigger bindings and lifecycle state, and an
-explicit handler may address one as `persona://agents/reviewer`.
-The runtime compiles the entry and imports from the exact bytes captured by a
-successful content-hash check. Imports may cross into content-hashed
-dependencies pinned by the activated generation lock; paths outside that
-content-pinned package graph are rejected.
+or inspecting a package alone never registers its triggers. After activation,
+canonical root `[[triggers]]` rows that target the activated persona enter the
+runtime with their schedule, matching, secret, and provider policy intact;
+unrelated package triggers remain inert. The runtime qualifies the projected
+trigger ID and persona handler with the dependency alias, so an explicit handler
+may address the same persona as `persona://agents/reviewer` without colliding
+with another package's exports. Activated personas keep that qualified identity
+in trigger bindings and lifecycle state.
+The runtime compiles workflow entries, local trigger predicates, and imports
+from the exact bytes captured by a successful content-hash check. Imports may
+cross into content-hashed dependencies pinned by the activated generation lock;
+paths outside that content-pinned package graph are rejected.
 
 ## Trigger handlers
 

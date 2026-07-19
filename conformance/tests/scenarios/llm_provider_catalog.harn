@@ -39,9 +39,8 @@ pipeline test(task) {
   assert_eq(mid.catalog.family, "qwen")
   assert(mid.capabilities.native_tools != nil, "capability lookup is present")
   const mid_route_model = mid.catalog?.wire_model ?? mid.id
-  const mid_routes = catalog.routing_routes.filter(
-    { route -> route.provider == mid.provider && route.model == mid_route_model },
-  )
+  const mid_routes = catalog.routing_routes
+    .filter({ route -> route.provider == mid.provider && route.model == mid_route_model })
   assert_eq(len(mid_routes), 1)
   assert_eq(mid_routes[0].family, mid.family)
   assert(

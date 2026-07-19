@@ -81,7 +81,8 @@ fn __normalize_criteria(value) {
         + "` has a `check` that must be a callable or nil; got "
         + type_of(entry.check)
     }
-    out = out.push(
+    out = out
+      .push(
       {check: entry?.check, description: description, id: entry?.id ?? ("sc_" + to_string(index))},
     )
     index = index + 1

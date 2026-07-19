@@ -6,11 +6,13 @@ pipeline default() {
   harness.fs.mkdir(script_dir)
   const writer = script_dir + "/writer.harn"
   const reader = script_dir + "/reader.harn"
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     writer,
     "import \"std/agent_state\"\n\npipeline default() {\n  let root = argv[0]\n  let handle = agent_state_init(root, {session_id: \"resume-session\", writer_id: \"writer-a\"})\n  agent_state_write(handle, \"plan.md\", \"persisted plan\")\n  agent_state_handoff(handle, {status: \"ready\", source: \"writer\"})\n  __io_println(agent_state_read(handle, \"plan.md\"))\n}\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     reader,
     "import \"std/agent_state\"\n\npipeline default() {\n  let root = argv[0]\n  let handle = agent_state_resume(root, \"resume-session\", nil)\n  __io_println(agent_state_read(handle, \"plan.md\"))\n  let handoff = json_parse(agent_state_read(handle, agent_state_handoff_key()))\n  __io_println(handoff.summary.status)\n  __io_println(handoff.session_id)\n}\n",
   )

@@ -137,11 +137,7 @@ pub fn __batch_request_rows_read(harness: Harness, requests_path: string) -> Bat
  * @effects: [fs.read]
  * @errors: [runtime]
  */
-pub fn __batch_artifact_read(
-  harness: Harness,
-  path: string,
-  kind: BatchArtifactKind,
-) -> BatchArtifactRead {
+pub fn __batch_artifact_read(harness: Harness, path: string, kind: BatchArtifactKind) -> BatchArtifactRead {
   const contract = __batch_artifact_contract(kind)
   let errors: list<string> = []
   if path == "" {

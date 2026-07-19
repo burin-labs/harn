@@ -1059,11 +1059,7 @@ fn __git_forge_repo_parts(full_name) {
  * @effects: []
  * @errors: []
  */
-pub fn git_forge_writeback_request(
-  event: GitForgePullRequestEvent,
-  body: string,
-  options = nil,
-) -> GitForgeWritebackRequest {
+pub fn git_forge_writeback_request(event: GitForgePullRequestEvent, body: string, options = nil) -> GitForgeWritebackRequest {
   const opts = options ?? {}
   const provider = lowercase(trim(to_string(opts?.provider ?? event.provider)))
   const target = event.writeback

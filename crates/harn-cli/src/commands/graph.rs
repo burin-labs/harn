@@ -505,15 +505,7 @@ fn collect_public_symbol(
         } if exports.contains(name) => out.push(GraphSymbol {
             name: name.clone(),
             kind: "pipeline".to_string(),
-            signature: format!(
-                "pipeline {}({}){}",
-                name,
-                params.join(", "),
-                return_type
-                    .as_ref()
-                    .map(|ty| format!(" -> {}", format_type(ty)))
-                    .unwrap_or_default()
-            ),
+            signature: callable_signature("pipeline", name, &[], params, return_type.as_ref(), &[]),
             metadata: None,
             derived_example: None,
         }),

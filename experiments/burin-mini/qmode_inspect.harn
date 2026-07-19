@@ -382,12 +382,7 @@ fn inspect_step_transcript(task_dir: string, input_findings: list, print_lines: 
   return record(findings, "WARN", "step transcript has no terminal tool", print_lines)
 }
 
-fn inspect_last_prompt(
-  task_dir: string,
-  qa: list,
-  input_findings: list,
-  print_lines: bool,
-) -> list {
+fn inspect_last_prompt(task_dir: string, qa: list, input_findings: list, print_lines: bool) -> list {
   let findings = input_findings
   const path = path_join(task_dir, "last-prompt.txt")
   if !harness.fs.exists(path) {

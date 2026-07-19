@@ -1108,6 +1108,19 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/secret_store/list.response.json"),
     ),
+    // host_lease/
+    (
+        "host_lease",
+        "status",
+        SchemaKind::Request,
+        include_str!("../schemas/host_lease/status.request.json"),
+    ),
+    (
+        "host_lease",
+        "status",
+        SchemaKind::Response,
+        include_str!("../schemas/host_lease/status.response.json"),
+    ),
     (
         "embed",
         "similarity",
@@ -1301,6 +1314,19 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         "run",
         SchemaKind::Response,
         include_str!("../schemas/lint/run.response.json"),
+    ),
+    // verdict/
+    (
+        "verdict",
+        "issue",
+        SchemaKind::Request,
+        include_str!("../schemas/verdict/issue.request.json"),
+    ),
+    (
+        "verdict",
+        "issue",
+        SchemaKind::Response,
+        include_str!("../schemas/verdict/issue.response.json"),
     ),
 ];
 

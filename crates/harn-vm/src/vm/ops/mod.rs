@@ -33,7 +33,37 @@ mod misc;
 mod parallel;
 mod stack;
 
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use pin_project_lite::pin_project;
+
 use crate::value::{VmError, VmValue};
+
+pin_project! {
+    /// Keeps the large generated async-opcode state machine out of each caller
+    /// without moving the future off the stack.
+    struct OpcodeDispatchFuture<F> {
+        #[pin]
+        inner: F,
+    }
+}
+
+impl<F> OpcodeDispatchFuture<F> {
+    fn new(inner: F) -> Self {
+        Self { inner }
+    }
+}
+
+impl<F: Future> Future for OpcodeDispatchFuture<F> {
+    type Output = F::Output;
+
+    #[inline(never)]
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().inner.poll(context)
+    }
+}
 
 harn_opcode_macros::define_opcodes! {
     // === Constants & nil ===

@@ -24,8 +24,11 @@ By-value capture's failure mode is the worst kind: a **silently vanishing
 write**. It is exactly the "looks right, behaves wrong" class Harn's soundness
 program exists to eliminate, and it is the natural habit of the LLMs that write
 most Harn code. It had already caused a latent bug in Harn's own stdlib
-(`std/text extract_paths` dedup accumulator was a no-op; quietly replaced by
-`.unique()`).
+(`std/text extract_paths` deduplicated through a captured accumulator that never
+accumulated, so duplicate paths slipped through). That call site is deliberately
+unchanged: under reference capture its `seen = seen + [p]` writes through the
+shared cell, so the dedup now simply works. The bug was fixed at the semantics
+layer, not worked around at the call site.
 
 ### Value semantics is preserved (orthogonal axis)
 

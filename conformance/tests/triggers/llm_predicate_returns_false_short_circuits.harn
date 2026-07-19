@@ -38,9 +38,8 @@ pipeline test(task) {
         handle,
         {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-false-" + unique}},
       )
-      const dispatches = trigger_inspect_lifecycle("DispatchStarted").filter(
-        { entry -> entry?.headers?.trigger_id == handle.id },
-      )
+      const dispatches = trigger_inspect_lifecycle("DispatchStarted")
+        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
       __io_println(fire.status == "dispatched")
       __io_println(contains(json_stringify(fire.result ?? {}), "\"skipped\":true"))
       __io_println(contains(json_stringify(fire.result ?? {}), "\"reason\":null"))

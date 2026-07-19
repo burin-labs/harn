@@ -1,7 +1,7 @@
 //! Recovery of tool calls whose object-literal argument is complete but whose
 //! own closing `)` the model omitted, e.g. `edit({ ..., content: <<EOF ... EOF }`
 //! (a bare `}` where `})` was meant). Kept in a focused file so the already
-//! grandfathered-oversized `heredoc_and_messages.rs` does not keep growing.
+//! oversized `heredoc_and_messages.rs` does not keep growing.
 
 use super::{
     json, parse_bare_calls_in_body, parse_text_tool_calls_with_tools, sample_tool_registry,

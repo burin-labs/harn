@@ -70,30 +70,35 @@ pub(super) async fn promote(args: &ModelsLoraPromoteArgs) -> i32 {
 fn promotion_evidence_bundle(
     args: &ModelsLoraPromoteArgs,
 ) -> Result<LoraPromotionEvidenceBundle, String> {
-    let manifest = read_json(&args.manifest)?;
-    let payload = unwrap_cli_envelope(&manifest);
+    let train_receipt = read_json(&args.train_receipt)?;
+    let payload = unwrap_cli_envelope(&train_receipt);
+    require_executed_train_receipt(payload, &args.train_receipt)?;
     let evidence = promotion_evidence_contract(payload).ok_or_else(|| {
         format!(
-            "{} does not contain promotion.evidence_contract or evaluation.evidence_contract",
-            args.manifest.display()
+            "{} does not contain promotion.evidence_contract",
+            args.train_receipt.display()
         )
     })?;
-    let manifest_dir = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+    let manifest_dir = args
+        .train_receipt
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
     let required_cases = evidence
         .get("required_probe_cases")
         .and_then(Value::as_array)
         .ok_or_else(|| "promotion evidence contract is missing required_probe_cases".to_string())?;
     let mut cases = Vec::new();
     let mut warnings = Vec::new();
-    let trainer_identity = trainer_identity_check(payload);
-    if !trainer_identity.promotable
+    let trainer_identity = trainer_identity_check(evidence);
+    let trainer_environment = trainer_environment_check(evidence);
+    if (!trainer_identity.promotable || !trainer_environment.promotable)
         && args
-            .trainer_identity_exception
+            .trainer_provenance_exception
             .as_deref()
             .map(str::trim)
             .is_some_and(|exception| !exception.is_empty())
     {
-        warnings.push("trainer identity promotion exception supplied".to_string());
+        warnings.push("trainer provenance promotion exception supplied".to_string());
     }
     for case in required_cases {
         let spec = probe_case_spec(case)?;
@@ -122,9 +127,9 @@ fn promotion_evidence_bundle(
     }
     Ok(LoraPromotionEvidenceBundle {
         schema_version: 1,
-        producer: "harn_models_lora_promote_bridge_v1".to_string(),
+        producer: "harn_models_lora_promote_bridge_v2".to_string(),
         request: PromotionRequest {
-            manifest: args.manifest.display().to_string(),
+            train_receipt: args.train_receipt.display().to_string(),
             probe_root: args.probe_root.display().to_string(),
             base_probe_root: args
                 .base_probe_root
@@ -132,7 +137,7 @@ fn promotion_evidence_bundle(
                 .map(|path| path.display().to_string()),
             out: args.out.as_ref().map(|path| path.display().to_string()),
             check: args.check,
-            trainer_identity_exception: args.trainer_identity_exception.clone(),
+            trainer_provenance_exception: args.trainer_provenance_exception.clone(),
         },
         contract: PromotionContractSummary {
             schema_version: value_u64(evidence, "schema_version"),
@@ -146,6 +151,7 @@ fn promotion_evidence_bundle(
                 .cloned()
                 .unwrap_or(Value::Null),
             trainer_identity,
+            trainer_environment,
         },
         evidence_cases: cases,
         warnings,
@@ -334,29 +340,10 @@ fn promotion_evidence_contract(payload: &Value) -> Option<&Value> {
     payload
         .get("promotion")
         .and_then(|promotion| promotion.get("evidence_contract"))
-        .or_else(|| {
-            payload
-                .get("evaluation")
-                .and_then(|evaluation| evaluation.get("evidence_contract"))
-        })
 }
 
-fn trainer_identity_check(payload: &Value) -> TrainerIdentityPromotionSummary {
-    let candidate = payload
-        .get("training")
-        .and_then(|training| training.get("trainer_identity"))
-        .or_else(|| {
-            payload
-                .get("promotion")
-                .and_then(|promotion| promotion.get("evidence_contract"))
-                .and_then(|evidence| evidence.get("trainer_identity"))
-        })
-        .or_else(|| {
-            payload
-                .get("evaluation")
-                .and_then(|evaluation| evaluation.get("evidence_contract"))
-                .and_then(|evidence| evidence.get("trainer_identity"))
-        });
+fn trainer_identity_check(evidence: &Value) -> TrainerIdentityPromotionSummary {
+    let candidate = evidence.get("trainer_identity");
     let Some(candidate) = candidate else {
         return TrainerIdentityPromotionSummary {
             status: "missing".to_string(),
@@ -393,6 +380,79 @@ fn trainer_identity_check(payload: &Value) -> TrainerIdentityPromotionSummary {
         observed: candidate.get("observed").cloned().unwrap_or(Value::Null),
         errors,
     }
+}
+
+fn trainer_environment_check(evidence: &Value) -> TrainerEnvironmentPromotionSummary {
+    let Some(candidate) = evidence.get("trainer_environment") else {
+        return TrainerEnvironmentPromotionSummary {
+            status: "missing".to_string(),
+            promotable: false,
+            attestation: Value::Null,
+            errors: vec!["trainer environment check is missing".to_string()],
+        };
+    };
+    let status = value_string(candidate, "status");
+    let promotable = candidate
+        .get("promotable")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut errors = candidate
+        .get("errors")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !promotable && errors.is_empty() {
+        errors.push("trainer environment is not promotable".to_string());
+    }
+    TrainerEnvironmentPromotionSummary {
+        status,
+        promotable,
+        attestation: candidate.get("attestation").cloned().unwrap_or(Value::Null),
+        errors,
+    }
+}
+
+fn require_executed_train_receipt(payload: &Value, path: &Path) -> Result<(), String> {
+    let producer = value_string(payload, "producer");
+    let mode = value_string(payload, "mode");
+    let request_execute = payload
+        .get("request")
+        .and_then(|request| request.get("execute"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let backend_execute = payload
+        .get("backend")
+        .and_then(|backend| backend.get("execute"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let backend_exit_code = payload
+        .get("backend")
+        .and_then(|backend| backend.get("exit_code"))
+        .and_then(Value::as_i64);
+    let backend_status = payload
+        .get("backend")
+        .and_then(|backend| backend.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if producer != "harn_models_lora_train_v1"
+        || mode != "execute"
+        || !request_execute
+        || !backend_execute
+        || backend_exit_code != Some(0)
+        || !backend_status.starts_with("completed")
+    {
+        return Err(format!(
+            "{} is not a finalized `harn models lora train --execute` receipt",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 fn unwrap_cli_envelope(value: &Value) -> &Value {
@@ -512,12 +572,12 @@ struct LoraPromotionEvidenceBundle {
 
 #[derive(Debug, Serialize)]
 struct PromotionRequest {
-    manifest: String,
+    train_receipt: String,
     probe_root: String,
     base_probe_root: Option<String>,
     out: Option<String>,
     check: bool,
-    trainer_identity_exception: Option<String>,
+    trainer_provenance_exception: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -530,6 +590,7 @@ struct PromotionContractSummary {
     base_route: Value,
     adapter_route: Value,
     trainer_identity: TrainerIdentityPromotionSummary,
+    trainer_environment: TrainerEnvironmentPromotionSummary,
 }
 
 #[derive(Debug, Serialize)]
@@ -538,6 +599,14 @@ struct TrainerIdentityPromotionSummary {
     promotable: bool,
     expected: Value,
     observed: Value,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainerEnvironmentPromotionSummary {
+    status: String,
+    promotable: bool,
+    attestation: Value,
     errors: Vec<String>,
 }
 

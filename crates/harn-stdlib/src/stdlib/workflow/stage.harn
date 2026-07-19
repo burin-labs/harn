@@ -613,12 +613,14 @@ pub fn workflow_evaluate_verification(config = nil) {
   const exit_status = __stage_exit_status(result)
   let checks = []
   if type_of(verify?.assert_text) == "string" {
-    checks = checks.push(
+    checks = checks
+      .push(
       {kind: "assert_text", ok: contains(visible_text, verify.assert_text), expected: verify.assert_text},
     )
   }
   if type_of(verify?.expect_status) == "int" {
-    checks = checks.push(
+    checks = checks
+      .push(
       {
         kind: "expect_status",
         ok: exit_status == verify.expect_status,

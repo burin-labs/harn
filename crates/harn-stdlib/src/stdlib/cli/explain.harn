@@ -71,7 +71,8 @@ fn render_envelope_json(entry: dict) -> string {
   let repairs = []
   const repair = entry["repair"]
   if repair != nil {
-    repairs = repairs.push({id: repair["id"], safety: repair["safety"], summary: repair["summary"]})
+    repairs = repairs
+      .push({id: repair["id"], safety: repair["safety"], summary: repair["summary"]})
   }
   const envelope = {
     schemaVersion: 1,
@@ -89,7 +90,8 @@ fn render_envelope_json(entry: dict) -> string {
 fn main(harness: Harness) {
   const raw = harness.env.get_or("HARN_EXPLAIN_ENTRY_JSON", "")
   if raw == "" {
-    harness.stdio.eprintln("internal error: HARN_EXPLAIN_ENTRY_JSON not set by dispatch shim")
+    harness.stdio
+      .eprintln("internal error: HARN_EXPLAIN_ENTRY_JSON not set by dispatch shim")
     exit(70)
   }
   const entry = json_parse(raw)

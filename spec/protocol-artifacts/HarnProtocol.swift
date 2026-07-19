@@ -352,6 +352,7 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
     case parseAborted = "parse_aborted"
     case timeout = "timeout"
     case network = "network"
+    case resourceBusy = "resource_busy"
     case cancelled = "cancelled"
     case abandonedAtLoopExit = "abandoned_at_loop_exit"
     case unknown = "unknown"
@@ -366,6 +367,7 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
         "parse_aborted",
         "timeout",
         "network",
+        "resource_busy",
         "cancelled",
         "abandoned_at_loop_exit",
         "unknown",
@@ -430,6 +432,7 @@ public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
     case providerUnavailable = "provider_unavailable"
     case rateLimited = "rate_limited"
     case timeout = "timeout"
+    case resourceBusy = "resource_busy"
     case toolPolicyRejected = "tool_policy_rejected"
     case hostBridgeUnimplemented = "host_bridge_unimplemented"
     case agentLoopProtocolFailure = "agent_loop_protocol_failure"
@@ -441,6 +444,7 @@ public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
         "provider_unavailable",
         "rate_limited",
         "timeout",
+        "resource_busy",
         "tool_policy_rejected",
         "host_bridge_unimplemented",
         "agent_loop_protocol_failure",

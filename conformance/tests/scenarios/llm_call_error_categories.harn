@@ -1,5 +1,14 @@
 import { with_llm_script } from "std/testing"
 
+type MockError = {category: string, message: string, status?: int, retry_after_ms?: int}
+
+fn mock_error(category: string, message: string) -> MockError {
+  if category == "overloaded" {
+    return {category: category, message: message, status: 503, retry_after_ms: 0}
+  }
+  return {category: category, message: message}
+}
+
 /**
  * Walk every canonical ErrorCategory string and verify the thrown
  * dict round-trips `category`, `message`, `provider`, and `model` on
@@ -26,7 +35,7 @@ pipeline default(task) {
   for category in categories {
     const model = "mock-" + category
     with_llm_script(
-      [{error: {category: category, message: "synthetic-" + category}}],
+      [{error: mock_error(category, "synthetic-" + category)}],
       { ->
         try {
           llm_call("probe", nil, {provider: "mock", model: model})
@@ -40,7 +49,7 @@ pipeline default(task) {
       },
     )
     with_llm_script(
-      [{error: {category: category, message: "safe-" + category}}],
+      [{error: mock_error(category, "safe-" + category)}],
       { ->
         const r = llm_call_safe("probe", nil, {provider: "mock", model: model})
         __io_println(

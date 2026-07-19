@@ -219,6 +219,9 @@ pub enum ErrorCategory {
     /// Network-level transient failure (connection reset, DNS hiccup,
     /// partial stream) — retryable but not provider-status-coded.
     TransientNetwork,
+    /// A shared local resource is temporarily unavailable, such as a
+    /// contended database write lock.
+    ResourceBusy,
     /// LLM output failed schema validation. Retryable via `schema_retries`.
     SchemaValidation,
     /// LLM streaming response was aborted mid-stream because the partial
@@ -252,6 +255,15 @@ pub enum ErrorCategory {
     /// that keeps a mis-wired builtin (e.g. a `#[harn_builtin]` def missing
     /// from its install array) from shipping silently inert.
     Internal,
+    /// A host environment / infrastructure problem that is not the workload's
+    /// code defect: a required developer-toolchain root or cache lies outside
+    /// the sandbox profile, a needed system binary is missing, or another
+    /// machine-provisioning gap. Distinct from `ToolRejected` (the host
+    /// deliberately refused an action) and `Internal` (an engine bug): the fix
+    /// is to widen the sandbox/config or provision the host, not to change the
+    /// agent's code. Callers (and embedders) branch on this to avoid blaming
+    /// the model for an environment gap.
+    Environment,
     /// Generic/unclassified error
     Generic,
 }
@@ -265,6 +277,7 @@ impl ErrorCategory {
             ErrorCategory::Overloaded => "overloaded",
             ErrorCategory::ServerError => "server_error",
             ErrorCategory::TransientNetwork => "transient_network",
+            ErrorCategory::ResourceBusy => "resource_busy",
             ErrorCategory::SchemaValidation => "schema_validation",
             ErrorCategory::SchemaStreamAborted => "schema_stream_aborted",
             ErrorCategory::ToolError => "tool_error",
@@ -276,6 +289,7 @@ impl ErrorCategory {
             ErrorCategory::CircuitOpen => "circuit_open",
             ErrorCategory::BudgetExceeded => "budget_exceeded",
             ErrorCategory::Internal => "internal",
+            ErrorCategory::Environment => "environment",
             ErrorCategory::Generic => "generic",
         }
     }
@@ -288,6 +302,7 @@ impl ErrorCategory {
             "overloaded" => ErrorCategory::Overloaded,
             "server_error" => ErrorCategory::ServerError,
             "transient_network" => ErrorCategory::TransientNetwork,
+            "resource_busy" => ErrorCategory::ResourceBusy,
             "schema_validation" => ErrorCategory::SchemaValidation,
             "schema_stream_aborted" => ErrorCategory::SchemaStreamAborted,
             "tool_error" => ErrorCategory::ToolError,
@@ -299,6 +314,7 @@ impl ErrorCategory {
             "circuit_open" => ErrorCategory::CircuitOpen,
             "budget_exceeded" => ErrorCategory::BudgetExceeded,
             "internal" => ErrorCategory::Internal,
+            "environment" => ErrorCategory::Environment,
             _ => ErrorCategory::Generic,
         }
     }
@@ -309,9 +325,9 @@ impl ErrorCategory {
         matches!(self, ErrorCategory::Internal)
     }
 
-    /// Whether an error of this category is worth retrying for a transient
-    /// provider-side reason. Agent loops consult this to decide whether to
-    /// back off and retry vs surface the error to the user.
+    /// Whether an error of this category is worth retrying because the
+    /// underlying condition is transient. Agent loops consult this to decide
+    /// whether to back off and retry vs surface the error to the user.
     pub fn is_transient(&self) -> bool {
         matches!(
             self,
@@ -320,6 +336,7 @@ impl ErrorCategory {
                 | ErrorCategory::Overloaded
                 | ErrorCategory::ServerError
                 | ErrorCategory::TransientNetwork
+                | ErrorCategory::ResourceBusy
         )
     }
 }
@@ -584,6 +601,7 @@ mod tests {
         ErrorCategory::Overloaded,
         ErrorCategory::ServerError,
         ErrorCategory::TransientNetwork,
+        ErrorCategory::ResourceBusy,
         ErrorCategory::SchemaValidation,
         ErrorCategory::SchemaStreamAborted,
         ErrorCategory::ToolError,
@@ -595,6 +613,7 @@ mod tests {
         ErrorCategory::CircuitOpen,
         ErrorCategory::BudgetExceeded,
         ErrorCategory::Internal,
+        ErrorCategory::Environment,
         ErrorCategory::Generic,
     ];
 
@@ -611,6 +630,7 @@ mod tests {
                 | ErrorCategory::Overloaded
                 | ErrorCategory::ServerError
                 | ErrorCategory::TransientNetwork
+                | ErrorCategory::ResourceBusy
                 | ErrorCategory::SchemaValidation
                 | ErrorCategory::SchemaStreamAborted
                 | ErrorCategory::ToolError
@@ -622,12 +642,13 @@ mod tests {
                 | ErrorCategory::CircuitOpen
                 | ErrorCategory::BudgetExceeded
                 | ErrorCategory::Internal
+                | ErrorCategory::Environment
                 | ErrorCategory::Generic => {}
             }
         }
         assert_eq!(
             ALL_CATEGORIES.len(),
-            18,
+            20,
             "a category was added or removed — update ALL_CATEGORIES and the \
              `Error categories` table in docs/src/builtins.md"
         );
@@ -649,7 +670,7 @@ mod tests {
 
     /// Scripts branch on these strings, so an undocumented category is a
     /// caller writing a match that cannot handle a value the runtime emits.
-    /// `error_category()` used to advertise 10 of the 18 — a dead-port probe
+    /// `error_category()` used to advertise 10 of the full category set — a dead-port probe
     /// returning `transient_network` fell outside its own documented list.
     #[test]
     fn every_category_is_documented_in_builtins_md() {

@@ -2,7 +2,8 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
   const path = path_join(harness.fs.temp_dir(), "harn-seed-" + uuid() + ".jsonl")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path,
     join(
       [
@@ -68,7 +69,8 @@ pipeline main() {
   __io_println(snap.messages[1].content)
   __io_println(snap.messages[1].tool_calls == nil)
   const legacy_path = path_join(harness.fs.temp_dir(), "harn-legacy-seed-" + uuid() + ".jsonl")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     legacy_path,
     join(
       [

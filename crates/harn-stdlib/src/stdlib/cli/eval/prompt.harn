@@ -333,10 +333,12 @@ fn __render_json(report) -> string {
 fn __html_escape(s: string) -> string {
   // The ampersand replace must run first to avoid double-encoding the
   // ampersands that the other replacements introduce.
-  return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace(
-    "'",
-    "&#39;",
-  )
+  return s
+    .replace("&", "&amp;")
+    .replace("<", "&lt;")
+    .replace(">", "&gt;")
+    .replace("\"", "&quot;")
+    .replace("'", "&#39;")
 }
 
 fn __html_render_card(render, runs) -> string {
@@ -454,7 +456,8 @@ fn __render_html(report) -> string {
 fn main(harness: Harness) {
   const raw = harness.env.get_or("HARN_EVAL_PROMPT_REPORT_JSON", "")
   if raw == "" {
-    harness.stdio.eprintln("internal error: HARN_EVAL_PROMPT_REPORT_JSON not set by dispatch shim")
+    harness.stdio
+      .eprintln("internal error: HARN_EVAL_PROMPT_REPORT_JSON not set by dispatch shim")
     exit(70)
   }
   const report = try {

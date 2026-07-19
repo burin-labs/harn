@@ -51,12 +51,7 @@ fn __cancel_status(job: dict, dry_run: bool) -> dict {
   }
 }
 
-fn __cancel_operation(
-  provider: string,
-  method: string,
-  url: string,
-  credential_env: string,
-) -> dict {
+fn __cancel_operation(provider: string, method: string, url: string, credential_env: string) -> dict {
   return {
     provider: provider,
     operation: method + " " + __redact_download_url(url),

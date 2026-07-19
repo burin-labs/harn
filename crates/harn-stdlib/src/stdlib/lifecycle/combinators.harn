@@ -162,7 +162,8 @@ pub fn with_telemetry(callback, span_name = "lifecycle_callback") {
     harness.emit_audit(label + "_started", {})
     try {
       const result = callback(harness, return_value)
-      harness.emit_audit(label + "_completed", {result_summary: __summarize_result(result)})
+      harness
+        .emit_audit(label + "_completed", {result_summary: __summarize_result(result)})
       __lifecycle_span_end(span)
       return result
     } catch (e) {
@@ -205,7 +206,8 @@ pub fn with_timeout(callback, ms) {
     if timeout_ms <= 0 || elapsed <= timeout_ms {
       return result
     }
-    harness.emit_audit("lifecycle_callback_timed_out", {timeout_ms: timeout_ms, elapsed_ms: elapsed})
+    harness
+      .emit_audit("lifecycle_callback_timed_out", {timeout_ms: timeout_ms, elapsed_ms: elapsed})
     return {__timed_out: true, timeout_ms: timeout_ms, elapsed_ms: elapsed, return_value: result}
   }
 }

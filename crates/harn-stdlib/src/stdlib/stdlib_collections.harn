@@ -28,11 +28,7 @@ pub fn filter_nil<V>(d: dict<string, V>) -> dict<string, V> {
  * @effects: []
  * @errors: []
  */
-pub fn pick_keys<V>(
-  d: dict<string, V>,
-  selected_keys: list<string>,
-  options: PickKeysOptions = {},
-) -> dict<string, V> {
+pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: PickKeysOptions = {}) -> dict<string, V> {
   if type_of(d) != "dict" {
     return {}
   }

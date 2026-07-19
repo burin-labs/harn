@@ -12,11 +12,13 @@ pipeline test(task) {
   const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-cli-" + uuid())
   harness.fs.mkdir(root)
   const replay_marker = path_join(root, "replay-ready.marker")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "harn.toml"),
     "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"cron-heartbeat\"\nkind = \"cron\"\nprovider = \"cron\"\nmatch = { events = [\"cron.tick\"] }\nhandler = \"handlers::on_tick\"\nretry = { retention_days = 7 }\nschedule = \"*/2 * * * * *\"\ntimezone = \"UTC\"\ncatchup_mode = \"latest\"\n\n[[triggers]]\nid = \"manual-replay\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"manual.trigger\"] }\nhandler = \"handlers::flaky_issue\"\nretry = { max = 1, backoff = \"immediate\", retention_days = 7 }\n\n[[triggers]]\nid = \"manual-discard\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"manual.trigger\"] }\nhandler = \"handlers::always_fail\"\nretry = { max = 1, backoff = \"immediate\", retention_days = 7 }\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\nlet replay_marker = \""
       + replay_marker

@@ -59,10 +59,12 @@ pipeline default() {
   __io_println(len(fourth.payload.batch.constituent_event_ids))
   // Span check: match span must multi-link to every emit span.
   const spans = trace_spans()
-  const emit_spans = spans.filter(
+  const emit_spans = spans
+    .filter(
     { s -> s.kind == "channel_emit" && s.metadata.name_resolved == "tenant:default:ch.otel.batch.input" },
   )
-  const match_spans = spans.filter(
+  const match_spans = spans
+    .filter(
     { s -> s.kind == "channel_match" && s.name == "channel.match tenant:default:ch.otel.batch.input" },
   )
   __io_println(len(emit_spans) >= 3)

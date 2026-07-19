@@ -37,6 +37,8 @@ mod worker;
 mod from_host_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tool_taxonomy_tests;
 
 pub use agent::AgentEvent;
 pub use host_injection::{
@@ -46,11 +48,15 @@ pub use host_injection::{
 #[cfg(test)]
 pub use registry::reset_wildcard_sinks;
 pub use registry::{
-    clear_session_sinks, emit_event, mirror_session_sinks, register_sink, register_wildcard_sink,
-    reset_all_sinks, session_closure_subscriber_count, session_external_sink_count,
-    session_has_external_sink, unregister_wildcard_sink, WildcardSinkHandle,
+    clear_session_sinks, emit_event, flush_and_clear_session_sinks, flush_session_sinks,
+    mirror_session_sinks, register_sink, register_wildcard_sink, reset_all_sinks,
+    session_closure_subscriber_count, session_external_sink_count, session_has_external_sink,
+    unregister_wildcard_sink, WildcardSinkHandle,
 };
-pub use sinks::{AgentEventSink, EventLogSink, JsonlEventSink, MultiSink, PersistedAgentEvent};
+pub use sinks::{
+    AgentEventSink, AgentEventSinkError, AgentEventSinkFlush, EventLogSink, JsonlEventSink,
+    MultiSink, PersistedAgentEvent,
+};
 pub use terminal::{
     classify_agent_terminal, classify_agent_terminal_with_class, AgentTerminalKind,
     AgentTerminalOutcome,

@@ -35,7 +35,8 @@ pipeline main() {
   const root = path_join(harness.fs.temp_dir(), "harn-suspend-cold-restart-" + uuid_v7())
   harness.fs.mkdir(root)
   const script = path_join(root, "cold_restart_suspend.harn")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     script,
     "pipeline main() {\n"
       + "  llm_mock({tool_calls: [{id: \"park_cold\", name: \"agent_await_resumption\", arguments: {reason: \"cold restart park\"}}]})\n"

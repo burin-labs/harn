@@ -310,7 +310,7 @@ mod tests {
         assert!(is_indexable_file(Path::new("Foo.SWIFT")));
         assert!(is_indexable_file(Path::new("Dockerfile")));
         assert!(!is_indexable_file(Path::new("foo.bin")));
-        assert!(!is_indexable_file(Path::new("README"))); // no extension, not whitelisted
+        assert!(!is_indexable_file(Path::new("README"))); // no extension, not allowlisted
     }
 
     #[test]

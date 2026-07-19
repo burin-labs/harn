@@ -17,8 +17,10 @@ use super::tool_conformance::{
 
 pub use super::tool_scorecard_types::*;
 
-pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 6;
-pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 3;
+mod catalog_drift;
+
+pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 7;
+pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Default)]
 struct RouteAccumulator {
@@ -32,6 +34,58 @@ struct RouteAccumulator {
 struct ToolScorecardObservedCase {
     probe_case: ToolProbeCase,
     case: ToolConformanceCase,
+}
+
+#[derive(Debug, Default)]
+struct PlanProviderAccumulator {
+    route_count: usize,
+    case_count: usize,
+    required_case_count: usize,
+    executable_case_count: usize,
+    live_tool_probe_case_count: usize,
+    offline_request_case_count: usize,
+    readiness_command_count: usize,
+    batch_manifest_request_count: usize,
+    not_applicable_case_count: usize,
+}
+
+impl PlanProviderAccumulator {
+    fn record_route(&mut self, cases: &[ToolScorecardPlanCase]) {
+        self.route_count += 1;
+        self.case_count += cases.len();
+        for case in cases {
+            if case.requirement == "required" {
+                self.required_case_count += 1;
+            }
+            match case.execution.status {
+                "executable" => {
+                    self.executable_case_count += 1;
+                    match case.execution.runner {
+                        "provider_tool_probe" => self.live_tool_probe_case_count += 1,
+                        "provider_tool_probe_request" => self.offline_request_case_count += 1,
+                        _ => {}
+                    }
+                }
+                "not_applicable" => self.not_applicable_case_count += 1,
+                _ => {}
+            }
+        }
+    }
+
+    fn into_summary(self, provider: String) -> ToolScorecardPlanProviderSummary {
+        ToolScorecardPlanProviderSummary {
+            provider,
+            route_count: self.route_count,
+            case_count: self.case_count,
+            required_case_count: self.required_case_count,
+            executable_case_count: self.executable_case_count,
+            live_tool_probe_case_count: self.live_tool_probe_case_count,
+            offline_request_case_count: self.offline_request_case_count,
+            readiness_command_count: self.readiness_command_count,
+            batch_manifest_request_count: self.batch_manifest_request_count,
+            not_applicable_case_count: self.not_applicable_case_count,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -174,6 +228,9 @@ pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolS
         pass: 0,
         warn: 0,
         fail: 0,
+        trusted: 0,
+        needs_review: 0,
+        quarantined: 0,
         best_route: routes.first().map(|route| ToolScorecardRouteKey {
             provider: route.provider.clone(),
             model: route.model.clone(),
@@ -185,6 +242,11 @@ pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolS
             "pass" => summary.pass += 1,
             "warn" => summary.warn += 1,
             _ => summary.fail += 1,
+        }
+        match route.trust_status {
+            "trusted" => summary.trusted += 1,
+            "quarantined" => summary.quarantined += 1,
+            _ => summary.needs_review += 1,
         }
     }
 
@@ -209,6 +271,7 @@ pub fn tool_scorecard_plan_from_catalog(
     let mut seen_routes = BTreeSet::new();
     let mut plan_routes = Vec::new();
     let mut batch_manifest_requests = Vec::new();
+    let mut provider_summaries = BTreeMap::<String, PlanProviderAccumulator>::new();
 
     let catalog_claims = catalog_claims_by_route();
 
@@ -225,6 +288,10 @@ pub fn tool_scorecard_plan_from_catalog(
                 "routing routes are generated from catalog models indexed by id and wire_model",
             );
         let cases = fixed_micro_cases_for_route(&route.provider, &route.model, &claim);
+        provider_summaries
+            .entry(route.provider.clone())
+            .or_default()
+            .record_route(&cases);
         if include_batch_manifest && claim.batch_api {
             for case in &cases {
                 if !case.batch_eligible {
@@ -241,11 +308,25 @@ pub fn tool_scorecard_plan_from_catalog(
                     batch_wire_format: claim.batch_wire_format.clone(),
                     batch_input_mode: claim.batch_input_mode.clone(),
                 });
+                provider_summaries
+                    .entry(route.provider.clone())
+                    .or_default()
+                    .batch_manifest_request_count += 1;
             }
+        }
+        let readiness = readiness_plan_for_route(&route.provider, &route.model);
+        if readiness.command.is_some() {
+            provider_summaries
+                .entry(route.provider.clone())
+                .or_default()
+                .readiness_command_count += 1;
         }
         plan_routes.push(ToolScorecardPlanRoute {
             provider: route.provider.clone(),
             model: route.model.clone(),
+            trust_status: "needs_review",
+            trust_reasons: vec!["missing_live_evidence"],
+            readiness,
             catalog_claim: claim,
             cases,
         });
@@ -265,11 +346,44 @@ pub fn tool_scorecard_plan_from_catalog(
     }
 
     let case_count = plan_routes.iter().map(|route| route.cases.len()).sum();
+    let readiness_command_count = plan_routes
+        .iter()
+        .filter(|route| route.readiness.command.is_some())
+        .count();
     let required_case_count = plan_routes
         .iter()
         .flat_map(|route| &route.cases)
         .filter(|case| case.requirement == "required")
         .count();
+    let executable_case_count = plan_routes
+        .iter()
+        .flat_map(|route| &route.cases)
+        .filter(|case| case.execution.status == "executable")
+        .count();
+    let live_tool_probe_case_count = plan_routes
+        .iter()
+        .flat_map(|route| &route.cases)
+        .filter(|case| {
+            case.execution.status == "executable" && case.execution.runner == "provider_tool_probe"
+        })
+        .count();
+    let offline_request_case_count = plan_routes
+        .iter()
+        .flat_map(|route| &route.cases)
+        .filter(|case| {
+            case.execution.status == "executable"
+                && case.execution.runner == "provider_tool_probe_request"
+        })
+        .count();
+    let not_applicable_case_count = plan_routes
+        .iter()
+        .flat_map(|route| &route.cases)
+        .filter(|case| case.execution.status == "not_applicable")
+        .count();
+    let provider_summaries = provider_summaries
+        .into_iter()
+        .map(|(provider, acc)| acc.into_summary(provider))
+        .collect();
     let unscorecardable_providers = unscorecardable_providers(&artifact);
 
     Ok(ToolScorecardPlan {
@@ -281,14 +395,58 @@ pub fn tool_scorecard_plan_from_catalog(
             hash_blake3: catalog_hash,
         },
         route_count: plan_routes.len(),
+        readiness_command_count,
         unscorecardable_provider_count: unscorecardable_providers.len(),
         case_count,
         required_case_count,
+        executable_case_count,
+        live_tool_probe_case_count,
+        offline_request_case_count,
+        not_applicable_case_count,
+        provider_summaries,
         batch_manifest_request_count: batch_manifest_requests.len(),
         routes: plan_routes,
         unscorecardable_providers,
         batch_manifest_requests,
     })
+}
+
+fn readiness_plan_for_route(provider: &str, model: &str) -> ToolScorecardReadinessPlan {
+    let Some(def) = crate::llm_config::provider_config(provider) else {
+        return readiness_missing_runner("unknown_provider");
+    };
+    if !crate::llm::readiness::supports_model_readiness_probe(&def) {
+        return readiness_missing_runner("provider_has_no_model_readiness_probe");
+    }
+    ToolScorecardReadinessPlan {
+        status: "executable",
+        runner: "provider_probe",
+        reason: "route_model_inventory_gate",
+        command: Some(vec![
+            "harn".to_string(),
+            "provider".to_string(),
+            "probe".to_string(),
+            provider.to_string(),
+            "--model".to_string(),
+            model.to_string(),
+            "--json".to_string(),
+        ]),
+        artifact_hint: Some(format!(
+            "provider-readiness-{}-{}.json",
+            artifact_segment(provider),
+            artifact_segment(model)
+        )),
+    }
+}
+
+fn readiness_missing_runner(reason: &'static str) -> ToolScorecardReadinessPlan {
+    ToolScorecardReadinessPlan {
+        status: "missing_runner",
+        runner: "none",
+        reason,
+        command: None,
+        artifact_hint: None,
+    }
 }
 
 fn unscorecardable_providers(
@@ -831,6 +989,8 @@ fn score_route(
         evidence_status,
         &issues,
     );
+    let trust_status = route_trust_status(status, recommended_tool_mode, evidence_status, &issues);
+    let trust_reasons = route_trust_reasons(status, evidence_status, &issues, &catalog_mismatches);
     let mode_evidence = stats_by_mode
         .into_iter()
         .map(|(mode, mode_stats)| mode_evidence(mode, mode_stats))
@@ -866,6 +1026,8 @@ fn score_route(
         actionless_rate,
         quality_score,
         status,
+        trust_status,
+        trust_reasons,
         evidence_status,
         probe_evidence_status,
         request_evidence_status,
@@ -882,6 +1044,46 @@ fn score_route(
         catalog_mismatches,
         suggested_catalog_updates,
     }
+}
+
+fn route_trust_status(
+    status: &str,
+    recommended_tool_mode: &str,
+    evidence_status: &str,
+    issues: &[&'static str],
+) -> &'static str {
+    if status == "pass" && evidence_status == "complete" && issues.is_empty() {
+        return "trusted";
+    }
+    if status == "fail" || recommended_tool_mode == "disabled" {
+        return "quarantined";
+    }
+    "needs_review"
+}
+
+fn route_trust_reasons(
+    status: &str,
+    evidence_status: &str,
+    issues: &[&'static str],
+    catalog_mismatches: &[ToolScorecardCatalogMismatch],
+) -> Vec<&'static str> {
+    let mut reasons = Vec::new();
+    if status == "fail" {
+        reasons.push("scorecard_failed");
+    }
+    if evidence_status != "complete" {
+        reasons.push("incomplete_evidence");
+    }
+    reasons.extend(issues.iter().copied());
+    if !catalog_mismatches.is_empty() {
+        reasons.push("catalog_drift");
+    }
+    if reasons.is_empty() {
+        reasons.push("scorecard_passed");
+    }
+    reasons.sort();
+    reasons.dedup();
+    reasons
 }
 
 fn mode_evidence(mode: &'static str, stats: CaseStats) -> ToolScorecardModeEvidence {
@@ -933,106 +1135,7 @@ fn catalog_drift(
     Vec<ToolScorecardCatalogMismatch>,
     Vec<ToolScorecardCatalogUpdate>,
 ) {
-    let Some(claim) = claim else {
-        return (
-            vec![ToolScorecardCatalogMismatch {
-                code: "route_missing_from_catalog",
-                field: "provider_catalog.models",
-                observed: recommended_tool_mode.to_string(),
-                catalog: None,
-            }],
-            Vec::new(),
-        );
-    };
-
-    let mut mismatches = Vec::new();
-    let mut updates = Vec::new();
-    let preferred = claim.preferred_tool_format.as_deref();
-    let recommended_preferred_format = recommended_preferred_format(recommended_tool_mode);
-
-    if let (Some(preferred), Some(recommended_preferred_format)) =
-        (preferred, recommended_preferred_format)
-    {
-        if !tool_format_matches_mode(preferred, recommended_tool_mode) {
-            mismatches.push(ToolScorecardCatalogMismatch {
-                code: "preferred_tool_format_disagrees",
-                field: "tool_support.preferred_format",
-                observed: recommended_tool_mode.to_string(),
-                catalog: Some(preferred.to_string()),
-            });
-            updates.push(set_catalog_update(
-                "tool_support.preferred_format",
-                recommended_preferred_format.to_string(),
-                "scorecard_recommended_tool_mode",
-            ));
-        }
-    }
-
-    match recommended_tool_mode {
-        "native" if !claim.native_tools => {
-            mismatches.push(ToolScorecardCatalogMismatch {
-                code: "observed_native_not_cataloged",
-                field: "tool_support.native",
-                observed: "true".to_string(),
-                catalog: Some("false".to_string()),
-            });
-            updates.push(set_catalog_update(
-                "tool_support.native",
-                "true".to_string(),
-                "scorecard_observed_native_tool_calls",
-            ));
-        }
-        "text" if !claim.text_tools => {
-            mismatches.push(ToolScorecardCatalogMismatch {
-                code: "observed_text_not_cataloged",
-                field: "tool_support.text",
-                observed: "true".to_string(),
-                catalog: Some("false".to_string()),
-            });
-            updates.push(set_catalog_update(
-                "tool_support.text",
-                "true".to_string(),
-                "scorecard_observed_text_tool_calls",
-            ));
-        }
-        _ => {}
-    }
-
-    (mismatches, updates)
-}
-
-fn tool_format_matches_mode(format: &str, recommended_tool_mode: &str) -> bool {
-    let Some(format_channel) = crate::llm_config::tool_format_channel(format) else {
-        return false;
-    };
-    matches!(
-        (format_channel, recommended_tool_mode),
-        (crate::llm_config::ToolFormatChannel::Native, "native")
-            | (crate::llm_config::ToolFormatChannel::Text, "text")
-    )
-}
-
-fn recommended_preferred_format(recommended_tool_mode: &str) -> Option<&'static str> {
-    match recommended_tool_mode {
-        "native" => Some("native"),
-        // A scorecard text-channel observation does not distinguish heredoc
-        // from fenced JSON; prefer Harn's safer global text-channel default.
-        "text" => Some("json"),
-        _ => None,
-    }
-}
-
-fn set_catalog_update(
-    field: &'static str,
-    value: String,
-    reason: &'static str,
-) -> ToolScorecardCatalogUpdate {
-    ToolScorecardCatalogUpdate {
-        field,
-        operation: "set",
-        value: Some(value),
-        reason,
-    }
+    catalog_drift::evaluate(claim, recommended_tool_mode)
 }
 
 fn rate(numerator: usize, denominator: usize) -> f64 {

@@ -869,6 +869,56 @@ mod tests {
     }
 
     #[test]
+    fn process_network_ceiling_controls_real_child_socket() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener");
+        let address = listener.local_addr().expect("listener address");
+        let args = vec![
+            "-c".to_string(),
+            format!("exec 3<>/dev/tcp/127.0.0.1/{}", address.port()),
+        ];
+
+        let run_probe = |policy: &CapabilityPolicy| {
+            let mut command = Command::new("/bin/bash");
+            command.args(&args).current_dir(workspace.path());
+            let preparation = Backend::prepare_std_command(
+                "/bin/bash",
+                &args,
+                &mut command,
+                policy,
+                SandboxProfile::Worktree,
+            )
+            .expect("prepare sandboxed child");
+            assert!(matches!(preparation, PrepareOutcome::Direct));
+            command.output().expect("run sandboxed child")
+        };
+
+        let mut denied = linux_policy_with_workspace_ops(&["read_text"]);
+        denied.workspace_roots = vec![workspace.path().display().to_string()];
+        denied.side_effect_level = Some("process_exec".to_string());
+        let denied_output = run_probe(&denied);
+        assert!(
+            !denied_output.status.success(),
+            "the default process-exec ceiling must deny an addressable child socket",
+        );
+
+        let mut allowed = denied;
+        allowed.side_effect_level = Some("network".to_string());
+        let allowed_output = run_probe(&allowed);
+        assert!(
+            allowed_output.status.success(),
+            "the network ceiling must permit the child loopback socket: {}",
+            String::from_utf8_lossy(&allowed_output.stderr),
+        );
+        listener
+            .set_nonblocking(true)
+            .expect("set listener nonblocking");
+        listener
+            .accept()
+            .expect("the listener must observe the allowed child connection");
+    }
+
+    #[test]
     fn seccomp_filter_is_default_deny_allowlist() {
         let filter = seccomp_allowlist_filter(&[libc::SYS_read, libc::SYS_write]);
         assert_eq!(

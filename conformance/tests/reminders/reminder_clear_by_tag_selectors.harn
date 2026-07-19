@@ -1,13 +1,13 @@
 pipeline main() {
-  const first = transcript.inject_reminder(
-    transcript(),
-    {body: "clear by id", tags: ["id_tag"], dedupe_key: "id-key"},
-  )
-  const second = transcript.inject_reminder(
+  const first = transcript
+    .inject_reminder(transcript(), {body: "clear by id", tags: ["id_tag"], dedupe_key: "id-key"})
+  const second = transcript
+    .inject_reminder(
     first.transcript,
     {body: "clear by dedupe", tags: ["dedupe_tag"], dedupe_key: "dedupe-key"},
   )
-  const third = transcript.inject_reminder(
+  const third = transcript
+    .inject_reminder(
     second.transcript,
     {body: "clear by tag", tags: ["tagged"], dedupe_key: "tag-key"},
   )

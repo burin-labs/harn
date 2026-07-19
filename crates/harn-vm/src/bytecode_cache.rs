@@ -25,7 +25,7 @@
 //! kind         : u8        1 = entry chunk, 2 = module artifact
 //! source_hash  : [u8; 32]
 //! context_hash : [u8; 32]
-//! payload      : bincode-serialized payload for `kind`
+//! payload      : postcard-serialized payload for `kind`
 //! ```
 //!
 //! The header lets a stale binary detect a future-version artifact
@@ -43,6 +43,7 @@ use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde::{de::DeserializeOwned, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::chunk::{CachedChunk, Chunk};
@@ -65,7 +66,8 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// On-disk format version. Bump when [`CachedChunk`] or the header
 /// layout changes in a backwards-incompatible way.
 /// v5: `ModuleArtifact` gained `public_type_names` (`pub type` exports).
-pub const SCHEMA_VERSION: u32 = 5;
+/// v6: payload encoding replaced with postcard.
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -386,17 +388,29 @@ fn write_atomic_module(target: &Path, key: &CacheKey, artifact: &ModuleArtifact)
 /// the filesystem.
 pub fn serialize_chunk_artifact(key: &CacheKey, chunk: &Chunk) -> io::Result<Vec<u8>> {
     let cached = chunk.freeze_for_cache();
-    let payload = bincode::serde::encode_to_vec(&cached, bincode::config::standard())
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let payload = serialize_cache_payload(&cached)?;
     Ok(encode_artifact(key, KIND_ENTRY_CHUNK, &payload))
 }
 
 /// Serialize a module artifact (header + payload) to bytes. Companion
 /// to [`serialize_chunk_artifact`] for the `.harnmod` family.
 pub fn serialize_module_artifact(key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<Vec<u8>> {
-    let payload = bincode::serde::encode_to_vec(artifact, bincode::config::standard())
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let payload = serialize_cache_payload(artifact)?;
     Ok(encode_artifact(key, KIND_MODULE_ARTIFACT, &payload))
+}
+
+fn serialize_cache_payload<T: Serialize>(value: &T) -> io::Result<Vec<u8>> {
+    postcard::to_allocvec(value)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
+}
+
+fn deserialize_cache_payload<T: DeserializeOwned>(payload: &[u8]) -> Result<T, String> {
+    let (value, remaining) = postcard::take_from_bytes(payload).map_err(|err| err.to_string())?;
+    if remaining.is_empty() {
+        Ok(value)
+    } else {
+        Err("cache payload contains trailing bytes".to_string())
+    }
 }
 
 fn encode_artifact(key: &CacheKey, kind: u8, payload: &[u8]) -> Vec<u8> {
@@ -509,11 +523,10 @@ fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk
     if header.kind != KIND_ENTRY_CHUNK {
         return Ok(None);
     }
-    let cached: CachedChunk =
-        match bincode::serde::decode_from_slice(&header.payload, bincode::config::standard()) {
-            Ok((c, _)) => c,
-            Err(_) => return Ok(None),
-        };
+    let cached: CachedChunk = match deserialize_cache_payload(&header.payload) {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
     Ok(Some(Chunk::from_cached(cached)))
 }
 
@@ -528,11 +541,8 @@ fn read_module_if_matches(
     if header.kind != KIND_MODULE_ARTIFACT {
         return Ok(None);
     }
-    match bincode::serde::decode_from_slice::<ModuleArtifact, _>(
-        &header.payload,
-        bincode::config::standard(),
-    ) {
-        Ok((mut artifact, _)) => {
+    match deserialize_cache_payload::<ModuleArtifact>(&header.payload) {
+        Ok(mut artifact) => {
             artifact.bind_source_file(source_path);
             Ok(Some(artifact))
         }
@@ -1022,6 +1032,16 @@ mod tests {
     }
 
     #[test]
+    fn cache_payload_rejects_trailing_bytes() {
+        let chunk = compile_source("1 + 1").expect("compile");
+        let cached = chunk.freeze_for_cache();
+        let mut payload = serialize_cache_payload(&cached).expect("serialize");
+        payload.push(0xFF);
+
+        assert!(deserialize_cache_payload::<CachedChunk>(&payload).is_err());
+    }
+
+    #[test]
     fn atomic_temp_paths_are_unique_within_process() {
         let target = Path::new("entry.harnbc");
         let first = atomic_tmp_path(target);
@@ -1046,6 +1066,21 @@ mod tests {
             compiler_tag: key.compiler_tag,
         };
         assert!(read_chunk_if_matches(&path, &other).unwrap().is_none());
+    }
+
+    #[test]
+    fn schema_mismatch_returns_none() {
+        let chunk = compile_source("1 + 1").expect("compile");
+        let key = CacheKey::from_source(Path::new("/tmp/schema.harn"), "1 + 1");
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("schema.harnbc");
+        store_at(&path, &key, &chunk).expect("write");
+
+        let mut bytes = std::fs::read(&path).expect("read cache");
+        bytes[8..12].copy_from_slice(&(SCHEMA_VERSION - 1).to_le_bytes());
+        std::fs::write(&path, bytes).expect("rewrite cache");
+
+        assert!(read_chunk_if_matches(&path, &key).unwrap().is_none());
     }
 
     #[test]
@@ -1228,6 +1263,26 @@ mod tests {
         assert_eq!(loaded.imports.len(), 1);
         assert_eq!(loaded.imports[0].path, "./dependency");
         assert!(loaded.public_names.contains("answer"));
+    }
+
+    #[test]
+    fn module_artifact_payload_round_trips() {
+        let source = "pub fn answer() { fn inner() { return 42 }; return inner() }\n";
+        let source_path = Path::new("/tmp/module-payload.harn");
+        let artifact =
+            crate::module_artifact::compile_module_artifact_from_source(source_path, source)
+                .expect("compile module");
+
+        let payload = serialize_cache_payload(&artifact).expect("serialize module artifact");
+        let round_tripped: ModuleArtifact =
+            deserialize_cache_payload(&payload).expect("deserialize module artifact");
+
+        assert!(round_tripped.public_names.contains("answer"));
+        assert!(round_tripped.functions["answer"]
+            .chunk
+            .functions
+            .iter()
+            .any(|function| function.name == "inner"));
     }
 
     #[test]

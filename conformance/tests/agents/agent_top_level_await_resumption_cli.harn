@@ -14,7 +14,8 @@ pipeline main() {
   const root = path_join(harness.fs.temp_dir(), "harn-top-level-resume-" + uuid_v7())
   harness.fs.mkdir(root)
   const script = path_join(root, "top_level_suspend.harn")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     script,
     "pipeline main() {\n"
       + "  llm_mock({tool_calls: [{id: \"park_1\", name: \"agent_await_resumption\", arguments: {reason: \"waiting on operator\"}}]})\n"

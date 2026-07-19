@@ -265,29 +265,34 @@ fn __candidate(entry: dict, workload: string) -> BatchCandidate {
     constraints = constraints.push("Provider catalog omits batch wire format; submission must probe before enqueue.")
   }
   if input_mode == "" {
-    constraints = constraints.push(
+    constraints = constraints
+      .push(
       "Provider catalog omits batch input mode; submission must choose a provider-native packer.",
     )
   }
   if discount == nil {
-    constraints = constraints.push(
+    constraints = constraints
+      .push(
       "Provider catalog does not publish a discount; cost planner must price from live usage tables.",
     )
   }
   if turnaround == nil {
-    constraints = constraints.push(
+    constraints = constraints
+      .push(
       "Provider catalog does not publish a turnaround bound; schedule as best-effort offline work.",
     )
   }
   if !safe_bool(live_adapter["submit"], false)
     || !safe_bool(live_adapter["status"], false)
     || !safe_bool(live_adapter["download"], false) {
-    constraints = constraints.push(
+    constraints = constraints
+      .push(
       "Harn can prepare this provider's batch request files, but live submit/status/download is not implemented; use --dry-run or add a provider adapter.",
     )
   }
   if !safe_bool(live_adapter["cancel"], false) {
-    constraints = constraints.push(
+    constraints = constraints
+      .push(
       "Harn cannot live-cancel this provider's batch jobs; use provider tooling if cancellation is required.",
     )
   }
@@ -466,13 +471,7 @@ fn __request_entry(row: dict, line_no: int, id_prefix: string) -> BatchRequestEn
   }
 }
 
-fn __group_key(
-  provider: string,
-  model: string,
-  batch: dict,
-  tool_format: string,
-  endpoint: string,
-) -> string {
+fn __group_key(provider: string, model: string, batch: dict, tool_format: string, endpoint: string) -> string {
   return provider
     + "\t"
     + model
@@ -785,7 +784,8 @@ fn __build_manifest(
     }
     const resolved = __resolve_candidate(catalog, provider, model, workload)
     if !safe_bool(resolved["ok"], false) {
-      errors = errors.push(
+      errors = errors
+        .push(
         "line " + to_string(line_no) + ": " + safe_string(resolved["error"], "unresolved model"),
       )
       continue
@@ -794,7 +794,8 @@ fn __build_manifest(
     const batch = safe_dict(candidate["batch"])
     const discount = __safe_int(batch["discount_percent"])
     if min_discount != nil && (discount == nil || discount < min_discount) {
-      errors = errors.push(
+      errors = errors
+        .push(
         "line "
           + to_string(line_no)
           + ": model discount below --min-discount-percent for "
@@ -806,7 +807,8 @@ fn __build_manifest(
     }
     const turnaround = __safe_int(batch["turnaround_hours"])
     if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
-      errors = errors.push(
+      errors = errors
+        .push(
         "line "
           + to_string(line_no)
           + ": model turnaround exceeds --max-turnaround-hours for "
@@ -898,7 +900,8 @@ fn __render_manifest_human(harness: Harness, report: dict) {
   harness.stdio.println("  manifest sha256: " + safe_string(report["manifest_sha256"], ""))
   for group in safe_list(report["groups"]) {
     const g = safe_dict(group)
-    harness.stdio.println(
+    harness.stdio
+      .println(
       "  "
         + safe_string(g["id"], "")
         + " "
@@ -1012,7 +1015,8 @@ fn __render_prepare_human(harness: Harness, report: dict) {
   harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
   for job in safe_list(report["jobs"]) {
     const j = safe_dict(job)
-    harness.stdio.println(
+    harness.stdio
+      .println(
       "  "
         + safe_string(j["id"], "")
         + " "

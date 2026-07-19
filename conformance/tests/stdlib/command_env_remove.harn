@@ -16,7 +16,8 @@ pipeline default() {
   const root = path_join(harness.fs.temp_dir(), "harn-command-env-remove-" + uuid_v7())
   const script = path_join(root, "child.harn")
   harness.fs.mkdir(root)
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     script,
     "import { command_run } from \"std/command\"\n\n"
       + "fn env_remove_probe_command() {\n"

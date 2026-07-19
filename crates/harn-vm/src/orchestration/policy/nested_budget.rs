@@ -99,6 +99,14 @@ impl Drop for NestedExecutionGuard {
     }
 }
 
+impl NestedExecutionGuard {
+    /// Disarm cleanup when the ambient scope that owned this guard has already
+    /// been abandoned. Popping here would mutate the caller's unrelated stack.
+    pub(crate) fn disarm(mut self) {
+        self.pushed = false;
+    }
+}
+
 /// Enter a child execution: validate the parent's recursion budget,
 /// decrement once for this descent, and push a policy carrier onto
 /// the thread-local execution policy stack. The guard pops it on drop.

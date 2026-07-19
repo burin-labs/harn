@@ -3,6 +3,7 @@ import {
   render_probe_command_templates,
   render_required_probe_cases,
   render_tool_catalog_contract,
+  render_trainer_environment_check,
   render_trainer_identity_check,
 } from "std/cli/models/lora_render"
 /**
@@ -46,7 +47,8 @@ fn __path_line(harness: Harness, label: string, value: unknown) {
   } else {
     " sha256=" + hash
   }
-  harness.stdio.println(
+  harness.stdio
+    .println(
     "  "
       + label
       + ": "
@@ -79,7 +81,8 @@ fn __render_human(harness: Harness, report: dict) {
   const evidence = safe_dict(promotion["evidence_contract"])
   const post_training = safe_dict(report["post_training"])
   const warnings = safe_list(report["warnings"])
-  harness.stdio.println(
+  harness.stdio
+    .println(
     "LoRA train "
       + safe_string(report["mode"], "")
       + " for "
@@ -93,7 +96,8 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("  request model: " + safe_string(target["request_model"], ""))
   harness.stdio.println("  output dir: " + safe_string(target["output_dir"], ""))
   harness.stdio.println("  contract: " + safe_string(contract["id"], ""))
-  harness.stdio.println(
+  harness.stdio
+    .println(
     "  tool format: "
       + safe_string(request["effective_tool_format"], "")
       + " (requested "
@@ -103,13 +107,16 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("  dataset format: " + safe_string(request["dataset_format"], ""))
   harness.stdio.println("  trainer: " + safe_string(training["trainer"], ""))
   render_trainer_identity_check(harness, training["trainer_identity"])
-  harness.stdio.println(
+  render_trainer_environment_check(harness, training["trainer_environment"])
+  harness.stdio
+    .println(
     "  training: "
       + safe_string(training["method"], "")
       + " + "
       + safe_string(training["adapter_type"], ""),
   )
-  harness.stdio.println(
+  harness.stdio
+    .println(
     "  LoRA hparams: rank="
       + safe_int_string(training["rank"], "")
       + " alpha="
@@ -124,15 +131,14 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("  template: " + safe_string(template["name"], ""))
   render_peft_save_policy(harness, peft_save_policy)
   render_tool_catalog_contract(harness, safe_dict(training_contract["tool_catalog"]))
-  harness.stdio.println(
-    "  training base precision: " + safe_string(precision["training_base_precision"], ""),
-  )
-  harness.stdio.println(
+  harness.stdio
+    .println("  training base precision: " + safe_string(precision["training_base_precision"], ""))
+  harness.stdio
+    .println(
     "  training compute precision: " + safe_string(precision["training_compute_precision"], ""),
   )
-  harness.stdio.println(
-    "  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""),
-  )
+  harness.stdio
+    .println("  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""))
   harness.stdio.println("  backend status: " + safe_string(backend["status"], ""))
   const backend_result_path = safe_string(backend["result_path"], "")
   if backend_result_path != "" {
@@ -147,7 +153,8 @@ fn __render_human(harness: Harness, report: dict) {
   const backend_trainable = safe_int_string(backend_result["trainable_records"], "")
   const backend_retention = safe_number_string(backend_result["retention_ratio"], "")
   if backend_rendered != "" || backend_trainable != "" || backend_retention != "" {
-    harness.stdio.println(
+    harness.stdio
+      .println(
       "  backend realized rows: rendered="
         + backend_rendered
         + " trainable="
@@ -160,7 +167,8 @@ fn __render_human(harness: Harness, report: dict) {
     harness.stdio.println("  backend argv: required")
   }
   __path_line(harness, "dataset", inputs["dataset"])
-  harness.stdio.println(
+  harness.stdio
+    .println(
     "  dataset audit: status="
       + safe_string(dataset_audit["status"], "")
       + " rows="
@@ -170,7 +178,8 @@ fn __render_human(harness: Harness, report: dict) {
       + " parse_errors="
       + safe_int_string(dataset_audit["json_parse_errors"], "0"),
   )
-  harness.stdio.println(
+  harness.stdio
+    .println(
     "  dataset coverage: text_tool_rows="
       + safe_int_string(dataset_audit["assistant_tool_text_rows"], "0")
       + " native_tool_rows="
@@ -182,7 +191,8 @@ fn __render_human(harness: Harness, report: dict) {
       + " multi_turn_rows="
       + safe_int_string(dataset_audit["multi_turn_rows"], "0"),
   )
-  harness.stdio.println(
+  harness.stdio
+    .println(
     "  dataset repairs: schema_repaired="
       + safe_int_string(dataset_audit["schema_repaired_rows"], "0")
       + " unavailable_tool="

@@ -50,9 +50,8 @@ pipeline default() {
       __io_println(result.visible_text.contains("Added the LRU eviction"))
       __io_println(to_string(llm_mock_calls()[0].system).contains("Done claim"))
       __io_println(
-        json_stringify(llm_mock_calls()[2].messages).contains(
-          "keep working until all requested tests exist",
-        ),
+        json_stringify(llm_mock_calls()[2].messages)
+          .contains("keep working until all requested tests exist"),
       )
     },
   )

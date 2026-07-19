@@ -8,14 +8,10 @@ import "std/code_librarian"
 fn seed_corpus(root: string) {
   harness.fs.mkdir(root)
   harness.fs.mkdir(path_join(root, "src"))
-  harness.fs.write_text(
-    path_join(root, "src/a.rs"),
-    "pub fn alpha() {}\npub fn beta() { alpha(); }\n",
-  )
-  harness.fs.write_text(
-    path_join(root, "src/b.rs"),
-    "pub fn gamma() {}\npub fn driver() { gamma(); }\n",
-  )
+  harness.fs
+    .write_text(path_join(root, "src/a.rs"), "pub fn alpha() {}\npub fn beta() { alpha(); }\n")
+  harness.fs
+    .write_text(path_join(root, "src/b.rs"), "pub fn gamma() {}\npub fn driver() { gamma(); }\n")
 }
 
 pipeline default() {

@@ -1,7 +1,8 @@
 /**
  * `harn models lora promote` renderer.
  *
- * Rust reads manifest/eval receipt files and supplies a typed evidence bundle.
+ * Rust reads the executed train receipt and probe receipt files, then supplies
+ * a typed evidence bundle.
  * This Harn source owns promotion policy, final receipt rendering, and
  * optional receipt writes.
  *
@@ -10,7 +11,10 @@
  *   HARN_MODELS_LORA_PROMOTE_PAYLOAD_PRETTY - pretty report JSON.
  *   HARN_OUTPUT_JSON                        - "1" for JSON, else human text.
  */
-import { render_trainer_identity_check } from "std/cli/models/lora_render"
+import {
+  render_trainer_environment_check,
+  render_trainer_identity_check,
+} from "std/cli/models/lora_render"
 import {
   cli_json_envelope,
   print_list,
@@ -30,7 +34,7 @@ fn __render_human(harness: Harness, report: dict) {
   const warnings = safe_list(report["warnings"])
   const errors = safe_list(report["errors"])
   harness.stdio.println("LoRA promotion probe matrix")
-  harness.stdio.println("  manifest: " + safe_string(request["manifest"], ""))
+  harness.stdio.println("  train receipt: " + safe_string(request["train_receipt"], ""))
   harness.stdio.println("  probe root: " + safe_string(request["probe_root"], ""))
   const out = safe_string(request["out"], "")
   if out != "" {
@@ -39,9 +43,12 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("  promotion id: " + safe_string(contract["promotion_id"], ""))
   harness.stdio.println("  LoRA contract: " + safe_string(contract["lora_contract_id"], ""))
   render_trainer_identity_check(harness, contract["trainer_identity"])
+  render_trainer_environment_check(harness, contract["trainer_environment"])
   harness.stdio.println("  eval dataset: " + safe_string(contract["eval_dataset"], ""))
-  harness.stdio.println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
-  harness.stdio.println(
+  harness.stdio
+    .println("  minimum trials: " + safe_int_string(contract["minimum_trials"], "0"))
+  harness.stdio
+    .println(
     "  totals: adapter_passed="
       + safe_int_string(totals["adapter_passed"], "0")
       + " adapter_failed="
@@ -230,8 +237,9 @@ fn __promotion_report(bundle: dict) -> dict {
     }
   }
   const trainer_identity = safe_dict(contract["trainer_identity"])
-  if !safe_bool(trainer_identity["promotable"], false)
-    && safe_string(request["trainer_identity_exception"], "") == "" {
+  const trainer_environment = safe_dict(contract["trainer_environment"])
+  const provenance_exception = safe_string(request["trainer_provenance_exception"], "")
+  if !safe_bool(trainer_identity["promotable"], false) && provenance_exception == "" {
     for error in safe_list(trainer_identity["errors"]) {
       errors = errors + ["trainer identity: " + safe_string(error, "trainer identity is not promotable")]
     }
@@ -239,10 +247,19 @@ fn __promotion_report(bundle: dict) -> dict {
       errors = errors + ["trainer identity is not promotable"]
     }
   }
+  if !safe_bool(trainer_environment["promotable"], false) && provenance_exception == "" {
+    for error in safe_list(trainer_environment["errors"]) {
+      errors = errors
+        + ["trainer environment: " + safe_string(error, "trainer environment is not promotable")]
+    }
+    if len(safe_list(trainer_environment["errors"])) == 0 {
+      errors = errors + ["trainer environment is not promotable"]
+    }
+  }
   const ok = len(errors) == 0
   return {
-    schema_version: 2,
-    producer: "harn_models_lora_promote_v2",
+    schema_version: 3,
+    producer: "harn_models_lora_promote_v3",
     ok: ok,
     receipt_kind: "promotion_evidence_bundle_receipt",
     request: request,

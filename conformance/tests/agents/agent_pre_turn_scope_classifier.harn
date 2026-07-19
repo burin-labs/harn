@@ -7,7 +7,8 @@ fn scope_events(events) {
 }
 
 fn scope_reminders(result) {
-  return transcript_events_by_kind(result?.transcript, "system_reminder").filter(
+  return transcript_events_by_kind(result?.transcript, "system_reminder")
+    .filter(
     { event -> event?.reminder?.tags != nil && event.reminder.tags.any({ tag -> tag == "scope_alert" }) },
   )
 }

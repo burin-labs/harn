@@ -212,11 +212,7 @@ fn __batch_lifecycle_retryable(state: BatchLifecycleState) -> bool {
   return state == "failed" || state == "not_ready"
 }
 
-fn __batch_job_lifecycle(
-  job: dict,
-  phase: BatchLifecyclePhase,
-  dry_run: bool,
-) -> BatchJobLifecycle {
+fn __batch_job_lifecycle(job: dict, phase: BatchLifecyclePhase, dry_run: bool) -> BatchJobLifecycle {
   const state = __batch_lifecycle_state(job["status"])
   return {
     phase: phase,

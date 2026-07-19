@@ -16,7 +16,8 @@ pipeline test(task) {
     "https://api.example.com/items",
     {responses: [{status: 503}, {status: 200, body: "created"}]},
   )
-  const with_retry = harness.net.post(
+  const with_retry = harness.net
+    .post(
     "https://api.example.com/items",
     "{}",
     {retry: {max: 1, backoff_ms: 0}, retry_methods: ["POST"]},

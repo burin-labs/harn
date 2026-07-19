@@ -2,10 +2,10 @@
 //! into every `session/prompt` VM before running a pipeline (see harn-serve's
 //! `adapters/acp/execute.rs`).
 //!
-//! Both the type checker's ambient-root whitelist (`typechecker::scope`) and the
+//! Both the type checker's ambient-root allowlist (`typechecker::scope`) and the
 //! executor's `set_global` loop derive their names from this one list, so the
 //! two cannot drift. That drift is the concrete failure this registry prevents:
-//! if the executor injects a global the checker does not whitelist, `harn check`
+//! if the executor injects a global the checker does not allowlist, `harn check`
 //! reports an unresolved-identifier error (`HARN-NAM-001`) for a reference to a
 //! global that genuinely exists at runtime.
 
@@ -13,7 +13,7 @@
 ///
 /// Adding a variant is a deliberate, load-bearing change: the executor's
 /// exhaustive `match` will not compile until it constructs a value for the new
-/// global, and the checker whitelist picks it up automatically through
+/// global, and the checker allowlist picks it up automatically through
 /// [`AcpAmbientGlobal::ALL`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AcpAmbientGlobal {
@@ -32,7 +32,7 @@ pub enum AcpAmbientGlobal {
 }
 
 impl AcpAmbientGlobal {
-    /// Every injected global, in injection order. Both the checker whitelist and
+    /// Every injected global, in injection order. Both the checker allowlist and
     /// the executor iterate this list, so it is the single source of truth for
     /// which identifiers are bound at ACP session-prompt time.
     pub const ALL: [AcpAmbientGlobal; 5] = [
@@ -43,7 +43,7 @@ impl AcpAmbientGlobal {
         Self::Mcp,
     ];
 
-    /// The identifier the executor binds and the checker whitelists.
+    /// The identifier the executor binds and the checker allowlists.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Prompt => "prompt",
@@ -74,7 +74,7 @@ mod tests {
         // The exhaustive match forces a new variant to be handled here; the
         // assertions then force it into `ALL`, the list both the checker and the
         // executor consume. A variant missing from `ALL` would be silently
-        // neither whitelisted nor injected.
+        // neither allowlisted nor injected.
         for variant in [
             AcpAmbientGlobal::Prompt,
             AcpAmbientGlobal::PromptContent,

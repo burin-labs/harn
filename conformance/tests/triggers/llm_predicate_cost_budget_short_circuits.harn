@@ -38,12 +38,10 @@ pipeline test(task) {
         handle,
         {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-budget-" + unique}},
       )
-      const budget_events = trigger_inspect_lifecycle("predicate.budget_exceeded").filter(
-        { entry -> entry?.headers?.trigger_id == handle.id },
-      )
-      const dispatches = trigger_inspect_lifecycle("DispatchStarted").filter(
-        { entry -> entry?.headers?.trigger_id == handle.id },
-      )
+      const budget_events = trigger_inspect_lifecycle("predicate.budget_exceeded")
+        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
+      const dispatches = trigger_inspect_lifecycle("DispatchStarted")
+        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
       __io_println(fire.status == "dispatched")
       __io_println(contains(json_stringify(fire.result ?? {}), "\"reason\":\"budget_exceeded\""))
       __io_println(len(budget_events) == 1 && budget_events[0]?.payload?.tokens == 7000)

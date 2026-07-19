@@ -72,10 +72,7 @@ fn __fs_structured_failure(
   return failure
 }
 
-fn __fs_read_structured_result(
-  path: string,
-  format: StructuredDataFormat,
-) -> Result<unknown, StructuredReadFailure> {
+fn __fs_read_structured_result(path: string, format: StructuredDataFormat) -> Result<unknown, StructuredReadFailure> {
   const read = harness.fs.read_text_result(path)
   if !is_ok(read) {
     const failure = unwrap_err(read)
@@ -173,11 +170,7 @@ pub fn read_json_result(path: string) -> Result<unknown, StructuredReadFailure> 
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_json_typed_result<T>(
-  path: string,
-  schema: Schema<T>,
-  apply_defaults: bool = false,
-) -> TypedReadResult<T> {
+pub fn read_json_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> TypedReadResult<T> {
   return __fs_read_structured_typed_result(path, "json", schema, apply_defaults)
 }
 
@@ -240,11 +233,7 @@ pub fn read_yaml_result(path: string) -> Result<unknown, StructuredReadFailure> 
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_yaml_typed_result<T>(
-  path: string,
-  schema: Schema<T>,
-  apply_defaults: bool = false,
-) -> TypedReadResult<T> {
+pub fn read_yaml_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> TypedReadResult<T> {
   return __fs_read_structured_typed_result(path, "yaml", schema, apply_defaults)
 }
 
@@ -269,7 +258,8 @@ pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  harness.fs.write_text(path, __fs_with_newline(yaml_stringify(value), opts.trailing_newline ?? true))
+  harness.fs
+    .write_text(path, __fs_with_newline(yaml_stringify(value), opts.trailing_newline ?? true))
 }
 
 /**
@@ -302,11 +292,7 @@ pub fn read_toml_result(path: string) -> Result<unknown, StructuredReadFailure> 
  * @effects: [fs.read]
  * @errors: []
  */
-pub fn read_toml_typed_result<T>(
-  path: string,
-  schema: Schema<T>,
-  apply_defaults: bool = false,
-) -> TypedReadResult<T> {
+pub fn read_toml_typed_result<T>(path: string, schema: Schema<T>, apply_defaults: bool = false) -> TypedReadResult<T> {
   return __fs_read_structured_typed_result(path, "toml", schema, apply_defaults)
 }
 
@@ -331,7 +317,8 @@ pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  harness.fs.write_text(path, __fs_with_newline(toml_stringify(value), opts.trailing_newline ?? true))
+  harness.fs
+    .write_text(path, __fs_with_newline(toml_stringify(value), opts.trailing_newline ?? true))
 }
 
 /**
@@ -345,10 +332,8 @@ pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions 
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  harness.fs.write_text(
-    path,
-    __fs_with_newline(join(lines ?? [], "\n"), opts.trailing_newline ?? true),
-  )
+  harness.fs
+    .write_text(path, __fs_with_newline(join(lines ?? [], "\n"), opts.trailing_newline ?? true))
 }
 
 /**

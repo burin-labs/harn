@@ -168,12 +168,7 @@ fn __rationale(ram_bytes, gpu: string, has_provider_key: bool, model_id: string)
   return ram + ", " + __gpu_label(gpu) + ", " + creds + " -> " + model_id
 }
 
-fn __alternative_suffix(
-  local_model,
-  cloud_model,
-  selected_provider: string,
-  selected_model: string,
-) -> string {
+fn __alternative_suffix(local_model, cloud_model, selected_provider: string, selected_model: string) -> string {
   const local = __resolve_local_model(local_model)
   if local != nil && (local["provider"] != selected_provider || local["model_id"] != selected_model) {
     const cached = if __safe_bool(__safe_dict(local_model)["cached"], false) {
@@ -235,9 +230,8 @@ fn __resolve_local_model(local_model) -> dict? {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_MODELS_RECOMMEND_PAYLOAD_JSON", "")
   if raw == "" {
-    harness.stdio.eprintln(
-      "internal error: HARN_MODELS_RECOMMEND_PAYLOAD_JSON not set by dispatch shim",
-    )
+    harness.stdio
+      .eprintln("internal error: HARN_MODELS_RECOMMEND_PAYLOAD_JSON not set by dispatch shim")
     return 70
   }
   const payload = try {
@@ -257,7 +251,8 @@ fn main(harness: Harness) -> int {
   const ram_bucket = __ram_bucket_from_bytes(ram["available_bytes"])
   const rule = __find_rule(rules, ram_bucket, gpu, has_provider_key)
   if rule == nil {
-    harness.stdio.eprintln(
+    harness.stdio
+      .eprintln(
       "no model recommendation for ram_bucket=" + ram_bucket
         + " gpu="
         + gpu
@@ -268,7 +263,8 @@ fn main(harness: Harness) -> int {
   }
   const resolved = __resolve_rule(rule, cloud_model)
   if resolved == nil {
-    harness.stdio.eprintln("recommendation table requested a cloud default without cloud credentials")
+    harness.stdio
+      .eprintln("recommendation table requested a cloud default without cloud credentials")
     return 1
   }
   const local_resolved = __resolve_local_model(local_model)

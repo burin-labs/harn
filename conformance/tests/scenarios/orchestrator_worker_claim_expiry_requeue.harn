@@ -12,23 +12,28 @@ pipeline default(task) {
   harness.fs.mkdir(failing_consumer_dir)
   harness.fs.mkdir(ok_consumer_dir)
   harness.fs.mkdir(state_dir)
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(producer_dir, "harn.toml"),
     "[package]\nname = \"worker-producer\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"worker://triage\"\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(failing_consumer_dir, "harn.toml"),
     "[package]\nname = \"worker-consumer-fail\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(failing_consumer_dir, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> any {\n  throw(\"fail:\" + event.id)\n}\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(ok_consumer_dir, "harn.toml"),
     "[package]\nname = \"worker-consumer-ok\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(ok_consumer_dir, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, event_id: event.id}\n}\n",
   )

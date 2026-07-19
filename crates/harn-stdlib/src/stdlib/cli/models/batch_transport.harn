@@ -230,7 +230,8 @@ fn __provider_auth_env_candidates(provider: string) -> list {
 pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   if provider == "openai" {
     return trim(
-      harness.env.get_or(
+      harness.env
+        .get_or(
         "HARN_BATCH_OPENAI_BASE_URL",
         harness.env.get_or("OPENAI_BASE_URL", "https://api.openai.com/v1"),
       ),
@@ -238,7 +239,8 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "anthropic" {
     return trim(
-      harness.env.get_or(
+      harness.env
+        .get_or(
         "HARN_BATCH_ANTHROPIC_BASE_URL",
         harness.env.get_or("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
       ),
@@ -246,7 +248,8 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "mistral" {
     return trim(
-      harness.env.get_or(
+      harness.env
+        .get_or(
         "HARN_BATCH_MISTRAL_BASE_URL",
         harness.env.get_or("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
       ),
@@ -254,7 +257,8 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "xai" {
     return trim(
-      harness.env.get_or(
+      harness.env
+        .get_or(
         "HARN_BATCH_XAI_BASE_URL",
         harness.env.get_or("XAI_BASE_URL", "https://api.x.ai/v1"),
       ),
@@ -262,11 +266,14 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "gemini" {
     return trim(
-      harness.env.get_or(
+      harness.env
+        .get_or(
         "HARN_BATCH_GEMINI_BASE_URL",
-        harness.env.get_or(
+        harness.env
+          .get_or(
           "GEMINI_BASE_URL",
-          harness.env.get_or(
+          harness.env
+            .get_or(
             "GOOGLE_GENERATIVE_LANGUAGE_BASE_URL",
             "https://generativelanguage.googleapis.com",
           ),
@@ -276,7 +283,8 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "groq" {
     return trim(
-      harness.env.get_or(
+      harness.env
+        .get_or(
         "HARN_BATCH_GROQ_BASE_URL",
         harness.env.get_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
       ),
@@ -284,9 +292,11 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "together" {
     return trim(
-      harness.env.get_or(
+      harness.env
+        .get_or(
         "HARN_BATCH_TOGETHER_BASE_URL",
-        harness.env.get_or(
+        harness.env
+          .get_or(
           "TOGETHER_AI_BASE_URL",
           harness.env.get_or("TOGETHER_BASE_URL", "https://api.together.xyz/v1"),
         ),
@@ -295,7 +305,8 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "fireworks" {
     return trim(
-      harness.env.get_or(
+      harness.env
+        .get_or(
         "HARN_BATCH_FIREWORKS_BASE_URL",
         harness.env.get_or("FIREWORKS_BASE_URL", "https://api.fireworks.ai/v1"),
       ),
@@ -303,7 +314,8 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "parasail" {
     return trim(
-      harness.env.get_or(
+      harness.env
+        .get_or(
         "HARN_BATCH_PARASAIL_BASE_URL",
         harness.env.get_or("PARASAIL_BASE_URL", "https://api.saas.parasail.io/v1"),
       ),

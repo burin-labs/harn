@@ -56,9 +56,8 @@ pipeline test(task) {
     "ID-JAG requested token type pinned",
   )
   assert(
-    catalog["id-jag"].provider_metadata_fields.contains(
-      "identity_chaining_requested_token_types_supported",
-    ),
+    catalog["id-jag"].provider_metadata_fields
+      .contains("identity_chaining_requested_token_types_supported"),
     "ID-JAG metadata detection field recorded",
   )
   assert_eq(

@@ -5,7 +5,6 @@ mod bootstrap;
 pub mod cli;
 mod cli_bytecode;
 pub mod commands;
-pub mod config;
 #[doc(hidden)]
 pub mod dispatch;
 pub mod env_guard;
@@ -38,6 +37,7 @@ use cli::{
     SkillTrustCommand, TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
+use harn_modules::project_config;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 use runtime::{build_cli_runtime, cli_runtime_mode, CliRuntimeMode};
 
@@ -280,7 +280,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             let sandbox_options = if args.no_sandbox {
                 commands::run::RunSandboxOptions::disabled()
             } else {
-                commands::run::RunSandboxOptions::default()
+                commands::run::RunSandboxOptions::sandboxed(args.allow_process_network)
                     .with_write_roots(args.write_root.iter().cloned())
                     .with_read_only_roots(args.read_only_root.iter().cloned())
             };
@@ -385,146 +385,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 ),
             }
         }
-        Command::Check(args) => {
-            let json_format_alias =
-                !args.json && matches!(args.format, cli::CheckOutputFormat::Json);
-            let matrix_format = if args.json {
-                if !matches!(args.format, cli::CheckOutputFormat::Text) {
-                    command_error("`harn check` accepts either `--json` or `--format`, not both");
-                }
-                cli::CheckOutputFormat::Json
-            } else {
-                args.format
-            };
-            if args.provider_matrix {
-                let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                let extensions = package::load_runtime_extensions(&cwd);
-                package::install_runtime_extensions(&extensions);
-                commands::check::provider_matrix::run(
-                    matrix_format,
-                    args.filter.as_deref(),
-                    json_format_alias,
-                );
-                return;
-            }
-            if args.connector_matrix {
-                commands::check::connector_matrix::run(
-                    matrix_format,
-                    args.filter.as_deref(),
-                    &args.targets,
-                    json_format_alias,
-                );
-                return;
-            }
-            let mut target_strings: Vec<String> = args.targets.clone();
-            if args.workspace {
-                let anchor = target_strings.first().map(Path::new);
-                match package::load_workspace_config(anchor) {
-                    Some((workspace, manifest_dir)) if !workspace.pipelines.is_empty() => {
-                        for pipeline in &workspace.pipelines {
-                            let candidate = Path::new(pipeline);
-                            let resolved = if candidate.is_absolute() {
-                                candidate.to_path_buf()
-                            } else {
-                                manifest_dir.join(candidate)
-                            };
-                            target_strings.push(resolved.to_string_lossy().into_owned());
-                        }
-                    }
-                    Some(_) => command_error(
-                        "--workspace requires `[workspace].pipelines` in the nearest harn.toml",
-                    ),
-                    None => command_error(
-                        "--workspace could not find a harn.toml walking up from the target(s)",
-                    ),
-                }
-            }
-            if target_strings.is_empty() {
-                if args.json {
-                    print_check_error(
-                        "missing_targets",
-                        "`harn check` requires at least one target path, or `--workspace` with `[workspace].pipelines`",
-                    );
-                }
-                command_error(
-                    "`harn check` requires at least one target path, or `--workspace` with `[workspace].pipelines`",
-                );
-            }
-            for target in &target_strings {
-                if let Err(error) = package::validate_runtime_manifest_extensions(Path::new(target))
-                {
-                    if args.json {
-                        print_check_error(
-                            "manifest_extension_error",
-                            &format!("manifest extension validation failed: {error}"),
-                        );
-                    }
-                    command_error(&format!("manifest extension validation failed: {error}"));
-                }
-            }
-            let targets: Vec<&str> = target_strings.iter().map(String::as_str).collect();
-            let files = commands::check::collect_harn_targets(&targets);
-            if files.is_empty() {
-                if args.json {
-                    print_check_error(
-                        "no_harn_files",
-                        "no .harn or .harn.txt files found under the given target(s)",
-                    );
-                }
-                command_error("no .harn or .harn.txt files found under the given target(s)");
-            }
-            let (module_graph, parsed_sources) =
-                commands::check::build_module_graph_with_parsed_sources(&files);
-            let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
-            let overrides = commands::check::CheckCliOverrides::from(&args);
-            let checked = commands::check::check_files(
-                &files,
-                &module_graph,
-                parsed_sources,
-                &cross_file_imports,
-                &overrides,
-                !args.json,
-            );
-            let mut should_fail = false;
-            let mut json_files = Vec::new();
-            for checked_file in checked {
-                should_fail |= checked_file
-                    .report
-                    .outcome()
-                    .should_fail(checked_file.strict);
-                if args.json {
-                    json_files.push(checked_file.report);
-                } else {
-                    checked_file.text.print();
-                }
-            }
-            if args.json {
-                let report = commands::check::CheckReport::from_files(json_files);
-                let envelope = if should_fail {
-                    json_envelope::JsonEnvelope {
-                        schema_version: commands::check::CHECK_SCHEMA_VERSION,
-                        ok: false,
-                        data: Some(report),
-                        error: Some(json_envelope::JsonError {
-                            code: "check_failed".to_string(),
-                            message: "one or more files failed `harn check`".to_string(),
-                            details: serde_json::Value::Null,
-                        }),
-                        warnings: Vec::new(),
-                    }
-                } else {
-                    json_envelope::JsonEnvelope::ok(commands::check::CHECK_SCHEMA_VERSION, report)
-                };
-                println!("{}", json_envelope::to_string_pretty(&envelope));
-                if should_fail {
-                    process::exit(1);
-                }
-                return;
-            }
-            if should_fail {
-                process::exit(1);
-            }
-        }
+        Command::Check(args) => commands::check::run_check_command(args),
         Command::Parse(args) => {
             if let Err(error) = commands::parse_tokens::run_parse(&args) {
                 command_error(&error);
@@ -575,6 +436,22 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     "no .harn, .harn.txt, or .harn.prompt files found under the given target(s)",
                 );
             }
+            if args.json {
+                let outcome = commands::check::run_lint_json(
+                    &files,
+                    commands::check::LintJsonOptions {
+                        strict: args.strict,
+                        require_file_header: args.require_file_header,
+                        require_public_api_types: args.require_public_api_types,
+                    },
+                )
+                .await;
+                println!("{}", json_envelope::to_string_pretty(&outcome.envelope));
+                if outcome.exit_code != 0 {
+                    process::exit(outcome.exit_code);
+                }
+                return;
+            }
             let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
             let module_graph =
                 commands::check::build_module_graph_and_seed_analysis(&files, &mut analysis);
@@ -590,74 +467,21 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     .map(Vec::as_slice)
                     .unwrap_or(&[])
             };
-            if args.json {
-                // `--json` always reports without modifying source — `--fix`
-                // is intentionally orthogonal to structured output so agents
-                // can plan repairs from the report and apply them in a
-                // follow-up `harn lint --fix` (or `harn fix apply`).
-                let mut should_fail = false;
-                let mut json_files: Vec<commands::check::LintFileReport> = Vec::new();
-                for file in &files {
-                    let mut config = package::load_check_config(Some(file));
-                    let lint_config = commands::check::load_harn_lint_config(file);
-                    commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
-                    let require_header =
-                        args.require_file_header || lint_config.require_file_header;
-                    let complexity_threshold = lint_config.complexity_threshold;
-                    let report = commands::check::lint_file_report(
-                        &mut analysis,
-                        file,
-                        &config,
-                        &cross_file_imports,
-                        &module_graph,
-                        require_header,
-                        complexity_threshold,
-                        &lint_config.persona_step_allowlist,
-                        script_diags_for(file.as_path()),
-                    );
-                    should_fail |= report.outcome().should_fail(config.strict || args.strict);
-                    json_files.push(report);
-                }
-                let report = commands::check::LintReport::from_files(json_files);
-                let envelope = if should_fail {
-                    json_envelope::JsonEnvelope {
-                        schema_version: commands::check::LINT_SCHEMA_VERSION,
-                        ok: false,
-                        data: Some(report),
-                        error: Some(json_envelope::JsonError {
-                            code: "lint_failed".to_string(),
-                            message: "one or more files failed `harn lint`".to_string(),
-                            details: serde_json::Value::Null,
-                        }),
-                        warnings: Vec::new(),
-                    }
-                } else {
-                    json_envelope::JsonEnvelope::ok(commands::check::LINT_SCHEMA_VERSION, report)
-                };
-                println!("{}", json_envelope::to_string_pretty(&envelope));
-                if should_fail {
-                    process::exit(1);
-                }
-                return;
-            }
             if args.fix {
                 let mut should_fail = false;
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
-                    let lint_config = commands::check::load_harn_lint_config(file);
+                    let mut lint_config = commands::check::load_harn_lint_config(file);
+                    lint_config.require_file_header |= args.require_file_header;
+                    lint_config.require_public_api_types |= args.require_public_api_types;
                     commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
-                    let require_header =
-                        args.require_file_header || lint_config.require_file_header;
-                    let complexity_threshold = lint_config.complexity_threshold;
                     let outcome = commands::check::lint_fix_file(
                         &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,
                         &module_graph,
-                        require_header,
-                        complexity_threshold,
-                        &lint_config.persona_step_allowlist,
+                        &lint_config,
                     );
                     should_fail |= outcome.should_fail(config.strict || args.strict);
                 }
@@ -689,20 +513,17 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 let mut total_fixable = 0usize;
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
-                    let lint_config = commands::check::load_harn_lint_config(file);
+                    let mut lint_config = commands::check::load_harn_lint_config(file);
+                    lint_config.require_file_header |= args.require_file_header;
+                    lint_config.require_public_api_types |= args.require_public_api_types;
                     commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
-                    let require_header =
-                        args.require_file_header || lint_config.require_file_header;
-                    let complexity_threshold = lint_config.complexity_threshold;
                     let outcome = commands::check::lint_file_inner(
                         &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,
                         &module_graph,
-                        require_header,
-                        complexity_threshold,
-                        &lint_config.persona_step_allowlist,
+                        &lint_config,
                         script_diags_for(file.as_path()),
                     );
                     total_findings += outcome.findings;
@@ -744,11 +565,11 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             // Anchor config resolution on the first target; CLI flags
             // always win over harn.toml values.
             let anchor = targets.first().map(Path::new).unwrap_or(Path::new("."));
-            let loaded = match config::load_for_path(anchor) {
+            let loaded = match project_config::load_for_path(anchor) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("warning: {e}");
-                    config::HarnConfig::default()
+                    project_config::HarnConfig::default()
                 }
             };
             let mut opts = harn_fmt::FmtOptions::default();
@@ -1460,7 +1281,7 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
     let should_verify = args.verify || args.warm;
     let mut ok = true;
     if should_verify {
-        if resolved.provider == "ollama" {
+        if commands::local::runtime::uses_ollama_wire_protocol(&resolved.provider) {
             let mut readiness = harn_vm::llm::OllamaReadinessOptions::new(resolved.id.clone());
             readiness.warm = args.warm;
             readiness.observe_loaded = true;
@@ -1483,7 +1304,7 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
                 "valid": false,
                 "status": "unsupported_provider",
                 "message": format!(
-                    "models info --verify is only supported for Ollama models; resolved provider is '{}'",
+                    "models info --verify is only supported for models whose local runtime declares the Ollama API protocol; resolved provider is '{}'",
                     resolved.provider
                 ),
                 "provider": resolved.provider,

@@ -1,6 +1,10 @@
-import { parse_args } from "std/cli"
+import { CliParseResult, help_requested, parse, parser } from "std/cli/argparse"
 
-const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v6"
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v8"
+
+const RUNTIME_RECEIPT_SCHEMA = "harn.provider_tool_probe_runtime.v1"
+
+const CATALOG_RECEIPT_SCHEMA = "harn.provider_tool_probe_catalog.v1"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
@@ -25,6 +29,33 @@ pub type ProviderToolProbeBehavior = {
   cheap: bool,
 }
 
+pub type ProviderToolProbeRuntimeStatus = "verified" | "unavailable" | "invalid"
+
+pub type ProviderToolProbeRuntimeReceipt = {
+  schema_version: "harn.provider_tool_probe_runtime.v1",
+  command: list<string>,
+  status: ProviderToolProbeRuntimeStatus,
+  exit_code: int,
+  version: string,
+  reason: string,
+}
+
+pub type ProviderToolProbeCatalogStatus = "verified" | "unavailable" | "invalid"
+
+pub type ProviderToolProbeCatalogReceipt = {
+  schema_version: "harn.provider_tool_probe_catalog.v1",
+  command: list<string>,
+  command_env: dict,
+  status: ProviderToolProbeCatalogStatus,
+  exit_code: int,
+  providers_config: string,
+  catalog_sha256: string,
+  provider_count: int,
+  model_count: int,
+  route_count: int,
+  reason: string,
+}
+
 pub type ProviderToolProbeCell = {
   id: string,
   provider: string,
@@ -44,7 +75,9 @@ pub type ProviderToolProbeCell = {
 }
 
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v6",
+  schema_version: "harn.provider_tool_probe_campaign.v8",
+  runtime: ProviderToolProbeRuntimeReceipt,
+  catalog: ProviderToolProbeCatalogReceipt,
   live: bool,
   include_expensive: bool,
   route_count: int,
@@ -60,6 +93,243 @@ pub type ProviderToolProbeCampaignReport = {
   behaviors: list<ProviderToolProbeBehavior>,
   cells: list<ProviderToolProbeCell>,
   artifacts: dict,
+}
+
+pub fn provider_tool_probe_campaign_providers_config(
+  explicit: string,
+  configured: string,
+  inherited: string,
+) -> string {
+  const requested = trim(explicit)
+  if requested != "" {
+    return requested
+  }
+  const campaign_config = trim(configured)
+  if campaign_config != "" {
+    return campaign_config
+  }
+  return trim(inherited)
+}
+
+pub fn provider_tool_probe_campaign_command_env(providers_config: string) -> dict {
+  const path = trim(providers_config)
+  if path == "" {
+    return {}
+  }
+  return {HARN_PROVIDERS_CONFIG: path}
+}
+
+fn __catalog_receipt(
+  command: list<string>,
+  command_env: dict,
+  status: ProviderToolProbeCatalogStatus,
+  exit_code: int,
+  providers_config: string,
+  catalog_sha256: string,
+  provider_count: int,
+  model_count: int,
+  route_count: int,
+  reason: string,
+) -> ProviderToolProbeCatalogReceipt {
+  return {
+    schema_version: CATALOG_RECEIPT_SCHEMA,
+    command: command,
+    command_env: command_env,
+    status: status,
+    exit_code: exit_code,
+    providers_config: providers_config,
+    catalog_sha256: catalog_sha256,
+    provider_count: provider_count,
+    model_count: model_count,
+    route_count: route_count,
+    reason: reason,
+  }
+}
+
+/** Normalize `provider catalog show` from the exact CLI used by probe children. */
+pub fn provider_tool_probe_campaign_catalog_snapshot(
+  harn_bin: string,
+  providers_config: string,
+  child: dict,
+) -> dict {
+  const command = [harn_bin, "provider", "catalog", "show"]
+  const command_env = provider_tool_probe_campaign_command_env(providers_config)
+  const exit_code = to_int(child?.exit_code) ?? -1
+  if exit_code != 0 {
+    const stderr = trim(to_string(child?.stderr ?? ""))
+    return {
+      receipt: __catalog_receipt(
+        command,
+        command_env,
+        "unavailable",
+        exit_code,
+        trim(providers_config),
+        "",
+        0,
+        0,
+        0,
+        if stderr != "" {
+          stderr
+        } else {
+          "target Harn catalog command exited unsuccessfully"
+        },
+      ),
+      catalog: {},
+    }
+  }
+  const parsed = try {
+    json_parse(to_string(child?.stdout ?? ""))
+  } catch (_) {
+    nil
+  }
+  if type_of(parsed) != "dict" || type_of(parsed?.providers) != "list"
+    || type_of(parsed?.models) != "list"
+    || type_of(parsed?.routing_routes) != "list" {
+    return {
+      receipt: __catalog_receipt(
+        command,
+        command_env,
+        "invalid",
+        exit_code,
+        trim(providers_config),
+        "",
+        0,
+        0,
+        0,
+        "target Harn runtime produced invalid provider catalog JSON",
+      ),
+      catalog: {},
+    }
+  }
+  const canonical = json_stringify(parsed)
+  return {
+    receipt: __catalog_receipt(
+      command,
+      command_env,
+      "verified",
+      exit_code,
+      trim(providers_config),
+      "sha256:" + sha256(canonical),
+      len(parsed.providers),
+      len(parsed.models),
+      len(parsed.routing_routes),
+      "target Harn provider catalog identified",
+    ),
+    catalog: parsed,
+  }
+}
+
+/** Normalize the target CLI's `version --json` result into campaign provenance. */
+pub fn provider_tool_probe_campaign_runtime_receipt(harn_bin: string, child: dict) -> ProviderToolProbeRuntimeReceipt {
+  const command = [harn_bin, "version", "--json"]
+  const exit_code = to_int(child?.exit_code) ?? -1
+  if exit_code != 0 {
+    const stderr = trim(to_string(child?.stderr ?? ""))
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "unavailable",
+      exit_code: exit_code,
+      version: "",
+      reason: if stderr != "" {
+        stderr
+      } else {
+        "target Harn runtime exited unsuccessfully"
+      },
+    }
+  }
+  const parsed = try {
+    json_parse(to_string(child?.stdout ?? ""))
+  } catch (_) {
+    nil
+  }
+  if type_of(parsed) != "dict" {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      reason: "target Harn runtime produced invalid version JSON",
+    }
+  }
+  const name = trim(to_string(parsed?.data?.name ?? ""))
+  const version = trim(to_string(parsed?.data?.version ?? ""))
+  if parsed?.schemaVersion != 1 || parsed?.ok != true || name != "harn-cli" || version == "" {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      reason: "target Harn runtime version JSON did not match the harn-cli contract",
+    }
+  }
+  return {
+    schema_version: RUNTIME_RECEIPT_SCHEMA,
+    command: command,
+    status: "verified",
+    exit_code: exit_code,
+    version: version,
+    reason: "target Harn runtime identified",
+  }
+}
+
+pub fn provider_tool_probe_campaign_runtime_allows_live(runtime: ProviderToolProbeRuntimeReceipt) -> bool {
+  return runtime.status == "verified" && runtime.version != ""
+}
+
+fn __provider_tool_probe_campaign_runtime(harness: Harness, harn_bin: string) -> ProviderToolProbeRuntimeReceipt {
+  const child = try {
+    harness.process.spawn_captured({cmd: harn_bin, args: ["version", "--json"]})
+  } catch (e) {
+    {exit_code: -1, stdout: "", stderr: to_string(e)}
+  }
+  return provider_tool_probe_campaign_runtime_receipt(harn_bin, child)
+}
+
+pub fn provider_tool_probe_campaign_providers_config_text_error(text: string) -> string? {
+  const parsed = try {
+    toml_parse(text)
+  } catch (error) {
+    return "providers config is invalid TOML: " + to_string(error)
+  }
+  if type_of(parsed) != "dict" {
+    return "providers config must decode to a TOML document"
+  }
+  return nil
+}
+
+fn __providers_config_error(harness: Harness, path: string) -> string? {
+  if path == "" {
+    return nil
+  }
+  if !harness.fs.exists(path) {
+    return "providers config does not exist: " + path
+  }
+  const text = try {
+    harness.fs.read_text(path)
+  } catch (error) {
+    return "providers config is unreadable: " + path + ": " + to_string(error)
+  }
+  return provider_tool_probe_campaign_providers_config_text_error(text)
+}
+
+fn __provider_tool_probe_campaign_catalog(
+  harness: Harness,
+  harn_bin: string,
+  providers_config: string,
+) -> dict {
+  const command = ["provider", "catalog", "show"]
+  const child = try {
+    harness.process
+      .spawn_captured(
+      {cmd: harn_bin, args: command, env: provider_tool_probe_campaign_command_env(providers_config)},
+    )
+  } catch (error) {
+    {exit_code: -1, stdout: "", stderr: to_string(error)}
+  }
+  return provider_tool_probe_campaign_catalog_snapshot(harn_bin, providers_config, child)
 }
 
 fn __split_once(text: string, sep: string) -> dict? {
@@ -106,9 +376,7 @@ pub fn provider_tool_probe_campaign_routes(specs: list<string>) -> list<Provider
   return routes
 }
 
-pub fn provider_tool_probe_campaign_default_routes(
-  include_expensive: bool,
-) -> list<ProviderToolProbeRoute> {
+pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> list<ProviderToolProbeRoute> {
   const routes: list<ProviderToolProbeRoute> = [
     {
       id: "fireworks-gpt-oss-120b",
@@ -315,10 +583,7 @@ fn __catalog_route_from_routing_row(
   }
 }
 
-fn __catalog_routes_from_routing_table(
-  catalog: dict,
-  include_expensive: bool,
-) -> list<ProviderToolProbeRoute> {
+fn __catalog_routes_from_routing_table(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
   const providers = __provider_meta_by_id(catalog)
   const models = __catalog_models_by_route(catalog)
   let routes: list<ProviderToolProbeRoute> = []
@@ -331,10 +596,7 @@ fn __catalog_routes_from_routing_table(
   return routes
 }
 
-fn __catalog_routes_from_models(
-  catalog: dict,
-  include_expensive: bool,
-) -> list<ProviderToolProbeRoute> {
+fn __catalog_routes_from_models(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
   const providers = __provider_meta_by_id(catalog)
   let routes: list<ProviderToolProbeRoute> = []
   for model in catalog.models ?? [] {
@@ -365,10 +627,7 @@ fn __catalog_routes_from_models(
   return routes
 }
 
-pub fn provider_tool_probe_campaign_catalog_routes(
-  catalog: dict,
-  include_expensive: bool,
-) -> list<ProviderToolProbeRoute> {
+pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
   if len(catalog.routing_routes ?? []) > 0 {
     return __catalog_routes_from_routing_table(catalog, include_expensive)
   }
@@ -513,9 +772,7 @@ fn __behavior_matches(behavior: ProviderToolProbeBehavior, filters: list<string>
   return false
 }
 
-pub fn provider_tool_probe_campaign_select_behaviors(
-  filters: list<string>,
-) -> list<ProviderToolProbeBehavior> {
+pub fn provider_tool_probe_campaign_select_behaviors(filters: list<string>) -> list<ProviderToolProbeBehavior> {
   let selected: list<ProviderToolProbeBehavior> = []
   for behavior in provider_tool_probe_campaign_behaviors() {
     if __behavior_matches(behavior, filters) {
@@ -836,10 +1093,7 @@ fn __missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> 
   return route.env_keys
 }
 
-pub fn provider_tool_probe_campaign_missing_env_keys(
-  route: ProviderToolProbeRoute,
-  env: dict,
-) -> list<string> {
+pub fn provider_tool_probe_campaign_missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
   return __missing_env_keys(route, env)
 }
 
@@ -1183,10 +1437,14 @@ pub fn provider_tool_probe_campaign_report(
   repeat: int,
   env: dict,
   env_source: dict,
+  runtime: ProviderToolProbeRuntimeReceipt,
+  catalog: ProviderToolProbeCatalogReceipt,
   campaign_slice: dict = {},
 ) -> ProviderToolProbeCampaignReport {
   return {
     schema_version: SCHEMA_VERSION,
+    runtime: runtime,
+    catalog: catalog,
     live: live,
     include_expensive: include_expensive,
     route_count: len(routes),
@@ -1231,6 +1489,8 @@ fn __markdown_status(status: string) -> string {
 pub fn provider_tool_probe_campaign_markdown(report: ProviderToolProbeCampaignReport) -> string {
   let out = "# Provider Tool-Probe Campaign\n\n"
   out = out + "- Schema: `" + report.schema_version + "`\n"
+  out = out + "- Target runtime: `" + json_stringify(report.runtime) + "`\n"
+  out = out + "- Target catalog: `" + json_stringify(report.catalog) + "`\n"
   out = out + "- Live: " + to_string(report.live) + "\n"
   out = out + "- Include expensive defaults: " + to_string(report.include_expensive) + "\n"
   out = out + "- Routes: " + to_string(report.route_count) + "\n"
@@ -1314,13 +1574,7 @@ pub fn provider_tool_probe_campaign_env_from_dotenv_text(text: string) -> dict {
   return env
 }
 
-fn __env_load_receipt(
-  path: string,
-  checked: bool,
-  loaded: bool,
-  key_count: int,
-  reason: string,
-) -> dict {
+fn __env_load_receipt(path: string, checked: bool, loaded: bool, key_count: int, reason: string) -> dict {
   return {path: path, checked: checked, loaded: loaded, parsed_key_count: key_count, reason: reason}
 }
 
@@ -1344,12 +1598,12 @@ fn __load_env_file(harness: Harness, env_file: string) -> dict {
   return {env: env, source: __env_load_receipt(env_file, true, true, len(env.keys()), "loaded")}
 }
 
-fn __default_env_file(harness: Harness) -> string {
-  const explicit = trim(harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_ENV_FILE", ""))
-  if explicit != "" {
-    return explicit
+pub fn provider_tool_probe_campaign_env_file(explicit: string, configured: string) -> string {
+  const requested = trim(explicit)
+  if requested != "" {
+    return requested
   }
-  return path_join(home_dir(), "projects", "burin-code", ".env")
+  return trim(configured)
 }
 
 fn __ensure_dir(harness: Harness, path: string) {
@@ -1358,58 +1612,94 @@ fn __ensure_dir(harness: Harness, path: string) {
   }
 }
 
-fn __arg_spec() -> list {
-  return [
-    {kind: "option", name: "route", flags: ["--route"], multi: true, default: []},
-    {kind: "option", name: "behavior", flags: ["--behavior"], multi: true, default: []},
-    {kind: "option", name: "mode", flags: ["--mode"], default: "both"},
-    {kind: "option", name: "repeat", flags: ["--repeat"], parse: "int", default: 1},
-    {kind: "option", name: "timeout_secs", flags: ["--timeout-secs"], parse: "int", default: 60},
-    {kind: "option", name: "shard_count", flags: ["--shard-count"], parse: "int", default: 1},
-    {kind: "option", name: "shard_index", flags: ["--shard-index"], parse: "int", default: 0},
-    {kind: "option", name: "max_probes", flags: ["--max-probes"], parse: "int", default: 0},
-    {kind: "option", name: "harn_bin", flags: ["--harn-bin"], default: "harn"},
-    {kind: "option", name: "env_file", flags: ["--env-file"], default: ""},
-    {kind: "option", name: "output_dir", flags: ["--output-dir"], default: DEFAULT_OUTPUT_DIR},
-    {kind: "flag", name: "include_expensive", flags: ["--include-expensive"]},
-    {kind: "flag", name: "catalog_routes", flags: ["--catalog-routes"]},
-    {kind: "flag", name: "live", flags: ["--live"]},
-    {kind: "flag", name: "markdown", flags: ["--markdown"]},
-  ]
+fn __arg_spec() {
+  return parser(
+    {
+      name: "provider_tool_probe_campaign",
+      args: [
+        {kind: "flag", name: "route", long: "--route", multi: true, default: []},
+        {kind: "flag", name: "behavior", long: "--behavior", multi: true, default: []},
+        {kind: "flag", name: "mode", long: "--mode", default: "both"},
+        {kind: "flag", name: "repeat", long: "--repeat", parse: "int", default: 1},
+        {kind: "flag", name: "timeout_secs", long: "--timeout-secs", parse: "int", default: 60},
+        {kind: "flag", name: "shard_count", long: "--shard-count", parse: "int", default: 1},
+        {kind: "flag", name: "shard_index", long: "--shard-index", parse: "int", default: 0},
+        {kind: "flag", name: "max_probes", long: "--max-probes", parse: "int", default: 0},
+        {kind: "flag", name: "harn_bin", long: "--harn-bin", default: "harn"},
+        {kind: "flag", name: "providers_config", long: "--providers-config", default: ""},
+        {kind: "flag", name: "env_file", long: "--env-file", default: ""},
+        {kind: "flag", name: "output_dir", long: "--output-dir", default: DEFAULT_OUTPUT_DIR},
+        {kind: "switch", name: "include_expensive", long: "--include-expensive"},
+        {kind: "switch", name: "catalog_routes", long: "--catalog-routes"},
+        {kind: "switch", name: "live", long: "--live"},
+        {kind: "switch", name: "markdown", long: "--markdown"},
+      ],
+    },
+  )
 }
 
-pub fn provider_tool_probe_campaign_parse_args(args: list<string>) -> dict {
-  return parse_args(args, __arg_spec())
+pub fn provider_tool_probe_campaign_parse_args(args: list<string>) -> CliParseResult<dict> {
+  return parse(__arg_spec(), args)
+}
+
+fn __target_runtime_context(harness: Harness, parsed: dict, live: bool, catalog_routes: bool) -> dict {
+  const harn_bin = to_string(parsed?.harn_bin ?? "harn")
+  const providers_config = provider_tool_probe_campaign_providers_config(
+    to_string(parsed?.providers_config ?? ""),
+    harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_PROVIDERS_CONFIG", ""),
+    harness.env.get_or("HARN_PROVIDERS_CONFIG", ""),
+  )
+  const providers_config_error = __providers_config_error(harness, providers_config)
+  if providers_config_error != nil {
+    harness.stdio.eprintln(providers_config_error)
+    exit(2)
+  }
+  const runtime: ProviderToolProbeRuntimeReceipt = __provider_tool_probe_campaign_runtime(harness, harn_bin)
+  if live && !provider_tool_probe_campaign_runtime_allows_live(runtime) {
+    harness.stdio
+      .eprintln(
+      "target Harn runtime is not identifiable; refusing live provider probes: " + runtime.reason,
+    )
+    exit(2)
+  }
+  const catalog_snapshot = __provider_tool_probe_campaign_catalog(harness, harn_bin, providers_config)
+  const catalog: ProviderToolProbeCatalogReceipt = catalog_snapshot.receipt
+  if catalog.status != "verified" && (live || catalog_routes || providers_config != "") {
+    harness.stdio
+      .eprintln(
+      "target Harn provider catalog is not identifiable; refusing catalog-bound probes: "
+        + catalog.reason,
+    )
+    exit(2)
+  }
+  return {
+    harn_bin: harn_bin,
+    providers_config: providers_config,
+    runtime: runtime,
+    catalog: catalog,
+    catalog_payload: catalog_snapshot.catalog,
+  }
 }
 
 fn main(harness: Harness) {
-  const parsed = provider_tool_probe_campaign_parse_args(argv)
-  if parsed?._help ?? false {
-    harness.stdio.println(
-      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
+  if help_requested(argv) {
+    harness.stdio
+      .println(
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
     )
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    harness.stdio.eprintln(join((parsed?._errors ?? []) + (parsed?._extras ?? []), "\n"))
+  const parsed_result = provider_tool_probe_campaign_parse_args(argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const include_expensive = parsed?.include_expensive ?? false
   const catalog_routes = parsed?.catalog_routes ?? false
   const route_specs = __as_string_list(parsed?.route)
   if catalog_routes && len(route_specs) > 0 {
     harness.stdio.eprintln("--catalog-routes cannot be combined with --route")
-    exit(2)
-  }
-  const routes = if catalog_routes {
-    provider_tool_probe_campaign_catalog_routes(llm_provider_catalog(), include_expensive)
-  } else if len(route_specs) == 0 {
-    provider_tool_probe_campaign_default_routes(include_expensive)
-  } else {
-    provider_tool_probe_campaign_routes(route_specs)
-  }
-  if len(routes) == 0 {
-    harness.stdio.eprintln("no provider routes selected")
     exit(2)
   }
   const requested_mode = to_string(parsed?.mode ?? "both")
@@ -1443,20 +1733,34 @@ fn main(harness: Harness) {
     harness.stdio.eprintln("--max-probes must be >= 0")
     exit(2)
   }
-  const harn_bin = to_string(parsed?.harn_bin ?? "harn")
+  const target = __target_runtime_context(harness, parsed, live, catalog_routes)
+  const harn_bin = target.harn_bin
+  const providers_config = target.providers_config
+  const runtime = target.runtime
+  const catalog_receipt = target.catalog
+  const routes = if catalog_routes {
+    provider_tool_probe_campaign_catalog_routes(target.catalog_payload, include_expensive)
+  } else if len(route_specs) == 0 {
+    provider_tool_probe_campaign_default_routes(include_expensive)
+  } else {
+    provider_tool_probe_campaign_routes(route_specs)
+  }
+  if len(routes) == 0 {
+    harness.stdio.eprintln("no provider routes selected")
+    exit(2)
+  }
   const output_dir = to_string(parsed?.output_dir ?? DEFAULT_OUTPUT_DIR)
   __ensure_dir(harness, ".harn-runs")
   __ensure_dir(harness, output_dir)
   const env_file_arg = trim(to_string(parsed?.env_file ?? ""))
-  const env_file_path = if env_file_arg != "" {
-    env_file_arg
-  } else if live {
-    __default_env_file(harness)
-  } else {
-    ""
-  }
+  const env_file_path = provider_tool_probe_campaign_env_file(
+    env_file_arg,
+    harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_ENV_FILE", ""),
+  )
   const env_load = __load_env_file(harness, env_file_path)
-  const env = env_load.env ?? {}
+  const auth_env = env_load.env ?? {}
+  const command_env = provider_tool_probe_campaign_command_env(providers_config)
+  const env = auth_env + command_env
   const cell_plan = if live {
     __live_cells(
       harness,
@@ -1492,15 +1796,15 @@ fn main(harness: Harness) {
     include_expensive,
     output_dir,
     repeat,
-    env,
+    auth_env,
     env_load.source ?? {},
+    runtime,
+    catalog_receipt,
     cell_plan.slice ?? {},
   )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
-  harness.fs.write_text(
-    report.artifacts.report_markdown,
-    provider_tool_probe_campaign_markdown(report),
-  )
+  harness.fs
+    .write_text(report.artifacts.report_markdown, provider_tool_probe_campaign_markdown(report))
   if parsed?.markdown ?? false {
     harness.stdio.println(provider_tool_probe_campaign_markdown(report))
   } else {

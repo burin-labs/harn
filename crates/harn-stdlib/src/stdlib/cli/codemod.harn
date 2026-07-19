@@ -105,7 +105,8 @@ fn main(harness: Harness) {
       if apply {
         harness.stdio.println("rewrote " + f.path + "  [safety=" + f.safety + "]")
       } else {
-        harness.stdio.println(
+        harness.stdio
+          .println(
           "would change "
             + f.path
             + "  [safety="

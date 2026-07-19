@@ -157,7 +157,8 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
   assert(errors.contains("ci.yml:test enables an ungated BuildKit cache writer"))
   assert(errors.contains("build-release-binaries.yml:cache_budget must grant actions: read"))
   assert(
-    errors.contains(
+    errors
+      .contains(
       "build-release-binaries.yml:cache_budget must run ./scripts/report_ci_cache_budget.sh exactly once",
     ),
   )
@@ -176,7 +177,8 @@ pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(task) {
     },
   }
   assert(
-    ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows()).contains(
+    ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows())
+      .contains(
       ".github/actions/rust-cache/action.yml must contain one pinned restore-only broad Rust cache fallback step",
     ),
   )
@@ -206,12 +208,14 @@ pipeline test_ci_cache_policy_rejects_writer_key_drift(task) {
   }
   const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
   assert(
-    errors.contains(
+    errors
+      .contains(
       "windows-nightly.yml:nextest:workspace-windows-renamed is not an authorized persistent cache writer",
     ),
   )
   assert(
-    errors.contains(
+    errors
+      .contains(
       "authorized persistent cache writer is not active: windows-nightly.yml:nextest:workspace-windows",
     ),
   )
@@ -264,7 +268,8 @@ pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(task) {
   }
   const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
   assert(
-    errors.contains(
+    errors
+      .contains(
       "cli-cold-start-budget.yml must not run release-build cold-start benchmarks on pull_request",
     ),
   )
@@ -274,7 +279,8 @@ pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(task) {
     errors.contains("cli-cold-start-budget.yml:cold-start-budget must cap total runtime at 25 minutes"),
   )
   assert(
-    errors.contains(
+    errors
+      .contains(
       "cli-cold-start-budget.yml:cold-start-budget release build step must cap runtime at 20 minutes",
     ),
   )

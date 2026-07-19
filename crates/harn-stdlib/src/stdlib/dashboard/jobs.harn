@@ -436,7 +436,8 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
     },
   ]
   if len(receipt_refs) > 0 {
-    out = out.push(
+    out = out
+      .push(
       {
         kind: "open_receipt",
         label: "Open receipt",
@@ -447,7 +448,8 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
     )
   }
   if len(replay_refs) > 0 {
-    out = out.push(
+    out = out
+      .push(
       {
         kind: "open_replay_fixture",
         label: "Open replay fixture",
@@ -458,7 +460,8 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
     )
   }
   if approval != nil && kind == "approval.requested" {
-    out = out.push(
+    out = out
+      .push(
       {
         kind: "review_approval",
         label: "Review approval",
@@ -469,7 +472,8 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
     )
   }
   if dlq != nil && kind == "dlq.created" {
-    out = out.push(
+    out = out
+      .push(
       {
         kind: "replay_dlq",
         label: "Replay DLQ item",
@@ -479,14 +483,14 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
       },
     )
       .push(
-        {
-          kind: "dismiss_dlq",
-          label: "Dismiss DLQ item",
-          target: target.merge({dlq_id: dlq.dlq_id}),
-          effect: "orchestrator_dlq_state",
-          requires_approval: true,
-        },
-      )
+      {
+        kind: "dismiss_dlq",
+        label: "Dismiss DLQ item",
+        target: target.merge({dlq_id: dlq.dlq_id}),
+        effect: "orchestrator_dlq_state",
+        requires_approval: true,
+      },
+    )
   }
   return out
 }
@@ -498,13 +502,7 @@ fn __job_default_actions(kind, job_id, run_id, approval, dlq, receipt_refs, repl
  * @errors: []
  * @api_stability: experimental
  */
-pub fn dashboard_job_dedupe_key(
-  kind,
-  job_id,
-  run_id = nil,
-  timestamp = nil,
-  source_id = nil,
-) -> string {
+pub fn dashboard_job_dedupe_key(kind, job_id, run_id = nil, timestamp = nil, source_id = nil) -> string {
   const seed = __job_text(kind)
     + "\n"
     + __job_text(job_id)
@@ -671,7 +669,8 @@ pub fn dashboard_job_emit(input: DashboardJobEvent, options = nil) -> DashboardJ
   const opts = options ?? {}
   const event = dashboard_job_validate(input)
   const topic = opts.topic ?? DASHBOARD_JOB_EVENT_TOPIC
-  const event_log_id = event_log.emit(
+  const event_log_id = event_log
+    .emit(
     topic,
     DASHBOARD_JOB_EVENT_KIND,
     event,
@@ -780,7 +779,8 @@ fn __job_card_from_event(event) {
 fn __job_merge_card(card, event) {
   const status_neutral = event.kind == "receipt.available" || event.kind == "replay_fixture.available"
   return filter_nil(
-    card.merge(
+    card
+      .merge(
       {
         title: status_neutral ? card.title : event.title,
         status: status_neutral ? card.status : event.status,

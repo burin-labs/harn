@@ -44,9 +44,8 @@ pipeline main() {
       const resumed_tail = resumed_msgs[len(resumed_msgs) - 1].content
       const next_msgs = calls[2].messages
       const next_tail = next_msgs[len(next_msgs) - 1].content
-      const remaining = transcript_events_by_kind(completed.transcript, "system_reminder").filter(
-        { event -> event.reminder.dedupe_key == "resume_continuity" },
-      )
+      const remaining = transcript_events_by_kind(completed.transcript, "system_reminder")
+        .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
       __io_println(suspended.status)
       __io_println(resumed.status)
       __io_println(completed.status)

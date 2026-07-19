@@ -103,6 +103,7 @@ for routes that declare video support. `std/llm/media` also provides
 | `cache_read_tokens` | int | Prompt tokens served from provider-side cache when supported |
 | `cache_write_tokens` | int | Prompt tokens written into provider-side cache when supported |
 | `cache_creation_input_tokens` | int | Anthropic-compatible alias for `cache_write_tokens` |
+| `usage.cost_usd` | float \| nil | Catalog-priced response cost; `nil` when pricing is unknown |
 | `cache_hit_ratio` | float | Fraction of prompt tokens served from provider-side cache |
 | `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; cache writes can be negative when writes cost more than normal input |
 | `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
@@ -132,6 +133,7 @@ call sites toward it.
 | `provider` | string | `"anthropic"` | Any configured provider. Built-in names include `"anthropic"`, `"openai"`, `"openrouter"`, `"huggingface"`, `"ollama"`, `"gemini"`, and `"local"` |
 | `model` | string | varies by provider | Model identifier |
 | `model_role` | string | nil | Fill missing call options from `[model_roles.<role>]` before normal provider/model/routing resolution. Explicit call options win. The `merge`/`fast_apply` roles also read `HARN_LLM_MERGE_*` and `HARN_LLM_FAST_APPLY_*` provider/model/route-policy overrides. |
+| `mock_scope` | string | `"default"` | Logical purpose bucket used only by deterministic mock-fixture replay. V1 fixtures match this scope first and may fall through to `default` only when `strictScopes` is false. Real providers ignore it. |
 | `models` | list | nil | Inline model ladder (`ModelLadder`): a cheap-first fallback tried in order. Entries are model strings or `{provider?, model?, options?, label?}` steps. Advances to the next rung **only on route failures** (429/5xx/timeout/circuit-open, including an empty generation after its bounded same-route retry), never on schema-validation failures (those re-ask the same rung). Mutually exclusive with `ladder`, with explicit `model`/`provider`, and with `routing`. See [Model ladders](../docs/llm/harn-quickref.md#model-ladders-models--ladder). |
 | `ladder` | string | nil | Name of a catalog ladder declared under `[model_ladders.<name>]`. Same cheap-first, advance-on-transport-failure semantics as `models`; mutually exclusive with the same options. |
 | `route_policy` | string | nil | Select a catalog-backed route policy such as `cheapest_over_quality(mid)`. Preference alternatives lower to the canonical routing executor. |
@@ -403,7 +405,7 @@ Envelope fields:
 | `attempts` | int | Number of model calls made. `1` = no retries; `2+` = schema retries kicked in. `0` only when arg parsing failed before any call. |
 | `repaired` | bool | `true` when the repair pass produced valid JSON. |
 | `extracted_json` | bool | `true` when JSON had to be lifted from prose / markdown fences. |
-| `usage` | `{input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_creation_input_tokens, cache_hit_ratio, cache_savings_usd, served_fast}` | Token and prompt-cache accounting from the final attempt. |
+| `usage` | dict | Final-attempt token, priced-cost, and prompt-cache accounting. Unknown `cost_usd` stays `nil`. |
 | `model` | string | Model that produced the final attempt. |
 | `provider` | string | Provider that produced the final attempt. |
 

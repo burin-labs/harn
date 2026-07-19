@@ -15,7 +15,9 @@ pipeline default() {
     + "world"
   __io_println(d)
   // Multiline method chaining
-  const e = [1, 2, 3, 4, 5].filter({ x -> x > 2 }).map({ x -> x * 10 })
+  const e = [1, 2, 3, 4, 5]
+    .filter({ x -> x > 2 })
+    .map({ x -> x * 10 })
   __io_println(e)
   // Multiline |> pipe
   const f = "hello world"

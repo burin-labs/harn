@@ -234,9 +234,8 @@ fn harn_command_argv(subcommand: string) -> list<string> {
   if harn_bin != nil && harn_bin != "" {
     return [harn_bin, subcommand]
   }
-  const meta = harness.process.spawn_captured(
-    {cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
-  )
+  const meta = harness.process
+    .spawn_captured({cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]})
   if meta.success {
     const parsed = try {
       json_parse(meta.stdout)
@@ -267,7 +266,8 @@ pipeline main(task) {
   /* The runtime sandbox only permits writes inside the workspace root,
    * so the scratch directory lives there (and is removed afterward)
    * rather than under the system temp dir the Python version used. */
-  const mk = harness.process.spawn_captured({cmd: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]})
+  const mk = harness.process
+    .spawn_captured({cmd: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]})
   if !mk.success {
     __io_eprintln("error: could not create temp directory")
     return 1

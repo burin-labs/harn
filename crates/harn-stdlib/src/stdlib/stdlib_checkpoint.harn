@@ -52,10 +52,7 @@ fn __checkpoint_stage_fingerprint(identity: unknown) -> string {
   return "sha256:" + sha256(json_stringify(identity))
 }
 
-fn __checkpoint_stage_keyed_record(
-  name: string,
-  fingerprint: string,
-) -> KeyedCheckpointStageRecord? {
+fn __checkpoint_stage_keyed_record(name: string, fingerprint: string) -> KeyedCheckpointStageRecord? {
   guard checkpoint_exists(name) else {
     return nil
   }
@@ -133,12 +130,7 @@ pub fn checkpoint_stage_retry(name, max_retries, f) {
  * @effects: []
  * @errors: []
  */
-pub fn checkpoint_stage_keyed_retry(
-  name: string,
-  identity: unknown,
-  max_retries: int,
-  f,
-) -> unknown {
+pub fn checkpoint_stage_keyed_retry(name: string, identity: unknown, max_retries: int, f) -> unknown {
   const fingerprint = __checkpoint_stage_fingerprint(identity)
   const cached = __checkpoint_stage_keyed_record(name, fingerprint)
   if cached != nil {

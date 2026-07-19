@@ -175,7 +175,8 @@ fn main(harness: Harness) -> int {
     || !contains(["meter-tune", "meter-holdout"], split)
     || minimum_trials < 5
     || !shared_ledger {
-    harness.stdio.eprintln(
+    harness.stdio
+      .eprintln(
       "set distinct commits, provider, model, frozen split, N>=5, and an absolute shared SQLite event-log path",
     )
     return 2

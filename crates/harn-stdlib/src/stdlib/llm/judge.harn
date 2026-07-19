@@ -122,7 +122,8 @@ pub fn parallel_judge(candidates, eval_set, metric, options = nil) {
     const case_scores = parallel each case_rows with { max_concurrent: _max_concurrent } { case_row ->
       __score_case(candidate, case_row.case, case_row.index, row.index, metric)
     }
-    scored = scored.push(
+    scored = scored
+      .push(
       {
         index: row.index,
         candidate: candidate,

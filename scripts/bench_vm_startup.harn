@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 
 type StartupSummary = {min_ms: float, avg_ms: float, max_ms: float}
 
@@ -61,9 +61,8 @@ pub fn summary_row(summary: StartupSummary) -> string {
 
 fn run_once_ms(harn_bin: string, fixture: string, cache_dir: string) -> float {
   const started = harness.clock.monotonic_ms()
-  const result = harness.process.spawn_captured(
-    {cmd: harn_bin, args: ["run", fixture], env: {HARN_CACHE_DIR: cache_dir}},
-  )
+  const result = harness.process
+    .spawn_captured({cmd: harn_bin, args: ["run", fixture], env: {HARN_CACHE_DIR: cache_dir}})
   const elapsed = harness.clock.monotonic_ms() - started
   if !result.success {
     if result.stderr != "" {
@@ -82,28 +81,34 @@ fn measure_runs(harn_bin: string, fixture: string, runs: int, cache_dir: string)
   return summarize_samples(samples)
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "harn_bin", flags: ["--harn-bin"], parse: "string", default: ""},
-    {kind: "option", name: "fixture", flags: ["--fixture"], parse: "string", default: ""},
-    {kind: "option", name: "runs", flags: ["--runs"], parse: "string", default: "1"},
-    {kind: "option", name: "cache_dir", flags: ["--cache-dir"], parse: "string", default: ""},
-  ]
+fn arg_spec() {
+  return parser(
+    {
+      name: "bench_vm_startup",
+      args: [
+        {kind: "flag", name: "harn_bin", long: "--harn-bin", parse: "string", default: ""},
+        {kind: "flag", name: "fixture", long: "--fixture", parse: "string", default: ""},
+        {kind: "flag", name: "runs", long: "--runs", parse: "string", default: "1"},
+        {kind: "flag", name: "cache_dir", long: "--cache-dir", parse: "string", default: ""},
+      ],
+    },
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
-    harness.stdio.println(
+  if help_requested(argv) {
+    harness.stdio
+      .println(
       "usage: harn run scripts/bench_vm_startup.harn -- --harn-bin BIN --fixture PATH --runs N --cache-dir DIR",
     )
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const harn_bin = to_string(parsed?.harn_bin ?? "")
   const fixture = to_string(parsed?.fixture ?? "")
   const cache_dir = to_string(parsed?.cache_dir ?? "")

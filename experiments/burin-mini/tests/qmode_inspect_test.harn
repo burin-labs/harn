@@ -63,7 +63,8 @@ fn write_json(path: string, value) -> nil {
 
 fn write_valid_fixture(task_dir: string) -> nil {
   write_json(path_join(task_dir, "task.json"), {task: "add per-IP rate limiting"})
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(task_dir, "qa.jsonl"),
     json_stringify(
       {
@@ -83,7 +84,8 @@ fn write_valid_fixture(task_dir: string) -> nil {
       ready: true,
     },
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(task_dir, "llm-mock.jsonl"),
     json_stringify(
       {
@@ -109,7 +111,8 @@ fn write_valid_fixture(task_dir: string) -> nil {
       + "\n",
   )
   write_json(path_join(task_dir, "step.json"), {tool_calls: [{name: "exit_plan_mode"}]})
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(task_dir, "last-prompt.txt"),
     "- Q: Which backing store should rate limits use?\n  A: Use Redis.\n",
   )
@@ -141,7 +144,8 @@ pipeline test_qmode_inspect_terminal_double_call_fails(_task) {
   with_temp_dir(
     { task_dir ->
       write_json(path_join(task_dir, "task.json"), {task: "improve performance"})
-      harness.fs.write_text(
+      harness.fs
+        .write_text(
         path_join(task_dir, "llm-mock.jsonl"),
         json_stringify(
           {

@@ -6,7 +6,7 @@
 import { agent_host_tools } from "std/agent/host_tools"
 import { agent_first_tool_format_override_warning_text } from "std/agent/options"
 import { agent_preset } from "std/agent/presets"
-import { parse_args } from "std/cli"
+import { parse, parser } from "std/cli/argparse"
 import { command_run } from "std/command"
 import { edit_apply_old_new_patch } from "std/edit"
 import { write_json } from "std/fs"
@@ -43,23 +43,28 @@ fn __workspace_path(root: string, path: string) -> string {
 
 fn __seed_python_add(harness: Harness, root: string) {
   harness.fs.mkdir(path_join(root, "tests"))
-  harness.fs.write_text(path_join(root, "math_utils.py"), "def add(a, b):\n    return a - b\n")
-  harness.fs.write_text(
+  harness.fs
+    .write_text(path_join(root, "math_utils.py"), "def add(a, b):\n    return a - b\n")
+  harness.fs
+    .write_text(
     path_join(root, "tests", "test_math_utils.py"),
     "import unittest\n\nfrom math_utils import add\n\n\nclass MathUtilsTest(unittest.TestCase):\n    def test_adds_two_numbers(self):\n        self.assertEqual(add(2, 3), 5)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "README.md"),
     "# Mini coding-agent fixture\n\nThe `add` helper is intentionally broken.\n",
   )
 }
 
 fn __seed_cli_help_flag(harness: Harness, root: string) {
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "app.py"),
     "import argparse\n\n\ndef build_parser():\n    parser = argparse.ArgumentParser(description=\"Print a greeting.\")\n    parser.add_argument(\"name\", help=\"Name to greet.\")\n    return parser\n\n\ndef main(argv=None):\n    args = build_parser().parse_args(argv)\n    print(f\"Hello, {args.name}!\")\n\n\nif __name__ == \"__main__\":\n    main()\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "README.md"),
     "# Greeting CLI\n\nRun `python app.py Ada` to print `Hello, Ada!`.\n",
   )
@@ -67,26 +72,31 @@ fn __seed_cli_help_flag(harness: Harness, root: string) {
 
 fn __seed_test_output_first(harness: Harness, root: string) {
   harness.fs.mkdir(path_join(root, "tests"))
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "stats_utils.py"),
     "def median(values):\n    ordered = sorted(values)\n    mid = len(ordered) // 2\n    return ordered[mid]\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "tests", "test_stats_utils.py"),
     "import unittest\n\nfrom stats_utils import median\n\n\nclass StatsUtilsTest(unittest.TestCase):\n    def test_even_count_uses_average_of_middle_pair(self):\n        self.assertEqual(median([10, 2, 4, 6]), 5)\n\n    def test_odd_count_uses_middle_value(self):\n        self.assertEqual(median([9, 1, 4]), 4)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
   )
 }
 
 fn __seed_docs_symbol_rename(harness: Harness, root: string) {
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "greeter.py"),
     "def format_greeting(name):\n    return f\"Hello, {name}!\"\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "example.py"),
     "from greeter import make_greeting\n\n\nprint(make_greeting(\"Ada\"))\n",
   )
-  harness.fs.write_text(
+  harness.fs
+    .write_text(
     path_join(root, "README.md"),
     "# Greeter\n\nUse `make_greeting(name)` to build the greeting shown in `example.py`.\n",
   )
@@ -704,11 +714,7 @@ fn __final_text(result) -> string {
  * Accepts native providers that make redundant read calls, but still requires
  * a README read, no non-read tools, the final audit token, and unchanged files.
  */
-pub fn coding_agent_read_only_audit_verification_success(
-  readme: string,
-  settings: string,
-  result,
-) -> bool {
+pub fn coding_agent_read_only_audit_verification_success(readme: string, settings: string, result) -> bool {
   return __read_only_audit_tool_calls_are_valid(result)
     && contains(__final_text(result), "AUDIT_OK")
     && readme == __READ_ONLY_AUDIT_README
@@ -947,32 +953,33 @@ fn __summary(
 }
 
 fn main(harness: Harness) {
-  const args = parse_args(
-    argv,
-    [
-      {kind: "option", name: "fixture", flags: ["--fixture"], required: true},
-      {kind: "option", name: "task", flags: ["--task"], default: ""},
-      {kind: "option", name: "workspace_root", flags: ["--workspace-root"]},
-      {kind: "option", name: "output_dir", flags: ["--output-dir"], required: true},
-      {kind: "option", name: "provider", flags: ["--provider"], default: "mock"},
-      {kind: "option", name: "model", flags: ["--model"], default: "mock"},
-      {kind: "option", name: "tool_format", flags: ["--tool-format"], default: "native"},
-      {kind: "option", name: "max_iterations", flags: ["--max-iterations"], parse: "int", default: 8},
-      {kind: "option", name: "python", flags: ["--python"], default: "python3"},
-      {kind: "flag", name: "seed_mock", flags: ["--seed-mock"]},
-      {kind: "option", name: "step_judge_json", flags: ["--step-judge-json"], default: ""},
-      {kind: "option", name: "override_reason", flags: ["--override-reason"], default: ""},
+  const parsed = parse(
+    parser(
       {
-        kind: "option",
-        name: "structural_validator_json",
-        flags: ["--structural-validator-json"],
-        default: "",
+        name: "coding_agent_suite",
+        args: [
+          {kind: "flag", name: "fixture", long: "--fixture", required: true},
+          {kind: "flag", name: "task", long: "--task", default: ""},
+          {kind: "flag", name: "workspace_root", long: "--workspace-root"},
+          {kind: "flag", name: "output_dir", long: "--output-dir", required: true},
+          {kind: "flag", name: "provider", long: "--provider", default: "mock"},
+          {kind: "flag", name: "model", long: "--model", default: "mock"},
+          {kind: "flag", name: "tool_format", long: "--tool-format", default: "native"},
+          {kind: "flag", name: "max_iterations", long: "--max-iterations", parse: "int", default: 8},
+          {kind: "flag", name: "python", long: "--python", default: "python3"},
+          {kind: "switch", name: "seed_mock", long: "--seed-mock"},
+          {kind: "flag", name: "step_judge_json", long: "--step-judge-json", default: ""},
+          {kind: "flag", name: "override_reason", long: "--override-reason", default: ""},
+          {kind: "flag", name: "structural_validator_json", long: "--structural-validator-json", default: ""},
+        ],
       },
-    ],
+    ),
+    argv,
   )
-  if len(args._errors) > 0 {
-    throw join(args._errors, "\n")
+  if is_err(parsed) {
+    throw unwrap_err(parsed).message
   }
+  const args = unwrap(parsed).options
   const output_dir = args.output_dir
   const root = args.workspace_root ?? path_join(output_dir, "workspace")
   __seed_workspace(harness, root, args.fixture)

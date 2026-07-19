@@ -108,7 +108,6 @@ impl A2aServer {
             tasks: self.tasks.clone(),
         });
         harn_vm::agent_events::register_sink(session_id.clone(), sink.clone());
-        let _sink_registration = AgentEventSinkRegistration::new(session_id.clone());
 
         let result = self
             .executor
@@ -135,7 +134,22 @@ impl A2aServer {
             })
             .await;
 
+        let sink_result = harn_vm::agent_events::flush_and_clear_session_sinks(&session_id).await;
         if self.is_cancelled(&task.id) {
+            if let Err(error) = sink_result {
+                self.record_task_persistence_error(&task.id, &error);
+            }
+            return;
+        }
+
+        if let Err(error) = sink_result {
+            let message = match result {
+                Ok(_) => format!("Failed to persist agent events: {error}"),
+                Err(dispatch_error) => {
+                    format!("{dispatch_error}; failed to persist agent events: {error}")
+                }
+            };
+            self.fail_task(&task.id, &message);
             return;
         }
 
@@ -165,6 +179,25 @@ impl A2aServer {
             }
             Err(error) => self.fail_task(&task.id, &error.to_string()),
         }
+    }
+
+    fn record_task_persistence_error(
+        &self,
+        task_id: &str,
+        error: &harn_vm::agent_events::AgentEventSinkError,
+    ) {
+        let mut tasks = self.tasks.lock().expect("tasks poisoned");
+        let Some(task) = tasks.get_mut(task_id) else {
+            return;
+        };
+        let harn = task
+            .metadata
+            .entry("harn".to_string())
+            .or_insert_with(|| json!({}));
+        if !harn.is_object() {
+            *harn = json!({});
+        }
+        harn["persistenceError"] = JsonValue::String(error.to_string());
     }
 
     pub(super) fn transition(&self, task_id: &str, status: TaskStatus) {
@@ -539,24 +572,5 @@ impl A2aServer {
                 }
             }
         });
-    }
-}
-
-struct AgentEventSinkRegistration {
-    session_id: String,
-}
-
-impl AgentEventSinkRegistration {
-    fn new(session_id: String) -> Self {
-        Self { session_id }
-    }
-}
-
-impl Drop for AgentEventSinkRegistration {
-    fn drop(&mut self) {
-        // Keep the sink registered until the terminal task transition has
-        // been published. Progress events can otherwise be lost as the VM
-        // dispatch result crosses back to the transport runtime.
-        harn_vm::agent_events::clear_session_sinks(&self.session_id);
     }
 }

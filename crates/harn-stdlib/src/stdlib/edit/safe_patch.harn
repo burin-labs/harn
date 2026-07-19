@@ -60,7 +60,8 @@ fn __edit_lifecycle_rejection(kind, verdict) {
 fn __edit_lifecycle_reject_fields(kind, rejection, fields = nil) {
   const reason = rejection?.reason ?? (kind + " rejected the edit")
   const code = rejection?.code ?? (kind + "_rejected")
-  return (fields ?? {}).merge(
+  return (fields ?? {})
+    .merge(
     {
       result: "rejected",
       errors: [{code: code, message: reason, reason: reason, cause: rejection?.cause, lifecycle_hook: kind}],

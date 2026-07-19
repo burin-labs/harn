@@ -608,8 +608,9 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         args: &cmd_args,
         cwd: cwd.as_deref(),
         env: &env_overrides,
-        // `spawn_captured` has always layered `env` over the inherited
-        // parent environment, so keep that merge behavior.
+        // `spawn_captured` layers `env` over the ambient environment rather
+        // than replacing it. Under a session profile that ambient base is the
+        // resolver's allowlist + grants, not the raw parent env.
         env_clear: false,
         stdin: stdin_bytes,
         timeout,
@@ -666,8 +667,9 @@ struct CapturedRun {
 
 /// Shared synchronous spawn-and-capture core used by `spawn_captured` and the
 /// `exec_opts`/`exec_at_opts` convenience builtins. Honors cwd, an env
-/// overlay (merge or replace via `env_clear`), optional stdin, and an optional
-/// wall-clock timeout (after which the child is killed and `timed_out` is set).
+/// overlay (merge or replace via `env_clear`), the live session profile's
+/// closed environment, optional stdin, and an optional wall-clock timeout
+/// (after which the child is killed and `timed_out` is set).
 ///
 /// The child runs in its own process group and the wait polls
 /// [`crate::op_interrupt::requested`], so scope cancellation, `deadline`
@@ -681,10 +683,20 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     if let Some(cwd) = spec.cwd {
         command.current_dir(cwd);
     }
-    if spec.env_clear {
+    // A `replace` request (`env_clear`) is already closed — only the caller's
+    // keys survive — so it needs no further narrowing. A `merge` request would
+    // otherwise inherit the parent environment wholesale, which under a session
+    // profile means credentials crossing into the child. Route it through the
+    // same resolver `process_command_config` uses so both seams close together.
+    let profile_env = if spec.env_clear {
+        None
+    } else {
+        session_closed_env(spec.env.iter().cloned())?
+    };
+    if spec.env_clear || profile_env.is_some() {
         command.env_clear();
     }
-    for (key, value) in spec.env {
+    for (key, value) in profile_env.as_deref().unwrap_or(spec.env) {
         command.env(key, value);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -781,9 +793,11 @@ struct ExecOptions {
 /// Extract `exec_opts` / `exec_at_opts` options into an [`ExecOptions`].
 ///
 /// `env_mode` mirrors the `process.exec` host op (and the env-clear footgun
-/// fix): the default is `"merge"` (overlay `env` keys on the inherited parent
-/// environment, keeping PATH/HOME/etc.); `"replace"` clears the parent
-/// environment first so only the provided keys remain.
+/// fix): the default is `"merge"` (overlay `env` keys on the ambient
+/// environment, keeping PATH/HOME/etc.); `"replace"` clears that environment
+/// first so only the provided keys remain. Under a session profile the ambient
+/// base a `"merge"` sees is the resolver's allowlist + grants, not the raw
+/// parent env — see [`session_closed_env`].
 fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, VmError> {
     let opts = match options {
         None | Some(VmValue::Nil) => return Ok(ExecOptions::default()),
@@ -1064,32 +1078,50 @@ fn process_command_config(
     if let Some(value) = env_override(HARN_REPLAY_ENV) {
         config.env.push((HARN_REPLAY_ENV.to_string(), value));
     }
-    // When the session launched under a capability profile, switch to the
-    // closed-by-construction environment: `resolve_env` composes the allowlisted
-    // subset of the parent env plus the profile's granted exposure. The
-    // host-set/execution-context overlays already collected in `config.env`
-    // (worktree paths, HARN_REPLAY, ...) win over the resolver base, then the
-    // whole set is handed to the child with the parent env cleared. A hermetic
-    // profile contributes no grants, so its child sees the allowlist alone.
-    if let Some(profile) = current_session_profile() {
-        let resolved = crate::security::resolve_env(
-            &profile,
-            &|name| std::env::var(name).ok(),
-            &resolve_grant_secret,
-        )
-        .map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "session grant env resolution failed: {error}"
-            ))))
-        })?;
-        let mut env: BTreeMap<String, String> = resolved;
-        for (key, value) in config.env.drain(..) {
-            env.insert(key, value);
-        }
-        config.env = env.into_iter().collect();
+    // `iter().cloned()`, not `drain(..)`: `Drain`'s destructor removes the
+    // range even when the iterator is never consumed, so draining here would
+    // silently empty `config.env` on the no-profile path.
+    if let Some(env) = session_closed_env(config.env.iter().cloned())? {
+        config.env = env;
         config.closed_env = true;
     }
     Ok(config)
+}
+
+/// The single place a live session profile becomes a child environment.
+///
+/// Returns `None` when no profile governs this session — the legacy path, where
+/// children inherit the parent environment and `overlay` is layered on top.
+/// Returns `Some(env)` when a profile is active: `resolve_env` composes the
+/// allowlisted subset of the parent env plus the profile's granted exposure,
+/// and `overlay` (worktree paths, `HARN_REPLAY`, caller-supplied `env`, ...)
+/// wins over that base. The caller must hand the result to the child with the
+/// inherited environment CLEARED — a closed env is only closed if nothing
+/// leaks in behind it. A hermetic profile contributes no grants, so its child
+/// sees the allowlist alone.
+///
+/// Every spawn seam must route through here. `resolve_env` is documented as the
+/// single environment builder, and a seam that skips it silently reopens the
+/// credential boundary the profile exists to close (harn#5011).
+pub(crate) fn session_closed_env(
+    overlay: impl Iterator<Item = (String, String)>,
+) -> Result<Option<Vec<(String, String)>>, VmError> {
+    let Some(profile) = current_session_profile() else {
+        return Ok(None);
+    };
+    let resolved = crate::security::resolve_env(
+        &profile,
+        &|name| std::env::var(name).ok(),
+        &resolve_grant_secret,
+    )
+    .map_err(|error| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "session grant env resolution failed: {error}"
+        ))))
+    })?;
+    let mut env: BTreeMap<String, String> = resolved;
+    env.extend(overlay);
+    Ok(Some(env.into_iter().collect()))
 }
 
 /// Resolve a `secret_store` grant pointer to its value through the crate's

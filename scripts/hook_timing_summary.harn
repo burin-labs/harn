@@ -1,4 +1,4 @@
-import { parse_args } from "std/cli"
+import { help_requested, parse, parser } from "std/cli/argparse"
 
 type HookTimingEvent = {
   ts: string?,
@@ -211,10 +211,7 @@ fn duration_stats(durations: list<int>) -> DurationStats {
   }
 }
 
-fn summarize_hook_timing_groups(
-  events: list<HookTimingEvent>,
-  by_worktree: bool,
-) -> list<HookTimingGroup> {
+fn summarize_hook_timing_groups(events: list<HookTimingEvent>, by_worktree: bool) -> list<HookTimingGroup> {
   let by_key = {}
   for event in events {
     const repo = if by_worktree {
@@ -368,9 +365,8 @@ pub fn summarize_hook_timing_worktrees(events: list<HookTimingEvent>) -> list<Ho
 }
 
 fn observation_window(events: list<HookTimingEvent>) -> string {
-  const timestamps = events.filter({ event -> event.ts != nil }).map({ event -> event.ts ?? "" }).to_list().sort_by(
-    { value -> value },
-  )
+  const timestamps = events.filter({ event -> event.ts != nil }).map({ event -> event.ts ?? "" }).to_list()
+    .sort_by({ value -> value })
   if timestamps.count == 0 {
     return "unknown"
   }
@@ -378,13 +374,16 @@ fn observation_window(events: list<HookTimingEvent>) -> string {
 }
 
 pub fn derive_hook_timing_budgets(events: list<HookTimingEvent>) -> HookTimingBudgetReport {
-  const successful = events.filter({ event -> (event.exit_code ?? 0) == 0 && event.profile != "legacy" }).to_list()
+  const successful = events
+    .filter({ event -> (event.exit_code ?? 0) == 0 && event.profile != "legacy" })
+    .to_list()
   let limits: dict<string, HookTimingBudget> = {}
   for group in summarize_hook_timings(successful) {
     if group.count < 4 {
       continue
     }
-    const samples = successful.filter(
+    const samples = successful
+      .filter(
       { event -> event.repository == group.repository && event.profile == group.profile
         && event.hook == group.hook },
     )
@@ -418,10 +417,7 @@ pub fn slowest_hook_timings(events: list<HookTimingEvent>, limit: int) -> list<H
   return sorted.slice(0, limit)
 }
 
-pub fn filter_hook_timings(
-  events: list<HookTimingEvent>,
-  filters: HookTimingFilters,
-) -> list<HookTimingEvent> {
+pub fn filter_hook_timings(events: list<HookTimingEvent>, filters: HookTimingFilters) -> list<HookTimingEvent> {
   let out: list<HookTimingEvent> = []
   for event in events {
     if filters.repo != ""
@@ -573,32 +569,37 @@ pub fn render_hook_timing_report(report: HookTimingReport, limit: int) -> string
   return join(lines, "\n")
 }
 
-fn arg_spec() -> list {
-  return [
-    {kind: "option", name: "input", flags: ["--input"], parse: "string", default: ""},
-    {kind: "option", name: "limit", flags: ["--limit"], parse: "int", default: 10},
-    {kind: "option", name: "repo", flags: ["--repo"], parse: "string", default: ""},
-    {kind: "option", name: "hook", flags: ["--hook"], parse: "string", default: ""},
-    {kind: "option", name: "min_ms", flags: ["--min-ms"], parse: "int", default: 0},
-    {kind: "flag", name: "json", flags: ["--json"], default: false},
-    {kind: "flag", name: "budgets", flags: ["--budgets"], default: false},
-    {kind: "flag", name: "worktrees", flags: ["--worktrees"], default: false},
-  ]
+fn arg_spec() {
+  return parser(
+    {
+      name: "hook_timing_summary",
+      args: [
+        {kind: "flag", name: "input", long: "--input", parse: "string", default: ""},
+        {kind: "flag", name: "limit", long: "--limit", parse: "int", default: 10},
+        {kind: "flag", name: "repo", long: "--repo", parse: "string", default: ""},
+        {kind: "flag", name: "hook", long: "--hook", parse: "string", default: ""},
+        {kind: "flag", name: "min_ms", long: "--min-ms", parse: "int", default: 0},
+        {kind: "switch", name: "json", long: "--json", default: false},
+        {kind: "switch", name: "budgets", long: "--budgets", default: false},
+        {kind: "switch", name: "worktrees", long: "--worktrees", default: false},
+      ],
+    },
+  )
 }
 
 fn main(harness: Harness) {
-  const parsed = parse_args(argv, arg_spec())
-  if parsed?._help ?? false {
+  if help_requested(argv) {
     harness.stdio.println(usage())
     return nil
   }
-  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
-    const errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
-    harness.stdio.eprintln(join(errors, "\n"))
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
     harness.stdio.eprintln("")
     harness.stdio.eprintln(usage())
     exit(2)
   }
+  const parsed = unwrap(parsed_result).options
   const input = if to_string(parsed?.input ?? "") == "" {
     default_hook_timing_path(harness.env.get("HOME") ?? "")
   } else {

@@ -20,14 +20,20 @@ all-features = true
 ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
     { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
-    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained; transitive, no vuln. bincode 2.x is a breaking rewrite not yet adopted upstream. https://rustsec.org/advisories/RUSTSEC-2025-0141" },
-
     # --- quick-xml DoS advisories: transitive under xcap (screen capture for
     # computer-use), which is at its latest 0.9.6. The fix (>=0.41.0) is
     # semver-incompatible with what xcb/wayland-scanner pin, so it cannot be
     # resolved without an upstream xcap release. The parsed XML is local
     # X11/Wayland protocol data (not attacker-controlled network input), so the
     # memory-exhaustion / quadratic-parse vectors are not reachable in practice.
+    #
+    # Two further reachability facts, so this does not get re-derived: xcap is
+    # optional behind harn-hostlib's `computer-local` feature, and `default` =
+    # `full` = ["ast", "terminal-session"] — no workspace crate enables
+    # `computer-local`, so quick-xml is not compiled in a default build at all
+    # (`cargo tree -i quick-xml` matches nothing). xcb's copy is additionally a
+    # BUILD-dependency used to generate X11 bindings, so it never ships in the
+    # binary. Both parents are Linux-only.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml quadratic attribute-check; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0194" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml unbounded namespace alloc; transitive via xcap@0.9.6 (latest) -> xcb/wayland. Fix >=0.41 semver-blocked upstream; local display-protocol data only. https://rustsec.org/advisories/RUSTSEC-2026-0195" },
 ]

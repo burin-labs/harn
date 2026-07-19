@@ -57,10 +57,7 @@ fn manifest_schema() -> Schema<Manifest> {
   )
 }
 
-fn read_structured_result(
-  format: StructuredDataFormat,
-  path: string,
-) -> Result<unknown, StructuredReadFailure> {
+fn read_structured_result(format: StructuredDataFormat, path: string) -> Result<unknown, StructuredReadFailure> {
   if format == "json" {
     return read_json_result(path)
   }
@@ -85,11 +82,7 @@ fn read_manifest_result(
   return read_toml_typed_result(path, schema, apply_defaults)
 }
 
-fn read_manifest_required(
-  format: StructuredDataFormat,
-  path: string,
-  schema: Schema<Manifest>,
-) -> Manifest {
+fn read_manifest_required(format: StructuredDataFormat, path: string, schema: Schema<Manifest>) -> Manifest {
   if format == "json" {
     return read_json_typed(path, schema)
   }
@@ -148,7 +141,8 @@ pipeline default(task) {
   __io_println(too_deep.kind)
   __io_println(too_deep.line > 0 && too_deep.column > 0)
   const deep_malformed_path = path_join(root, "deep-malformed.json")
-  harness.fs.write_text(deep_malformed_path, "[".repeat(128) + "x" + "]".repeat(128))
+  harness.fs
+    .write_text(deep_malformed_path, "[".repeat(128) + "x" + "]".repeat(128))
   const deep_malformed = unwrap_err(read_json_result(deep_malformed_path))
   __io_println(deep_malformed.kind)
   const typed_path = path_join(root, "typed.json")

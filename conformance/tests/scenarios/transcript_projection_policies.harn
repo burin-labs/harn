@@ -71,7 +71,8 @@ fn long_gc_transcript(stale_count) {
     for j in range(0, 24) {
       body = body + "stale output " + to_string(i) + " line " + to_string(j) + "\n"
     }
-    messages = messages.push(
+    messages = messages
+      .push(
       {role: "assistant", content: "", tool_calls: [{id: call_id, name: "read", arguments: {path: path}}]},
     )
     messages = messages.push({role: "tool", tool_call_id: call_id, name: "read", content: body})
@@ -80,7 +81,8 @@ fn long_gc_transcript(stale_count) {
   for k in range(0, 24) {
     live_body = live_body + "live output line " + to_string(k) + "\n"
   }
-  messages = messages.push(
+  messages = messages
+    .push(
     {
       role: "assistant",
       content: "",

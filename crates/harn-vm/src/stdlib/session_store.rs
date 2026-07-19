@@ -22,7 +22,7 @@ use crate::llm::vm_value_to_json;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{optional_dict_arg, required_string_arg, ErrorKind};
-use crate::value::{DictMap, VmError, VmValue};
+use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 const LEGACY_STORE_DIR: &str = "session-store";
@@ -309,7 +309,19 @@ async fn ensure_session(
     }
 }
 
-async fn read_all_events(
+/// Open the canonical store for a VM-owned agent session. The live transcript
+/// journal uses this adapter instead of reproducing SQLite setup, redaction,
+/// legacy import, or session-creation policy.
+pub(crate) async fn open_canonical_agent_session(
+    root: &Path,
+    session_id: &str,
+) -> Result<SqliteSessionStore, VmError> {
+    let store = open_store(root)?;
+    ensure_session(&store, root, session_id, true, None).await?;
+    Ok(store)
+}
+
+pub(crate) async fn read_all_events(
     store: &SqliteSessionStore,
     session_id: &str,
 ) -> Result<Vec<StoredEvent>, VmError> {
@@ -513,7 +525,7 @@ fn verify_report_value(report: VerifyReport, broken_at: Option<usize>) -> Result
     Ok(json_to_vm_value(&value))
 }
 
-fn store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
+pub(crate) fn canonical_store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
     Ok(option_string(options, "root")?
         .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
         .or_else(|| {
@@ -523,6 +535,10 @@ fn store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
                 .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
         })
         .unwrap_or_else(crate::stdlib::process::runtime_root_base))
+}
+
+fn store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
+    canonical_store_root(options)
 }
 
 fn legacy_session_path(root: &Path, session_id: &str) -> Result<PathBuf, VmError> {
@@ -749,12 +765,35 @@ fn normalize_legacy_identity_headers(
 }
 
 fn store_error(error: StoreError) -> VmError {
-    VmError::Runtime(format!("session_store: {error}"))
+    let message = format!("session_store: {error}");
+    match error {
+        StoreError::Contention { .. } => categorized_error(message, ErrorCategory::ResourceBusy),
+        _ => VmError::Runtime(message),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_session_store::StoreContention;
+
+    #[test]
+    fn store_contention_maps_to_typed_transient_category() {
+        let error = store_error(StoreError::Contention {
+            kind: StoreContention::DatabaseBusy,
+            message: "database is locked".to_string(),
+        });
+
+        assert_eq!(
+            crate::value::error_to_category(&error),
+            ErrorCategory::ResourceBusy
+        );
+        assert!(ErrorCategory::ResourceBusy.is_transient());
+        assert_eq!(
+            error.to_string(),
+            "Error [resource_busy]: session_store: retryable backend contention (database_busy): database is locked"
+        );
+    }
 
     fn write_legacy_fixture(root: &Path, session_id: &str) -> PathBuf {
         let path = legacy_session_path(root, session_id).unwrap();

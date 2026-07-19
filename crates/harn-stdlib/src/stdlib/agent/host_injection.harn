@@ -43,9 +43,7 @@ pub type HostAttachmentDescriptionOptions = {
   image?: dict,
 }
 
-fn __host_attachment_description_route(
-  options: HostAttachmentDescriptionOptions,
-) -> {provider?: string, model: string}? {
+fn __host_attachment_description_route(options: HostAttachmentDescriptionOptions) -> {provider?: string, model: string}? {
   if options.model != nil && options.model != "" {
     if options.provider == nil {
       return {model: options.model}
@@ -67,10 +65,7 @@ fn __host_attachment_description_route(
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn describe_host_attachment(
-  source: any,
-  options: HostAttachmentDescriptionOptions = {},
-) -> {description: string, description_model: string}? {
+pub fn describe_host_attachment(source: any, options: HostAttachmentDescriptionOptions = {}) -> {description: string, description_model: string}? {
   const route = __host_attachment_description_route(options)
   if route == nil {
     return nil

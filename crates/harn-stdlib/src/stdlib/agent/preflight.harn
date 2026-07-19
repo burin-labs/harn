@@ -479,7 +479,8 @@ fn __agent_context_profile_fragments(opts) {
     if body == "" {
       continue
     }
-    fragments = fragments.push(
+    fragments = fragments
+      .push(
       {
         id: fragment?.id ?? "profile",
         source: fragment?.source ?? "profile",

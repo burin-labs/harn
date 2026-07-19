@@ -1,4 +1,5 @@
-import { persona_compile_prompt } from "std/personas/compiler"
+import { persona_compile_prompt } from "std/personas/prompt_compiler"
+import "std/schema"
 import { llm_text, with_llm_script } from "std/testing"
 
 const PROVIDERS = [
@@ -31,7 +32,8 @@ const PROVIDERS = [
   },
 ]
 
-const PROVIDERS_WITH_ROTATED_SLACK_SECRET = PROVIDERS.map(
+const PROVIDERS_WITH_ROTATED_SLACK_SECRET = PROVIDERS
+  .map(
   { provider ->
     if provider.provider == "slack" {
       provider + {secret_requirements: [{name: "bot_token", required: true, namespace: "slack"}]}
@@ -46,17 +48,20 @@ pipeline test_persona_prompt_compile(_task) {
   with_llm_script(
     [
       llm_text(
-        "{\"schema_version\":\"1\",\"name\":\"sdk_watch\",\"description\":\"Narrates SDK changes.\",\"goal\":\"Watch github.com/acme/sdk every morning.\",\"template\":\"deterministic-sweeper\",\"cron\":{\"cron\":\"0 9 * * *\",\"timezone\":\"UTC\"}}",
+        "{\"schema_version\":\"1\",\"name\":\"sdk_watch\",\"description\":\"Narrates SDK changes.\",\"goal\":\"Watch github.com/acme/sdk every morning.\",\"template\":\"deterministic-sweeper\",\"source\":{\"kind\":\"cron\",\"cron\":\"0 9 * * *\",\"timezone\":\"UTC\"}}",
       )
         + {usage: {input_tokens: 11, output_tokens: 7, total_tokens: 18}},
       llm_text(
-        "{\"schema_version\":\"1\",\"name\":\"alerts_triage\",\"description\":\"Classifies alerts.\",\"goal\":\"Page, investigate, or ignore each alert.\",\"template\":\"hybrid-classify-then-act\",\"external\":{\"provider\":\"slack\",\"event\":\"slack.message\"}}",
+        "{\"schema_version\":\"1\",\"name\":\"alerts_triage\",\"description\":\"Classifies alerts.\",\"goal\":\"Page, investigate, or ignore each alert.\",\"template\":\"hybrid-classify-then-act\",\"source\":{\"kind\":\"external\",\"provider\":\"slack\",\"event\":\"slack.message\"}}",
       ),
       llm_text(
-        "{\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up.\",\"goal\":\"Surface replies every four hours.\",\"template\":\"deterministic-sweeper\",\"cron\":{\"cron\":\"0 */4 * * *\",\"timezone\":\"America/Los_Angeles\"}}",
+        "{\"schema_version\":\"1\",\"name\":\"reply_digest\",\"description\":\"Summarizes follow-up.\",\"goal\":\"Surface replies every four hours.\",\"template\":\"deterministic-sweeper\",\"source\":{\"kind\":\"cron\",\"cron\":\"0 */4 * * *\",\"timezone\":\"America/Los_Angeles\"}}",
       ),
       llm_text(
-        "{\"schema_version\":\"1\",\"name\":\"bad_route\",\"description\":\"Invalid route.\",\"goal\":\"Reject mismatched namespaces.\",\"template\":\"hybrid-classify-then-act\",\"external\":{\"provider\":\"slack\",\"event\":\"github.push\"}}",
+        "{\"schema_version\":\"1\",\"name\":\"bad_route\",\"description\":\"Invalid route.\",\"goal\":\"Reject mismatched namespaces.\",\"template\":\"hybrid-classify-then-act\",\"source\":{\"kind\":\"external\",\"provider\":\"slack\",\"event\":\"github.push\"}}",
+      ),
+      llm_text(
+        "{\"schema_version\":\"1\",\"name\":\"mixed_source\",\"description\":\"Invalid mixed source.\",\"goal\":\"Reject inactive source placeholders.\",\"template\":\"deterministic-sweeper\",\"source\":{\"kind\":\"cron\",\"cron\":\"0 9 * * *\",\"timezone\":\"UTC\",\"provider\":\"slack\",\"event\":\"slack.message\"}}",
       ),
     ],
     { ->
@@ -71,6 +76,38 @@ pipeline test_persona_prompt_compile(_task) {
       assert(sdk.usage.input_tokens > 0, "compiler receipt records realized prompt tokens")
       assert(sdk.usage.output_tokens > 0, "compiler receipt records realized output tokens")
       assert_eq(sdk.usage.total_tokens, sdk.usage.input_tokens + sdk.usage.output_tokens)
+      const prompt_schema = schema_json(llm_mock_calls()[0].output_format.schema)
+      assert_eq(
+        prompt_schema,
+        {
+          type: "object",
+          properties: {
+            schema_version: {const: "1"},
+            name: {type: "string"},
+            description: {type: "string"},
+            goal: {type: "string"},
+            template: {enum: ["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"]},
+            source: {
+              oneOf: [
+                {
+                  type: "object",
+                  properties: {kind: {const: "cron"}, cron: {type: "string"}, timezone: {type: "string"}},
+                  required: ["cron", "kind", "timezone"],
+                  additionalProperties: false,
+                },
+                {
+                  type: "object",
+                  properties: {kind: {const: "external"}, provider: {type: "string"}, event: {type: "string"}},
+                  required: ["event", "kind", "provider"],
+                  additionalProperties: false,
+                },
+              ],
+            },
+          },
+          required: ["description", "goal", "name", "schema_version", "source", "template"],
+          additionalProperties: false,
+        },
+      )
       const sdk_lowering = sdk.lowering
       guard sdk_lowering != nil else {
         throw "SDK prompt did not lower"
@@ -132,7 +169,12 @@ pipeline test_persona_prompt_compile(_task) {
         throw "Rejected prompt has no diagnostic"
       }
       assert_eq(rejected_error.code, "event_namespace_mismatch")
-      assert_eq(len(llm_mock_calls()), 4)
+      const mixed_source = persona_compile_prompt("Compile a mixed source.", {provider: "mock"}, PROVIDERS)
+      assert_eq(mixed_source.ok, false)
+      assert_eq(mixed_source.checkpoint.status, "schema_rejected")
+      assert_eq(mixed_source.checkpoint.attempts, 1)
+      assert_eq(mixed_source.blueprint, nil)
+      assert_eq(len(llm_mock_calls()), 5)
       const over_budget = persona_compile_prompt("Compile me.", {provider: "mock", max_tokens: 1201}, PROVIDERS)
       assert_eq(over_budget.ok, false)
       assert_eq(over_budget.checkpoint.status, "not_attempted")
@@ -141,11 +183,11 @@ pipeline test_persona_prompt_compile(_task) {
         throw "Over-budget prompt has no diagnostic"
       }
       assert_eq(over_budget_error.code, "max_tokens_out_of_range")
-      assert_eq(len(llm_mock_calls()), 4)
+      assert_eq(len(llm_mock_calls()), 5)
       const baseline_catalog = persona_compile_prompt("", {provider: "mock"}, PROVIDERS)
       const rotated_catalog = persona_compile_prompt("", {provider: "mock"}, PROVIDERS_WITH_ROTATED_SLACK_SECRET)
       assert_eq(baseline_catalog.catalog_digest == rotated_catalog.catalog_digest, false)
-      assert_eq(len(llm_mock_calls()), 4)
+      assert_eq(len(llm_mock_calls()), 5)
       log("persona prompt compiler ok")
     },
   )

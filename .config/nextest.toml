@@ -99,6 +99,10 @@ harn-dap = { max-threads = 1 }
 # OS resources. Keep these tests serialized under nextest so a valid sandbox
 # spawn is not forced to contend with several sibling AppContainer launches.
 harn-windows-sandbox = { max-threads = 1 }
+# These tests intentionally execute host-discovered `cargo test` plans. Running
+# several nested compilers together turns a tiny fixture into a scheduler test
+# and can consume the entire per-test timeout on a loaded worker.
+harn-nested-cargo = { max-threads = 1 }
 
 # Transport-layer LLM tests do real localhost TCP with a 3s accept deadline.
 # They're bounded internally but give them a bit more room than the default
@@ -163,6 +167,10 @@ test-group = "harn-dap"
 filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process/)'
 test-group = "harn-windows-sandbox"
 
+[[profile.default.overrides]]
+filter = 'package(harn-hostlib) and test(/host_discovered_test_plan_issues_pass|filtered_discovered_test_plan_cannot_issue_pass|overlapping_top_level_vms_issue_only_their_own_receipts/)'
+test-group = "harn-nested-cargo"
+
 [[profile.ci.overrides]]
 filter = "package(harn-cli) and kind(test)"
 test-group = "harn-subprocess"
@@ -180,6 +188,10 @@ test-group = "harn-dap"
 [[profile.ci.overrides]]
 filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process/)'
 test-group = "harn-windows-sandbox"
+
+[[profile.ci.overrides]]
+filter = 'package(harn-hostlib) and test(/host_discovered_test_plan_issues_pass|filtered_discovered_test_plan_cannot_issue_pass|overlapping_top_level_vms_issue_only_their_own_receipts/)'
+test-group = "harn-nested-cargo"
 
 # Flake-detection profile: zero retries, no fail-fast, tighter slow-test
 # threshold.  Used by the flake-detection CI workflow which runs touched
@@ -217,6 +229,10 @@ leak-timeout = { period = "10s", result = "pass" }
 [[profile.flake-detection.overrides]]
 filter = "package(harn-dap)"
 test-group = "harn-dap"
+
+[[profile.flake-detection.overrides]]
+filter = 'package(harn-hostlib) and test(/host_discovered_test_plan_issues_pass|filtered_discovered_test_plan_cannot_issue_pass|overlapping_top_level_vms_issue_only_their_own_receipts/)'
+test-group = "harn-nested-cargo"
 
 # E2E profile overrides: throttle subprocess concurrency the same way the
 # default/ci profiles do so nightly runs stay deterministic.

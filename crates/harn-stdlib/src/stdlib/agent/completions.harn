@@ -455,11 +455,7 @@ pub fn completion_policy(input = {}) -> CompletionPolicy {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_policy_decision(
-  context = {},
-  route = {},
-  policy = {},
-) -> CompletionPolicyDecision {
+pub fn completion_policy_decision(context = {}, route = {}, policy = {}) -> CompletionPolicyDecision {
   const ctx = completion_context(context)
   const r = __dict(route)
   const p = completion_policy(policy)
@@ -697,12 +693,7 @@ fn __usage_from(proposal, usage) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_shown_event(
-  proposal = {},
-  context = {},
-  usage = {},
-  opts = {},
-) -> CompletionEvent {
+pub fn completion_shown_event(proposal = {}, context = {}, usage = {}, opts = {}) -> CompletionEvent {
   const prop = completion_proposal(proposal)
   const ctx = completion_context(context)
   const options = __dict(opts)
@@ -761,11 +752,7 @@ pub fn completion_shown_event(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_decision_event(
-  shown_event = {},
-  decision = "rejected",
-  opts = {},
-) -> CompletionEvent {
+pub fn completion_decision_event(shown_event = {}, decision = "rejected", opts = {}) -> CompletionEvent {
   const shown = __dict(shown_event)
   const options = __dict(opts)
   const timestamp = __event_timestamp(options)
