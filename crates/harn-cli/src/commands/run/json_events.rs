@@ -282,11 +282,6 @@ impl RunEventSink for NdjsonSink {
 mod tests {
     use super::*;
 
-    /// `harn_vm::run_events::install_sink` writes a process-global
-    /// slot, so any test that swaps the sink must serialize against
-    /// peers.
-    static SINK_LOCK: Mutex<()> = Mutex::new(());
-
     struct BufWriter(Arc<Mutex<Vec<u8>>>);
     impl Write for BufWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -300,7 +295,7 @@ mod tests {
 
     #[test]
     fn emits_monotonic_seq_across_events() {
-        let _guard = SINK_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::tests::common::run_event_sink_lock::lock_run_event_sink();
         let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
         let emitter = NdjsonEmitter::new(Box::new(BufWriter(buf.clone())), false);
         let sink = emitter.sink();
@@ -340,7 +335,7 @@ mod tests {
 
     #[test]
     fn quiet_drops_stdout_and_stderr_without_gaps() {
-        let _guard = SINK_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::tests::common::run_event_sink_lock::lock_run_event_sink();
         let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
         let emitter = NdjsonEmitter::new(Box::new(BufWriter(buf.clone())), true);
         let sink = emitter.sink();
@@ -381,10 +376,9 @@ mod tests {
     // serialization guard for the whole async run. Keep it on one thread and
     // document the intentionally scoped exception instead of dropping the
     // guard and permitting a concurrent test to corrupt the event stream.
-    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn explicit_exit_emits_stdio_and_one_result_event() {
-        let _guard = SINK_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
         harn_vm::reset_thread_local_state();
         let temp = tempfile::TempDir::new().expect("temp dir");
         let script = temp.path().join("main.harn");
