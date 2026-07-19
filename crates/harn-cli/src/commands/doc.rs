@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use crate::package::{
-    collect_package_files, extract_api_symbols, push_api_symbol, PackageApiSymbol,
+    collect_package_files, extract_api_symbols_for_module, push_api_symbol, PackageApiSymbol,
 };
 
 /// One documented source file: its display path plus the public symbols it
@@ -66,18 +66,25 @@ fn collect_doc_modules(path: &Path) -> Result<Vec<DocModule>, String> {
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let mut modules = Vec::new();
     if metadata.is_file() {
-        if let Some(module) = doc_module_for_file(path, &path.to_string_lossy())? {
+        let graph = harn_modules::build(&[path.to_path_buf()]);
+        if let Some(module) = doc_module_for_file(path, &path.to_string_lossy(), &graph)? {
             modules.push(module);
         }
         return Ok(modules);
     }
 
     let files = collect_package_files(path).map_err(|error| error.to_string())?;
-    for rel in files {
-        if !rel.ends_with(".harn") {
-            continue;
-        }
-        if let Some(module) = doc_module_for_file(&path.join(&rel), &rel)? {
+    let harn_files = files
+        .into_iter()
+        .filter(|rel| rel.ends_with(".harn"))
+        .collect::<Vec<_>>();
+    let paths = harn_files
+        .iter()
+        .map(|rel| path.join(rel))
+        .collect::<Vec<_>>();
+    let graph = harn_modules::build(&paths);
+    for (rel, full) in harn_files.iter().zip(paths.iter()) {
+        if let Some(module) = doc_module_for_file(full, rel, &graph)? {
             modules.push(module);
         }
     }
@@ -86,10 +93,14 @@ fn collect_doc_modules(path: &Path) -> Result<Vec<DocModule>, String> {
 
 /// Read one `.harn` file and extract its public symbols. Returns `None` when
 /// the file declares nothing to document.
-fn doc_module_for_file(full: &Path, display: &str) -> Result<Option<DocModule>, String> {
-    let source = std::fs::read_to_string(full)
+fn doc_module_for_file(
+    full: &Path,
+    display: &str,
+    graph: &harn_modules::ModuleGraph,
+) -> Result<Option<DocModule>, String> {
+    std::fs::read_to_string(full)
         .map_err(|error| format!("failed to read {}: {error}", full.display()))?;
-    let symbols = extract_api_symbols(&source);
+    let symbols = extract_api_symbols_for_module(full, graph);
     if symbols.is_empty() {
         return Ok(None);
     }
@@ -190,6 +201,28 @@ fn private_helper(n: int) -> int {
         let doc = fs::read_to_string(&out).unwrap();
         assert!(doc.contains("### fn `greet`"), "{doc}");
         assert!(doc.contains("Greets a name."), "{doc}");
+        assert!(
+            doc.contains("pub fn greet(name: string) -> string"),
+            "{doc}"
+        );
+    }
+
+    #[test]
+    fn doc_targets_a_public_re_export_facade() {
+        let tmp = tempfile::tempdir().unwrap();
+        let facade = tmp.path().join("facade.harn");
+        fs::write(
+            tmp.path().join("implementation.harn"),
+            "/** Greets through a facade. */\npub fn greet(name: string) -> string { return \"hi \" + name }\n",
+        )
+        .unwrap();
+        fs::write(&facade, "pub import { greet } from \"./implementation\"\n").unwrap();
+
+        let out = tmp.path().join("out.md");
+        assert_eq!(run(&facade, Some(&out)), 0);
+        let doc = fs::read_to_string(&out).unwrap();
+        assert!(doc.contains("### fn `greet`"), "{doc}");
+        assert!(doc.contains("Greets through a facade."), "{doc}");
         assert!(
             doc.contains("pub fn greet(name: string) -> string"),
             "{doc}"

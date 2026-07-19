@@ -224,6 +224,12 @@ Generate docs with:
 harn package docs
 ```
 
+Package exports may be thin facade modules. `harn package check` and
+`harn package docs` follow selective, wildcard, and transitive `pub import`
+re-exports, and render each forwarded symbol using the signature and HarnDoc
+from its original declaration. Keep package boundaries explicit with a curated
+facade instead of adding pass-through wrapper functions only for documentation.
+
 CI should use:
 
 ```bash

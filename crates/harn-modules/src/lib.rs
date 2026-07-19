@@ -791,6 +791,17 @@ impl ModuleGraph {
         self.definition_of_inner(file, name, &mut visited)
     }
 
+    /// Find the declaration that contributes exported `name` to `file`.
+    ///
+    /// Unlike [`Self::definition_of`], this ignores private local declarations
+    /// and private imports. It follows only the module's public declaration and
+    /// `pub import` graph, making it suitable for package manifests, API docs,
+    /// and other consumers of a module's externally visible surface.
+    pub fn export_definition_of(&self, file: &Path, name: &str) -> Option<DefSite> {
+        let mut visited = HashSet::new();
+        self.export_definition_of_inner(file, name, &mut visited)
+    }
+
     /// Sorted names of every declaration recorded for `file` (functions,
     /// pipelines, tools, structs, ...). Used by the check-result cache to
     /// key the cross-file lint-exemption subset that applies to this file.
@@ -863,6 +874,38 @@ impl ModuleGraph {
             }
         }
 
+        None
+    }
+
+    fn export_definition_of_inner(
+        &self,
+        file: &Path,
+        name: &str,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Option<DefSite> {
+        let file = normalize_path(file);
+        if !visited.insert(file.clone()) {
+            return None;
+        }
+        let current = self.modules.get(&file)?;
+
+        if current.own_exports.contains(name) {
+            if let Some(local) = current.declarations.get(name) {
+                return Some(local.clone());
+            }
+        }
+        if let Some(sources) = current.selective_re_exports.get(name) {
+            for source in sources {
+                if let Some(definition) = self.export_definition_of_inner(source, name, visited) {
+                    return Some(definition);
+                }
+            }
+        }
+        for source in &current.wildcard_re_export_paths {
+            if let Some(definition) = self.export_definition_of_inner(source, name, visited) {
+                return Some(definition);
+            }
+        }
         None
     }
 
