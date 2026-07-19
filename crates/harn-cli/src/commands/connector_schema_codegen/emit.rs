@@ -8,6 +8,7 @@
 //! identically into either copy.
 
 use harn_parser::{Node, ShapeField, TypeExpr};
+use harn_vm::text::case::to_snake_case;
 
 /// A record type declaration lifted from the schema AST.
 struct Record {
@@ -414,20 +415,5 @@ fn event_discriminator(record_name: &str) -> Option<String> {
     if variant == "Other" {
         return None;
     }
-    Some(pascal_to_snake(&variant))
-}
-
-fn pascal_to_snake(value: &str) -> String {
-    let mut out = String::new();
-    for (index, ch) in value.char_indices() {
-        if ch.is_ascii_uppercase() {
-            if index != 0 {
-                out.push('_');
-            }
-            out.push(ch.to_ascii_lowercase());
-        } else {
-            out.push(ch);
-        }
-    }
-    out
+    Some(to_snake_case(&variant))
 }

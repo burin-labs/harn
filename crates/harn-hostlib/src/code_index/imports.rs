@@ -17,6 +17,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
+use harn_vm::text::case::to_snake_case;
 use serde::Deserialize;
 
 use super::file_table::FileId;
@@ -273,7 +274,7 @@ fn resolve_dotted(
         }
     }
     if rule.camel_to_snake {
-        candidate = camel_to_snake(&candidate);
+        candidate = to_snake_case(&candidate);
     }
     let replace = rule.replace_separator.as_deref().unwrap_or("/");
     let joined = candidate.replace(separator, replace);
@@ -372,19 +373,6 @@ fn extract_string_literal(text: &str) -> Option<String> {
     let second_offset = bytes[after..].iter().position(|b| *b == quote)?;
     let second = after + second_offset;
     Some(text[after..second].to_string())
-}
-
-fn camel_to_snake(input: &str) -> String {
-    let mut out = String::with_capacity(input.len() + 4);
-    for (i, ch) in input.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 {
-            out.push('_');
-        }
-        for lc in ch.to_lowercase() {
-            out.push(lc);
-        }
-    }
-    out
 }
 
 fn parent_relative(rel: &str) -> String {

@@ -95,6 +95,8 @@ sha2 = "0.11"
 sha3 = "0.12"
 # POSIX-correct argv quoting; see the note in harn-cli's manifest.
 shell-words = "1.1"
+strip-ansi-escapes = "0.2"
+strsim = "0.11"
 # On-demand native stack growth for recursive walks over arbitrarily deep
 # `VmValue` trees (display, equality, ordering, hashing, JSON). Same approach
 # serde/rustc/syn use to keep deeply nested data from overflowing the OS

@@ -38,6 +38,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::chunk::Chunk;
+use crate::text::truncate_start;
 
 static COVERAGE_ON: AtomicBool = AtomicBool::new(false);
 static GLOBAL_REPORT: OnceLock<Mutex<Coverage>> = OnceLock::new();
@@ -249,7 +250,9 @@ impl Coverage {
             let covered = lines.hit.len();
             out.push_str(&format!(
                 "{:<name_width$}  {:>6}  {:>7}  {:>5.1}\n",
-                truncate(&display_path(file), name_width),
+                // Tail-truncate: the leading directories are the common prefix
+                // that carries the least signal, the file name carries the most.
+                truncate_start(&display_path(file), name_width),
                 total,
                 covered,
                 pct(covered, total),
@@ -300,18 +303,6 @@ fn display_path(file: &str) -> String {
         }
     }
     file.to_string()
-}
-
-fn truncate(text: &str, width: usize) -> String {
-    let count = text.chars().count();
-    if count <= width {
-        return text.to_string();
-    }
-    // Keep the tail (the file name) since the leading dirs are the common
-    // prefix that carries the least signal.
-    let keep = width.saturating_sub(1);
-    let tail: String = text.chars().skip(count - keep).collect();
-    format!("…{tail}")
 }
 
 #[cfg(test)]
