@@ -128,16 +128,7 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_owned())
-        .unwrap_or_else(|| std::ffi::OsString::from("credentials.json"));
-    let mut tmp = dir.to_path_buf();
-    tmp.push(format!(".{}.tmp", file_name.to_string_lossy()));
-    fs::write(&tmp, bytes)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+    harn_vm::atomic_io::atomic_write(path, bytes)
 }
 
 #[cfg(unix)]

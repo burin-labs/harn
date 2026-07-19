@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use harn_lexer::Span;
 use harn_parser::{Attribute, AttributeArg, BindingPattern, HitlArg, HitlKind, Node, SNode};
 
+mod call_semantics;
+
 pub type NodeId = usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2010,7 +2012,7 @@ fn harness_sub_handle_for(object: &SNode, method: &str) -> Option<(&'static str,
     if receiver != "harness" && receiver != "_harness" {
         return None;
     }
-    HARNESS_SUB_HANDLES
+    call_semantics::HARNESS_SUB_HANDLES
         .iter()
         .find(|slug| **slug == sub_handle)
         .and_then(|slug| {
@@ -2018,10 +2020,6 @@ fn harness_sub_handle_for(object: &SNode, method: &str) -> Option<(&'static str,
                 .map(|ambient| (*slug, ambient))
         })
 }
-
-const HARNESS_SUB_HANDLES: &[&str] = &[
-    "stdio", "term", "clock", "fs", "env", "random", "net", "process", "crypto", "system", "llm",
-];
 
 fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
     let literal_args = args.iter().map(literal_value).collect::<Vec<_>>();
@@ -2032,8 +2030,7 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
         "egress_policy" => CallClassification::PolicyGate(PolicyScopeKind::Egress),
         "command_policy_push" => CallClassification::PolicyPush(PolicyScopeKind::Command),
         "command_policy_pop" => CallClassification::PolicyPop(PolicyScopeKind::Command),
-        "write_file" | "write_file_bytes" | "append_file" | "append_file_locked"
-        | "delete_file" | "mkdir" | "mkdtemp" | "apply_edit" | "move_file" => {
+        _ if call_semantics::is_workspace_mutation(name) => {
             let path = literal_args
                 .first()
                 .and_then(LiteralValue::as_str)

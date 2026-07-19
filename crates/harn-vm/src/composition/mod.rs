@@ -1018,6 +1018,11 @@ const DENIED_COMPOSITION_CALLS: &[&str] = &[
     "request_approval",
     "secret_get",
     "write_file",
+    "write_file_bytes",
+    "replace_file",
+    "replace_file_result",
+    "replace_file_bytes",
+    "replace_file_bytes_result",
 ];
 
 const PURE_COMPOSITION_CALLS: &[&str] = &[

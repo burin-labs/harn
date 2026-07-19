@@ -647,6 +647,10 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 | `package_snapshot_open(project_root)` | project_root: string | `{handle, generation, packages_root, lock_path, lock_digest, packages}` or nil | Acquire the current immutable package generation and exact locked package names while holding its reader lease. Pair every non-nil receipt with `package_snapshot_close(receipt.handle)`, normally in `defer` |
 | `package_snapshot_close(handle)` | handle: string | bool | Release a package-generation reader lease; returns false when the handle was not open |
 | `write_file(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
+| `replace_file(path, content, options?)` / `harness.fs.replace_text(...)` | path: string, content: string, options?: dict | receipt | Atomically replace complete text. An optional `expected_sha256` lease returns a non-mutating `stale` receipt when outdated. Options also control create, overwrite, parent creation, and `namespace`/`flush` durability |
+| `replace_file_result(path, content, options?)` / `harness.fs.replace_text_result(...)` | path: string, content: string, options?: dict | `Result<receipt, failure>` | Non-throwing text replacement |
+| `replace_file_bytes(path, content, options?)` / `harness.fs.replace_bytes(...)` | path: string, content: bytes, options?: dict | receipt | Byte form of conditional replacement |
+| `replace_file_bytes_result(path, content, options?)` / `harness.fs.replace_bytes_result(...)` | path: string, content: bytes, options?: dict | `Result<receipt, failure>` | Non-throwing byte replacement |
 | `append_file(path, content)` | path: string, content: string | nil | Append string to file, creating it if it doesn't exist. Throws on failure |
 | `append_file_locked(path, content, options?)` | path: string, content: string, options?: dict | nil | Append string to file while holding a cross-process advisory lock. Options: `timeout_ms` (default 10000), `sync_data` (default false) |
 | `copy_file(src, dst)` | src: string, dst: string | nil | Copy a file. Throws on failure |
@@ -2982,7 +2986,7 @@ For slow background context work, return a receipt from
 |---|---|---|---|
 | `register_session_hook(event, pattern?, handler)` | event: string, pattern: string?, handler: closure | nil | Register a session-level lifecycle hook |
 | `clear_session_hooks()` | none | nil | Remove all registered session-level hooks |
-| `notify_file_edited(path, metadata?)` | path: string, metadata: dict? | nil | Explicitly queue a `file_edited` notification; the standard fs builtins (`write_file`, `append_file`, `append_file_locked`, `write_file_bytes`) also queue automatically. Hooks fire at the next agent-loop turn boundary. |
+| `notify_file_edited(path, metadata?)` | path: string, metadata: dict? | nil | Explicitly queue a `file_edited` notification; successful standard filesystem mutations also queue automatically. Hooks fire at the next agent-loop turn boundary. |
 
 ### Reminder providers
 

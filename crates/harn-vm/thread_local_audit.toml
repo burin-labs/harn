@@ -9,6 +9,18 @@ thread_private_cache = "Thread-private cache, mock, or warning de-dupe state. Sa
 thread_private_test = "Test harness state. Safe to keep thread-local because tests install/reset it on the owning thread and production work-stealing tasks must not depend on it."
 
 [[thread_local]]
+path = "src/atomic_io.rs"
+statics = ["TEST_FAILURE_STAGE"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/conditional_replace.rs"
+statics = ["EXECUTION_LOCK_ROOT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/agent_sessions.rs"
 statics = ["SESSIONS", "SESSION_CAP", "DEFAULT_TRANSCRIPT_BUDGET_POLICY", "CURRENT_SESSION_STACK", "CURRENT_TOOL_CALL_STACK"]
 category = "runtime_registry"

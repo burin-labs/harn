@@ -751,28 +751,8 @@ fn persist_manifest(state: &SnapshotState) -> Result<(), String> {
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        stdfs::create_dir_all(parent)
-            .map_err(|err| format!("mkdir {}: {err}", parent.display()))?;
-    }
-    let tmp = path.with_extension(format!("tmp-{}-{}", std::process::id(), now_ms()));
-    stdfs::write(&tmp, bytes).map_err(|err| format!("write {}: {err}", tmp.display()))?;
-    match stdfs::rename(&tmp, path) {
-        Ok(()) => Ok(()),
-        Err(rename_err) => {
-            let _ = stdfs::remove_file(path);
-            stdfs::rename(&tmp, path).map_err(|retry| {
-                // Both renames failed; the temp file would otherwise linger
-                // and accumulate in the snapshot directory.
-                let _ = stdfs::remove_file(&tmp);
-                format!(
-                    "rename {} to {}: {rename_err}; retry: {retry}",
-                    tmp.display(),
-                    path.display()
-                )
-            })
-        }
-    }
+    harn_vm::atomic_io::atomic_write(path, bytes)
+        .map_err(|error| format!("write {}: {error}", path.display()))
 }
 
 /// Evict snapshots oldest-first until the session is back under its byte
