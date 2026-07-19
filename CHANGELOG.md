@@ -9,6 +9,23 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.28
+
+### Changed
+
+- **Versioned scoped LLM mock fixtures (#4984).** JSONL fixtures now install
+  atomically with stable IDs, explicit scopes, once/sticky consumption, strict
+  fallback control, typed receipts, queue snapshots, and Harn-owned purpose
+  routing while preserving headerless v0 replay.
+- Added an event-driven `supervisor_wait` builtin so workflows and conformance
+  tests can await terminal supervisor state without timing-based polling.
+
+### Fixed
+
+- **The formatter now wraps long inline shape types inside function and tool
+  parameters.** Nested schema-bearing shapes no longer produce unavoidable
+  line-width failures when a signature has only one parameter.
+
 ## v0.10.27
 
 ### Added
