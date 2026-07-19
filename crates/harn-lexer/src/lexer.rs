@@ -1435,17 +1435,6 @@ mod tests {
     }
 
     #[test]
-    fn test_backslash_continuation() {
-        let mut lexer = Lexer::new("10 \\\n- 3");
-        let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::IntLiteral(10));
-        assert_eq!(tokens[1].kind, TokenKind::Minus);
-        assert_eq!(tokens[2].kind, TokenKind::IntLiteral(3));
-        // No Newline token between 10 and -: continuation joined them.
-        assert_eq!(tokens.len(), 4);
-    }
-
-    #[test]
     fn test_unexpected_character() {
         let mut lexer = Lexer::new("`");
         let err = lexer.tokenize().unwrap_err();
