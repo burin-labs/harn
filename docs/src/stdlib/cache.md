@@ -76,7 +76,8 @@ that sits inline in the LLM caller stack:
 
 ```harn,ignore
 import { sqlite_cache } from "std/cache"
-import { compose, default_llm_caller, with_cache, with_retry } from "std/llm/handlers"
+import { default_llm_caller } from "std/llm/caller"
+import { compose, with_cache, with_retry } from "std/llm/handlers"
 
 const caller = compose([
   with_retry({max_attempts: 3}),
@@ -104,7 +105,8 @@ times — e.g. classifying inbound issues — wins big from caching:
 
 ```harn,ignore
 import { sqlite_cache } from "std/cache"
-import { compose, default_llm_caller, with_cache, with_retry } from "std/llm/handlers"
+import { default_llm_caller } from "std/llm/caller"
+import { compose, with_cache, with_retry } from "std/llm/handlers"
 
 const caller = compose([
   with_retry({max_attempts: 2}),

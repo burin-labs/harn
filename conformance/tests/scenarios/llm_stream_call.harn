@@ -20,7 +20,7 @@ pipeline default() {
       __io_println(raw == direct.text)
       __io_println(chunks[0].visible_delta == "Visible")
       __io_println(chunks[0].partial == "Visible")
-      __io_println(final.finish_reason)
+      __io_println(final.stop_reason)
       __io_println(final.delta == "")
     },
   )
@@ -29,7 +29,7 @@ pipeline default() {
     { ->
       const first = stream.first(llm_stream_call("cancel early", nil, {provider: "mock"}))
       __io_println(first.delta == "early cancel text")
-      __io_println(first.finish_reason == nil)
+      __io_println(first.stop_reason == nil)
     },
   )
   with_llm_script(
@@ -38,7 +38,7 @@ pipeline default() {
       let broke_before_terminal = false
       const cancel_stream = llm_stream_call("break early", nil, {provider: "mock"})
       for chunk in cancel_stream {
-        broke_before_terminal = chunk.finish_reason == nil
+        broke_before_terminal = chunk.stop_reason == nil
         break
       }
       __io_println(broke_before_terminal)

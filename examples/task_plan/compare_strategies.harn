@@ -605,10 +605,10 @@ fn __call_model_once(model, prompt, system, max_tokens, schema, use_structured_o
       throw e
     }
   }
-  const telemetry = resp?.provider_telemetry ?? {}
+  const telemetry = resp?.usage?.provider_telemetry ?? {}
   const text = resp.text ?? ""
-  const input_tokens = resp.input_tokens ?? 0
-  const output_tokens = resp.output_tokens ?? 0
+  const input_tokens = resp.usage?.input_tokens ?? 0
+  const output_tokens = resp.usage?.output_tokens ?? 0
   const cost = estimate_call_cost(
     {
       provider: resp.provider ?? "unknown",
@@ -625,7 +625,7 @@ fn __call_model_once(model, prompt, system, max_tokens, schema, use_structured_o
     server_load_ms: telemetry?.server_load_ms ?? 0,
     model: resp.model ?? model,
     provider: resp.provider ?? "unknown",
-    finish_reason: resp?.finish_reason ?? resp?.stop_reason,
+    finish_reason: resp?.stop_reason,
     cost_usd: cost?.cost_usd,
     input_cost_usd: cost?.breakdown?.input_usd,
     output_cost_usd: cost?.breakdown?.output_usd,

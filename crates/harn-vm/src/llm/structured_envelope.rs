@@ -540,10 +540,6 @@ fn empty_usage_dict() -> crate::value::DictMap {
         VmValue::Int(0),
     );
     usage.insert(
-        crate::value::intern_key("cache_creation_input_tokens"),
-        VmValue::Int(0),
-    );
-    usage.insert(
         crate::value::intern_key("cache_hit_ratio"),
         VmValue::Float(0.0),
     );
@@ -552,33 +548,23 @@ fn empty_usage_dict() -> crate::value::DictMap {
         VmValue::Float(0.0),
     );
     usage.insert(crate::value::intern_key("cost_usd"), VmValue::Nil);
+    usage.insert(
+        crate::value::intern_key("served_fast"),
+        VmValue::Bool(false),
+    );
     usage
 }
 
 fn build_usage_dict(outcome: &SchemaLoopOutcome) -> VmValue {
-    let dict = match outcome.vm_result.as_dict() {
-        Some(d) => d,
-        None => return VmValue::dict(empty_usage_dict()),
-    };
-    if let Some(VmValue::Dict(usage)) = dict.get("usage") {
-        return VmValue::Dict(usage.clone());
+    // The canonical envelope always carries `usage`; the empty dict covers
+    // non-dict results (schema-abort paths) only.
+    match outcome.vm_result.as_dict() {
+        Some(dict) => match dict.get("usage") {
+            Some(VmValue::Dict(usage)) => VmValue::Dict(usage.clone()),
+            _ => VmValue::dict(empty_usage_dict()),
+        },
+        None => VmValue::dict(empty_usage_dict()),
     }
-    let mut usage = empty_usage_dict();
-    for key in [
-        "input_tokens",
-        "output_tokens",
-        "cache_read_tokens",
-        "cache_write_tokens",
-        "cache_creation_input_tokens",
-        "cache_hit_ratio",
-        "cache_savings_usd",
-        "cost_usd",
-    ] {
-        if let Some(v) = dict.get(key) {
-            usage.insert(crate::value::intern_key(key), v.clone());
-        }
-    }
-    VmValue::dict(usage)
 }
 
 fn result_model_provider(outcome: &SchemaLoopOutcome) -> (String, String) {

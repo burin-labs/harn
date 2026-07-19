@@ -1176,7 +1176,6 @@ pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
         "output_tokens": result.output_tokens,
         "cache_read_tokens": result.cache_read_tokens,
         "cache_write_tokens": result.cache_write_tokens,
-        "cache_creation_input_tokens": result.cache_write_tokens,
         "model": result.model,
         "provider": result.provider,
         "thinking": result.thinking,

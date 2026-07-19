@@ -258,7 +258,7 @@ fn __stream_llm_options(options) {
  *   - `on_done(result)`
  *   - `on_error(result)`
  *
- * Returns `{ok, status, text, visible_text, chunks, finish_reason}` on success
+ * Returns `{ok, status, text, visible_text, chunks, stop_reason}` on success
  * and `{ok: false, status: "stream_interrupt", ...}` if stream consumption or
  * a callback throws. This keeps chat apps from hanging without a terminal event.
  *
@@ -270,7 +270,7 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
   const cfg = __stream_dict(options)
   const llm_options = __stream_llm_options(cfg)
   let state = agent_private_stream_state(cfg)
-  let finish_reason = nil
+  let stop_reason = nil
   const consumed = try {
     for chunk in llm_stream_call(prompt, system, llm_options) {
       let delta = chunk?.delta ?? chunk?.visible_delta ?? ""
@@ -282,8 +282,8 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
       if __stream_is_callable(cfg?.on_chunk) {
         cfg.on_chunk(chunk, event, state)
       }
-      if chunk?.finish_reason != nil {
-        finish_reason = chunk.finish_reason
+      if chunk?.stop_reason != nil {
+        stop_reason = chunk.stop_reason
       }
     }
     true
@@ -296,7 +296,7 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
       text: state.raw_text,
       visible_text: state.visible_text,
       chunks: state.chunks,
-      finish_reason: finish_reason,
+      stop_reason: stop_reason,
       state: state,
     }
     if __stream_is_callable(cfg?.on_error) {
@@ -331,7 +331,7 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
         text: state.raw_text,
         visible_text: state.visible_text,
         chunks: state.chunks,
-        finish_reason: finish_reason,
+        stop_reason: stop_reason,
         state: state,
       }
       if __stream_is_callable(cfg?.on_error) {
@@ -352,7 +352,7 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
     text: finished.text,
     visible_text: finished.visible_text,
     chunks: state.chunks,
-    finish_reason: finish_reason,
+    stop_reason: stop_reason,
     private_open: finished.private_open,
     withheld_suffix: finished.withheld_suffix,
     unterminated_private: finished.unterminated_private,

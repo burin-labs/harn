@@ -821,7 +821,6 @@ crates/harn-stdlib/src/stdlib/llm/ensemble.harn::parallel_judge
 crates/harn-stdlib/src/stdlib/llm/ensemble.harn::self_consistency
 crates/harn-stdlib/src/stdlib/llm/ensemble.harn::tree_of_thoughts
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::compose
-crates/harn-stdlib/src/stdlib/llm/handlers.harn::default_llm_caller
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_budget
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_cache
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_circuit_breaker

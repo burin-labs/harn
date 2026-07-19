@@ -492,7 +492,8 @@ route every turn through it:
 
 ```harn,ignore
 import { AgentLoopOptions } from "std/agent/options"
-import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
+import {default_llm_caller} from "std/llm/caller"
+import {with_retry, with_fallback, compose} from "std/llm/handlers"
 
 const caller = compose([
   with_retry({max_attempts: 4, backoff: "exponential"}),

@@ -5,7 +5,8 @@
  * inputs from fighting — otherwise the assembler would reduce the stale
  * fragments and silently ignore the rewrite.
  */
-import { default_llm_caller, with_prompt_rewrite } from "std/llm/handlers"
+import { default_llm_caller } from "std/llm/caller"
+import { with_prompt_rewrite } from "std/llm/handlers"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {

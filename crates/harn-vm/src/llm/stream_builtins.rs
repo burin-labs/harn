@@ -64,16 +64,18 @@ fn llm_stream_chunk(
     delta: &str,
     visible_delta: &str,
     partial: &str,
-    finish_reason: Option<&str>,
+    stop_reason: Option<&str>,
 ) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.put_str("delta", delta);
     dict.put_str("visible_delta", visible_delta);
     dict.put_str("partial", partial);
     dict.put_str("role", "assistant");
+    // Same spelling as the final `llm_call` envelope: `stop_reason`, never
+    // the OpenAI wire name `finish_reason`.
     dict.insert(
-        "finish_reason".to_string(),
-        finish_reason
+        "stop_reason".to_string(),
+        stop_reason
             .map(|reason| VmValue::String(arcstr::ArcStr::from(reason.to_string())))
             .unwrap_or(VmValue::Nil),
     );
