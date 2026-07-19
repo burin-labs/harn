@@ -1375,45 +1375,7 @@ impl Compiler {
 
     /// Check if a node produces a value on the stack that needs to be popped.
     pub(super) fn produces_value(node: &Node) -> bool {
-        match node {
-            // An attribute decorates a declaration (fn/struct/enum/…), never
-            // an expression — so an attributed top-level item is a statement
-            // that leaves nothing on the operand stack, exactly like its bare
-            // inner declaration. Classifying by the inner node prevents the
-            // script-mode top-level loop from emitting a spurious `Pop` (which
-            // underflows the stack) after compiling, e.g., a `@route pub fn`.
-            Node::AttributedDecl { inner, .. } => Self::produces_value(&inner.node),
-            Node::LetBinding { .. }
-            | Node::ConstBinding { .. }
-            | Node::Assignment { .. }
-            | Node::ReturnStmt { .. }
-            | Node::FnDecl { .. }
-            | Node::ToolDecl { .. }
-            | Node::SkillDecl { .. }
-            | Node::EvalPackDecl { .. }
-            | Node::ImplBlock { .. }
-            | Node::StructDecl { .. }
-            | Node::EnumDecl { .. }
-            | Node::InterfaceDecl { .. }
-            | Node::TypeDecl { .. }
-            // Metadata-only declarations that emit no bytecode — see the
-            // matching arm in `compile_node`.
-            | Node::OverrideDecl { .. }
-            | Node::Pipeline { .. }
-            | Node::ThrowStmt { .. }
-            | Node::BreakStmt
-            | Node::ContinueStmt
-            | Node::RequireStmt { .. }
-            | Node::DeferStmt { .. } => false,
-            Node::TryCatch { has_catch: _, .. }
-            | Node::TryExpr { .. }
-            | Node::Retry { .. }
-            | Node::GuardStmt { .. }
-            | Node::DeadlineBlock { .. }
-            | Node::MutexBlock { .. }
-            | Node::Spread(_) => true,
-            _ => true,
-        }
+        harn_parser::node_produces_value(node)
     }
 }
 

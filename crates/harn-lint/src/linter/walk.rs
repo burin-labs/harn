@@ -440,6 +440,12 @@ impl<'a> Linter<'a> {
                 }
             }
 
+            Node::ValueCall { callee, args } => {
+                self.lint_node(callee);
+                for arg in args {
+                    self.lint_node(arg);
+                }
+            }
             Node::MethodCall {
                 object,
                 method,

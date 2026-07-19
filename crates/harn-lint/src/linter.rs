@@ -1048,94 +1048,25 @@ impl<'a> Linter<'a> {
     }
 
     fn node_calls_cancel_handle(node: &SNode) -> bool {
-        match &node.node {
-            Node::FunctionCall { name, args, .. } => {
-                name == "cancel_handle"
-                    || matches!(
-                        (
-                            name.as_str(),
-                            args.first().and_then(Self::string_literal_value)
-                        ),
-                        (
-                            "host_tool_call",
-                            Some("cancel_handle" | "tools.cancel_handle")
-                        )
+        if let Node::FunctionCall { name, args, .. } = &node.node {
+            if name == "cancel_handle"
+                || matches!(
+                    (
+                        name.as_str(),
+                        args.first().and_then(Self::string_literal_value)
+                    ),
+                    (
+                        "host_tool_call",
+                        Some("cancel_handle" | "tools.cancel_handle")
                     )
-                    || args.iter().any(Self::node_calls_cancel_handle)
+                )
+            {
+                return true;
             }
-            Node::DictLiteral(entries) => entries.iter().any(|entry| {
-                Self::node_calls_cancel_handle(&entry.key)
-                    || Self::node_calls_cancel_handle(&entry.value)
-            }),
-            Node::ListLiteral(items) => items.iter().any(Self::node_calls_cancel_handle),
-            Node::IfElse {
-                condition,
-                then_body,
-                else_body,
-                ..
-            } => {
-                Self::node_calls_cancel_handle(condition)
-                    || Self::block_calls_cancel_handle(then_body)
-                    || else_body
-                        .as_ref()
-                        .is_some_and(|body| Self::block_calls_cancel_handle(body))
-            }
-            Node::TryCatch {
-                has_catch: _,
-                body,
-                catch_body,
-                finally_body,
-                ..
-            } => {
-                Self::block_calls_cancel_handle(body)
-                    || Self::block_calls_cancel_handle(catch_body)
-                    || finally_body
-                        .as_ref()
-                        .is_some_and(|body| Self::block_calls_cancel_handle(body))
-            }
-            Node::DeferStmt { body }
-            | Node::ForIn { body, .. }
-            | Node::WhileLoop { body, .. }
-            | Node::Retry { body, .. }
-            | Node::CostRoute { body, .. }
-            | Node::Block(body)
-            | Node::SpawnExpr { body }
-            | Node::ScopeBlock { body }
-            | Node::Closure { body, .. } => Self::block_calls_cancel_handle(body),
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
-                Self::node_calls_cancel_handle(object)
-                    || args.iter().any(Self::node_calls_cancel_handle)
-            }
-            Node::PropertyAccess { object, .. }
-            | Node::OptionalPropertyAccess { object, .. }
-            | Node::SubscriptAccess { object, .. }
-            | Node::OptionalSubscriptAccess { object, .. }
-            | Node::SliceAccess { object, .. } => Self::node_calls_cancel_handle(object),
-            Node::BinaryOp { left, right, .. } => {
-                Self::node_calls_cancel_handle(left) || Self::node_calls_cancel_handle(right)
-            }
-            Node::UnaryOp { operand, .. }
-            | Node::TryOperator { operand }
-            | Node::TryStar { operand } => Self::node_calls_cancel_handle(operand),
-            Node::Ternary {
-                condition,
-                true_expr,
-                false_expr,
-            } => {
-                Self::node_calls_cancel_handle(condition)
-                    || Self::node_calls_cancel_handle(true_expr)
-                    || Self::node_calls_cancel_handle(false_expr)
-            }
-            Node::ReturnStmt { value } | Node::YieldExpr { value } => value
-                .as_ref()
-                .is_some_and(|value| Self::node_calls_cancel_handle(value)),
-            Node::ThrowStmt { value } | Node::EmitExpr { value } => {
-                Self::node_calls_cancel_handle(value)
-            }
-            Node::AttributedDecl { inner, .. } => Self::node_calls_cancel_handle(inner),
-            _ => false,
         }
+        harn_parser::visit::immediate_children(node)
+            .into_iter()
+            .any(Self::node_calls_cancel_handle)
     }
 
     fn dict_key_name(node: &SNode) -> Option<String> {
@@ -1245,6 +1176,13 @@ impl<'a> Linter<'a> {
                 }
                 if Self::is_pr_open_call(name, args) && !state {
                     self.warn_missing_secret_scan(node.span);
+                }
+                state
+            }
+            Node::ValueCall { callee, args } => {
+                let mut state = self.analyze_secret_scan_expr(callee, scanned);
+                for arg in args {
+                    state = self.analyze_secret_scan_expr(arg, state);
                 }
                 state
             }
@@ -1611,193 +1549,12 @@ impl<'a> Linter<'a> {
     }
 
     fn collect_persona_calls_node(&mut self, persona_name: &str, node: &SNode) {
-        match &node.node {
-            Node::FunctionCall { name, args, .. } => {
-                self.persona_body_calls
-                    .push((name.clone(), node.span, persona_name.to_string()));
-                for arg in args {
-                    self.collect_persona_calls_node(persona_name, arg);
-                }
-            }
-            Node::LetBinding { value, .. }
-            | Node::ConstBinding { value, .. }
-            | Node::ReturnStmt { value: Some(value) }
-            | Node::YieldExpr { value: Some(value) }
-            | Node::EmitExpr { value }
-            | Node::ThrowStmt { value }
-            | Node::Spread(value)
-            | Node::TryOperator { operand: value }
-            | Node::TryStar { operand: value }
-            | Node::UnaryOp { operand: value, .. } => {
-                self.collect_persona_calls_node(persona_name, value);
-            }
-            Node::IfElse {
-                condition,
-                then_body,
-                else_body,
-                ..
-            } => {
-                self.collect_persona_calls_node(persona_name, condition);
-                self.collect_persona_calls(persona_name, then_body);
-                if let Some(else_body) = else_body {
-                    self.collect_persona_calls(persona_name, else_body);
-                }
-            }
-            Node::ForIn { iterable, body, .. } => {
-                self.collect_persona_calls_node(persona_name, iterable);
-                self.collect_persona_calls(persona_name, body);
-            }
-            Node::WhileLoop { condition, body } => {
-                self.collect_persona_calls_node(persona_name, condition);
-                self.collect_persona_calls(persona_name, body);
-            }
-            Node::Retry { count, body } => {
-                self.collect_persona_calls_node(persona_name, count);
-                self.collect_persona_calls(persona_name, body);
-            }
-            Node::CostRoute { options, body } => {
-                for (_, value) in options {
-                    self.collect_persona_calls_node(persona_name, value);
-                }
-                self.collect_persona_calls(persona_name, body);
-            }
-            Node::TryCatch {
-                has_catch: _,
-                body,
-                catch_body,
-                finally_body,
-                ..
-            } => {
-                self.collect_persona_calls(persona_name, body);
-                self.collect_persona_calls(persona_name, catch_body);
-                if let Some(finally_body) = finally_body {
-                    self.collect_persona_calls(persona_name, finally_body);
-                }
-            }
-            Node::TryExpr { body }
-            | Node::SpawnExpr { body }
-            | Node::ScopeBlock { body }
-            | Node::DeferStmt { body }
-            | Node::MutexBlock { body, .. }
-            | Node::Block(body)
-            | Node::Closure { body, .. } => self.collect_persona_calls(persona_name, body),
-            Node::DeadlineBlock { duration, body } => {
-                self.collect_persona_calls_node(persona_name, duration);
-                self.collect_persona_calls(persona_name, body);
-            }
-            Node::GuardStmt {
-                condition,
-                else_body,
-            } => {
-                self.collect_persona_calls_node(persona_name, condition);
-                self.collect_persona_calls(persona_name, else_body);
-            }
-            Node::RequireStmt { condition, message } => {
-                self.collect_persona_calls_node(persona_name, condition);
-                if let Some(message) = message {
-                    self.collect_persona_calls_node(persona_name, message);
-                }
-            }
-            Node::Parallel {
-                expr,
-                body,
-                options,
-                ..
-            } => {
-                self.collect_persona_calls_node(persona_name, expr);
-                for (_, value) in options {
-                    self.collect_persona_calls_node(persona_name, value);
-                }
-                self.collect_persona_calls(persona_name, body);
-            }
-            Node::SelectExpr {
-                cases,
-                timeout,
-                default_body,
-            } => {
-                for case in cases {
-                    self.collect_persona_calls_node(persona_name, &case.channel);
-                    self.collect_persona_calls(persona_name, &case.body);
-                }
-                if let Some((duration, body)) = timeout {
-                    self.collect_persona_calls_node(persona_name, duration);
-                    self.collect_persona_calls(persona_name, body);
-                }
-                if let Some(body) = default_body {
-                    self.collect_persona_calls(persona_name, body);
-                }
-            }
-            Node::MatchExpr { value, arms } => {
-                self.collect_persona_calls_node(persona_name, value);
-                for arm in arms {
-                    self.collect_persona_calls_node(persona_name, &arm.pattern);
-                    if let Some(guard) = &arm.guard {
-                        self.collect_persona_calls_node(persona_name, guard);
-                    }
-                    self.collect_persona_calls(persona_name, &arm.body);
-                }
-            }
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
-                self.collect_persona_calls_node(persona_name, object);
-                for arg in args {
-                    self.collect_persona_calls_node(persona_name, arg);
-                }
-            }
-            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-                self.collect_persona_calls_node(persona_name, object);
-            }
-            Node::SubscriptAccess { object, index }
-            | Node::OptionalSubscriptAccess { object, index } => {
-                self.collect_persona_calls_node(persona_name, object);
-                self.collect_persona_calls_node(persona_name, index);
-            }
-            Node::SliceAccess { object, start, end } => {
-                self.collect_persona_calls_node(persona_name, object);
-                if let Some(start) = start {
-                    self.collect_persona_calls_node(persona_name, start);
-                }
-                if let Some(end) = end {
-                    self.collect_persona_calls_node(persona_name, end);
-                }
-            }
-            Node::BinaryOp { left, right, .. } => {
-                self.collect_persona_calls_node(persona_name, left);
-                self.collect_persona_calls_node(persona_name, right);
-            }
-            Node::Ternary {
-                condition,
-                true_expr,
-                false_expr,
-            } => {
-                self.collect_persona_calls_node(persona_name, condition);
-                self.collect_persona_calls_node(persona_name, true_expr);
-                self.collect_persona_calls_node(persona_name, false_expr);
-            }
-            Node::Assignment { target, value, .. } => {
-                self.collect_persona_calls_node(persona_name, target);
-                self.collect_persona_calls_node(persona_name, value);
-            }
-            Node::EnumConstruct { args, .. } | Node::ListLiteral(args) | Node::OrPattern(args) => {
-                for arg in args {
-                    self.collect_persona_calls_node(persona_name, arg);
-                }
-            }
-            Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => {
-                for entry in fields {
-                    self.collect_persona_calls_node(persona_name, &entry.key);
-                    self.collect_persona_calls_node(persona_name, &entry.value);
-                }
-            }
-            Node::HitlExpr { args, .. } => {
-                for arg in args {
-                    self.collect_persona_calls_node(persona_name, &arg.value);
-                }
-            }
-            Node::AttributedDecl { inner, .. } => {
-                self.collect_persona_calls_node(persona_name, inner);
-            }
-            _ => {}
+        if let Node::FunctionCall { name, .. } = &node.node {
+            self.persona_body_calls
+                .push((name.clone(), node.span, persona_name.to_string()));
+        }
+        for child in harn_parser::visit::immediate_children(node) {
+            self.collect_persona_calls_node(persona_name, child);
         }
     }
 

@@ -12,6 +12,7 @@
 //! are in scope (i.e. a file that names `mod statements` somewhere).
 
 mod binary_ops;
+mod blocks;
 mod call_resolution;
 mod calls;
 mod decls;
@@ -20,6 +21,7 @@ mod expressions;
 mod flow;
 mod generic_bindings;
 mod hitl;
+mod pipe;
 mod statements;
 mod subtyping;
 mod variance;

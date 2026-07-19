@@ -679,6 +679,65 @@ impl TypeChecker {
             }
         }
     }
+    pub(in crate::typechecker) fn check_value_call(
+        &mut self,
+        callee: &SNode,
+        args: &[SNode],
+        scope: &mut TypeScope,
+        span: Span,
+    ) {
+        self.check_node(callee, scope);
+        let Some(callee_type) = self.infer_type(callee, scope) else {
+            for arg in args {
+                self.check_node(arg, scope);
+            }
+            return;
+        };
+        let resolved = self.resolve_alias(&callee_type, scope);
+        let TypeExpr::FnType { params, .. } = resolved else {
+            for arg in args {
+                self.check_node(arg, scope);
+            }
+            if !Self::is_wildcard_type(&callee_type) {
+                self.error_at(
+                    Code::CallableExpected,
+                    format!(
+                        "expression of type '{}' is not callable",
+                        format_type(&callee_type)
+                    ),
+                    span,
+                );
+            }
+            return;
+        };
+
+        let names: Vec<String> = (1..=params.len())
+            .map(|index| format!("arg{index}"))
+            .collect();
+        let call_params = params
+            .iter()
+            .zip(&names)
+            .map(|(ty, name)| CallParam {
+                name,
+                ty: Some(Cow::Borrowed(ty)),
+                bind_generics: false,
+                check_type: true,
+                allow_optional_nil: false,
+            })
+            .collect();
+        let has_spread = args.iter().any(|arg| matches!(&arg.node, Node::Spread(_)));
+        let sig = CallCheckSignature {
+            name: "expression result",
+            kind: CallKind::Function,
+            params: call_params,
+            required_params: params.len(),
+            type_param_names: Vec::new(),
+            where_clauses: Vec::new(),
+            has_rest: false,
+            definition_span: None,
+        };
+        self.check_call_signature_arguments(sig, &[], args, has_spread, scope, span);
+    }
 
     fn check_builtin_signature_call(
         &mut self,
@@ -1078,6 +1137,12 @@ impl TypeChecker {
                 }
                 for a in args {
                     self.visit_for_deprecation(a);
+                }
+            }
+            Node::ValueCall { callee, args } => {
+                self.visit_for_deprecation(callee);
+                for arg in args {
+                    self.visit_for_deprecation(arg);
                 }
             }
             Node::MethodCall { object, args, .. }

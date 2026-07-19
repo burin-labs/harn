@@ -507,81 +507,8 @@ where
     F: FnMut(&'a harn_parser::SNode),
 {
     visitor(node);
-    use harn_parser::Node;
-    match &node.node {
-        Node::Pipeline { body, .. }
-        | Node::FnDecl { body, .. }
-        | Node::ToolDecl { body, .. }
-        | Node::Block(body)
-        | Node::Closure { body, .. }
-        | Node::TryExpr { body }
-        | Node::SpawnExpr { body }
-        | Node::MutexBlock { body, .. }
-        | Node::DeferStmt { body } => visit_nodes(body, visitor),
-        Node::MatchExpr { value, arms } => {
-            visit_node(value, visitor);
-            for arm in arms {
-                visit_node(&arm.pattern, visitor);
-                if let Some(g) = &arm.guard {
-                    visit_node(g, visitor);
-                }
-                visit_nodes(&arm.body, visitor);
-            }
-        }
-        Node::IfElse {
-            condition,
-            then_body,
-            else_body,
-            ..
-        } => {
-            visit_node(condition, visitor);
-            visit_nodes(then_body, visitor);
-            if let Some(eb) = else_body {
-                visit_nodes(eb, visitor);
-            }
-        }
-        Node::ForIn { iterable, body, .. } => {
-            visit_node(iterable, visitor);
-            visit_nodes(body, visitor);
-        }
-        Node::WhileLoop { condition, body } => {
-            visit_node(condition, visitor);
-            visit_nodes(body, visitor);
-        }
-        Node::CostRoute { options, body } => {
-            for (_, value) in options {
-                visit_node(value, visitor);
-            }
-            visit_nodes(body, visitor);
-        }
-        Node::BinaryOp { left, right, .. } => {
-            visit_node(left, visitor);
-            visit_node(right, visitor);
-        }
-        Node::PropertyAccess { object, .. }
-        | Node::OptionalPropertyAccess { object, .. }
-        | Node::TryOperator { operand: object }
-        | Node::TryStar { operand: object } => visit_node(object, visitor),
-        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            visit_node(object, visitor);
-            for a in args {
-                visit_node(a, visitor);
-            }
-        }
-        Node::FunctionCall { args, .. } => {
-            for a in args {
-                visit_node(a, visitor);
-            }
-        }
-        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
-            visit_node(value, visitor);
-        }
-        Node::ReturnStmt { value: Some(v) } | Node::YieldExpr { value: Some(v) } => {
-            visit_node(v, visitor);
-        }
-        Node::EmitExpr { value } => visit_node(value, visitor),
-        Node::AttributedDecl { inner, .. } => visit_node(inner, visitor),
-        _ => {}
+    for child in harn_parser::visit::immediate_children(node) {
+        visit_node(child, visitor);
     }
 }
 

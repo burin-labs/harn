@@ -23,6 +23,20 @@ fn test_unnecessary_parentheses_autofixes_ternary_list_branch() {
 }
 
 #[test]
+fn test_unnecessary_parentheses_autofixes_wrapped_value_call() {
+    let source = r"fn make(value) { return { other -> value + other } }
+fn sum() { return (make(1)(2)) }
+";
+    let diags = lint_source(source);
+    assert_eq!(count_rule(&diags, "unnecessary-parentheses"), 1);
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains("return make(1)(2)"),
+        "expected autofix to unwrap value call, got: {fixed}",
+    );
+}
+
+#[test]
 fn test_unnecessary_parentheses_ignores_keyed_mutex_parens() {
     // `mutex(resource)` parens are required grammar (the lock key), not
     // redundant grouping — stripping them would produce unparseable source.

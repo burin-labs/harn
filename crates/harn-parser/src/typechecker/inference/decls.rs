@@ -217,7 +217,7 @@ impl TypeChecker {
         }
         // A body that can fall through implicitly returns its trailing value.
         if !self.body_cannot_fall_through(body, &scope) {
-            match self.infer_block_type(body, &scope) {
+            match self.infer_block_type(body, &scope).into_inferred() {
                 Some(ty) => returns.push(ty),
                 None => return None,
             }
@@ -547,9 +547,10 @@ impl TypeChecker {
                 self.check_return_type(stmt, ret_type, expected_span, &mut ret_scope);
             }
             if !self.body_cannot_fall_through(body, &ret_scope) {
-                let actual = self
-                    .infer_block_type(body, &ret_scope)
-                    .unwrap_or_else(|| TypeExpr::Named("nil".into()));
+                let actual = self.infer_block_type(body, &ret_scope);
+                let Some(actual) = actual.into_inferred() else {
+                    return;
+                };
                 if !self.types_compatible(ret_type, &actual, &ret_scope) {
                     let value_span = body.last().map(|stmt| stmt.span).unwrap_or(expected_span);
                     self.type_mismatch_at(

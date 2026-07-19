@@ -294,6 +294,9 @@ fn collect_eligible_opens(
         Node::FunctionCall { args, .. } if !args.is_empty() => {
             mark_close_at(&mut eligible, end_minus_one(node.span));
         }
+        Node::ValueCall { args, .. } if !args.is_empty() => {
+            mark_close_at(&mut eligible, end_minus_one(node.span));
+        }
         Node::MethodCall { args, .. } | Node::OptionalMethodCall { args, .. }
             if !args.is_empty() =>
         {

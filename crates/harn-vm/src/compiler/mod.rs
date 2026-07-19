@@ -383,6 +383,9 @@ impl Compiler {
             Node::FunctionCall { name, args, .. } => {
                 self.compile_function_call(name, args)?;
             }
+            Node::ValueCall { callee, args } => {
+                self.compile_call_expression(callee, args)?;
+            }
             Node::MethodCall {
                 object,
                 method,

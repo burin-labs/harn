@@ -13,6 +13,7 @@ use harn_lexer::{FixEdit, Span};
 mod access;
 mod attributes;
 mod blocks;
+mod check_helpers;
 mod check_node;
 mod expressions;
 mod name_resolution;

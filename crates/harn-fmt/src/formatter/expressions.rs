@@ -195,6 +195,15 @@ impl Formatter<'_> {
                 );
                 format!("{name}{type_args_str}({args_str})")
             }
+            Node::ValueCall { callee, args } => {
+                let mut callee_text = self.format_expr(callee, indent, column);
+                if needs_parens_as_postfix_object(&callee.node) {
+                    callee_text = format!("({callee_text})");
+                }
+                let args_str =
+                    self.format_call_args(args, column + text_width(&callee_text) + 1, indent);
+                format!("{callee_text}({args_str})")
+            }
             Node::MethodCall {
                 object,
                 method,

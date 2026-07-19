@@ -5,6 +5,9 @@ pub(super) fn contains_pipe_placeholder(node: &SNode) -> bool {
     match &node.node {
         Node::Identifier(name) if name == "_" => true,
         Node::FunctionCall { args, .. } => args.iter().any(contains_pipe_placeholder),
+        Node::ValueCall { callee, args } => {
+            contains_pipe_placeholder(callee) || args.iter().any(contains_pipe_placeholder)
+        }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             contains_pipe_placeholder(object) || args.iter().any(contains_pipe_placeholder)
         }
@@ -68,6 +71,10 @@ pub(super) fn replace_pipe_placeholder(node: &SNode) -> SNode {
         } => Node::FunctionCall {
             name: name.clone(),
             type_args: type_args.clone(),
+            args: args.iter().map(replace_pipe_placeholder).collect(),
+        },
+        Node::ValueCall { callee, args } => Node::ValueCall {
+            callee: Box::new(replace_pipe_placeholder(callee)),
             args: args.iter().map(replace_pipe_placeholder).collect(),
         },
         Node::MethodCall {

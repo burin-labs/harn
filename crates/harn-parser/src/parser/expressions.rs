@@ -531,16 +531,24 @@ impl Parser {
                     self.pos = saved_pos;
                     break;
                 }
-            } else if self.check(&TokenKind::LParen) && matches!(expr.node, Node::Identifier(_)) {
+            } else if self.check(&TokenKind::LParen) {
                 let start = expr.span;
                 self.advance();
                 let args = self.parse_arg_list()?;
                 self.consume(&TokenKind::RParen, ")")?;
-                if let Node::Identifier(name) = expr.node {
+                if let Node::Identifier(name) = &expr.node {
                     expr = spanned(
                         Node::FunctionCall {
-                            name,
+                            name: name.clone(),
                             type_args: Vec::new(),
+                            args,
+                        },
+                        Span::merge(start, self.prev_span()),
+                    );
+                } else {
+                    expr = spanned(
+                        Node::ValueCall {
+                            callee: Box::new(expr),
                             args,
                         },
                         Span::merge(start, self.prev_span()),

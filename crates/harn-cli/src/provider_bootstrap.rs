@@ -421,6 +421,9 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
         Node::HitlExpr { args, .. } => args
             .iter()
             .any(|arg| node_uses_provider_llm(&arg.value, shadows)),
+        Node::ValueCall { callee, args } => {
+            node_uses_provider_llm(callee, shadows) || nodes_use_provider_llm(args, shadows)
+        }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             node_uses_provider_llm(object, shadows) || nodes_use_provider_llm(args, shadows)
         }

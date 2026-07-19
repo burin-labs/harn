@@ -114,9 +114,10 @@ impl TypeChecker {
                             self.check_return_type(stmt, ret_type, inner_node.span, &mut ret_scope);
                         }
                         if !Self::block_definitely_exits(body) {
-                            let actual = self
-                                .infer_block_type(body, &ret_scope)
-                                .unwrap_or_else(|| TypeExpr::Named("nil".into()));
+                            let actual = self.infer_block_type(body, &ret_scope);
+                            let Some(actual) = actual.into_inferred() else {
+                                continue;
+                            };
                             if !self.types_compatible(ret_type, &actual, &ret_scope) {
                                 let value_span =
                                     body.last().map(|stmt| stmt.span).unwrap_or(inner_node.span);

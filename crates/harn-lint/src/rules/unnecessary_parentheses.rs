@@ -152,6 +152,7 @@ fn is_single_value_expr(node: &Node) -> bool {
     matches!(
         node,
         Node::FunctionCall { .. }
+            | Node::ValueCall { .. }
             | Node::MethodCall { .. }
             | Node::OptionalMethodCall { .. }
             | Node::PropertyAccess { .. }

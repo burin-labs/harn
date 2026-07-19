@@ -6,4 +6,9 @@ pipeline test(task) {
   const implicit_tail = fn(x: int) -> int { x + 1 }
   assert(implicit_tail(4) == 5, "annotated fn expression checks implicit tail")
   log("closure_return_annotation tests passed")
+  fn make_adder(base: int) -> fn(int) -> int {
+    return { value: int -> base + value }
+  }
+  assert(make_adder(40)(2) == 42, "call a returned closure")
+  assert(make_adder(39)(3) == 42, "call another returned closure")
 }

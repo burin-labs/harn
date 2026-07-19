@@ -65,6 +65,10 @@ impl CostAnalyzer {
                 }
                 self.walk_nodes(args);
             }
+            Node::ValueCall { callee, args } => {
+                self.walk_node(callee);
+                self.walk_nodes(args);
+            }
             Node::MethodCall { object, args, .. }
             | Node::OptionalMethodCall { object, args, .. } => {
                 self.walk_node(object);

@@ -424,6 +424,24 @@ fn collect_mock_host_capabilities_from_node(
                 );
             }
         }
+        Node::ValueCall { callee, args } => {
+            collect_mock_host_capabilities_from_node(
+                callee,
+                file_path,
+                source,
+                visited,
+                capabilities,
+            );
+            for arg in args {
+                collect_mock_host_capabilities_from_node(
+                    arg,
+                    file_path,
+                    source,
+                    visited,
+                    capabilities,
+                );
+            }
+        }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             collect_mock_host_capabilities_from_node(
                 object,

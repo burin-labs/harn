@@ -788,6 +788,7 @@ module.exports = grammar({
         seq(
           field("function", choice(
             $.identifier,
+            $.call_expression,
             $.property_access,
             $.subscript_expression,
             $.parenthesized_expression

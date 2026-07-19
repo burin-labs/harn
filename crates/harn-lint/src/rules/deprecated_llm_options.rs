@@ -217,6 +217,10 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
             }
         }
         Node::EnumConstruct { args, .. } => visit_nodes(args, diagnostics),
+        Node::ValueCall { callee, args } => {
+            visit_node(callee, diagnostics);
+            visit_nodes(args, diagnostics);
+        }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             visit_node(object, diagnostics);
             visit_nodes(args, diagnostics);
