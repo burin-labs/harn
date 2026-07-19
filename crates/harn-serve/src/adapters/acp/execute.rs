@@ -225,7 +225,7 @@ pub(super) async fn execute_chunk(
 
     vm.set_harness(harn_vm::Harness::real());
     // Bind the ACP session-prompt ambient globals from the single source of
-    // truth the type-checker whitelist also consumes (`harn_parser`), so a
+    // truth the type-checker allowlist also consumes (`harn_parser`), so a
     // global bound here can never be one `harn check` rejects. The exhaustive
     // match makes adding a global a deliberate, checked change on both sides.
     let mut mcp_globals = load_host_mcp_clients(host_bridge.clone()).await;

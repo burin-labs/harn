@@ -59,7 +59,7 @@ pipeline test_cap_and_new_oversized_source_rules(task) {
 }
 
 @test
-pipeline test_exact_grandfathered_count_passes_and_growth_fails(task) {
+pipeline test_exact_existing_count_passes_and_growth_fails(task) {
   const baseline = [
     {
       kind: "valid",
@@ -258,7 +258,7 @@ pipeline test_tightening_and_removal_apply_end_to_end(task) {
 }
 
 @test
-pipeline test_normal_update_never_grandfathers_or_records_growth(task) {
+pipeline test_normal_update_never_exempts_or_records_growth(task) {
   with_temp_dir(
     { root ->
       const old = "crates/example/src/old.rs"
