@@ -497,16 +497,28 @@ mod tests {
             return;
         }
         let cargo_home = tempfile::TempDir::new().expect("temp CARGO_HOME");
-        let registry = cargo_home.path().join("registry");
+        // macOS resolves /var/folders through /private/var/folders. Use the
+        // canonical spelling for every rule and disable the broad UserTemp
+        // grant so only the explicit toolchain-cache root can authorize writes.
+        let cargo_home_path =
+            std::fs::canonicalize(cargo_home.path()).expect("canonical CARGO_HOME");
+        let registry = cargo_home_path.join("registry");
         std::fs::create_dir_all(&registry).expect("registry dir");
-        let config = cargo_home.path().join("config.toml");
+        let config = cargo_home_path.join("config.toml");
         std::fs::write(&config, "[net]\noffline = true\n").expect("cargo config");
 
         let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
         policy.workspace_roots.clear();
+        policy.process_sandbox.presets = Some(
+            ProcessSandboxPreset::default_presets()
+                .iter()
+                .copied()
+                .filter(|preset| *preset != ProcessSandboxPreset::UserTemp)
+                .collect(),
+        );
         let profile = render_profile_with_extra_read_roots(
             &policy,
-            &[cargo_home.path().to_path_buf()],
+            &[cargo_home_path],
             &[config.clone()],
             std::slice::from_ref(&registry),
         );

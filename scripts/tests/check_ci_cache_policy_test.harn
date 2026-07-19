@@ -56,6 +56,9 @@ fn action() {
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
           with: {
+            "shared-key": gha_expression(
+              "inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key",
+            ),
             "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
           },
         },
@@ -203,6 +206,32 @@ pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(task) {
   assert(
     ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows()).contains(
       ".github/actions/rust-cache/action.yml must contain one pinned restore-only broad Rust cache fallback step",
+    ),
+  )
+}
+
+pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(task) {
+  const valid_action = action()
+  const invalid_action = {
+    ...valid_action,
+    runs: {
+      ...valid_action.runs,
+      steps: [
+        valid_action.runs.steps[0],
+        {
+          ...valid_action.runs.steps[1],
+          with: {
+            ...valid_action.runs.steps[1]?.with ?? {},
+            "shared-key": gha_expression("inputs.shared-key"),
+            key: gha_expression("inputs.source-key"),
+          },
+        },
+      ],
+    },
+  }
+  assert(
+    ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows()).contains(
+      ".github/actions/rust-cache/action.yml must compose source-key into the effective upstream shared-key",
     ),
   )
 }

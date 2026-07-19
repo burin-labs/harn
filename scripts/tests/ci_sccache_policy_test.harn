@@ -113,6 +113,9 @@ fn windows_cache_pair() {
   const checkout = {uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"}
   const toolchain = {uses: "./.github/actions/rust-toolchain"}
   const environment = {CARGO_INCREMENTAL: "0", CARGO_TERM_COLOR: "always", RUSTFLAGS: "-D warnings"}
+  const source_key = gha_expression(
+    "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')",
+  )
   return {
     consumer: {
       env: environment,
@@ -121,7 +124,10 @@ fn windows_cache_pair() {
           steps: [
             checkout,
             toolchain,
-            {uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-windows"}},
+            {
+              uses: "./.github/actions/rust-cache",
+              with: {"shared-key": "workspace-windows", "source-key": source_key},
+            },
           ],
         },
       },
@@ -135,7 +141,7 @@ fn windows_cache_pair() {
             toolchain,
             {
               uses: "./.github/actions/rust-cache",
-              with: {"shared-key": "workspace-windows", save: true},
+              with: {"shared-key": "workspace-windows", "source-key": source_key, save: true},
             },
           ],
         },
@@ -200,13 +206,16 @@ pipeline test_rejects_windows_cache_wrapper_drift(task) {
       },
     },
   }
-  assert_eq(
-    windows_shared_cache_errors(pair.consumer, producer),
-    [
+  const errors = windows_shared_cache_errors(pair.consumer, producer)
+  assert_eq(len(errors), 2)
+  assert(
+    errors.contains(
       "workspace-windows producer and consumer must use plain rustc: [\"mozilla-actions/sccache-action@untrusted\"]",
-      "workspace-windows cache-key inputs drift: consumer=[\"CARGO_INCREMENTAL=0\",\"CARGO_TERM_COLOR=always\",\"RUSTC_WRAPPER=<unset>\",\"RUSTFLAGS=-D warnings\",\"pre-cache-uses=actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\",\"pre-cache-uses=./.github/actions/rust-toolchain\"] producer=[\"CARGO_INCREMENTAL=0\",\"CARGO_TERM_COLOR=always\",\"RUSTC_WRAPPER=<unset>\",\"RUSTFLAGS=-D warnings\",\"pre-cache-uses=actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\",\"pre-cache-uses=./.github/actions/rust-toolchain\",\"pre-cache-uses=mozilla-actions/sccache-action@untrusted\"]",
-    ],
+    ),
   )
+  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
+  assert(errors.any({ error -> error.contains("rust-cache-source-key=") }))
+  assert(errors.any({ error -> error.contains("hashFiles(") }))
 }
 
 @test
@@ -216,10 +225,90 @@ pipeline test_rejects_windows_cache_environment_drift(task) {
     ...pair.producer,
     env: {...pair.producer.env, RUSTFLAGS: "-D warnings -C target-cpu=native"},
   }
+  const errors = windows_shared_cache_errors(pair.consumer, producer)
+  assert_eq(len(errors), 1)
+  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
+  assert(errors.any({ error -> error.contains("RUSTFLAGS=-D warnings -C target-cpu=native") }))
+  assert(errors.any({ error -> error.contains("rust-cache-source-key=") }))
+  assert(errors.any({ error -> error.contains("hashFiles(") }))
+}
+
+@test
+pipeline test_rejects_windows_cache_source_fingerprint_drift(task) {
+  const pair = windows_cache_pair()
+  const producer_cache = pair.producer.jobs.nextest.steps[2]
+  const producer = {
+    ...pair.producer,
+    jobs: {
+      ...pair.producer.jobs,
+      nextest: {
+        ...pair.producer.jobs.nextest,
+        steps: [
+          pair.producer.jobs.nextest.steps[0],
+          pair.producer.jobs.nextest.steps[1],
+          {
+            ...producer_cache,
+            with: {
+              ...producer_cache?.with ?? {},
+              "source-key": gha_expression("hashFiles('Cargo.lock')"),
+            },
+          },
+        ],
+      },
+    },
+  }
+  const errors = windows_shared_cache_errors(pair.consumer, producer)
+  assert_eq(len(errors), 2)
+  assert(
+    errors.contains(
+      "workspace-windows producer and consumer must use the canonical source fingerprint",
+    ),
+  )
+  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
+}
+
+@test
+pipeline test_rejects_paired_windows_cache_source_fingerprint_drift(task) {
+  const pair = windows_cache_pair()
+  const drifted_source_key = gha_expression("hashFiles('Cargo.lock')")
+  const consumer_cache = pair.consumer.jobs.windows.steps[2]
+  const producer_cache = pair.producer.jobs.nextest.steps[2]
+  const consumer = {
+    ...pair.consumer,
+    jobs: {
+      ...pair.consumer.jobs,
+      windows: {
+        ...pair.consumer.jobs.windows,
+        steps: [
+          pair.consumer.jobs.windows.steps[0],
+          pair.consumer.jobs.windows.steps[1],
+          {
+            ...consumer_cache,
+            with: {...consumer_cache?.with ?? {}, "source-key": drifted_source_key},
+          },
+        ],
+      },
+    },
+  }
+  const producer = {
+    ...pair.producer,
+    jobs: {
+      ...pair.producer.jobs,
+      nextest: {
+        ...pair.producer.jobs.nextest,
+        steps: [
+          pair.producer.jobs.nextest.steps[0],
+          pair.producer.jobs.nextest.steps[1],
+          {
+            ...producer_cache,
+            with: {...producer_cache?.with ?? {}, "source-key": drifted_source_key},
+          },
+        ],
+      },
+    },
+  }
   assert_eq(
-    windows_shared_cache_errors(pair.consumer, producer),
-    [
-      "workspace-windows cache-key inputs drift: consumer=[\"CARGO_INCREMENTAL=0\",\"CARGO_TERM_COLOR=always\",\"RUSTC_WRAPPER=<unset>\",\"RUSTFLAGS=-D warnings\",\"pre-cache-uses=actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\",\"pre-cache-uses=./.github/actions/rust-toolchain\"] producer=[\"CARGO_INCREMENTAL=0\",\"CARGO_TERM_COLOR=always\",\"RUSTC_WRAPPER=<unset>\",\"RUSTFLAGS=-D warnings -C target-cpu=native\",\"pre-cache-uses=actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\",\"pre-cache-uses=./.github/actions/rust-toolchain\"]",
-    ],
+    windows_shared_cache_errors(consumer, producer),
+    ["workspace-windows producer and consumer must use the canonical source fingerprint"],
   )
 }
