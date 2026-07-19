@@ -178,9 +178,13 @@ fn run_one_baseline(task: dict, system: dict) -> dict {
     task_id: task.id,
     strategy: "baseline",
     context: system.label,
-    cost_usd: cost_for_tokens(CHEAP_MODEL.model, result.input_tokens, result.output_tokens),
-    input_tokens: result.input_tokens,
-    output_tokens: result.output_tokens,
+    cost_usd: cost_for_tokens(
+      CHEAP_MODEL.model,
+      result.usage.input_tokens,
+      result.usage.output_tokens,
+    ),
+    input_tokens: result.usage.input_tokens,
+    output_tokens: result.usage.output_tokens,
     code: code,
     looks_valid: typechecks(code),
   }

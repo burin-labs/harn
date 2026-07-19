@@ -704,9 +704,7 @@ pub(crate) fn is_billed_noncommittal_completion(signals: &CompletionContractSign
 }
 
 fn is_length_stop_reason(stop_reason: Option<&str>) -> bool {
-    stop_reason.is_some_and(|reason| {
-        reason.eq_ignore_ascii_case("length") || reason.eq_ignore_ascii_case("max_tokens")
-    })
+    stop_reason.is_some_and(super::result::stop_reason_is_length)
 }
 
 /// Build the loud, actionable error returned when

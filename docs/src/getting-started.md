@@ -210,7 +210,8 @@ For production callers, wrap with retry middleware from
 `std/llm/handlers`:
 
 ```harn,ignore
-import {default_llm_caller, with_retry} from "std/llm/handlers"
+import {default_llm_caller} from "std/llm/caller"
+import {with_retry} from "std/llm/handlers"
 
 const caller = with_retry(default_llm_caller(), {max_attempts: 4})
 const result = agent_loop(task, system, {llm_caller: caller, loop_until_done: true})

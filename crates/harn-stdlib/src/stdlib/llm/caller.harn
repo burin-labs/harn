@@ -1,0 +1,94 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/caller — the blessed default LLM caller stack.
+//
+// The call plane's front door: composed, policy-complete callers built from
+// the middleware in std/llm/handlers. Caller-plane sugar accumulates here so
+// std/llm/handlers stays a flat toolbox of individual middlewares.
+import { with_retry } from "std/llm/handlers"
+import { llm_call_options } from "std/llm/options"
+import { __wrap_llm_result } from "std/llm/safe"
+
+/**
+ * One request through a caller stack: the prompt/system pair plus the
+ * `llm_call` options dict the bottom of the stack forwards verbatim.
+ */
+pub type LlmCallerRequest = {prompt: string, system?: string, opts?: dict}
+
+/**
+ * A composable caller: middleware like `with_retry` / `with_cache` wrap one
+ * and return another. The result is the `std/llm/safe` status envelope
+ * (`{status, value?, error?, ...}`) around the canonical `llm_call` response.
+ */
+pub type LlmCaller = fn(LlmCallerRequest) -> dict
+
+/**
+ * default_llm_caller returns a closure with the canonical (call) -> result
+ * shape. It mirrors the built-in __default_invoke_llm body in std/agent/loop.
+ * Use as the bottom of a middleware composition:
+ *
+ *     let caller = with_retry(default_llm_caller(), {...})
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn default_llm_caller() -> LlmCaller {
+  return { call ->
+    const provider = __default_caller_render_context_provider(call)
+    const model = __default_caller_render_context_model(call)
+    const pushed = __push_llm_render_context(provider, model)
+    defer {
+      if pushed {
+        __pop_llm_render_context()
+      }
+    }
+    return __wrap_llm_result(
+      try {
+        llm_call(call.prompt, call.system, llm_call_options(call.opts))
+      },
+    )
+  }
+}
+
+/**
+ * llm_caller is the blessed default caller stack: `default_llm_caller`
+ * composed with `with_retry` under the default policy — typed reserved-status
+ * classification (no string sniffing), billed-empty re-dispatch, Retry-After
+ * honoring, exponential backoff with full jitter.
+ *
+ * This is the stack downstream wrappers historically reconstructed by hand
+ * (envelope alias probing + empty-generation sniffing + ad-hoc retry). With
+ * the canonical envelope those wrappers reduce to:
+ *
+ *     const caller = llm_caller()
+ *     const result = caller({prompt: prompt, system: system, opts: opts})
+ *
+ * `opts.retry` tunes the retry layer (same options as `with_retry`); compose
+ * `with_cache` / `with_budget` / `with_logging` around it for more.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn llm_caller(opts = nil) -> LlmCaller {
+  const cfg = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  return with_retry(default_llm_caller(), cfg?.retry ?? {})
+}
+
+/**
+ * Provider/model accessors for the ambient LLM render-context frame
+ * published around `default_llm_caller`. Named helpers keep the
+ * closure body readable and make the option-shape contract easy to
+ * extend (e.g. dispatch on `model_tier` if a future caller wants to
+ * publish the context before resolution).
+ */
+fn __default_caller_render_context_provider(call) -> string {
+  return to_string(call?.opts?.provider ?? "")
+}
+
+fn __default_caller_render_context_model(call) -> string {
+  return to_string(call?.opts?.model ?? "")
+}

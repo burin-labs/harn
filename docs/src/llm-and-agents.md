@@ -128,7 +128,7 @@ across turns. See [Agent loops](./llm/agent_loop.md#skills-lifecycle).
 
 `llm_stream` returns a channel of raw response chunks. `llm_stream_call` returns
 a first-class `Stream` of structured chunks `{delta, visible_delta, partial,
-role, finish_reason}` and cancels the background request when the stream is
+role, stop_reason}` and cancels the background request when the stream is
 dropped. Both accept the same provider, model, and generation options as
 `llm_call`. See [Streaming and transcripts](./llm/streaming.md).
 

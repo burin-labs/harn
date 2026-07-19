@@ -9,10 +9,10 @@ pipeline default() {
   const second = llm_call(prompt, nil, options)
   __io_println(first.usage.cache_read_tokens == 0)
   __io_println(first.usage.cache_write_tokens > 0)
-  __io_println(first.usage.cache_creation_input_tokens == first.usage.cache_write_tokens)
   __io_println(second.usage.cache_read_tokens > 0)
   __io_println(second.usage.cache_write_tokens == 0)
   __io_println(second.usage.cache_hit_ratio == 1.0)
   __io_println(second.usage.cache_savings_usd > 0.0)
-  __io_println(second.cache_read_tokens == second.usage.cache_read_tokens)
+  // usage is the single owner of cache accounting: no top-level duplicate.
+  __io_println(second.cache_read_tokens == nil)
 }

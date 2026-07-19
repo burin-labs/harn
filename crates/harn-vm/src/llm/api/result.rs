@@ -194,10 +194,6 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
         crate::value::intern_key("cache_write_tokens"),
         VmValue::Int(result.cache_write_tokens),
     );
-    usage.insert(
-        crate::value::intern_key("cache_creation_input_tokens"),
-        VmValue::Int(result.cache_write_tokens),
-    );
     if result.cache_supported {
         usage.insert(
             crate::value::intern_key("cache_hit_ratio"),
@@ -227,7 +223,7 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
 /// llama.cpp reasoning models, Kimi) instead of in a separate provider
 /// reasoning field. When the route's capability matrix marks it as an
 /// inline-reasoning emitter, split those blocks out of the visible text so
-/// `text`/`prose`/`visible_text` carry only the answer, and return the
+/// `text`/`visible_text` carry only the answer, and return the
 /// extracted reasoning so it can be folded into the reasoning channel —
 /// mirroring how hosted-provider thinking is already surfaced.
 ///
@@ -274,6 +270,116 @@ fn merge_reasoning_channels(existing: &Option<String>, inline: Option<String>) -
             }
         }
     }
+}
+
+/// Canonical caller-facing classification of a completed (non-thrown) LLM
+/// call. This is the typed answer to "what did this call actually produce?"
+/// so no consumer ever re-derives it from stop-reason vocabularies or
+/// token-count probing (the class of bug behind harn#4744 and the
+/// billed-noncommittal S2 failure in the tool-calling north star).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LlmOutcomeKind {
+    /// The model committed a normal answer and stopped cleanly.
+    Complete,
+    /// The response's actionable content is one or more tool calls.
+    ToolUse,
+    /// The provider cut generation on an output-token limit; text and
+    /// especially tool-call arguments must be treated as suspect.
+    Truncated,
+    /// The provider refused or filtered the completion.
+    Refused,
+    /// The provider paused the turn (e.g. Anthropic `pause_turn`); the call
+    /// should be resumed, not judged.
+    Paused,
+    /// The call committed nothing usable: no visible text, no tool calls,
+    /// no thinking. `billed` distinguishes the paid-for flavor.
+    Empty,
+}
+
+impl LlmOutcomeKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::ToolUse => "tool_use",
+            Self::Truncated => "truncated",
+            Self::Refused => "refused",
+            Self::Paused => "paused",
+            Self::Empty => "empty",
+        }
+    }
+}
+
+/// Single owner of the "provider cut generation on an output-token limit"
+/// stop-reason vocabulary. `canonical_provider_stop_reason` /
+/// `is_length_truncation` (session plane) and the response parsers all
+/// delegate here so a new provider spelling is added exactly once.
+pub(crate) fn stop_reason_is_length(stop_reason: &str) -> bool {
+    // OpenAI-compat "length", Anthropic/Bedrock "max_tokens" (Bedrock wire
+    // camelCase is normalized before it reaches LlmResult), Gemini
+    // "MAX_TOKENS" (case-insensitive compare covers it).
+    stop_reason.eq_ignore_ascii_case("length")
+        || stop_reason.eq_ignore_ascii_case("max_tokens")
+        || stop_reason.eq_ignore_ascii_case("max_output_tokens")
+        || stop_reason.eq_ignore_ascii_case("model_length")
+}
+
+fn stop_reason_is_refusal(stop_reason: &str) -> bool {
+    // Anthropic "refusal", OpenAI "content_filter", Bedrock
+    // "content_filtered", Gemini safety finish reasons.
+    [
+        "refusal",
+        "content_filter",
+        "content_filtered",
+        "safety",
+        "recitation",
+        "prohibited_content",
+        "blocklist",
+        "image_safety",
+    ]
+    .iter()
+    .any(|reason| stop_reason.eq_ignore_ascii_case(reason))
+}
+
+/// Classify the canonical `outcome` for a completed call. `has_tool_calls`
+/// covers BOTH provider-native and text-protocol-parsed calls (the struct's
+/// own `tool_calls` only carries native ones), and `has_visible_text` /
+/// `has_thinking` reflect the post-projection channels the caller can act on.
+pub(crate) fn classify_llm_outcome(
+    result: &LlmResult,
+    has_tool_calls: bool,
+    has_visible_text: bool,
+    has_thinking: bool,
+) -> LlmOutcomeKind {
+    let stop_reason = result.stop_reason.as_deref().unwrap_or("");
+    if !has_visible_text && !has_tool_calls && !has_thinking {
+        return LlmOutcomeKind::Empty;
+    }
+    if stop_reason_is_refusal(stop_reason) {
+        return LlmOutcomeKind::Refused;
+    }
+    if stop_reason.eq_ignore_ascii_case("pause_turn") {
+        return LlmOutcomeKind::Paused;
+    }
+    if stop_reason_is_length(stop_reason) {
+        return LlmOutcomeKind::Truncated;
+    }
+    if has_tool_calls {
+        return LlmOutcomeKind::ToolUse;
+    }
+    LlmOutcomeKind::Complete
+}
+
+fn build_outcome_dict(kind: LlmOutcomeKind, result: &LlmResult) -> crate::value::DictMap {
+    let mut outcome = crate::value::DictMap::new();
+    outcome.put_str("kind", kind.as_str());
+    // `billed` is what turns an `empty` outcome into the S2
+    // "billed-noncommittal" signal; carried on every outcome so callers
+    // never re-derive it from usage.
+    outcome.insert(
+        crate::value::intern_key("billed"),
+        VmValue::Bool(result.input_tokens > 0 || result.output_tokens > 0),
+    );
+    outcome
 }
 
 struct TextToolProjection {
@@ -338,67 +444,29 @@ pub(crate) fn vm_build_llm_result(
     let mut dict = crate::value::DictMap::new();
     dict.put_str("model", result.model.as_str());
     dict.put_str("provider", result.provider.as_str());
-    dict.insert(
-        crate::value::intern_key("input_tokens"),
-        VmValue::Int(result.input_tokens),
-    );
-    dict.insert(
-        crate::value::intern_key("output_tokens"),
-        VmValue::Int(result.output_tokens),
-    );
-    // Cache accounting (0 when provider doesn't report cache info).
-    dict.insert(
-        crate::value::intern_key("cache_read_tokens"),
-        VmValue::Int(result.cache_read_tokens),
-    );
-    dict.insert(
-        crate::value::intern_key("cache_write_tokens"),
-        VmValue::Int(result.cache_write_tokens),
-    );
-    dict.insert(
-        crate::value::intern_key("cache_creation_input_tokens"),
-        VmValue::Int(result.cache_write_tokens),
-    );
-    dict.insert(
-        crate::value::intern_key("served_fast"),
-        VmValue::Bool(result.served_fast),
-    );
-    let usage = build_usage_dict(result);
-    if let Some(value) = usage.get("cache_hit_ratio") {
-        dict.insert(crate::value::intern_key("cache_hit_ratio"), value.clone());
-    }
-    if let Some(value) = usage.get("cache_visibility") {
-        dict.insert(crate::value::intern_key("cache_visibility"), value.clone());
-    }
-    if let Some(value) = usage.get("cache_savings_usd") {
-        dict.insert(crate::value::intern_key("cache_savings_usd"), value.clone());
-    }
-    // Surface provider-side timings (Ollama load_duration, prompt_eval_duration,
+    // `usage` is the single owner of ALL accounting (tokens, cache, cost,
+    // served tier, provider timings). No accounting key is duplicated at the
+    // top level: one spelling, one place.
+    let mut usage = build_usage_dict(result);
+    // Provider-side timings (Ollama load_duration, prompt_eval_duration,
     // eval_duration; OpenAI usage; llama.cpp `timings`). Evals key off
-    // `provider_telemetry` for cold-vs-steady-state and prefill-vs-generation
-    // breakdowns; absent fields stay absent rather than collapsing to zero.
-    let telemetry_dict = result.telemetry.as_vm_dict();
-    let mut usage = usage;
-    if let Some(ref telemetry_dict) = telemetry_dict {
+    // `usage.provider_telemetry` for cold-vs-steady-state and
+    // prefill-vs-generation breakdowns; absent fields stay absent rather than
+    // collapsing to zero.
+    if let Some(telemetry_dict) = result.telemetry.as_vm_dict() {
         usage.insert(
-            crate::value::intern_key("provider_telemetry"),
-            telemetry_dict.clone(),
-        );
-    }
-    dict.insert(crate::value::intern_key("usage"), VmValue::dict(usage));
-    if let Some(telemetry_dict) = telemetry_dict {
-        dict.insert(
             crate::value::intern_key("provider_telemetry"),
             telemetry_dict,
         );
     }
+    dict.insert(crate::value::intern_key("usage"), VmValue::dict(usage));
 
     if let Some(json_val) = parsed_json {
         dict.insert(crate::value::intern_key("data"), json_val);
     }
 
     // Keep parsing available for tool-calling responses so llm_call can
-    // expose canonical/prose/tool metadata, but do not surface tagged-protocol
+    // expose canonical/tool metadata, but do not surface tagged-protocol
     // violations for ordinary plain-text completions with no tools.
     let projection = build_text_tool_projection(&visible_text_src, tools_val, &result.tool_calls);
     dict.put_str("raw_text", visible_text_src.as_str());
@@ -411,13 +479,13 @@ pub(crate) fn vm_build_llm_result(
     } else {
         Vec::new()
     };
-    if !merged_tool_calls.is_empty() {
-        let calls: Vec<VmValue> = merged_tool_calls.iter().map(json_to_vm_value).collect();
-        dict.insert(
-            crate::value::intern_key("tool_calls"),
-            VmValue::List(std::sync::Arc::new(calls)),
-        );
-    }
+    // Always present (possibly empty) so consumers never branch on key
+    // existence to mean "no tool calls".
+    let calls: Vec<VmValue> = merged_tool_calls.iter().map(json_to_vm_value).collect();
+    dict.insert(
+        crate::value::intern_key("tool_calls"),
+        VmValue::List(std::sync::Arc::new(calls)),
+    );
     // Expose native_tool_calls separately so the agent loop can distinguish
     // provider-native tool calls from text-parsed ones for native_tool_fallback
     // detection. `tool_calls` (above) merges both sources for callers that
@@ -453,22 +521,15 @@ pub(crate) fn vm_build_llm_result(
         }
         if let Some(ref body) = parse.done_marker {
             dict.put_str("done_marker", body.as_str());
-            dict.put_str("parsed_done_marker", body.as_str());
         }
         if !parse.canonical.is_empty() {
             dict.put_str("canonical_text", parse.canonical.as_str());
         }
-        // Always emit `prose` (fall back to raw text) so callers have a
-        // single reliable "the answer" key regardless of whether the model
-        // used the tagged protocol.
-        dict.put_str("prose", projection.public_text.as_str());
-    } else {
-        dict.put_str("prose", visible_text_src.as_str());
     }
 
-    if let Some(thinking) = merge_reasoning_channels(&result.thinking, inline_reasoning) {
+    let merged_thinking = merge_reasoning_channels(&result.thinking, inline_reasoning);
+    if let Some(ref thinking) = merged_thinking {
         dict.put_str("thinking", thinking.as_str());
-        dict.put_str("private_reasoning", thinking.as_str());
     }
     if let Some(ref summary) = result.thinking_summary {
         dict.put_str("thinking_summary", summary.as_str());
@@ -477,6 +538,23 @@ pub(crate) fn vm_build_llm_result(
     if let Some(ref stop_reason) = result.stop_reason {
         dict.put_str("stop_reason", stop_reason.as_str());
     }
+
+    // Canonical outcome classification. "Usable content" mirrors
+    // `LlmResult::committed_nothing_usable` (trim-based, harn#4744) but also
+    // counts text-protocol-parsed tool calls, which only exist
+    // post-projection.
+    let outcome_kind = classify_llm_outcome(
+        result,
+        !merged_tool_calls.is_empty(),
+        !visible_text_src.trim().is_empty(),
+        merged_thinking
+            .as_deref()
+            .is_some_and(|thinking| !thinking.trim().is_empty()),
+    );
+    dict.insert(
+        crate::value::intern_key("outcome"),
+        VmValue::dict(build_outcome_dict(outcome_kind, result)),
+    );
     if let Some(ref request_id) = result.telemetry.request_id {
         dict.put_str("provider_response_id", request_id.as_str());
     }
@@ -603,6 +681,165 @@ mod cache_supported_serde_tests {
     }
 
     #[test]
+    fn envelope_top_level_keys_are_canonical() {
+        // THE canonical envelope guard: exactly one spelling per field, no
+        // accounting outside `usage`, no alias keys. A new top-level key is a
+        // contract change and must be added here deliberately.
+        let allowed: std::collections::BTreeSet<&str> = [
+            "model",
+            "provider",
+            "usage",
+            "outcome",
+            "data",
+            "text",
+            "raw_text",
+            "visible_text",
+            "canonical_text",
+            "thinking",
+            "thinking_summary",
+            "stop_reason",
+            "tool_calls",
+            "native_tool_calls",
+            "protocol_violations",
+            "tool_parse_errors",
+            "done_marker",
+            "provider_response_id",
+            "transcript",
+            "blocks",
+            "logprobs",
+            // Attached post-build by `call.rs::attach_routing_block`.
+            "routing",
+        ]
+        .into_iter()
+        .collect();
+
+        let mut result = mock_completion_response("hi", None);
+        result.thinking = Some("plan".to_string());
+        result.thinking_summary = Some("summary".to_string());
+        result.logprobs = vec![serde_json::json!({"token": "x"})];
+        let value = vm_build_llm_result(&result, None, None, None);
+        let dict = value.as_dict().expect("result dict");
+        for key in dict.keys() {
+            assert!(
+                allowed.contains(key.as_str()),
+                "non-canonical top-level envelope key: {key}"
+            );
+        }
+        // Single-owner accounting: usage holds tokens, nothing else does.
+        let usage = dict
+            .get("usage")
+            .and_then(VmValue::as_dict)
+            .expect("usage dict");
+        for key in [
+            "input_tokens",
+            "output_tokens",
+            "cost_usd",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "cache_hit_ratio",
+            "cache_visibility",
+            "cache_savings_usd",
+            "served_fast",
+        ] {
+            assert!(usage.get(key).is_some(), "usage must own {key}");
+            assert!(
+                dict.get(key).is_none(),
+                "{key} must not be duplicated at the top level"
+            );
+        }
+        assert!(
+            usage.get("cache_creation_input_tokens").is_none(),
+            "the cache_write_tokens alias must not exist"
+        );
+        for alias in ["prose", "private_reasoning", "parsed_done_marker"] {
+            assert!(dict.get(alias).is_none(), "alias key {alias} must be dead");
+        }
+    }
+
+    #[test]
+    fn outcome_classification_covers_the_vocabulary() {
+        use super::{classify_llm_outcome, LlmOutcomeKind};
+
+        let served = mock_completion_response("hi", None);
+        assert_eq!(
+            classify_llm_outcome(&served, false, true, false),
+            LlmOutcomeKind::Complete
+        );
+        assert_eq!(
+            classify_llm_outcome(&served, true, true, false),
+            LlmOutcomeKind::ToolUse
+        );
+
+        let mut truncated = mock_completion_response("hi", None);
+        truncated.stop_reason = Some("max_tokens".to_string());
+        assert_eq!(
+            classify_llm_outcome(&truncated, false, true, false),
+            LlmOutcomeKind::Truncated
+        );
+        // Length-stop with tool calls is still truncated: partial tool-call
+        // arguments must not be trusted as a clean tool_use.
+        assert_eq!(
+            classify_llm_outcome(&truncated, true, true, false),
+            LlmOutcomeKind::Truncated
+        );
+        truncated.stop_reason = Some("MAX_TOKENS".to_string());
+        assert_eq!(
+            classify_llm_outcome(&truncated, false, true, false),
+            LlmOutcomeKind::Truncated
+        );
+
+        let mut refused = mock_completion_response("hi", None);
+        refused.stop_reason = Some("content_filter".to_string());
+        assert_eq!(
+            classify_llm_outcome(&refused, false, true, false),
+            LlmOutcomeKind::Refused
+        );
+
+        let mut paused = mock_completion_response("hi", None);
+        paused.stop_reason = Some("pause_turn".to_string());
+        assert_eq!(
+            classify_llm_outcome(&paused, false, true, false),
+            LlmOutcomeKind::Paused
+        );
+
+        // Nothing usable at all: empty wins over every stop_reason reading.
+        let mut empty = mock_completion_response("hi", None);
+        empty.stop_reason = Some("end_turn".to_string());
+        assert_eq!(
+            classify_llm_outcome(&empty, false, false, false),
+            LlmOutcomeKind::Empty
+        );
+        // Thinking-only responses committed something usable.
+        assert_eq!(
+            classify_llm_outcome(&empty, false, false, true),
+            LlmOutcomeKind::Complete
+        );
+    }
+
+    #[test]
+    fn billed_empty_outcome_is_surfaced_on_the_envelope() {
+        let mut result = mock_completion_response("x", None);
+        result.text = "   \n".to_string();
+        result.input_tokens = 100;
+        result.output_tokens = 3;
+        let value = vm_build_llm_result(&result, None, None, None);
+        let dict = value.as_dict().expect("result dict");
+        let outcome = dict
+            .get("outcome")
+            .and_then(VmValue::as_dict)
+            .expect("outcome dict");
+        assert_eq!(
+            outcome.get("kind").map(VmValue::display).as_deref(),
+            Some("empty")
+        );
+        assert!(
+            matches!(outcome.get("billed"), Some(VmValue::Bool(true))),
+            "billed must be true, got: {:?}",
+            outcome.get("billed")
+        );
+    }
+
+    #[test]
     fn raw_provider_tool_call_rejects_non_object() {
         let constructed = RawProviderToolCall::new(serde_json::json!("tool_call"));
         let deserialized =
@@ -718,22 +955,19 @@ mod cache_supported_serde_tests {
         let value = vm_build_llm_result(&result, None, None, None);
         let dict = value.as_dict().expect("result dict");
 
+        let Some(VmValue::List(tool_calls)) = dict.get("tool_calls") else {
+            panic!("tool_calls must always be present as a list: {dict:?}");
+        };
         assert!(
-            dict.get("tool_calls").is_none(),
+            tool_calls.is_empty(),
             "provider reasoning must not become executable tool calls"
         );
         assert_eq!(
-            dict.get("prose").map(VmValue::display).as_deref(),
+            dict.get("text").map(VmValue::display).as_deref(),
             Some("Done.")
         );
         assert_eq!(
             dict.get("thinking").map(VmValue::display).as_deref(),
-            result.thinking.as_deref()
-        );
-        assert_eq!(
-            dict.get("private_reasoning")
-                .map(VmValue::display)
-                .as_deref(),
             result.thinking.as_deref()
         );
     }
@@ -757,7 +991,6 @@ mod cache_supported_serde_tests {
         let dict = value.as_dict().expect("result dict");
 
         assert_eq!(dict.get("text").map(VmValue::display).as_deref(), Some(""));
-        assert_eq!(dict.get("prose").map(VmValue::display).as_deref(), Some(""));
         assert_eq!(
             dict.get("visible_text").map(VmValue::display).as_deref(),
             Some("")
@@ -823,12 +1056,6 @@ mod cache_supported_serde_tests {
             "raw parser text must preserve the done sentinel"
         );
         assert_eq!(
-            dict.get("parsed_done_marker")
-                .map(VmValue::display)
-                .as_deref(),
-            Some("##DONE##")
-        );
-        assert_eq!(
             dict.get("done_marker").map(VmValue::display).as_deref(),
             Some("##DONE##")
         );
@@ -856,7 +1083,6 @@ mod cache_supported_serde_tests {
         let dict = value.as_dict().expect("result dict");
 
         assert_eq!(dict.get("text").map(VmValue::display).as_deref(), Some(""));
-        assert_eq!(dict.get("prose").map(VmValue::display).as_deref(), Some(""));
         assert_eq!(
             dict.get("visible_text").map(VmValue::display).as_deref(),
             Some("")

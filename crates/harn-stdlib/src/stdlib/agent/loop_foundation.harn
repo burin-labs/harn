@@ -115,7 +115,7 @@ pub fn __autocontinue_hidden_reasoning_truncated(llm_result, tool_call_count) {
   if thinking != "" || summary != "" {
     return true
   }
-  return (to_int(llm_result?.output_tokens ?? 0) ?? 0) > 0
+  return (to_int(llm_result?.usage?.output_tokens ?? 0) ?? 0) > 0
 }
 
 /**

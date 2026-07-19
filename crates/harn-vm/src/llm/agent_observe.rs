@@ -48,7 +48,7 @@
 //!   when the provider supplied native object receipts before normalization;
 //!   dispatch continues to use `tool_calls`. Also carries diagnostics
 //!   `{cost_usd, cache_* (cache_read_tokens, cache_write_tokens,
-//!   cache_creation_input_tokens, cache_hit_ratio, cache_savings_usd,
+//!   cache_hit_ratio, cache_savings_usd,
 //!   cache_hit), thinking, thinking_summary, provider_telemetry,
 //!   structural_experiment}`.
 //! - `interpreted_response` `{call_id, iteration, tool_format, prose,

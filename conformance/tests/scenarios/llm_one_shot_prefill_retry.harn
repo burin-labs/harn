@@ -1,4 +1,5 @@
-import { default_llm_caller, with_retry } from "std/llm/handlers"
+import { default_llm_caller } from "std/llm/caller"
+import { with_retry } from "std/llm/handlers"
 import { llm_arm_one_shot_prefill } from "std/llm/options"
 import { llm_text, with_llm_script } from "std/testing"
 

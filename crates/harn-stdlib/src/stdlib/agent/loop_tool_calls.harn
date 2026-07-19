@@ -235,7 +235,7 @@ pub fn __run_structural_validator(
       tool_parse_errors: parsed?.tool_parse_errors ?? [],
       protocol_violations: parsed?.protocol_violations ?? [],
       tool_format: turn_opts?.tool_format ?? llm_opts?.tool_format ?? "",
-      output_tokens: llm_result?.output_tokens ?? 0,
+      output_tokens: llm_result?.usage?.output_tokens ?? 0,
       max_output_tokens: llm_opts?.max_tokens ?? turn_opts?.max_tokens ?? 0,
       provider: llm_result?.provider ?? "",
       model: llm_result?.model ?? "",

@@ -12,7 +12,8 @@
 import { agent_tool_format_resolution } from "std/agent/options"
 import { pin_kinds } from "std/agent/pins"
 import { agent_apply_default_retry } from "std/agent/retry"
-import { compose, default_llm_caller, with_logging, with_routing } from "std/llm/handlers"
+import { default_llm_caller } from "std/llm/caller"
+import { compose, with_logging, with_routing } from "std/llm/handlers"
 import {
   compose_tool_callers,
   with_audit_log,

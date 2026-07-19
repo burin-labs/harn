@@ -12,7 +12,11 @@ safety.
 
 Concretely:
 
-- `default_llm_caller()` from `std/llm/handlers` is the bottom of the
+- `llm_caller(opts?)` from `std/llm/caller` is the blessed default
+  stack — `with_retry(default_llm_caller(), opts?.retry ?? {})` with
+  typed reserved-status classification and billed-empty re-dispatch on by
+  default. Reach for it before composing retry by hand.
+- `default_llm_caller()` from `std/llm/caller` is the bottom of the
   middleware stack. It mirrors `agent_loop`'s built-in invocation.
 - `with_*` wrappers in `std/llm/handlers` take a `next` caller and
   return a new caller. Compose them left-to-right with `compose([...])`.
@@ -43,11 +47,13 @@ fn(call) -> LlmCallerResult
 
 Reserved statuses:
 
-`"budget_exhausted"`, `"transport_error"`, `"caller_aborted"`,
+`"budget_exhausted"`, `"transient"`, `"caller_aborted"`,
 `"caller_skipped"`, `"exception"`, `"schema_validation"`,
 `"rate_limited"`, `"timeout"`, `"network"`, `"provider_5xx"`,
-`"stream_interrupt"`, `"context_window_exceeded"`, `"auth"`,
-`"policy_blocked"`, `"circuit_open"`.
+`"stream_interrupt"`, `"context_window_exceeded"` (alias
+`"context_overflow"`), `"auth"`, `"policy_blocked"`, `"circuit_open"`,
+and `"provider_error"` (terminal provider classes — invalid_request /
+model_unavailable / unknown-terminal — never retried).
 
 Anything else lands in `error` and is preserved but not interpreted.
 Wrappers must catch raw thrown errors and re-emit them as
@@ -105,8 +111,9 @@ non-empty.
 
 | Function | Signature | Description |
 |---|---|---|
-| `default_llm_caller()` | `() -> caller` | Bottom of the stack; mirrors `agent_loop`'s built-in `__default_invoke_llm`. Returns `{ok: true, value}` on success, `{ok: false, status: "budget_exhausted"}` on budget, `{ok: false, status: "exception", error}` otherwise. Never throws. |
-| `with_retry(next, opts?)` | `(caller, dict?) -> caller` | Bounded retry. Defaults: `max_attempts: 3, base_ms: 250, max_ms: 8000, backoff: "exponential", jitter: "full", honor_retry_after: true`. Honors `error.retry_after_ms` and case-insensitive `Retry-After`. Default predicate retries `transient/rate_limited/timeout/exception/network/provider_5xx/stream_interrupt`; never retries `schema_validation/auth/budget_exhausted/context_window_exceeded/policy_blocked/caller_aborted/caller_skipped/circuit_open`. Returns the last envelope plus `retries_attempted: N`. Never throws. |
+| `llm_caller(opts?)` | `(dict?) -> caller` | (From `std/llm/caller`.) Blessed default stack: `with_retry(default_llm_caller(), opts?.retry ?? {})`. Typed reserved-status classification (no string sniffing) and billed-empty re-dispatch on by default. `opts.retry` tunes the retry layer; compose `with_cache` / `with_budget` / `with_logging` around it for more. |
+| `default_llm_caller()` | `() -> caller` | (From `std/llm/caller`.) Bottom of the stack; mirrors `agent_loop`'s built-in `__default_invoke_llm`. Returns `{ok: true, value}` on success; failures carry the typed reserved status projected from the thrown error (`rate_limited`, `timeout`, `network`, `provider_5xx`, `context_window_exceeded`, `auth`, `policy_blocked`, `budget_exhausted`, `transient`, `provider_error`, or `exception`). Never throws. |
+| `with_retry(next, opts?)` | `(caller, dict?) -> caller` | Bounded retry. Defaults: `max_attempts: 3, base_ms: 250, max_ms: 8000, backoff: "exponential", jitter: "full", honor_retry_after: true`. Honors `error.retry_after_ms` and case-insensitive `Retry-After`. Default predicate retries `transient/rate_limited/timeout/exception/network/provider_5xx/stream_interrupt`; never retries `schema_validation/auth/budget_exhausted/context_window_exceeded/policy_blocked/provider_error/caller_aborted/caller_skipped/circuit_open`. Returns the last envelope plus `retries_attempted: N`. Never throws. |
 | `with_fallback(callers)` | `(list<caller>) -> caller` | Try callers in order; advance on `{ok: false}`. On success: result + `{fallback_index, fallback_total}`. Emits `llm_fallback_attempt` per attempt. |
 | `with_shadow(primary, shadow, opts?)` | `(caller, caller, dict?) -> caller` | Run both via `parallel each`; return primary. `sampler(call) -> bool`, `on_diff(p, s) -> nil`, `diff_when ∈ {"any","ok_only"}`. Emits `llm_shadow_diff` when text differs. |
 | `with_prompt_rewrite(next, rewriter)` | `(caller, fn(prompt, system, opts) -> {prompt?, system?, opts?}) -> caller` | Rewrite the call before delegating; missing keys fall back to original. Used by `refine_caller`. |
@@ -123,7 +130,8 @@ non-empty.
 ### Minimal example
 
 ```harn,ignore
-import {default_llm_caller, with_retry, with_logging, compose} from "std/llm/handlers"
+import {default_llm_caller} from "std/llm/caller"
+import {with_retry, with_logging, compose} from "std/llm/handlers"
 
 const caller = compose([
   with_logging({level: "info"}),
@@ -145,7 +153,8 @@ tool middleware from `std/llm/tool_middleware`):
 
 ```harn,ignore
 import {agent_model_options} from "std/agent/options"
-import {compose, default_llm_caller, with_logging, with_retry} from "std/llm/handlers"
+import {default_llm_caller} from "std/llm/caller"
+import {compose, with_logging, with_retry} from "std/llm/handlers"
 
 const route = agent_model_options({
   role: "planner",
@@ -171,10 +180,8 @@ frontier escalation only on ambiguity, deterministic budget enforcement
 per persona, and receipt-grade structured logs for every model call.
 
 ```harn,ignore
-import {
-  default_llm_caller, with_retry, with_logging, with_budget,
-  with_routing, with_fallback, with_circuit_breaker, compose,
-} from "std/llm/handlers"
+import {default_llm_caller} from "std/llm/caller"
+import {with_retry, with_logging, with_budget, with_routing, with_fallback, with_circuit_breaker, compose} from "std/llm/handlers"
 
 // Cheap default: a fast / inexpensive model on a tight retry budget.
 const cheap = with_circuit_breaker(
@@ -488,7 +495,7 @@ agent_loop(task, system, opts + {loop_until_done: true})
 
 | Function | Signature | Description |
 |---|---|---|
-| `safe_call(prompt, system, options)` | `(string, string\|nil, dict) -> dict` | Try-wrap `llm_call` into `{ok: true, value}` or `{ok: false, status: "budget_exhausted"\|"exception", error}`. Same shape as `default_llm_caller`. |
+| `safe_call(prompt, system, options)` | `(string, string\|nil, dict) -> dict` | Try-wrap `llm_call` into `{ok: true, value}` or `{ok: false, status, error}`. Maps typed llm error dicts onto reserved statuses — `budget_exhausted`, `rate_limited`, `timeout`, `network`, `provider_5xx`, `context_window_exceeded`, `auth`, `policy_blocked`, `transient` (other retryable reasons, e.g. empty generation), `provider_error` (other terminal reasons, `retryable: false`), or `exception`. Same shape as `default_llm_caller`. |
 | `safe_field(envelope, names, default)` | `(dict, list<string>, any) -> any` | Try each name (case-insensitive) in order; return first non-nil non-empty value, else default. Top-level keys only. |
 | `dict_get_ci(d, key)` | `(dict, string) -> any` | Single-key case-insensitive lookup. |
 | `with_case_insensitive_keys(envelope)` | `(any) -> any` | Recursively lowercase all dict keys. Idempotent. |
