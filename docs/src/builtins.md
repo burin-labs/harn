@@ -2176,6 +2176,7 @@ distinguish new failure modes.
 | `circuit_open` | The circuit breaker is open |
 | `budget_exceeded` | An LLM cost or token budget would be exceeded |
 | `internal` | An engine or wiring bug — an undefined builtin, corrupt bytecode, a violated VM invariant. Retrying and rewording the prompt cannot fix it, so the agent loop re-raises rather than folding it into a tool observation |
+| `environment` | A host environment or infrastructure gap, not the workload's code — a developer-toolchain root or cache outside the sandbox profile, a missing system binary, or another provisioning problem. The fix is to widen the sandbox/config or provision the host; embedders branch on this to avoid blaming the model for an environment gap |
 | `generic` | Unclassified |
 
 Example:
