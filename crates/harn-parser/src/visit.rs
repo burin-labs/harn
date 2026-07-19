@@ -51,6 +51,39 @@ pub fn contains_identifier_receiver_access(program: &[SNode]) -> bool {
     found
 }
 
+/// Return whether a program contains an enum-shaped match pattern whose
+/// receiver is a bare identifier (`Status.Ready` or `Status.Error(value)`).
+///
+/// Ordinary property access does not need enum metadata: the runtime module
+/// namespace supplies the same value through normal property lookup. The
+/// compiler only needs the imported-enum catalog when lowering these match
+/// patterns, where a dotted expression is otherwise indistinguishable from a
+/// value comparison. Keeping this predicate pattern-specific avoids forcing a
+/// full import-graph walk on modules that merely use record or namespace
+/// property access.
+pub fn contains_identifier_enum_pattern(program: &[SNode]) -> bool {
+    let mut found = false;
+    walk_program(program, &mut |node| {
+        let Node::MatchExpr { arms, .. } = &node.node else {
+            return;
+        };
+        found |= arms
+            .iter()
+            .any(|arm| contains_identifier_enum_pattern_node(&arm.pattern));
+    });
+    found
+}
+
+fn contains_identifier_enum_pattern_node(node: &SNode) -> bool {
+    match &node.node {
+        Node::PropertyAccess { object, .. } | Node::MethodCall { object, .. } => {
+            matches!(&object.node, Node::Identifier(_))
+        }
+        Node::OrPattern(patterns) => patterns.iter().any(contains_identifier_enum_pattern_node),
+        _ => false,
+    }
+}
+
 /// Visit `node`, then recurse into its children.
 pub fn walk_node(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
     let mut stack = vec![node];
@@ -450,6 +483,30 @@ mod tests {
             property: "Ready".to_string(),
         })];
         assert!(contains_identifier_receiver_access(&qualified));
+    }
+
+    #[test]
+    fn enum_pattern_predicate_ignores_ordinary_property_access() {
+        let ordinary = vec![dummy(Node::PropertyAccess {
+            object: Box::new(dummy(Node::Identifier("record".to_string()))),
+            property: "field".to_string(),
+        })];
+        assert!(!contains_identifier_enum_pattern(&ordinary));
+
+        let pattern = dummy(Node::PropertyAccess {
+            object: Box::new(dummy(Node::Identifier("Status".to_string()))),
+            property: "Ready".to_string(),
+        });
+        let match_expr = dummy(Node::MatchExpr {
+            value: Box::new(dummy(Node::Identifier("value".to_string()))),
+            arms: vec![MatchArm {
+                pattern,
+                guard: None,
+                body: Vec::new(),
+                span: Span::dummy(),
+            }],
+        });
+        assert!(contains_identifier_enum_pattern(&[match_expr]));
     }
 
     #[test]

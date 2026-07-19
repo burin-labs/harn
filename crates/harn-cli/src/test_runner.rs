@@ -751,8 +751,7 @@ fn extract_cases_from_program(
 }
 
 fn seed_imported_enum_candidates(file: &Path, source: &str, cases: &mut [TestCase]) {
-    if cases.is_empty()
-        || !harn_parser::visit::contains_identifier_receiver_access(&cases[0].program)
+    if cases.is_empty() || !harn_parser::visit::contains_identifier_enum_pattern(&cases[0].program)
     {
         return;
     }

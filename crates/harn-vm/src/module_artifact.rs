@@ -357,7 +357,7 @@ fn imported_enum_candidates_for_program(
 }
 
 fn needs_imported_enum_candidates(program: &[harn_parser::SNode]) -> bool {
-    harn_parser::visit::contains_identifier_receiver_access(program)
+    harn_parser::visit::contains_identifier_enum_pattern(program)
 }
 
 fn parse_module_source(
