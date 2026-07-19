@@ -1077,16 +1077,13 @@ support boundary.
 | `run_artifacts_from_dir(kind, dir)` | Reconstruct the basic run artifact shape for recovery/chat/review flows without writing |
 | `run_artifacts_list(kind, options?)` | List recent run directories newest-first with `{root?, namespace?, limit?}` |
 | `run_artifact_path(run, name)` | Resolve a relative artifact path inside `run.dir`, rejecting absolute paths and `..` traversal |
-| `run_artifact_write_json(run, name, value, options?)` | Write JSON through `std/fs.write_json` conventions |
-| `run_artifact_write_json_contract_result<T>(run, name, value, contract, options?)` | Validate structural and relational rules before replacing JSON; leave the destination unchanged on failure |
-| `run_artifact_write_json_contract<T>(run, name, value, contract, options?)` | Throwing convenience wrapper over the same validate-before-write boundary |
-| `run_artifact_read_json_contract_result<T>(run, name, contract)` | Read contract-bound JSON without erasing read, schema, or rule failures |
-| `run_artifact_read_json_contract<T>(run, name, contract)` | Read required contract-bound JSON and throw its typed failure |
-| `run_artifact_write_json_typed<T>(run, name, value, schema, options?)` | Validate JSON before writing, leaving the prior artifact unchanged on contract failure |
-| `run_artifact_read_json(run, name)` | Read a required JSON artifact through `std/fs.read_json` |
-| `run_artifact_read_json_typed<T>(run, name, schema, apply_defaults?)` | Read required JSON and validate the consumer-owned artifact shape |
-| `run_artifact_read_json_typed_result<T>(run, name, schema, apply_defaults?)` | Read optional JSON as a typed Result that preserves read and schema failure details |
-| `run_artifact_read_json_result(run, name)` | Read an optional JSON artifact while preserving typed failure detail |
+| `artifact_descriptor<T>(name, contract)` | Bind one traversal-safe artifact name to its `SchemaContract<T>` |
+| `run_artifact_write_json<T>(run, descriptor, value, options?)` | Validate and conditionally replace descriptor-bound JSON, returning the file receipt |
+| `run_artifact_write_json_result<T>(run, descriptor, value, options?)` | Preserve validation and filesystem failures without mutating on invalid or stale input |
+| `run_artifact_read_json<T>(run, descriptor)` | Read required JSON through the descriptor's structural schema and validation rules |
+| `run_artifact_read_json_result<T>(run, descriptor)` | Preserve absence, malformed JSON, schema, rule, and broken-rule failures |
+| `run_artifact_write_json_raw` / `run_artifact_write_json_raw_result` | Low-level untyped JSON write escape hatch |
+| `run_artifact_read_json_raw` / `run_artifact_read_json_raw_result` | Low-level untyped JSON read escape hatch |
 | `run_artifact_write_text(run, name, text, options?)` | Write text with parent-directory and trailing-newline behavior |
 | `run_artifact_read_text(run, name, fallback?)` | Read text with a fallback for missing or unreadable files |
 | `run_artifact_transcript_dir(run, name?)` | Return a transcript sidecar directory such as `agent-llm` or `chat-llm` |
@@ -1096,22 +1093,39 @@ support boundary.
 `run_artifacts_list` returns `list<RunArtifactsRun>`. The nested
 `RunArtifactPaths` shape contains the standard local artifact names: `facts`,
 `audit`, `review`, `agent_result`, `agent_trace`, and
-`agent_llm_transcript`.
+`agent_llm_transcript`. `ArtifactWriteOptions.replace` accepts the
+`std/fs.FileReplaceOptions` lease and durability policy. Descriptor writes
+validate before entering that conditional-replacement boundary.
 
 ```harn
 import {
+  artifact_descriptor,
+  run_artifact_read_json,
   run_artifact_transcript_path,
   run_artifact_write_json,
   run_artifacts_from_dir,
   run_artifacts_open,
 } from "std/run_artifacts"
+import { schema_contract } from "std/schema"
+
+type EvaluationFacts = {status: "complete", checks: int}
 
 const run = run_artifacts_open("eval", {run_id: "smoke-001"})
-run_artifact_write_json(run, "facts.json", {status: "ok"}, {pretty: true})
-run_artifact_write_json(run, "agent-result.json", {summary: "complete"})
+const facts_artifact = artifact_descriptor(
+  "facts.json",
+  schema_contract(schema_of(EvaluationFacts), []),
+)
+const written = run_artifact_write_json(
+  run,
+  facts_artifact,
+  {status: "complete", checks: 7},
+  {pretty: true},
+)
+const facts: EvaluationFacts = run_artifact_read_json(run, facts_artifact)
 
 const transcript = run_artifact_transcript_path(run)
 const reopened = run_artifacts_from_dir("eval", run.dir)
+log(written.status + ":" + facts.status)
 log(reopened.paths.facts)
 log(transcript)
 ```

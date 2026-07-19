@@ -1800,8 +1800,10 @@ Each named `ValidationRule<T>` returns `list<ValidationIssue>`; an empty list
 passes. Capture typed context in the rule closure instead of passing an open
 dictionary. `schema_contract_check(value, contract)` never throws and returns
 `schema_invalid`, `rule_failed`, or `rule_error`. `std/fs` and
-`std/run_artifacts` provide matching `*_contract_result` readers. Run-artifact
-writes validate the complete contract before replacing a file.
+`std/run_artifacts` preserve those failures in typed `Result` readers. Bind a
+stable artifact name and contract once with `artifact_descriptor`; reuse that
+descriptor for reads and writes. Descriptor writes validate the complete
+contract before conditional replacement.
 
 Batch grading at bounded concurrency:
 
