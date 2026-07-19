@@ -45,6 +45,7 @@ pub use changed_paths::{
     clear_all_session_changed_paths, clear_session_changed_paths, record_session_changed_path,
     session_changed_paths, take_session_changed_paths,
 };
+pub(crate) use journal::has_journal;
 mod journal;
 pub(crate) use journal::{clear_journal, install_journal, next_journal_event, pop_journal_event};
 

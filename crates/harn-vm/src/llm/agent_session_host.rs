@@ -103,8 +103,31 @@ struct AgentHostSession {
     /// Pops the per-session capability policy off the execution stack
     /// on drop. Declared last so it Drops last in `AgentHostSession`'s
     /// natural field-order drop, after every other cleanup completes.
-    #[allow(dead_code, reason = "held for Drop side effect")]
-    nested_policy_guard: Option<NestedExecutionGuard>,
+    nested_policy_guard: Option<CancelSafeNestedExecutionGuard>,
+}
+
+/// Owns a nested-policy push across the async agent lifecycle. Normal
+/// finalization explicitly pops it while the session's ambient scope is
+/// installed; cancellation merely disarms it because dropping the future
+/// happens after that scope has been swapped out.
+struct CancelSafeNestedExecutionGuard(Option<NestedExecutionGuard>);
+
+impl CancelSafeNestedExecutionGuard {
+    fn new(guard: NestedExecutionGuard) -> Self {
+        Self(Some(guard))
+    }
+
+    fn finish(mut self) {
+        drop(self.0.take());
+    }
+}
+
+impl Drop for CancelSafeNestedExecutionGuard {
+    fn drop(&mut self) {
+        if let Some(guard) = self.0.take() {
+            guard.disarm();
+        }
+    }
 }
 
 /// Tracks which scoped policy stacks were pushed for a guarded tool
@@ -452,7 +475,7 @@ async fn host_agent_session_init(
     }
 
     let nested_policy_guard = match install_session_nested_budget(&opts_map, &resolved) {
-        Ok(guard) => Some(guard),
+        Ok(guard) => Some(CancelSafeNestedExecutionGuard::new(guard)),
         Err(error) => {
             let denial = build_nested_budget_denial(&resolved, &message, &error);
             live_transcript_journal::flush_init_terminal(
@@ -718,7 +741,7 @@ async fn host_agent_session_finalize(
     let mut terminal_error = opt_json(&status_dict, "error");
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
 
-    let session = AGENT_HOST_SESSIONS
+    let mut session = AGENT_HOST_SESSIONS
         .with(|sessions| sessions.borrow_mut().remove(&session_id))
         .ok_or_else(|| {
             VmError::Runtime(format!(
@@ -810,11 +833,6 @@ async fn host_agent_session_finalize(
 
     // Pair with the push in init so subsequent loops see the right stack.
     crate::agent_sessions::pop_current_session();
-    // Fire registered native session-end hooks (e.g. cancelling orphaned
-    // long-running handles) after the session has been removed from
-    // the active map so hooks observe a fully-quiesced session.
-    super::agent_runtime::fire_session_end_hooks(&session_id, canonical_status != "suspended");
-
     let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or(session.tool_mode);
     let acp_stop_reason = canonical_acp_stop_reason(
         &final_status,
@@ -855,6 +873,14 @@ async fn host_agent_session_finalize(
         terminal_error.as_ref(),
     )
     .await?;
+    // Everything below the durable flush is synchronous. Keep native cleanup
+    // and the policy pop after the final cancellation point so they happen
+    // exactly once on normal completion; daemon cancellation uses
+    // `abandon_agent_session` instead.
+    super::agent_runtime::fire_session_end_hooks(&session_id, canonical_status != "suspended");
+    if let Some(guard) = session.nested_policy_guard.take() {
+        guard.finish();
+    }
     let snapshot = crate::agent_sessions::transcript(&session_id);
     let transcript_json = snapshot
         .as_ref()
@@ -923,6 +949,30 @@ async fn host_agent_session_finalize(
         "daemon_snapshot_path": session.daemon_snapshot_path,
     });
     Ok(json_to_vm(&result))
+}
+
+/// Release host-owned state after an embedding surface has cancelled and
+/// awaited an agent future instead of letting it reach `finalize`.
+///
+/// The cancelled future's ambient execution scope has already been discarded,
+/// so its nested-policy guard must be disarmed rather than popping the
+/// unrelated caller's policy stack.
+pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmError> {
+    let has_host_session =
+        AGENT_HOST_SESSIONS.with(|sessions| sessions.borrow().contains_key(session_id));
+    if !has_host_session && !crate::agent_sessions::has_journal(session_id) {
+        return Ok(());
+    }
+
+    // Do not discard pending transcript mutations. On failure, retain both
+    // owners so a later daemon_stop call can retry the durable flush.
+    crate::agent_session_journal::flush(session_id).await?;
+    AGENT_HOST_SESSIONS.with(|sessions| sessions.borrow_mut().remove(session_id));
+    crate::agent_sessions::clear_journal(session_id);
+    permissions::clear_session_grants(session_id);
+    crate::orchestration::clear_approval_policy_repeat_counts(session_id);
+    super::agent_runtime::fire_session_end_hooks(session_id, false);
+    Ok(())
 }
 
 /// Map an agent-loop terminal state to the canonical ACP `stopReason`

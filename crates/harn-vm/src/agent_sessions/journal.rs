@@ -60,3 +60,12 @@ pub(crate) fn clear_journal(id: &str) {
         }
     });
 }
+
+pub(crate) fn has_journal(id: &str) -> bool {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(id)
+            .is_some_and(|state| state.transcript_journal.is_some())
+    })
+}

@@ -44,6 +44,7 @@ use crate::agent_sessions::swap_current_session_stack;
 use crate::autonomy::{swap_autonomy_policy_stack, AutonomyPolicy};
 use crate::connectors::harn_module::swap_active_harn_connector_ctx;
 use crate::connectors::ConnectorCtx;
+use crate::llm::agent_observe::{swap_llm_transcript_ambient, LlmTranscriptAmbient};
 use crate::llm::capabilities::{
     swap_user_overrides as swap_capability_overrides, CapabilitiesFile,
 };
@@ -70,6 +71,7 @@ pub(crate) struct AmbientExecutionScope {
     runtime_context: Vec<RuntimeContextOverlay>,
     autonomy: Vec<AutonomyPolicy>,
     llm_render: Vec<LlmRenderContextFrame>,
+    llm_transcript: LlmTranscriptAmbient,
     connector_ctx: Vec<ConnectorCtx>,
     /// Provider catalog overlay for this execution. An ACP host can install a
     /// verified endpoint without mutating the process or a sibling server.
@@ -167,6 +169,7 @@ impl AmbientExecutionScope {
             permissions: clone_via_swap(swap_dynamic_permission_stack),
             runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
+            llm_transcript: clone_via_swap(swap_llm_transcript_ambient),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
@@ -219,6 +222,7 @@ impl AmbientExecutionScope {
             runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
             llm_render: clone_via_swap(swap_llm_render_stack),
+            llm_transcript: clone_via_swap(swap_llm_transcript_ambient),
             connector_ctx: clone_via_swap(swap_active_harn_connector_ctx),
             session_stack: clone_via_swap(swap_current_session_stack),
             execution_context: clone_via_swap(swap_thread_execution_context),
@@ -250,6 +254,7 @@ impl AmbientExecutionScope {
             runtime_context: swap_runtime_context_overlay_stack(self.runtime_context),
             autonomy: swap_autonomy_policy_stack(self.autonomy),
             llm_render: swap_llm_render_stack(self.llm_render),
+            llm_transcript: swap_llm_transcript_ambient(self.llm_transcript),
             connector_ctx: swap_active_harn_connector_ctx(self.connector_ctx),
             session_stack: swap_current_session_stack(self.session_stack),
             execution_context: swap_thread_execution_context(self.execution_context),
@@ -457,13 +462,7 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
              dispatch frame.",
         ),
     ),
-    (
-        "TRANSCRIPT_DIR_STACK",
-        AmbientScoping::Uncaptured(
-            "llm/agent_observe.rs transcript output dir; push/pop balanced within an observe \
-             scope.",
-        ),
-    ),
+    ("TRANSCRIPT_DIR_STACK", AmbientScoping::Captured),
     (
         "VM_TRACE_STACK",
         AmbientScoping::Uncaptured(
@@ -1243,6 +1242,7 @@ mod tests {
             "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
             "LLM_CAPABILITY_OVERRIDES_CONTEXT",
             "ACTIVE_EXECUTION_SCOPE_STACK",
+            "TRANSCRIPT_DIR_STACK",
         ]
         .into_iter()
         .collect();
