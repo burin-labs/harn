@@ -1,21 +1,18 @@
 import { AgentLoopOptions } from "std/agent/options"
-import { parse_jsonl } from "std/jsonl"
 import { process_shell } from "std/runtime"
 import { llm_text, with_llm_script } from "std/testing"
-import { resolve_harn_bin, wait_for_file_content, wait_for_log_match } from "../_common.harn"
+import { resolve_harn_bin, wait_for_log_match } from "../_common.harn"
 
 pipeline default() {
   const root = project_root() ?? cwd()
   const helper = path_join(root, "conformance/helpers/mcp_http_elicit_server.harn")
   const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, root))
   const state_dir = path_join(harness.fs.temp_dir(), "harn-mcp-http-elicit-" + uuid())
-  const state_path = path_join(state_dir, "state.jsonl")
   const pid_path = path_join(state_dir, "server.pid")
   const log_path = path_join(state_dir, "server.log")
   harness.fs.mkdir(state_dir)
   const start = process_shell(
-    "HARN_MCP_ELICIT_STATE_FILE=\"" + state_path + "\" \"" + harn_bin
-      + "\" serve mcp --transport http --bind 127.0.0.1:0 \""
+    "\"" + harn_bin + "\" serve mcp --transport http --bind 127.0.0.1:0 \""
       + helper
       + "\" >\""
       + log_path
@@ -32,9 +29,7 @@ pipeline default() {
     [
       {
         text: "Calling MCP elicitation tool.",
-        tool_calls: [
-          {id: "mcp-elicit", name: "remote__ask", arguments: {prompt: "Choose deploy target"}},
-        ],
+        tool_calls: [{id: "mcp-elicit", name: "remote__ask", arguments: {prompt: "Choose deploy target"}}],
       },
       llm_text("<done>##DONE##</done>"),
     ],
@@ -47,29 +42,16 @@ pipeline default() {
       }
       const result = agent_loop("Use the remote ask tool", nil, opts)
       const calls = host_mock_calls()
-      const events = wait_for_file_content(
-        harness,
-        state_path,
-        { text ->
-          const parsed = parse_jsonl(text)
-          const has_tool_call = parsed.find({ event -> event?.kind == "tool_call" }) != nil
-          const has_elicit = parsed.find({ event -> event?.kind == "elicit_response" }) != nil
-          if has_tool_call && has_elicit {
-            return parsed
-          }
-          return nil
-        },
-      )
-      require events != nil,
-        "timed out waiting for MCP server to record the tool call and elicitation response"
+      const successful = result?.tools.successful[0]
+      const tool_name_parts = split(successful, "__")
+      const response = regex_captures("(accept):(staging):(true)", json_stringify(llm_mock_calls()[1].messages))
+      require len(response) == 1, "completed MCP tool result carries the elicitation response"
       process_shell("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
-      const tool_call = events.find({ event -> event?.kind == "tool_call" })
-      const elicit_response = events.find({ event -> event?.kind == "elicit_response" })
-      __io_println(result?.tools.successful[0])
-      __io_println(tool_call.name)
-      __io_println(elicit_response.response.action)
-      __io_println(elicit_response.response.content.env)
-      __io_println(elicit_response.response.content.confirm)
+      __io_println(successful)
+      __io_println(tool_name_parts[len(tool_name_parts) - 1])
+      __io_println(response[0].groups[0])
+      __io_println(response[0].groups[1])
+      __io_println(response[0].groups[2])
       __io_println(calls[0].capability)
       __io_println(calls[0].operation)
       __io_println(calls[0].params.server)
