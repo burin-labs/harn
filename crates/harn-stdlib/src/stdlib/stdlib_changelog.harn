@@ -1,0 +1,568 @@
+// std/changelog — pure typed changelog parsing and fragment assembly.
+/** A caller-defined changelog category in deterministic display order. */
+pub type ChangelogCategory = {slug: string, heading: string}
+
+/** One parsed `<id>.<category>.md` fragment. */
+pub type ChangelogFragment = {id: string, category: string, body: string, file?: string}
+
+/** One exact second-level Markdown section. Offsets are UTF-8 byte offsets. */
+pub type ChangelogSection = {heading: string, body: string, start: int, end: int}
+
+pub type ChangelogFailureKind = "invalid_category" | "duplicate_category" | "malformed_filename" | "unknown_category" | "empty_body" | "duplicate_fragment" | "duplicate_heading" | "missing_section"
+
+/** A deterministic validation or parsing failure. */
+pub type ChangelogFailure = {kind: ChangelogFailureKind, message: string, value?: string}
+
+pub type ChangelogResult<T> = Result<T, ChangelogFailure>
+
+/** A format-preserving changelog transformation. */
+pub type ChangelogMerge = {text: string, changed: bool}
+
+fn __changelog_failure(kind: ChangelogFailureKind, message: string, value: string? = nil) -> ChangelogFailure {
+  let failure: ChangelogFailure = {kind: kind, message: message}
+  if value != nil {
+    failure = failure + {value: value}
+  }
+  return failure
+}
+
+fn __changelog_category_heading(category: ChangelogCategory) -> string {
+  return "### " + category.heading
+}
+
+/**
+ * Validate category configuration without changing caller order.
+ * @effects: []
+ * @errors: []
+ */
+pub fn changelog_validate_categories(categories: list<ChangelogCategory>) -> ChangelogResult<list<ChangelogCategory>> {
+  let slugs: list<string> = []
+  let headings: list<string> = []
+  for category in categories {
+    const slug = trim(category.slug)
+    const heading = trim(category.heading)
+    if slug == "" || regex_match("^[a-z][a-z0-9_-]*$", slug) == nil {
+      return Err(__changelog_failure("invalid_category", "category slug must be lowercase and non-empty", slug))
+    }
+    if heading == "" || contains(heading, "\n") || starts_with(heading, "#") {
+      return Err(
+        __changelog_failure("invalid_category", "category heading must be plain non-empty text", heading),
+      )
+    }
+    if contains(slugs, slug) {
+      return Err(__changelog_failure("duplicate_category", "duplicate category slug: " + slug, slug))
+    }
+    if contains(headings, heading) {
+      return Err(__changelog_failure("duplicate_category", "duplicate category heading: " + heading, heading))
+    }
+    slugs = slugs.push(slug)
+    headings = headings.push(heading)
+  }
+  return Ok(categories)
+}
+
+fn __changelog_category(categories: list<ChangelogCategory>, slug: string) -> ChangelogCategory? {
+  for category in categories {
+    if category.slug == slug {
+      return category
+    }
+  }
+  return nil
+}
+
+/**
+ * Parse one `<id>.<category>.md` filename and its non-empty body.
+ * @effects: []
+ * @errors: []
+ */
+pub fn changelog_parse_fragment(filename: string, body: string, categories: list<ChangelogCategory>) -> ChangelogResult<ChangelogFragment> {
+  const valid = changelog_validate_categories(categories)
+  if is_err(valid) {
+    return Err(unwrap_err(valid))
+  }
+  const name = trim(filename)
+  const captures = regex_captures("^([A-Za-z0-9_-]+)\\.([a-z][a-z0-9_-]*)\\.md$", name)
+  if len(captures) == 0 {
+    return Err(
+      __changelog_failure("malformed_filename", "fragment filename must match <id>.<category>.md", name),
+    )
+  }
+  const id = captures[0].groups[0]
+  const category = captures[0].groups[1]
+  if __changelog_category(categories, category) == nil {
+    return Err(__changelog_failure("unknown_category", "unknown fragment category: " + category, category))
+  }
+  const normalized_body = trim(body)
+  if normalized_body == "" {
+    return Err(__changelog_failure("empty_body", "fragment body must be non-empty", name))
+  }
+  return Ok({id: id, category: category, body: normalized_body, file: name})
+}
+
+fn __changelog_is_numeric_id(id: string) -> bool {
+  return regex_match("^[0-9]+$", id) != nil
+}
+
+fn __changelog_numeric_canonical(id: string) -> string {
+  let out = id
+  while len(out) > 1 && starts_with(out, "0") {
+    out = substring(out, 1, len(out))
+  }
+  return out
+}
+
+fn __changelog_lex_compare(a: string, b: string) -> int {
+  if a == b {
+    return 0
+  }
+  return [a, b].sort()[0] == a ? -1 : 1
+}
+
+fn __changelog_fragment_compare(a: ChangelogFragment, b: ChangelogFragment) -> int {
+  const a_numeric = __changelog_is_numeric_id(a.id)
+  const b_numeric = __changelog_is_numeric_id(b.id)
+  if a_numeric != b_numeric {
+    return a_numeric ? -1 : 1
+  }
+  if a_numeric {
+    const an = __changelog_numeric_canonical(a.id)
+    const bn = __changelog_numeric_canonical(b.id)
+    if len(an) != len(bn) {
+      return len(an) < len(bn) ? -1 : 1
+    }
+    const numeric_order = __changelog_lex_compare(an, bn)
+    if numeric_order != 0 {
+      return numeric_order
+    }
+  }
+  const id_order = __changelog_lex_compare(a.id, b.id)
+  if id_order != 0 {
+    return id_order
+  }
+  return __changelog_lex_compare(a.file ?? "", b.file ?? "")
+}
+
+fn __changelog_insert_fragment(sorted: list<ChangelogFragment>, fragment: ChangelogFragment) -> list<ChangelogFragment> {
+  let out: list<ChangelogFragment> = []
+  let inserted = false
+  for current in sorted {
+    if !inserted && __changelog_fragment_compare(fragment, current) < 0 {
+      out = out.push(fragment)
+      inserted = true
+    }
+    out = out.push(current)
+  }
+  return inserted ? out : out.push(fragment)
+}
+
+/**
+ * Order fragments by category, natural ID, and filename tie-breaker.
+ * @effects: []
+ * @errors: []
+ */
+pub fn changelog_order_fragments(
+  fragments: list<ChangelogFragment>,
+  categories: list<ChangelogCategory>,
+) -> ChangelogResult<list<ChangelogFragment>> {
+  const valid = changelog_validate_categories(categories)
+  if is_err(valid) {
+    return Err(unwrap_err(valid))
+  }
+  let identities: list<string> = []
+  for fragment in fragments {
+    if __changelog_category(categories, fragment.category) == nil {
+      return Err(
+        __changelog_failure(
+          "unknown_category",
+          "unknown fragment category: " + fragment.category,
+          fragment.category,
+        ),
+      )
+    }
+    if trim(fragment.body) == "" {
+      return Err(__changelog_failure("empty_body", "fragment body must be non-empty", fragment.file))
+    }
+    const identity = fragment.category + "\n" + fragment.id
+    if contains(identities, identity) {
+      return Err(
+        __changelog_failure(
+          "duplicate_fragment",
+          "duplicate fragment id in category: " + fragment.id + "." + fragment.category,
+          fragment.id,
+        ),
+      )
+    }
+    identities = identities.push(identity)
+  }
+  let ordered: list<ChangelogFragment> = []
+  for category in categories {
+    let in_category: list<ChangelogFragment> = []
+    for fragment in fragments {
+      if fragment.category == category.slug {
+        in_category = __changelog_insert_fragment(in_category, fragment)
+      }
+    }
+    ordered = ordered + in_category
+  }
+  return Ok(ordered)
+}
+
+fn __changelog_starts_with_bullet(body: string) -> bool {
+  for line in split(body, "\n") {
+    const content = trim(line)
+    if content != "" {
+      return starts_with(content, "- ") || starts_with(content, "* ")
+    }
+  }
+  return false
+}
+
+/**
+ * Normalize prose to a Markdown bullet while preserving existing bullet bodies.
+ * @effects: []
+ * @errors: []
+ */
+pub fn changelog_normalize_fragment_body(body: string) -> ChangelogResult<string> {
+  const content = trim(body)
+  if content == "" {
+    return Err(__changelog_failure("empty_body", "fragment body must be non-empty"))
+  }
+  if __changelog_starts_with_bullet(content) {
+    return Ok(content)
+  }
+  let lines: list<string> = []
+  let first = true
+  for line in split(content, "\n") {
+    const normalized = trim(line)
+    if normalized == "" {
+      lines = lines.push("")
+    } else if first {
+      lines = lines.push("- " + normalized)
+      first = false
+    } else {
+      lines = lines.push("  " + normalized)
+    }
+  }
+  return Ok(lines.join("\n"))
+}
+
+/**
+ * Assemble fragments into deterministic categorized `###` sections.
+ * @effects: []
+ * @errors: []
+ */
+pub fn changelog_assemble_fragments(
+  fragments: list<ChangelogFragment>,
+  categories: list<ChangelogCategory>,
+) -> ChangelogResult<string> {
+  const ordered = changelog_order_fragments(fragments, categories)
+  if is_err(ordered) {
+    return Err(unwrap_err(ordered))
+  }
+  let parts: list<string> = []
+  for category in categories {
+    let bodies: list<string> = []
+    for fragment in unwrap(ordered) {
+      if fragment.category == category.slug {
+        const normalized = changelog_normalize_fragment_body(fragment.body)
+        if is_err(normalized) {
+          return Err(unwrap_err(normalized))
+        }
+        bodies = bodies.push(unwrap(normalized))
+      }
+    }
+    if len(bodies) > 0 {
+      parts = parts.push(__changelog_category_heading(category) + "\n\n" + bodies.join("\n"))
+    }
+  }
+  return Ok(parts.join("\n\n"))
+}
+
+fn __changelog_fence_marker(line: string) -> string? {
+  const content = trim(line)
+  if regex_match("^`{3,}.*$", content) != nil {
+    return "`"
+  }
+  if regex_match("^~{3,}.*$", content) != nil {
+    return "~"
+  }
+  return nil
+}
+
+fn __changelog_fence_closes(line: string, marker: string) -> bool {
+  const content = trim(line)
+  const pattern = marker == "`" ? "^`{3,}[ \\t]*$" : "^~{3,}[ \\t]*$"
+  return regex_match(pattern, content) != nil
+}
+
+fn __changelog_heading(line: string) -> string? {
+  const content = ends_with(line, "\r") ? substring(line, 0, len(line) - 1) : line
+  if regex_match("^## [^#].*$", content) == nil {
+    return nil
+  }
+  return content
+}
+
+fn __changelog_scan_sections(text: string) -> ChangelogResult<list<dict>> {
+  const lines = split(text, "\n")
+  let scanned: list<dict> = []
+  let seen: list<string> = []
+  let current = nil
+  let char_offset = 0
+  let byte_offset = 0
+  let fence: string? = nil
+  for indexed in lines.enumerate() {
+    const line = indexed.value
+    const has_newline = indexed.index + 1 < len(lines)
+    const newline_width = has_newline ? 1 : 0
+    const line_char_end = char_offset + len(line)
+    const line_byte_end = byte_offset + bytes_len(bytes_from_string(line))
+    const marker = __changelog_fence_marker(line)
+    if fence != nil {
+      if __changelog_fence_closes(line, fence ?? "") {
+        fence = nil
+      }
+    } else if marker != nil {
+      fence = marker
+    } else {
+      const heading = __changelog_heading(line)
+      if heading != nil {
+        if contains(seen, heading ?? "") {
+          return Err(
+            __changelog_failure("duplicate_heading", "duplicate changelog heading: " + (heading ?? ""), heading),
+          )
+        }
+        seen = seen.push(heading ?? "")
+        if current != nil {
+          scanned = scanned.push(current + {end: byte_offset, end_char: char_offset})
+        }
+        const body_char = line_char_end + newline_width
+        current = {heading: heading, start: byte_offset, start_char: char_offset, body_char: body_char}
+      }
+    }
+    char_offset = line_char_end + newline_width
+    byte_offset = line_byte_end + newline_width
+  }
+  if current != nil {
+    scanned = scanned.push(current + {end: byte_offset, end_char: char_offset})
+  }
+  return Ok(scanned)
+}
+
+/**
+ * Parse exact `##` Markdown sections outside fenced code blocks.
+ * @effects: []
+ * @errors: []
+ */
+pub fn changelog_parse_sections(text: string) -> ChangelogResult<list<ChangelogSection>> {
+  const scanned = __changelog_scan_sections(text)
+  if is_err(scanned) {
+    return Err(unwrap_err(scanned))
+  }
+  let sections: list<ChangelogSection> = []
+  for section in unwrap(scanned) {
+    sections = sections
+      .push(
+      {
+        heading: section.heading,
+        body: trim(substring(text, section.body_char, section.end_char)),
+        start: section.start,
+        end: section.end,
+      },
+    )
+  }
+  return Ok(sections)
+}
+
+fn __changelog_full_heading(heading: string) -> string {
+  const normalized = trim(heading)
+  return starts_with(normalized, "## ") ? normalized : "## " + normalized
+}
+
+/**
+ * Find one named section, returning an explicit missing-section failure.
+ * @effects: []
+ * @errors: []
+ */
+pub fn changelog_find_section(text: string, heading: string) -> ChangelogResult<ChangelogSection> {
+  const sections = changelog_parse_sections(text)
+  if is_err(sections) {
+    return Err(unwrap_err(sections))
+  }
+  const target = __changelog_full_heading(heading)
+  for section in unwrap(sections) {
+    if section.heading == target {
+      return Ok(section)
+    }
+  }
+  return Err(__changelog_failure("missing_section", "missing changelog section: " + target, target))
+}
+
+fn __changelog_parse_subsections(body: string) -> list<dict> {
+  let sections: list<dict> = []
+  let heading = ""
+  let lines: list<string> = []
+  for line in split(trim(body), "\n") {
+    const normalized = ends_with(line, "\r") ? substring(line, 0, len(line) - 1) : line
+    if regex_match("^### [^#].*$", normalized) != nil {
+      if heading != "" || trim(lines.join("\n")) != "" {
+        sections = sections.push({heading: heading, body: trim(lines.join("\n"))})
+      }
+      heading = normalized
+      lines = []
+    } else {
+      lines = lines.push(normalized)
+    }
+  }
+  if heading != "" || trim(lines.join("\n")) != "" {
+    sections = sections.push({heading: heading, body: trim(lines.join("\n"))})
+  }
+  return sections
+}
+
+fn __changelog_append_unique(current: string, addition: string) -> string {
+  const left = trim(current)
+  const right = trim(addition)
+  if right == "" || left == right || contains(left, right) {
+    return left
+  }
+  return left == "" ? right : left + "\n\n" + right
+}
+
+fn __changelog_merge_bodies(current: string, addition: string, categories: list<ChangelogCategory>) -> string {
+  let existing = __changelog_parse_subsections(current)
+  const incoming = __changelog_parse_subsections(addition)
+  let preamble = ""
+  for section in existing {
+    if section.heading == "" {
+      preamble = __changelog_append_unique(preamble, section.body)
+    }
+  }
+  for added in incoming {
+    if added.heading == "" {
+      preamble = __changelog_append_unique(preamble, added.body)
+      continue
+    }
+    let merged = false
+    let next: list<dict> = []
+    for section in existing {
+      if !merged && section.heading == added.heading {
+        next = next
+          .push(
+          {heading: section.heading, body: __changelog_append_unique(section.body, added.body)},
+        )
+        merged = true
+      } else {
+        next = next.push(section)
+      }
+    }
+    if !merged {
+      next = next.push(added)
+    }
+    existing = next
+  }
+  let rendered: list<string> = []
+  if preamble != "" {
+    rendered = rendered.push(preamble)
+  }
+  let emitted: list<string> = []
+  for category in categories {
+    const category_heading = __changelog_category_heading(category)
+    let category_body = ""
+    for section in existing {
+      if section.heading == category_heading {
+        category_body = __changelog_append_unique(category_body, section.body)
+      }
+    }
+    if category_body != "" {
+      rendered = rendered.push(category_heading + "\n\n" + category_body)
+      emitted = emitted.push(category_heading)
+    }
+  }
+  for section in existing {
+    if section.heading != "" && !contains(emitted, section.heading) {
+      let section_body = ""
+      for matching in existing {
+        if matching.heading == section.heading {
+          section_body = __changelog_append_unique(section_body, matching.body)
+        }
+      }
+      rendered = rendered.push(section.heading + "\n\n" + section_body)
+      emitted = emitted.push(section.heading)
+    }
+  }
+  return rendered.join("\n\n")
+}
+
+fn __changelog_newline(text: string) -> string {
+  return contains(text, "\r\n") ? "\r\n" : "\n"
+}
+
+fn __changelog_with_newlines(text: string, newline: string) -> string {
+  return newline == "\r\n" ? replace(text, "\n", "\r\n") : text
+}
+
+/**
+ * Merge assembled fragments into `## Unreleased`, preserving operator content.
+ * @effects: []
+ * @errors: []
+ */
+pub fn changelog_merge_unreleased(
+  text: string,
+  assembled: string,
+  categories: list<ChangelogCategory>,
+) -> ChangelogResult<ChangelogMerge> {
+  const valid = changelog_validate_categories(categories)
+  if is_err(valid) {
+    return Err(unwrap_err(valid))
+  }
+  const addition = trim(replace(assembled, "\r\n", "\n"))
+  if addition == "" {
+    return Ok({text: text, changed: false})
+  }
+  const scanned = __changelog_scan_sections(text)
+  if is_err(scanned) {
+    return Err(unwrap_err(scanned))
+  }
+  const newline = __changelog_newline(text)
+  let unreleased = nil
+  for section in unwrap(scanned) {
+    if section.heading == "## Unreleased" {
+      unreleased = section
+    }
+  }
+  if unreleased != nil {
+    const current = replace(substring(text, unreleased.body_char, unreleased.end_char), "\r\n", "\n")
+    const merged = __changelog_merge_bodies(current, addition, categories)
+    if trim(current) == merged {
+      return Ok({text: text, changed: false})
+    }
+    const terminal = unreleased.end_char == len(text) && ends_with(text, "\n")
+    let block = "## Unreleased\n\n" + merged
+    if unreleased.end_char < len(text) {
+      block = block + "\n\n"
+    } else if terminal {
+      block = block + "\n"
+    }
+    const normalized_block = __changelog_with_newlines(block, newline)
+    const updated = substring(text, 0, unreleased.start_char)
+      + normalized_block
+      + substring(text, unreleased.end_char, len(text))
+    return Ok({text: updated, changed: updated != text})
+  }
+  const sections = unwrap(scanned)
+  const insert_char = len(sections) == 0 ? len(text) : sections[0].start_char
+  const prefix = substring(text, 0, insert_char)
+  const suffix = substring(text, insert_char, len(text))
+  const before = if prefix == "" || ends_with(prefix, newline + newline) {
+    ""
+  } else if ends_with(prefix, newline) {
+    newline
+  } else {
+    newline + newline
+  }
+  const after = suffix == "" ? "" : newline + newline
+  const block = __changelog_with_newlines("## Unreleased\n\n" + addition, newline)
+  const updated = prefix + before + block + after + suffix
+  return Ok({text: updated, changed: true})
+}
