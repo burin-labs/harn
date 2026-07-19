@@ -2,6 +2,15 @@
 
 use super::*;
 
+fn render_unresolved_call(source: &str) -> String {
+    let diag = check_source_with_imports(source, &[])
+        .into_iter()
+        .find(|diag| diag.code == crate::diagnostic_codes::Code::UndefinedFunction)
+        .expect("source should produce HARN-NAM-002");
+    crate::diagnostic::set_color_override(Some(false));
+    crate::diagnostic::render_type_diagnostic(source, "test.harn", &diag)
+}
+
 #[test]
 fn test_strict_types_json_parse_property_access() {
     let errs = strict_errors(
@@ -239,6 +248,44 @@ fn test_cross_module_unresolved_call_errors() {
     assert!(
         errs.iter().any(|m| m.contains("missing_helper")),
         "expected undefined-call error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_cross_module_unresolved_call_render_suggests_transposed_builtin() {
+    let rendered = render_unresolved_call(
+        r#"pipeline t(task) {
+  parse_json("{}")
+}"#,
+    );
+    assert!(
+        rendered.contains(
+            "error[HARN-NAM-002]: call target `parse_json` is not defined or imported — did you mean `json_parse`?"
+        ),
+        "expected transposition suggestion, got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("= help: did you mean `json_parse`?"),
+        "expected rendered help suggestion, got:\n{rendered}"
+    );
+}
+
+#[test]
+fn test_cross_module_unresolved_call_render_suggests_plain_typo() {
+    let rendered = render_unresolved_call(
+        r#"pipeline t(task) {
+  json_pars("{}")
+}"#,
+    );
+    assert!(
+        rendered.contains(
+            "error[HARN-NAM-002]: call target `json_pars` is not defined or imported — did you mean `json_parse`?"
+        ),
+        "expected typo suggestion, got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("= help: did you mean `json_parse`?"),
+        "expected rendered help suggestion, got:\n{rendered}"
     );
 }
 
