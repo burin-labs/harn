@@ -474,6 +474,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/stdlib/host/turn_cache.rs"
+statics = ["TURN_STABLE_HOST_CACHE"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/stdlib/host/operation_registry.rs"
 statics = ["SCOPED_MOCKABLE"]
 category = "thread_private"
