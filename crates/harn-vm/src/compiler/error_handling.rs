@@ -7,26 +7,46 @@ use super::{Compiler, FinallyEntry};
 
 impl Compiler {
     pub(super) fn compile_throw_stmt(&mut self, value: &SNode) -> Result<(), CompileError> {
-        // Only run finallys the unwind will actually cross — i.e.,
-        // those between this throw and the innermost `CatchBarrier`.
-        // Finallys beyond the nearest local `catch` aren't on the
-        // throw's escape path (the catch halts unwinding there), so
-        // pre-running them wrongly fires outer side effects.
-        let pending = self.pending_finallys_until_barrier();
-        if !pending.is_empty() {
-            self.compile_node(value)?;
+        let has_pending_finally = self.has_pending_finally_until_barrier();
+        self.compile_transfer_operand(value)?;
+        if has_pending_finally {
             self.temp_counter += 1;
             let temp_name = format!("__throw_val_{}__", self.temp_counter);
             self.emit_define_binding(&temp_name, true);
-            // Mask each finally while it runs so a `throw` inside a finally
-            // doesn't re-run the finally it is in (which recursed forever).
             self.run_pending_finallys_until_barrier()?;
             self.emit_get_binding(&temp_name);
-            self.chunk.emit(Op::Throw, self.line);
-        } else {
-            self.compile_node(value)?;
-            self.chunk.emit(Op::Throw, self.line);
         }
+        self.chunk.emit(Op::Throw, self.line);
+        Ok(())
+    }
+    /// Evaluate a transfer operand under the pending throw-unwind cleanup path.
+    /// The temporary handler is removed before cleanup runs, so a cleanup throw
+    /// replaces the operand error instead of being caught here.
+    pub(super) fn compile_transfer_operand(&mut self, operand: &SNode) -> Result<(), CompileError> {
+        if !self.has_pending_finally_until_barrier() {
+            return self.compile_node(operand);
+        }
+
+        self.handler_depth += 1;
+        let error_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+        let empty_type = self.string_constant("");
+        self.emit_type_name_extra(empty_type);
+
+        self.compile_node(operand)?;
+
+        self.handler_depth -= 1;
+        self.chunk.emit(Op::PopHandler, self.line);
+        let success_jump = self.chunk.emit_jump(Op::Jump, self.line);
+
+        self.chunk.patch_jump(error_jump);
+        self.temp_counter += 1;
+        let temp_name = format!("__transfer_err_{}__", self.temp_counter);
+        self.emit_define_binding(&temp_name, true);
+        self.run_pending_finallys_until_barrier()?;
+        self.emit_get_binding(&temp_name);
+        self.chunk.emit(Op::Throw, self.line);
+
+        self.chunk.patch_jump(success_jump);
         Ok(())
     }
 
@@ -52,17 +72,14 @@ impl Compiler {
         // finallys between us and the innermost catch barrier
         // (mirrors `Node::ThrowStmt` lowering), then rethrow.
         self.chunk.patch_jump(catch_jump);
-        let pending = self.pending_finallys_until_barrier();
-        if pending.is_empty() {
-            self.chunk.emit(Op::Throw, self.line);
-        } else {
+        if self.has_pending_finally_until_barrier() {
             self.temp_counter += 1;
             let temp_name = format!("__try_star_err_{}__", self.temp_counter);
             self.emit_define_binding(&temp_name, true);
             self.run_pending_finallys_until_barrier()?;
             self.emit_get_binding(&temp_name);
-            self.chunk.emit(Op::Throw, self.line);
         }
+        self.chunk.emit(Op::Throw, self.line);
 
         self.chunk.patch_jump(end_jump);
         Ok(())

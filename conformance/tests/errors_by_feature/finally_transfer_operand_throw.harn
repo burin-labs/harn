@@ -1,0 +1,94 @@
+fn fail(message) {
+  throw message
+}
+
+fn identity(value) {
+  return value
+}
+
+fn return_value() {
+  try {
+    return "value"
+  } finally {
+    __io_println("cleanup:value")
+  }
+}
+
+fn return_failed_call() {
+  try {
+    return fail("direct")
+  } finally {
+    __io_println("cleanup:direct")
+  }
+}
+
+fn return_nested_failed_call() {
+  try {
+    return identity(fail("nested"))
+  } finally {
+    __io_println("cleanup:nested")
+  }
+}
+
+fn return_with_failed_cleanup() {
+  try {
+    return fail("original")
+  } finally {
+    throw "cleanup"
+  }
+}
+
+fn throw_failed_call() {
+  try {
+    throw fail("throw operand")
+  } finally {
+    __io_println("cleanup:throw operand")
+  }
+}
+
+fn continue_and_break() {
+  let events = []
+  for i in [1, 2, 3] {
+    try {
+      if i == 1 {
+        continue
+      }
+      if i == 3 {
+        break
+      }
+      events = events + ["body:${i}"]
+    } finally {
+      events = events + ["cleanup:${i}"]
+    }
+  }
+  return events
+}
+
+pipeline default() {
+  __io_println(return_value())
+  const direct = try {
+    return_failed_call()
+  } catch (error) {
+    "caught:${error}"
+  }
+  __io_println(direct)
+  const nested = try {
+    return_nested_failed_call()
+  } catch (error) {
+    "caught:${error}"
+  }
+  __io_println(nested)
+  const precedence = try {
+    return_with_failed_cleanup()
+  } catch (error) {
+    "caught:${error}"
+  }
+  __io_println(precedence)
+  const throw_operand = try {
+    throw_failed_call()
+  } catch (error) {
+    "caught:${error}"
+  }
+  __io_println(throw_operand)
+  __io_println(continue_and_break())
+}
