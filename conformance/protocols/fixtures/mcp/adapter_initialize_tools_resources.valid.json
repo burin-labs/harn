@@ -30,7 +30,7 @@
         },
         "serverInfo": {
           "name": "server",
-          "version": "0.10.23",
+          "version": "0.10.24",
           "card": {
             "name": "fixture-card",
             "version": "1"
