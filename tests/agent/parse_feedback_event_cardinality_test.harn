@@ -1,0 +1,75 @@
+// Run: harn test tests/agent/parse_feedback_event_cardinality_test.harn
+//
+// A parse-repair turn injects one runtime-feedback message into the transcript.
+// Its observability stream must count that same logical injection exactly once.
+import {
+  agent_capture_events,
+  agent_event_value,
+  agent_feedback_injected_event_schema,
+} from "std/agent/events"
+import { AgentLoopOptions } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn parse_feedback_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "add",
+    "Add two integers.",
+    {
+      handler: { args -> args.left + args.right },
+      parameters: {
+        left: {type: "integer", description: "Left operand"},
+        right: {type: "integer", description: "Right operand"},
+      },
+      returns: {type: "integer"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline test_parse_feedback_is_counted_once(task) {
+  with_llm_script(
+    [llm_text("<tool_call>\nadd({ left: })\n</tool_call>"), llm_text("<done>##DONE##</done>")],
+    { ->
+      const session = "parse-feedback-cardinality-" + uuid()
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        session_id: session,
+        tools: parse_feedback_tools(),
+        tool_format: "text",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 3,
+      }
+      const captured = agent_capture_events(
+        session,
+        fn() { return agent_loop("Add the two numbers, then finish.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      let parse_guidance_events = 0
+      let feedback_events = 0
+      for event in captured.events {
+        if event.type != "feedback_injected" {
+          continue
+        }
+        feedback_events = feedback_events + 1
+        const feedback = agent_event_value(event, agent_feedback_injected_event_schema())
+        if feedback.kind == "parse_guidance" {
+          parse_guidance_events = parse_guidance_events + 1
+        }
+      }
+      assert_eq(parse_guidance_events, 1)
+      assert_eq(feedback_events, 1)
+      let transcript_feedback_messages = 0
+      for message in captured.result?.transcript?.messages ?? [] {
+        if contains(message?.content ?? "", "<runtime_feedback kind=\"parse_guidance\">") {
+          transcript_feedback_messages = transcript_feedback_messages + 1
+        }
+      }
+      assert_eq(transcript_feedback_messages, 1)
+    },
+  )
+}
