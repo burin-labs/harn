@@ -216,12 +216,21 @@ pub struct LongRunningHandleInfo {
     pub snapshot_binding: Option<harn_vm::value::DictMap>,
 }
 
+/// Default ceiling for the progress-emission backoff schedule when the caller
+/// does not pin `progress_max_interval_ms`. The schedule starts at the base
+/// `progress_interval`, doubles after each snapshot, and is clamped here — so a
+/// multi-minute command emits a handful of re-entries (2s, 4s, 8s, 16s, 30s,
+/// 30s, ...) instead of one every base interval, keeping a silent long build
+/// token-cheap while still surfacing early, frequent progress.
+const DEFAULT_PROGRESS_MAX_INTERVAL: Duration = Duration::from_secs(30);
+
 pub(crate) struct LongRunningSpawnOptions {
     pub(crate) env_mode: EnvMode,
     pub(crate) env_remove: Vec<String>,
     pub(crate) capture: CaptureConfig,
     pub(crate) session_id: String,
     pub(crate) progress_interval: Option<Duration>,
+    pub(crate) progress_max_interval: Option<Duration>,
     pub(crate) progress_max_inline_bytes: usize,
     pub(crate) snapshot_binding: Option<harn_vm::value::DictMap>,
 }
@@ -234,6 +243,7 @@ struct WaiterContext {
     process_group_id: Option<u32>,
     command_display: String,
     progress_interval: Option<Duration>,
+    progress_max_interval: Option<Duration>,
     progress_max_inline_bytes: usize,
     snapshot_binding: Option<harn_vm::value::DictMap>,
 }
@@ -252,7 +262,11 @@ struct ProgressThreadContext {
     cancel_state: Arc<CancelState>,
     done: Arc<AtomicBool>,
     started: std::time::Instant,
+    /// Base delay before the first progress snapshot and the seed of the
+    /// doubling backoff schedule.
     interval: Duration,
+    /// Upper bound the doubling schedule is clamped to.
+    max_interval: Duration,
     max_inline_bytes: usize,
     snapshot_binding: Option<harn_vm::value::DictMap>,
 }
@@ -306,6 +320,7 @@ pub fn spawn_long_running(
             capture: CaptureConfig::default(),
             session_id,
             progress_interval: None,
+            progress_max_interval: None,
             progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
             snapshot_binding: None,
         },
@@ -380,6 +395,7 @@ pub(crate) fn spawn_long_running_with_options(
         process_group_id,
         command_display: command_display.clone(),
         progress_interval: options.progress_interval,
+        progress_max_interval: options.progress_max_interval,
         progress_max_inline_bytes: options.progress_max_inline_bytes,
         snapshot_binding: options.snapshot_binding.clone(),
     };
@@ -460,6 +476,14 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         .progress_interval
         .filter(|interval| !interval.is_zero())
         .map(|interval| {
+            // The backoff ceiling is never below the base interval: a caller that
+            // pins a large base without a cap gets a fixed cadence, not a cap that
+            // silently shrinks its interval.
+            let max_interval = context
+                .progress_max_interval
+                .filter(|cap| !cap.is_zero())
+                .unwrap_or(DEFAULT_PROGRESS_MAX_INTERVAL)
+                .max(interval);
             spawn_progress_thread(ProgressThreadContext {
                 command_id: context.command_id.clone(),
                 handle_id: context.handle_id.clone(),
@@ -475,6 +499,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
                 done: done.clone(),
                 started: waiter_start,
                 interval,
+                max_interval,
                 max_inline_bytes: context.progress_max_inline_bytes,
                 snapshot_binding: context.snapshot_binding.clone(),
             })
@@ -674,16 +699,31 @@ fn spawn_output_drain(
     })
 }
 
+/// Next delay in the progress backoff schedule: double the current delay,
+/// clamped to `max`. Saturates to `max` rather than overflowing.
+fn next_progress_interval(current: Duration, max: Duration) -> Duration {
+    current.checked_mul(2).unwrap_or(max).min(max)
+}
+
 fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
+        // Exponential backoff: wait `interval`, emit a snapshot, then double the
+        // wait after each snapshot up to `max_interval`. Progress is frequent
+        // while the model most wants to know whether the command is moving, and
+        // thins out for a long-running command so it stays token-cheap. The final
+        // completion snapshot is emitted by the waiter thread on exit, independent
+        // of where this schedule is, so the terminal result is never delayed by a
+        // long backoff wait.
+        let mut current = context.interval;
         while !context.done.load(Ordering::Acquire)
             && !context.cancel_state.cancellation_published()
         {
-            std::thread::sleep(context.interval);
+            std::thread::sleep(current);
             if context.done.load(Ordering::Acquire) || context.cancel_state.cancellation_published()
             {
                 break;
             }
+            current = next_progress_interval(current, context.max_interval);
             let (stdout, stderr) = {
                 let state = context
                     .output_state
@@ -934,9 +974,29 @@ pub fn register_result_notifier(handle_id: &str) -> Option<std::sync::mpsc::Rece
 #[cfg(test)]
 mod tests {
     use std::sync::{mpsc, Arc};
+    use std::time::Duration;
 
-    use super::CancelState;
+    use super::{next_progress_interval, CancelState};
     use crate::process::ProcessCleanupReport;
+
+    #[test]
+    fn progress_backoff_doubles_then_clamps_to_max() {
+        let max = Duration::from_secs(30);
+        // Doubles from the base while below the cap.
+        assert_eq!(
+            next_progress_interval(Duration::from_secs(2), max),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            next_progress_interval(Duration::from_secs(8), max),
+            Duration::from_secs(16)
+        );
+        // Clamps to the cap once doubling would exceed it, and stays there.
+        assert_eq!(next_progress_interval(Duration::from_secs(16), max), max);
+        assert_eq!(next_progress_interval(max, max), max);
+        // Saturates instead of overflowing at the Duration ceiling.
+        assert_eq!(next_progress_interval(Duration::MAX, max), max);
+    }
 
     #[test]
     fn terminal_snapshot_waits_for_cleanup_publication() {

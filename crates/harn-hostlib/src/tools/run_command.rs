@@ -126,6 +126,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .unwrap_or(false);
     let background_after_ms = optional_u64(NAME, &map, "background_after_ms")?;
     let progress_interval_ms = optional_u64(NAME, &map, "progress_interval_ms")?;
+    let progress_max_interval_ms = optional_u64(NAME, &map, "progress_max_interval_ms")?;
     let progress_max_inline_bytes = optional_u64(NAME, &map, "progress_max_inline_bytes")?
         .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
         .unwrap_or(capture.max_inline_bytes);
@@ -157,6 +158,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 capture,
                 session_id: session_id.clone(),
                 progress_interval: progress_interval_ms.map(Duration::from_millis),
+                progress_max_interval: progress_max_interval_ms.map(Duration::from_millis),
                 progress_max_inline_bytes,
                 snapshot_binding,
             },
