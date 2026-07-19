@@ -34,6 +34,7 @@ const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assista
 const HOST_SESSION_RECORD_TOOL_RESULTS: &str = "__host_agent_session_record_tool_results";
 const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
+const HOST_SESSION_DRAIN_COMMAND_UPDATES: &str = "__host_agent_session_drain_command_updates";
 const HOST_SESSION_AWAIT_INBOX: &str = "__host_agent_session_await_inbox";
 const HOST_SESSION_DRAIN_HOST_INJECTIONS: &str = "__host_agent_session_drain_host_injections";
 const HOST_SESSION_DRAIN_BRIDGE_INJECTIONS: &str = "__host_agent_session_drain_bridge_injections";
@@ -2182,6 +2183,54 @@ fn host_agent_session_drain_feedback_builtin(
         item.put_str("kind", entry.kind);
         item.put_str("content", entry.content);
         item.put_str("source", entry.source);
+        item.insert(
+            crate::value::intern_key("sequence"),
+            VmValue::Int(entry.sequence as i64),
+        );
+        item.insert(crate::value::intern_key("ts_ms"), VmValue::Int(entry.ts_ms));
+        VmValue::dict(item)
+    })
+    .collect::<Vec<_>>();
+    Ok(VmValue::List(std::sync::Arc::new(drained)))
+}
+
+/// Drain the session's queued long-running-command update entries — the
+/// `tool_progress` / `tool_result` pushes the hostlib background waiter emits —
+/// and leave every other inbox entry in place for the normal feedback path.
+///
+/// This is the command ledger's dedicated consumer. Kind-filtering here is the
+/// digest-build boundary, NOT a wake decision: `wait_async` still wakes on ANY
+/// entry (see `host_agent_session_await_inbox`), so a user interrupt or peer
+/// message parked alongside a build still breaks the hold — it simply flows
+/// through `drain_feedback`, never through this drain. Each returned entry is
+/// `{kind, content, sequence, ts_ms}`; `content` is the JSON snapshot string the
+/// ledger parses loop-side (offsets, stderr counts, terminal status), keeping
+/// snapshot parsing in one place (Harn).
+#[harn_builtin(
+    sig = "__host_agent_session_drain_command_updates(session_id: string) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_agent_session_drain_command_updates_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_DRAIN_COMMAND_UPDATES}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let drained = crate::orchestration::agent_inbox::drain_where(&session_id, |entry| {
+        entry.kind == "tool_progress" || entry.kind == "tool_result"
+    })
+    .into_iter()
+    .map(|entry| {
+        let mut item = crate::value::DictMap::new();
+        item.put_str("kind", entry.kind);
+        item.put_str("content", entry.content);
         item.insert(
             crate::value::intern_key("sequence"),
             VmValue::Int(entry.sequence as i64),

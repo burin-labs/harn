@@ -626,6 +626,22 @@ pub fn __agent_loop_checkpoint_modes(kind) {
       typed_delivery: nil,
     }
   }
+  if kind == "command_hold" {
+    // The command-hold seam: the loop parked on `agent_session_await_inbox`
+    // while awaited command handles were live and re-entered the model with
+    // one coalesced `command_status` digest. No drains here — the hold owns
+    // command-update consumption via `agent_session_drain_command_updates`,
+    // and its wake set is inclusive, so a user interrupt / peer message flows
+    // through the normal drains at the following `iteration_start`. This row
+    // exists so the checkpoint is a canonical, replayable transcript event.
+    return {
+      immediate: false,
+      finish_step: false,
+      audit_only: false,
+      inbox: false,
+      typed_delivery: nil,
+    }
+  }
   if kind == "loop_exit" {
     return {
       immediate: false,

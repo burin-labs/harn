@@ -212,6 +212,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/autocompact" => "stdlib/agent/autocompact.harn",
     "agent/mcp" => "stdlib/agent/mcp.harn",
     "agent/command_capture" => "stdlib/agent/command_capture.harn",
+    "agent/command_ledger" => "stdlib/agent/command_ledger.harn",
     "agent/host_tools" => "stdlib/agent/host_tools.harn",
     "agent/host_injection" => "stdlib/agent/host_injection.harn",
     "agent/budget" => "stdlib/agent/budget.harn",

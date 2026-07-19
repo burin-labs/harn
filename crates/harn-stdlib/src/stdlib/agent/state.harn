@@ -170,6 +170,44 @@ pub fn agent_session_drain_feedback(session_id) {
 }
 
 /**
+ * agent_session_await_inbox.
+ *
+ * Park the calling turn until the session has a queued `agent_inbox` entry OR
+ * `timeout_ms` elapses on the harness clock. Returns `true` when woken by an
+ * entry, `false` on the deadline. The command-hold's re-entry primitive: the
+ * loop parks here (zero inference) between decision re-entries. The wake set is
+ * INCLUSIVE — any queued entry (progress, terminal, user interrupt, peer
+ * message) wakes it; kind-filtering happens only where the ledger BUILDS its
+ * digest, never here.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_await_inbox(session_id, timeout_ms) {
+  return __host_agent_session_await_inbox(session_id, timeout_ms)
+}
+
+/**
+ * agent_session_drain_command_updates.
+ *
+ * Drain the session's queued long-running-command update entries
+ * (`tool_progress` / `tool_result` pushed by the hostlib background waiter),
+ * leaving every other inbox entry (user interrupts, peer messages, plain
+ * feedback) untouched for the normal feedback path. Each returned entry is
+ * `{kind, content, sequence, ts_ms}`; `content` is the JSON snapshot the ledger
+ * parses. This is the ONLY consumer of command-update kinds, so the ledger owns
+ * per-handle coalescing and the wake set stays inclusive.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_drain_command_updates(session_id) {
+  return __host_agent_session_drain_command_updates(session_id)
+}
+
+/**
  * agent_session_drain_host_injections.
  *
  * @effects: [host]

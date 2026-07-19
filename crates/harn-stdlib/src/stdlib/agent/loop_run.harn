@@ -1,3 +1,12 @@
+import {
+  command_ledger_has_awaited,
+  command_ledger_hold,
+  command_ledger_ingest,
+  command_ledger_new,
+  command_ledger_release,
+  command_ledger_should_hold,
+  command_wait_normalize,
+} from "std/agent/command_ledger"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_finalize"
 import "std/agent/loop_foundation"
@@ -72,6 +81,20 @@ pub fn __agent_loop_run(message, session, initial_opts) {
       0
     }
     let terminal_callback_continues = 0
+    // Command ledger + hold: a session-scoped registry of long-running
+    // handles the loop owns instead of asking the model to poll. Threaded
+    // through the turn loop like `stall_state`. `command_wait` normalizes all
+    // thresholds and wording once here (harn#4456); a linked host that
+    // predates the feature passes no `command_wait` and gets the defaults.
+    const command_wait = command_wait_normalize(opts?.command_wait)
+    let command_ledger = command_ledger_new()
+    let command_hold_state = {reentries: 0}
+    // One-shot output cap for the turn immediately after a progress-only hold
+    // digest: deciding "keep waiting" needs no reasoning budget, so the weak
+    // model's laziest completion (say nothing) is the correct one. Nil for a
+    // normal turn and for terminal-result re-entries (acting on results is
+    // uncapped). Cleared after it is applied to exactly one turn.
+    let command_hold_cap_tokens = nil
     while true {
       while iteration < current_max {
         const boundary_exhaustion = __agent_loop_budget_exhaustion(
@@ -155,6 +178,10 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         turn_opts = agent_tool_search_inject_if_needed(turn_opts)
         turn_opts = agent_apply_tool_surface_narrowing(turn_opts)
         turn_opts = agent_stance_apply(turn_opts)
+        if command_hold_cap_tokens != nil {
+          turn_opts = turn_opts + {max_tokens: command_hold_cap_tokens}
+          command_hold_cap_tokens = nil
+        }
         const turn_llm_opts = __agent_loop_effective_llm_options(turn_opts)
         __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
         agent_autocompact_if_needed(session, turn_llm_opts)
@@ -1000,6 +1027,16 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         )
         const dispatch = dispatched.dispatch
         const actuation_dispatch_results = __dispatch_results_list(dispatch)
+        // Register any long-running handle this turn spawned (a converted
+        // `run_command` returns `status=="running"` with a `handle_id`).
+        // Awaited rows gate the next no-tool-call boundary into a hold; the
+        // loop owns the decision cadence, so the model never polls.
+        command_ledger = command_ledger_ingest(
+          command_ledger,
+          actuation_dispatch_results,
+          __agent_loop_clock_now_ms(),
+          command_wait,
+        )
         stall_state = stall_state
           + {
           monologue_actuation: agent_monologue_actuation_observe_completed_dispatch(
@@ -1080,6 +1117,77 @@ pub fn __agent_loop_run(message, session, initial_opts) {
         if agent_budget_post_call_blocked(totals, turn_opts) {
           final_status = "budget_exhausted"
           break
+        }
+        // Command hold. A no-tool-call segment while an `awaited` handle is
+        // live does not end the turn: the loop parks on the inbox (zero
+        // inference) and re-enters the model only on its own sparse,
+        // delta-gated schedule with one coalesced `command_status` digest. A
+        // done attempt with pending awaited leases lands here too
+        // (`tool_count == 0`), so it cannot silently finish over a running
+        // build — it gets a forced-resolution re-entry.
+        if tool_count == 0 && command_ledger_should_hold(command_ledger, tool_count) {
+          const hold = command_ledger_hold(
+            session.session_id,
+            command_ledger,
+            command_wait,
+            command_hold_state,
+          )
+          command_ledger = hold.ledger
+          command_hold_state = hold.hold_state
+          __agent_loop_checkpoint(
+            session.session_id,
+            "command_hold",
+            {iteration: iteration_index + 1},
+          )
+          agent_emit_event(
+            session.session_id,
+            "command_hold",
+            {
+              iteration: iteration_index + 1,
+              outcome: hold.outcome,
+              reentries: command_hold_state.reentries,
+              awaited: command_ledger_has_awaited(command_ledger),
+            },
+          )
+          if hold.outcome == "digest" {
+            agent_session_inject_feedback(session.session_id, "command_status", hold.digest)
+            command_hold_cap_tokens = hold?.reentry_cap
+            // A hold turn is the model correctly WAITING, not stalling:
+            // exempt it from the stuck/nudge streaks so a long build never
+            // trips the narration-loop detector.
+            consecutive_text_only = 0
+            turns_since_progress = 0
+            continue
+          }
+          if hold.outcome == "interrupted" {
+            // A non-command inbox entry (user interrupt / peer message) woke
+            // the inclusive park; re-enter so the normal `iteration_start`
+            // drains deliver it.
+            continue
+          }
+          if hold.outcome == "exhausted" {
+            // Re-entry budget spent: signal `await_exhausted` into the stuck-
+            // detector adapter (recovery, not a kill) and flip the awaited rows
+            // to service leases so the hold cannot busy-loop — the processes
+            // keep running until the session-end reaper.
+            for row in command_ledger {
+              if row?.lease == "awaited" {
+                command_ledger = command_ledger_release(command_ledger, row.handle_id)
+              }
+            }
+            agent_session_inject_feedback(
+              session.session_id,
+              "await_exhausted",
+              "Background commands are still running after repeated waits. Take a different action now: "
+                + "act on what you have, kill_command to abort, or release_command to leave them running.",
+            )
+            consecutive_text_only = 0
+            turns_since_progress = 0
+            continue
+          }
+          // outcome == "resolved": every awaited handle is terminal / killed /
+          // released and its completion was already surfaced; fall through to
+          // the loop's normal done resolution.
         }
         consecutive_text_only = __next_text_only_count(tool_count, consecutive_text_only)
         last_tool_count = tool_count

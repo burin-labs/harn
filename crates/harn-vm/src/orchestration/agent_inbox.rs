@@ -435,6 +435,33 @@ mod tests {
         assert_eq!(remaining[1].content, "c");
     }
 
+    // The command ledger drains ONLY command-update kinds; a user interrupt or
+    // peer message parked alongside a running build must survive for the normal
+    // feedback path (the inclusive-wake invariant at the digest-build boundary).
+    // Mirrors the predicate in `host_agent_session_drain_command_updates_builtin`.
+    #[test]
+    fn command_updates_drain_leaves_user_feedback() {
+        let sid = fresh_session_id();
+        push(
+            &sid,
+            "tool_progress",
+            "tick",
+            "hostlib.long_running.progress",
+        );
+        push(&sid, "user_interrupt", "stop please", "user");
+        push(&sid, "tool_result", "exit 0", "hostlib.long_running.exit");
+        let updates = drain_where(&sid, |e| {
+            e.kind == "tool_progress" || e.kind == "tool_result"
+        });
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0].content, "tick");
+        assert_eq!(updates[1].content, "exit 0");
+        let remaining = drain(&sid);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].kind, "user_interrupt");
+        assert_eq!(remaining[0].content, "stop please");
+    }
+
     #[test]
     fn requeue_front_keeps_unwanted_entry_at_head() {
         let sid = fresh_session_id();

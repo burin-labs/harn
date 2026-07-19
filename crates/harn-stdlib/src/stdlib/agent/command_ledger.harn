@@ -1,0 +1,801 @@
+import {
+  agent_emit_event,
+  agent_session_await_inbox,
+  agent_session_drain_command_updates,
+} from "std/agent/state"
+
+// Command Ledger + Hold.
+//
+// A session-scoped registry of long-running `run_command` handles that the
+// agent loop OWNS instead of asking the model to poll. Rows are created from
+// `status=="running" && handle_id` dispatch results; while any `awaited` row is
+// live and a model segment produces no tool calls, the loop parks on
+// `agent_session_await_inbox` (zero inference) and re-enters the model only on
+// its own sparse, delta-gated decision schedule with ONE coalesced
+// `command_status` digest covering every live handle.
+//
+// This module owns cadence/orchestration/transcript semantics (Harn's layer);
+// thresholds and user-visible wording are normalized here from host-supplied
+// overrides (a Burin product concern passed in via `command_wait` options —
+// harn#4456: the owning boundary normalizes defaults once, callers pass only
+// overrides). No per-language logic; the ledger is language-agnostic.
+//
+// Determinism: every deadline reads `harness.clock.now_ms()` — the SAME clock
+// `agent_session_await_inbox` parks on — so a `PausedClock` drives both the
+// schedule and the park. The pure decision functions below take `now_ms` as an
+// argument and touch no clock or inbox, so they are exercised with synthetic
+// snapshots and virtual time and zero real sleeps (see
+// `pipeline-tests`/`tests/agent`). The park/wake ordering itself is proven by
+// the Rust `agent_inbox` PausedClock tests.
+
+// -------------------------------------------------------------------------------------------------
+// Constants (defaults; every one is overridable through `command_wait`).
+// -------------------------------------------------------------------------------------------------
+
+const __CL_DECISION_BASE_MS = 30000
+
+const __CL_DECISION_MULTIPLIER = 2
+
+const __CL_DECISION_CAP_MS = 300000
+
+const __CL_SILENCE_FLOOR_MS = 300000
+
+const __CL_STALL_AFTER_MS = 300000
+
+const __CL_MAX_AWAITED_WALL_MS = 900000
+
+const __CL_HOLD_REENTRY_MAX_TOKENS = 96
+
+const __CL_HOLD_REENTRY_BUDGET = 8
+
+// -------------------------------------------------------------------------------------------------
+
+// Options contract. Harn defines the shape and normalizes ALL defaults once at
+// this owning boundary; hosts pass only overrides.
+
+// -------------------------------------------------------------------------------------------------
+
+pub type CommandWaitOptions = {
+  inline_window_ms?: int,
+  decision_base_ms?: int,
+  decision_multiplier?: int,
+  decision_cap_ms?: int,
+  silence_floor_ms?: int,
+  stall_after_ms?: int,
+  max_awaited_wall_ms?: int,
+  hold_reentry_max_tokens?: int,
+  hold_reentry_budget?: int,
+  auto_resolve?: string,
+  wording?: dict,
+}
+
+fn __cl_pos_int(value, fallback: int) -> int {
+  const resolved = to_int(value)
+  if resolved != nil && resolved > 0 {
+    return resolved
+  }
+  return fallback
+}
+
+/**
+ * Normalize a host-supplied `command_wait` override dict into a fully defaulted
+ * contract. Every consumer below reads the RESULT of this function, never a raw
+ * option, so a missing/blank/non-positive value resolves to its default in
+ * exactly one place. `auto_resolve` is the per-surface ceiling fork: `"kill"`
+ * (headless/eval — deterministic verdicts) or `"release"` (interactive —
+ * release-to-service + receipt). Defaults to `"kill"`; Burin overrides for
+ * interactive surfaces.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_wait_normalize(raw) -> CommandWaitOptions {
+  const opts = if type_of(raw) == "dict" {
+    raw
+  } else {
+    {}
+  }
+  const auto_resolve = if opts?.auto_resolve == "release" {
+    "release"
+  } else {
+    "kill"
+  }
+  return {
+    inline_window_ms: __cl_pos_int(opts?.inline_window_ms, 10000),
+    decision_base_ms: __cl_pos_int(opts?.decision_base_ms, __CL_DECISION_BASE_MS),
+    decision_multiplier: __cl_pos_int(opts?.decision_multiplier, __CL_DECISION_MULTIPLIER),
+    decision_cap_ms: __cl_pos_int(opts?.decision_cap_ms, __CL_DECISION_CAP_MS),
+    silence_floor_ms: __cl_pos_int(opts?.silence_floor_ms, __CL_SILENCE_FLOOR_MS),
+    stall_after_ms: __cl_pos_int(opts?.stall_after_ms, __CL_STALL_AFTER_MS),
+    max_awaited_wall_ms: __cl_pos_int(opts?.max_awaited_wall_ms, __CL_MAX_AWAITED_WALL_MS),
+    hold_reentry_max_tokens: __cl_pos_int(
+      opts?.hold_reentry_max_tokens,
+      __CL_HOLD_REENTRY_MAX_TOKENS,
+    ),
+    hold_reentry_budget: __cl_pos_int(opts?.hold_reentry_budget, __CL_HOLD_REENTRY_BUDGET),
+    auto_resolve: auto_resolve,
+    wording: if type_of(opts?.wording) == "dict" {
+      opts.wording
+    } else {
+      {}
+    },
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Ledger construction + queries.
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * A fresh, empty ledger. The loop holds one per `agent_loop` invocation,
+ * threaded through the turn loop like `stall_state`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_new() {
+  return []
+}
+
+fn __cl_is_running_handle(result) -> bool {
+  if type_of(result) != "dict" {
+    return false
+  }
+  const handle = trim(to_string(result?.handle_id ?? ""))
+  return to_string(result?.status ?? "") == "running" && handle != ""
+}
+
+fn __cl_row_index(ledger, handle_id) -> int {
+  let index = 0
+  for row in ledger {
+    if row?.handle_id == handle_id {
+      return index
+    }
+    index = index + 1
+  }
+  return -1
+}
+
+fn __cl_replace_row(ledger, handle_id, new_row) {
+  let out = []
+  for row in ledger {
+    if row?.handle_id == handle_id {
+      out = out.push(new_row)
+    } else {
+      out = out.push(row)
+    }
+  }
+  return out
+}
+
+fn __cl_new_row(result, now_ms, cw) {
+  const lease = if to_string(result?.lease ?? "") == "service" {
+    "service"
+  } else {
+    "awaited"
+  }
+  const offset = __cl_pos_int(result?.output_offset ?? result?.byte_count, 0)
+  return {
+    handle_id: to_string(result.handle_id),
+    descriptor: to_string(
+      result?.command_or_op_descriptor ?? result?.descriptor ?? result?.command ?? "",
+    ),
+    lease: lease,
+    status: "running",
+    started_at_ms: now_ms,
+    output_offset: offset,
+    stderr_byte_count: __cl_pos_int(result?.stderr_byte_count, 0),
+    silence_ms: __cl_pos_int(result?.silence_ms, 0),
+    last_digest_offset: offset,
+    decision_interval_ms: cw.decision_base_ms,
+    next_decision_at_ms: now_ms + cw.decision_base_ms,
+    reentries: 0,
+    saw_stderr: __cl_pos_int(result?.stderr_byte_count, 0) > 0,
+    stall_fired: false,
+    escalated: false,
+    new_output: to_string(result?.stdout ?? ""),
+    last_elapsed_ms: 0,
+  }
+}
+
+/**
+ * Ingest a turn's dispatch results, appending an `awaited`/`service` row for
+ * each `status=="running" && handle_id` result not already tracked. An
+ * auto-converted command (`background_after_ms` inline window) is `awaited`; a
+ * bare detach is `service`. Existing rows are untouched (their schedule
+ * persists across the turns the model spends doing other work).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_ingest(ledger, dispatch_results, now_ms, cw) {
+  let out = ledger
+  for result in dispatch_results ?? [] {
+    if __cl_is_running_handle(result) && __cl_row_index(out, to_string(result.handle_id)) < 0 {
+      out = out.push(__cl_new_row(result, now_ms, cw))
+    }
+  }
+  return out
+}
+
+fn __cl_awaited_running(ledger) {
+  let out = []
+  for row in ledger {
+    if row?.lease == "awaited" && row?.status == "running" {
+      out = out.push(row)
+    }
+  }
+  return out
+}
+
+/**
+ * True when the ledger holds at least one live `awaited` handle — the
+ * precondition for a hold. Service leases never gate a turn boundary.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_has_awaited(ledger) -> bool {
+  return len(__cl_awaited_running(ledger)) > 0
+}
+
+/**
+ * True when a no-tool-call model segment should park rather than end the turn:
+ * the model emitted zero tool calls AND a live `awaited` handle exists.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_should_hold(ledger, tool_call_count) -> bool {
+  return to_int(tool_call_count ?? 0) == 0 && command_ledger_has_awaited(ledger)
+}
+
+/**
+ * Retire a handle from the ledger (terminal delivered, killed, or released away
+ * from the awaited schedule). Returns a ledger without that row.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_retire(ledger, handle_id) {
+  let out = []
+  for row in ledger {
+    if row?.handle_id != handle_id {
+      out = out.push(row)
+    }
+  }
+  return out
+}
+
+/**
+ * Flip an awaited row to a `service` lease: it leaves the decision schedule and
+ * runs until the session-end reaper, no longer holding turn boundaries. Unknown
+ * handles pass through unchanged.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_release(ledger, handle_id) {
+  const index = __cl_row_index(ledger, handle_id)
+  if index < 0 {
+    return ledger
+  }
+  const row = ledger[index]
+  return __cl_replace_row(ledger, handle_id, row + {lease: "service"})
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Update application: coalesce drained snapshots per handle, advance the delta
+// cursor, and flip the terminal / first-stderr / byte-stall event edges.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __cl_parse_snapshot(entry) {
+  const parsed = try {
+    json_parse(to_string(entry?.content ?? ""))
+  } catch (e) {
+    nil
+  }
+  if type_of(parsed) != "dict" {
+    return nil
+  }
+  return parsed + {__cl_kind: to_string(entry?.kind ?? "")}
+}
+
+fn __cl_apply_one(row, snapshot, now_ms, cw) {
+  const is_terminal = to_string(snapshot?.__cl_kind ?? "") == "tool_result"
+    || (to_string(
+    snapshot?.status ?? "",
+  )
+    != "running"
+    && snapshot?.status != nil)
+  const offset = __cl_pos_int(snapshot?.output_offset ?? snapshot?.byte_count, row.output_offset)
+  const stderr_bytes = __cl_pos_int(snapshot?.stderr_byte_count, row.stderr_byte_count)
+  const silence = __cl_pos_int(snapshot?.silence_ms, row.silence_ms)
+  // A bounded stdout tail IS the newest output; when the cumulative offset
+  // advanced we surface that tail as the delta (exact inter-offset bytes are
+  // unreconstructable from a tail, and the newest bytes are what the digest
+  // needs). Accumulated deltas are collapsed to the latest by coalescing.
+  const advanced = offset > row.output_offset
+  const delta_text = if advanced {
+    to_string(snapshot?.stdout ?? row.new_output)
+  } else {
+    row.new_output
+  }
+  const just_saw_stderr = !row.saw_stderr && stderr_bytes > 0
+  return row
+    + {
+    status: if is_terminal {
+      to_string(snapshot?.status ?? "completed")
+    } else {
+      "running"
+    },
+    terminal_snapshot: if is_terminal {
+      snapshot
+    } else {
+      row?.terminal_snapshot
+    },
+    output_offset: offset,
+    stderr_byte_count: stderr_bytes,
+    silence_ms: silence,
+    new_output: delta_text,
+    saw_stderr: row.saw_stderr || stderr_bytes > 0,
+    first_stderr_edge: just_saw_stderr,
+    last_elapsed_ms: __cl_pos_int(
+      snapshot?.elapsed_ms ?? snapshot?.duration_ms,
+      now_ms - row.started_at_ms,
+    ),
+  }
+}
+
+/**
+ * Apply drained command-update entries to the ledger. Multiple snapshots for
+ * one handle coalesce to the latest (last write wins on offsets/status); the
+ * per-handle event edges (`first_stderr_edge`, terminal) are set for the
+ * decision pass to read. Entries for unknown handles are ignored (a completed
+ * handle already retired). Returns the updated ledger.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_apply_updates(ledger, entries, now_ms, cw) {
+  let out = ledger
+  for entry in entries ?? [] {
+    const snapshot = __cl_parse_snapshot(entry)
+    if snapshot != nil {
+      const handle = trim(to_string(snapshot?.handle_id ?? ""))
+      const index = __cl_row_index(out, handle)
+      if handle != "" && index >= 0 {
+        out = __cl_replace_row(out, handle, __cl_apply_one(out[index], snapshot, now_ms, cw))
+      }
+    }
+  }
+  return out
+}
+
+// -------------------------------------------------------------------------------------------------
+// Decision pass: delta gate + event triggers + schedule. One mechanism.
+// -------------------------------------------------------------------------------------------------
+
+fn __cl_row_fires(row, now_ms, cw) -> bool {
+  if row.status != "running" {
+    // Terminal: always fires immediately (the completion payload).
+    return true
+  }
+  if row?.first_stderr_edge ?? false {
+    return true
+  }
+  if !(row?.stall_fired ?? false) && row.silence_ms >= cw.stall_after_ms {
+    return true
+  }
+  if now_ms >= row.next_decision_at_ms {
+    const has_new_output = row.output_offset > row.last_digest_offset
+    const silence_floor_hit = now_ms - (row?.last_digest_at_ms ?? row.started_at_ms)
+      >= cw
+      .silence_floor_ms
+    return has_new_output || silence_floor_hit
+  }
+  return false
+}
+
+fn __cl_advance_schedule_row(row, now_ms, cw) {
+  const next_interval = min(row.decision_interval_ms * cw.decision_multiplier, cw.decision_cap_ms)
+  return row + {decision_interval_ms: next_interval, next_decision_at_ms: now_ms + next_interval}
+}
+
+/**
+ * Decide, at virtual time `now_ms`, whether the hold should re-enter the model.
+ * For each awaited row: terminal / first-stderr / byte-stall event triggers
+ * bypass the schedule and fire immediately; a reached decision rung fires only
+ * if there is new output since the last digest OR the silence floor elapsed
+ * (silent builds skip rungs at zero token cost, doubling the interval). Returns
+ * `{ledger, fire: bool}` — `ledger` carries advanced schedules for reached-but-
+ * skipped rungs so the caller re-parks on a fresh deadline instead of busy-
+ * looping.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_decide(ledger, now_ms, cw) {
+  let fire = false
+  let out = []
+  for row in ledger {
+    if row?.lease == "awaited" && (row.status == "running" || row?.status == nil) {
+      if __cl_row_fires(row, now_ms, cw) {
+        fire = true
+        out = out.push(row)
+      } else if now_ms >= row.next_decision_at_ms {
+        out = out.push(__cl_advance_schedule_row(row, now_ms, cw))
+      } else {
+        out = out.push(row)
+      }
+    } else if row.status != "running" && row?.lease == "awaited" {
+      // A terminal row always fires (completion payload).
+      fire = true
+      out = out.push(row)
+    } else {
+      out = out.push(row)
+    }
+  }
+  return {ledger: out, fire: fire}
+}
+
+fn __cl_earliest_deadline(ledger, cw) -> int {
+  let earliest = nil
+  for row in ledger {
+    if row?.lease == "awaited" && row.status == "running" {
+      const ceiling_at = row.started_at_ms + cw.max_awaited_wall_ms
+      const row_deadline = min(row.next_decision_at_ms, ceiling_at)
+      if earliest == nil || row_deadline < earliest {
+        earliest = row_deadline
+      }
+    }
+  }
+  if earliest == nil {
+    return 0
+  }
+  return earliest
+}
+
+// -------------------------------------------------------------------------------------------------
+// Digest builder — the ONE coalesced `command_status` block for N handles.
+// -------------------------------------------------------------------------------------------------
+
+fn __cl_command_entry(row) {
+  if row.status != "running" {
+    const snap = row?.terminal_snapshot ?? {}
+    return {
+      handle_id: row.handle_id,
+      descriptor: row.descriptor,
+      lease: row.lease,
+      status: row.status,
+      exit_code: snap?.exit_code,
+      duration_ms: snap?.duration_ms ?? row.last_elapsed_ms,
+      stdout: to_string(snap?.stdout ?? ""),
+      output_path: snap?.output_path,
+    }
+  }
+  return {
+    handle_id: row.handle_id,
+    descriptor: row.descriptor,
+    lease: row.lease,
+    status: "running",
+    elapsed_ms: row.last_elapsed_ms,
+    new_output: row.new_output,
+    byte_count: row.output_offset,
+    silent_for_ms: row.silence_ms,
+  }
+}
+
+fn __cl_decision_wording(ledger, cw) -> string {
+  let stalled = false
+  for row in ledger {
+    if row?.lease == "awaited" && row.status == "running" && row.silence_ms >= cw.stall_after_ms {
+      stalled = true
+    }
+  }
+  if stalled {
+    const stall_word = trim(to_string(cw?.wording?.stall ?? ""))
+    if stall_word != "" {
+      return stall_word
+    }
+    return "No output for a while. `kill_command` to abort; if this is an intentional service, `release_command`."
+  }
+  const decision_word = trim(to_string(cw?.wording?.decision ?? ""))
+  if decision_word != "" {
+    return decision_word
+  }
+  return "No action needed. Continue waiting (no tool call), act on results, kill_command, or release_command."
+}
+
+/**
+ * Render the single `command_status` digest covering every live handle: the
+ * `new_output` delta (never the cumulative tail, so repeated digests neither
+ * re-pay bytes nor trip byte-identical-observation heuristics) for running
+ * handles and the terminal payload for just-completed ones. Serialized as
+ * deterministic JSON so replay is byte-stable.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_build_digest(ledger, now_ms, cw) -> string {
+  let commands = []
+  let next_update = nil
+  for row in ledger {
+    if row?.lease == "awaited" {
+      commands = commands.push(__cl_command_entry(row))
+      if row.status == "running" {
+        const until = max(0, row.next_decision_at_ms - now_ms)
+        if next_update == nil || until < next_update {
+          next_update = until
+        }
+      }
+    }
+  }
+  const digest = {
+    kind: "command_status",
+    commands: commands,
+    next_update_in_ms: next_update ?? 0,
+    decision: __cl_decision_wording(ledger, cw),
+  }
+  return json_stringify(digest)
+}
+
+/**
+ * After a digest fires, reset the delta cursor and stamp the last-digest time
+ * for every awaited running row, advance any fired rung, mark stalls reported,
+ * and retire terminal rows (their completion has now been surfaced exactly
+ * once). Clears the one-shot `first_stderr_edge`. Returns the updated ledger.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_after_digest(ledger, now_ms, cw) {
+  let out = []
+  for row in ledger {
+    if row?.lease != "awaited" {
+      out = out.push(row)
+    } else if row.status != "running" {
+      // Terminal awaited row: surfaced once, now retired.
+    } else {
+      const next_interval = min(
+        row.decision_interval_ms * cw.decision_multiplier,
+        cw.decision_cap_ms,
+      )
+      out = out.push(
+        row
+          + {
+          last_digest_offset: row.output_offset,
+          last_digest_at_ms: now_ms,
+          new_output: "",
+          first_stderr_edge: false,
+          stall_fired: row.silence_ms >= cw.stall_after_ms || row?.stall_fired,
+          reentries: row.reentries + 1,
+          decision_interval_ms: next_interval,
+          next_decision_at_ms: now_ms + next_interval,
+        },
+      )
+    }
+  }
+  return out
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Ceiling + auto-resolve. A per-handle awaited wall ceiling that needs no model
+// cooperation: one escalated re-entry, then harness auto-resolve (kill in
+// headless/eval; release-to-service + receipt in interactive).
+
+// -------------------------------------------------------------------------------------------------
+
+fn __cl_ceiling_breaches(ledger, now_ms, cw) {
+  let out = []
+  for row in ledger {
+    if row?.lease == "awaited" && row.status == "running" {
+      if now_ms - row.started_at_ms >= cw.max_awaited_wall_ms {
+        out = out.push(row)
+      }
+    }
+  }
+  return out
+}
+
+fn __cl_kill_handle(handle_id) {
+  return try {
+    hostlib_tools_cancel_handle({handle_id: handle_id, timed_out: true})
+  } catch (e) {
+    nil
+  }
+}
+
+/**
+ * Apply the awaited-wall ceiling at `now_ms`. A row breaching the ceiling that
+ * has NOT yet been escalated gets one escalated re-entry (marked `escalated`,
+ * digest surfaced by the caller). A row already escalated is auto-resolved by
+ * surface: `kill` cancels the handle and retires the row; `release` flips it to
+ * a service lease (kept running, off-schedule) with a receipt event. Returns
+ * `{ledger, breached: bool, escalated: bool, receipts}`.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) {
+  const breaches = __cl_ceiling_breaches(ledger, now_ms, cw)
+  if len(breaches) == 0 {
+    return {ledger: ledger, breached: false, escalated: false, receipts: []}
+  }
+  let out = ledger
+  let escalated = false
+  let receipts = []
+  for row in breaches {
+    if row?.escalated ?? false {
+      if cw.auto_resolve == "release" {
+        out = command_ledger_release(out, row.handle_id)
+        const receipt = {
+          schema: "harn.command_ledger_ceiling.v1",
+          handle_id: row.handle_id,
+          descriptor: row.descriptor,
+          action: "release_to_service",
+          elapsed_ms: now_ms - row.started_at_ms,
+        }
+        receipts = receipts.push(receipt)
+        agent_emit_event(session_id, "command_ceiling_resolved", receipt)
+      } else {
+        let _ = __cl_kill_handle(row.handle_id)
+        out = command_ledger_retire(out, row.handle_id)
+        const receipt = {
+          schema: "harn.command_ledger_ceiling.v1",
+          handle_id: row.handle_id,
+          descriptor: row.descriptor,
+          action: "kill",
+          elapsed_ms: now_ms - row.started_at_ms,
+        }
+        receipts = receipts.push(receipt)
+        agent_emit_event(session_id, "command_ceiling_resolved", receipt)
+      }
+    } else {
+      escalated = true
+      out = __cl_replace_row(
+        out,
+        row.handle_id,
+        out[__cl_row_index(out, row.handle_id)] + {escalated: true},
+      )
+    }
+  }
+  return {ledger: out, breached: true, escalated: escalated, receipts: receipts}
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// The hold orchestration entry. Parks (zero inference) across silent decision
+// rungs and returns to the loop only when a model re-entry is warranted, all
+// awaited handles resolve, the re-entry budget is spent, or a non-command inbox
+// entry (user interrupt / peer message) breaks the hold.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __cl_now_ms() -> int {
+  return harness.clock.now_ms()
+}
+
+/**
+ * Run one command hold. `hold_state = {reentries}` carries the separate
+ * `hold_reentries` budget class across successive holds in the loop (a long
+ * build never eats the work-iteration budget). Returns:
+ *   {ledger, outcome, hold_state, digest?, reentry_max_tokens?, receipts?}
+ * where `outcome` is one of:
+ *   "digest"      — inject `digest` as a `command_status` feedback block and run
+ *                   ONE re-entry inference capped at `reentry_max_tokens`.
+ *   "resolved"    — every awaited handle is terminal/killed/released; fall
+ *                   through to the loop's normal done resolution.
+ *   "interrupted" — a non-command inbox entry woke the park; let the loop's
+ *                   normal drain/turn machinery handle it.
+ *   "exhausted"   — the re-entry budget is spent; caller emits `await_exhausted`
+ *                   into the stuck-detector adapter (recovery, not a kill).
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn command_ledger_hold(session_id, ledger, cw, hold_state) {
+  let live = ledger
+  let state = if type_of(hold_state) == "dict" {
+    hold_state
+  } else {
+    {reentries: 0}
+  }
+  let receipts = []
+  while true {
+    if len(__cl_awaited_running(live)) == 0 && !__cl_has_terminal_awaited(live) {
+      return {ledger: live, outcome: "resolved", hold_state: state, receipts: receipts}
+    }
+    const now = __cl_now_ms()
+    const ceiling = command_ledger_apply_ceiling(live, now, cw, session_id)
+    live = ceiling.ledger
+    for receipt in ceiling.receipts {
+      receipts = receipts.push(receipt)
+    }
+    if ceiling.escalated {
+      const digest = command_ledger_build_digest(live, now, cw)
+      live = command_ledger_after_digest(live, now, cw)
+      state = state + {reentries: state.reentries + 1}
+      return {
+        ledger: live,
+        outcome: "digest",
+        digest: digest,
+        // A ceiling escalation is a progress-only decision (keep waiting / kill /
+        // release) — capped, like any progress re-entry.
+        reentry_cap: cw.hold_reentry_max_tokens,
+        hold_state: state,
+        receipts: receipts,
+      }
+    }
+    if ceiling.breached {
+      // Auto-resolved a breach without an escalation digest; re-evaluate.
+      continue
+    }
+    if state.reentries >= cw.hold_reentry_budget {
+      return {ledger: live, outcome: "exhausted", hold_state: state, receipts: receipts}
+    }
+    const earliest = __cl_earliest_deadline(live, cw)
+    const timeout = max(0, earliest - now)
+    const woke = agent_session_await_inbox(session_id, timeout)
+    const entries = agent_session_drain_command_updates(session_id)
+    const now2 = __cl_now_ms()
+    if len(entries) > 0 {
+      live = command_ledger_apply_updates(live, entries, now2, cw)
+    }
+    const decision = command_ledger_decide(live, now2, cw)
+    live = decision.ledger
+    if decision.fire {
+      const digest = command_ledger_build_digest(live, now2, cw)
+      // A digest carrying a terminal completion re-enters the model UNCAPPED —
+      // acting on results needs reasoning budget. A progress-only digest ("keep
+      // waiting") is capped: the model's cheapest action (say nothing) is right.
+      const cap = if __cl_has_terminal_awaited(live) {
+        nil
+      } else {
+        cw.hold_reentry_max_tokens
+      }
+      live = command_ledger_after_digest(live, now2, cw)
+      state = state + {reentries: state.reentries + 1}
+      return {
+        ledger: live,
+        outcome: "digest",
+        digest: digest,
+        reentry_cap: cap,
+        hold_state: state,
+        receipts: receipts,
+      }
+    }
+    if woke && len(entries) == 0 {
+      // Woken by a non-command entry (user interrupt / peer / plain feedback):
+      // the wake set is inclusive; hand control back for normal processing.
+      return {ledger: live, outcome: "interrupted", hold_state: state, receipts: receipts}
+    }
+    // Deadline rung with no due digest (delta-gated silent build): the schedule
+    // advanced above; re-park on the fresh deadline. Zero inference.
+  }
+}
+
+fn __cl_has_terminal_awaited(ledger) -> bool {
+  for row in ledger {
+    if row?.lease == "awaited" && row.status != "running" {
+      return true
+    }
+  }
+  return false
+}
