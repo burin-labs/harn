@@ -239,10 +239,12 @@ fn render_profile_with_extra_read_roots(
             .iter()
             .chain(package_manager_read_roots.iter())
         {
-            profile.push_str(&format!(
-                "(deny file-write* (subpath \"{}\"))\n",
-                sandbox_profile_escape(&root.display().to_string())
-            ));
+            for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+                profile.push_str(&format!(
+                    "(deny file-write* (subpath \"{}\"))\n",
+                    sandbox_profile_escape(&path)
+                ));
+            }
         }
     }
     if policy_allows_network(policy) {
@@ -296,6 +298,25 @@ fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
 
 fn sandbox_profile_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// macOS exposes `/tmp` and parts of `/var` through both logical and
+/// `/private` paths. Seatbelt evaluates those spellings independently, so a
+/// writable alias can bypass a deny rule emitted for only one spelling.
+fn sandbox_profile_path_aliases(path: &str) -> Vec<String> {
+    let mut aliases = vec![path.to_string()];
+    if path == "/tmp" || path.starts_with("/tmp/") || path == "/var" || path.starts_with("/var/") {
+        aliases.push(format!("/private{path}"));
+    } else if path == "/private/tmp"
+        || path.starts_with("/private/tmp/")
+        || path == "/private/var"
+        || path.starts_with("/private/var/")
+    {
+        aliases.push(path.replacen("/private", "", 1));
+    }
+    aliases.sort_unstable();
+    aliases.dedup();
+    aliases
 }
 
 fn standard_device_profile_rules() -> &'static str {

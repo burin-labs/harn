@@ -1,3 +1,4 @@
+import "./support"
 import "./types"
 
 const RUNTIME_RECEIPT_SCHEMA = "harn.provider_tool_probe_runtime.v1"
@@ -105,7 +106,10 @@ pub fn provider_tool_probe_campaign_catalog_snapshot(
 }
 
 /** Normalize the target CLI's `version --json` result into campaign provenance. */
-pub fn provider_tool_probe_campaign_runtime_receipt(harn_bin: string, child: dict) -> ProviderToolProbeRuntimeReceipt {
+pub fn provider_tool_probe_campaign_runtime_receipt(
+  harn_bin: string,
+  child: dict,
+) -> ProviderToolProbeRuntimeReceipt {
   const command = [harn_bin, "version", "--json"]
   const exit_code = to_int(child?.exit_code) ?? -1
   if exit_code != 0 {
@@ -160,11 +164,16 @@ pub fn provider_tool_probe_campaign_runtime_receipt(harn_bin: string, child: dic
   }
 }
 
-pub fn provider_tool_probe_campaign_runtime_allows_live(runtime: ProviderToolProbeRuntimeReceipt) -> bool {
+pub fn provider_tool_probe_campaign_runtime_allows_live(
+  runtime: ProviderToolProbeRuntimeReceipt,
+) -> bool {
   return runtime.status == "verified" && runtime.version != ""
 }
 
-pub fn __provider_tool_probe_campaign_runtime(harness: Harness, harn_bin: string) -> ProviderToolProbeRuntimeReceipt {
+pub fn __provider_tool_probe_campaign_runtime(
+  harness: Harness,
+  harn_bin: string,
+) -> ProviderToolProbeRuntimeReceipt {
   const child = try {
     harness.process.spawn_captured({cmd: harn_bin, args: ["version", "--json"]})
   } catch (e) {
@@ -207,8 +216,7 @@ pub fn __provider_tool_probe_campaign_catalog(
 ) -> dict {
   const command = ["provider", "catalog", "show"]
   const child = try {
-    harness.process
-      .spawn_captured(
+    harness.process.spawn_captured(
       {cmd: harn_bin, args: command, env: provider_tool_probe_campaign_command_env(providers_config)},
     )
   } catch (error) {
@@ -261,7 +269,9 @@ pub fn provider_tool_probe_campaign_routes(specs: list<string>) -> list<Provider
   return routes
 }
 
-pub fn provider_tool_probe_campaign_default_routes(include_expensive: bool) -> list<ProviderToolProbeRoute> {
+pub fn provider_tool_probe_campaign_default_routes(
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
   const routes: list<ProviderToolProbeRoute> = [
     {
       id: "fireworks-gpt-oss-120b",
@@ -468,7 +478,10 @@ pub fn __catalog_route_from_routing_row(
   }
 }
 
-pub fn __catalog_routes_from_routing_table(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+pub fn __catalog_routes_from_routing_table(
+  catalog: dict,
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
   const providers = __provider_meta_by_id(catalog)
   const models = __catalog_models_by_route(catalog)
   let routes: list<ProviderToolProbeRoute> = []
@@ -481,7 +494,10 @@ pub fn __catalog_routes_from_routing_table(catalog: dict, include_expensive: boo
   return routes
 }
 
-pub fn __catalog_routes_from_models(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+pub fn __catalog_routes_from_models(
+  catalog: dict,
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
   const providers = __provider_meta_by_id(catalog)
   let routes: list<ProviderToolProbeRoute> = []
   for model in catalog.models ?? [] {
@@ -512,7 +528,10 @@ pub fn __catalog_routes_from_models(catalog: dict, include_expensive: bool) -> l
   return routes
 }
 
-pub fn provider_tool_probe_campaign_catalog_routes(catalog: dict, include_expensive: bool) -> list<ProviderToolProbeRoute> {
+pub fn provider_tool_probe_campaign_catalog_routes(
+  catalog: dict,
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
   if len(catalog.routing_routes ?? []) > 0 {
     return __catalog_routes_from_routing_table(catalog, include_expensive)
   }
@@ -657,7 +676,9 @@ pub fn __behavior_matches(behavior: ProviderToolProbeBehavior, filters: list<str
   return false
 }
 
-pub fn provider_tool_probe_campaign_select_behaviors(filters: list<string>) -> list<ProviderToolProbeBehavior> {
+pub fn provider_tool_probe_campaign_select_behaviors(
+  filters: list<string>,
+) -> list<ProviderToolProbeBehavior> {
   let selected: list<ProviderToolProbeBehavior> = []
   for behavior in provider_tool_probe_campaign_behaviors() {
     if __behavior_matches(behavior, filters) {

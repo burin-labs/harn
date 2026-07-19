@@ -311,6 +311,11 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/http/client.rs",
   "crates/harn-vm/src/http/streaming/websocket.rs",
   "crates/harn-vm/src/llm/agent_observe.rs",
+  // Split children preserve the parent observability contracts: transcript
+  // timestamps and streamed tool-call coalescing use host time as the source
+  // of truth, rather than VM-scheduled time.
+  "crates/harn-vm/src/llm/agent_observe/transcript_observability.rs",
+  "crates/harn-vm/src/llm/api/transport/sse.rs",
   // Agent host primitive tool dispatch records actual host monotonic
   // elapsed time for transcript / portal execution telemetry.
   "crates/harn-vm/src/llm/agent_host_primitives.rs",

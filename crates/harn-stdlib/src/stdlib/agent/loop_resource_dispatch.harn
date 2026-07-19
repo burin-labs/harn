@@ -517,7 +517,13 @@ pub fn __intra_turn_failed_guard_record(call, index, resource_guard, result) {
   }
 }
 
-pub fn __intra_turn_dependent_suffix_count(tool_calls, tools, options, index, blocking_guard) -> number {
+pub fn __intra_turn_dependent_suffix_count(
+  tool_calls,
+  tools,
+  options,
+  index,
+  blocking_guard,
+) -> number {
   let count = 0
   for (candidate_index, candidate_call) in iter(tool_calls).enumerate() {
     if candidate_index < index {
@@ -908,8 +914,9 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       // Unknown still poisons, preserving today's conservative behavior.
       if resource_guard != nil && !__tool_result_ok(result)
         && __intra_turn_failure_poisons_resource(result) {
-        failed_resource_guards = failed_resource_guards
-          .push(__intra_turn_failed_guard_record(call, index, resource_guard, result))
+        failed_resource_guards = failed_resource_guards.push(
+          __intra_turn_failed_guard_record(call, index, resource_guard, result),
+        )
       }
       if fanout_cap > 0 {
         const signature = __intra_turn_failure_signature(result)
@@ -960,8 +967,7 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       if __agent_error_must_propagate(err) {
         throw err
       }
-      results = results
-        .push(
+      results = results.push(
         {
           ok: false,
           status: "error",

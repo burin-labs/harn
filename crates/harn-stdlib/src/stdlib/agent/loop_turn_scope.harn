@@ -23,8 +23,7 @@ pub fn __scope_classifier_recent_context(messages, limit) {
   let i = start
   while i < total {
     const msg = messages[i]
-    out = out
-      .push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
+    out = out.push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
     i = i + 1
   }
   return out
@@ -249,8 +248,7 @@ pub fn __scope_classifier_mounted_roots(anchor) {
   }
   let lines = []
   for root in roots {
-    lines = lines
-      .push(
+    lines = lines.push(
       "  - " + to_string(root?.path ?? root?.root ?? "")
         + " (mount_mode: "
         + to_string(root?.mount_mode ?? "")
@@ -721,8 +719,9 @@ pub fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reas
   }
   const wrapup_context = __agent_loop_effective_wrapup_context(wrapup_opts, final_status, stop_reason)
   const turn_messages = if host_wrapup {
-    turn_prompt.messages
-      .push({role: "user", content: directive + __agent_loop_render_wrapup_context(wrapup_context)})
+    turn_prompt.messages.push(
+      {role: "user", content: directive + __agent_loop_render_wrapup_context(wrapup_context)},
+    )
   } else {
     turn_prompt.messages
   }

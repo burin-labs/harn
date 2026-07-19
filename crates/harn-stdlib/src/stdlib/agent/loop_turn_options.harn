@@ -33,7 +33,13 @@ pub fn __agent_loop_verify_closure_exists(turn_opts) -> bool {
   return turn_opts?.verify_completion != nil || turn_opts?.verify_completion_judge != nil
 }
 
-pub fn __agent_loop_post_edit_reverify_mandated(repair_cfg, turn_opts, stall_state, dispatch, tools) -> bool {
+pub fn __agent_loop_post_edit_reverify_mandated(
+  repair_cfg,
+  turn_opts,
+  stall_state,
+  dispatch,
+  tools,
+) -> bool {
   const has_live_failure = stall_state.last_diagnostic_class == "fail" || stall_state.reverify_owed
   return repair_cfg.post_edit_reverify
     && __agent_loop_verify_closure_exists(turn_opts)
@@ -178,101 +184,6 @@ pub fn __apply_post_turn_options(opts, outcome) {
     }
   }
   return updated
-}
-
-pub fn __agent_loop_llm_overrides(opts) {
-  const overrides = opts?.llm_options
-  if type_of(overrides) == "dict" {
-    return overrides
-  }
-  return {}
-}
-
-pub fn __agent_loop_effective_llm_options(opts) {
-  const base = opts ?? {}
-  let merged = agent_merge_llm_options(base, __agent_loop_llm_overrides(base))
-  const call_opts = if merged?._output_schema_repair ?? false {
-    merged
-  } else {
-    __agent_loop_ordinary_turn_llm_options(merged)
-  }
-  return agent_sanitize_model_options(agent_refresh_tool_format_for_route(call_opts))
-}
-
-pub fn __agent_loop_has_terminal_schema_contract(opts) {
-  return opts?.output_schema != nil
-}
-
-pub fn __agent_loop_ordinary_turn_llm_options(opts) {
-  // In agent_loop, output_schema is a final-answer contract. If callers also
-  // pass equivalent llm_call schema knobs, keep them off ordinary turns and
-  // re-apply them only for the terminal repair request.
-  if !__agent_loop_has_terminal_schema_contract(opts) {
-    return opts
-  }
-  return omit(
-    opts,
-    [
-      "json_schema",
-      "output_format",
-      "output_schema",
-      "response_format",
-      "schema",
-      "schema_stream_abort",
-    ],
-  )
-}
-
-pub fn __agent_loop_route_options(provider, model, tool_format) {
-  return {
-    provider: to_string(provider ?? ""),
-    model: to_string(model ?? ""),
-    tool_format: to_string(tool_format ?? ""),
-  }
-}
-
-pub fn __agent_loop_enable_equivalent_failover(llm_opts, primary_provider, primary_model, loop_opts) {
-  const provider = to_string(llm_opts?.provider ?? "")
-  const model = to_string(llm_opts?.model ?? "")
-  const has_primary = primary_provider != "" || primary_model != ""
-  const has_current = provider != "" || model != ""
-  const partial_route_patch = (loop_opts?._agent_loop_last_llm_route_patch_seen ?? false)
-    && !(loop_opts?._agent_loop_last_llm_route_patch_complete ?? false)
-  const changed_partial_route = has_primary && has_current
-    && (provider != primary_provider || model != primary_model)
-    && partial_route_patch
-  return llm_enable_equivalent_failover(llm_opts, changed_partial_route)
-}
-
-pub fn __agent_loop_with_llm_render_context(opts, render) {
-  const effective = __agent_loop_effective_llm_options(opts)
-  const provider = to_string(effective?.provider ?? "")
-  const model = to_string(effective?.model ?? "")
-  const pushed = __push_llm_render_context(provider, model)
-  defer {
-    if pushed {
-      __pop_llm_render_context()
-    }
-  }
-  return render(effective)
-}
-
-pub fn __agent_loop_build_turn_prompt(session, opts, iteration) {
-  return __agent_loop_with_llm_render_context(
-    opts,
-    { effective ->
-      const fragments = agent_build_turn_system_fragments(session, effective, iteration)
-      let parts = []
-      for fragment in fragments {
-        parts = parts.push(fragment.body)
-      }
-      return {
-        fragments: fragments,
-        system: join(parts, "\n\n"),
-        messages: agent_build_turn_messages(session, effective, iteration),
-      }
-    },
-  )
 }
 
 pub fn __next_text_only_count(tool_count, consecutive_text_only) {
@@ -464,8 +375,7 @@ pub fn __agent_loop_emit_budget_exhausted(session_id, exhaustion) {
 }
 
 pub fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason) {
-  return decisions
-    .push(
+  return decisions.push(
     {
       iteration: iteration,
       action: "stop",
@@ -478,8 +388,7 @@ pub fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason
 }
 
 pub fn __agent_loop_record_terminal_callback_continue(decisions, iteration, old_limit, new_limit) {
-  return decisions
-    .push(
+  return decisions.push(
     {
       iteration: iteration,
       action: "extend",
@@ -623,80 +532,6 @@ pub fn __agent_loop_emit_provider_error(
       },
     },
   )
-}
-
-pub fn __agent_loop_finalize_failed(session, iteration) {
-  try {
-    agent_session_finalize(
-      session.session_id,
-      {final_status: "failed", stop_reason: "error", iterations: iteration},
-    )
-  } catch (e) {
-  }
-}
-
-pub fn __agent_loop_current_worker() {
-  const ctx = runtime_context()
-  const worker_id = ctx?.worker_id
-  if type_of(worker_id) != "string" || worker_id == "" {
-    return nil
-  }
-  for worker in list_agents() {
-    if worker?.id == worker_id {
-      return worker
-    }
-  }
-  return nil
-}
-
-pub fn __agent_loop_suspend_reminder_body(reason) {
-  if type_of(reason) == "string" && reason != "" {
-    return "Worker suspended before the next turn: " + reason
-  }
-  return "Worker suspended before the next turn."
-}
-
-pub fn __agent_loop_suspend_initiator(value) {
-  let text = to_string(value ?? "operator")
-  if text == "self_initiated" {
-    return "self"
-  }
-  return text
-}
-
-pub fn __agent_loop_suspend_checkpoint(session, iteration) {
-  const worker = __agent_loop_current_worker()
-  if worker == nil || worker?.status != "suspended" {
-    return nil
-  }
-  const suspension = worker?.suspension ?? {}
-  const reason = to_string(suspension?.reason ?? "")
-  const initiator = __agent_loop_suspend_initiator(suspension?.initiator)
-  const conditions = suspension?.conditions
-  const payload = {
-    status: "suspended",
-    handle: worker,
-    worker: worker,
-    reason: reason,
-    initiator: initiator,
-    conditions: conditions,
-    iterations_completed: iteration,
-    session_id: session.session_id,
-  }
-  agent_session_inject(
-    session.session_id,
-    transcript_reminder_event(
-      {
-        body: __agent_loop_suspend_reminder_body(reason),
-        source: "in_pipeline",
-        tags: ["agent_loop", "worker_suspend"],
-        dedupe_key: "worker_suspend:" + worker.id,
-        ttl_turns: 1,
-        fired_at_turn: iteration + 1,
-      },
-    ),
-  )
-  return payload
 }
 
 /**

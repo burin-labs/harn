@@ -1,54 +1,53 @@
 import { help_requested } from "std/cli/argparse"
 pub import {
+  provider_tool_probe_campaign_behaviors,
+  provider_tool_probe_campaign_catalog_routes,
   provider_tool_probe_campaign_catalog_snapshot,
-  provider_tool_probe_campaign_runtime_receipt,
-  provider_tool_probe_campaign_runtime_allows_live,
+  provider_tool_probe_campaign_default_routes,
+  provider_tool_probe_campaign_filter_behavior_modes,
+  provider_tool_probe_campaign_modes,
   provider_tool_probe_campaign_providers_config_text_error,
   provider_tool_probe_campaign_routes,
-  provider_tool_probe_campaign_default_routes,
-  provider_tool_probe_campaign_catalog_routes,
-  provider_tool_probe_campaign_modes,
-  provider_tool_probe_campaign_behaviors,
+  provider_tool_probe_campaign_runtime_allows_live,
+  provider_tool_probe_campaign_runtime_receipt,
   provider_tool_probe_campaign_select_behaviors,
-  provider_tool_probe_campaign_filter_behavior_modes,
 } from "./provider_tool_probe_campaign/catalog"
 pub import {
-  provider_tool_probe_campaign_env_from_dotenv_text,
   provider_tool_probe_campaign_env_file,
+  provider_tool_probe_campaign_env_from_dotenv_text,
   provider_tool_probe_campaign_parse_args,
 } from "./provider_tool_probe_campaign/env"
 pub import {
-  provider_tool_probe_campaign_missing_env_keys,
   provider_tool_probe_campaign_artifact_path,
+  provider_tool_probe_campaign_missing_env_keys,
 } from "./provider_tool_probe_campaign/execute"
 pub import {
   provider_tool_probe_campaign_planned_cells,
-  provider_tool_probe_campaign_planned_cells_with_options,
   provider_tool_probe_campaign_planned_cells_sliced_with_options,
+  provider_tool_probe_campaign_planned_cells_with_options,
 } from "./provider_tool_probe_campaign/plan"
 pub import {
-  provider_tool_probe_campaign_report,
   provider_tool_probe_campaign_markdown,
+  provider_tool_probe_campaign_report,
 } from "./provider_tool_probe_campaign/report"
 pub import {
-  ProviderToolProbeRoute,
   ProviderToolProbeBehavior,
-  ProviderToolProbeRuntimeStatus,
-  ProviderToolProbeRuntimeReceipt,
-  ProviderToolProbeCatalogStatus,
-  ProviderToolProbeCatalogReceipt,
-  ProviderToolProbeCell,
   ProviderToolProbeCampaignReport,
-  provider_tool_probe_campaign_providers_config,
+  ProviderToolProbeCatalogReceipt,
+  ProviderToolProbeCatalogStatus,
+  ProviderToolProbeCell,
+  ProviderToolProbeRoute,
+  ProviderToolProbeRuntimeReceipt,
+  ProviderToolProbeRuntimeStatus,
   provider_tool_probe_campaign_command_env,
+  provider_tool_probe_campaign_providers_config,
 } from "./provider_tool_probe_campaign/types"
 
 const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
     )
     return nil
@@ -167,8 +166,10 @@ fn main(harness: Harness) {
     cell_plan.slice ?? {},
   )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
-  harness.fs
-    .write_text(report.artifacts.report_markdown, provider_tool_probe_campaign_markdown(report))
+  harness.fs.write_text(
+    report.artifacts.report_markdown,
+    provider_tool_probe_campaign_markdown(report),
+  )
   if parsed?.markdown ?? false {
     harness.stdio.println(provider_tool_probe_campaign_markdown(report))
   } else {

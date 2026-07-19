@@ -74,7 +74,12 @@ pub type DetectorSpec = {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn token_runaway_resolve_cap(median: float, stddev: float, sigma: float, fallback: float) -> float {
+pub fn token_runaway_resolve_cap(
+  median: float,
+  stddev: float,
+  sigma: float,
+  fallback: float,
+) -> float {
   if median <= 0.0 {
     return fallback
   }

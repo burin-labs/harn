@@ -1,5 +1,6 @@
 import "./catalog"
 import "./plan"
+import "./support"
 import "./types"
 
 pub fn __safe_status(value) -> string {
@@ -88,7 +89,10 @@ pub fn __missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<stri
   return route.env_keys
 }
 
-pub fn provider_tool_probe_campaign_missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
+pub fn provider_tool_probe_campaign_missing_env_keys(
+  route: ProviderToolProbeRoute,
+  env: dict,
+) -> list<string> {
   return __missing_env_keys(route, env)
 }
 

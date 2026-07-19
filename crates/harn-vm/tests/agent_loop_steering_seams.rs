@@ -73,6 +73,13 @@ fn run_with_bridge(source: &str) -> Result<String, String> {
     })
 }
 
+/// Canonical session journals outlive a VM and are shared by parallel test
+/// processes. Resetting thread-local state therefore cannot make a fixed
+/// session id hermetic; mint a fresh id for every pipeline invocation.
+fn fresh_session_id(label: &str) -> String {
+    format!("{label}-{}", uuid::Uuid::now_v7().simple())
+}
+
 fn out_lines(raw: &str) -> Vec<String> {
     raw.lines()
         .filter_map(|l| l.strip_prefix("[harn] "))
@@ -183,8 +190,11 @@ pipeline main(task) {{
 
 #[test]
 fn pre_tool_dispatch_skips_when_interrupt_immediate_queued_mid_turn() {
-    let raw = run_with_bridge(&race_window_pipeline("race-window-stops-dispatch", true))
-        .expect("script must run");
+    let raw = run_with_bridge(&race_window_pipeline(
+        &fresh_session_id("race-window-stops-dispatch"),
+        true,
+    ))
+    .expect("script must run");
     let lines = out_lines(&raw);
     // Status: done (model returned `##DONE##` on the second iteration).
     assert_eq!(lines[0], "done", "lines: {lines:?}");
@@ -217,8 +227,11 @@ fn pre_tool_dispatch_skips_when_interrupt_immediate_queued_mid_turn() {
 
 #[test]
 fn pre_tool_dispatch_dispatches_when_no_injection_queued() {
-    let raw = run_with_bridge(&race_window_pipeline("race-window-no-stop", false))
-        .expect("script must run");
+    let raw = run_with_bridge(&race_window_pipeline(
+        &fresh_session_id("race-window-no-stop"),
+        false,
+    ))
+    .expect("script must run");
     let lines = out_lines(&raw);
     // Status: done.
     assert_eq!(lines[0], "done", "lines: {lines:?}");
@@ -322,8 +335,11 @@ pipeline main(task) {{
 
 #[test]
 fn audit_only_reminder_lands_in_transcript_but_model_never_sees_it() {
-    let raw =
-        run_with_bridge(&audit_only_pipeline("audit-only-records", true)).expect("script must run");
+    let raw = run_with_bridge(&audit_only_pipeline(
+        &fresh_session_id("audit-only-records"),
+        true,
+    ))
+    .expect("script must run");
     let lines = out_lines(&raw);
     assert_eq!(lines[0], "done", "lines: {lines:?}");
     // Exactly one LLM call: the stub fires once, returns ##DONE##, the
@@ -347,8 +363,11 @@ fn audit_only_reminder_lands_in_transcript_but_model_never_sees_it() {
 
 #[test]
 fn audit_only_control_run_records_no_audit_reminder() {
-    let raw = run_with_bridge(&audit_only_pipeline("audit-only-control", false))
-        .expect("script must run");
+    let raw = run_with_bridge(&audit_only_pipeline(
+        &fresh_session_id("audit-only-control"),
+        false,
+    ))
+    .expect("script must run");
     let lines = out_lines(&raw);
     assert_eq!(lines[0], "done", "lines: {lines:?}");
     // Same single LLM call as the audit_only variant — confirming the
@@ -517,7 +536,8 @@ pipeline main(task) {{
 
 #[test]
 fn steer_user_message_delivered_mid_turn_at_tool_boundary() {
-    let raw = run_with_bridge(&steer_pipeline("steer-mid-turn", true)).expect("script must run");
+    let raw = run_with_bridge(&steer_pipeline(&fresh_session_id("steer-mid-turn"), true))
+        .expect("script must run");
     let lines = out_lines(&raw);
     // Status: done (model returned `##DONE##` on the second iteration).
     assert_eq!(lines[0], "done", "lines: {lines:?}");
@@ -560,7 +580,8 @@ fn steer_user_message_delivered_mid_turn_at_tool_boundary() {
 
 #[test]
 fn steer_control_run_without_inject_is_eval_safe() {
-    let raw = run_with_bridge(&steer_pipeline("steer-control", false)).expect("script must run");
+    let raw = run_with_bridge(&steer_pipeline(&fresh_session_id("steer-control"), false))
+        .expect("script must run");
     let lines = out_lines(&raw);
     // (c) NO-INJECT PATH UNCHANGED: same status, same LLM-call count, and
     // same tool_result count as the steer variant — the no-inject path is

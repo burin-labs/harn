@@ -258,7 +258,11 @@ pub fn agent_stall_clear_current_failure(stall_state: AgentStallState) -> AgentS
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_stall_apply_result(result: dict, stall_enabled: bool, stall_state: AgentStallState) -> dict {
+pub fn agent_stall_apply_result(
+  result: dict,
+  stall_enabled: bool,
+  stall_state: AgentStallState,
+) -> dict {
   if !stall_enabled && len(stall_state.warnings) == 0 {
     return result
   }

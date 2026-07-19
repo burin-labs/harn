@@ -285,7 +285,11 @@ pub fn __agent_stall_gate_failure(gate) -> bool {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_made_edit: bool) -> AgentStallState {
+pub fn __agent_stall_fold_diagnostic(
+  state: AgentStallState,
+  prev_dispatch,
+  turn_made_edit: bool,
+) -> AgentStallState {
   // Edit bookkeeping first: a successful workspace mutation advances the epoch,
   // which arms the post-edit re-verify mandate in the loop.
   const new_write_epoch = if turn_made_edit {
@@ -608,7 +612,10 @@ pub fn __agent_stall_maybe_emit(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_update_ping_pong(state: AgentStallState, signature: string) -> AgentStallState {
+pub fn __agent_stall_update_ping_pong(
+  state: AgentStallState,
+  signature: string,
+) -> AgentStallState {
   const a = state.ping_pong_a
   const b = state.ping_pong_b
   if a == "" {
@@ -645,7 +652,10 @@ pub fn __agent_stall_update_ping_pong(state: AgentStallState, signature: string)
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_register_trip(state: AgentStallState, config: AgentStallConfig) -> AgentStallState {
+pub fn __agent_stall_register_trip(
+  state: AgentStallState,
+  config: AgentStallConfig,
+) -> AgentStallState {
   const trips = state.consecutive_trips + 1
   return state + {consecutive_trips: trips, hard_stop: trips >= config.hard_stop_after_trips}
 }
@@ -1017,8 +1027,7 @@ pub fn __agent_stall_observe_core(
   // Soft progress-report tools (e.g. `agent_progress`) report status without
   // advancing task state, so they are excluded from the real-action stream: a
   // turn whose only call is such a report is treated as no-progress.
-  const substantive_calls = tool_calls
-    .filter({ c -> !contains(SOFT_PROGRESS_TOOLS, __agent_tool_call_name(c)) })
+  const substantive_calls = tool_calls.filter({ c -> !contains(SOFT_PROGRESS_TOOLS, __agent_tool_call_name(c)) })
   if len(substantive_calls) == 0 {
     // No substantive tool call this turn — either none at all, or only soft
     // progress reports. With visible text or a progress report, that is a
@@ -1227,8 +1236,7 @@ pub fn __agent_stall_apply_repair(
   // so a non-tripping evaluation still records the new per-signature count.
   let current = folded
   if delivered_candidate {
-    const raw_delivered = config
-      .remediation_delivered(
+    const raw_delivered = config.remediation_delivered(
       {prev_dispatch: prev_dispatch, session_id: session_id, signature: folded.last_diagnostic_signature},
     )
     const evaluated = __agent_stall_eval_remediation(folded, folded.last_diagnostic_signature, raw_delivered)
@@ -1346,7 +1354,9 @@ pub fn __agent_stall_apply_action_signal(
   )
 }
 
-pub fn __agent_stall_observe_monologue_actuation(observation: AgentStallObservation) -> AgentStallObservation {
+pub fn __agent_stall_observe_monologue_actuation(
+  observation: AgentStallObservation,
+) -> AgentStallObservation {
   return observation
     + {
     state: observation.state

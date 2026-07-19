@@ -1,6 +1,7 @@
 import "./catalog"
 import "./execute"
 import "./plan"
+import "./support"
 import "./types"
 
 const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v8"
@@ -68,35 +69,6 @@ pub fn __live_cells(
   }
 }
 
-pub fn __campaign_slice_selects_unit(ordinal: int, shard_count: int, shard_index: int) -> bool {
-  if shard_count <= 1 {
-    return true
-  }
-  return ordinal % shard_count == shard_index
-}
-
-pub fn __campaign_slice_receipt(
-  shard_count: int,
-  shard_index: int,
-  max_probes: int,
-  probe_units_total: int,
-  probe_units_selected: int,
-  executable_units_selected: int,
-  probe_units_excluded_by_shard: int,
-  probe_units_excluded_by_cap: int,
-) -> dict {
-  return {
-    shard_count: shard_count,
-    shard_index: shard_index,
-    max_probes: max_probes,
-    probe_units_total: probe_units_total,
-    probe_units_selected: probe_units_selected,
-    executable_units_selected: executable_units_selected,
-    probe_units_excluded_by_shard: probe_units_excluded_by_shard,
-    probe_units_excluded_by_cap: probe_units_excluded_by_cap,
-  }
-}
-
 pub fn __summary(cells: list<ProviderToolProbeCell>) -> dict {
   let summary: dict = {pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
   for cell in cells {
@@ -116,10 +88,6 @@ pub fn __runner_summary(cells: list<ProviderToolProbeCell>) -> dict {
     }
   }
   return summary
-}
-
-pub fn __increment_key(counts: dict, key: string) -> dict {
-  return counts + {[key]: (counts[key] ?? 0) + 1}
 }
 
 pub fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {

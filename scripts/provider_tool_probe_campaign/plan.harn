@@ -1,4 +1,5 @@
 import "./catalog"
+import "./support"
 import "./types"
 
 pub fn __provider_catalog_claim(route: ProviderToolProbeRoute) -> dict {

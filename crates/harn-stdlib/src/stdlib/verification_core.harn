@@ -785,7 +785,10 @@ pub fn __verification_delta_set_minus(left: list<string>, right: list<string>) -
   return out.sort()
 }
 
-pub fn __verification_delta_set_intersection(left: list<string>, right: list<string>) -> list<string> {
+pub fn __verification_delta_set_intersection(
+  left: list<string>,
+  right: list<string>,
+) -> list<string> {
   let out: list<string> = []
   for item in left {
     if right.contains(item) && !out.contains(item) {
@@ -881,7 +884,11 @@ pub fn __verification_gate_unclassified(value) -> dict {
   }
 }
 
-pub fn __verification_gate_classification(value, current_hashes: dict, hashes_available: bool) -> dict {
+pub fn __verification_gate_classification(
+  value,
+  current_hashes: dict,
+  hashes_available: bool,
+) -> dict {
   const embedded = __verification_gate_embedded_classification(value)
   if embedded != nil {
     return embedded
@@ -926,7 +933,10 @@ pub fn __verification_gate_reason(delta: dict, classification: dict) -> string {
   return to_string(delta?.reason ?? "")
 }
 
-pub fn verification_warm_state_facts(rows: list<dict>, options = nil) -> list<VerificationWarmStateFact> {
+pub fn verification_warm_state_facts(
+  rows: list<dict>,
+  options = nil,
+) -> list<VerificationWarmStateFact> {
   const opts = __verification_opts(options)
   let facts = []
   let index = 0
