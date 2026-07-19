@@ -149,7 +149,7 @@ test-fast:
 
 # Run Harn conformance test suite
 conformance:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) test conformance
+	$(HARN_RUST_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance
 
 # Mechanism-contract onramp tier: the manufactured mini-evals that prove a new
 # termination/escalation/judge/guard/routing mechanism ENGAGES correctly (fires
@@ -304,13 +304,13 @@ EXTRA_HARN_FIND := find $(EXTRA_HARN_DIRS) -type d -name .harn -prune -o -type f
 
 fmt-harn-fix:
 	@echo "=== Formatting Harn files ==="
-	@find $(STDLIB_HARN_DIR) -name '*.harn' -print0 \
+	@find $(STDLIB_HARN_DIR) -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt
-	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
+	@find conformance/tests -type f -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
 		| xargs -0 $(HARN_CMD) fmt
-	@find experiments -name '*.harn' -print0 \
+	@find experiments -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt
-	@find scripts -name '*.harn' -print0 \
+	@find scripts -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt
 	@$(EXTRA_HARN_FIND) \
 		| xargs -0 -r $(HARN_CMD) fmt
@@ -318,13 +318,13 @@ fmt-harn-fix:
 
 fmt-harn:
 	@echo "=== Checking Harn formatting ==="
-	@find $(STDLIB_HARN_DIR) -name '*.harn' -print0 \
+	@find $(STDLIB_HARN_DIR) -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
-	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
+	@find conformance/tests -type f -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
-	@find experiments -name '*.harn' -print0 \
+	@find experiments -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
-	@find scripts -name '*.harn' -print0 \
+	@find scripts -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
 	@$(EXTRA_HARN_FIND) \
 		| xargs -0 -r $(HARN_CMD) fmt --check
@@ -606,9 +606,12 @@ check-connector-matrix:
 # changes, run
 #   $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check --update
 # and commit the regenerated files under scripts/provider_catalog_fixtures/.
+# The fixture workflow installs its own deterministic egress policy. Clear
+# operator/environment policy variables so that policy is not configured twice
+# before the Harn script reaches its fixture setup.
 check-provider-catalog-drift:
 	@echo "=== Checking provider catalog refresh workflow ==="
-	@$(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
+	@$(HARN_RUST_TEST_ENV) $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
 	@echo "    Provider catalog refresh OK."
 
 # Validate the ready-to-customize trigger example library.

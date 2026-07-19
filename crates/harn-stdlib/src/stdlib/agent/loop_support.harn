@@ -1,0 +1,299 @@
+pub import { agent_autocompact_if_needed, agent_emergency_compact } from "std/agent/autocompact"
+pub import { agent_budget_post_call_blocked, agent_budget_pre_call_blocked } from "std/agent/budget"
+pub import {
+  agent_loop_apply_command,
+  agent_loop_control_invoke,
+  agent_loop_snapshot_state,
+} from "std/agent/control"
+pub import { agent_daemon_snapshot, agent_daemon_step } from "std/agent/daemon"
+pub import {
+  __agent_input_guardrail_fail_open,
+  __agent_input_guardrail_normalize,
+} from "std/agent/guardrails"
+pub import {
+  agent_done_judge_cap,
+  agent_verify_completion_judge_cap,
+  agent_verify_or_continue,
+} from "std/agent/judge"
+pub import { agent_invoke_llm } from "std/agent/llm_dispatch"
+pub import {
+  agent_mcp_admit_bootstrap,
+  agent_mcp_bootstrap_if_needed,
+  agent_mcp_mount_additional,
+} from "std/agent/mcp"
+pub import {
+  agent_monologue_actuation_observe_completed_dispatch,
+  agent_monologue_actuation_take_for_turn,
+} from "std/agent/monologue_actuation"
+pub import {
+  agent_loop_options,
+  agent_merge_llm_options,
+  agent_refresh_tool_format_for_route,
+  agent_sanitize_model_options,
+  agent_tool_format,
+} from "std/agent/options"
+pub import {
+  agent_apply_tool_surface_narrowing,
+  agent_compute_post_turn,
+  agent_compute_terminal_callback,
+  agent_reset_tool_surface_narrowing,
+} from "std/agent/postturn"
+pub import { agent_take_one_shot_prefill } from "std/agent/prefill"
+pub import {
+  agent_build_turn_messages,
+  agent_build_turn_system_fragments,
+  agent_tool_call_paradigm,
+} from "std/agent/preflight"
+pub import { agent_dispatch_tool_call } from "std/agent/primitives"
+pub import { agent_progress_apply_options } from "std/agent/progress"
+pub import { native_tool_contract_feedback_prompt, parse_guidance_prompt } from "std/agent/prompts"
+pub import {
+  agent_required_tools_enforce,
+  agent_required_tools_inject_feedback,
+  agent_required_tools_missing_from_session,
+} from "std/agent/required_tools"
+pub import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
+pub import { agent_skills_match } from "std/agent/skills"
+pub import {
+  agent_stall_apply_result,
+  agent_stall_clear_current_failure,
+  agent_stall_done_judge_due,
+  agent_stall_initial_state,
+  agent_stall_inject_feedback,
+  agent_stall_no_net_progress,
+  agent_stall_observe_tool_calls,
+  agent_stall_repair_config,
+  agent_stall_repeated_verified_pass,
+  agent_stall_verified_write_satisfied,
+} from "std/agent/stall"
+pub import {
+  agent_stance_apply,
+  agent_stance_post_turn,
+  agent_stance_prepare,
+} from "std/agent/stance"
+pub import {
+  agent_emit_event,
+  agent_record_native_tool_fallback,
+  agent_reminder_providers_fire,
+  agent_session_drain_bridge_injections,
+  agent_session_drain_feedback,
+  agent_session_drain_host_injections,
+  agent_session_finalize,
+  agent_session_flush,
+  agent_session_init,
+  agent_session_inject_feedback,
+  agent_session_messages,
+  agent_session_pair_orphaned_tool_use,
+  agent_session_pop_last_assistant,
+  agent_session_record_assistant,
+  agent_session_record_tool_results,
+  agent_session_record_undispatched_tool_results,
+  agent_session_record_usage,
+  agent_session_totals,
+} from "std/agent/state"
+pub import { agent_step_judge } from "std/agent/step_judge"
+pub import {
+  agent_collapse_duplicate_read_calls,
+  agent_tool_annotations,
+  agent_tool_calls_are_read_only,
+  agent_tool_entry_annotations,
+} from "std/agent/tool_annotations"
+pub import {
+  agent_tool_lifecycle_error_category,
+  agent_tool_mutation_status,
+} from "std/agent/tool_lifecycle"
+pub import {
+  agent_tool_search_emit_queries,
+  agent_tool_search_inject_if_needed,
+  agent_tool_search_record_results,
+} from "std/agent/tool_search"
+pub import {
+  agent_await_resumption,
+  agent_lifecycle_tools,
+  list_agents,
+  suspend_agent,
+} from "std/agent/workers"
+pub import { omit } from "std/json"
+pub import {
+  llm_arm_one_shot_prefill,
+  llm_clear_one_shot_prefill,
+  llm_enable_equivalent_failover,
+} from "std/llm/options"
+
+pub fn __agent_loop_llm_overrides(opts) {
+  const overrides = opts?.llm_options
+  if type_of(overrides) == "dict" {
+    return overrides
+  }
+  return {}
+}
+
+pub fn __agent_loop_has_terminal_schema_contract(opts) {
+  return opts?.output_schema != nil
+}
+
+pub fn __agent_loop_ordinary_turn_llm_options(opts) {
+  // In agent_loop, output_schema is a final-answer contract. If callers also
+  // pass equivalent llm_call schema knobs, keep them off ordinary turns and
+  // re-apply them only for the terminal repair request.
+  if !__agent_loop_has_terminal_schema_contract(opts) {
+    return opts
+  }
+  return omit(
+    opts,
+    [
+      "json_schema",
+      "output_format",
+      "output_schema",
+      "response_format",
+      "schema",
+      "schema_stream_abort",
+    ],
+  )
+}
+
+pub fn __agent_loop_effective_llm_options(opts) {
+  const base = opts ?? {}
+  let merged = agent_merge_llm_options(base, __agent_loop_llm_overrides(base))
+  const call_opts = if merged?._output_schema_repair ?? false {
+    merged
+  } else {
+    __agent_loop_ordinary_turn_llm_options(merged)
+  }
+  return agent_sanitize_model_options(agent_refresh_tool_format_for_route(call_opts))
+}
+
+pub fn __agent_loop_route_options(provider, model, tool_format) {
+  return {
+    provider: to_string(provider ?? ""),
+    model: to_string(model ?? ""),
+    tool_format: to_string(tool_format ?? ""),
+  }
+}
+
+pub fn __agent_loop_enable_equivalent_failover(
+  llm_opts,
+  primary_provider,
+  primary_model,
+  loop_opts,
+) {
+  const provider = to_string(llm_opts?.provider ?? "")
+  const model = to_string(llm_opts?.model ?? "")
+  const has_primary = primary_provider != "" || primary_model != ""
+  const has_current = provider != "" || model != ""
+  const partial_route_patch = (loop_opts?._agent_loop_last_llm_route_patch_seen ?? false)
+    && !(loop_opts
+    ?._agent_loop_last_llm_route_patch_complete
+    ?? false)
+  const changed_partial_route = has_primary && has_current
+    && (provider != primary_provider
+    || model
+    != primary_model)
+    && partial_route_patch
+  return llm_enable_equivalent_failover(llm_opts, changed_partial_route)
+}
+
+pub fn __agent_loop_finalize_failed(session, iteration) {
+  try {
+    agent_session_finalize(
+      session.session_id,
+      {final_status: "failed", stop_reason: "error", iterations: iteration},
+    )
+  } catch (e) {
+  }
+}
+
+pub fn __agent_loop_current_worker() {
+  const ctx = runtime_context()
+  const worker_id = ctx?.worker_id
+  if type_of(worker_id) != "string" || worker_id == "" {
+    return nil
+  }
+  for worker in list_agents() {
+    if worker?.id == worker_id {
+      return worker
+    }
+  }
+  return nil
+}
+
+pub fn __agent_loop_suspend_reminder_body(reason) {
+  if type_of(reason) == "string" && reason != "" {
+    return "Worker suspended before the next turn: " + reason
+  }
+  return "Worker suspended before the next turn."
+}
+
+pub fn __agent_loop_suspend_initiator(value) {
+  let text = to_string(value ?? "operator")
+  if text == "self_initiated" {
+    return "self"
+  }
+  return text
+}
+
+pub fn __agent_loop_suspend_checkpoint(session, iteration) {
+  const worker = __agent_loop_current_worker()
+  if worker == nil || worker?.status != "suspended" {
+    return nil
+  }
+  const suspension = worker?.suspension ?? {}
+  const reason = to_string(suspension?.reason ?? "")
+  const initiator = __agent_loop_suspend_initiator(suspension?.initiator)
+  const conditions = suspension?.conditions
+  const payload = {
+    status: "suspended",
+    handle: worker,
+    worker: worker,
+    reason: reason,
+    initiator: initiator,
+    conditions: conditions,
+    iterations_completed: iteration,
+    session_id: session.session_id,
+  }
+  agent_session_inject(
+    session.session_id,
+    transcript_reminder_event(
+      {
+        body: __agent_loop_suspend_reminder_body(reason),
+        source: "in_pipeline",
+        tags: ["agent_loop", "worker_suspend"],
+        dedupe_key: "worker_suspend:" + worker.id,
+        ttl_turns: 1,
+        fired_at_turn: iteration + 1,
+      },
+    ),
+  )
+  return payload
+}
+
+pub fn __agent_loop_with_llm_render_context(opts, render) {
+  const effective = __agent_loop_effective_llm_options(opts)
+  const provider = to_string(effective?.provider ?? "")
+  const model = to_string(effective?.model ?? "")
+  const pushed = __push_llm_render_context(provider, model)
+  defer {
+    if pushed {
+      __pop_llm_render_context()
+    }
+  }
+  return render(effective)
+}
+
+pub fn __agent_loop_build_turn_prompt(session, opts, iteration) {
+  return __agent_loop_with_llm_render_context(
+    opts,
+    { effective ->
+      const fragments = agent_build_turn_system_fragments(session, effective, iteration)
+      let parts = []
+      for fragment in fragments {
+        parts = parts.push(fragment.body)
+      }
+      return {
+        fragments: fragments,
+        system: join(parts, "\n\n"),
+        messages: agent_build_turn_messages(session, effective, iteration),
+      }
+    },
+  )
+}
