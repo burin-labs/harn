@@ -273,7 +273,7 @@ fn activation_failure_rolls_back_install_without_ledger_mutation() {
     assert!(!output.status.success());
     let failure: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(failure["stage"], "activate");
-    assert_eq!(failure["error"]["code"], "activation_preflight_failed");
+    assert_eq!(failure["error"]["code"], "activation_failed");
     assert_eq!(failure["error"]["installed_inert"], false);
     assert_eq!(failure["error"]["activation_present"], false);
     assert_eq!(fs::read(&ledger).unwrap(), invalid_ledger);
@@ -287,10 +287,15 @@ fn activation_failure_rolls_back_install_without_ledger_mutation() {
         .unwrap()
         .iter()
         .any(|persona| persona["id"] == persona_id));
-    assert_eq!(
-        fs::read_to_string(root.join("harn.toml")).unwrap(),
-        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n"
+    assert!(!fs::read_to_string(root.join("harn.toml"))
+        .unwrap()
+        .contains("accepted_prompt_watch ="));
+    assert!(root.join("harn.lock").is_file());
+    assert!(
+        harn_modules::package_snapshot::PackageSnapshot::acquire(root)
+            .unwrap()
+            .unwrap()
+            .package_names()
+            .is_empty()
     );
-    assert!(!root.join("harn.lock").exists());
-    assert!(!root.join(".harn/package-current.toml").exists());
 }

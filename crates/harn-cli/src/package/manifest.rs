@@ -1440,12 +1440,6 @@ pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, PackageEr
     Ok(manifest)
 }
 
-pub(crate) fn write_manifest_content(path: &Path, content: &str) -> Result<(), PackageError> {
-    harn_vm::atomic_io::atomic_write(path, content.as_bytes()).map_err(|error| {
-        PackageError::Manifest(format!("failed to write {}: {error}", path.display()))
-    })
-}
-
 pub(crate) fn absolutize_check_config_paths(
     mut config: CheckConfig,
     manifest_dir: &Path,

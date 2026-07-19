@@ -196,12 +196,16 @@ chooses a deterministic collision-safe dependency alias, and activates only the
 generated `suggest` policy. Its versioned JSON receipt distinguishes
 materialization, installation, package doctor, activation, and runtime
 verification failures. Materialization publishes its generated package
-independently. The subsequent manifest, lockfile, package-generation, and
-activation changes form one apply transaction: a doctor, activation, or
-verification failure restores the pre-install package state and leaves the
-activation ledger unchanged. A rollback failure is reported explicitly instead
-of claiming atomicity. Repeating the same accepted receipt reuses identical
-package bytes, package generation, dependency alias, and activation record.
+independently. The subsequent install, activation, and verification stages hold
+one project mutation lock. A failure removes only the dependency edge introduced
+by that apply, republishes packages from the current manifest, and restores the
+activation record it replaced. Rollback deliberately does not restore historical
+lockfile or package-generation pointer bytes, because doing so could erase a
+concurrent package refresh; a previously lockless project may therefore retain
+an empty lockfile and package generation. Concurrent persona applies and manual
+activation mutations are serialized, and a rollback failure is reported
+explicitly instead of claiming atomicity. Repeating the same accepted receipt
+reuses identical package bytes, dependency alias, and activation record.
 Burin and other hosts own review and approval UX; Harn owns this apply
 transaction and its receipts.
 

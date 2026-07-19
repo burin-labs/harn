@@ -196,18 +196,32 @@ async fn apply_reviewed_persona_with_verifier(
         }
     };
     let workspace = PackageWorkspace::from_manifest_dir(&project.dir);
-    let install_transaction = match package::install_local_package(&workspace, &materialized.root) {
-        Ok(install) => install,
+    let mutation_lock = match package::acquire_project_mutation_lock(&project.dir) {
+        Ok(lock) => lock,
         Err(error) => {
             return failed(
                 receipt,
                 PersonaApplyStage::Install,
-                "install_failed",
+                "mutation_lock_failed",
                 error.to_string(),
                 true,
             );
         }
     };
+    let install_transaction =
+        match package::install_local_package_locked(&workspace, &materialized.root, &mutation_lock)
+        {
+            Ok(install) => install,
+            Err(error) => {
+                return failed(
+                    receipt,
+                    PersonaApplyStage::Install,
+                    "install_failed",
+                    error.to_string(),
+                    true,
+                );
+            }
+        };
     let persona_id = format!("{}/{}", install_transaction.receipt().alias, persona_name);
     receipt.stage = PersonaApplyStage::Install;
     receipt.install = Some(install_transaction.receipt().clone());
@@ -243,23 +257,7 @@ async fn apply_reviewed_persona_with_verifier(
         }
     }
 
-    let previous_activation =
-        match package::list_persona_activations(Some(&project.manifest_path())) {
-            Ok(activations) => activations
-                .into_iter()
-                .find(|activation| activation.persona_id == persona_id),
-            Err(error) => {
-                return failed_with_install_rollback(
-                    receipt,
-                    install_transaction,
-                    PersonaApplyStage::Activate,
-                    "activation_preflight_failed",
-                    error.to_string(),
-                    true,
-                );
-            }
-        };
-    let activation = match package::activate_persona(
+    let (activation, previous_activation) = match package::activate_persona_with_previous_locked(
         Some(&project.manifest_path()),
         &persona_id,
         &PersonaAttenuation {
@@ -267,8 +265,9 @@ async fn apply_reviewed_persona_with_verifier(
             ..PersonaAttenuation::default()
         },
         harn_vm::persona_now_ms(),
+        &mutation_lock,
     ) {
-        Ok(activation) => activation,
+        Ok(transaction) => transaction,
         Err(error) => {
             return failed_with_install_rollback(
                 receipt,
@@ -303,10 +302,11 @@ async fn apply_reviewed_persona_with_verifier(
                     .as_ref()
                     .and_then(|activation| activation.activation.as_ref())
                     .expect("changed activation receipt must contain its record");
-                if let Err(activation_rollback_error) = package::restore_persona_activation(
+                if let Err(activation_rollback_error) = package::restore_persona_activation_locked(
                     Some(&project.manifest_path()),
                     expected,
                     previous_activation.clone(),
+                    &mutation_lock,
                 ) {
                     return failed(
                         receipt,
@@ -548,6 +548,10 @@ fn materialized_persona_name(package_root: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::thread;
+
+    use harn_modules::package_snapshot::PackageSnapshot;
 
     use super::*;
 
@@ -632,6 +636,63 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_identical_apply_waits_for_failed_transaction_then_succeeds() {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, first_args) = apply_fixture(temp.path());
+        let second_args = PersonaMaterializeArgs {
+            blueprint: first_args.blueprint.clone(),
+            compile_receipt: first_args.compile_receipt.clone(),
+            output_root: first_args.output_root.clone(),
+            force: first_args.force,
+            activate: first_args.activate,
+            json: first_args.json,
+        };
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        let second_handle = Arc::new(Mutex::new(None));
+        let second_handle_for_verifier = Arc::clone(&second_handle);
+        let second_manifest = manifest.clone();
+
+        let first =
+            apply_reviewed_persona_with_verifier(Some(&manifest), &first_args, move |_, _, _| {
+                let handle = thread::spawn(move || {
+                    package::project_mutation_lock_test_probe::install(move || {
+                        attempted_tx.send(()).unwrap();
+                    });
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(apply_reviewed_persona(Some(&second_manifest), &second_args))
+                });
+                *second_handle_for_verifier.lock().unwrap() = Some(handle);
+                attempted_rx.recv().unwrap();
+                Err("forced verification failure".to_string())
+            })
+            .await;
+        assert!(!first.ok);
+        assert_eq!(first.stage, PersonaApplyStage::Verify);
+
+        let second = second_handle
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(second.ok, "{:#?}", second.error);
+        let persona_id = second.verification.unwrap().persona_id;
+        assert!(package::list_persona_activations(Some(&manifest))
+            .unwrap()
+            .iter()
+            .any(|activation| activation.persona_id == persona_id));
+        let project = package::load_manifest_context_for_anchor(Some(&manifest)).unwrap();
+        assert!(project
+            .manifest
+            .dependencies
+            .contains_key("harn-accepted-prompt-watch-persona"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn apply_requires_an_explicit_project_manifest() {
         let temp = tempfile::tempdir().unwrap();
         let (_, args) = apply_fixture(temp.path());
@@ -684,7 +745,6 @@ mod tests {
     async fn activation_failure_rolls_back_the_local_package_install() {
         let temp = tempfile::tempdir().unwrap();
         let (manifest, args) = apply_fixture(temp.path());
-        let manifest_before = fs::read(&manifest).unwrap();
         let ledger = temp.path().join(".harn/personas/activations.json");
         fs::create_dir_all(ledger.parent().unwrap()).unwrap();
         fs::write(&ledger, "{\"schema_version\":99,\"activations\":{}}\n").unwrap();
@@ -696,13 +756,19 @@ mod tests {
         assert!(receipt.install.is_some());
         assert!(receipt.activation.is_none());
         let error = receipt.error.unwrap();
-        assert_eq!(error.code, "activation_preflight_failed");
+        assert_eq!(error.code, "activation_failed");
         assert!(error.retryable);
         assert!(!error.installed_inert);
         assert!(!error.activation_present);
-        assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
-        assert!(!temp.path().join("harn.lock").exists());
-        assert!(!temp.path().join(".harn/package-current.toml").exists());
+        assert!(!fs::read_to_string(&manifest)
+            .unwrap()
+            .contains("accepted_prompt_watch ="));
+        assert!(temp.path().join("harn.lock").exists());
+        assert!(PackageSnapshot::acquire(temp.path())
+            .unwrap()
+            .unwrap()
+            .package_names()
+            .is_empty());
         let ledger_value: serde_json::Value =
             serde_json::from_slice(&fs::read(&ledger).unwrap()).unwrap();
         assert_eq!(ledger_value["activations"], serde_json::json!({}));
@@ -779,6 +845,57 @@ mod tests {
         assert_eq!(
             package::list_persona_activations(Some(&manifest)).unwrap(),
             newer
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn activation_mutation_returns_the_atomic_replaced_record() {
+        let temp = tempfile::tempdir().unwrap();
+        let (manifest, args) = apply_fixture(temp.path());
+        let applied = apply_reviewed_persona(Some(&manifest), &args).await;
+        assert!(applied.ok, "{:#?}", applied.error);
+        let persona_id = applied.verification.unwrap().persona_id;
+        let stale_observation = package::list_persona_activations(Some(&manifest))
+            .unwrap()
+            .pop()
+            .unwrap();
+
+        package::activate_persona(
+            Some(&manifest),
+            &persona_id,
+            &PersonaAttenuation {
+                autonomy_tier: Some(PersonaAutonomyTier::Shadow),
+                ..PersonaAttenuation::default()
+            },
+            345_678,
+        )
+        .unwrap();
+        let interleaved = package::list_persona_activations(Some(&manifest))
+            .unwrap()
+            .pop()
+            .unwrap();
+        let (replacement, previous) = package::activate_persona_with_previous(
+            Some(&manifest),
+            &persona_id,
+            &PersonaAttenuation {
+                autonomy_tier: Some(PersonaAutonomyTier::Suggest),
+                ..PersonaAttenuation::default()
+            },
+            456_789,
+        )
+        .unwrap();
+
+        assert_ne!(interleaved, stale_observation);
+        assert_eq!(previous.as_ref(), Some(&interleaved));
+        package::restore_persona_activation(
+            Some(&manifest),
+            replacement.activation.as_ref().unwrap(),
+            previous,
+        )
+        .unwrap();
+        assert_eq!(
+            package::list_persona_activations(Some(&manifest)).unwrap(),
+            vec![interleaved]
         );
     }
 

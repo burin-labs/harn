@@ -1,5 +1,32 @@
 use super::*;
-use harn_modules::package_snapshot::{package_current_path, PackageSnapshot};
+use harn_modules::package_snapshot::PackageSnapshot;
+
+#[cfg(test)]
+mod preparation_test_probe {
+    use std::cell::Cell;
+
+    use super::PackageError;
+
+    thread_local! {
+        static FAIL_AFTER_UPSERT: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(super) fn fail_after_upsert() {
+        FAIL_AFTER_UPSERT.with(|fail| fail.set(true));
+    }
+
+    pub(super) fn after_upsert() -> Result<(), PackageError> {
+        FAIL_AFTER_UPSERT.with(|fail| {
+            if fail.replace(false) {
+                Err(PackageError::Ops(
+                    "injected post-upsert preparation failure".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct LocalDependencyInstallReceipt {
@@ -40,10 +67,7 @@ struct LocalDependencyRollback {
     package_root: PathBuf,
     alias: String,
     owned_edge_added: bool,
-    manifest: FileSnapshot,
-    lock: FileSnapshot,
-    generation_pointer: FileSnapshot,
-    _prior_generation: Option<PackageSnapshot>,
+    _mutation_lock: Option<ProjectMutationLock>,
 }
 
 impl LocalDependencyRollback {
@@ -52,19 +76,15 @@ impl LocalDependencyRollback {
         ctx: &ManifestContext,
         package_root: &Path,
         alias: &str,
-    ) -> Result<Self, PackageError> {
-        let prior_generation = PackageSnapshot::acquire(&ctx.dir)
-            .map_err(|error| PackageError::Lockfile(error.to_string()))?;
-        Ok(Self {
+        mutation_lock: Option<ProjectMutationLock>,
+    ) -> Self {
+        Self {
             workspace: workspace.clone(),
             package_root: package_root.to_path_buf(),
             alias: alias.to_string(),
             owned_edge_added: !ctx.manifest.dependencies.contains_key(alias),
-            manifest: FileSnapshot::capture(ctx.manifest_path())?,
-            lock: FileSnapshot::capture(ctx.lock_path())?,
-            generation_pointer: FileSnapshot::capture(package_current_path(&ctx.dir))?,
-            _prior_generation: prior_generation,
-        })
+            _mutation_lock: mutation_lock,
+        }
     }
 
     fn restore_after_failed_install(self) -> Result<(), PackageError> {
@@ -76,88 +96,52 @@ impl LocalDependencyRollback {
     }
 
     fn restore_owned_dependency_from_manifest(self) -> Result<(), PackageError> {
+        let manifest_path = self.workspace.manifest_dir().join(MANIFEST);
+        with_manifest_write_lock(&manifest_path, || {
+            self.restore_owned_dependency_under_manifest_lock(&manifest_path)
+        })
+    }
+
+    fn restore_owned_dependency_under_manifest_lock(
+        &self,
+        manifest_path: &Path,
+    ) -> Result<(), PackageError> {
+        if !self.owned_edge_added {
+            return Ok(());
+        }
         let ctx = self.workspace.load_manifest_context()?;
-        match (
-            self.owned_edge_added,
-            ctx.manifest.dependencies.get(&self.alias),
-        ) {
-            (true, Some(dependency))
-                if dependency_targets(&ctx.dir, dependency, &self.package_root) =>
-            {
-                remove_dependency_from_manifest(&ctx.manifest_path(), &self.alias)?;
+        let removed = match ctx.manifest.dependencies.get(&self.alias) {
+            Some(dependency) if dependency_targets(&ctx.dir, dependency, &self.package_root) => {
+                remove_dependency_from_manifest_locked(manifest_path, &self.alias)?
             }
-            (true, Some(_)) => {
+            Some(_) => {
                 return Err(PackageError::Ops(format!(
                     "refusing to roll back local dependency '{}' because its target changed",
                     self.alias
                 )))
             }
-            _ => {}
+            None => false,
+        };
+        if !removed {
+            return Ok(());
         }
-
-        let manifest_now = fs::read(ctx.manifest_path()).map_err(|error| {
-            PackageError::Ops(format!(
-                "failed to read {} during rollback: {error}",
-                ctx.manifest_path().display()
-            ))
-        })?;
-        if same_toml_document(self.manifest.before.as_deref(), Some(&manifest_now))? {
-            return collect_restore_errors([
-                self.manifest.restore_unconditionally(),
-                self.lock.restore_unconditionally(),
-                self.generation_pointer.restore_unconditionally(),
-            ]);
-        }
-
-        // Another operation added unrelated manifest state. Preserve it and
-        // republish a generation from the current manifest after removing only
-        // the dependency edge owned by this transaction.
-        install_packages_in(&self.workspace, false, None, false).map(|_| ())
+        // Never restore stale lock or pointer bytes. Re-resolve while the
+        // manifest mutation remains locked, so the next manifest writer
+        // observes both the rollback edit and its published generation.
+        install_packages_in_locked(&self.workspace, false, None, false).map(|_| ())
     }
 }
 
-fn same_toml_document(left: Option<&[u8]>, right: Option<&[u8]>) -> Result<bool, PackageError> {
-    fn parse(bytes: Option<&[u8]>) -> Result<Option<toml::Value>, PackageError> {
-        bytes
-            .map(|bytes| {
-                std::str::from_utf8(bytes)
-                    .map_err(|error| PackageError::Manifest(error.to_string()))
-                    .and_then(|source| {
-                        let mut document: toml::Value =
-                            toml::from_str(source).map_err(|error| {
-                                PackageError::Manifest(format!(
-                                    "failed to compare manifest during rollback: {error}"
-                                ))
-                            })?;
-                        if let Some(table) = document.as_table_mut() {
-                            if table
-                                .get("dependencies")
-                                .and_then(toml::Value::as_table)
-                                .is_some_and(toml::map::Map::is_empty)
-                            {
-                                table.remove("dependencies");
-                            }
-                        }
-                        Ok(document)
-                    })
-            })
-            .transpose()
-    }
-    Ok(parse(left)? == parse(right)?)
-}
-
-fn collect_restore_errors<const N: usize>(
-    results: [Result<(), PackageError>; N],
-) -> Result<(), PackageError> {
-    let errors = results
-        .into_iter()
-        .filter_map(Result::err)
-        .map(|error| error.to_string())
-        .collect::<Vec<_>>();
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(PackageError::Ops(errors.join("; ")))
+fn preparation_failure_with_rollback(
+    rollback: &LocalDependencyRollback,
+    manifest_path: &Path,
+    error: PackageError,
+) -> PackageError {
+    match rollback.restore_owned_dependency_under_manifest_lock(manifest_path) {
+        Ok(()) => error,
+        Err(rollback_error) => PackageError::Ops(format!(
+            "local dependency preparation failed: {error}; rollback failed: {rollback_error}"
+        )),
     }
 }
 
@@ -173,52 +157,28 @@ fn failed_install_with_rollback(
     }
 }
 
-struct FileSnapshot {
-    path: PathBuf,
-    before: Option<Vec<u8>>,
-}
-
-impl FileSnapshot {
-    fn capture(path: PathBuf) -> Result<Self, PackageError> {
-        let before = read_optional_file(&path)?;
-        Ok(Self { path, before })
-    }
-
-    fn restore_unconditionally(self) -> Result<(), PackageError> {
-        restore_file(&self.path, self.before.as_deref())
-    }
-}
-
-fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>, PackageError> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(PackageError::Ops(format!(
-            "failed to read {}: {error}",
-            path.display()
-        ))),
-    }
-}
-
-fn restore_file(path: &Path, bytes: Option<&[u8]>) -> Result<(), PackageError> {
-    match bytes {
-        Some(bytes) => harn_vm::atomic_io::atomic_write(path, bytes).map_err(|error| {
-            PackageError::Ops(format!("failed to restore {}: {error}", path.display()))
-        }),
-        None => match fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(PackageError::Ops(format!(
-                "failed to remove {} during rollback: {error}",
-                path.display()
-            ))),
-        },
-    }
-}
-
+#[cfg(test)]
 pub(crate) fn install_local_package(
     workspace: &PackageWorkspace,
     package_root: &Path,
+) -> Result<LocalDependencyInstall, PackageError> {
+    let mutation_lock = acquire_project_mutation_lock(workspace.manifest_dir())
+        .map_err(|error| PackageError::Ops(error.to_string()))?;
+    install_local_package_inner(workspace, package_root, Some(mutation_lock))
+}
+
+pub(crate) fn install_local_package_locked(
+    workspace: &PackageWorkspace,
+    package_root: &Path,
+    _mutation_lock: &ProjectMutationLock,
+) -> Result<LocalDependencyInstall, PackageError> {
+    install_local_package_inner(workspace, package_root, None)
+}
+
+fn install_local_package_inner(
+    workspace: &PackageWorkspace,
+    package_root: &Path,
+    mut mutation_lock: Option<ProjectMutationLock>,
 ) -> Result<LocalDependencyInstall, PackageError> {
     let package_root = package_root.canonicalize().map_err(|error| {
         PackageError::Manifest(format!(
@@ -233,49 +193,75 @@ pub(crate) fn install_local_package(
         )));
     }
 
-    let ctx = workspace.load_manifest_context()?;
-    let dependency_path = local_dependency_path(&ctx.dir, &package_root)?;
-    let preferred = derive_package_alias_from_path(&package_root)?;
-    let alias = local_dependency_alias(&ctx, &package_root, &preferred, &dependency_path)?;
-    let manifest_path = ctx.manifest_path();
-    let rollback = LocalDependencyRollback::capture(workspace, &ctx, &package_root, &alias)?;
-    let manifest_before =
-        rollback.manifest.before.clone().ok_or_else(|| {
-            PackageError::Manifest(format!("{} is missing", manifest_path.display()))
-        })?;
-    let generation_before = rollback
-        ._prior_generation
-        .as_ref()
-        .map(|snapshot| snapshot.generation().to_string());
-
-    let install_result = add_package_to(
-        workspace,
-        &alias,
-        Some(&alias),
-        None,
-        None,
-        None,
-        None,
-        Some(&dependency_path),
-        None,
-    );
-    let (_, installed_packages) = match install_result {
-        Ok(result) => result,
-        Err(error) => return failed_install_with_rollback(rollback, error),
-    };
-    let manifest_after = match fs::read(&manifest_path) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            return failed_install_with_rollback(
-                rollback,
+    let manifest_path = workspace.manifest_dir().join(MANIFEST);
+    let (alias, dependency_path, manifest_changed, generation_before, rollback) =
+        with_manifest_write_lock(&manifest_path, || {
+            let ctx = workspace.load_manifest_context()?;
+            let dependency_path = local_dependency_path(&ctx.dir, &package_root)?;
+            let preferred = derive_package_alias_from_path(&package_root)?;
+            let alias = local_dependency_alias(&ctx, &package_root, &preferred, &dependency_path)?;
+            let rollback = LocalDependencyRollback::capture(
+                workspace,
+                &ctx,
+                &package_root,
+                &alias,
+                mutation_lock.take(),
+            );
+            let manifest_before = fs::read_to_string(&manifest_path).map_err(|error| {
                 PackageError::Manifest(format!(
                     "failed to read {}: {error}",
                     manifest_path.display()
-                )),
-            )
-        }
+                ))
+            })?;
+            let generation_before = current_generation(&ctx.dir)?;
+            let dependency = Dependency::Table(Box::new(DepTable {
+                path: Some(dependency_path.clone()),
+                ..DepTable::default()
+            }));
+            if let Err(error) =
+                upsert_dependency_in_manifest_locked(&manifest_path, &alias, &dependency)
+            {
+                return Err(preparation_failure_with_rollback(
+                    &rollback,
+                    &manifest_path,
+                    error,
+                ));
+            }
+            #[cfg(test)]
+            if let Err(error) = preparation_test_probe::after_upsert() {
+                return Err(preparation_failure_with_rollback(
+                    &rollback,
+                    &manifest_path,
+                    error,
+                ));
+            }
+            let manifest_after = match fs::read_to_string(&manifest_path) {
+                Ok(content) => content,
+                Err(error) => {
+                    return Err(preparation_failure_with_rollback(
+                        &rollback,
+                        &manifest_path,
+                        PackageError::Manifest(format!(
+                            "failed to read {}: {error}",
+                            manifest_path.display()
+                        )),
+                    ));
+                }
+            };
+            Ok((
+                alias,
+                dependency_path,
+                manifest_before != manifest_after,
+                generation_before,
+                rollback,
+            ))
+        })?;
+
+    let installed_packages = match install_packages_in_locked(workspace, false, None, false) {
+        Ok(installed) => installed,
+        Err(error) => return failed_install_with_rollback(rollback, error),
     };
-    let generation = match current_generation(&ctx.dir) {
+    let generation = match current_generation(workspace.manifest_dir()) {
         Ok(Some(generation)) => generation,
         Ok(None) => {
             return failed_install_with_rollback(
@@ -287,13 +273,12 @@ pub(crate) fn install_local_package(
         }
         Err(error) => return failed_install_with_rollback(rollback, error),
     };
-
     Ok(LocalDependencyInstall {
         receipt: LocalDependencyInstallReceipt {
             alias,
             path: dependency_path,
             installed_packages,
-            manifest_changed: manifest_before != manifest_after,
+            manifest_changed,
             generation_changed: generation_before.as_deref() != Some(generation.as_str()),
             generation,
         },
@@ -376,9 +361,11 @@ fn current_generation(project_root: &Path) -> Result<Option<String>, PackageErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+    use std::thread;
 
     #[test]
-    fn failed_generation_restores_manifest_lock_and_pointer() {
+    fn failed_generation_removes_owned_dependency_and_republishes() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         let manifest = root.join(MANIFEST);
@@ -398,13 +385,94 @@ mod tests {
             .expect("missing transitive dependency must fail installation");
 
         assert!(error.to_string().contains("missing"), "{error}");
-        assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
-        assert!(!root.join(LOCK_FILE).exists());
-        assert!(!package_current_path(root).exists());
+        let restored = PackageWorkspace::from_manifest_dir(root)
+            .load_manifest_context()
+            .unwrap();
+        assert!(restored.manifest.dependencies.is_empty());
+        assert!(root.join(LOCK_FILE).is_file());
+        assert!(PackageSnapshot::acquire(root)
+            .unwrap()
+            .unwrap()
+            .package_names()
+            .is_empty());
     }
 
     #[test]
-    fn rollback_restores_an_existing_generation_exactly() {
+    fn post_upsert_preparation_failure_rolls_back_the_owned_edge() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join(MANIFEST),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let package = root.join("prepared-package");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join(MANIFEST),
+            "[package]\nname = \"prepared-package\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        preparation_test_probe::fail_after_upsert();
+
+        let error = install_local_package(&PackageWorkspace::from_manifest_dir(root), &package)
+            .err()
+            .expect("injected post-upsert failure must abort installation");
+
+        assert!(error.to_string().contains("injected post-upsert"));
+        let ctx = PackageWorkspace::from_manifest_dir(root)
+            .load_manifest_context()
+            .unwrap();
+        assert!(!ctx.manifest.dependencies.contains_key("prepared-package"));
+        assert!(PackageSnapshot::acquire(root)
+            .unwrap()
+            .unwrap()
+            .package_names()
+            .is_empty());
+    }
+
+    #[test]
+    fn post_upsert_failure_preserves_a_preexisting_dependency_edge() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join(MANIFEST),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let package = root.join("existing-package");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join(MANIFEST),
+            "[package]\nname = \"existing-package\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let workspace = PackageWorkspace::from_manifest_dir(root);
+        install_local_package(&workspace, &package)
+            .unwrap()
+            .commit();
+        let manifest_before = fs::read(root.join(MANIFEST)).unwrap();
+        let generation_before = current_generation(root).unwrap();
+        preparation_test_probe::fail_after_upsert();
+
+        let error = install_local_package(&workspace, &package)
+            .err()
+            .expect("injected post-upsert failure must abort installation");
+
+        assert!(error.to_string().contains("injected post-upsert"));
+        assert_eq!(fs::read(root.join(MANIFEST)).unwrap(), manifest_before);
+        assert_eq!(current_generation(root).unwrap(), generation_before);
+        assert_eq!(
+            PackageSnapshot::acquire(root)
+                .unwrap()
+                .unwrap()
+                .package_names(),
+            &["existing-package".to_string()]
+        );
+    }
+
+    #[test]
+    fn rollback_republishes_the_existing_dependency_generation() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         fs::write(
@@ -427,8 +495,6 @@ mod tests {
 
         let manifest_before = fs::read(root.join(MANIFEST)).unwrap();
         let lock_before = fs::read(root.join(LOCK_FILE)).unwrap();
-        let pointer_before = fs::read(package_current_path(root)).unwrap();
-        let generation_before = current_generation(root).unwrap().unwrap();
 
         let second_package = root.join("second-package");
         fs::create_dir_all(&second_package).unwrap();
@@ -445,12 +511,11 @@ mod tests {
         assert_eq!(fs::read(root.join(MANIFEST)).unwrap(), manifest_before);
         assert_eq!(fs::read(root.join(LOCK_FILE)).unwrap(), lock_before);
         assert_eq!(
-            fs::read(package_current_path(root)).unwrap(),
-            pointer_before
-        );
-        assert_eq!(
-            current_generation(root).unwrap().unwrap(),
-            generation_before
+            PackageSnapshot::acquire(root)
+                .unwrap()
+                .unwrap()
+                .package_names(),
+            &["first-package".to_string()]
         );
     }
 
@@ -478,8 +543,10 @@ mod tests {
             .unwrap();
         }
 
-        let first = install_local_package(&workspace, &first_package).unwrap();
-        install_local_package(&workspace, &second_package)
+        let mutation_lock = acquire_project_mutation_lock(root).unwrap();
+        let first =
+            install_local_package_locked(&workspace, &first_package, &mutation_lock).unwrap();
+        install_local_package_locked(&workspace, &second_package, &mutation_lock)
             .unwrap()
             .commit();
         first.rollback().unwrap();
@@ -526,5 +593,57 @@ mod tests {
             .unwrap();
 
         assert_eq!(fs::read(root.join(MANIFEST)).unwrap(), manifest_before);
+    }
+
+    #[test]
+    fn ordinary_add_waits_for_local_transaction_rollback() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        fs::write(
+            root.join(MANIFEST),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let package = root.join("shared-package");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join(MANIFEST),
+            "[package]\nname = \"shared-package\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let first =
+            install_local_package(&PackageWorkspace::from_manifest_dir(&root), &package).unwrap();
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        let add_root = root.clone();
+        let add = thread::spawn(move || {
+            project_mutation_lock_test_probe::install(move || {
+                attempted_tx.send(()).unwrap();
+            });
+            add_package_to(
+                &PackageWorkspace::from_manifest_dir(&add_root),
+                "shared-package",
+                Some("shared-package"),
+                None,
+                None,
+                None,
+                None,
+                Some("shared-package"),
+                None,
+            )
+            .unwrap()
+        });
+        attempted_rx.recv().unwrap();
+        first.rollback().unwrap();
+        add.join().unwrap();
+
+        let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        assert!(manifest.contains("shared-package = { path = \"shared-package\" }"));
+        assert_eq!(
+            PackageSnapshot::acquire(&root)
+                .unwrap()
+                .unwrap()
+                .package_names(),
+            &["shared-package".to_string()]
+        );
     }
 }
