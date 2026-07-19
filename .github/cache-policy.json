@@ -15,6 +15,21 @@
       "workflow": "windows-nightly.yml",
       "job": "nextest",
       "shared_key": "workspace-windows"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "package-audit",
+      "shared_key": "package-audit"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "rust-builds",
+      "shared_key": "workspace-behavior"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "rust-test",
+      "shared_key": "workspace-test"
     }
   ]
 }
