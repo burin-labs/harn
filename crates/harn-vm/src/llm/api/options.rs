@@ -767,11 +767,11 @@ pub(crate) struct LlmRequestPayload {
     /// transport snapshots because it is an in-process harness handle.
     #[serde(skip_serializing)]
     pub cli_llm_mock_scope: Option<u64>,
-    /// Mock fixture scope this call draws from (`main`, `judge`, …). `None`
-    /// resolves to the default shared bucket. Product-set per call so a
-    /// full-loop run can script the main turn and its auxiliary calls without
-    /// them cannibalizing one queue. Skipped in serialized transport snapshots
-    /// because it is an in-process test-harness routing hint.
+    /// Mock fixture purpose bucket this call draws from (for example
+    /// `agent.main` or `completion.judge`). `None` resolves to the default
+    /// shared bucket. Harn assigns purposes at call sites so auxiliary calls
+    /// cannot cannibalize the main queue. Skipped in serialized transport
+    /// snapshots because it is an in-process test-harness routing hint.
     #[serde(skip_serializing)]
     pub mock_scope: Option<String>,
 }

@@ -540,6 +540,42 @@ fn run_command_kills_child_when_scope_interrupt_fires() {
 }
 
 #[test]
+fn run_command_background_ignores_scope_interrupt() {
+    // Background commands deliberately wait without polling the invoking
+    // scope's interrupt state. Their lifetime is owned by the handle store;
+    // explicit cancellation is the only path that should kill them.
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let _interrupt = harn_vm::op_interrupt::install(Some(cancel), None);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "30"]));
+    req.insert("background".into(), VmValue::Bool(true));
+    let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let handle_id = require_str(&response, "handle_id");
+    assert_eq!(require_str(&response, "status"), "running");
+    assert!(
+        !controller.was_killed(),
+        "scope interrupt must not kill background work"
+    );
+
+    let completion_rx = register_completion_notifier(&handle_id);
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel_response = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(require_bool(&cancel_response, "cancelled"));
+    assert!(
+        controller.was_killed(),
+        "explicit cancellation must kill background work"
+    );
+    completion_rx
+        .expect("background handle should still be live")
+        .recv()
+        .expect("background waiter did not publish completion");
+}
+
+#[test]
 fn run_command_surfaces_wait_errors() {
     let config = MockProcessConfig {
         wait_error: Some("wait blew up".to_string()),

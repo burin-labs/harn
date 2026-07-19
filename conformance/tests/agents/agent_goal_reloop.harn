@@ -45,7 +45,9 @@ pipeline test() {
       },
     }
   }
-  const session = "agent-goal-reloop-conformance"
+  // Durable session journals outlive a fixture process; a fresh id keeps this
+  // re-loop hermetic without depending on external store cleanup.
+  const session = "agent-goal-reloop-conformance-" + uuid()
   const result = agent_loop(
     "achieve the goal",
     nil,

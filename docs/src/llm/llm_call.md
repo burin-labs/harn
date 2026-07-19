@@ -591,11 +591,41 @@ llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"
 
 // Inspect what was sent to the mock provider
 const calls = llm_mock_calls()
-// Each entry: {messages: [...], system: "..." or nil, tools: [...] or nil}
+// Each entry includes mock_scope plus {messages: [...], system: "..." or nil,
+// tools: [...] or nil}.
 
 // Clear all mocks and call log between tests
 llm_mock_clear()
 ```
+
+For concurrent agent work, load one complete versioned JSONL document with
+`llm_mock_load_jsonl(text)`. Version 1 requires an explicit `id`, open-string
+`scope`, and `consume: "once"` or `"sticky"` on every entry:
+
+```harn
+const fixture = """
+{"schemaVersion":1,"strictScopes":false}
+{"id":"main-1","scope":"agent.main","consume":"once","text":"MAIN"}
+{"id":"judge-1","scope":"completion.judge","consume":"sticky","match":"*","text":"JUDGE"}
+"""
+const loaded = llm_mock_load_jsonl(fixture)
+const receipts = llm_mock_receipts()
+const queue = llm_mock_snapshot()
+const harn_purposes = llm_mock_known_scopes()
+```
+
+Matching checks the requested scope first. With `strictScopes: false`, a
+non-`default` request may fall through only to the `default` bucket; it never
+consumes another purpose's queue. `llm_mock_load_jsonl` validates the complete
+document before replacing the active store, so malformed input preserves the
+previous fixture. Headerless v0 documents retain the legacy default-scope
+FIFO/pattern behavior. Unknown v1 scopes are accepted as open strings and
+returned as advisory `warnings` rather than being rejected.
+`llm_mock_known_scopes()` exposes Harn's current purpose vocabulary to scripts;
+it is advisory and does not close the open-string `scope` field.
+Each `llm_mock_receipts()` item contains the authored `id`, requested and
+resolved scopes, `consume`, `fell_through`, and the post-match `remaining`
+count; `llm_mock_snapshot()` exposes the remaining count for every scope.
 
 When no `llm_mock()` responses are queued, the mock provider falls back to
 its default deterministic behavior (echoing prompt metadata). This means

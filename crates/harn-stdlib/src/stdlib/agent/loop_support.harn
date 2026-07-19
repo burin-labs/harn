@@ -161,6 +161,9 @@ pub fn __agent_loop_effective_llm_options(opts) {
     __agent_loop_ordinary_turn_llm_options(merged)
   }
   return agent_sanitize_model_options(agent_refresh_tool_format_for_route(call_opts))
+    + {
+    mock_scope: call_opts?.mock_scope ?? "agent.main",
+  }
 }
 
 pub fn __agent_loop_route_options(provider, model, tool_format) {
