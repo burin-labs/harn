@@ -81,6 +81,7 @@ jobs:
       portal: ${{ steps.surface_filter.outputs.portal }}
       docs_site: ${{ steps.surface_filter.outputs.docs_site }}
       prompt_prose: ${{ steps.surface_filter.outputs.prompt_prose }}
+      setup_action: ${{ steps.surface_filter.outputs.setup_action }}
       release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -115,6 +116,9 @@ jobs:
               - 'scripts/allowed_long_strings.txt'
               - 'scripts/check_no_rust_prompt_prose.sh'
               - 'scripts/check_rust_prompt_prose.harn'
+            setup_action:
+              - '.github/actions/setup-harn/**'
+              - '.github/workflows/ci.yml'
             package_audit:
               - '.github/workflows/ci.yml'
               - 'Cargo.lock'
@@ -1162,6 +1166,40 @@ jobs:
           min-severity: medium
           min-confidence: medium
 
+  setup-harn-action:
+    name: Setup Harn action (${{ matrix.os }})
+    needs: [changes]
+    if: needs.changes.outputs.setup_action == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Run deterministic setup-action tests
+        if: runner.os == 'Linux'
+        run: node --test .github/actions/setup-harn/setup-harn.test.mjs
+      - name: Install a published Harn release
+        id: harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version: 0.10.28
+          max-attempts: "3"
+          retry-delay-seconds: "1"
+      - name: Verify installed release and receipt outputs
+        shell: bash
+        env:
+          HARN_PATH: ${{ steps.harn.outputs.path }}
+          HARN_VERSION: ${{ steps.harn.outputs.version }}
+          HARN_CHECKSUM: ${{ steps.harn.outputs.checksum }}
+        run: |
+          set -euo pipefail
+          test "$HARN_VERSION" = "0.10.28"
+          [[ "$HARN_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]
+          test -x "$HARN_PATH" || [[ "$RUNNER_OS" = "Windows" && -f "$HARN_PATH" ]]
+          harn --version
+
   e2e:
     name: Slow E2E suite
     runs-on: ubuntu-latest
@@ -1201,7 +1239,29 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [runner-availability, changes, fmt, package-audit, lint-md, rust-builds, rust-test, rust-security, harn-audit, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
+    needs:
+      [
+        runner-availability,
+        changes,
+        fmt,
+        package-audit,
+        lint-md,
+        rust-builds,
+        rust-test,
+        rust-security,
+        harn-audit,
+        audit-scripts,
+        windows-plan,
+        windows,
+        windows-cross-check,
+        macos-plan,
+        macos,
+        portal,
+        docs-site,
+        actions,
+        setup-harn-action,
+        e2e,
+      ]
     steps:
       - name: Verify required CI jobs
         env:
@@ -1352,6 +1412,13 @@ jobs:
           echo "Docs site: $docs_site_result"
           if [ "$docs_site_result" != "success" ] && [ "$docs_site_result" != "skipped" ]; then
             echo "::error::Docs site failed."
+            exit 1
+          fi
+
+          setup_harn_result="${{ needs['setup-harn-action'].result }}"
+          echo "Setup Harn action: $setup_harn_result"
+          if [ "$setup_harn_result" != "success" ] && [ "$setup_harn_result" != "skipped" ]; then
+            echo "::error::Setup Harn action failed."
             exit 1
           fi
 
