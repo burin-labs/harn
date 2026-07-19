@@ -1,5 +1,6 @@
 import {
   aggregate_runs,
+  best_metrics,
   evaluate_metrics,
   load_platform_baseline,
   parse_diagnose_output,
@@ -215,4 +216,31 @@ pipeline test_baseline_loader_is_platform_specific_and_versioned(task) {
     load_platform_baseline(text.replace("schema_version = 1", "schema_version = 2"), "macos").ok,
     false,
   )
+}
+
+@test
+pipeline test_best_metrics_takes_the_per_metric_minimum_across_rounds(task) {
+  const noisy = metrics() + {setup_p90_ms: 40.0, sum_sys_ms: 600.0}
+  const clean = metrics() + {max_child_wall_ms: 900.0}
+  const best = best_metrics([noisy, clean])
+  assert_eq(best.setup_p90_ms, 9.0)
+  assert_eq(best.sum_sys_ms, 250.0)
+  assert_eq(best.max_child_wall_ms, 500.0)
+  assert_eq(best.telemetry.max_rss_kb, 200.0)
+}
+
+@test
+pipeline test_transient_noise_spike_clears_on_the_re_measured_round(task) {
+  const spiked = metrics() + {setup_p90_ms: 40.0}
+  assert_eq(evaluate_metrics(best_metrics([spiked]), baseline()).ok, false)
+  const remeasured = best_metrics([spiked, metrics()])
+  assert_eq(evaluate_metrics(remeasured, baseline()).ok, true)
+}
+
+@test
+pipeline test_persistent_regression_breaches_every_round_and_still_fails(task) {
+  const regressed = metrics() + {setup_p90_ms: 40.0}
+  const verdict = evaluate_metrics(best_metrics([regressed, regressed, regressed]), baseline())
+  assert_eq(verdict.ok, false)
+  assert_eq(verdict.failures.count, 1)
 }
