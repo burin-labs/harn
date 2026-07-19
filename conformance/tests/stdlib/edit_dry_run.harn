@@ -26,7 +26,11 @@ pipeline default() {
   // 1) Multi-op plan: AST-precise body rewrite + safe text patch on the
   //    rename. Both ops touch the same file so the response yields one
   //    per-file diff that carries both edits.
-  const rs_path = write_fixture(root, "lib.rs", "fn greet(name: &str) -> String {\n    format!(\"hi {name}\")\n}\n")
+  const rs_path = write_fixture(
+    root,
+    "lib.rs",
+    "fn greet(name: &str) -> String {\n    format!(\"hi {name}\")\n}\n",
+  )
   const before = harness.fs.read_text(rs_path)
   const bundle = edit_dry_run(
     {

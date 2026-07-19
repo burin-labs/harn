@@ -14,7 +14,9 @@ pipeline default() {
     { event ->
       __io_println(
         "pre_finish: has_on_finish=" + to_string(event.has_on_finish) + " return_value="
-          + to_string(event.return_value),
+          + to_string(
+          event.return_value,
+        ),
       )
       return nil
     },

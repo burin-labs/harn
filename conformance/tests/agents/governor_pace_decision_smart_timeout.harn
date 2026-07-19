@@ -34,14 +34,21 @@ pipeline default() {
   __io_println(line(governor_pace_decision({}, {armed_budget_ms: 1000, elapsed_ms: 500})))
   // At checkpoint, no progress => cut.
   __io_println(
-    line(governor_pace_decision({}, {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: false})),
+    line(
+      governor_pace_decision({}, {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: false}),
+    ),
   )
   // A write landed but the verifier signature did not improve => cut.
   __io_println(
     line(
       governor_pace_decision(
         {},
-        {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: true, verifier_signature_unchanged: true},
+        {
+          armed_budget_ms: 1000,
+          elapsed_ms: 1000,
+          made_progress: true,
+          verifier_signature_unchanged: true,
+        },
       ),
     ),
   )
@@ -50,13 +57,20 @@ pipeline default() {
     line(
       governor_pace_decision(
         {},
-        {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: true, env_blame_without_infra: true},
+        {
+          armed_budget_ms: 1000,
+          elapsed_ms: 1000,
+          made_progress: true,
+          env_blame_without_infra: true,
+        },
       ),
     ),
   )
   // Progress within the estimate => silent extend to the next checkpoint.
   __io_println(
-    line(governor_pace_decision({}, {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: true})),
+    line(
+      governor_pace_decision({}, {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: true}),
+    ),
   )
   // Progress within estimate but the extend budget is spent => cut.
   __io_println(

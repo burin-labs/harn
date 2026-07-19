@@ -27,7 +27,9 @@ pipeline default() {
   for attempt in attempts {
     __io_println(
       to_string(attempt.attempt) + "|" + attempt.status + "|" + attempt.outcome + "|"
-        + to_string(attempt.branch),
+        + to_string(
+        attempt.branch,
+      ),
     )
     __io_println(attempt.error == nil)
     __io_println(attempt.verification.ok)

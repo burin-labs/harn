@@ -61,7 +61,8 @@ pipeline test_cargo_catch_all_is_rejected(task) {
 
 @test
 pipeline test_yaml_boundary_rejects_malformed_groups(task) {
-  const invalid = "version: 2\nupdates:\n  - package-ecosystem: cargo\n    groups:\n      wasmtime:\n        patterns: wasmtime*\n"
+  const invalid =
+    "version: 2\nupdates:\n  - package-ecosystem: cargo\n    groups:\n      wasmtime:\n        patterns: wasmtime*\n"
   assert_eq(
     is_err(
       try {

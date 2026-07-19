@@ -31,7 +31,12 @@ fn observe(config, state, prev_dispatch) {
 
 pipeline default() {
   // ---- PARITY: no remediation_delivered => plain stuck nudge at streak 3 ----
-  const base_cfg = {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 3, post_edit_reverify: true}
+  const base_cfg = {
+    enabled: true,
+    repair_aware: true,
+    stuck_same_diagnostic_after: 3,
+    post_edit_reverify: true,
+  }
   const p = agent_stall_initial_state()
   const p1 = observe(base_cfg, p, fail_dispatch("boom"))
   assert(p1.warning == nil, "parity turn1: no trip at streak 1")
@@ -45,10 +50,12 @@ pipeline default() {
   // The callback returns true ONLY when it received the well-formed context
   // (the ACTIVE failure signature + session id + prev_dispatch), so a trip is
   // proof the seam passed the right facts.
-  const remediation = { ctx -> ctx?.signature != nil
-    && ctx.signature != ""
-    && ctx?.session_id == "seam3-delivered"
-    && contains(keys(ctx ?? {}), "prev_dispatch") }
+  const remediation = { ctx ->
+    ctx?.signature != nil
+      && ctx.signature != ""
+      && ctx?.session_id == "seam3-delivered"
+      && contains(keys(ctx ?? {}), "prev_dispatch")
+  }
   const live_cfg = base_cfg + {remediation_delivered: remediation}
   const s = agent_stall_initial_state()
   const s1 = observe(live_cfg, s, fail_dispatch("boom"))

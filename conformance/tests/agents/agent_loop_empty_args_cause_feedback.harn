@@ -93,7 +93,10 @@ pipeline default() {
   // the empty-args cause-naming must not fire.
   with_llm_script(
     [
-      {tool_calls: [{id: "t1", name: "write_note", arguments: {body: "hello"}}], stop_reason: "length"},
+      {
+        tool_calls: [{id: "t1", name: "write_note", arguments: {body: "hello"}}],
+        stop_reason: "length",
+      },
       {
         tool_calls: [{id: "t2", name: "write_note", arguments: {path: "a.txt"}}],
         stop_reason: "tool_calls",

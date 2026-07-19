@@ -32,16 +32,18 @@ fn parent_tools() {
     "delegate",
     "Run a sub-agent",
     {
-      handler: { args -> sub_agent_run(
-        args.task,
-        {
-          provider: "mock",
-          tools: child_tools(),
-          allowed_tools: ["search", "read"],
-          tool_format: "native",
-          max_iterations: 3,
-        },
-      ) },
+      handler: { args ->
+        sub_agent_run(
+          args.task,
+          {
+            provider: "mock",
+            tools: child_tools(),
+            allowed_tools: ["search", "read"],
+            tool_format: "native",
+            max_iterations: 3,
+          },
+        )
+      },
       parameters: {task: {type: "string"}},
       returns: {type: "object"},
     },

@@ -16,7 +16,9 @@ fn repo_root() -> string {
   let depth = 0
   while depth < 8 {
     if harness.fs.exists(path_join(dir, "Cargo.toml"))
-      && harness.fs.exists(path_join(dir, "experiments")) {
+      && harness.fs.exists(
+      path_join(dir, "experiments"),
+    ) {
       return dir
     }
     const parent = dirname(dir) ?? dir
@@ -92,7 +94,9 @@ fn write_valid_fixture(task_dir: string) -> nil {
           {role: "system", content: "## Question-at-a-time planner\nUse tools."},
           {role: "user", content: "add per-IP rate limiting"},
         ],
-        tool_calls: [{name: "ask_question", args: {question: "Which backing store should rate limits use?"}}],
+        tool_calls: [
+          {name: "ask_question", args: {question: "Which backing store should rate limits use?"}},
+        ],
       },
     )
       + "\n"
@@ -145,7 +149,10 @@ pipeline test_qmode_inspect_terminal_double_call_fails(_task) {
         path_join(task_dir, "llm-mock.jsonl"),
         json_stringify(
           {
-            tool_calls: [{name: "ask_question", args: {question: "Where?"}}, {name: "exit_plan_mode", args: {plan: "{}"}}],
+            tool_calls: [
+              {name: "ask_question", args: {question: "Where?"}},
+              {name: "exit_plan_mode", args: {plan: "{}"}},
+            ],
           },
         )
           + "\n",
@@ -168,7 +175,14 @@ pipeline test_qmode_inspect_cli_exit_code_and_output(_task) {
       const root = repo_root()
       const harn_bin = resolve_harn_bin(root)
       const child = command_run(
-        [harn_bin, "run", "--no-sandbox", "experiments/burin-mini/qmode_inspect.harn", "--", task_dir],
+        [
+          harn_bin,
+          "run",
+          "--no-sandbox",
+          "experiments/burin-mini/qmode_inspect.harn",
+          "--",
+          task_dir,
+        ],
         {cwd: root, capture: {max_inline_bytes: 200000}},
       )
       assert(child.success, "CLI should exit zero: " + to_string(child?.combined ?? ""))

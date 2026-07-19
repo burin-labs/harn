@@ -10,7 +10,10 @@ fn first_snapshot_line(text) {
 
 pipeline main() {
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
   const root = path_join(harness.fs.temp_dir(), "harn-top-level-resume-" + uuid_v7())
   harness.fs.mkdir(root)
   const script = path_join(root, "top_level_suspend.harn")

@@ -119,7 +119,9 @@ fn __edit_line_candidate_contexts(text, candidates, max_contexts) {
     const suffix_end = min(end_line_exclusive + 2, len(lines))
     const snippet = trim(join(lines[prefix_start:suffix_end], "\n"))
     contexts = contexts
-      + [{start_line: start_line, end_line: end_line_exclusive - 1, snippet: snippet}]
+      + [
+      {start_line: start_line, end_line: end_line_exclusive - 1, snippet: snippet},
+    ]
     idx = idx + 1
   }
   return contexts
@@ -157,7 +159,13 @@ fn __edit_lazy_placeholder_patterns() {
 }
 
 fn __edit_lazy_placeholder_phrases() {
-  return ["unchanged", "omitted for brevity", "same as before", "rest of the file", "remaining code"]
+  return [
+    "unchanged",
+    "omitted for brevity",
+    "same as before",
+    "rest of the file",
+    "remaining code",
+  ]
 }
 
 fn __edit_lazy_match_count(text) {
@@ -203,18 +211,27 @@ fn __edit_guardrails(old_text, new_text, options) {
     return {code: "whitespace_only", message: "patch changes only whitespace"}
   }
   if __edit_has_lazy_placeholder(new_text) && !(opts?.allow_lazy_placeholders ?? false) {
-    return {code: "lazy_placeholder", message: "patch contains an omission or unchanged-content placeholder"}
+    return {
+      code: "lazy_placeholder",
+      message: "patch contains an omission or unchanged-content placeholder",
+    }
   }
   const old_len = len(old_text)
   const new_len = len(new_text)
   const growth = new_len - old_len
   const max_growth_bytes = opts?.max_growth_bytes ?? 20000
   if max_growth_bytes != nil && growth > max_growth_bytes {
-    return {code: "excessive_growth", message: "patch grows selected text by more than max_growth_bytes"}
+    return {
+      code: "excessive_growth",
+      message: "patch grows selected text by more than max_growth_bytes",
+    }
   }
   const max_growth_ratio = opts?.max_growth_ratio ?? 8
   if max_growth_ratio != nil && growth > 1024 && new_len > old_len * max_growth_ratio {
-    return {code: "excessive_growth", message: "patch grows selected text by more than max_growth_ratio"}
+    return {
+      code: "excessive_growth",
+      message: "patch grows selected text by more than max_growth_ratio",
+    }
   }
   return nil
 }
@@ -231,7 +248,13 @@ fn __edit_success(
 ) {
   const before_hash = edit_patch_content_hash(text)
   const after_hash = edit_patch_content_hash(patched)
-  const expected_region = __edit_region(start_line, end_line_exclusive, old_text, new_text, match_kind)
+  const expected_region = __edit_region(
+    start_line,
+    end_line_exclusive,
+    old_text,
+    new_text,
+    match_kind,
+  )
   return {
     ok: true,
     changed: text != patched,
@@ -329,7 +352,10 @@ fn __edit_line_candidates(text, old_text, structural, options) {
     while start + width <= len(lines) {
       const segment = join(lines[start:start + width], "\n")
       if __edit_signature(segment, false) == target {
-        candidates = candidates + [{start_line: start, end_line_exclusive: start + width, text: segment}]
+        candidates = candidates
+          + [
+          {start_line: start, end_line_exclusive: start + width, text: segment},
+        ]
       }
       start = start + 1
     }
@@ -382,12 +408,21 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
       {
         candidate_count: len(candidates),
         match_kind: match_kind,
-        candidate_contexts: __edit_line_candidate_contexts(text, candidates, opts?.max_candidate_contexts),
+        candidate_contexts: __edit_line_candidate_contexts(
+          text,
+          candidates,
+          opts?.max_candidate_contexts,
+        ),
       },
     )
   }
   const candidate = candidates[0]
-  const patched = __edit_splice_raw(text, candidate.start_line, candidate.end_line_exclusive, new_text)
+  const patched = __edit_splice_raw(
+    text,
+    candidate.start_line,
+    candidate.end_line_exclusive,
+    new_text,
+  )
   const result = __edit_success(
     text,
     patched,
@@ -466,7 +501,11 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
         new,
         {
           candidate_count: len(parts) - 1,
-          candidate_contexts: __edit_candidate_contexts(parts, old, opts?.max_candidate_contexts ?? 3),
+          candidate_contexts: __edit_candidate_contexts(
+            parts,
+            old,
+            opts?.max_candidate_contexts ?? 3,
+          ),
         },
       )
     }
@@ -487,7 +526,13 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
       return line_result
     }
     if mode == "line" {
-      return __edit_error("no_match", "old_text did not match any normalized line region", source, old, new)
+      return __edit_error(
+        "no_match",
+        "old_text did not match any normalized line region",
+        source,
+        old,
+        new,
+      )
     }
   }
   if mode == "structural" || mode == "auto" {
@@ -527,12 +572,25 @@ pub fn edit_splice_lines(text, start_line, end_line_exclusive, new_text, options
     )
   }
   const old = join(lines[start:end], "\n")
-  const guardrail = __edit_guardrails(old, new_text ?? "", (options ?? {}).merge({allow_empty_old_text: true}))
+  const guardrail = __edit_guardrails(
+    old,
+    new_text ?? "",
+    (options ?? {}).merge({allow_empty_old_text: true}),
+  )
   if guardrail != nil {
     return __edit_error(guardrail.code, guardrail.message, source, old, new_text ?? "")
   }
   const patched = __edit_splice_raw(source, start, end, new_text ?? "")
-  return __edit_success(source, patched, old, new_text ?? "", "line_splice", start, end, options ?? {})
+  return __edit_success(
+    source,
+    patched,
+    old,
+    new_text ?? "",
+    "line_splice",
+    start,
+    end,
+    options ?? {},
+  )
 }
 
 fn __edit_find_resync(before_lines, after_lines, before_index, after_index) {
@@ -596,7 +654,16 @@ pub fn edit_changed_regions(before, after) {
     const next_before = resync.before_index
     const next_after = resync.after_index
     regions = regions
-      + [__edit_hunk(before_start, after_start, next_before - 1, next_after - 1, next_before, next_after)]
+      + [
+      __edit_hunk(
+        before_start,
+        after_start,
+        next_before - 1,
+        next_after - 1,
+        next_before,
+        next_after,
+      ),
+    ]
     before_index = next_before
     after_index = next_after
   }
@@ -814,7 +881,8 @@ pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
     ok: false,
     lazy: true,
     error_code: "lazy_truncation",
-    message: "lazy edit: file was truncated from ${old_lines} to ${new_lines} lines with placeholder comments — provide the complete implementation",
+    message:
+      "lazy edit: file was truncated from ${old_lines} to ${new_lines} lines with placeholder comments — provide the complete implementation",
     old_lines: old_lines,
     new_lines: new_lines,
     lazy_hits: lazy_hits,

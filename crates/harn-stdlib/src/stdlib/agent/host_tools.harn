@@ -41,7 +41,10 @@ fn __agent_host_tool_enabled(options, key, group) {
   const opts = __agent_host_options(options)
   const enabled = opts?.enabled_tools ?? opts?.tools
   if enabled != nil && !__agent_host_list_contains(enabled, "all")
-    && !__agent_host_list_contains(enabled, group)
+    && !__agent_host_list_contains(
+    enabled,
+    group,
+  )
     && !__agent_host_list_contains(enabled, key) {
     return false
   }
@@ -56,20 +59,31 @@ fn __agent_host_lifecycle_tool_enabled(options, key) {
   const opts = __agent_host_options(options)
   const enabled = opts?.enabled_tools ?? opts?.tools
   const explicitly_enabled = __agent_host_list_contains(enabled, key)
-    || __agent_host_list_contains(enabled, "command_lifecycle")
-  const opted_in = opts?.background_commands ?? opts?.enable_background_commands ?? opts?.command_lifecycle_tools
+    || __agent_host_list_contains(
+    enabled,
+    "command_lifecycle",
+  )
+  const opted_in = opts?.background_commands ?? opts?.enable_background_commands
+    ?? opts
+    ?.command_lifecycle_tools
     ?? false
   if !opted_in && !explicitly_enabled {
     return false
   }
   const disabled = opts?.disabled_tools ?? []
   if __agent_host_list_contains(disabled, "command")
-    || __agent_host_list_contains(disabled, "command_lifecycle")
+    || __agent_host_list_contains(
+    disabled,
+    "command_lifecycle",
+  )
     || __agent_host_list_contains(disabled, key) {
     return false
   }
   if enabled != nil && !explicitly_enabled && !__agent_host_list_contains(enabled, "all")
-    && !__agent_host_list_contains(enabled, "command") {
+    && !__agent_host_list_contains(
+    enabled,
+    "command",
+  ) {
     return false
   }
   return true
@@ -207,20 +221,29 @@ fn __agent_host_search_request(args, options) {
   }
   req = req + {path: __agent_host_resolve_path(search_path, options)}
   const default_max_matches = __agent_host_options(options)?.search_max_matches
-    ?? __agent_host_options(options)?.max_search_matches
+    ?? __agent_host_options(
+    options,
+  )?.max_search_matches
     ?? 50
   if args?.max_matches == nil && default_max_matches != nil {
     req = req + {max_matches: default_max_matches}
   }
   const default_max_line_bytes = __agent_host_options(options)?.search_max_line_bytes
-    ?? __agent_host_options(options)?.max_search_line_bytes
+    ?? __agent_host_options(
+    options,
+  )?.max_search_line_bytes
   if args?.max_line_bytes == nil && default_max_line_bytes != nil {
     req = req + {max_line_bytes: default_max_line_bytes}
   }
   const configured_exclude_globs = __agent_host_options(options)?.search_exclude_globs
-    ?? __agent_host_options(options)?.exclude_globs
+    ?? __agent_host_options(
+    options,
+  )?.exclude_globs
   const exclude_globs = __agent_host_string_list(configured_exclude_globs, "exclude_globs")
-    + __agent_host_string_list(args?.exclude_globs, "exclude_globs")
+    + __agent_host_string_list(
+    args?.exclude_globs,
+    "exclude_globs",
+  )
   if len(exclude_globs) > 0 {
     req = req + {exclude_globs: exclude_globs}
   }
@@ -373,7 +396,8 @@ fn __agent_host_apply_command_policy(request, args, options) {
     const allow_value = verdict?.allow
     const blocked_value = verdict?.blocked
     if (type_of(allow_value) == "bool" && !allow_value)
-      || (type_of(blocked_value) == "bool" && blocked_value) {
+      || (type_of(blocked_value) == "bool"
+      && blocked_value) {
       return __agent_host_policy_blocked(
         verdict?.reason ?? "command_policy rejected command",
         request,
@@ -473,9 +497,14 @@ fn __agent_host_command_request(args, options) {
     if command_cwd != nil && command_cwd != "" {
       req = req + {cwd: command_cwd}
     }
-    return __agent_host_apply_command_policy(__agent_host_command_request_common(req, args, opts), args, opts)
+    return __agent_host_apply_command_policy(
+      __agent_host_command_request_common(req, args, opts),
+      args,
+      opts,
+    )
   }
-  if (opts?.allow_shell ?? false) && type_of(args?.command) == "string" && trim(args.command) != "" {
+  if (opts?.allow_shell ?? false) && type_of(args?.command) == "string"
+    && trim(args.command) != "" {
     let req = {mode: "shell", command: args.command}
     const shell_cwd = __agent_host_command_cwd(args, opts)
     if shell_cwd != nil && shell_cwd != "" {
@@ -491,7 +520,11 @@ fn __agent_host_command_request(args, options) {
     if args?.interactive != nil {
       req = req + {interactive: args.interactive}
     }
-    return __agent_host_apply_command_policy(__agent_host_command_request_common(req, args, opts), args, opts)
+    return __agent_host_apply_command_policy(
+      __agent_host_command_request_common(req, args, opts),
+      args,
+      opts,
+    )
   }
   if type_of(args?.command) == "string" && trim(args.command) != "" {
     // A non-empty shell string was supplied, but shell mode is disabled for
@@ -540,7 +573,12 @@ fn __agent_host_command_request_common(base_request, args, options) {
   if len(capture.keys()) > 0 {
     req = req + {capture: capture}
   }
-  for key in ["background", "background_after_ms", "progress_interval_ms", "progress_max_inline_bytes"] {
+  for key in [
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+  ] {
     const value = args?.[key] ?? behavior[key]
     if value != nil {
       req = req + {[key]: value}
@@ -677,8 +715,18 @@ pub fn agent_read_tools(registry = nil, options = nil) {
             encoding: {type: "string", enum: ["utf-8", "binary"], required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(hostlib_tools_read_file(__agent_host_read_file_request(args, opts)), opts, key) },
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_read_file(__agent_host_read_file_request(args, opts)),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -699,12 +747,18 @@ pub fn agent_read_tools(registry = nil, options = nil) {
         {
           parameters: {path: {type: "string"}, length: {type: "integer", required: false}},
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_read_file(__agent_host_tail_file_request(harness, args, opts)),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_read_file(__agent_host_tail_file_request(harness, args, opts)),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -729,12 +783,18 @@ pub fn agent_read_tools(registry = nil, options = nil) {
             max_entries: {type: "integer", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_list_directory(__agent_host_list_directory_request(args, opts)),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_list_directory(__agent_host_list_directory_request(args, opts)),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -755,12 +815,18 @@ pub fn agent_read_tools(registry = nil, options = nil) {
         {
           parameters: {path: {type: "string"}, max_depth: {type: "integer", required: false}},
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_get_file_outline(__agent_host_file_outline_request(args, opts)),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_get_file_outline(__agent_host_file_outline_request(args, opts)),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -793,8 +859,18 @@ pub fn agent_read_tools(registry = nil, options = nil) {
             exclude_globs: {type: "array", items: {type: "string"}, required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "search", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(hostlib_tools_search(__agent_host_search_request(args, opts)), opts, key) },
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "search", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_search(__agent_host_search_request(args, opts)),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -816,7 +892,16 @@ pub fn agent_read_tools(registry = nil, options = nil) {
           parameters: {
             operation: {
               type: "string",
-              enum: ["status", "diff", "log", "blame", "show", "branch_list", "current_branch", "remote_list"],
+              enum: [
+                "status",
+                "diff",
+                "log",
+                "blame",
+                "show",
+                "branch_list",
+                "current_branch",
+                "remote_list",
+              ],
             },
             repo: {type: "string", required: false},
             path: {type: "string", required: false},
@@ -825,8 +910,14 @@ pub fn agent_read_tools(registry = nil, options = nil) {
             max_count: {type: "integer", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(hostlib_tools_git(__agent_host_git_request(args, opts)), opts, key) },
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(hostlib_tools_git(__agent_host_git_request(args, opts)), opts, key)
+          },
         },
       ),
     )
@@ -870,7 +961,11 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             stdin: {type: "string", required: false},
             env: {type: "object", required: false},
             env_remove: {type: "array", items: {type: "string"}, required: false},
-            env_mode: {type: "string", enum: ["inherit_clean", "replace", "patch"], required: false},
+            env_mode: {
+              type: "string",
+              enum: ["inherit_clean", "replace", "patch"],
+              required: false,
+            },
             shell_id: {type: "string", required: false},
             login: {type: "boolean", required: false},
             interactive: {type: "boolean", required: false},
@@ -935,12 +1030,18 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             session_id: {type: "string", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "execute", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_wait_command(__agent_host_wait_command_request(args, key, 0)),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "execute", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_wait_command(__agent_host_wait_command_request(args, key, 0)),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -966,18 +1067,24 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             session_id: {type: "string", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "execute", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_wait_command(
-              __agent_host_wait_command_request(
-                args,
-                key,
-                args?.timeout_ms ?? opts?.wait_command_timeout_ms ?? 60000,
-              ),
-            ),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "execute", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_wait_command(
+                __agent_host_wait_command_request(
+                  args,
+                  key,
+                  args?.timeout_ms ?? opts?.wait_command_timeout_ms ?? 60000,
+                ),
+              ),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -1003,12 +1110,18 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             timed_out: {type: "boolean", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "execute", side_effect_level: "process_exec"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_cancel_handle(__agent_host_cancel_command_request(args)),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "execute", side_effect_level: "process_exec"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_cancel_handle(__agent_host_cancel_command_request(args)),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -1035,12 +1148,18 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             length: {type: "integer", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_read_command_output(__agent_host_read_command_request(args, opts)),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_read_command_output(__agent_host_read_command_request(args, opts)),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -1066,12 +1185,18 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             length: {type: "integer", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_read_command_output(__agent_host_tail_command_request(args, opts)),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_read_command_output(__agent_host_tail_command_request(args, opts)),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -1136,14 +1261,25 @@ pub fn agent_composition_tools(registry = nil, options = nil) {
         opts,
         key,
         {
-          parameters: {code: {type: "string"}, allow_tools: {type: "array", items: {type: "string"}, required: false}},
+          parameters: {
+            code: {type: "string"},
+            allow_tools: {type: "array", items: {type: "string"}, required: false},
+          },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "code_mode", side_effect_level: "workspace"}),
-          handler: { args -> __agent_host_render(
-            __host_code_mode_run({code: args.code, allow_tools: args?.allow_tools, tools: tools, options: opts}),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "code_mode", side_effect_level: "workspace"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              __host_code_mode_run(
+                {code: args.code, allow_tools: args?.allow_tools, tools: tools, options: opts},
+              ),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -1235,12 +1371,20 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
         {
           parameters: {path: {type: "string"}, content: {type: "string"}},
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "edit", side_effect_level: "workspace_write"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_write_file({path: __agent_host_resolve_path(args.path, opts), content: args.content}),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "edit", side_effect_level: "workspace_write"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_write_file(
+                {path: __agent_host_resolve_path(args.path, opts), content: args.content},
+              ),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )
@@ -1266,8 +1410,14 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
             replace_all: {type: "boolean", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "edit", side_effect_level: "workspace_write"}),
-          handler: { args -> __agent_host_render(__agent_host_edit_file_apply(args, opts), opts, key) },
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "edit", side_effect_level: "workspace_write"},
+          ),
+          handler: { args ->
+            __agent_host_render(__agent_host_edit_file_apply(args, opts), opts, key)
+          },
         },
       ),
     )
@@ -1288,7 +1438,11 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
         {
           parameters: {path: {type: "string"}},
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "edit", side_effect_level: "workspace_write"}),
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "edit", side_effect_level: "workspace_write"},
+          ),
           handler: { args ->
             const path = __agent_host_resolve_path(args.path, opts)
             harness.fs.mkdir(path, true)
@@ -1314,14 +1468,23 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
         {
           parameters: {path: {type: "string"}, recursive: {type: "boolean", required: false}},
           returns: {type: "object"},
-          annotations: __agent_host_annotations(opts, key, {kind: "delete", side_effect_level: "workspace_write"}),
-          handler: { args -> __agent_host_render(
-            hostlib_tools_delete_file(
-              {path: __agent_host_resolve_path(args.path, opts), recursive: args?.recursive ?? false},
-            ),
+          annotations: __agent_host_annotations(
             opts,
             key,
-          ) },
+            {kind: "delete", side_effect_level: "workspace_write"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              hostlib_tools_delete_file(
+                {
+                  path: __agent_host_resolve_path(args.path, opts),
+                  recursive: args?.recursive ?? false,
+                },
+              ),
+              opts,
+              key,
+            )
+          },
         },
       ),
     )

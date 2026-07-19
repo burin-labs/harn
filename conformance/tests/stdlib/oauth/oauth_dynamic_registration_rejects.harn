@@ -65,7 +65,11 @@ pipeline test(task) {
     "client_secret_carrier_pigeon",
   )
   // Wrong type for redirect_uris.
-  expect_reject("redirect_uris as dict", {redirect_uris: {primary: "https://app.example/cb"}}, "list")
+  expect_reject(
+    "redirect_uris as dict",
+    {redirect_uris: {primary: "https://app.example/cb"}},
+    "list",
+  )
   // Validation never mutates the store.
   assert_eq(len(list_clients(store)), cursor_before, "store unchanged by validation calls")
   // register_client must also reject and not insert.

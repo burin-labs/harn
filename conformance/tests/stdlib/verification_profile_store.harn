@@ -22,7 +22,9 @@ pipeline test(task) {
   assert_eq(len(stored.rows), 3)
   assert_eq(stored.rows[0].futureField, "kept")
   // Most-specific wins: task kind outranks dir glob + language.
-  const edit_row = verification_profile_resolve({path: "src/a.tx", language: "toolchainx", task: "post_edit"})
+  const edit_row = verification_profile_resolve(
+    {path: "src/a.tx", language: "toolchainx", task: "post_edit"},
+  )
   assert_eq(edit_row.id, "tx/edit")
   const file_row = verification_profile_resolve({path: "src/a.tx", language: "toolchainx"})
   assert_eq(file_row.id, "tx/file")
@@ -48,7 +50,12 @@ pipeline test(task) {
   assert_eq(verification_profile_record_run("missing", {durationMs: 5}), nil)
   // Stale-diagnostic contract: a bound diagnostic is fresh only while the
   // snapshot still matches the current hashes.
-  const envelope = {rung: "R2", rowId: "tx/file", at: updated.lastRun.at, snapshot: {"src/a.tx": "hash1"}}
+  const envelope = {
+    rung: "R2",
+    rowId: "tx/file",
+    at: updated.lastRun.at,
+    snapshot: {"src/a.tx": "hash1"},
+  }
   const fresh = verification_diagnostic_classify(envelope, {"src/a.tx": "hash1"})
   assert_eq(fresh.status, "bound_fresh")
   assert_eq(fresh.feedsGates, true)

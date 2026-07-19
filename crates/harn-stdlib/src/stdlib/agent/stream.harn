@@ -192,7 +192,12 @@ pub fn agent_private_stream_delta(state = nil, delta = "", config = nil) {
     withheld_suffix: len(pending) > 0,
     unterminated_private: private_open,
   }
-  return {state: next, visible_delta: visible_delta, raw_delta: raw_delta, private_open: private_open}
+  return {
+    state: next,
+    visible_delta: visible_delta,
+    raw_delta: raw_delta,
+    private_open: private_open,
+  }
 }
 
 /**
@@ -308,7 +313,12 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
   const finished = agent_private_stream_finish(state, cfg)
   state = finished.state
   if finished.visible_delta != "" && __stream_is_callable(cfg?.on_delta) {
-    const event = {state: state, visible_delta: finished.visible_delta, raw_delta: "", private_open: false}
+    const event = {
+      state: state,
+      visible_delta: finished.visible_delta,
+      raw_delta: "",
+      private_open: false,
+    }
     const notified = try {
       cfg.on_delta(finished.visible_delta, event, state)
       true

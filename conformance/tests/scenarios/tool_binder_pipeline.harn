@@ -26,19 +26,21 @@ import {
 import { compose_tool_callers } from "std/llm/tool_middleware"
 
 fn synthetic_next() {
-  return { call -> return {
-    ok: true,
-    status: "ok",
-    tool_name: call.tool_name,
-    tool_call_id: call.call_id,
-    arguments: call.tool_args,
-    result: "ran " + call.tool_name,
-    rendered_result: "ran " + call.tool_name,
-    observation: "[result of " + call.tool_name + "]\n",
-    error: nil,
-    error_category: nil,
-    executor: "harn",
-  } }
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: "ran " + call.tool_name,
+      rendered_result: "ran " + call.tool_name,
+      observation: "[result of " + call.tool_name + "]\n",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
 }
 
 fn envelope(name, args, schema) {
@@ -109,7 +111,10 @@ pipeline default() {
     {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
   )
   const _ = mock_time(0)
-  const r3 = mw_ok(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
+  const r3 = mw_ok(
+    envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
+    next,
+  )
   const _ = unmock_time()
   __io_println(r3.ok)
   __io_println(r3.audit.binder.status)
@@ -173,7 +178,15 @@ pipeline default() {
   // Stripped args reach next() — intent is gone, original args (empty here) pass through.
   __io_println(contains(r4.arguments.keys(), "_nl_intent"))
   // (6) on_failure: "reject" — bad binder JSON short-circuits with schema_violation.
-  const bad_binder = { _prompt, _system, _opts -> return {text: "not json at all", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0} }
+  const bad_binder = { _prompt, _system, _opts ->
+    return {
+      text: "not json at all",
+      model: "mock",
+      provider: "mock",
+      input_tokens: 0,
+      output_tokens: 0,
+    }
+  }
   const was_dispatched = atomic(0)
   const watch_next = { call ->
     let _ = atomic_set(was_dispatched, 1)
@@ -196,7 +209,10 @@ pipeline default() {
   // (7) compose_tool_callers stacks cleanly with the binder.
   const composed = compose_tool_callers([mw_ok])
   const _ = mock_time(0)
-  const r6 = composed(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
+  const r6 = composed(
+    envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
+    next,
+  )
   const _ = unmock_time()
   __io_println(r6.ok)
   __io_println(r6.audit.binder.status)

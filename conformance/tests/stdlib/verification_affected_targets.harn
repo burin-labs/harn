@@ -9,7 +9,8 @@ pipeline test(task) {
         parser_id: "cargo.metadata.v1",
         spec: {
           mode: "shell",
-          command: "printf '%s' '{\"packages\":[{\"name\":\"app\",\"manifest_path\":\"crates/app/Cargo.toml\",\"targets\":[{\"name\":\"app\"},{\"name\":\"app-tests\"}]},{\"name\":\"other\",\"manifest_path\":\"crates/other/Cargo.toml\",\"targets\":[{\"name\":\"other\"}]}]}'",
+          command:
+            "printf '%s' '{\"packages\":[{\"name\":\"app\",\"manifest_path\":\"crates/app/Cargo.toml\",\"targets\":[{\"name\":\"app\"},{\"name\":\"app-tests\"}]},{\"name\":\"other\",\"manifest_path\":\"crates/other/Cargo.toml\",\"targets\":[{\"name\":\"other\"}]}]}'",
         },
       },
       {
@@ -17,7 +18,8 @@ pipeline test(task) {
         parser_id: "js.workspace_graph.v1",
         spec: {
           mode: "shell",
-          command: "printf '%s' '{\"projects\":{\"web\":{\"root\":\"apps/web\",\"targets\":{\"build\":{},\"test\":{}}},\"admin\":{\"root\":\"apps/admin\",\"targets\":{\"build\":{}}}}}'",
+          command:
+            "printf '%s' '{\"projects\":{\"web\":{\"root\":\"apps/web\",\"targets\":{\"build\":{},\"test\":{}}},\"admin\":{\"root\":\"apps/admin\",\"targets\":{\"build\":{}}}}}'",
         },
       },
       {
@@ -25,7 +27,8 @@ pipeline test(task) {
         parser_id: "harn.targets_json.v1",
         spec: {
           mode: "shell",
-          command: "printf '%s' '{\"targets\":[{\"id\":\"plugin:a\",\"kind\":\"plugin-check\",\"files\":[\"plugins/a/file.foo\"]}]}'",
+          command:
+            "printf '%s' '{\"targets\":[{\"id\":\"plugin:a\",\"kind\":\"plugin-check\",\"files\":[\"plugins/a/file.foo\"]}]}'",
         },
       },
     ],

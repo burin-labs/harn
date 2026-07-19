@@ -181,7 +181,9 @@ pub fn extract_harn_fences(markdown: string) -> list {
           const snippet = strip_ws(fence_lines.join("\n"))
           if snippet != "" {
             fences = fences
-              + [{heading: current_heading, line: fence_start, mode: mode, snippet: snippet + "\n"}]
+              + [
+              {heading: current_heading, line: fence_start, mode: mode, snippet: snippet + "\n"},
+            ]
           }
         }
         in_fence = false
@@ -267,7 +269,9 @@ pipeline main(task) {
   /* The runtime sandbox only permits writes inside the workspace root,
    * so the scratch directory lives there (and is removed afterward)
    * rather than under the system temp dir the Python version used. */
-  const mk = harness.process.spawn_captured({cmd: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]})
+  const mk = harness.process.spawn_captured(
+    {cmd: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]},
+  )
   if !mk.success {
     __io_eprintln("error: could not create temp directory")
     return 1
@@ -292,7 +296,9 @@ pipeline main(task) {
     const path = tmpbase + "/" + name
     harness.fs.write_text(path, normalize_snippet(fence.snippet))
     manifest_lines = manifest_lines
-      + ["${name}: ${fence.heading} (${fence.mode}, spec line ${fence.line})"]
+      + [
+      "${name}: ${fence.heading} (${fence.mode}, spec line ${fence.line})",
+    ]
     const argv_prefix = harn_command_argv(fence.mode)
     const bin = argv_prefix[0]
     const args = if fence.mode == "parse" {

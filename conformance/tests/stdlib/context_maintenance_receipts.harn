@@ -52,7 +52,10 @@ pipeline default() {
   )
   __io_println(failed.status)
   __io_println(failed.retry_hint.reason)
-  const skipped = context_maintenance_replay_decision(succeeded, {mode: "skip", reason: "fixture covers it"})
+  const skipped = context_maintenance_replay_decision(
+    succeeded,
+    {mode: "skip", reason: "fixture covers it"},
+  )
   __io_println(skipped.should_run)
   __io_println(skipped.receipt.status)
   __io_println(skipped.receipt.error)
@@ -62,7 +65,17 @@ pipeline default() {
     context_maintenance_receipt("context.refresh", "paused", {})
   }
   __io_println(is_err(invalid))
-  const key_a = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["b", "a", "a"], "session-1")
-  const key_b = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["a", "b"], "session-1")
+  const key_a = context_maintenance_dedupe_key(
+    "context.refresh",
+    "FileEdited",
+    ["b", "a", "a"],
+    "session-1",
+  )
+  const key_b = context_maintenance_dedupe_key(
+    "context.refresh",
+    "FileEdited",
+    ["a", "b"],
+    "session-1",
+  )
   __io_println(key_a == key_b)
 }

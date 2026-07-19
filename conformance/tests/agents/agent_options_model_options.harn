@@ -27,7 +27,12 @@ pipeline default() {
   __io_println(explicit.model)
   __io_println(explicit.options.reasoning_effort)
   const sanitized = agent_sanitize_model_options(
-    {provider: "mock", model: "gpt-4o", reasoning_effort: "high", cache_control: {type: "ephemeral"}},
+    {
+      provider: "mock",
+      model: "gpt-4o",
+      reasoning_effort: "high",
+      cache_control: {type: "ephemeral"},
+    },
   )
   __io_println(sanitized.reasoning_effort == nil)
   __io_println(sanitized.cache_control == nil)

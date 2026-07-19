@@ -37,7 +37,11 @@ pipeline default() {
       node: {
         context_policy: {include_kinds: ["summary"]},
         input_contract: {},
-        map_policy: {items: [{name: "one"}, {name: "two"}, {name: "three"}], item_artifact_kind: "work", max_items: 2},
+        map_policy: {
+          items: [{name: "one"}, {name: "two"}, {name: "three"}],
+          item_artifact_kind: "work",
+          max_items: 2,
+        },
       },
       artifacts: [{id: "summary", kind: "summary", text: "s"}],
     },

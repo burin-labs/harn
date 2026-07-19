@@ -15,7 +15,9 @@ pipeline main() {
   register_tool_hook(
     {
       pattern: "pre_hook_tool",
-      pre: { _event -> return {reminder: {body: "pre tool reminder", tags: ["pre"], dedupe_key: "pre-hook"}} },
+      pre: { _event ->
+        return {reminder: {body: "pre tool reminder", tags: ["pre"], dedupe_key: "pre-hook"}}
+      },
     },
   )
   with_llm_script(

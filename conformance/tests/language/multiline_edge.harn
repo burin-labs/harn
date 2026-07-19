@@ -1,8 +1,10 @@
 pipeline default() {
   // Multiline in closure
-  const f = { x -> x + 1
-    + 2
-    + 3 }
+  const f = { x ->
+    x + 1
+      + 2
+      + 3
+  }
   __io_println(f(10))
   // Multiline in match arm
   const val = "hello"

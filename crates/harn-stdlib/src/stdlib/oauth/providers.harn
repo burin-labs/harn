@@ -80,7 +80,8 @@ fn __github_record() {
       "Device flow must be enabled on the app registration before use.",
       "Revocation uses the REST API app-token endpoint with client authentication.",
     ],
-    documentation_url: "https://docs.github.com/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
+    documentation_url:
+      "https://docs.github.com/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
   }
 }
 
@@ -119,9 +120,12 @@ pub fn github_enterprise(base_url, overrides = nil) -> OAuthProvider {
       device_code_url: web_url + "/login/device/code",
       revoke_url: api_url + "/applications/{client_id}/token",
       userinfo_url: api_url + "/user",
-      documentation_url: "https://docs.github.com/en/enterprise-server@latest/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
+      documentation_url:
+        "https://docs.github.com/en/enterprise-server@latest/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
       documented_quirks: __github_record().documented_quirks
-        + ["Use the instance web base URL for browser/device endpoints and /api/v3 for REST endpoints."],
+        + [
+        "Use the instance web base URL for browser/device endpoints and /api/v3 for REST endpoints.",
+      ],
     },
     overrides,
   )
@@ -188,7 +192,9 @@ pub fn linear(overrides = nil) -> OAuthProvider {
         "use expires_in and refresh with grant_type=refresh_token",
         "standard_refresh_token",
         true,
-        ["Linear OAuth apps use rotating refresh tokens and return a replacement refresh_token on refresh."],
+        [
+          "Linear OAuth apps use rotating refresh tokens and return a replacement refresh_token on refresh.",
+        ],
       ),
       documented_quirks: [
         "Scopes are comma-separated in the authorization request.",
@@ -297,7 +303,9 @@ pub fn microsoft(overrides = nil) -> OAuthProvider {
         "use expires_in and refresh with grant_type=refresh_token; persist replacement refresh tokens when returned",
         "standard_refresh_token",
         true,
-        ["Use a tenant-specific URL instead of /common when an app is single-tenant or tenant-pinned."],
+        [
+          "Use a tenant-specific URL instead of /common when an app is single-tenant or tenant-pinned.",
+        ],
       ),
       documented_quirks: [
         "Graph delegated scopes such as User.Read are resource permissions, not OIDC claims.",
@@ -338,7 +346,8 @@ pub fn atlassian(overrides = nil) -> OAuthProvider {
         "Authorization requests need audience=api.atlassian.com for product API access.",
         "Product API calls use api.atlassian.com rather than the customer atlassian.net host.",
       ],
-      documentation_url: "https://developer.atlassian.com/cloud/oauth/getting-started/implementing-oauth-3lo/",
+      documentation_url:
+        "https://developer.atlassian.com/cloud/oauth/getting-started/implementing-oauth-3lo/",
     },
     overrides,
   )
@@ -402,7 +411,9 @@ pub fn gitlab(overrides = nil) -> OAuthProvider {
         "use expires_in and refresh with grant_type=refresh_token",
         "standard_refresh_token",
         true,
-        ["Refreshing invalidates the existing access token and refresh token and returns replacements."],
+        [
+          "Refreshing invalidates the existing access token and refresh token and returns replacements.",
+        ],
       ),
       documented_quirks: [
         "Device authorization grant is available on GitLab 17.1+ and generally available in 17.9+.",
@@ -544,7 +555,9 @@ pub fn provider_catalog(overrides = nil) {
 pub fn providers(overrides = nil) {
   return provider_catalog(overrides)
     + {
-    github_enterprise: { base_url, factory_overrides = nil -> github_enterprise(base_url, factory_overrides) },
+    github_enterprise: { base_url, factory_overrides = nil ->
+      github_enterprise(base_url, factory_overrides)
+    },
     custom: { config, factory_overrides = nil -> custom(config, factory_overrides) },
   }
 }
@@ -582,7 +595,9 @@ pub fn custom(config, overrides = nil) -> OAuthProvider {
         "custom provider; use token response metadata and provider documentation",
         "custom",
         false,
-        ["Validate endpoint, scope, refresh, and revocation behavior against the provider's primary docs."],
+        [
+          "Validate endpoint, scope, refresh, and revocation behavior against the provider's primary docs.",
+        ],
       ),
       documented_quirks: config?.documented_quirks ?? [],
       documentation_url: config?.documentation_url,

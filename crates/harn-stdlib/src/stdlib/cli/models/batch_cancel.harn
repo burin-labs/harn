@@ -95,7 +95,8 @@ fn __cancel_operation_for_job(harness: Harness, job: dict, provider: string) -> 
 fn __batch_cancel_skip_reason(job: dict) -> string {
   const state = __batch_lifecycle_state(job["status"])
   if state == "completed" || state == "downloaded" || state == "canceled" || state == "failed"
-    || state == "not_ready" {
+    || state
+    == "not_ready" {
     return "job " + safe_string(job["id"], "") + " is terminal (" + to_string(state) + ")"
   }
   const cancellation = safe_string(safe_dict(job["batch"])["cancellation"], "unknown")
@@ -134,7 +135,12 @@ fn __skipped_cancel_job(job: dict, dry_run: bool, reason: string) -> dict {
   return {
     ok: true,
     job: __cancel_status(job, dry_run)
-      + {status: "skipped", cancel_requested: false, skipped: true, skip_reason: reason},
+      + {
+      status: "skipped",
+      cancel_requested: false,
+      skipped: true,
+      skip_reason: reason,
+    },
     skipped: true,
     errors: [],
   }
@@ -151,7 +157,10 @@ fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> 
     "POST",
     __cancel_url_for_job(harness, job, provider),
     {
-      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        Authorization: "Bearer " + safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       timeout_ms: 120000,
       max_response_bytes: 1048576,
     },
@@ -236,7 +245,10 @@ fn __cancel_gemini(harness: Harness, job: dict) -> dict {
     "POST",
     __cancel_url_for_job(harness, job, "gemini"),
     {
-      headers: {"x-goog-api-key": safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        "x-goog-api-key": safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       body: "{}",
       timeout_ms: 120000,
       max_response_bytes: 1048576,
@@ -320,7 +332,8 @@ fn __count_cancelable_jobs(jobs: list) -> int {
 fn __cancel_status_summary(jobs: list, errors: list, dry_run: bool) -> string {
   if len(errors) > 0 {
     if __count_jobs_with_status(jobs, "canceling") > 0
-      || __count_jobs_with_status(jobs, "canceled") > 0 {
+      || __count_jobs_with_status(jobs, "canceled")
+      > 0 {
       return "partial"
     }
     return "failed"

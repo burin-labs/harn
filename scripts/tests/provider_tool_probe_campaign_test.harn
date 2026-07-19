@@ -127,7 +127,9 @@ pipeline test_provider_tool_probe_campaign_normalizes_verified_runtime_receipt(t
     "/opt/harn",
     {
       exit_code: 0,
-      stdout: json_stringify({schemaVersion: 1, ok: true, data: {name: "harn-cli", version: "0.10.24"}}),
+      stdout: json_stringify(
+        {schemaVersion: 1, ok: true, data: {name: "harn-cli", version: "0.10.24"}},
+      ),
       stderr: "",
     },
   )
@@ -167,7 +169,10 @@ pipeline test_provider_tool_probe_campaign_normalizes_unavailable_runtime_receip
 
 @test
 pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(task) {
-  const malformed = provider_tool_probe_campaign_runtime_receipt("harn", {exit_code: 0, stdout: "not-json", stderr: ""})
+  const malformed = provider_tool_probe_campaign_runtime_receipt(
+    "harn",
+    {exit_code: 0, stdout: "not-json", stderr: ""},
+  )
   assert_eq(
     malformed,
     {
@@ -248,7 +253,9 @@ pipeline test_provider_tool_probe_campaign_cli_collects_repeated_routes_and_beha
 
 @test
 pipeline test_provider_tool_probe_campaign_rejects_malformed_routes(task) {
-  const routes = provider_tool_probe_campaign_routes(["missing-separator", "openai:", ":model", "ollama:gemma4:e4b"])
+  const routes = provider_tool_probe_campaign_routes(
+    ["missing-separator", "openai:", ":model", "ollama:gemma4:e4b"],
+  )
   assert_eq(len(routes), 1)
   const route = routes[0]
   assert_eq(route.provider, "ollama")
@@ -279,7 +286,11 @@ pipeline test_provider_tool_probe_campaign_include_expensive_adds_xai(task) {
 pipeline test_provider_tool_probe_campaign_catalog_routes_use_catalog_metadata(task) {
   const catalog = {
     providers: [
-      {id: "anthropic", classification: "hosted", auth: {env: ["ANTHROPIC_API_KEY"], required: true}},
+      {
+        id: "anthropic",
+        classification: "hosted",
+        auth: {env: ["ANTHROPIC_API_KEY"], required: true},
+      },
       {id: "ollama", classification: "local", auth: {env: [], required: false}},
     ],
     models: [
@@ -434,7 +445,10 @@ pipeline test_provider_tool_probe_campaign_behavior_filter_matches_category_and_
 pipeline test_provider_tool_probe_campaign_mode_filter_keeps_matching_behaviors(task) {
   const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calls"])
   const streaming = provider_tool_probe_campaign_filter_behavior_modes(behaviors, "streaming")
-  const non_streaming = provider_tool_probe_campaign_filter_behavior_modes(behaviors, "non-streaming")
+  const non_streaming = provider_tool_probe_campaign_filter_behavior_modes(
+    behaviors,
+    "non-streaming",
+  )
   assert_eq(len(streaming), 1)
   assert_eq(streaming[0]?.id, "tool_calling_streaming")
   assert_eq(streaming[0]?.modes, ["streaming"])
@@ -475,9 +489,17 @@ pipeline test_provider_tool_probe_campaign_planned_cells_cover_route_behavior_fo
 
 @test
 pipeline test_provider_tool_probe_campaign_planned_cells_include_custom_command_recipe(task) {
-  const routes = provider_tool_probe_campaign_routes(["fireworks:accounts/fireworks/models/gpt-oss-120b"])
+  const routes = provider_tool_probe_campaign_routes(
+    ["fireworks:accounts/fireworks/models/gpt-oss-120b"],
+  )
   const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_streaming"])
-  const cells = provider_tool_probe_campaign_planned_cells_with_options(routes, behaviors, "./harn", 5, 12)
+  const cells = provider_tool_probe_campaign_planned_cells_with_options(
+    routes,
+    behaviors,
+    "./harn",
+    5,
+    12,
+  )
   assert_eq(len(cells), 3)
   assert_eq(
     cells[0]?.command,
@@ -757,7 +779,10 @@ pipeline test_provider_tool_probe_campaign_auth_readiness_summarizes_env_without
   assert_eq(report.auth_readiness.ready_by_provider.moonshot, 1)
   assert_eq(report.auth_readiness.ready_by_provider.ollama, 1)
   assert_eq(report.auth_readiness.missing_by_provider.fireworks, 1)
-  assert_eq(report.auth_readiness.missing_env_candidates_by_provider.fireworks, ["FIREWORKS_API_KEY"])
+  assert_eq(
+    report.auth_readiness.missing_env_candidates_by_provider.fireworks,
+    ["FIREWORKS_API_KEY"],
+  )
 }
 
 @test
@@ -777,7 +802,12 @@ pipeline test_provider_tool_probe_campaign_artifact_paths_are_unique_per_behavio
   )
   let paths: list<string> = []
   for behavior in behaviors {
-    const path = provider_tool_probe_campaign_artifact_path(route, behavior, "non-streaming", ".out")
+    const path = provider_tool_probe_campaign_artifact_path(
+      route,
+      behavior,
+      "non-streaming",
+      ".out",
+    )
     assert_false(paths.contains(path), "artifact path must be unique: " + path)
     paths = paths + [path]
   }

@@ -15,11 +15,18 @@ import { StageSpec, WorkflowRetryPolicy, workflow_stage_spec } from "std/workflo
 
 pipeline test(task) {
   const budget: LlmBudget = {max_cost_usd: 0.25, max_output_tokens: 512}
-  const call_opts: LlmCallOptions = {provider: "mock", model: "mock-small", temperature: 0.0, budget: budget}
+  const call_opts: LlmCallOptions = {
+    provider: "mock",
+    model: "mock-small",
+    temperature: 0.0,
+    budget: budget,
+  }
   const projected = llm_options(call_opts)
   log(
     "llm provider=" + to_string(projected.provider) + " budget="
-      + to_string(projected.budget?.max_cost_usd),
+      + to_string(
+      projected.budget?.max_cost_usd,
+    ),
   )
   const ladder: ModelLadder = [
     "mock-small",
@@ -42,9 +49,15 @@ pipeline test(task) {
   const typed_loop = agent_options(loop_opts)
   log(
     "loop until_done=" + to_string(typed_loop.loop_until_done) + " prose_cap="
-      + to_string(typed_loop.turn_policy?.max_prose_chars),
+      + to_string(
+      typed_loop.turn_policy?.max_prose_chars,
+    ),
   )
-  const preset_overrides: AgentPresetOptions = {provider: "mock", rate_limit: {max_calls: 5}, task_kind: "verify"}
+  const preset_overrides: AgentPresetOptions = {
+    provider: "mock",
+    rate_limit: {max_calls: 5},
+    task_kind: "verify",
+  }
   log("preset task_kind=" + to_string(agent_preset_options(preset_overrides).task_kind))
   const stage_retry: WorkflowRetryPolicy = {max_attempts: 3, verify: true, backoff_ms: 100}
   const stage: StageSpec = {
@@ -58,6 +71,8 @@ pipeline test(task) {
   const typed_stage = workflow_stage_spec(stage)
   log(
     "stage id=" + to_string(typed_stage.id) + " retries="
-      + to_string(typed_stage.retry_policy?.max_attempts),
+      + to_string(
+      typed_stage.retry_policy?.max_attempts,
+    ),
   )
 }

@@ -44,7 +44,10 @@ pipeline main() {
       const parsed = agent_parse_tool_calls(turn.raw_text, tools)
       const dispatched = agent_dispatch_tool_call(parsed.tool_calls[0], tools)
       const batch = agent_dispatch_tool_batch(parsed.tool_calls, tools)
-      const malformed_text = agent_parse_tool_calls("<tool_call>\nadd({ left: })\n</tool_call>", tools)
+      const malformed_text = agent_parse_tool_calls(
+        "<tool_call>\nadd({ left: })\n</tool_call>",
+        tools,
+      )
       const schema_error = agent_dispatch_tool_call({name: "add", arguments: {left: 2}}, tools)
       const handler_error = agent_dispatch_tool_call({name: "explode", arguments: {}}, tools)
       const native_turn = agent_llm_turn("Calculate 4 + 6", nil, {provider: "mock", tools: tools})

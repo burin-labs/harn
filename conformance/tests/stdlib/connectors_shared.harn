@@ -19,7 +19,9 @@ pipeline test(task) {
     verify_hmac_signature("payload", legacy_signature, "secret", "sha1", {allow_legacy_sha1: true}),
   )
   const root = project_root() ?? cwd()
-  const private_key = harness.fs.read_text(path_join(root, "conformance/helpers/github_app_test_key.pem"))
+  const private_key = harness.fs.read_text(
+    path_join(root, "conformance/helpers/github_app_test_key.pem"),
+  )
   const token = jwt_sign("RS256", {iss: "issuer", aud: "audience", exp: 4102444800}, private_key)
   const jwt_result = verify_jwt(
     token,
@@ -31,7 +33,8 @@ pipeline test(task) {
         keys: [
           {
             kty: "RSA",
-            n: "-g_nRee8veA57dDDv-MV0XO3YcFwdhBjZ4Md5Z_V6WpoSRLQRydJ_PXKdOO4Nlv519ugR5RIxYeyqc3kc1gEYTS_ct_TOLEXR8j9vDvOXQRJWkwAJOdtAFxYSxxdr_PuKSUg7O_LaEiaEXxTVpn3hWLBcwJOMvIJ6HGCZYf9WJBjxKFpb7A5arSZbxNJqfLDauQYot_bThGdhEBpVhYBvr6olX5EOONL6h2zAK1n7mT0-zOxCsKh2vO5LRUGKnsfb074Z7fuzbRNsaY8Q1vk75vvNKupd6wYjgbzaLJY7l9GEdWsK_cQrcmyBno9yWvjU-JpEzURJvcRO62Rj6lGew",
+            n:
+              "-g_nRee8veA57dDDv-MV0XO3YcFwdhBjZ4Md5Z_V6WpoSRLQRydJ_PXKdOO4Nlv519ugR5RIxYeyqc3kc1gEYTS_ct_TOLEXR8j9vDvOXQRJWkwAJOdtAFxYSxxdr_PuKSUg7O_LaEiaEXxTVpn3hWLBcwJOMvIJ6HGCZYf9WJBjxKFpb7A5arSZbxNJqfLDauQYot_bThGdhEBpVhYBvr6olX5EOONL6h2zAK1n7mT0-zOxCsKh2vO5LRUGKnsfb074Z7fuzbRNsaY8Q1vk75vvNKupd6wYjgbzaLJY7l9GEdWsK_cQrcmyBno9yWvjU-JpEzURJvcRO62Rj6lGew",
             e: "AQAB",
           },
         ],
@@ -48,7 +51,10 @@ pipeline test(task) {
   __io_println(second.allowed)
   __io_println(second.retry_after_ms)
   __io_println(third.allowed)
-  const pages = [{results: [{id: "a"}], next_cursor: "page-2"}, {results: [{id: "b"}], next_cursor: nil}]
+  const pages = [
+    {results: [{id: "a"}], next_cursor: "page-2"},
+    {results: [{id: "b"}], next_cursor: nil},
+  ]
   const paged = paginate_cursor(
     "https://api.example/items",
     { _url, cursor ->
@@ -67,7 +73,11 @@ pipeline test(task) {
       "github",
       {
         action: "closed",
-        repository: {full_name: "octo-org/octo-repo", id: 99, html_url: "https://github.com/octo-org/octo-repo"},
+        repository: {
+          full_name: "octo-org/octo-repo",
+          id: 99,
+          html_url: "https://github.com/octo-org/octo-repo",
+        },
         pull_request: {
           number: 17,
           title: "Preview me",
@@ -94,7 +104,11 @@ pipeline test(task) {
       {
         object_kind: "merge_request",
         user: {username: "alex"},
-        project: {id: 42, path_with_namespace: "group/project", web_url: "https://gitlab.example/group/project"},
+        project: {
+          id: 42,
+          path_with_namespace: "group/project",
+          web_url: "https://gitlab.example/group/project",
+        },
         object_attributes: {
           iid: 9,
           action: "update",
@@ -135,7 +149,12 @@ pipeline test(task) {
     "https://auth.example/token",
     {status: 200, body: "{\"access_token\":\"new-token\",\"expires_in\":3600}", headers: {}},
   )
-  const refreshed = oauth2_token_refresh("client-id", "client-secret", "refresh-token", "https://auth.example/token")
+  const refreshed = oauth2_token_refresh(
+    "client-id",
+    "client-secret",
+    "refresh-token",
+    "https://auth.example/token",
+  )
   __io_println(refreshed.ok)
   __io_println(refreshed.access_token)
   const calls = http_mock_calls({include_sensitive: true})

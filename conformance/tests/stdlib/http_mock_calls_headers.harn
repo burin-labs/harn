@@ -8,7 +8,11 @@ pipeline test(task) {
   const get_resp = harness.net.get(
     "https://api.example.com/items",
     {
-      headers: {Authorization: "Bearer secret-token", "X-Api-Key": "header-secret", Accept: "application/json"},
+      headers: {
+        Authorization: "Bearer secret-token",
+        "X-Api-Key": "header-secret",
+        Accept: "application/json",
+      },
       query: {api_key: "secret", limit: 2},
     },
   )

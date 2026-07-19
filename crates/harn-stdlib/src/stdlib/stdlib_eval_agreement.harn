@@ -125,7 +125,9 @@ fn passing(verdicts: list) -> list {
 }
 
 fn execution_passes(verdicts: list) -> list {
-  return verdicts.filter({ v -> v?.verdict == verdict_pass() && v?.kind == evaluator_kind_execution() })
+  return verdicts.filter(
+    { v -> v?.verdict == verdict_pass() && v?.kind == evaluator_kind_execution() },
+  )
     .to_list()
 }
 

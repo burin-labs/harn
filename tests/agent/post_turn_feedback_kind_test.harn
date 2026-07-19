@@ -49,12 +49,18 @@ pipeline test_post_turn_feedback_kind_threads_to_event(task) {
         max_iterations: 3,
         post_turn_callback: { info ->
           if info.iteration == 0 {
-            return {feedback_kind: "typed_policy_feedback", message: "Policy feedback wording may evolve."}
+            return {
+              feedback_kind: "typed_policy_feedback",
+              message: "Policy feedback wording may evolve.",
+            }
           }
           return nil
         },
       }
-      const captured = agent_capture_events(session, fn() { return agent_loop("Finish after the callback.", nil, opts) })
+      const captured = agent_capture_events(
+        session,
+        fn() { return agent_loop("Finish after the callback.", nil, opts) },
+      )
       const feedback = __feedback_event_by_kind(captured, "typed_policy_feedback")
       assert(feedback != nil, "typed callback feedback should emit a structured event")
       assert(agent_event_report(feedback, agent_feedback_injected_event_schema()).ok)
@@ -84,7 +90,10 @@ pipeline test_post_turn_feedback_kind_defaults_when_absent_or_empty(task) {
           return nil
         },
       }
-      const captured = agent_capture_events(session, fn() { return agent_loop("Finish after two callbacks.", nil, opts) })
+      const captured = agent_capture_events(
+        session,
+        fn() { return agent_loop("Finish after two callbacks.", nil, opts) },
+      )
       assert_eq(__feedback_event_count_by_kind(captured, "post_turn"), 2)
       assert_eq(captured.result.status, "done")
     },
@@ -102,7 +111,12 @@ pipeline test_terminal_feedback_kind_threads_to_event(task) {
         loop_until_done: true,
         done_sentinel: "##DONE##",
         iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0},
-        terminal_callback: { _info -> return {feedback_kind: "terminal_rescue_policy", message: "Terminal rescue wording may evolve."} },
+        terminal_callback: { _info ->
+          return {
+            feedback_kind: "terminal_rescue_policy",
+            message: "Terminal rescue wording may evolve.",
+          }
+        },
       }
       const captured = agent_capture_events(
         session,

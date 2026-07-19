@@ -58,13 +58,17 @@ pub fn token_exchange_capability_rows() -> list {
       issued_token_types: [__ID_JAG],
       delegation: true,
       impersonation: true,
-      provider_metadata_fields: ["identity_chaining_requested_token_types_supported", "authorization_grant_profiles_supported"],
+      provider_metadata_fields: [
+        "identity_chaining_requested_token_types_supported",
+        "authorization_grant_profiles_supported",
+      ],
       tracking: {
         status: "ietf-draft",
         drafts: [
           {
             name: "draft-ietf-oauth-identity-assertion-authz-grant-04",
-            url: "https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-assertion-authz-grant/",
+            url:
+              "https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-assertion-authz-grant/",
           },
           {
             name: "draft-ietf-oauth-identity-chaining-14",
@@ -82,7 +86,14 @@ pub fn token_exchange_capability_rows() -> list {
       id: "txn-token",
       label: "OAuth Transaction Tokens",
       supported: true,
-      subject_token_types: [__ACCESS_TOKEN, __JWT, __ID_TOKEN, __SAML2, __SELF_SIGNED, __UNSIGNED_JSON],
+      subject_token_types: [
+        __ACCESS_TOKEN,
+        __JWT,
+        __ID_TOKEN,
+        __SAML2,
+        __SELF_SIGNED,
+        __UNSIGNED_JSON,
+      ],
       actor_token_types: [],
       requested_token_types: [__TXN_TOKEN],
       issued_token_types: [__TXN_TOKEN],
@@ -98,7 +109,8 @@ pub fn token_exchange_capability_rows() -> list {
           },
           {
             name: "draft-araut-oauth-transaction-tokens-for-agents-02",
-            url: "https://datatracker.ietf.org/doc/draft-araut-oauth-transaction-tokens-for-agents/",
+            url:
+              "https://datatracker.ietf.org/doc/draft-araut-oauth-transaction-tokens-for-agents/",
           },
         ],
       },
@@ -126,7 +138,10 @@ pub fn token_exchange_capability_rows() -> list {
             name: "draft-ietf-wimse-workload-creds-01",
             url: "https://datatracker.ietf.org/doc/draft-ietf-wimse-workload-creds/",
           },
-          {name: "draft-ietf-wimse-wpt-01", url: "https://datatracker.ietf.org/doc/draft-ietf-wimse-wpt/"},
+          {
+            name: "draft-ietf-wimse-wpt-01",
+            url: "https://datatracker.ietf.org/doc/draft-ietf-wimse-wpt/",
+          },
         ],
       },
       notes: [

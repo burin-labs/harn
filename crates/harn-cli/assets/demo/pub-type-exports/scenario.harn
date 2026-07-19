@@ -31,7 +31,11 @@ pipeline default(_task) {
   __io_println("=== pub-type-exports demo ===")
   __io_println("")
   // 1. The imported alias as a plain annotation.
-  const manual: GradeReport = {verdict: "pass", score: 92, summary: "hand-written report bound against the imported alias"}
+  const manual: GradeReport = {
+    verdict: "pass",
+    score: 92,
+    summary: "hand-written report bound against the imported alias",
+  }
   __io_println("annotation:  [" + verdict_label(manual.verdict) + "] " + describe(manual))
   __io_println("")
   // 2. The imported alias as `output_schema`: the compiler lowers
@@ -45,7 +49,9 @@ pipeline default(_task) {
   const report: GradeReport = graded.data
   __io_println(
     "llm_call(output_schema: GradeReport):  [" + verdict_label(report.verdict) + "] "
-      + describe(report),
+      + describe(
+      report,
+    ),
   )
   __io_println("")
   const receipt = {

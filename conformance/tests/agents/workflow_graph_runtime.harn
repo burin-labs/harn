@@ -4,7 +4,11 @@ pipeline main() {
       name: "graph_runtime",
       entry: "gate",
       nodes: {
-        gate: {kind: "condition", context_policy: {include_kinds: ["plan"]}, metadata: {contains_text: "go"}},
+        gate: {
+          kind: "condition",
+          context_policy: {include_kinds: ["plan"]},
+          metadata: {contains_text: "go"},
+        },
         fan: {kind: "fork"},
         map_docs: {
           kind: "map",

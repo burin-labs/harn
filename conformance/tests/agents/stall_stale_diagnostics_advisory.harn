@@ -30,7 +30,15 @@ fn run(dispatches, config) {
   let state = agent_stall_initial_state()
   let warnings = []
   for item in dispatches {
-    const obs = agent_stall_observe_tool_calls("stall-stale-diag-" + uuid(), call(), 1, config, state, true, item)
+    const obs = agent_stall_observe_tool_calls(
+      "stall-stale-diag-" + uuid(),
+      call(),
+      1,
+      config,
+      state,
+      true,
+      item,
+    )
     state = obs.state
     if obs.warning != nil {
       warnings = warnings + [obs.warning]
@@ -41,7 +49,12 @@ fn run(dispatches, config) {
 
 pipeline default() {
   const stale = run(
-    [dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new")],
+    [
+      dispatch("old", "new"),
+      dispatch("old", "new"),
+      dispatch("old", "new"),
+      dispatch("old", "new"),
+    ],
     {
       enabled: true,
       inject_feedback: false,

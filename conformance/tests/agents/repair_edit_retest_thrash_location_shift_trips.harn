@@ -29,7 +29,8 @@ fn repair_tools() {
       // The SAME error class, re-reported at a shifting file:line:col taken
       // from the call argument. Location varies; the diagnostic does not.
       handler: { args ->
-        throw "foo.zig:" + to_string(args?.loc ?? "1:1") + ": error: expected type 'u8', found 'i32'"
+        throw "foo.zig:" + to_string(args?.loc ?? "1:1")
+          + ": error: expected type 'u8', found 'i32'"
       },
       parameters: {loc: {type: "string", description: "file position"}},
       returns: {type: "string"},

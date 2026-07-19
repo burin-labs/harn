@@ -22,7 +22,10 @@ pipeline default() {
   host_mock(
     "memory",
     "embed",
-    {result: {vector: [0.99, 0.14, 0.0], dim: 3, model: "t"}, params: {text: "France's capital city?"}},
+    {
+      result: {vector: [0.99, 0.14, 0.0], dim: 3, model: "t"},
+      params: {text: "France's capital city?"},
+    },
   )
   host_mock(
     "memory",
@@ -35,7 +38,10 @@ pipeline default() {
   const calls = atomic(0)
   const next = { call ->
     const _ = atomic_add(calls, 1)
-    return {ok: true, value: {text: "answer:" + call.prompt, usage: {input_tokens: 10, output_tokens: 5}}}
+    return {
+      ok: true,
+      value: {text: "answer:" + call.prompt, usage: {input_tokens: 10, output_tokens: 5}},
+    }
   }
   const caller = with_semantic_cache(
     next,

@@ -17,9 +17,11 @@ import {
   success_message,
 } from "../verify_release_metadata.harn"
 
-const CARGO = "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.8.71\"\nedition = \"2021\"\n"
+const CARGO =
+  "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.8.71\"\nedition = \"2021\"\n"
 
-const CHANGELOG = "# Changelog\n\nintro text\n\n## v0.8.71\n\n- Added a thing.\n\n## v0.8.70\n\n- Fixed a thing.\n"
+const CHANGELOG =
+  "# Changelog\n\nintro text\n\n## v0.8.71\n\n- Added a thing.\n\n## v0.8.70\n\n- Fixed a thing.\n"
 
 const ACP_MANIFEST = "{\n"
   + "  \"id\": \"harn\",\n"
@@ -43,7 +45,8 @@ pipeline test_current_version(task) {
 
 @test
 pipeline test_protocol_artifact_version(task) {
-  const manifest = "{\n  \"protocolVersion\": \"0.3.0\",\n  \"artifactVersion\": \"0.8.71\",\n  \"x\": 1\n}\n"
+  const manifest =
+    "{\n  \"protocolVersion\": \"0.3.0\",\n  \"artifactVersion\": \"0.8.71\",\n  \"x\": 1\n}\n"
   assert_eq(protocol_artifact_version(manifest), "0.8.71")
 }
 
@@ -79,7 +82,11 @@ pipeline test_check_acp_agent_manifest_ok(task) {
 
 @test
 pipeline test_check_acp_agent_manifest_rejects_stale_version(task) {
-  const manifest = regex_replace(r#""version": "0\.8\.71""#, "\"version\": \"0.8.70\"", ACP_MANIFEST)
+  const manifest = regex_replace(
+    r#""version": "0\.8\.71""#,
+    "\"version\": \"0.8.70\"",
+    ACP_MANIFEST,
+  )
   const r = try {
     check_acp_agent_manifest(manifest, "0.8.71")
   } catch (e) {

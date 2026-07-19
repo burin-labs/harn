@@ -143,12 +143,14 @@ pipeline test_next_action_checkpoint_repairs_missing_evidence(task) {
   llm_mock_clear()
   llm_mock(
     {
-      text: "```json\n{\"action\":\"update_branch\",\"deterministic_inputs\":[],\"approval_required\":false,\"reason\":\"behind\"}\n```",
+      text:
+        "```json\n{\"action\":\"update_branch\",\"deterministic_inputs\":[],\"approval_required\":false,\"reason\":\"behind\"}\n```",
     },
   )
   llm_mock(
     {
-      text: "{\"action\":\"update_branch\",\"deterministic_inputs\":[\"behind_by\",\"base_ref\",\"head_ref\"],\"approval_required\":false,\"reason\":\"branch is behind base\"}",
+      text:
+        "{\"action\":\"update_branch\",\"deterministic_inputs\":[\"behind_by\",\"base_ref\",\"head_ref\"],\"approval_required\":false,\"reason\":\"branch is behind base\"}",
     },
   )
   const checkpoint = choose_next_action_checkpoint(
@@ -169,12 +171,14 @@ pipeline test_ci_failure_checkpoint_rejects_unknown_log_span(task) {
   llm_mock_clear()
   llm_mock(
     {
-      text: "{\"category\":\"deterministic_failure\",\"selected_log_span_ids\":[\"not-present\"],\"likely_owner\":\"repair_worker\",\"next_inspection_commands\":[\"cargo test\"],\"confidence\":0.91,\"reason\":\"failure\"}",
+      text:
+        "{\"category\":\"deterministic_failure\",\"selected_log_span_ids\":[\"not-present\"],\"likely_owner\":\"repair_worker\",\"next_inspection_commands\":[\"cargo test\"],\"confidence\":0.91,\"reason\":\"failure\"}",
     },
   )
   llm_mock(
     {
-      text: "{\"category\":\"flaky_test\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"merge_captain\",\"next_inspection_commands\":[\"cargo test -- --exact test_flake\"],\"confidence\":0.82,\"reason\":\"same test is nondeterministic\"}",
+      text:
+        "{\"category\":\"flaky_test\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"merge_captain\",\"next_inspection_commands\":[\"cargo test -- --exact test_flake\"],\"confidence\":0.82,\"reason\":\"same test is nondeterministic\"}",
     },
   )
   const checkpoint = diagnose_ci_failure_checkpoint(
@@ -194,12 +198,14 @@ pipeline test_flake_checkpoint_requires_flake_or_missing_context(task) {
   llm_mock_clear()
   llm_mock(
     {
-      text: "{\"category\":\"deterministic_failure\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"repair_worker\",\"next_inspection_commands\":[\"cargo test\"],\"confidence\":0.91,\"reason\":\"single failure\"}",
+      text:
+        "{\"category\":\"deterministic_failure\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"repair_worker\",\"next_inspection_commands\":[\"cargo test\"],\"confidence\":0.91,\"reason\":\"single failure\"}",
     },
   )
   llm_mock(
     {
-      text: "{\"category\":\"flaky_test\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"merge_captain\",\"next_inspection_commands\":[\"cargo test -- --exact test_flake\"],\"confidence\":0.82,\"reason\":\"rerun passed\"}",
+      text:
+        "{\"category\":\"flaky_test\",\"selected_log_span_ids\":[\"span-1\"],\"likely_owner\":\"merge_captain\",\"next_inspection_commands\":[\"cargo test -- --exact test_flake\"],\"confidence\":0.82,\"reason\":\"rerun passed\"}",
     },
   )
   const checkpoint = classify_flake_checkpoint(
@@ -219,7 +225,8 @@ pipeline test_release_changelog_checkpoint_separates_commit_evidence(task) {
   llm_mock_clear()
   llm_mock(
     {
-      text: "{\"gaps\":[\"missing note\"],\"rewrite_sections\":[{\"section\":\"Unreleased / Added\",\"after\":\"Add release audit.\",\"evidence_commit_shas\":[\"abc123\"],\"uncertainty\":\"none\"}],\"blockers\":[],\"evidence_checked\":[\"commit abc123\"],\"confidence\":0.88}",
+      text:
+        "{\"gaps\":[\"missing note\"],\"rewrite_sections\":[{\"section\":\"Unreleased / Added\",\"after\":\"Add release audit.\",\"evidence_commit_shas\":[\"abc123\"],\"uncertainty\":\"none\"}],\"blockers\":[],\"evidence_checked\":[\"commit abc123\"],\"confidence\":0.88}",
     },
   )
   const checkpoint = audit_release_changelog_checkpoint(

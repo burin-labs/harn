@@ -20,7 +20,8 @@ import {
   verdict_is_pass,
 } from "std/agent/verdict"
 
-const PASSING = "running 2 tests\ntest a ... ok\ntest b ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
+const PASSING =
+  "running 2 tests\ntest a ... ok\ntest b ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
 
 // Verdict issuance reads the host execution store, so it rides the deterministic
 // host-tools gate; a real consumer (an eval / agent loop) has it enabled. Enable

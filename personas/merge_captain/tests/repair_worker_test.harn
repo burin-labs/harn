@@ -25,16 +25,20 @@ fn _ok_output() {
 }
 
 fn _stub_executor(output) {
-  return { _bundle, _options -> {
-    ok: true,
-    output: output,
-    raw: "stub",
-    agent_loop: {status: "completed", iterations: 1, input_tokens: 100, output_tokens: 50},
-  } }
+  return { _bundle, _options ->
+    {
+      ok: true,
+      output: output,
+      raw: "stub",
+      agent_loop: {status: "completed", iterations: 1, input_tokens: 100, output_tokens: 50},
+    }
+  }
 }
 
 fn _failing_executor(error) {
-  return { _bundle, _options -> {ok: false, output: nil, raw: "garbage", error: error, agent_loop: {status: "error"}} }
+  return { _bundle, _options ->
+    {ok: false, output: nil, raw: "garbage", error: error, agent_loop: {status: "error"}}
+  }
 }
 
 fn _ci_bundle() {
@@ -66,7 +70,11 @@ fn _autopilot_policy() {
 
 fn _human_required_policy() {
   return {
-    repair_worker: {enabled: true, handles_kinds: ["ci_failure"], require_human_for: ["semantic_repair"]},
+    repair_worker: {
+      enabled: true,
+      handles_kinds: ["ci_failure"],
+      require_human_for: ["semantic_repair"],
+    },
   }
 }
 
@@ -130,11 +138,15 @@ pipeline test_default_executor_repairs_validator_failures(task) {
   llm_mock_clear()
   llm_mock(
     {
-      text: "{\"diagnosis\":\"maybe\",\"files_changed\":[{\"path\":\"src/foo.rs\",\"action\":\"modified\"}],\"tests_run\":[],\"commits_created\":[{\"sha\":\"abc\",\"subject\":\"fix\"}],\"push_result\":{\"pushed\":true,\"ref\":\"feat\",\"sha\":\"abc\",\"force_with_lease\":true},\"residual_risk\":\"unknown\"}",
+      text:
+        "{\"diagnosis\":\"maybe\",\"files_changed\":[{\"path\":\"src/foo.rs\",\"action\":\"modified\"}],\"tests_run\":[],\"commits_created\":[{\"sha\":\"abc\",\"subject\":\"fix\"}],\"push_result\":{\"pushed\":true,\"ref\":\"feat\",\"sha\":\"abc\",\"force_with_lease\":true},\"residual_risk\":\"unknown\"}",
     },
   )
   llm_mock({text: json_stringify(_ok_output())})
-  const result = default_executor(_ci_bundle(), {provider: "mock", validator_retries: 1, repair: {enabled: false}})
+  const result = default_executor(
+    _ci_bundle(),
+    {provider: "mock", validator_retries: 1, repair: {enabled: false}},
+  )
   assert(result.ok)
   assert_eq(result.output.diagnosis, "fixed")
   assert_eq(result.typed_checkpoint.checkpoint_attempts, 2)

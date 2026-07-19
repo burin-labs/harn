@@ -150,7 +150,10 @@ fn main(harness: Harness) {
     exit(2)
   }
   const parsed = unwrap(parsed_result).options
-  const report = check_burin_protocol_bindings(to_string(parsed?.burin_root ?? ""), parsed?.required ?? false)
+  const report = check_burin_protocol_bindings(
+    to_string(parsed?.burin_root ?? ""),
+    parsed?.required ?? false,
+  )
   if report.status == "missing_root" {
     if parsed?.required ?? false {
       harness.stdio.eprintln("error: Burin Code checkout not found")

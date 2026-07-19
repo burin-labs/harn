@@ -57,7 +57,8 @@ pipeline main() {
       for event in events {
         if event.kind == "plan" {
           saw_plan = true
-          require event.metadata.plan.schema_version == "harn.plan.v1", "transcript plan metadata should be structured"
+          require event.metadata.plan.schema_version == "harn.plan.v1",
+            "transcript plan metadata should be structured"
         }
       }
       require saw_plan, "agent loop should persist an emitted plan event"

@@ -12,7 +12,10 @@ pipeline main() {
       const first_snapshot = json_parse(harness.fs.read_text(first?.snapshot_path))
       __io_println(first_snapshot?.carry_policy?.transcript_mode == "reset")
       __io_println(
-        contains(json_stringify(first_snapshot?.transcript?.messages ?? []), "first carried answer"),
+        contains(
+          json_stringify(first_snapshot?.transcript?.messages ?? []),
+          "first carried answer",
+        ),
       )
       const resumed = send_input(first, "Answer the second prompt.")
       const second = wait_agent(resumed)

@@ -43,7 +43,13 @@ fn arg_spec() {
       name: "ci_walltime_report",
       args: [
         {kind: "flag", name: "repo", long: "--repo", parse: "string", default: DEFAULT_REPOSITORY},
-        {kind: "flag", name: "workflow", long: "--workflow", parse: "string", default: DEFAULT_WORKFLOW},
+        {
+          kind: "flag",
+          name: "workflow",
+          long: "--workflow",
+          parse: "string",
+          default: DEFAULT_WORKFLOW,
+        },
         {kind: "flag", name: "event", long: "--event", parse: "string", default: DEFAULT_EVENT},
         {kind: "flag", name: "limit", long: "--limit", parse: "int", default: DEFAULT_LIMIT},
         {kind: "switch", name: "json", long: "--json", default: false},
@@ -172,16 +178,19 @@ fn format_seconds(duration_ms: int) -> string {
 
 fn render_report(report: CiWalltimeReport) -> string {
   const wall = report.wall
-  const summary = "${report.repository} ${report.workflow} ${report.event}: n=${wall.count} mean=${format_seconds(wall.mean_ms)} p50=${format_seconds(wall.p50_ms)} p90=${format_seconds(wall.p90_ms)} max=${format_seconds(wall.max_ms)}"
+  const summary =
+    "${report.repository} ${report.workflow} ${report.event}: n=${wall.count} mean=${format_seconds(wall.mean_ms)} p50=${format_seconds(wall.p50_ms)} p90=${format_seconds(wall.p90_ms)} max=${format_seconds(wall.max_ms)}"
   const rows = report.jobs.map(
-    { group -> {
-      job: group.name,
-      n: group.stats.count,
-      mean: format_seconds(group.stats.mean_ms),
-      p50: format_seconds(group.stats.p50_ms),
-      p90: format_seconds(group.stats.p90_ms),
-      max: format_seconds(group.stats.max_ms),
-    } },
+    { group ->
+      {
+        job: group.name,
+        n: group.stats.count,
+        mean: format_seconds(group.stats.mean_ms),
+        p50: format_seconds(group.stats.p50_ms),
+        p90: format_seconds(group.stats.p90_ms),
+        max: format_seconds(group.stats.max_ms),
+      }
+    },
   )
     .to_list()
   return summary

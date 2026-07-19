@@ -68,38 +68,79 @@ fn __introspection_tool_specs() {
   return [
     {
       name: "current_model",
-      description: "Return the resolved {model, model_alias, family, tier, resolved} for the most recent llm_call on this thread.",
-      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+      description:
+        "Return the resolved {model, model_alias, family, tier, resolved} for the most recent llm_call on this thread.",
+      config: {
+        executor: "harn",
+        parameters: nullary_params,
+        returns: returns_object,
+        annotations: annotations,
+      },
     },
     {
       name: "current_provider",
-      description: "Return the resolved {provider, tool_format, resolved} used for the most recent llm_call on this thread.",
-      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+      description:
+        "Return the resolved {provider, tool_format, resolved} used for the most recent llm_call on this thread.",
+      config: {
+        executor: "harn",
+        parameters: nullary_params,
+        returns: returns_object,
+        annotations: annotations,
+      },
     },
     {
       name: "current_context_window",
-      description: "Return {context_window, runtime_context_window, resolved} for the resolved model. Both windows are token counts and may be null when the catalog doesn't carry the model.",
-      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+      description:
+        "Return {context_window, runtime_context_window, resolved} for the resolved model. Both windows are token counts and may be null when the catalog doesn't carry the model.",
+      config: {
+        executor: "harn",
+        parameters: nullary_params,
+        returns: returns_object,
+        annotations: annotations,
+      },
     },
     {
       name: "current_harn_version",
       description: "Return {harn_version} — the embedded Harn release this runtime was built from.",
-      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+      config: {
+        executor: "harn",
+        parameters: nullary_params,
+        returns: returns_object,
+        annotations: annotations,
+      },
     },
     {
       name: "current_harness",
-      description: "Return {harness} — the host shell embedding the runtime (e.g. \"editor\", \"harn\", \"claude-code\"). Reads HARN_HARNESS, falls back to \"harn\".",
-      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+      description:
+        "Return {harness} — the host shell embedding the runtime (e.g. \"editor\", \"harn\", \"claude-code\"). Reads HARN_HARNESS, falls back to \"harn\".",
+      config: {
+        executor: "harn",
+        parameters: nullary_params,
+        returns: returns_object,
+        annotations: annotations,
+      },
     },
     {
       name: "available_runtime_capabilities",
-      description: "Return {capabilities, resolved} — the provider/model capability matrix the runtime resolved (native tools, prompt caching, vision, thinking modes, structured output mode, etc).",
-      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+      description:
+        "Return {capabilities, resolved} — the provider/model capability matrix the runtime resolved (native tools, prompt caching, vision, thinking modes, structured output mode, etc).",
+      config: {
+        executor: "harn",
+        parameters: nullary_params,
+        returns: returns_object,
+        annotations: annotations,
+      },
     },
     {
       name: "current_compaction_policy",
-      description: "Return {policy} — the transcript compaction policy that will apply if this agent_loop accumulates enough context to trigger it.",
-      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+      description:
+        "Return {policy} — the transcript compaction policy that will apply if this agent_loop accumulates enough context to trigger it.",
+      config: {
+        executor: "harn",
+        parameters: nullary_params,
+        returns: returns_object,
+        annotations: annotations,
+      },
     },
   ]
 }

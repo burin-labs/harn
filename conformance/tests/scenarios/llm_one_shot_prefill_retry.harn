@@ -20,7 +20,9 @@ pipeline default() {
     [{error: {category: "rate_limit", message: "mock 429 transient"}}, llm_text("recovered")],
     { ->
       const caller = retry_caller()
-      const result = caller(call(llm_arm_one_shot_prefill("one physical request", {provider: "mock"})))
+      const result = caller(
+        call(llm_arm_one_shot_prefill("one physical request", {provider: "mock"})),
+      )
       const calls = llm_mock_calls()
       __io_println(result.ok)
       __io_println(calls[0].prefill)

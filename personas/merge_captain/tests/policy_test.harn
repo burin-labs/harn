@@ -33,7 +33,8 @@ pipeline test_validation_rejects_bad_method(task) {
 }
 
 pipeline test_load_round_trip(task) {
-  const json = "{\"repo\": \"burin-labs/harn\", \"merge_queue_enabled\": true, \"required_checks\": [\"a\", \"b\"]}"
+  const json =
+    "{\"repo\": \"burin-labs/harn\", \"merge_queue_enabled\": true, \"required_checks\": [\"a\", \"b\"]}"
   const res = load_policy(json)
   assert(res.ok)
   assert_eq(res.policy.repo, "burin-labs/harn")
@@ -47,7 +48,9 @@ pipeline test_load_rejects_bad_json(task) {
 }
 
 pipeline test_autopilot_helpers(task) {
-  const p = with_defaults({repo: "a/b", autopilot_states: ["queued"], require_human_for: ["blocked"]})
+  const p = with_defaults(
+    {repo: "a/b", autopilot_states: ["queued"], require_human_for: ["blocked"]},
+  )
   assert(autopilot_for(p, "queued"))
   assert(!autopilot_for(p, "blocked"))
   assert(requires_human(p, "blocked"))

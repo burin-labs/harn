@@ -2,7 +2,9 @@ import "std/worktree"
 
 pipeline main() {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const base = path_join(harness.fs.temp_dir(), "harn-worktree-runtime-" + unique)
   harness.fs.mkdir(base)
   const repo = path_join(base, "repo")
@@ -11,7 +13,8 @@ pipeline main() {
   harness.fs.write_text(path_join(repo, "README.md"), "hello\n")
   __io_println(exec_at(repo, "git", "add", "README.md")?.success)
   __io_println(
-    shell_at(repo, "git -c user.name='Harn' -c user.email='harn@example.com' commit -m init")?.success,
+    shell_at(repo, "git -c user.name='Harn' -c user.email='harn@example.com' commit -m init")
+      ?.success,
   )
   const worktree = worktree_create(repo, "feature_runtime", "HEAD", nil)
   __io_println(worktree?.success)

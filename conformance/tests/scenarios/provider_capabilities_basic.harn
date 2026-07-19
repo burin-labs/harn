@@ -96,7 +96,10 @@ pipeline test(task) {
     openrouter_gpt_oss.text_tool_wire_format_supported,
     "OpenRouter GPT-OSS supports text tool formatting",
   )
-  const fireworks_gpt_oss = provider_capabilities("fireworks", "accounts/fireworks/models/gpt-oss-120b")
+  const fireworks_gpt_oss = provider_capabilities(
+    "fireworks",
+    "accounts/fireworks/models/gpt-oss-120b",
+  )
   assert(!fireworks_gpt_oss.native_tools, "Fireworks GPT-OSS disables native tools")
   assert(
     fireworks_gpt_oss.preferred_tool_format == "text",

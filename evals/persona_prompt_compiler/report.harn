@@ -79,7 +79,9 @@ pub fn persona_prompt_eval_cohort(rows: list, minimum_trials: int = 5) -> dict {
     total_cost_usd: total_cost,
     mean_wall_time_seconds: if len(aggregated) > 0 {
       aggregated.reduce(0.0, { total, row -> total + row.mean_wall_time_seconds })
-        / to_float(len(aggregated))
+        / to_float(
+        len(aggregated),
+      )
     } else {
       0.0
     },
@@ -103,10 +105,18 @@ pub fn persona_prompt_eval_comparison(
   const baseline = persona_prompt_eval_cohort(baseline_rows, minimum_trials)
   const treatment = persona_prompt_eval_cohort(treatment_rows, minimum_trials)
   const expected_cases = len(expected_case_fingerprints)
-  const baseline_identity_matches = baseline.fingerprint_integrity.case_fingerprints == expected_case_fingerprints
-    && baseline.fingerprint_integrity.harness_fingerprints == [expected_harness_fingerprint]
-  const treatment_identity_matches = treatment.fingerprint_integrity.case_fingerprints == expected_case_fingerprints
-    && treatment.fingerprint_integrity.harness_fingerprints == [expected_harness_fingerprint]
+  const baseline_identity_matches = baseline.fingerprint_integrity.case_fingerprints
+    == expected_case_fingerprints
+    && baseline.fingerprint_integrity.harness_fingerprints
+    == [
+    expected_harness_fingerprint,
+  ]
+  const treatment_identity_matches = treatment.fingerprint_integrity.case_fingerprints
+    == expected_case_fingerprints
+    && treatment.fingerprint_integrity.harness_fingerprints
+    == [
+    expected_harness_fingerprint,
+  ]
   const paired = paired_delta_report(baseline.rows, treatment.rows)
   const regression = regression_gate(baseline.rows, treatment.rows)
   const gate_evaluable = minimum_trials >= 5
@@ -167,10 +177,12 @@ fn main(harness: Harness) -> int {
   const minimum_trials = to_int(harness.env.get_or("HARN_PERSONA_EVAL_MIN_TRIALS", "5")) ?? 5
   const ledger_path = harness.env.get_or("HARN_EVENT_LOG_SQLITE_PATH", "")
   const shared_ledger = harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite"
-    && ledger_path != ""
+    && ledger_path
+    != ""
     && is_absolute(ledger_path)
   if baseline_commit == "" || treatment_commit == "" || baseline_commit == treatment_commit
-    || provider == ""
+    || provider
+    == ""
     || model == ""
     || !contains(["meter-tune", "meter-holdout"], split)
     || minimum_trials < 5
@@ -189,9 +201,21 @@ fn main(harness: Harness) -> int {
   const baseline_rows = eval_ledger_read(common + {commit: baseline_commit}).rows
   const treatment_rows = eval_ledger_read(common + {commit: treatment_commit}).rows
   const manifest_path = path_join(source_dir(), "harn.eval.toml")
-  const raw = eval_pack_manifest(toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: source_dir()})
-  const manifest = persona_prompt_eval_manifest(raw, split, minimum_trials, provider, model, ledger_path)
-  const identity_plan = eval_ledger_resolve_resume_plan(manifest, common + {commit: baseline_commit})
+  const raw = eval_pack_manifest(
+    toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: source_dir()},
+  )
+  const manifest = persona_prompt_eval_manifest(
+    raw,
+    split,
+    minimum_trials,
+    provider,
+    model,
+    ledger_path,
+  )
+  const identity_plan = eval_ledger_resolve_resume_plan(
+    manifest,
+    common + {commit: baseline_commit},
+  )
   const report = persona_prompt_eval_comparison(
     baseline_rows,
     treatment_rows,

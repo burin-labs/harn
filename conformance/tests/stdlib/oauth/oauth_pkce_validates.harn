@@ -32,7 +32,12 @@ pipeline test(task) {
   )
   const cli = client(
     provider,
-    {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", scopes: ["read"], storage: store},
+    {
+      client_id: "cli-id",
+      redirect_uri: "http://127.0.0.1:9999/cb",
+      scopes: ["read"],
+      storage: store,
+    },
   )
   const pkce = start_authorization(cli)
   http_mock_clear()
@@ -64,7 +69,10 @@ pipeline test(task) {
   // server had something to validate against.
   const calls = http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "one POST to token endpoint")
-  assert(contains(calls[0].body, "code_verifier=" + pkce.code_verifier), "code_verifier sent in body")
+  assert(
+    contains(calls[0].body, "code_verifier=" + pkce.code_verifier),
+    "code_verifier sent in body",
+  )
   assert(contains(calls[0].body, "grant_type=authorization_code"), "auth-code grant type")
   // No audit event must fire on a failed exchange.
   const latest_after = event_log.latest(topic) ?? 0

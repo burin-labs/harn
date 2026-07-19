@@ -3,7 +3,10 @@ import "../remote_eval_fanout_plan.harn"
 fn catalog() {
   return {
     evals: {"cpp-test": {}, "swift-feat": {}, "zig-test": {}},
-    groups: {"meter-mini": ["cpp-test", "zig-test"], duplicates: ["cpp-test", "cpp-test", "swift-feat"]},
+    groups: {
+      "meter-mini": ["cpp-test", "zig-test"],
+      duplicates: ["cpp-test", "cpp-test", "swift-feat"],
+    },
   }
 }
 
@@ -119,9 +122,21 @@ pipeline test_remote_eval_fanout_artifact_manifest_rewrites_paths(task) {
 @test
 pipeline test_remote_eval_fanout_rejoin_blocks_missing_duplicate_failed_and_unknown(task) {
   const plan = small_plan()
-  const good = remote_eval_fanout_trial_receipt(plan, "cpp-test-t1", {status: "passed", passed: true})
-  const duplicate = remote_eval_fanout_trial_receipt(plan, "cpp-test-t1", {status: "passed", passed: true})
-  const failed = remote_eval_fanout_trial_receipt(plan, "zig-test-t1", {status: "failed", passed: false})
+  const good = remote_eval_fanout_trial_receipt(
+    plan,
+    "cpp-test-t1",
+    {status: "passed", passed: true},
+  )
+  const duplicate = remote_eval_fanout_trial_receipt(
+    plan,
+    "cpp-test-t1",
+    {status: "passed", passed: true},
+  )
+  const failed = remote_eval_fanout_trial_receipt(
+    plan,
+    "zig-test-t1",
+    {status: "failed", passed: false},
+  )
   const receipt = remote_eval_fanout_rejoin_receipt(
     plan,
     [good, duplicate, failed, {shard_id: "swift-feat-t1", status: "passed", ok: true}],

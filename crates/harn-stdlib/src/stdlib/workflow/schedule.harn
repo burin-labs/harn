@@ -64,7 +64,11 @@ pub fn workflow_join_readiness(config = nil) {
       completed_inputs = completed_inputs + 1
     }
   }
-  return {ready: completed_inputs >= required, required: required, completed_inputs: completed_inputs}
+  return {
+    ready: completed_inputs >= required,
+    required: required,
+    completed_inputs: completed_inputs,
+  }
 }
 
 fn __schedule_branch_matches(left, right) {

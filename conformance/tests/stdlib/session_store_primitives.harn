@@ -9,8 +9,16 @@ pipeline default() {
   const root = path_join(".harn", "tmp", "harn-session-store-" + uuid())
   const sid = "burin.agent_context.memories.project"
   const opts = {root: root, kind_type: "AgentMemory"}
-  const first = session_store_append(sid, {operation: "upsert", record: {id: "m1", title: "one"}}, opts)
-  const second = session_store_append(sid, {operation: "upsert", record: {id: "m2", title: "two"}}, opts)
+  const first = session_store_append(
+    sid,
+    {operation: "upsert", record: {id: "m1", title: "one"}},
+    opts,
+  )
+  const second = session_store_append(
+    sid,
+    {operation: "upsert", record: {id: "m2", title: "two"}},
+    opts,
+  )
   session_store_append(sid, {operation: "upsert", record: {id: "m1", title: "one-v2"}}, opts)
   session_store_append(sid, {operation: "delete", id: "m2"}, opts)
   // Hash chain: 1-based event_id, genesis prev_hash is nil, then links.
@@ -35,7 +43,10 @@ pipeline default() {
   __io_println(session_store_project_value(vsid, "fallback", {root: root}))
   __io_println(
     ends_with(session_store_path(sid, {root: root}), "/.harn/session-store/" + sid + ".jsonl")
-      && ends_with(session_store_database_path({root: root}), "/.harn/session-store.sqlite"),
+      && ends_with(
+      session_store_database_path({root: root}),
+      "/.harn/session-store.sqlite",
+    ),
   )
   harness.fs.delete(root)
 }

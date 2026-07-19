@@ -72,7 +72,12 @@ pipeline test(task) {
     "AKIAABCDEFGHIJKLMNOP",
   )
   const huggingface = "hf_" + "abcdefghijklmnopqrstuvwx"
-  expect_redacted("huggingface_token", "hf=" + huggingface + " ok", "huggingface_token", huggingface)
+  expect_redacted(
+    "huggingface_token",
+    "hf=" + huggingface + " ok",
+    "huggingface_token",
+    huggingface,
+  )
   const cerebras = "csk-" + "aaaaaaaaaaaaaaaaaaaaaaaa" + "aaaaaaaaaaaaaaaaaaaaaaaa"
   expect_redacted("cerebras_key", "cerebras=" + cerebras + " ok", "cerebras_key", cerebras)
   const together = "tgp_v1_" + "aaaaaaaaaaaaaaaa" + "aaaaaaaaaaaaaaaa"

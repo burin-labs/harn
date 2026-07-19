@@ -10,7 +10,10 @@ pipeline main() {
     payload,
     {reminders: {config: {idle_nudge: {idle_seconds: 60}}}},
   )
-  const enabled_reminders = transcript_events_by_kind(agent_session_snapshot(enabled_session), "system_reminder")
+  const enabled_reminders = transcript_events_by_kind(
+    agent_session_snapshot(enabled_session),
+    "system_reminder",
+  )
   // Opt out by listing the negated provider name.
   const opted_out_session = agent_session_open("provider-opt-out-disabled")
   agent_session_reset(opted_out_session)
@@ -20,7 +23,10 @@ pipeline main() {
     {session: {id: opted_out_session}, iteration: 1, wake_interval_ms: 65000},
     {reminders: {providers: ["-idle_nudge"], config: {idle_nudge: {idle_seconds: 60}}}},
   )
-  const opted_out_reminders = transcript_events_by_kind(agent_session_snapshot(opted_out_session), "system_reminder")
+  const opted_out_reminders = transcript_events_by_kind(
+    agent_session_snapshot(opted_out_session),
+    "system_reminder",
+  )
   __io_println(enabled.fired_count)
   __io_println(len(enabled_reminders))
   __io_println(opted_out.fired_count)

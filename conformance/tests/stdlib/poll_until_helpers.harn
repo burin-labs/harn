@@ -57,7 +57,10 @@ pipeline default() {
   __io_println(retry_report.ok)
   __io_println(retry_report.attempts)
   __io_println(retry_report.value.attempt)
-  const exhausted = retry_with_result(fn(attempt) { return Err("permanent") }, {max_attempts: 2, base_ms: 5})
+  const exhausted = retry_with_result(
+    fn(attempt) { return Err("permanent") },
+    {max_attempts: 2, base_ms: 5},
+  )
   __io_println(exhausted.ok)
   __io_println(exhausted.attempts)
   __io_println(exhausted.error)

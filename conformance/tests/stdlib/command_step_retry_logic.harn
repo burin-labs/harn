@@ -49,7 +49,9 @@ pipeline default() {
     "classified",
     ["fake"],
     {
-      runner: { _spec, _options -> return {status: "completed", exit_code: 13, stdout: "", stderr: "denied", timed_out: false} },
+      runner: { _spec, _options ->
+        return {status: "completed", exit_code: 13, stdout: "", stderr: "denied", timed_out: false}
+      },
       classify: { step ->
         if contains(step.stderr, "denied") {
           return {kind: "permission", retryable: false}
@@ -68,7 +70,9 @@ pipeline default() {
     "classified",
     ["fake"],
     {
-      runner: { _spec, _options -> return {status: "completed", exit_code: 13, stdout: "", stderr: "denied", timed_out: false} },
+      runner: { _spec, _options ->
+        return {status: "completed", exit_code: 13, stdout: "", stderr: "denied", timed_out: false}
+      },
       classify: { _step -> return {kind: "permission"} },
     },
   )

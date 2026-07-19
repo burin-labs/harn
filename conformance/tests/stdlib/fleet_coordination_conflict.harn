@@ -4,7 +4,12 @@ import { fleet_claim, fleet_done, fleet_project } from "std/fleet/coordination"
 pipeline default() {
   mock_time(2000)
   const room = {session_id: "fleet-conflict"}
-  const first = fleet_claim("session", "ops", "repo#7", room + {id: "claim-a", from: {agent: "lane-a"}})
+  const first = fleet_claim(
+    "session",
+    "ops",
+    "repo#7",
+    room + {id: "claim-a", from: {agent: "lane-a"}},
+  )
   const _ = fleet_claim("session", "ops", "repo#7", room + {id: "claim-b", from: {agent: "lane-b"}})
   const _ = coord_post(
     "session",
@@ -28,7 +33,10 @@ pipeline default() {
     },
     room + {id: "malformed-heartbeat"},
   )
-  const conflicted = fleet_project(coord_read("session", "ops", room + {include_events: true}), {now_ms: 2000})
+  const conflicted = fleet_project(
+    coord_read("session", "ops", room + {include_events: true}),
+    {now_ms: 2000},
+  )
   __io_println(len(conflicted.conflicts))
   __io_println(conflicted.claims[0]?.state)
   __io_println(conflicted.claims[1]?.state)
@@ -42,7 +50,10 @@ pipeline default() {
     "completed",
     room + {id: "done-wrong-key", from: {agent: "lane-a"}},
   )
-  const wrong_key = fleet_project(coord_read("session", "ops", room + {include_events: true}), {now_ms: 2000})
+  const wrong_key = fleet_project(
+    coord_read("session", "ops", room + {include_events: true}),
+    {now_ms: 2000},
+  )
   __io_println(wrong_key.claims[0]?.state)
   const _ = fleet_done(
     "session",
@@ -52,7 +63,10 @@ pipeline default() {
     "completed",
     room + {id: "done-a", from: {agent: "lane-a"}},
   )
-  const resolved = fleet_project(coord_read("session", "ops", room + {include_events: true}), {now_ms: 2000})
+  const resolved = fleet_project(
+    coord_read("session", "ops", room + {include_events: true}),
+    {now_ms: 2000},
+  )
   __io_println(len(resolved.conflicts))
   __io_println(resolved.claims[0]?.state)
   __io_println(resolved.claims[1]?.state)

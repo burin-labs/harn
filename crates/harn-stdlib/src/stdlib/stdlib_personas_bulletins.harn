@@ -14,7 +14,14 @@ import { memory_store } from "std/memory"
  * Cloud sync without per-host translation. Receipts retain the proposal and
  * decision history so replay tooling can audit how persona context evolved.
  */
-type BulletinScope = "user" | "project" | "workspace" | "task" | "team" | "session" | "global" | string
+type BulletinScope = "user" \
+  | "project" \
+  | "workspace" \
+  | "task" \
+  | "team" \
+  | "session" \
+  | "global" \
+  | string
 
 type BulletinStatus = "proposed" | "accepted" | "rejected" | "expired" | "superseded" | string
 
@@ -377,7 +384,13 @@ pub fn bulletin_propose(input, options = nil) -> ProfileBulletin {
   const review_after = __bulletin_first([opts?.review_after, input?.review_after])
   const supersedes = __bulletin_string_list(opts?.supersedes ?? input?.supersedes)
   const id = __bulletin_first([opts?.id, input?.id])
-    ?? bulletin_id(scope, scope_key, subject, assertion, persona)
+    ?? bulletin_id(
+    scope,
+    scope_key,
+    subject,
+    assertion,
+    persona,
+  )
   const bulletin = {
     schema: BULLETIN_SCHEMA,
     id: id,
@@ -431,7 +444,10 @@ pub fn bulletin_dedupe(bulletins: list) -> list<ProfileBulletin> {
  */
 pub fn bulletin_emit(input, options = nil) -> BulletinProposeReceipt {
   const opts = options ?? {}
-  const raw = input?.schema == BULLETIN_SCHEMA ? bulletin_validate(input) : bulletin_propose(input, opts)
+  const raw = input?.schema == BULLETIN_SCHEMA ? bulletin_validate(input) : bulletin_propose(
+    input,
+    opts,
+  )
   const bulletin = raw + {status: "proposed"}
   const topic = opts?.topic ?? BULLETIN_PROPOSAL_TOPIC
   const event_log_id = event_log.emit(
@@ -551,7 +567,9 @@ pub fn bulletin_memory_namespace(bulletin: ProfileBulletin) -> string {
 fn __bulletin_remember_accepted(bulletin: ProfileBulletin, options) {
   const opts = options ?? {}
   const override_namespace = __bulletin_text(opts?.memory_namespace)
-  const namespace = override_namespace != "" ? override_namespace : bulletin_memory_namespace(bulletin)
+  const namespace = override_namespace != "" ? override_namespace : bulletin_memory_namespace(
+    bulletin,
+  )
   const subject = __bulletin_text(bulletin.subject)
   const assertion = __bulletin_text(bulletin.assertion)
   const text = subject == "" ? assertion : subject + " — " + assertion
@@ -641,7 +659,8 @@ fn __bulletin_decision_index(decisions) {
       continue
     }
     const existing = index[id]
-    if existing == nil || __bulletin_text(raw?.decided_at) >= __bulletin_text(existing?.decided_at) {
+    if existing == nil
+      || __bulletin_text(raw?.decided_at) >= __bulletin_text(existing?.decided_at) {
       index = index + {[id]: raw}
     }
   }

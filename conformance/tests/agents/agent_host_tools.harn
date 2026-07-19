@@ -75,7 +75,10 @@ pipeline main() {
   )
   __io_println(git_blocked.ok)
   __io_println(contains(git_blocked.error, "absolute paths are disabled"))
-  const blocked = agent_dispatch_tool_call({id: "c3", name: "release_run", arguments: {argv: ["echo", "no"]}}, tools)
+  const blocked = agent_dispatch_tool_call(
+    {id: "c3", name: "release_run", arguments: {argv: ["echo", "no"]}},
+    tools,
+  )
   const blocked_data = json_parse(blocked.rendered_result)
   __io_println(blocked_data.blocked)
   const lifecycle_tools = agent_command_tools(

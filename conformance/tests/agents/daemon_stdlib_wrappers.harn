@@ -13,7 +13,9 @@ fn wait_for_iterations(handle, min_iterations) {
 
 pipeline test(task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const root = path_join(harness.fs.temp_dir(), "harn-daemon-stdlib-" + unique)
   harness.fs.mkdir(root)
   with_llm_script(

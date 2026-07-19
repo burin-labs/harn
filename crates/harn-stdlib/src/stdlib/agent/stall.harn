@@ -243,7 +243,8 @@ fn __agent_stall_closure(value, field: string) {
   if type_of(value) == "closure" {
     return value
   }
-  throw "agent_loop: stall_diagnostics." + field + " must be a closure or nil; got " + type_of(value)
+  throw "agent_loop: stall_diagnostics." + field + " must be a closure or nil; got "
+    + type_of(value)
 }
 
 /**
@@ -291,7 +292,10 @@ fn __agent_stall_opt_int(value, field: string) {
   if type_of(value) == "int" && value >= 1 {
     return value
   }
-  throw "agent_loop: stall_diagnostics." + field + " must be a positive int or nil; got " + type_of(value)
+  throw "agent_loop: stall_diagnostics." + field + " must be a positive int or nil; got "
+    + type_of(
+    value,
+  )
 }
 
 fn __agent_stall_default_config() -> AgentStallConfig {
@@ -344,7 +348,9 @@ fn __agent_stall_config(value) -> AgentStallConfig {
   const repair_diagnostics = value?.repair_diagnostics
   if repair_diagnostics != nil && type_of(repair_diagnostics) != "dict" {
     throw "agent_loop: stall_diagnostics.repair_diagnostics must be a dict or nil; got "
-      + type_of(repair_diagnostics)
+      + type_of(
+      repair_diagnostics,
+    )
   }
   const {threshold = 3, max_feedback = 1} = value ?? {}
   const exempt_tools = if value?.exempt_tools != nil {
@@ -377,12 +383,28 @@ fn __agent_stall_config(value) -> AgentStallConfig {
     },
     exempt_tools: exempt_tools,
     include_arguments: __agent_stall_bool(value?.include_arguments, false, "include_arguments"),
-    repeat_same_observation: __agent_stall_int(value?.repeat_same_observation, same_observation_default, 2),
+    repeat_same_observation: __agent_stall_int(
+      value?.repeat_same_observation,
+      same_observation_default,
+      2,
+    ),
     repeat_same_error: __agent_stall_int(value?.repeat_same_error, STALL_REPEAT_SAME_ERROR, 2),
-    no_progress_messages: __agent_stall_int(value?.no_progress_messages, STALL_NO_PROGRESS_MESSAGES, 2),
+    no_progress_messages: __agent_stall_int(
+      value?.no_progress_messages,
+      STALL_NO_PROGRESS_MESSAGES,
+      2,
+    ),
     ping_pong_cycles: __agent_stall_int(value?.ping_pong_cycles, STALL_PING_PONG_CYCLES, 2),
-    repeat_context_window_error: __agent_stall_int(value?.repeat_context_window_error, STALL_REPEAT_CONTEXT_WINDOW_ERROR, 1),
-    hard_stop_after_trips: __agent_stall_int(value?.hard_stop_after_trips, STALL_HARD_STOP_AFTER_TRIPS, 1),
+    repeat_context_window_error: __agent_stall_int(
+      value?.repeat_context_window_error,
+      STALL_REPEAT_CONTEXT_WINDOW_ERROR,
+      1,
+    ),
+    hard_stop_after_trips: __agent_stall_int(
+      value?.hard_stop_after_trips,
+      STALL_HARD_STOP_AFTER_TRIPS,
+      1,
+    ),
     repair_aware: __agent_stall_bool(
       __agent_stall_repair_value(value, repair_diagnostics, "repair_aware"),
       false,
@@ -808,7 +830,11 @@ fn __agent_stall_fold_diagnostic(
           turns_since_clean_verify: new_turns_since_clean_verify,
         }
       }
-      return state + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
+      return state
+        + {
+        write_epoch: new_write_epoch,
+        turns_since_clean_verify: new_turns_since_clean_verify,
+      }
     }
     if turn_made_edit {
       if state.last_diagnostic_class == "fail" {
@@ -820,11 +846,19 @@ fn __agent_stall_fold_diagnostic(
           turns_since_clean_verify: new_turns_since_clean_verify,
         }
       }
-      return state + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
+      return state
+        + {
+        write_epoch: new_write_epoch,
+        turns_since_clean_verify: new_turns_since_clean_verify,
+      }
     }
     if result == nil {
       // No verification evidence and no edit-on-failure: leave the model alone.
-      return state + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
+      return state
+        + {
+        write_epoch: new_write_epoch,
+        turns_since_clean_verify: new_turns_since_clean_verify,
+      }
     }
     // A passing verification clears the current-failure model.
     const pass_signature = if delta != nil {
@@ -988,7 +1022,8 @@ fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
       + " turns elapsed since the last clean verification without a passing verify"
   } else if pattern == "ping_pong" {
     "the loop is ping-ponging between two actions (" + count + " cycles)"
-  } else if pattern == "repeated_context_window_error" {
+  } else if pattern
+    == "repeated_context_window_error" {
     "the run hit a context-window error " + count + " times in a row"
   } else {
     "the last " + count + " tool calls repeated `" + warning.tool_name
@@ -1054,7 +1089,11 @@ pub fn agent_stall_inject_feedback(
   const wants_feedback = config.inject_feedback ?? true
   const should_feedback = wants_feedback && state.feedback_count < config.max_feedback
   if should_feedback {
-    agent_session_inject_feedback(session_id, "stall_diagnostics", __agent_stall_feedback_text(warning))
+    agent_session_inject_feedback(
+      session_id,
+      "stall_diagnostics",
+      __agent_stall_feedback_text(warning),
+    )
     return state + {feedback_count: state.feedback_count + 1}
   }
   return state
@@ -1395,7 +1434,11 @@ fn __agent_stall_classify_trip(config: AgentStallConfig, s) {
     }
   }
   if !repair_owns_repeat && s.same_error_streak >= config.repeat_same_error {
-    return {pattern: "repeated_error", count: s.same_error_streak, threshold: config.repeat_same_error}
+    return {
+      pattern: "repeated_error",
+      count: s.same_error_streak,
+      threshold: config.repeat_same_error,
+    }
   }
   if !repair_owns_repeat
     && s.outcome_kind == "ok"
@@ -1472,7 +1515,9 @@ fn __agent_stall_observe_core(
   // Soft progress-report tools (e.g. `agent_progress`) report status without
   // advancing task state, so they are excluded from the real-action stream: a
   // turn whose only call is such a report is treated as no-progress.
-  const substantive_calls = tool_calls.filter({ c -> !contains(SOFT_PROGRESS_TOOLS, __agent_tool_call_name(c)) })
+  const substantive_calls = tool_calls.filter(
+    { c -> !contains(SOFT_PROGRESS_TOOLS, __agent_tool_call_name(c)) },
+  )
   if len(substantive_calls) == 0 {
     // No substantive tool call this turn — either none at all, or only soft
     // progress reports. With visible text or a progress report, that is a
@@ -1521,7 +1566,13 @@ fn __agent_stall_observe_core(
         config,
         trip.threshold,
       )
-      const emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
+      const emitted = __agent_stall_maybe_emit(
+        session_id,
+        warning,
+        config,
+        next_state,
+        defer_feedback,
+      )
       next_state = emitted.state
       if emitted_warning == nil {
         emitted_warning = warning
@@ -1588,7 +1639,9 @@ fn __agent_stall_eval_remediation(state: AgentStallState, signature: string, raw
     }
   }
   throw "agent_loop: stall_diagnostics.remediation_delivered callback must return a bool, an int cumulative count, or nil; got "
-    + type_of(raw)
+    + type_of(
+    raw,
+  )
 }
 
 fn __agent_stall_apply_repair(
@@ -1616,8 +1669,12 @@ fn __agent_stall_apply_repair(
   const folded = __agent_stall_fold_diagnostic(observation.state, prev_dispatch, turn_made_edit)
   const hard_cap_due = config.no_net_progress_extend_guard
     && folded.last_diagnostic_class == "fail"
-    && folded.failing_verify_turns >= config.no_net_progress_hard_cap_after
-    && observation.state.failing_verify_turns < config.no_net_progress_hard_cap_after
+    && folded.failing_verify_turns
+    >= config
+    .no_net_progress_hard_cap_after
+    && observation.state.failing_verify_turns
+    < config
+    .no_net_progress_hard_cap_after
   if hard_cap_due {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
     return __agent_stall_emit_diagnostic_trip(
@@ -1639,8 +1696,12 @@ fn __agent_stall_apply_repair(
   // stop. Inert unless the caller sets `turns_since_clean_verify` (nil = off), so today's
   // behavior is byte-identical.
   const clean_floor_due = config.turns_since_clean_verify != nil
-    && folded.turns_since_clean_verify >= config.turns_since_clean_verify
-    && observation.state.turns_since_clean_verify < config.turns_since_clean_verify
+    && folded.turns_since_clean_verify
+    >= config
+    .turns_since_clean_verify
+    && observation.state.turns_since_clean_verify
+    < config
+    .turns_since_clean_verify
   if clean_floor_due {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
     return __agent_stall_emit_diagnostic_trip(
@@ -1666,9 +1727,12 @@ fn __agent_stall_apply_repair(
   // callback is invoked ONLY inside the guard below, so an absent callback (or a
   // turn that does not otherwise qualify) leaves behavior byte-identical. Fires
   // regardless of `repair_aware` (it keys on the fact, not the repair nudge).
-  const delivered_streak_advanced = folded.same_diagnostic_streak > observation.state.same_diagnostic_streak
+  const delivered_streak_advanced = folded.same_diagnostic_streak
+    > observation.state
+    .same_diagnostic_streak
   const delivered_candidate = config.remediation_delivered != nil
-    && folded.last_diagnostic_class == "fail"
+    && folded.last_diagnostic_class
+    == "fail"
     && folded.same_diagnostic_streak >= STALL_DELIVERED_FIX_AFTER
     && delivered_streak_advanced
     && observation.warning == nil
@@ -1679,11 +1743,22 @@ fn __agent_stall_apply_repair(
   let current = folded
   if delivered_candidate {
     const raw_delivered = config.remediation_delivered(
-      {prev_dispatch: prev_dispatch, session_id: session_id, signature: folded.last_diagnostic_signature},
+      {
+        prev_dispatch: prev_dispatch,
+        session_id: session_id,
+        signature: folded.last_diagnostic_signature,
+      },
     )
-    const evaluated = __agent_stall_eval_remediation(folded, folded.last_diagnostic_signature, raw_delivered)
+    const evaluated = __agent_stall_eval_remediation(
+      folded,
+      folded.last_diagnostic_signature,
+      raw_delivered,
+    )
     current = folded
-      + {remediation_delivered_count: evaluated.count, remediation_delivered_signature: evaluated.signature}
+      + {
+      remediation_delivered_count: evaluated.count,
+      remediation_delivered_signature: evaluated.signature,
+    }
     if evaluated.delivered {
       const tripped = __agent_stall_register_trip(current, config)
       return __agent_stall_emit_diagnostic_trip(
@@ -1873,7 +1948,12 @@ pub fn agent_stall_observe_tool_calls(
   if observation.config.progress_signal != nil {
     resolved = resolved
       + {
-      state: __agent_stall_fold_verify_state(resolved.state, observation.config, payload, turn_made_edit),
+      state: __agent_stall_fold_verify_state(
+        resolved.state,
+        observation.config,
+        payload,
+        turn_made_edit,
+      ),
     }
   }
   return __agent_stall_observe_monologue_actuation(resolved)
@@ -2000,20 +2080,28 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
     const streak = stall_state.same_diagnostic_streak
     const long_stall = predicates.long_stall
       && streak >= config.verify_state_streak
-      && stall_state.verify_turns_since_advance >= config.verify_state_stall_turns
+      && stall_state.verify_turns_since_advance
+      >= config
+      .verify_state_stall_turns
     // Hard-recurrence trips on EITHER a consecutive same-diagnostic streak OR the
     // TOTAL (non-consecutive) occurrences of the CURRENT failure signature across
     // the run. The total counter catches interleaved churn (the same dead API /
     // error re-proposed N times with off-signature failures churning between, so
     // the consecutive streak keeps resetting and never trips). Both predicates
     // share `verify_state_recurrence_hard`.
-    const sig_total = to_int((stall_state.verify_signature_counts ?? {})[stall_state.last_diagnostic_signature] ?? 0)
+    const sig_total = to_int(
+      (stall_state.verify_signature_counts ?? {})[stall_state.last_diagnostic_signature] ?? 0,
+    )
       ?? 0
     const hard_recurrence = predicates.hard_recurrence
       && (streak >= config.verify_state_recurrence_hard
-      || sig_total >= config.verify_state_recurrence_hard)
+      || sig_total
+      >= config
+      .verify_state_recurrence_hard)
     const write_axis = predicates.write_axis
-      && stall_state.verify_turns_since_advance >= config.no_verifier_progress_limit
+      && stall_state.verify_turns_since_advance
+      >= config
+      .no_verifier_progress_limit
       && stall_state.verify_wrote_since_advance
     return long_stall || hard_recurrence || write_axis
   }
@@ -2024,7 +2112,9 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
     return false
   }
   return stall_state.same_diagnostic_streak >= config.no_net_progress_extend_after
-    || stall_state.failing_verify_turns >= config.no_net_progress_hard_cap_after
+    || stall_state
+    .failing_verify_turns
+    >= config.no_net_progress_hard_cap_after
 }
 
 /**
@@ -2053,7 +2143,8 @@ pub fn agent_stall_verified_write_satisfied(raw_config, stall_state: AgentStallS
  */
 pub fn agent_stall_repeated_verified_pass(raw_config, stall_state: AgentStallState) -> bool {
   return agent_stall_verified_write_satisfied(raw_config, stall_state)
-    && stall_state.last_outcome_kind == "ok"
+    && stall_state.last_outcome_kind
+    == "ok"
     && stall_state.same_observation_streak >= 2
 }
 
@@ -2368,7 +2459,10 @@ pub fn token_runaway_post_turn(config: dict) {
   return { payload ->
     const session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
     const totals = agent_session_totals(session_id)
-    const obs = {making_progress: token_runaway_made_progress(payload), tokens: to_float(totals?.input_tokens ?? 0)}
+    const obs = {
+      making_progress: token_runaway_made_progress(payload),
+      tokens: to_float(totals?.input_tokens ?? 0),
+    }
     const decision = token_runaway_decision(config, obs)
     if decision.action != "abort" {
       nil
@@ -2390,7 +2484,9 @@ pub fn token_runaway_post_turn(config: dict) {
       agent_emit_event(session_id, "agent_loop_stall_warning", warning)
       {
         message: "Token-runaway detector: output has grown well past this task's typical size ("
-          + to_string(to_int(obs.tokens))
+          + to_string(
+          to_int(obs.tokens),
+        )
           + " input tokens vs a ~"
           + to_string(to_int(decision.cap))
           + " ceiling) without landing verified progress. Stop and report the blocker instead of generating more.",

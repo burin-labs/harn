@@ -9,7 +9,12 @@ pipeline default() {
       const r = llm_call(
         "Grade this",
         nil,
-        {provider: "mock", output_schema: GraderOut, output_validation: "error", response_format: "json"},
+        {
+          provider: "mock",
+          output_schema: GraderOut,
+          output_validation: "error",
+          response_format: "json",
+        },
       )
       const v: "pass" | "fail" = r.data.verdict
       const s: string = r.data.summary

@@ -44,19 +44,35 @@ pipeline default() {
       __io_println(harness.fs.read_text(path) == before)
       const calls = llm_mock_calls()
       __io_println(contains(calls[0].messages[0].content, "Preimage: sha256:"))
-      const applied = fast_apply(path, "Change answer to return 3.", {llm_options: {provider: "mock", model: "mock"}})
+      const applied = fast_apply(
+        path,
+        "Change answer to return 3.",
+        {llm_options: {provider: "mock", model: "mock"}},
+      )
       __io_println(applied.result)
       __io_println(applied.applied)
       __io_println(applied.telemetry.applied)
       __io_println(applied.safe_text_patch.telemetry.applied)
       __io_println(contains(harness.fs.read_text(path), "    3"))
       const py_path = write_fixture(root, "calc.py", "def answer():\n    return 1\n")
-      const py = fast_apply(py_path, "Change answer to return 4.", {llm_options: {provider: "mock", model: "mock"}})
+      const py = fast_apply(
+        py_path,
+        "Change answer to return 4.",
+        {llm_options: {provider: "mock", model: "mock"}},
+      )
       __io_println(py.result)
       __io_println(py.telemetry.apply_path)
       __io_println(contains(harness.fs.read_text(py_path), "return 4"))
-      const ts_path = write_fixture(root, "widget.ts", "export function answer(): number {\n  return 1;\n}\n")
-      const ts = fast_apply(ts_path, "Change answer to return 5.", {llm_options: {provider: "mock", model: "mock"}})
+      const ts_path = write_fixture(
+        root,
+        "widget.ts",
+        "export function answer(): number {\n  return 1;\n}\n",
+      )
+      const ts = fast_apply(
+        ts_path,
+        "Change answer to return 5.",
+        {llm_options: {provider: "mock", model: "mock"}},
+      )
       __io_println(ts.result)
       __io_println(ts.telemetry.apply_path)
       __io_println(contains(harness.fs.read_text(ts_path), "return 5"))

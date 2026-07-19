@@ -56,7 +56,9 @@ fn __render_harn_toml(package_name: string, description: string, harn_range: str
   const pkg = __toml_string_literal(package_name)
   const desc = __toml_string_literal(description)
   const repo = __toml_string_literal("https://github.com/OWNER/" + package_name)
-  const prov = __toml_string_literal("https://github.com/OWNER/" + package_name + "/releases/tag/v0.1.0")
+  const prov = __toml_string_literal(
+    "https://github.com/OWNER/" + package_name + "/releases/tag/v0.1.0",
+  )
   return "[package]\n"
     + "name = "
     + pkg

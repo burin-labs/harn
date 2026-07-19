@@ -31,7 +31,13 @@ pub type InvalidBaselineCount = {
 
 pub type BaselineCount = ValidBaselineCount | InvalidBaselineCount
 
-pub type SourceLengthFindingKind = "malformed_baseline" | "orphan_baseline" | "invalid_baseline" | "obsolete_baseline" | "new_oversized_source" | "growth" | "stale_baseline"
+pub type SourceLengthFindingKind = "malformed_baseline" \
+  | "orphan_baseline" \
+  | "invalid_baseline" \
+  | "obsolete_baseline" \
+  | "new_oversized_source" \
+  | "growth" \
+  | "stale_baseline"
 
 pub type SourceLengthFinding = {
   kind: SourceLengthFindingKind,
@@ -180,7 +186,8 @@ pub fn source_files(root: string = "") -> list<string> {
   } else {
     path_normalize(root)
   }
-  let paths = files_below(resolved_root, "", ".rs").filter({ path -> !is_generated_source(path) }).to_list()
+  let paths = files_below(resolved_root, "", ".rs").filter({ path -> !is_generated_source(path) })
+    .to_list()
   for path in files_below(resolved_root, "crates/harn-stdlib/src/stdlib", ".harn") {
     paths = paths.push(path)
   }
@@ -388,7 +395,9 @@ pub fn plan_baseline_update(
         )
       }
     } else if baseline != nil {
-      edits = edits.push({kind: "delete", shard_path: baseline.shard_path, source_path: source.path})
+      edits = edits.push(
+        {kind: "delete", shard_path: baseline.shard_path, source_path: source.path},
+      )
     }
   }
   for baseline in baselines {
@@ -501,7 +510,10 @@ fn main(harness: Harness) {
     path_normalize(to_string(parsed.root))
   }
   if parsed?.update ?? false {
-    const edits = plan_baseline_update(source_inventory(resolved_root), baseline_inventory(resolved_root))
+    const edits = plan_baseline_update(
+      source_inventory(resolved_root),
+      baseline_inventory(resolved_root),
+    )
     apply_baseline_edits(resolved_root, edits)
     harness.stdio.println("updated ${edits.count} source file-length baseline shard(s)")
   }

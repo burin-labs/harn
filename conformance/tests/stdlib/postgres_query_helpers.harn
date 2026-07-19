@@ -92,7 +92,10 @@ LIMIT {limit}
   __io_println(rows[0].payload.ok)
   const result = exec(db, update_query)
   __io_println(result.rows_affected)
-  const named_rows = run(db, named("list_receipts_named", "many", list_query.sql, list_query.params))
+  const named_rows = run(
+    db,
+    named("list_receipts_named", "many", list_query.sql, list_query.params),
+  )
   __io_println(named_rows[0].created_at)
   const calls = pg_mock_calls(db)
   __io_println(len(calls))
@@ -104,10 +107,16 @@ LIMIT {limit}
   const brace_query = sql("SELECT '{{}}' AS empty, {value} AS value", {value: "ok"})
   __io_println(brace_query.sql)
   __io_println(brace_query.params?.[0])
-  const path_query = sql("SELECT * FROM {table}", {table: ident_path(["tenant data", "receipts\"live"])})
+  const path_query = sql(
+    "SELECT * FROM {table}",
+    {table: ident_path(["tenant data", "receipts\"live"])},
+  )
   __io_println(path_query.sql)
   __io_println(quote_identifier("select"))
-  const ordinary_dict = sql("SELECT {payload}", {payload: {_type: "std/postgres/query.sql_fragment.v1", sql: "danger"}})
+  const ordinary_dict = sql(
+    "SELECT {payload}",
+    {payload: {_type: "std/postgres/query.sql_fragment.v1", sql: "danger"}},
+  )
   __io_println(ordinary_dict.sql)
   __io_println(ordinary_dict.params?.[0]?.sql)
   const unsafe_ident = try {
@@ -202,7 +211,10 @@ LIMIT {limit}
       {key: "owner's note", value: ident_path(["receipts", "note"])},
       {
         key: "created_at",
-        value: sql_fragment("to_json({created_at})#>>'{{}}'", {created_at: ident_path(["receipts", "created_at"])}),
+        value: sql_fragment(
+          "to_json({created_at})#>>'{{}}'",
+          {created_at: ident_path(["receipts", "created_at"])},
+        ),
       },
     ],
   )
@@ -213,7 +225,10 @@ LIMIT {limit}
           sql_fragment("{tenant} IS NULL", {tenant: ident_path(["receipts", "tenant_id"])}),
           sql_fragment(
             "{tenant} = {owner}",
-            {tenant: ident_path(["receipts", "tenant_id"]), owner: ident_path(["receipts", "owner_tenant_id"])},
+            {
+              tenant: ident_path(["receipts", "tenant_id"]),
+              owner: ident_path(["receipts", "owner_tenant_id"]),
+            },
           ),
         ],
       ),

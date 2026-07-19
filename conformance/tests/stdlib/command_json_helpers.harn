@@ -23,9 +23,15 @@ fn no_newline_echo(text) {
 }
 
 pipeline default() {
-  const direct = command_json(no_newline_echo("{\"direct\":true}"), {capture: {max_inline_bytes: 100}})
+  const direct = command_json(
+    no_newline_echo("{\"direct\":true}"),
+    {capture: {max_inline_bytes: 100}},
+  )
   assert_eq(direct.direct, true)
-  const parsed = command_json(["fake-json"], {runner: json_runner("{\"name\":\"harn\",\"count\":2}")})
+  const parsed = command_json(
+    ["fake-json"],
+    {runner: json_runner("{\"name\":\"harn\",\"count\":2}")},
+  )
   assert_eq(parsed.name, "harn")
   assert_eq(parsed.count, 2)
   const empty = command_json(["empty"], {runner: json_runner(""), allow_empty: true})
@@ -95,7 +101,10 @@ pipeline default() {
   assert_eq(spec_fallback.value.payload, 42)
   const exhausted = command_try(
     [
-      {source: "a", run: fn() { return {ok: false, status: "missing", error: {category: "missing"}} }},
+      {
+        source: "a",
+        run: fn() { return {ok: false, status: "missing", error: {category: "missing"}} },
+      },
       {
         source: "b",
         run: fn() {

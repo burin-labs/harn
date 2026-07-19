@@ -65,7 +65,10 @@ fn run_with_caller(category, cap, calls) {
 
 pipeline default() {
   const one_call = [{id: "c1", name: "echo", arguments: {msg: "hi"}}]
-  const two_calls = [{id: "c1", name: "echo", arguments: {msg: "hi"}}, {id: "c2", name: "echo", arguments: {msg: "yo"}}]
+  const two_calls = [
+    {id: "c1", name: "echo", arguments: {msg: "hi"}},
+    {id: "c2", name: "echo", arguments: {msg: "yo"}},
+  ]
   // Sequential dispatch (cap=1): an internal bug aborts the loop.
   const seq = run_with_caller("internal", 1, one_call)
   __io_println("seq.aborted=" + to_string(seq.aborted))

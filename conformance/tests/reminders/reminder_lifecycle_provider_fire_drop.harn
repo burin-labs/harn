@@ -7,15 +7,17 @@ pipeline main() {
     {
       id: "lifecycle_provider",
       subscribes_to: ["session_idle"],
-      evaluate: { _ctx -> return {
-        reminder: {
-          body: "provider reminder",
-          tags: ["provider"],
-          dedupe_key: "provider-slot",
-          ttl_turns: 2,
-          role_hint: "developer",
-        },
-      } },
+      evaluate: { _ctx ->
+        return {
+          reminder: {
+            body: "provider reminder",
+            tags: ["provider"],
+            dedupe_key: "provider-slot",
+            ttl_turns: 2,
+            role_hint: "developer",
+          },
+        }
+      },
     },
   )
   const topic = "transcript.reminder.lifecycle"
@@ -84,7 +86,9 @@ pipeline main() {
         contains(json_stringify(e), "transcript")
       }
       const validation_did_not_fire = event_log.latest(topic) == validation_cursor
-      const stream = event_log.subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
+      const stream = event_log.subscribe(
+        {topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."},
+      )
       const evaluated = stream.next().value
       const injected = stream.next().value
       const fired = stream.next().value

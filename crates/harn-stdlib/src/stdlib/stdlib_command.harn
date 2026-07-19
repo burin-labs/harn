@@ -96,7 +96,10 @@ fn __command_apply_option_defaults(req, options) {
 
 fn __command_request(spec, options) {
   if type_of(spec) == "list" {
-    return __command_apply_option_defaults({mode: "argv", argv: __command_require_argv(spec)}, options)
+    return __command_apply_option_defaults(
+      {mode: "argv", argv: __command_require_argv(spec)},
+      options,
+    )
   }
   if type_of(spec) != "dict" {
     throw "command_run: spec must be an argv list or command spec dict"
@@ -219,7 +222,9 @@ fn __command_wait_request(locator, options) {
  */
 pub fn command_wait(locator, options = nil) -> dict {
   const _ = hostlib_enable("tools:deterministic")
-  return __command_normalize_result(hostlib_tools_wait_command(__command_wait_request(locator, options)))
+  return __command_normalize_result(
+    hostlib_tools_wait_command(__command_wait_request(locator, options)),
+  )
 }
 
 /**
@@ -310,7 +315,10 @@ fn __command_stream_flush(locator, source: string, offset: int, length: int, opt
 
 fn __command_stream_read_inline(locator, source: string, options) -> string {
   const opts = __command_options(options)
-  const length = __command_positive_int(opts?.max_inline_bytes ?? opts?.capture?.max_inline_bytes, 50000)
+  const length = __command_positive_int(
+    opts?.max_inline_bytes ?? opts?.capture?.max_inline_bytes,
+    50000,
+  )
   const read = try {
     command_output_range(locator, {source: source, offset: 0, length: length})
   } catch (_e) {
@@ -464,7 +472,10 @@ pub fn command_output_range(locator, options = nil) -> dict {
   const opts = __command_options(options)
   const _ = hostlib_enable("tools:deterministic")
   const req = __command_locator(locator, opts)
-    + {offset: opts?.offset ?? 0, length: opts?.length ?? 65536}
+    + {
+    offset: opts?.offset ?? 0,
+    length: opts?.length ?? 65536,
+  }
   const result = hostlib_tools_read_command_output(req)
   return {
     content: result?.content ?? "",
@@ -752,7 +763,11 @@ pub fn command_step(name: string, spec, options = nil) -> dict {
     step = step + {attempts: attempts}
     final_step = step
     if step.success || attempt_number >= max_attempts
-      || !__command_should_retry(policy, step, attempt_number) {
+      || !__command_should_retry(
+      policy,
+      step,
+      attempt_number,
+    ) {
       return final_step
     }
     __command_before_retry(policy, step, attempt_number)
@@ -950,7 +965,9 @@ pub fn shell_command_from_value(value) -> string {
   }
   if type_of(value) == "dict" {
     return __command_shell_command_from_field(value?.argv)
-      ?? __command_shell_command_from_field(value?.command)
+      ?? __command_shell_command_from_field(
+      value?.command,
+    )
       ?? __command_shell_command_from_field(value?.cmd)
       ?? ""
   }
@@ -1073,7 +1090,11 @@ fn __command_json_parse_error(label, stream, text, parsed, step, options) {
     label,
     label + " produced invalid JSON on " + stream + ": " + reason,
     step,
-    {source: stream, reason: reason, text_tail: truncate_text(text, opts?.parse_error_chars ?? 1000)},
+    {
+      source: stream,
+      reason: reason,
+      text_tail: truncate_text(text, opts?.parse_error_chars ?? 1000),
+    },
   )
 }
 
@@ -1101,7 +1122,14 @@ fn __command_json_annotate_step(step, spec, options) {
   }
   const error = __command_json_parse_error(label, stream, text, parsed, step, opts)
   return step
-    + {success: false, ok: false, status: "invalid_json", json: nil, parse_error: error, error: error}
+    + {
+    success: false,
+    ok: false,
+    status: "invalid_json",
+    json: nil,
+    parse_error: error,
+    error: error,
+  }
 }
 
 fn __command_json_record(step) {
@@ -1110,7 +1138,11 @@ fn __command_json_record(step) {
   }
   return {
     ok: false,
-    error: step?.error ?? step?.parse_error ?? __command_json_failure_error(step?.name ?? "command", step),
+    error: step?.error ?? step?.parse_error
+      ?? __command_json_failure_error(
+      step?.name ?? "command",
+      step,
+    ),
     step: step,
   }
 }
@@ -1222,7 +1254,10 @@ fn __command_try_raw(attempt, options) {
     return attempt.run()
   }
   if attempt?.spec != nil {
-    return {ok: true, value: command_json(attempt.spec, __command_try_command_options(attempt, options))}
+    return {
+      ok: true,
+      value: command_json(attempt.spec, __command_try_command_options(attempt, options)),
+    }
   }
   if attempt?.argv != nil || attempt?.command != nil {
     return {ok: true, value: command_json(attempt, __command_try_command_options(attempt, options))}
@@ -1310,7 +1345,13 @@ fn __command_try_attempt(attempt, index, total, options) {
       error: {category: "normalize_failed", source: source, message: reason},
     }
   }
-  return {ok: true, source: source, fallback_index: index, fallback_total: total, value: unwrap(normalized)}
+  return {
+    ok: true,
+    source: source,
+    fallback_index: index,
+    fallback_total: total,
+    value: unwrap(normalized),
+  }
 }
 
 fn __command_try_attempt_record(attempt) {
@@ -1372,7 +1413,15 @@ pub fn command_try(attempts, options = nil) -> dict {
  */
 pub fn command_result_ok(stdout: string = "", extra = nil) -> dict {
   const base = extra ?? {}
-  return base + {success: true, ok: true, status: "completed", exit_code: 0, stdout: stdout, stderr: ""}
+  return base
+    + {
+    success: true,
+    ok: true,
+    status: "completed",
+    exit_code: 0,
+    stdout: stdout,
+    stderr: "",
+  }
 }
 
 /**

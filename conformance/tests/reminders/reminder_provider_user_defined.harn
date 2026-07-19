@@ -9,9 +9,16 @@ pipeline main() {
     {
       id: "custom_echo",
       subscribes_to: ["session_idle"],
-      evaluate: { ctx -> return {
-        reminder: {body: "custom " + ctx.payload.note, tags: ["custom"], dedupe_key: "custom_echo", ttl_turns: 2},
-      } },
+      evaluate: { ctx ->
+        return {
+          reminder: {
+            body: "custom " + ctx.payload.note,
+            tags: ["custom"],
+            dedupe_key: "custom_echo",
+            ttl_turns: 2,
+          },
+        }
+      },
     },
   )
   const session = agent_session_open("reminder-provider-user-defined")

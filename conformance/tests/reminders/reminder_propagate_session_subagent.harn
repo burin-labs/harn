@@ -7,10 +7,12 @@ fn child_tools(grandchild_session) {
     "delegate_grandchild",
     "Run a grandchild sub-agent",
     {
-      handler: { _args -> sub_agent_run(
-        "Grandchild task.",
-        {provider: "mock", session_id: grandchild_session, max_iterations: 1, done_judge: nil},
-      ) },
+      handler: { _args ->
+        sub_agent_run(
+          "Grandchild task.",
+          {provider: "mock", session_id: grandchild_session, max_iterations: 1, done_judge: nil},
+        )
+      },
       parameters: {},
       returns: {type: "object"},
     },
@@ -25,17 +27,19 @@ fn parent_tools(child_session, grandchild_session) {
     "delegate_child",
     "Run a child sub-agent",
     {
-      handler: { _args -> sub_agent_run(
-        "Child task.",
-        {
-          provider: "mock",
-          session_id: child_session,
-          tools: child_tools(grandchild_session),
-          tool_format: "native",
-          max_iterations: 2,
-          done_judge: nil,
-        },
-      ) },
+      handler: { _args ->
+        sub_agent_run(
+          "Child task.",
+          {
+            provider: "mock",
+            session_id: child_session,
+            tools: child_tools(grandchild_session),
+            tool_format: "native",
+            max_iterations: 2,
+            done_judge: nil,
+          },
+        )
+      },
       parameters: {},
       returns: {type: "object"},
     },
@@ -55,7 +59,12 @@ pipeline main() {
   agent_session_inject(
     parent,
     transcript_reminder_event(
-      {body: "session reminder", tags: ["session"], dedupe_key: "session-key", propagate: "session"},
+      {
+        body: "session reminder",
+        tags: ["session"],
+        dedupe_key: "session-key",
+        propagate: "session",
+      },
     ),
   )
   with_llm_script(
@@ -79,8 +88,14 @@ pipeline main() {
           done_judge: nil,
         },
       )
-      const child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
-      const grandchild_reminders = transcript_events_by_kind(agent_session_snapshot(grandchild), "system_reminder")
+      const child_reminders = transcript_events_by_kind(
+        agent_session_snapshot(child),
+        "system_reminder",
+      )
+      const grandchild_reminders = transcript_events_by_kind(
+        agent_session_snapshot(grandchild),
+        "system_reminder",
+      )
       __io_println(len(child_reminders))
       __io_println(child_reminders[0].reminder.body)
       __io_println(child_reminders[0].reminder.source)

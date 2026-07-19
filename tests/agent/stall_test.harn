@@ -174,7 +174,12 @@ pipeline test_text_only_turn_without_parse_errors_still_trips(task) {
  * substantive non-edit call ("run") plus a synthetic `prev_dispatch` (the
  * PRIOR turn's verification result) and the prior turn's `turn_made_edit`.
  */
-const REPAIR_CONFIG = {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 3, post_edit_reverify: true}
+const REPAIR_CONFIG = {
+  enabled: true,
+  repair_aware: true,
+  stuck_same_diagnostic_after: 3,
+  post_edit_reverify: true,
+}
 
 fn _run_call() {
   return [{name: "run", arguments: {cmd: "test"}}]
@@ -239,7 +244,11 @@ pipeline test_fold_same_failure_no_edit_increments_streak(task) {
 }
 
 pipeline test_fold_location_shift_uses_verification_delta_normalization(task) {
-  const o1 = _fold(agent_stall_initial_state(), _fail_dispatch("src/a.rs:10:2: error E0425: missing foo"), false)
+  const o1 = _fold(
+    agent_stall_initial_state(),
+    _fail_dispatch("src/a.rs:10:2: error E0425: missing foo"),
+    false,
+  )
   const o2 = _fold(o1.state, _fail_dispatch("src/a.rs:99:7: error E0425: missing foo"), false)
   assert(o2.state.same_diagnostic_streak == 2)
   assert(o2.state.last_diagnostic_delta_status == "unchanged")
@@ -358,7 +367,11 @@ pipeline test_repair_diagnostics_flat_fields_override_nested(task) {
       repair_aware: false,
       post_edit_reverify: false,
       reserved_terminal_verify: false,
-      repair_diagnostics: {repair_aware: true, post_edit_reverify: true, reserved_terminal_verify: true},
+      repair_diagnostics: {
+        repair_aware: true,
+        post_edit_reverify: true,
+        reserved_terminal_verify: true,
+      },
     },
   )
   assert(!parsed.repair_aware)
@@ -778,7 +791,12 @@ fn _observe_noprog_signal(state, cfg, text, payload) {
 pipeline test_action_signal_trips_on_single_flailing_action(task) {
   // A truthy action_signal callback trips IMMEDIATELY on a single turn (no streak)
   // with the distinct `flailing_action` pattern, riding the existing warning event.
-  const cfg = {enabled: true, action_signal: { _p -> true }, post_edit_reverify: false, repair_aware: false}
+  const cfg = {
+    enabled: true,
+    action_signal: { _p -> true },
+    post_edit_reverify: false,
+    repair_aware: false,
+  }
   const o = _observe_signal(agent_stall_initial_state(), cfg, {any: "payload"})
   assert(o.warning != nil)
   assert(o.warning.pattern == "flailing_action")
@@ -909,7 +927,13 @@ pipeline test_action_signal_does_not_double_fire_when_core_tripped(task) {
 pipeline test_action_signal_validated_loudly_at_config_time(task) {
   // A mistyped action_signal fails loudly at config parse time, like the sibling seams.
   assert_throws(
-    { -> return _observe_signal(agent_stall_initial_state(), {enabled: true, action_signal: "not-a-closure"}, {}) },
+    { ->
+      return _observe_signal(
+        agent_stall_initial_state(),
+        {enabled: true, action_signal: "not-a-closure"},
+        {},
+      )
+    },
     "non-closure action_signal must throw",
   )
 }
@@ -1023,21 +1047,25 @@ pipeline test_turns_since_clean_verify_floor_unset_is_inert(task) {
 pipeline test_turns_since_clean_verify_floor_validated_loudly(task) {
   // A non-positive / mistyped floor fails loudly at config time.
   assert_throws(
-    { -> return _fold_floor(
-      agent_stall_initial_state(),
-      FLOOR_CONFIG + {turns_since_clean_verify: 0},
-      _fail_dispatch("boom"),
-      false,
-    ) },
+    { ->
+      return _fold_floor(
+        agent_stall_initial_state(),
+        FLOOR_CONFIG + {turns_since_clean_verify: 0},
+        _fail_dispatch("boom"),
+        false,
+      )
+    },
     "non-positive turns_since_clean_verify must throw",
   )
   assert_throws(
-    { -> return _fold_floor(
-      agent_stall_initial_state(),
-      FLOOR_CONFIG + {turns_since_clean_verify: "many"},
-      _fail_dispatch("boom"),
-      false,
-    ) },
+    { ->
+      return _fold_floor(
+        agent_stall_initial_state(),
+        FLOOR_CONFIG + {turns_since_clean_verify: "many"},
+        _fail_dispatch("boom"),
+        false,
+      )
+    },
     "non-int turns_since_clean_verify must throw",
   )
 }
@@ -1055,7 +1083,18 @@ fn _parity_drive(cfg) {
     [_fail_dispatch("boom"), false],
   ]
   for step in seq {
-    const o = agent_stall_observe_tool_calls("parity", _run_call(), 1, cfg, s, true, step[0], "", false, step[1])
+    const o = agent_stall_observe_tool_calls(
+      "parity",
+      _run_call(),
+      1,
+      cfg,
+      s,
+      true,
+      step[0],
+      "",
+      false,
+      step[1],
+    )
     s = o.state
     out = out.push(
       {
@@ -1076,7 +1115,12 @@ pipeline test_new_seams_unset_are_byte_identical(task) {
   // OFF value (nil) — and assert the decision stream is byte-for-byte equal AND matches
   // the known pre-seam outcome (a single stuck_same_diagnostic trip at streak 3). If a
   // future edit perturbs default behavior, this equality/known-outcome pair breaks.
-  const base = {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 3, post_edit_reverify: true}
+  const base = {
+    enabled: true,
+    repair_aware: true,
+    stuck_same_diagnostic_after: 3,
+    post_edit_reverify: true,
+  }
   const with_off = base + {action_signal: nil, turns_since_clean_verify: nil}
   const a = _parity_drive(base)
   const b = _parity_drive(with_off)
@@ -1098,7 +1142,13 @@ pipeline test_new_seams_unset_are_byte_identical(task) {
   // ALLOWLIST leak-guard: the projection's TOP-LEVEL keys must be a subset of the
   // known set, so any FUTURE internal state field added to the projection fails
   // here by default (the denylist above only catches fields named ahead of time).
-  const known_projection_keys = ["current_failure", "repeated_tool_calls", "stall_warnings", "status", "suspected_loop"]
+  const known_projection_keys = [
+    "current_failure",
+    "repeated_tool_calls",
+    "stall_warnings",
+    "status",
+    "suspected_loop",
+  ]
   for key in keys(applied) {
     assert(contains(known_projection_keys, key), "unexpected projection key leaked: " + key)
   }
@@ -1176,16 +1226,21 @@ pipeline test_no_net_progress_disarming_other_predicates_keeps_trip(task) {
   // is armed by this evidence anyway) leaves the hard-recurrence trip intact.
   const cfg = PRED_CONFIG + {no_net_progress_predicates: {long_stall: false, write_axis: false}}
   const s = _drive_three_recurrences(cfg)
-  assert(agent_stall_no_net_progress(cfg, s), "hard-recurrence still trips with the others disarmed")
+  assert(
+    agent_stall_no_net_progress(cfg, s),
+    "hard-recurrence still trips with the others disarmed",
+  )
 }
 
 pipeline test_no_net_progress_predicates_unknown_key_throws(task) {
   // An unknown predicate key fails loudly at config parse time.
   assert_throws(
-    { -> return agent_stall_no_net_progress(
-      PRED_CONFIG + {no_net_progress_predicates: {bogus_predicate: true}},
-      agent_stall_initial_state(),
-    ) },
+    { ->
+      return agent_stall_no_net_progress(
+        PRED_CONFIG + {no_net_progress_predicates: {bogus_predicate: true}},
+        agent_stall_initial_state(),
+      )
+    },
     "unknown predicate key must throw",
   )
 }
@@ -1295,11 +1350,13 @@ pipeline test_remediation_bad_return_throws(task) {
   // A callback returning neither bool, int, nor nil fails loudly.
   const cb = { _ctx -> "not-a-count" }
   assert_throws(
-    { -> return _fold_remediation(
-      _fold_remediation(agent_stall_initial_state(), cb, _fail_dispatch("boom")).state,
-      cb,
-      _fail_dispatch("boom"),
-    ) },
+    { ->
+      return _fold_remediation(
+        _fold_remediation(agent_stall_initial_state(), cb, _fail_dispatch("boom")).state,
+        cb,
+        _fail_dispatch("boom"),
+      )
+    },
     "non-bool/int/nil remediation return must throw",
   )
 }

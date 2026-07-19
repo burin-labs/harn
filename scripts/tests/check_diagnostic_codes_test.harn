@@ -197,7 +197,8 @@ pipeline test_format_str_list_python_repr(task) {
 @test
 pipeline test_check_registry_text_happy_path(task) {
   // Two well-formed entries across two categories → no errors, both variants.
-  const text = "  TypeMismatch, \"HARN-TYP-001\", Typ, \"a\";\n  ParseFail, \"HARN-PAR-001\", Par, \"b\";"
+  const text =
+    "  TypeMismatch, \"HARN-TYP-001\", Typ, \"a\";\n  ParseFail, \"HARN-PAR-001\", Par, \"b\";"
   const reg = check_registry_text(text)
   // Fewer than 40 entries → the count error, but not malformed/category errors.
   assert_eq(reg.variants.contains("TypeMismatch"), true)

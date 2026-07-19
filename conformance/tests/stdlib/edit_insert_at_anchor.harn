@@ -21,7 +21,11 @@ pipeline default() {
   )
   harness.fs.mkdir(root)
   // 1) Rust: append a sibling function after `alpha`.
-  const rs_path = write_fixture(root, "rs_lib.rs", "fn alpha() {\n    1\n}\n\nfn gamma() {\n    3\n}\n")
+  const rs_path = write_fixture(
+    root,
+    "rs_lib.rs",
+    "fn alpha() {\n    1\n}\n\nfn gamma() {\n    3\n}\n",
+  )
   const rs_after = edit_insert_at_anchor(
     {
       path: rs_path,
@@ -48,7 +52,8 @@ pipeline default() {
   const ts_before = edit_insert_at_anchor(
     {
       path: ts_path,
-      query: "(import_statement source: (string (string_fragment) @src) (#eq? @src \"./b\")) @anchor",
+      query:
+        "(import_statement source: (string (string_fragment) @src) (#eq? @src \"./b\")) @anchor",
       position: "before",
       content: "import { aa } from \"./aa\";",
     },
@@ -59,11 +64,16 @@ pipeline default() {
   const b_idx = ts_text.index_of("./b\"")
   __io_println(aa_idx >= 0 && b_idx >= 0 && aa_idx < b_idx)
   // 3) Rust: append a new test as last_child of a `mod tests` body.
-  const mod_path = write_fixture(root, "mod_tests.rs", "#[cfg(test)]\nmod tests {\n    #[test]\n    fn one() {}\n}\n")
+  const mod_path = write_fixture(
+    root,
+    "mod_tests.rs",
+    "#[cfg(test)]\nmod tests {\n    #[test]\n    fn one() {}\n}\n",
+  )
   const mod_after = edit_insert_at_anchor(
     {
       path: mod_path,
-      query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
+      query:
+        "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
       position: "last_child",
       content: "#[test]\nfn two() {}",
     },
@@ -109,7 +119,9 @@ pipeline default() {
   __io_println(!broken.applied && broken.result == "syntax_error")
   __io_println(harness.fs.read_text(broken_path) == broken_before)
   // 7) Invalid tree-sitter query surfaces a structured error.
-  const bad_query = edit_insert_at_anchor({path: rs_path, query: "((((", position: "after", content: "fn x() {}"})
+  const bad_query = edit_insert_at_anchor(
+    {path: rs_path, query: "((((", position: "after", content: "fn x() {}"},
+  )
   __io_println(!bad_query.applied && bad_query.result == "invalid_query")
   // 8) Dry-run leaves the file untouched but returns a preview.
   const dry_path = write_fixture(root, "dry.rs", "fn alpha() {}\n")

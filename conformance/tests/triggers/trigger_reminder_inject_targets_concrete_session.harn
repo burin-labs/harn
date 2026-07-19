@@ -12,7 +12,9 @@ pipeline test(task) {
   const target_session = agent_session_open("trigger-reminder-inject-concrete")
   agent_session_reset(target_session)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const trigger_id = "trigger-reminder-inject-concrete-" + unique
   const handle: TriggerHandle = trigger_register(
     {
@@ -47,7 +49,10 @@ pipeline test(task) {
   __io_println(dispatch.result?.status == "injected")
   __io_println(dispatch.result?.target_kind == "concrete")
   __io_println(dispatch.result?.target_session_id == target_session)
-  const reminders = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
+  const reminders = transcript_events_by_kind(
+    agent_session_snapshot(target_session),
+    "system_reminder",
+  )
   __io_println(len(reminders))
   __io_println(reminders[0].reminder.body)
   __io_println(reminders[0].reminder.tags[0])

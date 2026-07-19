@@ -15,7 +15,10 @@ pipeline main() {
     kept,
     {body: "drop me", dedupe_key: "drop", ttl_turns: 2, preserve_on_compact: false},
   ).transcript
-  const compacted = transcript_compact(mixed, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  const compacted = transcript_compact(
+    mixed,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
   __io_println(len(reminders))
   __io_println(reminders[0].reminder.body)

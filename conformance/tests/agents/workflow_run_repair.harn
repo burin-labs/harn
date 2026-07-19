@@ -11,7 +11,9 @@ pipeline default() {
   const token = "GOTOKEN"
   // The finding IS the token the mock must echo back to pass — so a pass on
   // attempt 2 proves the finding reached attempt 2's (feedback-threaded) prompt.
-  const verifier = { r -> return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]} }
+  const verifier = { r ->
+    return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]}
+  }
   const out = workflow_run_repair(
     {task: "Z", model_policy: {provider: "mock"}, verify: verifier, max_attempts: 2},
   )

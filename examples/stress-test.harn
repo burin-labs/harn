@@ -53,7 +53,9 @@ pipeline default(task) {
   const c = "found"
   log("Coalesce: ${a ?? b ?? c}")
   const processed = "  Hello, World!  " |> { s -> s.trim() } |> { s -> s.lowercase() }
-    |> { s -> s.replace("world", "harn") }
+    |> { s ->
+    s.replace("world", "harn")
+  }
   log("Processed: ${processed}")
   log("All stress tests passed!")
 }

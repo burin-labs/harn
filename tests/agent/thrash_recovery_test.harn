@@ -211,7 +211,10 @@ pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(task) {
           max_feedback: 1,
         },
       }
-      const captured = agent_capture_events(session, fn() { return agent_loop("Edit the target file.", nil, opts) })
+      const captured = agent_capture_events(
+        session,
+        fn() { return agent_loop("Edit the target file.", nil, opts) },
+      )
       assert_eq(captured.result.status, "stuck")
       const decisions = events_of(captured.events, "loop_control_decision").filter(
         { event -> event.reason == "thrash_hard_stop" },
@@ -236,7 +239,9 @@ pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(task) {
 
 pipeline test_final_wrapup_tool_call_skip_is_observable(task) {
   let session = "wrapup-tool-skip-" + uuid()
-  let wrapup_counter = shared_cell({scope: "task_group", key: "wrapup-tool-skip-" + session, initial: 0})
+  let wrapup_counter = shared_cell(
+    {scope: "task_group", key: "wrapup-tool-skip-" + session, initial: 0},
+  )
   let mock_llm = { call ->
     if call?.opts?._final_wrapup == true {
       let snap = shared_snapshot(wrapup_counter)

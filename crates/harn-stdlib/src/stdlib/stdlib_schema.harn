@@ -170,10 +170,26 @@ pub fn schema_validator(schema, options = nil) {
     is: fn(value) { return schema_is(value, schema) },
     check: fn(value) { return schema_check(value, schema) },
     parse: fn(value) { return schema_parse(value, schema) },
-    report: fn(value, apply_defaults = default_apply_defaults) { return schema_report(value, schema, apply_defaults) },
-    expect: fn(value, apply_defaults = default_apply_defaults) { return schema_expect(value, schema, apply_defaults) },
-    errors: fn(value, apply_defaults = default_apply_defaults) { return schema_report(value, schema, apply_defaults).errors },
-    issues: fn(value, apply_defaults = default_apply_defaults) { return schema_report(value, schema, apply_defaults).issues },
+    report: fn(value, apply_defaults = default_apply_defaults) { return schema_report(
+      value,
+      schema,
+      apply_defaults,
+    ) },
+    expect: fn(value, apply_defaults = default_apply_defaults) { return schema_expect(
+      value,
+      schema,
+      apply_defaults,
+    ) },
+    errors: fn(value, apply_defaults = default_apply_defaults) { return schema_report(
+      value,
+      schema,
+      apply_defaults,
+    ).errors },
+    issues: fn(value, apply_defaults = default_apply_defaults) { return schema_report(
+      value,
+      schema,
+      apply_defaults,
+    ).issues },
     json_schema: fn() { return schema_to_json_schema(schema) },
     openapi_schema: fn() { return schema_to_openapi_schema(schema) },
   }

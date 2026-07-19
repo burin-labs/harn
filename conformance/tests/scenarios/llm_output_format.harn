@@ -23,7 +23,12 @@ pipeline default() {
       const legacy = llm_call(
         "Return JSON",
         nil,
-        {provider: "mock", response_format: "json", json_schema: schema, output_validation: "error"},
+        {
+          provider: "mock",
+          response_format: "json",
+          json_schema: schema,
+          output_validation: "error",
+        },
       )
       __io_println(legacy.data.answer)
     },
@@ -31,7 +36,11 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"answer\":\"loose\"}")],
     { ->
-      const loose = llm_call("Return JSON", nil, {provider: "mock", output_format: {kind: "json_object"}})
+      const loose = llm_call(
+        "Return JSON",
+        nil,
+        {provider: "mock", output_format: {kind: "json_object"}},
+      )
       __io_println(loose.data.answer)
     },
   )

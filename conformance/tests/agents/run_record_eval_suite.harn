@@ -30,13 +30,23 @@ pipeline main() {
       status: "failed",
       started_at: "1",
       stages: [
-        {id: "stage_1", node_id: "act", kind: "stage", status: "failed", outcome: "error", started_at: "1"},
+        {
+          id: "stage_1",
+          node_id: "act",
+          kind: "stage",
+          status: "failed",
+          outcome: "error",
+          started_at: "1",
+        },
       ],
     },
   )
   const fixture = run_record_fixture(good)
   const suite = run_record_eval_suite(
-    [{run: good, fixture: fixture, path: "good.json"}, {run: bad, fixture: fixture, path: "bad.json"}],
+    [
+      {run: good, fixture: fixture, path: "good.json"},
+      {run: bad, fixture: fixture, path: "bad.json"},
+    ],
   )
   const diff = run_record_diff(good, bad)
   __io_println(!suite?.pass)

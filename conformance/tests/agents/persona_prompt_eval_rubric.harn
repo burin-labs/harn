@@ -19,7 +19,10 @@ const PROVIDERS = [
   },
 ]
 
-const EXPECTED_CASE_FINGERPRINTS = {"cron-case": "case-cron-case", "external-case": "case-external-case"}
+const EXPECTED_CASE_FINGERPRINTS = {
+  "cron-case": "case-cron-case",
+  "external-case": "case-external-case",
+}
 
 const EXPECTED_HARNESS_FINGERPRINT = "harness-v1"
 
@@ -140,7 +143,8 @@ pipeline test_persona_prompt_eval_rubric(_task) {
   )
   const eval_root = path_join(source_dir(), "../../../evals/persona_prompt_compiler")
   const pack = eval_pack_manifest(
-    toml_parse(harness.fs.read_text(path_join(eval_root, "harn.eval.toml"))) + {base_dir: eval_root},
+    toml_parse(harness.fs.read_text(path_join(eval_root, "harn.eval.toml")))
+      + {base_dir: eval_root},
   )
   assert_eq(len(pack.cases), 12)
   assert_eq(len(pack.split["meter-tune"]), 6)
@@ -168,7 +172,10 @@ pipeline test_persona_prompt_eval_rubric(_task) {
   const mismatched = comparison(baseline, trial_rows("treatment", 5, "harness-v2"))
   assert_eq(mismatched.gate_evaluable, false)
   assert_eq(mismatched.verdict, "insufficient_evidence")
-  const mixed_generation = comparison(baseline, treatment + trial_rows("treatment", 5, "harness-v2"))
+  const mixed_generation = comparison(
+    baseline,
+    treatment + trial_rows("treatment", 5, "harness-v2"),
+  )
   assert_eq(mixed_generation.treatment.fingerprint_integrity.complete, true)
   assert_eq(mixed_generation.treatment.fingerprint_integrity.consistent, false)
   assert_eq(mixed_generation.gate_evaluable, false)
@@ -178,7 +185,10 @@ pipeline test_persona_prompt_eval_rubric(_task) {
     treatment.filter({ row -> row.case_name == "cron-case" }).to_list(),
   )
   assert_eq(partial.gate_evaluable, false)
-  const underpowered = comparison(trial_rows("baseline", 0, "harness-v1", 3), trial_rows("treatment", 3, "harness-v1", 3))
+  const underpowered = comparison(
+    trial_rows("baseline", 0, "harness-v1", 3),
+    trial_rows("treatment", 3, "harness-v1", 3),
+  )
   assert_eq(underpowered.gate_evaluable, false)
   const skip_heavy = comparison(
     trial_rows("baseline", 0, EXPECTED_HARNESS_FINGERPRINT, 5, 4),
@@ -208,7 +218,10 @@ pipeline test_persona_prompt_eval_rubric(_task) {
   assert_eq(foreign_cases.baseline.matches_frozen_manifest, false)
   assert_eq(foreign_cases.treatment.matches_frozen_manifest, false)
   assert_eq(foreign_cases.gate_evaluable, false)
-  const stale_harness = comparison(trial_rows("baseline", 0, "stale-harness"), trial_rows("treatment", 5, "stale-harness"))
+  const stale_harness = comparison(
+    trial_rows("baseline", 0, "stale-harness"),
+    trial_rows("treatment", 5, "stale-harness"),
+  )
   assert_eq(stale_harness.baseline.fingerprint_integrity.consistent, true)
   assert_eq(stale_harness.treatment.fingerprint_integrity.consistent, true)
   assert_eq(stale_harness.baseline.matches_frozen_manifest, false)

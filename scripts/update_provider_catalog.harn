@@ -179,7 +179,9 @@ fn __pricing_from_per_token_record(pricing) {
   let pricing_dict = {}
   const input_rate = __rate_per_mtok_from_per_token(pricing?.prompt ?? pricing?.input)
   const output_rate = __rate_per_mtok_from_per_token(pricing?.completion ?? pricing?.output)
-  const cache_read = __rate_per_mtok_from_per_token(pricing?.input_cache_read ?? pricing?.cache_read)
+  const cache_read = __rate_per_mtok_from_per_token(
+    pricing?.input_cache_read ?? pricing?.cache_read,
+  )
   if input_rate != nil {
     pricing_dict = pricing_dict + {input_per_mtok: input_rate}
   }
@@ -296,24 +298,28 @@ fn __keyed_models_spec(
   }
   return {
     key_envs: config.key_envs,
-    run_fn: { env -> key_required_adapter(
-      env,
-      config
-        + {
-        adapter: { adapter_env -> json_api_adapter(
-          adapter_env,
-          {
-            id: config.id,
-            provider: config.provider,
-            source_url: config.source_url,
-            source_owner: config.source_owner,
-            confidence: config.confidence,
-            terms_notes: config.terms_notes,
-            mapper: config.mapper,
+    run_fn: { env ->
+      key_required_adapter(
+        env,
+        config
+          + {
+          adapter: { adapter_env ->
+            json_api_adapter(
+              adapter_env,
+              {
+                id: config.id,
+                provider: config.provider,
+                source_url: config.source_url,
+                source_owner: config.source_owner,
+                confidence: config.confidence,
+                terms_notes: config.terms_notes,
+                mapper: config.mapper,
+              },
+            )
           },
-        ) },
-      },
-    ) },
+        },
+      )
+    },
   }
 }
 
@@ -539,7 +545,8 @@ fn __live_adapter_specs() {
       "https://tokens.flex.ai/api/models",
       ["FLEXAI_API_KEY"],
       {
-        terms_notes: "FlexAI detailed model-discovery endpoint with context, pricing, support, and health metadata.",
+        terms_notes:
+          "FlexAI detailed model-discovery endpoint with context, pricing, support, and health metadata.",
       },
     ),
     __keyed_models_spec(
@@ -555,7 +562,8 @@ fn __live_adapter_specs() {
       "https://api.siliconflow.com/v1/models",
       ["SILICONFLOW_API_KEY"],
       {
-        terms_notes: "SiliconFlow OpenAI-compatible /models endpoint; override SILICONFLOW_BASE_URL for regional endpoints.",
+        terms_notes:
+          "SiliconFlow OpenAI-compatible /models endpoint; override SILICONFLOW_BASE_URL for regional endpoints.",
       },
     ),
     __keyed_models_spec(

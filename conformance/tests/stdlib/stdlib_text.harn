@@ -10,7 +10,9 @@ pipeline default() {
   __io_println(parse_float_or("2.25", 0.0))
   __io_println(parse_float_or("oops", 1.5))
   // extract_paths
-  const paths = extract_paths("Error in /src/main.rs at line 5\nAlso see ./lib/test.go\n// /ignored/comment.txt")
+  const paths = extract_paths(
+    "Error in /src/main.rs at line 5\nAlso see ./lib/test.go\n// /ignored/comment.txt",
+  )
   __io_println(len(paths))
   __io_println(paths[0])
   __io_println(paths[1])
@@ -21,7 +23,8 @@ pipeline default() {
   __io_println(punctuated[0])
   __io_println(punctuated[1])
   // parse_cells
-  const response = "Here is code:\n```go\nfmt.Println(\"hi\")\n```\nAnd a call:\n```call python\nwrite_file(\"test.py\", code)\n```\nDone"
+  const response =
+    "Here is code:\n```go\nfmt.Println(\"hi\")\n```\nAnd a call:\n```call python\nwrite_file(\"test.py\", code)\n```\nDone"
   const cells = parse_cells(response)
   __io_println(len(cells))
   __io_println(cells[0].type)

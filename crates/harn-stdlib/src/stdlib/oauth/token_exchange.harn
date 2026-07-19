@@ -88,7 +88,9 @@ fn __normalize_row(raw) {
     subject_token_types: __normalize_token_types(raw?.subject_token_types ?? []),
     actor_token_types: __normalize_token_types(raw?.actor_token_types ?? []),
     requested_token_types: __normalize_token_types(raw?.requested_token_types ?? []),
-    issued_token_types: __normalize_token_types(raw?.issued_token_types ?? raw?.requested_token_types ?? []),
+    issued_token_types: __normalize_token_types(
+      raw?.issued_token_types ?? raw?.requested_token_types ?? [],
+    ),
     delegation: raw?.delegation ?? true,
     impersonation: raw?.impersonation ?? true,
     provider_metadata_fields: raw?.provider_metadata_fields ?? [],

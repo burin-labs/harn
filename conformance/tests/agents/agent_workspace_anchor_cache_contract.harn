@@ -27,7 +27,9 @@ pipeline default() {
         session_id,
         {
           primary: "/workspace/b",
-          additional_roots: [{path: "/workspace/c", mount_mode: "read_only", mounted_at: "2026-05-24T00:00:01Z"}],
+          additional_roots: [
+            {path: "/workspace/c", mount_mode: "read_only", mounted_at: "2026-05-24T00:00:01Z"},
+          ],
           anchored_at: "2026-05-24T00:00:02Z",
         },
       )
@@ -68,7 +70,8 @@ pipeline default() {
       __io_println(!contains(calls[1].system, "/workspace/b"))
       __io_println(
         first.transcript.metadata.system_prompt.sha256
-          == second.transcript.metadata.system_prompt.sha256,
+          == second.transcript.metadata.system_prompt
+          .sha256,
       )
       __io_println(contains(first_body, "primary: /workspace/a"))
       __io_println(contains(second_body, "primary: /workspace/b"))

@@ -4,7 +4,10 @@ pipeline default() {
   const root = path_join(harness.fs.temp_dir(), "harn-memory-replay-" + uuid())
   host_mock_clear()
   host_mock("memory", "embed", {result: {vector: [0.6, 0.8], dim: 2, model: "fake"}})
-  memory_open("agent/replay", {backend: "vector", embed_dim: 2, embed_model_hint: "fake", root: root})
+  memory_open(
+    "agent/replay",
+    {backend: "vector", embed_dim: 2, embed_model_hint: "fake", root: root},
+  )
   // First round: stores call memory.embed (cache miss → host).
   memory_store(
     "agent/replay",

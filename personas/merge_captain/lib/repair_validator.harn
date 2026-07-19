@@ -19,7 +19,14 @@ import { process_run } from "std/runtime"
 
 /** Required top-level keys on a repair_output document. */
 pub fn required_keys() {
-  return ["diagnosis", "files_changed", "tests_run", "commits_created", "push_result", "residual_risk"]
+  return [
+    "diagnosis",
+    "files_changed",
+    "tests_run",
+    "commits_created",
+    "push_result",
+    "residual_risk",
+  ]
 }
 
 fn _err(messages) {
@@ -86,7 +93,9 @@ pub fn validate_tests(bundle, output) {
       }
     }
     if len(missing) > 0 {
-      return _err(["missing tests: required_verification entries not run: ${json_stringify(missing)}"])
+      return _err(
+        ["missing tests: required_verification entries not run: ${json_stringify(missing)}"],
+      )
     }
   }
   let failed = []
@@ -272,7 +281,10 @@ pub fn harness_validate(bundle, output, options) {
     return _err(["harness cwd contains shell metacharacters"])
   }
   const result = try {
-    process_run(["git", "-C", cwd, "status", "--porcelain"], {timeout_ms: options.timeout_ms ?? 30000})
+    process_run(
+      ["git", "-C", cwd, "status", "--porcelain"],
+      {timeout_ms: options.timeout_ms ?? 30000},
+    )
   }
   if !is_ok(result) {
     return _err(["harness check failed: ${to_string(unwrap_err(result))}"])

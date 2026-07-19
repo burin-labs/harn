@@ -10,7 +10,10 @@ pipeline main() {
           {
             id: "park_until_review",
             name: "agent_await_resumption",
-            arguments: {reason: "waiting on review", conditions: {trigger: {kind: "review.approved", provider: "github"}}},
+            arguments: {
+              reason: "waiting on review",
+              conditions: {trigger: {kind: "review.approved", provider: "github"}},
+            },
           },
         ],
         input_tokens: 7,

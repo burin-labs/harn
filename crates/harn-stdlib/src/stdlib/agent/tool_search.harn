@@ -8,10 +8,22 @@ fn __tool_search_config(value) {
     if !value {
       return nil
     }
-    return {variant: "bm25", mode: "auto", strategy: "bm25", name: "__harn_tool_search", always_loaded: []}
+    return {
+      variant: "bm25",
+      mode: "auto",
+      strategy: "bm25",
+      name: "__harn_tool_search",
+      always_loaded: [],
+    }
   }
   if type_of(value) == "string" {
-    return {variant: value, mode: "auto", strategy: value, name: "__harn_tool_search", always_loaded: []}
+    return {
+      variant: value,
+      mode: "auto",
+      strategy: value,
+      name: "__harn_tool_search",
+      always_loaded: [],
+    }
   }
   if type_of(value) != "dict" {
     return nil
@@ -201,7 +213,9 @@ fn __tool_search_run(args, state) {
   const query = args?.query ?? ""
   const raw_result = if type_of(state.strategy) == "closure" {
     state.strategy(query, state.deferred_registry, {variant: state.variant})
-  } else if type_of(state.strategy) == "dict" && type_of(state.strategy?.handler) == "closure" {
+  } else if type_of(state.strategy) == "dict"
+    && type_of(state.strategy?.handler)
+    == "closure" {
     state.strategy.handler(query, state.deferred_registry, state.strategy)
   } else {
     __host_tool_search_score(
@@ -350,7 +364,8 @@ fn __tool_search_apply_budget(state, names) {
   let promoted = state.promoted
   for name in names {
     if !__tool_search_contains(promoted, name)
-      && __tool_search_find_tool(state.deferred_tools, name) != nil {
+      && __tool_search_find_tool(state.deferred_tools, name)
+      != nil {
       promoted = promoted.push(name)
     }
   }

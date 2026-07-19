@@ -19,7 +19,12 @@ const CARGO_FAMILIES: dict<string, list<string>> = {
     "cranelift-object",
   ],
   wasmtime: ["wasmtime", "wasmtime-wasi"],
-  opentelemetry: ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"],
+  opentelemetry: [
+    "opentelemetry",
+    "opentelemetry_sdk",
+    "opentelemetry-otlp",
+    "tracing-opentelemetry",
+  ],
 }
 
 fn dependabot_schema() {
@@ -124,7 +129,14 @@ pub fn cargo_group_errors(
       const matches = matching_groups(groups, dependency)
       if matches != [family.key] {
         errors = errors
-          + [{kind: "ambiguous_membership", group: family.key, dependency: dependency, matches: matches}]
+          + [
+          {
+            kind: "ambiguous_membership",
+            group: family.key,
+            dependency: dependency,
+            matches: matches,
+          },
+        ]
       }
     }
   }

@@ -3,7 +3,9 @@ import { ConvergenceFactVector, convergence_guard_decision } from "std/agent/gov
 fn summarize(obs: ConvergenceFactVector) -> string {
   const decision = convergence_guard_decision({}, obs)
   return decision.shape + ":" + to_string(decision?.receipt?.reason ?? "") + ":"
-    + to_string(decision?.recovery?.verb ?? "")
+    + to_string(
+    decision?.recovery?.verb ?? "",
+  )
 }
 
 pipeline default() {

@@ -45,7 +45,11 @@ pipeline default() {
   const branched = workflow_stages(
     {
       name: "loop",
-      stages: [{id: "impl", kind: "stage"}, {id: "verify", kind: "verify"}, {id: "repair", kind: "stage"}],
+      stages: [
+        {id: "impl", kind: "stage"},
+        {id: "verify", kind: "verify"},
+        {id: "repair", kind: "stage"},
+      ],
       edges: [
         {from: "impl", to: "verify"},
         {from: "verify", to: "repair", branch: "failed"},

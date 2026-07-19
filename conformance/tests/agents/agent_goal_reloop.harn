@@ -12,11 +12,15 @@ pipeline test() {
   const g = goal(
     {
       objective: "make CI green",
-      success_criteria: [{check: { f -> return f?.ci_green == true }, description: "CI is green", id: "green"}],
+      success_criteria: [
+        {check: { f -> return f?.ci_green == true }, description: "CI is green", id: "green"},
+      ],
     },
   )
   // Live facts: the goal is met once the agent's latest output reports CI_IS_GREEN.
-  const facts_fn = { payload -> return {ci_green: to_string(payload?.visible_text ?? "").contains("CI_IS_GREEN")} }
+  const facts_fn = { payload ->
+    return {ci_green: to_string(payload?.visible_text ?? "").contains("CI_IS_GREEN")}
+  }
   // Mock agent: reports success only once it has SEEN the unmet-criteria feedback.
   const caller = { call ->
     let saw_findings = false
@@ -32,7 +36,13 @@ pipeline test() {
     }
     return {
       ok: true,
-      value: {input_tokens: 0, model: "mock", output_tokens: 0, provider: "mock", text: body + " <<GOAL-DONE>>"},
+      value: {
+        input_tokens: 0,
+        model: "mock",
+        output_tokens: 0,
+        provider: "mock",
+        text: body + " <<GOAL-DONE>>",
+      },
     }
   }
   const session = "agent-goal-reloop-conformance"
@@ -41,7 +51,13 @@ pipeline test() {
     nil,
     goal_reloop(
       g,
-      {facts_fn: facts_fn, llm_caller: caller, max_attempts: 4, provider: "mock", session_id: session},
+      {
+        facts_fn: facts_fn,
+        llm_caller: caller,
+        max_attempts: 4,
+        provider: "mock",
+        session_id: session,
+      },
     ),
   )
   // Converged by satisfying the goal (not by exhausting the iteration bound).

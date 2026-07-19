@@ -79,7 +79,8 @@ fn __overlay_validate_rows(rows) {
       throw "overlay_policy: each overlay row needs a non-empty `mode`"
     }
     if type_of(row?.lines) != "list" {
-      throw "overlay_policy: overlay row for mode \"" + to_string(row.mode) + "\" needs a `lines` list"
+      throw "overlay_policy: overlay row for mode \"" + to_string(row.mode)
+        + "\" needs a `lines` list"
     }
   }
   return rows

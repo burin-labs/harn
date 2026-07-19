@@ -51,7 +51,10 @@ pipeline test(task) {
       assert(call.provider_tools[0].type == "web_search", "hosted tool recorded")
       assert(call.provider_tools[1].type == "mcp", "remote MCP tool recorded")
       assert(call.provider_tools[1].server_label == "docs", "remote MCP metadata recorded")
-      assert(call.provider_tools[1].require_approval == "always", "provider approval policy recorded")
+      assert(
+        call.provider_tools[1].require_approval == "always",
+        "provider approval policy recorded",
+      )
       assert(call.previous_response_id == "resp_prev", "previous response id recorded")
       assert(!call.store, "store flag recorded")
       assert(call.background, "background flag recorded")

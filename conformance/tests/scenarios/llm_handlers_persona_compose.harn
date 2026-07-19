@@ -27,28 +27,42 @@ pipeline run() {
   const router = with_routing(
     {
       default: cheap,
-      routes: [{name: "frontier", when: { call -> call?.opts?.escalate ?? false }, caller: frontier}],
+      routes: [
+        {name: "frontier", when: { call -> call?.opts?.escalate ?? false }, caller: frontier},
+      ],
     },
   )
   const sink = { _record ->
     let _ = atomic_add(log_records, 1)
   }
   const middleware = compose(
-    [with_logging({level: "info", sink: sink}), with_budget({max_calls: 2, on_exceed: "short_circuit"})],
+    [
+      with_logging({level: "info", sink: sink}),
+      with_budget({max_calls: 2, on_exceed: "short_circuit"}),
+    ],
   )
   const persona = middleware(router)
   // First call — under budget, default route.
-  const env1 = persona({prompt: "p1", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const env1 = persona(
+    {prompt: "p1", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(env1.value.text)
   __io_println(env1.route_name)
   // Second call — escalates to frontier.
   const env2 = persona(
-    {prompt: "p2", system: "", opts: {escalate: true}, turn: {iteration: 0, session_id: "", attempt: 1}},
+    {
+      prompt: "p2",
+      system: "",
+      opts: {escalate: true},
+      turn: {iteration: 0, session_id: "", attempt: 1},
+    },
   )
   __io_println(env2.value.text)
   __io_println(env2.route_name)
   // Third call — budget exhausted.
-  const env3 = persona({prompt: "p3", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const env3 = persona(
+    {prompt: "p3", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(env3.ok)
   __io_println(env3.status)
   __io_println(atomic_get(cheap_calls))

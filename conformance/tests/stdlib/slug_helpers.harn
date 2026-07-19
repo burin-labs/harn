@@ -5,8 +5,14 @@ pipeline test(task) {
   const random_parts = split(random_name, "_")
   __io_println(len(random_parts) == 3)
   __io_println(random_parts[0] != "" && random_parts[1] != "" && random_parts[2] != "")
-  const a = slug_from("agent", {segments: 4, separator: ".", pattern: ["adjective", "noun", "verb", "noun"]})
-  const b = slug_from("agent", {segments: 4, separator: ".", pattern: ["adjective", "noun", "verb", "noun"]})
+  const a = slug_from(
+    "agent",
+    {segments: 4, separator: ".", pattern: ["adjective", "noun", "verb", "noun"]},
+  )
+  const b = slug_from(
+    "agent",
+    {segments: 4, separator: ".", pattern: ["adjective", "noun", "verb", "noun"]},
+  )
   __io_println(a == b)
   __io_println(len(split(a, ".")) == 4)
   const custom = slug_from(

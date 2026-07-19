@@ -12,13 +12,17 @@ import "std/triggers"
 pipeline test(task) {
   const _ = lifecycle_audit_log_take()
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const handle: TriggerHandle = trigger_register(
     {
       id: "trigger-interrupt-empty-" + unique,
       kind: "issue.opened",
       provider: "github",
-      handler: InterruptAndSuspend({target_agents: ["worker-does-not-exist-" + unique], reason: "phantom_panic"}),
+      handler: InterruptAndSuspend(
+        {target_agents: ["worker-does-not-exist-" + unique], reason: "phantom_panic"},
+      ),
       when: nil,
       retry: nil,
       match: {events: ["issue.opened"]},

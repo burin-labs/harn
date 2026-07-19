@@ -64,7 +64,9 @@ fn git_candidate_files(root: string) -> list<string>? {
   // Test/temp trees nested inside a checkout must use the filesystem fallback;
   // otherwise git reports candidates relative to the parent repository and the
   // requested subtree is silently skipped.
-  const top_level = harness.process.spawn_captured({cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]})
+  const top_level = harness.process.spawn_captured(
+    {cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
+  )
   if top_level.exit_code != 0
     || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
     return nil
@@ -136,7 +138,9 @@ pub fn line_has_let_only_harn_binding_regex(line: string) -> bool {
 }
 
 pub fn line_has_stale_var_tool_registry_example(line: string) -> bool {
-  return len(regex_captures(r"(^|[^A-Za-z0-9_])var\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*tool_registry\s*\(", line))
+  return len(
+    regex_captures(r"(^|[^A-Za-z0-9_])var\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*tool_registry\s*\(", line),
+  )
     > 0
 }
 

@@ -26,11 +26,17 @@ pipeline test_classify_nil_inputs(task) {
 }
 
 pipeline test_missing_tests_when_no_tests(task) {
-  const missing = infer_missing_tests(["Sources/Foo.swift", "Sources/Bar.swift"], ["Tests/", "_test.swift"])
+  const missing = infer_missing_tests(
+    ["Sources/Foo.swift", "Sources/Bar.swift"],
+    ["Tests/", "_test.swift"],
+  )
   assert_eq(len(missing), 2)
 }
 
 pipeline test_missing_tests_when_tests_present(task) {
-  const missing = infer_missing_tests(["Sources/Foo.swift", "Tests/FooTests.swift"], ["Tests/", "_test.swift"])
+  const missing = infer_missing_tests(
+    ["Sources/Foo.swift", "Tests/FooTests.swift"],
+    ["Tests/", "_test.swift"],
+  )
   assert_eq(len(missing), 0)
 }

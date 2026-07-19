@@ -104,7 +104,10 @@ fn __repair_command_verifier(spec) {
     } else {
       {
         ok: false,
-        findings: ["command exited " + to_string(code) + " (expected " + to_string(expected) + "): " + detail],
+        findings: [
+          "command exited " + to_string(code) + " (expected " + to_string(expected) + "): "
+            + detail,
+        ],
       }
     }
   }

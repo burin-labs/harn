@@ -4,7 +4,9 @@
  * single matched variant in the else branch. This is the symmetric
  * counterpart of `==` discriminator narrowing.
  */
-type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int} | {kind: "close", reason: string}
+type Msg = {kind: "ping", ttl: int} \
+  | {kind: "pong", latency_ms: int} \
+  | {kind: "close", reason: string}
 
 pipeline default() {
   fn describe(m: Msg) -> string {

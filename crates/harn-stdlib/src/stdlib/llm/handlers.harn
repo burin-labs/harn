@@ -198,7 +198,15 @@ fn __retry_default_predicate(envelope) {
     return false
   }
   const status = to_string(envelope?.status ?? "")
-  const retryable_statuses = ["transient", "rate_limited", "timeout", "exception", "network", "provider_5xx", "stream_interrupt"]
+  const retryable_statuses = [
+    "transient",
+    "rate_limited",
+    "timeout",
+    "exception",
+    "network",
+    "provider_5xx",
+    "stream_interrupt",
+  ]
   const never_retry = [
     "schema_validation",
     "auth",
@@ -318,7 +326,9 @@ pub fn with_retry(next, opts = nil) {
     return __partial(with_retry, next)
   }
   const cfg = __opts_dict(opts)
-  const {max_attempts = 3, base_ms = 250, max_ms = 8000, backoff = "exponential", jitter = "full", honor_retry_after = true} = cfg ?? {}
+  const {max_attempts = 3, base_ms = 250, max_ms = 8000, backoff = "exponential", jitter = "full", honor_retry_after = true} =
+    cfg
+    ?? {}
   const predicate = cfg?.predicate
   return { call ->
     const base_turn = call?.turn ?? {iteration: 0, session_id: "", attempt: 1}
@@ -616,7 +626,8 @@ pub fn with_logging(next, opts = nil) {
       attempt: to_int(call?.turn?.attempt ?? 1),
     }
     if include_prompt {
-      record = record + {prompt: to_string(call?.prompt ?? ""), system: to_string(call?.system ?? "")}
+      record = record
+        + {prompt: to_string(call?.prompt ?? ""), system: to_string(call?.system ?? "")}
     }
     __emit_event(to_string(call?.turn?.session_id ?? ""), "llm_call_log", record)
     if sink != nil {
@@ -693,9 +704,19 @@ pub fn with_budget(next, opts = nil) {
     const in_so_far = atomic_get(total_in)
     const out_so_far = atomic_get(total_out)
     const exhaustion = __budget_check("max_calls", max_calls, calls_so_far, on_exceed)
-      ?? __budget_check("max_input_tokens", max_input_tokens, in_so_far, on_exceed)
+      ?? __budget_check(
+      "max_input_tokens",
+      max_input_tokens,
+      in_so_far,
+      on_exceed,
+    )
       ?? __budget_check("max_output_tokens", max_output_tokens, out_so_far, on_exceed)
-      ?? __budget_check("max_total_tokens", max_total_tokens, in_so_far + out_so_far, on_exceed)
+      ?? __budget_check(
+      "max_total_tokens",
+      max_total_tokens,
+      in_so_far + out_so_far,
+      on_exceed,
+    )
     if exhaustion != nil {
       return exhaustion
     }
@@ -935,7 +956,8 @@ fn __semantic_index_load(cache_opts) -> list {
 
 fn __semantic_similarity(query_vector, entry_vector) -> float {
   if type_of(entry_vector) != "list" || len(entry_vector) != len(query_vector)
-    || len(query_vector) == 0 {
+    || len(query_vector)
+    == 0 {
     return 0.0
   }
   const scored = try {
@@ -1191,7 +1213,10 @@ pub fn with_result_schema(next, schema = nil, opts = nil) {
           {}
         }
         return envelope
-          + {value: value + {data: extracted.value}, result_schema: {valid: true, attempts: attempt}}
+          + {
+          value: value + {data: extracted.value},
+          result_schema: {valid: true, attempts: attempt},
+        }
       }
       last_issue_text = if extracted.present {
         __result_schema_issue_text(extracted.value, schema)
@@ -1201,7 +1226,9 @@ pub fn with_result_schema(next, schema = nil, opts = nil) {
       if attempt >= max_attempts {
         if on_exhaust == "return" {
           return last_envelope
-            + {result_schema: {valid: false, attempts: attempt, issues: last_issue_text}}
+            + {
+            result_schema: {valid: false, attempts: attempt, issues: last_issue_text},
+          }
         }
         throw {
           kind: "result_schema",
@@ -1220,7 +1247,10 @@ pub fn with_result_schema(next, schema = nil, opts = nil) {
       )
       attempt = attempt + 1
     }
-    return last_envelope + {result_schema: {valid: false, attempts: max_attempts, issues: last_issue_text}}
+    return last_envelope
+      + {
+      result_schema: {valid: false, attempts: max_attempts, issues: last_issue_text},
+    }
   }
 }
 

@@ -29,7 +29,11 @@ fn node_action() {
           if: "github.ref != 'refs/heads/main'",
           "continue-on-error": true,
         },
-        {uses: "actions/cache@exact-pin", if: "github.ref == 'refs/heads/main'", "continue-on-error": true},
+        {
+          uses: "actions/cache@exact-pin",
+          if: "github.ref == 'refs/heads/main'",
+          "continue-on-error": true,
+        },
       ],
     },
   }
@@ -51,7 +55,9 @@ fn action() {
         {
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
-          with: {"save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'")},
+          with: {
+            "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
+          },
         },
       ],
     },
@@ -66,7 +72,10 @@ fn workflows() {
           steps: [
             {
               uses: "./.github/actions/rust-cache",
-              with: {"shared-key": "release-target", save: gha_expression("needs.setup.outputs.build_mode == 'warm'")},
+              with: {
+                "shared-key": "release-target",
+                save: gha_expression("needs.setup.outputs.build_mode == 'warm'"),
+              },
             },
           ],
         },
@@ -85,7 +94,9 @@ fn workflows() {
             {uses: "./.github/actions/node-cache"},
             {
               uses: "docker/build-push-action@exact-pin",
-              with: {"cache-to": gha_expression("github.ref == 'refs/heads/main' && 'type=gha' || ''")},
+              with: {
+                "cache-to": gha_expression("github.ref == 'refs/heads/main' && 'type=gha' || ''"),
+              },
             },
           ],
         },
@@ -95,7 +106,8 @@ fn workflows() {
       on: {schedule: [{cron: "17 11 * * *"}], workflow_dispatch: {}},
       jobs: {
         "cold-start-budget": {
-          if: "(github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))",
+          if:
+            "(github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))",
           "timeout-minutes": 25,
           steps: [{name: "Build release harn", "timeout-minutes": 20}],
         },
@@ -104,7 +116,12 @@ fn workflows() {
     "windows-nightly.yml": {
       jobs: {
         nextest: {
-          steps: [{uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-windows", save: true}}],
+          steps: [
+            {
+              uses: "./.github/actions/rust-cache",
+              with: {"shared-key": "workspace-windows", save: true},
+            },
+          ],
         },
       },
     },
@@ -147,10 +164,14 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
     },
   }
   const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
-  assert(errors.contains("ci.yml.env.SCCACHE_GHA_ENABLED enables the per-object GHA sccache backend"))
+  assert(
+    errors.contains("ci.yml.env.SCCACHE_GHA_ENABLED enables the per-object GHA sccache backend"),
+  )
   assert(errors.contains("ci.yml:test bypasses ./.github/actions/rust-cache"))
   assert(errors.contains("ci.yml:test:rogue is not an authorized persistent cache writer"))
-  assert(errors.contains("ci.yml:test bypasses ./.github/actions/node-cache with setup-node caching"))
+  assert(
+    errors.contains("ci.yml:test bypasses ./.github/actions/node-cache with setup-node caching"),
+  )
   assert(
     errors.contains(
       "ci.yml:test bypasses Harn-owned cache actions with actions/cache/save@floating",
@@ -172,7 +193,9 @@ pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(task) {
         {
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
-          with: {"save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'")},
+          with: {
+            "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
+          },
         },
       ],
     },
@@ -270,8 +293,12 @@ pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(task) {
       "cli-cold-start-budget.yml must not run release-build cold-start benchmarks on pull_request",
     ),
   )
-  assert(errors.contains("cli-cold-start-budget.yml must keep a scheduled main-branch advisory run"))
-  assert(errors.contains("cli-cold-start-budget.yml:cold-start-budget must skip release manual refs"))
+  assert(
+    errors.contains("cli-cold-start-budget.yml must keep a scheduled main-branch advisory run"),
+  )
+  assert(
+    errors.contains("cli-cold-start-budget.yml:cold-start-budget must skip release manual refs"),
+  )
   assert(
     errors.contains(
       "cli-cold-start-budget.yml:cold-start-budget must cap total runtime at 25 minutes",

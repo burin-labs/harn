@@ -5,7 +5,11 @@ pipeline default() {
   with_llm_script(
     [llm_text("Full response text")],
     { ->
-      const opts: AgentLoopOptions = {provider: "mock", max_iterations: 1, on_delta: { delta -> __io_println("delta=[" + delta + "]") }}
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        max_iterations: 1,
+        on_delta: { delta -> __io_println("delta=[" + delta + "]") },
+      }
       const result = agent_loop("go", nil, opts)
       __io_println(result.status)
       __io_println(result.visible_text)

@@ -148,7 +148,8 @@ type GitHubPullRequestChecks = {
   checks: list<GitHubCheckRun>,
 }
 
-type GitHubPullRequestChecksResponse = GitHubPullRequestChecks | Result<GitHubPullRequestChecks, any>
+type GitHubPullRequestChecksResponse = GitHubPullRequestChecks \
+  | Result<GitHubPullRequestChecks, any>
 
 type GitHubRelease = {
   ok: bool,
@@ -553,7 +554,11 @@ pub fn read_file_at_ref(
   options: GitHubCallOptions = {},
 ) {
   const r = __github_repo_or_throw(repo)
-  return call("repos.get_text", filter_nil({owner: r.owner, repo: r.name, path: path, ref: ref}), options)
+  return call(
+    "repos.get_text",
+    filter_nil({owner: r.owner, repo: r.name, path: path, ref: ref}),
+    options,
+  )
 }
 
 /**
@@ -591,7 +596,11 @@ pub fn latest_release(repo: string | dict, options: GitHubCallOptions = {}) {
  */
 pub fn release_assets(repo: string | dict, release_id: any = nil, options: GitHubCallOptions = {}) {
   const r = __github_repo_or_throw(repo)
-  return call("github.release.assets", filter_nil({repo: r.full_name, release_id: release_id}), options)
+  return call(
+    "github.release.assets",
+    filter_nil({repo: r.full_name, release_id: release_id}),
+    options,
+  )
 }
 
 /**
@@ -616,7 +625,11 @@ pub fn repos_list_release_assets(
   release_id: any,
   options: GitHubCallOptions = {},
 ) {
-  return call("repos.list_release_assets", {owner: owner, repo: repo, release_id: release_id}, options)
+  return call(
+    "repos.list_release_assets",
+    {owner: owner, repo: repo, release_id: release_id},
+    options,
+  )
 }
 
 /**
@@ -814,7 +827,8 @@ fn __github_auto_merge_success(
 ) -> GitHubAutoMergeResult {
   const state = result?.state ?? "enabled"
   const merge_method = result?.requested_method ?? result?.auto_merge?.merge_method
-    ?? result?.pull_request?.autoMergeRequest?.mergeMethod
+    ?? result
+    ?.pull_request?.autoMergeRequest?.mergeMethod
     ?? requested_method
   return {
     ok: true,
@@ -909,7 +923,12 @@ pub fn check_run_source(repo: string, check_run_id: any, options: GitHubCallOpti
     label: "github.check_run:" + repo + "#" + to_string(check_run_id),
     prefers_push: true,
     poll: { _ ->
-      const check_run = api_call("/repos/" + repo + "/check-runs/" + to_string(check_run_id), "GET", nil, options)
+      const check_run = api_call(
+        "/repos/" + repo + "/check-runs/" + to_string(check_run_id),
+        "GET",
+        nil,
+        options,
+      )
       return {
         repo: repo,
         check_run_id: check_run_id,
@@ -944,7 +963,12 @@ pub fn pull_request_merged_source(
     label: "github.pull_request_merged:" + repo + "#" + to_string(number),
     prefers_push: true,
     poll: { _ ->
-      const pull_request = api_call("/repos/" + repo + "/pulls/" + to_string(number), "GET", nil, options)
+      const pull_request = api_call(
+        "/repos/" + repo + "/pulls/" + to_string(number),
+        "GET",
+        nil,
+        options,
+      )
       return {
         repo: repo,
         number: number,

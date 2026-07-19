@@ -80,7 +80,10 @@ fn __render_human(report: dict) -> string {
     }
     const usage = __safe_dict(run["usage"])
     out = out + "  run " + to_string(__safe_int(run["run_index"], 0)) + ": "
-      + __safe_string(run["classification"], "")
+      + __safe_string(
+      run["classification"],
+      "",
+    )
       + " input="
       + to_string(__safe_int(usage["input_tokens"], 0))
       + " fresh="

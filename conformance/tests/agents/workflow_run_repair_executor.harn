@@ -31,8 +31,12 @@ pipeline default() {
     }
     return {text: body + mark}
   }
-  const verifier = { r -> return {ok: contains(to_string(r?.visible_text), token), findings: [token]} }
-  const out = workflow_run_repair({task: "Z", executor: executor, verify: verifier, max_attempts: 2})
+  const verifier = { r ->
+    return {ok: contains(to_string(r?.visible_text), token), findings: [token]}
+  }
+  const out = workflow_run_repair(
+    {task: "Z", executor: executor, verify: verifier, max_attempts: 2},
+  )
   // Settled successfully after exactly two attempts (fail -> pass).
   __io_println(out.ok)
   __io_println(len(out.attempts))

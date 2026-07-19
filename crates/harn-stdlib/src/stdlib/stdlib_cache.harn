@@ -213,7 +213,12 @@ pub fn with_cache_envelope(key: string, compute, options = nil) -> CacheEnvelope
       __with_cache_emit(
         session_id,
         "cache_hit",
-        {key: key, backend: cached?.backend ?? "", namespace: cached?.namespace ?? "", metrics: metrics},
+        {
+          key: key,
+          backend: cached?.backend ?? "",
+          namespace: cached?.namespace ?? "",
+          metrics: metrics,
+        },
       )
     }
     return {value: cached.value, hit: true, key: key, metrics: metrics}

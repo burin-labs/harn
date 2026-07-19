@@ -33,7 +33,10 @@ pipeline test(task) {
         "author fingerprint surfaces",
       )
       assert(
-        contains(json_stringify(chain), "84878ad03a6518f7bb8f5f4eff29591bb94cafa2ddf37ded6b5bba82cd8ddc60"),
+        contains(
+          json_stringify(chain),
+          "84878ad03a6518f7bb8f5f4eff29591bb94cafa2ddf37ded6b5bba82cd8ddc60",
+        ),
         "endorsement chain surfaces",
       )
       assert(

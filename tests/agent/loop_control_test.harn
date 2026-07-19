@@ -112,7 +112,11 @@ pipeline test_thrash_no_net_advance_does_not_extend(task) {
 pipeline test_real_progress_still_extends_with_advance_field(task) {
   // A genuinely-advancing run (changed true, no_net_advance FALSE — error count
   // draining / signature changing) still reads as progress and keeps its budget.
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_advance(true, false, 0, false, true))
+  const cmd = agent_loop_control_invoke(
+    {},
+    BUDGET,
+    _state_with_advance(true, false, 0, false, true),
+  )
   assert_eq(cmd.action, "extend")
   assert_eq(cmd.reason, "recent turn made progress")
 }
@@ -129,7 +133,11 @@ pipeline test_no_net_advance_yields_to_completion_veto(task) {
 pipeline test_no_net_advance_yields_to_required_tools(task) {
   // Likewise, required-tools-missing is ordered ahead of progress and still
   // extends on a thrash turn.
-  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_advance(true, true, 0, false, false))
+  const cmd = agent_loop_control_invoke(
+    {},
+    BUDGET,
+    _state_with_advance(true, true, 0, false, false),
+  )
   assert_eq(cmd.action, "extend")
   assert_eq(cmd.reason, "required tools missing")
 }

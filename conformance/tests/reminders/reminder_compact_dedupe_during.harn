@@ -15,7 +15,10 @@ pipeline main() {
     ],
     events: [older, newer],
   }
-  const compacted = transcript_compact(crafted, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  const compacted = transcript_compact(
+    crafted,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
   // Two reminders sharing the same dedupe_key collapse to one during
   // compaction, preserving the newest body and TTL.

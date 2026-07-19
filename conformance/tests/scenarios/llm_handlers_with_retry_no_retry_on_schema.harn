@@ -9,7 +9,9 @@ pipeline default() {
     return {ok: false, status: "schema_validation", error: "bad shape"}
   }
   const caller = with_retry(synthetic, {max_attempts: 5, base_ms: 1})
-  const env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const env = caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(env.ok)
   __io_println(env.status)
   __io_println(env.retries_attempted)

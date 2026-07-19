@@ -84,7 +84,10 @@ pipeline default() {
         { s -> s.warning.pattern == "stuck_same_diagnostic" },
       )
       __io_println(
-        contains(to_string(stalls[0].warning?.diagnostic_snippet ?? ""), "FATAL: linker error in module X"),
+        contains(
+          to_string(stalls[0].warning?.diagnostic_snippet ?? ""),
+          "FATAL: linker error in module X",
+        ),
       )
     },
   )

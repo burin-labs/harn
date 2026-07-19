@@ -14,7 +14,11 @@ pipeline test_regression_notification_posts(task) {
   http_mock(
     "POST",
     base + "/chat.postMessage",
-    {status: 200, body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}", headers: {}},
+    {
+      status: 200,
+      body: "{\"ok\":true,\"channel\":\"C111\",\"ts\":\"1713650000.000100\"}",
+      headers: {},
+    },
   )
   const namespace = "eval-notifier-test-" + uuid()
   const manifest = load_eval_manifest()

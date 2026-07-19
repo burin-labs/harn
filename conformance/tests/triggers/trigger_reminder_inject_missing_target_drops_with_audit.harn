@@ -11,13 +11,17 @@ import "std/triggers"
 pipeline test(task) {
   const _ = lifecycle_audit_log_take()
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const handle: TriggerHandle = trigger_register(
     {
       id: "trigger-reminder-inject-missing-" + unique,
       kind: "issue.opened",
       provider: "github",
-      handler: ReminderInject({target: "does-not-exist-" + unique, body: "Should never be injected."}),
+      handler: ReminderInject(
+        {target: "does-not-exist-" + unique, body: "Should never be injected."},
+      ),
       when: nil,
       retry: nil,
       match: {events: ["issue.opened"]},

@@ -382,7 +382,14 @@ fn __tool_call_record_issues(record, index: int) -> list {
   for call in calls {
     if type_of(call) != "dict" {
       issues = issues
-        + [__issue("tool_call_not_object", "tool call must be an object", index, {call_index: call_index})]
+        + [
+        __issue(
+          "tool_call_not_object",
+          "tool call must be an object",
+          index,
+          {call_index: call_index},
+        ),
+      ]
       call_index = call_index + 1
       continue
     }
@@ -452,12 +459,19 @@ fn __assistant_row(record, index: int, iteration: int) -> dict {
     iteration: iteration,
     index: index,
     text: agent_transcript_text(record?.text ?? record?.content ?? record?.message?.content),
-    tool_calls: agent_transcript_tool_calls(record?.tool_calls ?? record?.message?.tool_calls ?? []),
+    tool_calls: agent_transcript_tool_calls(
+      record?.tool_calls ?? record?.message?.tool_calls ?? [],
+    ),
     provider: record?.provider ?? record?.llm?.provider,
     model: record?.model ?? record?.llm?.model ?? record?.message?.model,
     usage: {
-      input_tokens: record?.input_tokens ?? record?.usage?.input_tokens ?? record?.llm?.input_tokens ?? 0,
-      output_tokens: record?.output_tokens ?? record?.usage?.output_tokens ?? record?.llm?.output_tokens ?? 0,
+      input_tokens: record?.input_tokens ?? record?.usage?.input_tokens
+        ?? record?.llm?.input_tokens
+        ?? 0,
+      output_tokens: record?.output_tokens ?? record?.usage?.output_tokens
+        ?? record?.llm
+        ?.output_tokens
+        ?? 0,
       cache_read_tokens: record?.cache_read_tokens ?? record?.usage?.cache_read_tokens ?? 0,
       cache_write_tokens: record?.cache_write_tokens ?? record?.usage?.cache_write_tokens ?? 0,
       response_ms: record?.response_ms ?? record?.latency_ms ?? 0,
@@ -528,7 +542,10 @@ fn __tool_message_row(record, index: int, iteration: int) -> dict {
 }
 
 fn __parse_tool_result_attrs(attrs: string) -> dict {
-  const captures = regex_captures("([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*[\"']?([^\"'\\s>]+)", attrs ?? "")
+  const captures = regex_captures(
+    "([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*[\"']?([^\"'\\s>]+)",
+    attrs ?? "",
+  )
     ?? []
   let out = {}
   for capture in captures {
@@ -566,7 +583,13 @@ pub fn agent_transcript_tool_result_blocks(text: string) -> list {
       ""
     }
     out = out
-      + [{name: attrs?.name ?? "unknown", tool_call_id: attrs?.id ?? attrs?.tool_call_id ?? "", text: body}]
+      + [
+      {
+        name: attrs?.name ?? "unknown",
+        tool_call_id: attrs?.id ?? attrs?.tool_call_id ?? "",
+        text: body,
+      },
+    ]
   }
   return out
 }
@@ -634,7 +657,11 @@ pub fn agent_transcript_normalize(records) -> list {
     } else if role == "tool" || role == "tool_result" {
       rows = rows + [__tool_message_row(record, index, max(0, last_assistant_iteration))]
     } else if record_type == "request" {
-      const extracted = __legacy_request_tool_result_rows(record, index, previous_legacy_result_count)
+      const extracted = __legacy_request_tool_result_rows(
+        record,
+        index,
+        previous_legacy_result_count,
+      )
       rows = rows + extracted.rows
       previous_legacy_result_count = extracted.count
     } else if role == "user" {
@@ -664,7 +691,12 @@ pub fn agent_transcript_normalize_report(records) -> dict {
     if records != nil {
       issues = issues
         + [
-        __issue("input_not_list", "transcript records must be a list", -1, {actual_type: type_of(records)}),
+        __issue(
+          "input_not_list",
+          "transcript records must be a list",
+          -1,
+          {actual_type: type_of(records)},
+        ),
       ]
     }
     []

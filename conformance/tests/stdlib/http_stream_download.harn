@@ -9,7 +9,9 @@ pipeline default() {
   const first = http_stream_read(stream, 6)
   const second = http_stream_read(stream, 64)
   const end = http_stream_read(stream, 64)
-  const text = bytes_to_string(bytes_concat(first ?? bytes_from_string(""), second ?? bytes_from_string("")))
+  const text = bytes_to_string(
+    bytes_concat(first ?? bytes_from_string(""), second ?? bytes_from_string("")),
+  )
   const closed = http_stream_close(stream)
   const dst = path_join(harness.fs.temp_dir(), "harn-http-download-" + uuid() + ".txt")
   http_mock(

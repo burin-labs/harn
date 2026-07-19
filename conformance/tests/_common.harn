@@ -116,7 +116,10 @@ fn log_contains(harness: Harness, log_path, needle) {
  * signal as a hard prereq should fail with a descriptive `require`.
  */
 pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
-  return poll_until({ -> log_contains(harness, log_path, needle) }, {timeout_ms: 30000, interval_ms: 50})
+  return poll_until(
+    { -> log_contains(harness, log_path, needle) },
+    {timeout_ms: 30000, interval_ms: 50},
+  )
     ?? false
 }
 

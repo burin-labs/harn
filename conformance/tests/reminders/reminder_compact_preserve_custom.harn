@@ -21,9 +21,11 @@ pipeline main() {
       strategy: "custom",
       keep_last: 1,
       target_tokens: 1,
-      custom_compactor: { messages, reminders -> "CUSTOM " + to_string(len(messages)) + " messages " + to_string(len(reminders))
-        + " reminders "
-        + reminders[1].body },
+      custom_compactor: { messages, reminders ->
+        "CUSTOM " + to_string(len(messages)) + " messages " + to_string(len(reminders))
+          + " reminders "
+          + reminders[1].body
+      },
     },
   )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")

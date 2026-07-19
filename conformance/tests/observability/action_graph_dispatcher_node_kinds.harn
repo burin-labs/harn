@@ -39,7 +39,9 @@ fn action_graph_has_edge(trace_id: string, kind: string) -> bool {
 
 pipeline test(task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const root = path_join(harness.fs.temp_dir(), "harn-action-graph-dispatcher-" + unique)
   harness.fs.mkdir(root)
   harness.fs.write_text(
@@ -47,7 +49,10 @@ pipeline test(task) {
     "pipeline default(task) {\n  let envelope = json_parse(task)\n  __io_println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   const start = shell_at(
     root,

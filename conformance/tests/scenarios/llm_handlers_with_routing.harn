@@ -28,14 +28,21 @@ pipeline default() {
     },
   )
   // Default route — cheap caller wins.
-  const default_env = router({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const default_env = router(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(default_env.value.text)
   __io_println(default_env.route_index)
   __io_println(default_env.route_name)
   __io_println(default_env.used_default ?? false)
   // Escalation predicate matches — frontier route wins.
   const escalated_env = router(
-    {prompt: "p", system: "", opts: {escalate: true}, turn: {iteration: 0, session_id: "", attempt: 1}},
+    {
+      prompt: "p",
+      system: "",
+      opts: {escalate: true},
+      turn: {iteration: 0, session_id: "", attempt: 1},
+    },
   )
   __io_println(escalated_env.value.text)
   __io_println(escalated_env.route_index)

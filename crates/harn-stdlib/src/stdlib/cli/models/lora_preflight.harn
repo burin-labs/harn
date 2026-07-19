@@ -64,7 +64,10 @@ fn __render_human(harness: Harness, report: dict) {
   )
   harness.stdio.println(
     "  export-required source tool format: "
-      + safe_string(thresholds["required_export_source_tool_format"], ""),
+      + safe_string(
+      thresholds["required_export_source_tool_format"],
+      "",
+    ),
   )
   harness.stdio.println("  max_seq_length: " + safe_int_string(thresholds["max_seq_length"], "0"))
   harness.stdio.println("  required fit ratio: " + __percent(thresholds["min_fit_ratio"]))

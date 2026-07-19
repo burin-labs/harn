@@ -8,7 +8,10 @@ pub fn provider_name() {
 
 /** Resolve the generator model for Burin Mini runs. */
 pub fn generator_model() {
-  return harness.env.get_or("BURIN_MINI_GENERATOR_MODEL", harness.env.get_or("HARN_LLM_MODEL", "mock"))
+  return harness.env.get_or(
+    "BURIN_MINI_GENERATOR_MODEL",
+    harness.env.get_or("HARN_LLM_MODEL", "mock"),
+  )
 }
 
 /** Resolve the evaluator model for Burin Mini runs. */
@@ -107,7 +110,8 @@ fn trimmed_string(value) {
 fn generic_action_task(value) {
   const normalized = trimmed_string(value).lower()
   return normalized == "" || normalized == "write" || normalized == "edit" || normalized == "run"
-    || normalized == "execute"
+    || normalized
+    == "execute"
     || normalized == "verify"
 }
 
@@ -125,7 +129,10 @@ fn action_is_verification_like(profile, title, task, command) {
   }
   const mentions_verify = contains(haystack, "verify") || contains(haystack, "verification")
   const mentions_runner = contains(haystack, "script") || contains(haystack, "command")
-    || contains(haystack, "contract")
+    || contains(
+    haystack,
+    "contract",
+  )
     || contains(haystack, "success criteria")
     || contains(haystack, "confirm")
   return mentions_verify && mentions_runner
@@ -819,7 +826,11 @@ pub fn parse_json_object(text) {
 /** Decode a direct `sub_agent_run` result into `{ok, error, data}`. */
 pub fn decode_sub_agent_result(result) {
   if !(result?.ok ?? true) {
-    return {ok: false, error: result?.error ?? {message: result?.summary ?? "sub-agent failed"}, data: {}}
+    return {
+      ok: false,
+      error: result?.error ?? {message: result?.summary ?? "sub-agent failed"},
+      data: {},
+    }
   }
   return {ok: true, error: nil, data: parse_json_object(result?.summary ?? "")}
 }

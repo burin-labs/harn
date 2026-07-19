@@ -29,7 +29,13 @@ pub type CliValueParser = "string" | "int" | "float" | "bool" | "list"
 
 pub type CliParseStage = "argv" | "schema"
 
-pub type CliParseCode = "missing_required" | "unknown_flag" | "unknown_arg" | "value_required" | "bad_value" | "invalid_value" | "schema_mismatch"
+pub type CliParseCode = "missing_required" \
+  | "unknown_flag" \
+  | "unknown_arg" \
+  | "value_required" \
+  | "bad_value" \
+  | "invalid_value" \
+  | "schema_mismatch"
 
 /**
  * Declarative spec for a single argument or flag.
@@ -181,7 +187,9 @@ fn __validate_arg_default(arg: ArgSpec) {
   }
   const decoder = arg.parse ?? "string"
   const repeated = (arg.kind == "flag" && (arg.multi ?? false))
-    || (arg.kind == "positional" && (arg.variadic ?? false))
+    || (arg.kind == "positional"
+    && (arg.variadic
+    ?? false))
   const valid = if arg.kind == "switch" {
     type_of(arg.default) == "bool"
   } else if repeated {
@@ -222,7 +230,10 @@ fn __append_arg_aliases(arg: ArgSpec, aliases: list<string>) -> list<string> {
   }
   if arg.long != nil {
     if !starts_with(arg.long, "--") || starts_with(arg.long, "---") || len(arg.long) <= 2
-      || contains(arg.long, "=")
+      || contains(
+      arg.long,
+      "=",
+    )
       || regex_match("\\s", arg.long) != nil {
       throw "std/cli/argparse: long alias for arg '" + arg.name + "' must have form '--name'"
     }
@@ -350,7 +361,9 @@ fn __schema_failure(failure) -> CliParseFailure {
   }
   const message = failure?.message ?? "schema validation failed"
   if len(issues) == 0 {
-    issues = issues.push({stage: "schema", code: "schema.validation", message: message, path: "root"})
+    issues = issues.push(
+      {stage: "schema", code: "schema.validation", message: message, path: "root"},
+    )
   }
   return {
     kind: "cli_parse_failure",
@@ -544,7 +557,13 @@ fn __finish_parse(
   }
   const missing = __first_missing_required(args, collected)
   if missing != "" {
-    return Err(__argv_failure("missing_required", missing, "required argument '${missing}' was not provided"))
+    return Err(
+      __argv_failure(
+        "missing_required",
+        missing,
+        "required argument '${missing}' was not provided",
+      ),
+    )
   }
   const options = __apply_defaults(collected, args)
   return Ok({options: options, rest: rest})
@@ -587,7 +606,12 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
       seen_dash_dash = true
       continue
     }
-    if __accepts_signed_numeric_positional(validated_spec.args, positionals, positional_idx, arg_str) {
+    if __accepts_signed_numeric_positional(
+      validated_spec.args,
+      positionals,
+      positional_idx,
+      arg_str,
+    ) {
       const consumed = __consume_positional(collected, positionals, positional_idx, arg_str)
       if is_err(consumed) {
         return Err(unwrap_err(consumed))

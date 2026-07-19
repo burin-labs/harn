@@ -39,7 +39,11 @@ pipeline default() {
           },
         }
       }
-      const result = agent_loop("hi", nil, {provider: "mock", llm_caller: bon_caller, max_iterations: 1})
+      const result = agent_loop(
+        "hi",
+        nil,
+        {provider: "mock", llm_caller: bon_caller, max_iterations: 1},
+      )
       __io_println(result.status)
       __io_println(result.visible_text)
     },

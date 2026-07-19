@@ -27,7 +27,8 @@ pipeline default() {
   __io_println("entry_count=" + to_string(len(event.entries)))
   __io_println(
     "first=" + event.entries[0].content + ":" + event.entries[0].status + ":"
-      + event.entries[0].priority,
+      + event.entries[0]
+      .priority,
   )
   __io_println(
     "second="

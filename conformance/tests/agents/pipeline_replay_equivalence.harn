@@ -36,7 +36,9 @@ pipeline default() {
       )
       harness.emit_audit("pipeline_finalized", {reason: "replay_complete"})
       const recorded = lifecycle_audit_log_take()
-      const stream = event_log.subscribe({topic: topic, from_cursor: cursor, kind_prefix: "lifecycle_audit"})
+      const stream = event_log.subscribe(
+        {topic: topic, from_cursor: cursor, kind_prefix: "lifecycle_audit"},
+      )
       const first = stream.next().value
       const second = stream.next().value
       const third = stream.next().value
@@ -53,7 +55,9 @@ pipeline default() {
       harness.stdio.println("third_reason=" + third.payload.payload.reason)
       harness.stdio.println(
         "seq_monotonic="
-          + to_string(first.payload.seq < second.payload.seq && second.payload.seq < third.payload.seq),
+          + to_string(
+          first.payload.seq < second.payload.seq && second.payload.seq < third.payload.seq,
+        ),
       )
       return return_value
     },

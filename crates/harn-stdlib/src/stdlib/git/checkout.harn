@@ -13,7 +13,8 @@ pub type GitCheckoutOptions = {
   runner?: fn(GitCheckoutStep) -> dict,
 }
 
-pub type GitCheckoutStepReceipt = GitCheckoutStep & {success: bool, status: string, exit_code: int?, stdout: string, stderr: string}
+pub type GitCheckoutStepReceipt = GitCheckoutStep \
+  & {success: bool, status: string, exit_code: int?, stdout: string, stderr: string}
 
 pub type GitCheckoutReceipt = {
   schema: string,
@@ -272,7 +273,8 @@ pub fn git_checkout_run(options: GitCheckoutOptions) -> GitCheckoutReceipt {
   if original != cfg.base {
     ran = __checkout_run_step(runner, plan, "local_base", state.steps)
     state = state + {steps: ran.steps}
-    const local_status = ran.result.exit_code ?? if ran.result.success {
+    const local_status = ran.result.exit_code
+      ?? if ran.result.success {
       0
     } else {
       2

@@ -77,7 +77,12 @@ fn __resolve_app_home(
  * @example: xdg_config_home("harn")
  */
 pub fn xdg_config_home(app_name: string) -> string {
-  return __resolve_app_home(app_name, "XDG_CONFIG_HOME", [".config"], ["Library", "Application Support"])
+  return __resolve_app_home(
+    app_name,
+    "XDG_CONFIG_HOME",
+    [".config"],
+    ["Library", "Application Support"],
+  )
 }
 
 /**

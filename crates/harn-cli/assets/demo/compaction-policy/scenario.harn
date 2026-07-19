@@ -55,7 +55,9 @@ pipeline default(_task) {
     session,
     {
       strategy: "custom",
-      summarize_fn: { archived, _reminders -> {summary: "compacted " + to_string(len(archived)) + " messages"} },
+      summarize_fn: { archived, _reminders ->
+        {summary: "compacted " + to_string(len(archived)) + " messages"}
+      },
     },
   )
   // 4. Re-check post-run.

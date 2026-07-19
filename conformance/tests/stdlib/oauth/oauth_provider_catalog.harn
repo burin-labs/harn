@@ -77,7 +77,10 @@ fn mock_flow_for_provider(harness: Harness, name) {
   require token_resp.status == 200, name + " token response"
   const token = json_parse(token_resp.body)
   require token.access_token == "access-" + name, name + " access token"
-  const profile_resp = harness.net.get(userinfo_url, {headers: {Authorization: "Bearer " + token.access_token}})
+  const profile_resp = harness.net.get(
+    userinfo_url,
+    {headers: {Authorization: "Bearer " + token.access_token}},
+  )
   require profile_resp.status == 200, name + " userinfo response"
   const profile = json_parse(profile_resp.body)
   require profile.provider == name, name + " profile provider"

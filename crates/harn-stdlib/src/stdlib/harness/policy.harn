@@ -181,7 +181,8 @@ fn __policy_enforce_segment(opts, req, ctx) {
       throw "require_policy: match requires left and right"
     }
     if (__policy_ref_needs_auth(left) || __policy_ref_needs_auth(right))
-      && !harness.auth.is_authenticated() {
+      && !harness.auth
+      .is_authenticated() {
       return __policy_missing_auth()
     }
     const left_value = __policy_resolve_ref(left, req, ctx)

@@ -33,7 +33,10 @@ pipeline default(task) {
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, event_id: event.id}\n}\n",
   )
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   const fire = exec(
     harn_bin,
@@ -70,7 +73,8 @@ pipeline default(task) {
     first_data.summary.in_flight == 1
       && first_data.summary.responses == 1
       && first_data.responses[0].outcome?.status == "dlq"
-      && first_data.responses[0].outcome?.error != nil,
+      && first_data.responses[0].outcome?.error
+      != nil,
   )
   // Poll the second drain until the expired claim is reclaimed. A bare
   // `sleep(120ms)` was the original wait, but under heavy parallel
@@ -119,11 +123,15 @@ pipeline default(task) {
   __io_println(
     first_has_response
       && second_has_response
-      && second_data.responses[0].job_event_id == first_data.responses[0].job_event_id
+      && second_data.responses[0].job_event_id
+      == first_data.responses[0]
+      .job_event_id
       && second_data.responses[0].outcome?.status == "succeeded",
   )
   __io_println(
     second_data.summary.ready == 0 && second_data.summary.in_flight == 0
-      && second_data.summary.responses == 2,
+      && second_data.summary
+      .responses
+      == 2,
   )
 }

@@ -110,7 +110,10 @@ pipeline test_find_hits_no_match(task) {
 @test
 pipeline test_instant_deadline_pattern(task) {
   assert_eq(find_hits("while Instant::now() < deadline {}\n", instant_deadline_pattern()).count, 1)
-  assert_eq(find_hits("while Instant::now()  >= deadline {}\n", instant_deadline_pattern()).count, 1)
+  assert_eq(
+    find_hits("while Instant::now()  >= deadline {}\n", instant_deadline_pattern()).count,
+    1,
+  )
   // A bare read (no comparison) is the non-test-pattern form.
   assert_eq(find_hits("let t = Instant::now();\n", instant_deadline_pattern()).count, 0)
 }

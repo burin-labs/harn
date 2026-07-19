@@ -33,12 +33,25 @@ pipeline test(task) {
       prompt_recording: "metadata",
     },
   )
-  const allowed = completion_policy_decision(context, {provider: "ollama", model_id: "qwen"}, policy)
+  const allowed = completion_policy_decision(
+    context,
+    {provider: "ollama", model_id: "qwen"},
+    policy,
+  )
   const blocked = completion_policy_decision(context, {provider: "openai", model_id: "gpt"}, policy)
   const camel_policy = completion_policy(
-    {allowedProviders: ["ollama"], allowRemoteModels: false, promptRecording: "off", maxPromptChars: 12},
+    {
+      allowedProviders: ["ollama"],
+      allowRemoteModels: false,
+      promptRecording: "off",
+      maxPromptChars: 12,
+    },
   )
-  const camel_blocked = completion_policy_decision(context, {provider: "openai", modelID: "gpt"}, camel_policy)
+  const camel_blocked = completion_policy_decision(
+    context,
+    {provider: "openai", modelID: "gpt"},
+    camel_policy,
+  )
   const proposal = completion_proposal(
     {
       kind: "inline_replace",

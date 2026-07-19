@@ -50,7 +50,10 @@ fn workflow() {
     "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
     "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
   )
-  const rust_with_flags = {...rust, env: {...rust.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"}}
+  const rust_with_flags = {
+    ...rust,
+    env: {...rust.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
+  }
   const rust_test_base = persistent_job(
     gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
     "workspace-behavior",
@@ -77,7 +80,11 @@ fn workflow() {
           matrix: {
             include: [
               {kind: "lint", runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
-              {kind: "behavior", runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-behavior"},
+              {
+                kind: "behavior",
+                runner: "blacksmith-8vcpu-ubuntu-2404",
+                cache_key: "workspace-behavior",
+              },
             ],
           },
         },
@@ -94,7 +101,9 @@ fn workflow() {
       "rust-test": {
         ...rust_test,
         steps: rust_test.steps
-          + [{name: "Run full environment-neutral test suite", env: {CARGO_BUILD_JOBS: "4"}}],
+          + [
+          {name: "Run full environment-neutral test suite", env: {CARGO_BUILD_JOBS: "4"}},
+        ],
       },
     },
   }
@@ -124,7 +133,10 @@ fn windows_cache_pair() {
           steps: [
             checkout,
             toolchain,
-            {uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-windows", save: true}},
+            {
+              uses: "./.github/actions/rust-cache",
+              with: {"shared-key": "workspace-windows", save: true},
+            },
           ],
         },
       },
@@ -139,7 +151,9 @@ pipeline test_accepts_pinned_lane_local_sticky_cache_with_kill_switch(task) {
 
 @test
 pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(task) {
-  const invalid_action = {runs: {steps: [{uses: "useblacksmith/stickydisk@v1", with: {key: "shared", path: "target"}}]}}
+  const invalid_action = {
+    runs: {steps: [{uses: "useblacksmith/stickydisk@v1", with: {key: "shared", path: "target"}}]},
+  }
   const invalid_workflow = {
     jobs: {
       "package-audit": {"runs-on": "ubuntu-latest", steps: []},
@@ -198,7 +212,10 @@ pipeline test_rejects_windows_cache_wrapper_drift(task) {
 @test
 pipeline test_rejects_windows_cache_environment_drift(task) {
   const pair = windows_cache_pair()
-  const producer = {...pair.producer, env: {...pair.producer.env, RUSTFLAGS: "-D warnings -C target-cpu=native"}}
+  const producer = {
+    ...pair.producer,
+    env: {...pair.producer.env, RUSTFLAGS: "-D warnings -C target-cpu=native"},
+  }
   assert_eq(
     windows_shared_cache_errors(pair.consumer, producer),
     [

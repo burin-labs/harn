@@ -10,7 +10,12 @@ pipeline default() {
       const result = agent_loop(
         "What is 2 + 2?",
         nil,
-        {provider: "mock", loop_until_done: true, max_iterations: 2, done_judge: {fail_open_on_error: true}},
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 2,
+          done_judge: {fail_open_on_error: true},
+        },
       )
       __io_println(result.status)
       __io_println(result.visible_text)

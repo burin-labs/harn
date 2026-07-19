@@ -1,7 +1,9 @@
 import { assert_host_called, host_call_count, with_host_mocks } from "std/testing"
 
 fn body_process_exec_alias() {
-  const result = hostlib_tools_run_command({argv: ["echo", "from-mock"], cwd: "/definitely/not/a/harn-test-root"})
+  const result = hostlib_tools_run_command(
+    {argv: ["echo", "from-mock"], cwd: "/definitely/not/a/harn-test-root"},
+  )
   require result.status == "completed"
   require result.exit_code == 0
   require result.stdout == "legacy stdout"
@@ -11,7 +13,9 @@ fn body_process_exec_alias() {
 }
 
 fn body_tools_run_command() {
-  const result = hostlib_tools_run_command({argv: ["printf", "direct"], cwd: "/definitely/not/a/harn-test-root"})
+  const result = hostlib_tools_run_command(
+    {argv: ["printf", "direct"], cwd: "/definitely/not/a/harn-test-root"},
+  )
   require result.status == "completed"
   require result.exit_code == 0
   require result.stdout == "direct stdout"
@@ -27,7 +31,13 @@ pipeline test_hostlib_run_command_host_mocks(task) {
         capability: "process",
         operation: "exec",
         params: {argv: ["echo", "from-mock"]},
-        result: {status: "completed", exit_code: 0, stdout: "legacy stdout", stderr: "", command_id: "mock-legacy"},
+        result: {
+          status: "completed",
+          exit_code: 0,
+          stdout: "legacy stdout",
+          stderr: "",
+          command_id: "mock-legacy",
+        },
       },
     ],
     body_process_exec_alias,
@@ -40,7 +50,13 @@ pipeline test_hostlib_run_command_host_mocks(task) {
         capability: "tools",
         operation: "run_command",
         params: {argv: ["printf", "direct"]},
-        result: {status: "completed", exit_code: 0, stdout: "direct stdout", stderr: "", command_id: "mock-direct"},
+        result: {
+          status: "completed",
+          exit_code: 0,
+          stdout: "direct stdout",
+          stderr: "",
+          command_id: "mock-direct",
+        },
       },
     ],
     body_tools_run_command,

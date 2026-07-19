@@ -11,38 +11,42 @@
 import { with_timeout } from "std/llm/tool_middleware"
 
 fn fast_next() {
-  return { call -> return {
-    ok: true,
-    status: "ok",
-    tool_name: call.tool_name,
-    tool_call_id: call.call_id,
-    arguments: call.tool_args,
-    result: "fast",
-    rendered_result: "fast",
-    observation: "",
-    error: nil,
-    error_category: nil,
-    executor: "harn",
-  } }
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: "fast",
+      rendered_result: "fast",
+      observation: "",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
 }
 
 fn slow_next(elapsed_simulator) {
   // The middleware reads `now_ms()` directly, so we can't easily mock
   // wall clock from a synthetic next. Instead, drive the breach path by
   // setting `max_ms: -1` so any non-negative elapsed is over budget.
-  return { call -> return {
-    ok: true,
-    status: "ok",
-    tool_name: call.tool_name,
-    tool_call_id: call.call_id,
-    arguments: call.tool_args,
-    result: "slow:" + to_string(elapsed_simulator),
-    rendered_result: "slow",
-    observation: "",
-    error: nil,
-    error_category: nil,
-    executor: "harn",
-  } }
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: "slow:" + to_string(elapsed_simulator),
+      rendered_result: "slow",
+      observation: "",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
 }
 
 fn envelope(name) {
