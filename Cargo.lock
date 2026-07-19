@@ -3495,6 +3495,7 @@ name = "harn-vm"
 version = "0.10.24"
 dependencies = [
  "aes-gcm",
+ "aho-corasick",
  "arcstr",
  "async-trait",
  "base64 0.22.1",
