@@ -35,6 +35,18 @@ pub(super) fn validate(
         ("cache_type_k_arg", runtime.cache_type_k_arg.as_deref()),
         ("cache_type_v_arg", runtime.cache_type_v_arg.as_deref()),
         ("cache_ram_arg", runtime.cache_ram_arg.as_deref()),
+        (
+            "chat_template_kwargs_arg",
+            runtime.chat_template_kwargs_arg.as_deref(),
+        ),
+        ("jinja_arg", runtime.jinja_arg.as_deref()),
+        ("reasoning_arg", runtime.reasoning_arg.as_deref()),
+        (
+            "reasoning_format_arg",
+            runtime.reasoning_format_arg.as_deref(),
+        ),
+        ("flash_attn_arg", runtime.flash_attn_arg.as_deref()),
+        ("metrics_arg", runtime.metrics_arg.as_deref()),
         ("enable_lora_arg", runtime.enable_lora_arg.as_deref()),
         ("lora_modules_arg", runtime.lora_modules_arg.as_deref()),
         (

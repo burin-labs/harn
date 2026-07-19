@@ -69,9 +69,16 @@ harn eval coding-agent \
   --fixture all \
   --model mock:mock,together:Qwen/Qwen3-Coder-30B-A3B-Instruct \
   --tool-format native,text \
+  --replicates 2 \
   --env-file ~/path/to/provider.env \
   --max-runs 4
 ```
+
+`--replicates` runs each fixture/model/tool-format cell independently and keeps
+each transcript under a distinct run directory. The parity overlay counts every
+native/text pair, so `--fixture all --replicates 2` meets the classifier's
+two-replicate confidence floor when at least five fixtures complete in both
+formats.
 
 Missing remote-provider credentials skip the run by default. Add
 `--fail-on-unauthorized` when CI should fail instead. Environment values loaded

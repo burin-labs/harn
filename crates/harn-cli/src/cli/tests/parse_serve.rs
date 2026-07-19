@@ -356,6 +356,8 @@ fn test_parses_local_launch_args() {
         "off",
         "--reasoning-format",
         "deepseek",
+        "--chat-template-kwargs",
+        r#"{"enable_thinking":false}"#,
         "--flash-attn",
         "on",
         "--jinja",
@@ -394,6 +396,10 @@ fn test_parses_local_launch_args() {
     assert_eq!(args.max_lora_rank, Some(64));
     assert_eq!(args.reasoning.as_deref(), Some("off"));
     assert_eq!(args.reasoning_format.as_deref(), Some("deepseek"));
+    assert_eq!(
+        args.chat_template_kwargs.as_deref(),
+        Some(r#"{"enable_thinking":false}"#)
+    );
     assert_eq!(args.flash_attn.as_deref(), Some("on"));
     assert!(args.jinja);
     assert!(args.metrics);

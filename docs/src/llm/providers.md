@@ -117,6 +117,10 @@ harn local status
 # Ollama warms the daemon; llama.cpp/MLX launch a tracked process.
 harn local launch devstral-small-2:24b --provider ollama
 harn local launch local-qwen3.6 --provider llamacpp --model-source ~/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --ctx 8192
+harn local launch local-qwen3.6 --provider llamacpp --model-source ~/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
+  --ctx 65536 --gpu-layers all --parallel 1 --flash-attn on --jinja \
+  --reasoning-format deepseek --chat-template-kwargs '{"enable_thinking":false}' \
+  --cache-type-k q8_0 --cache-type-v q8_0
 harn local launch mlx-qwen3.6 --provider mlx --model-source unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit
 harn local launch local-gemma4-e4b --provider vllm \
   --model-source google/gemma-4-e4b-it --lora-adapter tools=org/tools-lora
@@ -148,6 +152,14 @@ facts to block obviously risky starts before spawning a process, recommends a
 smaller `--ctx` when it can, and includes the `memory_plan` in `--json` output.
 Pass `--allow-memory-risk` only when you have manually freed RAM or know the
 catalog estimate is too conservative for your runtime build.
+
+Managed-process launch flags are catalog-mapped, so the same Harn local launch
+surface can express runtime-specific model and server settings without shell
+wrappers. The llama.cpp mapping covers context, slots, GPU layers, K/V cache
+types, Jinja, reasoning, flash attention, metrics, and JSON chat-template
+kwargs. Use repeatable `--server-arg <token>` only for a flag that the runtime
+catalog does not yet model; those tokens are appended verbatim and retained in
+the PID receipt for reproducibility.
 
 Local runtime launch mechanics live in the provider catalog under
 `[providers.<id>.local_runtime]`, not in CLI-only code. The bundled rows cover

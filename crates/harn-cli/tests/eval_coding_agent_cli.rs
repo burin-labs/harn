@@ -52,6 +52,7 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         max_local_models: 2,
         keep_local_after_run: false,
         max_runs: None,
+        replicates: 2,
         max_iterations: 6,
         python: "python3".to_string(),
         fail_on_unauthorized: false,
@@ -76,14 +77,14 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         serde_json::from_str(&summary_raw).expect("summary parses as JSON");
     assert_eq!(summary["schema_version"], 3);
     assert_eq!(summary["fixture_ids"].as_array().map(Vec::len), Some(6));
-    assert_eq!(summary["total_runs"], 12);
-    assert_eq!(summary["passed_runs"], 12);
+    assert_eq!(summary["total_runs"], 24);
+    assert_eq!(summary["passed_runs"], 24);
     assert_eq!(summary["skipped_runs"], 0);
     assert_eq!(summary["diverged_comparisons"], 0);
     let comparisons = summary["comparisons"]
         .as_array()
         .expect("comparisons should be an array");
-    assert_eq!(comparisons.len(), 6);
+    assert_eq!(comparisons.len(), 12);
     let mut comparison_fixtures = comparisons
         .iter()
         .map(|comparison| {
@@ -94,6 +95,7 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         })
         .collect::<Vec<_>>();
     comparison_fixtures.sort();
+    comparison_fixtures.dedup();
     assert_eq!(
         comparison_fixtures,
         vec![
@@ -118,11 +120,13 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         .as_array()
         .expect("parity_by_pair should be an array");
     assert_eq!(parity_by_pair.len(), 1);
-    assert_eq!(parity_by_pair[0]["sample_size"], 6);
+    assert_eq!(parity_by_pair[0]["sample_size"], 12);
     assert_eq!(parity_by_pair[0]["native"]["pass_rate"], 1.0);
     assert_eq!(parity_by_pair[0]["text"]["pass_rate"], 1.0);
     assert_eq!(parity_by_pair[0]["agreement_rate"], 1.0);
     assert_eq!(parity_by_pair[0]["verifier_divergence_rate"], 0.0);
+    assert_eq!(parity_by_pair[0]["native"]["replicate_count"], 2);
+    assert_eq!(parity_by_pair[0]["text"]["replicate_count"], 2);
     assert_eq!(
         summary
             .pointer("/rollups/by_fixture")
@@ -144,7 +148,7 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     );
 
     let per_run = fs::read_to_string(output.join("per_run.jsonl")).expect("per-run JSONL exists");
-    assert_eq!(per_run.lines().count(), 12);
+    assert_eq!(per_run.lines().count(), 24);
     for line in per_run.lines() {
         let row: serde_json::Value = serde_json::from_str(line).expect("per-run row parses");
         assert!(
@@ -181,6 +185,9 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         .join("python-add__mock_mock__native/transcript_events.jsonl")
         .exists());
     assert!(output
+        .join("python-add__mock_mock__native__r2/transcript_events.jsonl")
+        .exists());
+    assert!(output
         .join("read-only-audit__mock_mock__text/summary.json")
         .exists());
     assert!(output
@@ -189,6 +196,11 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     assert!(output
         .join(PARITY_DIRECTORY)
         .join("python-add__mock_mock")
+        .join("parity.json")
+        .exists());
+    assert!(output
+        .join(PARITY_DIRECTORY)
+        .join("python-add__mock_mock__r2")
         .join("parity.json")
         .exists());
     let parity_raw = fs::read_to_string(
@@ -203,7 +215,10 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     assert_eq!(parity["text_verdict"], "passed");
     assert_eq!(parity["agreement"], true);
     assert_eq!(parity["divergence_class"], "both_pass");
-    assert!(output.join(PARITY_OVERLAY_FILENAME).exists());
+    let overlay_raw =
+        fs::read_to_string(output.join(PARITY_OVERLAY_FILENAME)).expect("parity overlay exists");
+    assert!(overlay_raw.contains("confidence = \"high\""));
+    assert!(overlay_raw.contains("replicate_count = 2"));
     assert!(output.join("summary.md").exists());
     assert!(output.join("followups.md").exists());
     let summary_md =
@@ -226,6 +241,7 @@ fn json_tool_run_stops_after_required_tool_and_final_answer() {
         max_local_models: 2,
         keep_local_after_run: false,
         max_runs: Some(1),
+        replicates: 1,
         max_iterations: 4,
         python: "python3".to_string(),
         fail_on_unauthorized: false,
@@ -283,6 +299,7 @@ fn mock_matrix_resumes_completed_live_verify_cell_from_ledger() {
         max_local_models: 2,
         keep_local_after_run: false,
         max_runs: None,
+        replicates: 1,
         max_iterations: 6,
         python: "python3".to_string(),
         fail_on_unauthorized: false,
@@ -349,6 +366,7 @@ fn mock_matrix_output_dir_can_be_workspace_root() {
         max_local_models: 2,
         keep_local_after_run: false,
         max_runs: None,
+        replicates: 1,
         max_iterations: 6,
         python: "python3".to_string(),
         fail_on_unauthorized: false,

@@ -352,6 +352,9 @@
         "cache_type_v_arg": {
           "type": "string"
         },
+        "chat_template_kwargs_arg": {
+          "type": "string"
+        },
         "command": {
           "minLength": 1,
           "type": "string"
@@ -373,10 +376,16 @@
         "enable_lora_arg": {
           "type": "string"
         },
+        "flash_attn_arg": {
+          "type": "string"
+        },
         "gpu_layers_arg": {
           "type": "string"
         },
         "host_arg": {
+          "type": "string"
+        },
+        "jinja_arg": {
           "type": "string"
         },
         "kind": {
@@ -399,6 +408,9 @@
           ]
         },
         "max_lora_rank_arg": {
+          "type": "string"
+        },
+        "metrics_arg": {
           "type": "string"
         },
         "model_arg": {
@@ -424,6 +436,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "reasoning_arg": {
+          "type": "string"
+        },
+        "reasoning_format_arg": {
+          "type": "string"
         },
         "served_model_arg": {
           "type": "string"

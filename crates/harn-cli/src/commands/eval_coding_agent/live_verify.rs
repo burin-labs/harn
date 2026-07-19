@@ -66,8 +66,9 @@ pub(super) async fn run_matrix_entry(
     fixture: EvalPackCase,
     selector: ModelSelector,
     tool_format: String,
+    replicate: usize,
 ) -> RunReport {
-    let run_id = super::run_id_for(&fixture, &selector, &tool_format);
+    let run_id = super::run_id_for(&fixture, &selector, &tool_format, replicate);
     let run_dir = output_dir.join(&run_id);
     if let Err(error) = fs::create_dir_all(&run_dir) {
         return error_report(
@@ -88,13 +89,18 @@ pub(super) async fn run_matrix_entry(
         return skipped_report(run_id, fixture, selector, tool_format, run_dir, reason);
     }
 
-    let manifest =
-        match coding_agent_eval_pack_manifest(&run_dir, &fixture, &selector, &tool_format) {
-            Ok(manifest) => manifest,
-            Err(error) => {
-                return error_report(run_id, fixture, selector, tool_format, run_dir, error);
-            }
-        };
+    let manifest = match coding_agent_eval_pack_manifest(
+        &run_dir,
+        &fixture,
+        &selector,
+        &tool_format,
+        replicate,
+    ) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return error_report(run_id, fixture, selector, tool_format, run_dir, error);
+        }
+    };
     let mut executor = CodingAgentLiveExecutor {
         args,
         fixture: fixture.clone(),
@@ -292,6 +298,7 @@ fn coding_agent_eval_pack_manifest(
     fixture: &EvalPackCase,
     selector: &ModelSelector,
     tool_format: &str,
+    replicate: usize,
 ) -> Result<EvalPackManifest, String> {
     let mut case = fixture.clone();
     case.workspace = Some(".".to_string());
@@ -316,6 +323,10 @@ fn coding_agent_eval_pack_manifest(
     metadata.insert(
         "tool_format".to_string(),
         JsonValue::String(tool_format.to_string()),
+    );
+    metadata.insert(
+        "replicate".to_string(),
+        JsonValue::Number(serde_json::Number::from(replicate)),
     );
     Ok(EvalPackManifest {
         version: 1,

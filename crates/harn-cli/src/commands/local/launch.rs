@@ -555,19 +555,48 @@ fn build_managed_args(
         );
     }
     if args.jinja {
-        explicit.push("--jinja".to_string());
+        explicit.push(runtime_arg(runtime.jinja_arg.as_deref(), "--jinja")?.to_string());
     }
     if let Some(value) = args.reasoning.as_deref() {
-        explicit.extend(["--reasoning".to_string(), value.to_string()]);
+        push_arg(
+            &mut explicit,
+            Some(runtime_arg(
+                runtime.reasoning_arg.as_deref(),
+                "--reasoning",
+            )?),
+            value,
+        );
     }
     if let Some(value) = args.reasoning_format.as_deref() {
-        explicit.extend(["--reasoning-format".to_string(), value.to_string()]);
+        push_arg(
+            &mut explicit,
+            Some(runtime_arg(
+                runtime.reasoning_format_arg.as_deref(),
+                "--reasoning-format",
+            )?),
+            value,
+        );
+    }
+    if let Some(value) = args.chat_template_kwargs.as_deref() {
+        validate_json_object(value, "--chat-template-kwargs")?;
+        let argument = runtime_arg(
+            runtime.chat_template_kwargs_arg.as_deref(),
+            "--chat-template-kwargs",
+        )?;
+        push_arg(&mut explicit, Some(argument), value);
     }
     if let Some(value) = args.flash_attn.as_deref() {
-        explicit.extend(["--flash-attn".to_string(), value.to_string()]);
+        push_arg(
+            &mut explicit,
+            Some(runtime_arg(
+                runtime.flash_attn_arg.as_deref(),
+                "--flash-attn",
+            )?),
+            value,
+        );
     }
     if args.metrics {
-        explicit.push("--metrics".to_string());
+        explicit.push(runtime_arg(runtime.metrics_arg.as_deref(), "--metrics")?.to_string());
     }
     explicit.extend(build_lora_args(args, runtime, model_source)?);
 
@@ -580,6 +609,26 @@ fn build_managed_args(
     out.extend(explicit);
     out.extend(args.server_args.iter().cloned());
     Ok(out)
+}
+
+fn validate_json_object(value: &str, flag: &str) -> Result<(), String> {
+    let parsed: serde_json::Value = serde_json::from_str(value)
+        .map_err(|error| format!("{flag} must be a valid JSON object: {error}"))?;
+    if !parsed.is_object() {
+        return Err(format!("{flag} must be a valid JSON object"));
+    }
+    Ok(())
+}
+
+fn runtime_arg<'a>(argument: Option<&'a str>, flag: &str) -> Result<&'a str, String> {
+    argument
+        .map(str::trim)
+        .filter(|argument| !argument.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "this local runtime does not declare {flag}; use --server-arg for provider-specific flags or add the runtime flag to the catalog"
+            )
+        })
 }
 
 fn build_lora_args(
@@ -855,6 +904,7 @@ mod tests {
             max_lora_rank: None,
             reasoning: Some("off".to_string()),
             reasoning_format: Some("deepseek".to_string()),
+            chat_template_kwargs: Some("{\"enable_thinking\":false}".to_string()),
             flash_attn: Some("on".to_string()),
             jinja: true,
             metrics: true,
@@ -882,6 +932,12 @@ mod tests {
             cache_type_k_arg: Some("--cache-type-k".to_string()),
             cache_type_v_arg: Some("--cache-type-v".to_string()),
             cache_ram_arg: Some("--cache-ram".to_string()),
+            chat_template_kwargs_arg: Some("--chat-template-kwargs".to_string()),
+            jinja_arg: Some("--jinja".to_string()),
+            reasoning_arg: Some("--reasoning".to_string()),
+            reasoning_format_arg: Some("--reasoning-format".to_string()),
+            flash_attn_arg: Some("--flash-attn".to_string()),
+            metrics_arg: Some("--metrics".to_string()),
             default_args: vec!["--jinja".to_string()],
             stop: Some(LocalRuntimeStop::Pid),
             ..LocalRuntimeDef::default()
@@ -910,6 +966,9 @@ mod tests {
         assert!(built.contains(&"--jinja".to_string()));
         assert!(built.contains(&"--metrics".to_string()));
         assert!(built.contains(&"--no-warmup".to_string()));
+        assert!(built
+            .windows(2)
+            .any(|pair| pair == ["--chat-template-kwargs", "{\"enable_thinking\":false}"]));
         // `--jinja` is in both `default_args` and set as a dedicated flag, but
         // must land in the argv exactly once.
         assert_eq!(
@@ -936,6 +995,7 @@ mod tests {
         let mut args = cli_args();
         args.reasoning = None;
         args.reasoning_format = None;
+        args.chat_template_kwargs = None;
         args.flash_attn = None;
         args.jinja = false;
         args.metrics = false;
@@ -1048,6 +1108,40 @@ mod tests {
         assert!(built
             .windows(2)
             .any(|pair| pair == ["--reasoning-format", "deepseek"]));
+    }
+
+    #[test]
+    fn build_managed_args_rejects_non_object_chat_template_kwargs() {
+        let mut args = cli_args();
+        args.chat_template_kwargs = Some("false".to_string());
+        let error = build_managed_args(
+            &args,
+            &runtime(),
+            "/models/qwen.gguf",
+            "qwen3.6-35b-a3b-ud-q4-k-xl",
+            "127.0.0.1",
+            8001,
+            8192,
+        )
+        .expect_err("scalar kwargs must be rejected");
+        assert!(error.contains("must be a valid JSON object"));
+    }
+
+    #[test]
+    fn build_managed_args_rejects_unmapped_runtime_flags() {
+        let mut runtime = runtime();
+        runtime.jinja_arg = None;
+        let error = build_managed_args(
+            &cli_args(),
+            &runtime,
+            "/models/qwen.gguf",
+            "qwen3.6-35b-a3b-ud-q4-k-xl",
+            "127.0.0.1",
+            8001,
+            8192,
+        )
+        .expect_err("dedicated flags must be declared by the runtime catalog");
+        assert!(error.contains("does not declare --jinja"));
     }
 
     #[test]

@@ -105,6 +105,9 @@ pub(crate) struct LocalLaunchArgs {
     /// llama.cpp reasoning extraction format, for example `deepseek`.
     #[arg(long = "reasoning-format")]
     pub reasoning_format: Option<String>,
+    /// JSON object passed to a runtime's chat-template parser.
+    #[arg(long = "chat-template-kwargs")]
+    pub chat_template_kwargs: Option<String>,
     /// llama.cpp flash-attention mode (`on`, `off`, or `auto`).
     #[arg(long = "flash-attn")]
     pub flash_attn: Option<String>,
