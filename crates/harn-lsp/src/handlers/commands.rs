@@ -13,6 +13,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
 use super::formatting::build_code_actions;
+use crate::source_text::SourceText;
 use crate::HarnLsp;
 
 /// Command name advertised in `ServerCapabilities::execute_command_provider`
@@ -83,7 +84,7 @@ fn parse_apply_repair_args(arguments: &[Value]) -> Option<(Url, String)> {
 /// `executeCommand` path and the inline code-action path can never drift.
 fn resolve_repair_edit(
     uri: &Url,
-    source: &str,
+    source: &SourceText,
     diagnostics: &[Diagnostic],
     lint_diags: &[harn_lint::LintDiagnostic],
     type_diags: &[harn_parser::TypeDiagnostic],

@@ -8,10 +8,10 @@ use tower_lsp::lsp_types::*;
 use crate::helpers::{
     code_action_kind_for_safety_name, diagnostic_repair_code_action_data,
     diagnostic_repair_code_action_kind, extract_backtick_name, find_word_in_region,
-    lsp_position_to_offset, offset_to_position, repair_code_action_data, repair_code_action_kind,
-    span_to_range,
+    repair_code_action_data, repair_code_action_kind, span_to_range,
 };
 use crate::rules::RuleDiagnostic;
+use crate::source_text::SourceText;
 use crate::HarnLsp;
 
 impl HarnLsp {
@@ -102,7 +102,7 @@ impl HarnLsp {
 
 pub(crate) fn build_code_actions(
     uri: &Url,
-    source: &str,
+    source: &SourceText,
     lint_diags: &[harn_lint::LintDiagnostic],
     type_diags: &[harn_parser::TypeDiagnostic],
     rule_diags: &[RuleDiagnostic],
@@ -151,8 +151,8 @@ pub(crate) fn build_code_actions(
                     .iter()
                     .map(|fe| TextEdit {
                         range: Range {
-                            start: offset_to_position(source, fe.span.start),
-                            end: offset_to_position(source, fe.span.end),
+                            start: source.position(fe.span.start),
+                            end: source.position(fe.span.end),
                         },
                         new_text: fe.replacement.clone(),
                     })
@@ -200,8 +200,8 @@ pub(crate) fn build_code_actions(
                         .iter()
                         .map(|fe| TextEdit {
                             range: Range {
-                                start: offset_to_position(source, fe.span.start),
-                                end: offset_to_position(source, fe.span.end),
+                                start: source.position(fe.span.start),
+                                end: source.position(fe.span.end),
                             },
                             new_text: fe.replacement.clone(),
                         })
@@ -264,15 +264,16 @@ pub(crate) fn build_code_actions(
         // Fallback manual code actions for rules without structured fixes.
         if msg.contains("[unused-variable]") || msg.contains("[unused-parameter]") {
             if let Some(name) = extract_backtick_name(msg) {
-                let offset = lsp_position_to_offset(source, diag.range.start);
-                let end_offset = lsp_position_to_offset(source, diag.range.end)
+                let offset = source.offset(diag.range.start);
+                let end_offset = source
+                    .offset(diag.range.end)
                     .max(offset + 1)
                     .min(source.len());
                 let search_region = &source[offset..end_offset];
                 if let Some(name_pos) = find_word_in_region(search_region, &name) {
                     let abs_pos = offset + name_pos;
-                    let start = offset_to_position(source, abs_pos);
-                    let end = offset_to_position(source, abs_pos + name.len());
+                    let start = source.position(abs_pos);
+                    let end = source.position(abs_pos + name.len());
                     let edit_range = Range { start, end };
 
                     let mut changes = HashMap::new();
@@ -324,8 +325,8 @@ pub(crate) fn build_code_actions(
                 .iter()
                 .map(|fe| TextEdit {
                     range: Range {
-                        start: offset_to_position(source, fe.span.start),
-                        end: offset_to_position(source, fe.span.end),
+                        start: source.position(fe.span.start),
+                        end: source.position(fe.span.end),
                     },
                     new_text: fe.replacement.clone(),
                 })
@@ -393,9 +394,9 @@ fn format_whole_document_edit(source: &str) -> Option<TextEdit> {
 /// keeps "Format Selection" from silently rewriting the whole file while
 /// still handling the common cases (a whole-file selection, or a
 /// selection that fully contains the messy region).
-fn range_format_edit(source: &str, range: Range) -> Option<TextEdit> {
+fn range_format_edit(source: &SourceText, range: Range) -> Option<TextEdit> {
     let formatted = harn_fmt::format_source(source).ok()?;
-    if formatted == source {
+    if formatted == source.as_str() {
         return None;
     }
 
@@ -434,12 +435,12 @@ fn range_format_edit(source: &str, range: Range) -> Option<TextEdit> {
         return None;
     }
 
-    let start_offset = lsp_position_to_offset(source, Position::new(prefix as u32, 0));
+    let start_offset = source.offset(Position::new(prefix as u32, 0));
     let new_lines = &fmt[prefix..fmt.len() - suffix];
     let (end_offset, new_text) = if orig_end_line < orig.len() {
         // The region ends before the final line, so it is replaced up to the
         // start of the next line — include each replacement line's newline.
-        let end = lsp_position_to_offset(source, Position::new(orig_end_line as u32, 0));
+        let end = source.offset(Position::new(orig_end_line as u32, 0));
         let mut text = new_lines.join("\n");
         if !new_lines.is_empty() {
             text.push('\n');
@@ -453,8 +454,8 @@ fn range_format_edit(source: &str, range: Range) -> Option<TextEdit> {
 
     Some(TextEdit {
         range: Range {
-            start: offset_to_position(source, start_offset),
-            end: offset_to_position(source, end_offset),
+            start: source.position(start_offset),
+            end: source.position(end_offset),
         },
         new_text,
     })
@@ -487,7 +488,7 @@ fn fix_all_requested(only: Option<&[CodeActionKind]>) -> bool {
 /// byte position) — in that case the code-action is silently skipped
 /// rather than emitting a broken edit.
 pub(super) fn build_missing_arms_edit(
-    source: &str,
+    source: &SourceText,
     match_span: &harn_lexer::Span,
     missing: &[String],
 ) -> Option<TextEdit> {
@@ -530,7 +531,7 @@ pub(super) fn build_missing_arms_edit(
     }
     inserted.push('\n');
     inserted.push_str(&brace_indent);
-    let brace_pos = offset_to_position(source, close_brace_byte);
+    let brace_pos = source.position(close_brace_byte);
     Some(TextEdit {
         range: Range {
             start: brace_pos,
@@ -546,6 +547,7 @@ mod tests {
         build_code_actions, build_missing_arms_edit, format_whole_document_edit, range_format_edit,
     };
     use crate::document::DocumentState;
+    use crate::source_text::SourceText;
     use harn_lexer::Span;
     use tower_lsp::lsp_types::{
         CodeActionContext, CodeActionOrCommand, NumberOrString, Position, Range, Url,
@@ -636,7 +638,7 @@ mod tests {
         };
         let missing = vec!["\"fail\"".to_string(), "\"skip\"".to_string()];
         let _ = end;
-        let edit = build_missing_arms_edit(source, &span, &missing)
+        let edit = build_missing_arms_edit(&SourceText::new(source), &span, &missing)
             .expect("expected edit for well-formed match");
         assert!(edit.new_text.contains("\"fail\" -> "), "{edit:?}");
         assert!(edit.new_text.contains("\"skip\" -> "), "{edit:?}");
@@ -662,7 +664,7 @@ mod tests {
             column: 1,
             end_line: 1,
         };
-        let edit = build_missing_arms_edit(source, &span, &["\"x\"".to_string()]);
+        let edit = build_missing_arms_edit(&SourceText::new(source), &span, &["\"x\"".to_string()]);
         assert!(edit.is_none());
     }
 
@@ -670,8 +672,11 @@ mod tests {
     fn range_format_selecting_whole_document_formats_everything() {
         let source = "fn main(){\nconst x=1\n}\n";
         // Selection spanning the entire document.
-        let edit = range_format_edit(source, Range::new(Position::new(0, 0), Position::new(3, 0)))
-            .expect("expected an edit for a messy document");
+        let edit = range_format_edit(
+            &SourceText::new(source),
+            Range::new(Position::new(0, 0), Position::new(3, 0)),
+        )
+        .expect("expected an edit for a messy document");
         assert!(edit.new_text.contains("fn main() {"), "{}", edit.new_text);
         assert!(edit.new_text.contains("const x = 1"), "{}", edit.new_text);
         assert_eq!(edit.range.start, Position::new(0, 0));
@@ -681,8 +686,11 @@ mod tests {
     fn range_format_confines_edit_to_selected_lines() {
         let source = "fn main(){\nconst x=1\n}\n";
         // Selection covering just the two messy lines (0 and 1).
-        let edit = range_format_edit(source, Range::new(Position::new(0, 0), Position::new(2, 0)))
-            .expect("expected an edit for the selected messy region");
+        let edit = range_format_edit(
+            &SourceText::new(source),
+            Range::new(Position::new(0, 0), Position::new(2, 0)),
+        )
+        .expect("expected an edit for the selected messy region");
         // The edit must not reach past line 1 into the closing brace on line 2.
         assert!(
             edit.range.end.line <= 2,
@@ -697,7 +705,10 @@ mod tests {
         let source = "fn main(){\nconst x=1\n}\n";
         // Selecting only the already-well-formatted closing brace line: the
         // formatter's changes lie outside the selection, so no edit.
-        let edit = range_format_edit(source, Range::new(Position::new(2, 0), Position::new(3, 0)));
+        let edit = range_format_edit(
+            &SourceText::new(source),
+            Range::new(Position::new(2, 0), Position::new(3, 0)),
+        );
         assert!(
             edit.is_none(),
             "expected no edit when the selection excludes the changed region: {edit:?}"
@@ -707,7 +718,10 @@ mod tests {
     #[test]
     fn range_format_returns_none_for_already_formatted_source() {
         let source = "fn main() {\n  const x = 1\n}\n";
-        let edit = range_format_edit(source, Range::new(Position::new(0, 0), Position::new(3, 0)));
+        let edit = range_format_edit(
+            &SourceText::new(source),
+            Range::new(Position::new(0, 0), Position::new(3, 0)),
+        );
         assert!(edit.is_none(), "already-formatted source needs no edit");
     }
 

@@ -9,6 +9,7 @@ use tower_lsp::lsp_types::{
 
 use crate::document::DocumentState;
 use crate::helpers::{span_to_full_range, word_at_position};
+use crate::source_text::SourceText;
 use crate::symbols::{HarnSymbolKind, SymbolInfo};
 
 #[derive(Debug, Clone)]
@@ -28,7 +29,7 @@ type CallGroup = (CallHierarchyItem, Vec<Range>);
 
 pub(crate) fn prepare_call_hierarchy(
     uri: &Url,
-    source: &str,
+    source: &SourceText,
     symbols: &[SymbolInfo],
     position: Position,
 ) -> Option<Vec<CallHierarchyItem>> {
@@ -146,7 +147,7 @@ pub(crate) fn outgoing_call_hierarchy(
     }
 }
 
-fn call_hierarchy_item(uri: &Url, source: &str, sym: &SymbolInfo) -> CallHierarchyItem {
+fn call_hierarchy_item(uri: &Url, source: &SourceText, sym: &SymbolInfo) -> CallHierarchyItem {
     let range = span_to_full_range(&sym.def_span, source);
     CallHierarchyItem {
         name: sym.name.clone(),
@@ -167,14 +168,14 @@ fn is_callable_symbol(sym: &SymbolInfo) -> bool {
     )
 }
 
-fn span_range_eq(span: &Span, source: &str, range: Range) -> bool {
+fn span_range_eq(span: &Span, source: &SourceText, range: Range) -> bool {
     span_to_full_range(span, source) == range
 }
 
 fn symbol_for_callable<'a>(
     symbols: &'a [SymbolInfo],
     callable: &CallableInfo,
-    source: &str,
+    source: &SourceText,
 ) -> Option<&'a SymbolInfo> {
     symbols.iter().find(|sym| {
         is_callable_symbol(sym)
@@ -755,8 +756,9 @@ mod tests {
         let uri = Url::parse("file:///test.harn").unwrap();
         let state = DocumentState::new(source.to_string());
 
-        let prepared = prepare_call_hierarchy(&uri, source, &state.symbols, Position::new(0, 4))
-            .expect("callee should prepare");
+        let prepared =
+            prepare_call_hierarchy(&uri, &state.source, &state.symbols, Position::new(0, 4))
+                .expect("callee should prepare");
         assert_eq!(prepared[0].name, "callee");
 
         let mut docs = HashMap::new();
@@ -772,7 +774,7 @@ mod tests {
 
         let main_item = prepare_call_hierarchy(
             &uri,
-            source,
+            &docs.get(&uri).unwrap().source,
             &docs.get(&uri).unwrap().symbols,
             Position::new(8, 10),
         )

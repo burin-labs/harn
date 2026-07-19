@@ -15,6 +15,7 @@ mod helpers;
 mod references;
 mod rules;
 mod semantic_tokens;
+mod source_text;
 mod symbols;
 
 use std::collections::HashMap;
@@ -83,6 +84,7 @@ mod tests {
     use super::*;
     use crate::handlers::hover::{resolve_hover_target, HoverTarget};
     use crate::helpers::word_at_position;
+    use crate::source_text::SourceText;
     use crate::symbols::HarnSymbolKind;
 
     /// Resolve the hover target at the given 0-based line/column, through the
@@ -92,7 +94,7 @@ mod tests {
     /// builtin/keyword/symbol ordering as the LSP handler.
     fn hover_target_at(source: &str, line: u32, col: u32) -> Option<HoverTarget> {
         let state = DocumentState::new(source.to_string());
-        resolve_hover_target(source, &state.symbols, Position::new(line, col))
+        resolve_hover_target(&state.source, &state.symbols, Position::new(line, col))
     }
 
     /// The hover symbol at the given position, asserting the word under the
@@ -103,7 +105,7 @@ mod tests {
         col: u32,
         word: &str,
     ) -> Option<symbols::SymbolInfo> {
-        let extracted = word_at_position(source, Position::new(line, col));
+        let extracted = word_at_position(&SourceText::new(source), Position::new(line, col));
         assert_eq!(
             extracted.as_deref(),
             Some(word),
