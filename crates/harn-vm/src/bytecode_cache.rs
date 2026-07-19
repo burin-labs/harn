@@ -1240,7 +1240,10 @@ mod tests {
         let round_tripped: ModuleArtifact =
             deserialize_cache_payload(&payload).expect("deserialize module artifact");
 
-        assert!(round_tripped.public_names.contains("answer"));
+        assert_eq!(
+            round_tripped.public_exports.get("answer"),
+            Some(&harn_modules::DefKind::Function)
+        );
         assert!(round_tripped.functions["answer"]
             .chunk
             .functions
