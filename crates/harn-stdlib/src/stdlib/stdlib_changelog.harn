@@ -18,7 +18,11 @@ pub type ChangelogResult<T> = Result<T, ChangelogFailure>
 /** A format-preserving changelog transformation. */
 pub type ChangelogMerge = {text: string, changed: bool}
 
-fn __changelog_failure(kind: ChangelogFailureKind, message: string, value: string? = nil) -> ChangelogFailure {
+fn __changelog_failure(
+  kind: ChangelogFailureKind,
+  message: string,
+  value: string? = nil,
+) -> ChangelogFailure {
   let failure: ChangelogFailure = {kind: kind, message: message}
   if value != nil {
     failure = failure + {value: value}
@@ -35,7 +39,9 @@ fn __changelog_category_heading(category: ChangelogCategory) -> string {
  * @effects: []
  * @errors: []
  */
-pub fn changelog_validate_categories(categories: list<ChangelogCategory>) -> ChangelogResult<list<ChangelogCategory>> {
+pub fn changelog_validate_categories(
+  categories: list<ChangelogCategory>,
+) -> ChangelogResult<list<ChangelogCategory>> {
   let slugs: list<string> = []
   let headings: list<string> = []
   for category in categories {
@@ -76,7 +82,11 @@ fn __changelog_category(categories: list<ChangelogCategory>, slug: string) -> Ch
  * @effects: []
  * @errors: []
  */
-pub fn changelog_parse_fragment(filename: string, body: string, categories: list<ChangelogCategory>) -> ChangelogResult<ChangelogFragment> {
+pub fn changelog_parse_fragment(
+  filename: string,
+  body: string,
+  categories: list<ChangelogCategory>,
+) -> ChangelogResult<ChangelogFragment> {
   const valid = changelog_validate_categories(categories)
   if is_err(valid) {
     return Err(unwrap_err(valid))
@@ -143,7 +153,10 @@ fn __changelog_fragment_compare(a: ChangelogFragment, b: ChangelogFragment) -> i
   return __changelog_lex_compare(a.file ?? "", b.file ?? "")
 }
 
-fn __changelog_insert_fragment(sorted: list<ChangelogFragment>, fragment: ChangelogFragment) -> list<ChangelogFragment> {
+fn __changelog_insert_fragment(
+  sorted: list<ChangelogFragment>,
+  fragment: ChangelogFragment,
+) -> list<ChangelogFragment> {
   let out: list<ChangelogFragment> = []
   let inserted = false
   for current in sorted {
@@ -371,8 +384,7 @@ pub fn changelog_parse_sections(text: string) -> ChangelogResult<list<ChangelogS
   }
   let sections: list<ChangelogSection> = []
   for section in unwrap(scanned) {
-    sections = sections
-      .push(
+    sections = sections.push(
       {
         heading: section.heading,
         body: trim(substring(text, section.body_char, section.end_char)),
@@ -440,7 +452,11 @@ fn __changelog_append_unique(current: string, addition: string) -> string {
   return left == "" ? right : left + "\n\n" + right
 }
 
-fn __changelog_merge_bodies(current: string, addition: string, categories: list<ChangelogCategory>) -> string {
+fn __changelog_merge_bodies(
+  current: string,
+  addition: string,
+  categories: list<ChangelogCategory>,
+) -> string {
   let existing = __changelog_parse_subsections(current)
   const incoming = __changelog_parse_subsections(addition)
   let preamble = ""
@@ -458,8 +474,7 @@ fn __changelog_merge_bodies(current: string, addition: string, categories: list<
     let next: list<dict> = []
     for section in existing {
       if !merged && section.heading == added.heading {
-        next = next
-          .push(
+        next = next.push(
           {heading: section.heading, body: __changelog_append_unique(section.body, added.body)},
         )
         merged = true
