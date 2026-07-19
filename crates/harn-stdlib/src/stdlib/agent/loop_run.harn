@@ -1141,8 +1141,10 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           )
           agent_emit_event(
             session.session_id,
-            "command_hold",
+            "typed_checkpoint",
             {
+              schema: "harn.command_hold.v1",
+              kind: "command_hold",
               iteration: iteration_index + 1,
               outcome: hold.outcome,
               reentries: command_hold_state.reentries,

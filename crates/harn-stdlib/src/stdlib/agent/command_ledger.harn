@@ -646,25 +646,27 @@ pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) -> dict {
         out = command_ledger_release(out, row.handle_id)
         const receipt = {
           schema: "harn.command_ledger_ceiling.v1",
+          kind: "command_ceiling_resolved",
           handle_id: row.handle_id,
           descriptor: row.descriptor,
           action: "release_to_service",
           elapsed_ms: now_ms - row.started_at_ms,
         }
         receipts = receipts.push(receipt)
-        agent_emit_event(session_id, "command_ceiling_resolved", receipt)
+        agent_emit_event(session_id, "typed_checkpoint", receipt)
       } else {
         let _ = __cl_kill_handle(row.handle_id)
         out = command_ledger_retire(out, row.handle_id)
         const receipt = {
           schema: "harn.command_ledger_ceiling.v1",
+          kind: "command_ceiling_resolved",
           handle_id: row.handle_id,
           descriptor: row.descriptor,
           action: "kill",
           elapsed_ms: now_ms - row.started_at_ms,
         }
         receipts = receipts.push(receipt)
-        agent_emit_event(session_id, "command_ceiling_resolved", receipt)
+        agent_emit_event(session_id, "typed_checkpoint", receipt)
       }
     } else {
       escalated = true
