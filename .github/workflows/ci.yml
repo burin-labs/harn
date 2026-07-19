@@ -336,6 +336,12 @@ jobs:
           shared-key: package-audit
           cache-on-failure: true
           cache-bin: false
+          # Authorize this lane as the package-audit main-branch cache writer.
+          # Package-relevant merges are exactly the pushes where this lane runs,
+          # so the saved key tracks every lockfile/manifest change. Before this,
+          # NO Linux lane ever saved (`save` defaulted off at every call site),
+          # so every hosted run restored nothing and compiled from scratch.
+          save: "true"
       - name: Generate release/package CLI AOT payload
         run: make gen-cli-aot && make check-cli-aot
       - name: Check published crate packages
@@ -432,8 +438,15 @@ jobs:
         if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
         continue-on-error: true
         with:
-          shared-key: ${{ matrix.cache_key }}
+          # Both legs restore the behavior cache and only the behavior leg
+          # writes it (on main pushes). The lint leg needs no writer of its
+          # own: `cargo clippy` compiles dependency crates with plain rustc,
+          # so the behavior cache's dep artifacts are directly reusable and
+          # a separate workspace-lint key would only spend cache quota.
+          shared-key: workspace-behavior
+          cache-on-failure: true
           cache-bin: false
+          save: ${{ matrix.kind == 'behavior' }}
       - name: Install cargo-nextest
         if: matrix.kind == 'behavior'
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
@@ -521,8 +534,13 @@ jobs:
         if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
         continue-on-error: true
         with:
-          shared-key: workspace-behavior
+          # workspace-test, not workspace-behavior: the test profile compiles
+          # dev-dependencies and test binaries the behavior payload never
+          # builds, so this lane is its own authorized main-branch writer.
+          shared-key: workspace-test
+          cache-on-failure: true
           cache-bin: false
+          save: "true"
       - name: Install cargo-nextest
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
