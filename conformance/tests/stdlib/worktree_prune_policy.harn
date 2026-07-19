@@ -44,7 +44,9 @@ pipeline default() {
   __io_println(verdict_reason(base + {merged: false, abandoned: false}) == "not_merged")
   __io_println(verdict_reason(base + {age_seconds: 10 * 60}) == "too_young")
   __io_println(worktree_prune_classify(base + {age_seconds: 10 * 60}, 5 * 60).reclaimable)
-  __io_println(verdict_reason(base + {has_process: true, age_seconds: 10 * 24 * 60 * 60}) == "in_use")
+  __io_println(
+    verdict_reason(base + {has_process: true, age_seconds: 10 * 24 * 60 * 60}) == "in_use",
+  )
   __io_println(!worktree_prune_status_has_real_edits(""))
   __io_println(
     !worktree_prune_status_has_real_edits(

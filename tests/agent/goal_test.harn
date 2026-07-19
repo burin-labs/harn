@@ -20,7 +20,10 @@ fn __manual_omit(o, drop) {
 
 pipeline test_callable_check_is_kept(task) {
   const g = goal(
-    {objective: "ship it", success_criteria: [{check: { f -> f?.ok ?? false }, description: "green"}]},
+    {
+      objective: "ship it",
+      success_criteria: [{check: { f -> f?.ok ?? false }, description: "green"}],
+    },
   )
   assert_eq(goal_check(g, {ok: true}).done, true)
   assert_eq(goal_check(g, {ok: false}).done, false)

@@ -7,19 +7,21 @@
 import { with_scoped_executor } from "std/llm/tool_middleware"
 
 fn synthetic_next() {
-  return { call -> return {
-    ok: true,
-    status: "ok",
-    tool_name: call.tool_name,
-    tool_call_id: call.call_id,
-    arguments: call.tool_args,
-    result: "ran " + call.tool_name,
-    rendered_result: "ran " + call.tool_name,
-    observation: "",
-    error: nil,
-    error_category: nil,
-    executor: "harn",
-  } }
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: "ran " + call.tool_name,
+      rendered_result: "ran " + call.tool_name,
+      observation: "",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
 }
 
 fn envelope(name) {
@@ -37,7 +39,9 @@ fn envelope(name) {
 pipeline default() {
   const next = synthetic_next()
   // Allowed tool passes; audit.scope records the stage + allowlist.
-  const research_mw = with_scoped_executor({stage: "research", allowed_tools: ["search_files", "read_file"]})
+  const research_mw = with_scoped_executor(
+    {stage: "research", allowed_tools: ["search_files", "read_file"]},
+  )
   const ok = research_mw(envelope("search_files"), next)
   __io_println(ok.ok)
   __io_println(ok.audit.scope.stage)
@@ -51,7 +55,9 @@ pipeline default() {
   __io_println(reject.error)
   __io_println(reject.audit.layers[0].status)
   // `on_violation: "raise"` throws instead of short-circuiting.
-  const raising_mw = with_scoped_executor({stage: "plan", allowed_tools: ["sketch_plan"], on_violation: "raise"})
+  const raising_mw = with_scoped_executor(
+    {stage: "plan", allowed_tools: ["sketch_plan"], on_violation: "raise"},
+  )
   try {
     raising_mw(envelope("edit_file"), next)
     __io_println("no-throw")
@@ -98,10 +104,12 @@ pipeline default() {
       returns: {type: "string"},
     },
   )
-  const dispatch_next = { call -> return agent_dispatch_tool_call(
-    {name: "write_note", id: call.call_id, arguments: {path: "notes.txt"}},
-    tools,
-  ) }
+  const dispatch_next = { call ->
+    return agent_dispatch_tool_call(
+      {name: "write_note", id: call.call_id, arguments: {path: "notes.txt"}},
+      tools,
+    )
+  }
   const dispatch_mw = with_scoped_executor({stage: "audit", allowed_tools: ["read_note"]})
   // Envelope advertises an allowed name; `next` rewrites to the denied
   // name to simulate a misbehaving inner layer.

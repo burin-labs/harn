@@ -47,7 +47,8 @@ pipeline test(task) {
         throw "audit entry must report a positive match_count, got " + to_string(entry.match_count)
       }
       if entry.bytes_redacted <= 0 {
-        throw "audit entry must report positive bytes_redacted, got " + to_string(entry.bytes_redacted)
+        throw "audit entry must report positive bytes_redacted, got "
+          + to_string(entry.bytes_redacted)
       }
       if entry.pattern == "" {
         throw "audit entry must name a pattern"

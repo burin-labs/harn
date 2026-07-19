@@ -19,10 +19,14 @@ pipeline main() {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "park_a", name: "agent_await_resumption", arguments: {reason: "worker A parks"}}],
+        tool_calls: [
+          {id: "park_a", name: "agent_await_resumption", arguments: {reason: "worker A parks"}},
+        ],
       },
       {
-        tool_calls: [{id: "park_b", name: "agent_await_resumption", arguments: {reason: "worker B parks"}}],
+        tool_calls: [
+          {id: "park_b", name: "agent_await_resumption", arguments: {reason: "worker B parks"}},
+        ],
       },
       llm_text("worker A completed"),
       llm_text("worker B completed"),

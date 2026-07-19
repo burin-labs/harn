@@ -1,5 +1,9 @@
 fn __llm_media_is_url(source) {
-  return starts_with(source, "http://") || starts_with(source, "https://") || starts_with(source, "data:")
+  return starts_with(source, "http://") || starts_with(source, "https://")
+    || starts_with(
+    source,
+    "data:",
+  )
 }
 
 fn __llm_media_source_field(harness: Harness, source, media_type) {
@@ -124,7 +128,11 @@ pub fn document_content(source, options = nil) {
     return source
   }
   const opts = options ?? {}
-  const media_type = opts?.media_type ?? opts?.mime_type ?? media_type_for_path(source, "application/pdf")
+  const media_type = opts?.media_type ?? opts?.mime_type
+    ?? media_type_for_path(
+    source,
+    "application/pdf",
+  )
   if opts?.file_id != nil {
     return {type: "pdf", file_id: opts.file_id, media_type: media_type}
   }

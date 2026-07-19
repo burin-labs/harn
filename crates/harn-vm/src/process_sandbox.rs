@@ -20,7 +20,7 @@
 pub use crate::stdlib::sandbox::{
     active_backend_available, active_backend_name, active_workspace_tmpdir_env,
     check_fs_path_scope, command_output, deterministic_message_locale_env, enforce_process_cwd,
-    process_spawn_error, process_violation_error, push_process_sandbox_scope, std_command_for,
-    tokio_command_for, FsAccess, ProcessCommandConfig, ProcessSandboxScope,
+    process_spawn_error, process_violation_error, push_process_sandbox_scope, render_policy_root,
+    std_command_for, tokio_command_for, FsAccess, ProcessCommandConfig, ProcessSandboxScope,
     ProcessSandboxScopeGuard, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
 };

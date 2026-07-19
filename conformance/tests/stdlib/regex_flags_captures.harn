@@ -11,7 +11,10 @@ pipeline test(task) {
   assert_eq(trailing, inline)
   const class_any = regex_captures("(?i)<tool_result\\b([^>]*)>([\\s\\S]*?)</tool_result>", text)
   assert_eq(class_any, inline)
-  const named = regex_captures("(?is)<(?P<tag>tool_result)\\b([^>]*)>(.*?)</(?P<tag_close>tool_result)>", text)
+  const named = regex_captures(
+    "(?is)<(?P<tag>tool_result)\\b([^>]*)>(.*?)</(?P<tag_close>tool_result)>",
+    text,
+  )
   assert_eq(named[0].tag, "Tool_Result")
   assert_eq(named[0].tag_close, "Tool_Result")
   assert_eq(named[0].groups, ["Tool_Result", " id=\"42\"", "\nAlpha\nbeta\n", "Tool_Result"])

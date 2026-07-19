@@ -24,7 +24,9 @@ pipeline main() {
       iteration: 3,
       tool_name: "exec_command",
       tool: {name: "exec_command", args: {cmd: "cargo check -p demo"}},
-      result: {text: "error[E0425]: cannot find value `missing` in this scope\n --> src/lib.rs:2:5\n"},
+      result: {
+        text: "error[E0425]: cannot find value `missing` in this scope\n --> src/lib.rs:2:5\n",
+      },
     },
     opts,
   )
@@ -59,7 +61,10 @@ pipeline main() {
     },
     opts,
   )
-  const verifier_reminder = transcript_events_by_kind(agent_session_snapshot(verifier_session), "system_reminder")[0].reminder
+  const verifier_reminder = transcript_events_by_kind(
+    agent_session_snapshot(verifier_session),
+    "system_reminder",
+  )[0].reminder
   __io_println(verifier.fired_count)
   __io_println(contains(verifier_reminder.body, "verified:verifier:lint"))
   __io_println(contains(verifier_reminder.body, "forbidden pattern matched"))

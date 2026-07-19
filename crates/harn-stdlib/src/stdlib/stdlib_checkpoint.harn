@@ -363,7 +363,11 @@ pub fn typed_output_checkpoint(name, prompt, schema, options = nil, validator = 
   let last_result = nil
   while checkpoint_attempt <= max_validator_retries {
     checkpoint_attempt = checkpoint_attempt + 1
-    const result = llm_call_structured_result(current_prompt, schema, __typed_checkpoint_options(opts))
+    const result = llm_call_structured_result(
+      current_prompt,
+      schema,
+      __typed_checkpoint_options(opts),
+    )
     last_result = result
     const result_attempts = result?.attempts ?? 0
     total_llm_attempts = total_llm_attempts + result_attempts

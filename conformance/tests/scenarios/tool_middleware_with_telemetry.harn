@@ -14,41 +14,45 @@ import { with_telemetry } from "std/llm/tool_middleware"
 import { resolve_telemetry_sink, tool_call_span } from "std/llm/tool_telemetry"
 
 fn ok_next() {
-  return { call -> return {
-    ok: true,
-    status: "ok",
-    tool_name: call.tool_name,
-    tool_call_id: call.call_id,
-    arguments: call.tool_args,
-    result: {rendered: "hello"},
-    rendered_result: "hello",
-    observation: "",
-    error: nil,
-    error_category: nil,
-    executor: "harn",
-    audit: {
-      layers: [
-        {name: "with_consent", status: "approved"},
-        {name: "with_rate_limit", status: "ok", count: 3, cap: 50},
-      ],
-    },
-  } }
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: {rendered: "hello"},
+      rendered_result: "hello",
+      observation: "",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+      audit: {
+        layers: [
+          {name: "with_consent", status: "approved"},
+          {name: "with_rate_limit", status: "ok", count: 3, cap: 50},
+        ],
+      },
+    }
+  }
 }
 
 fn scope_violation_next() {
-  return { call -> return {
-    ok: false,
-    status: "error",
-    tool_name: call.tool_name,
-    tool_call_id: call.call_id,
-    arguments: call.tool_args,
-    result: nil,
-    rendered_result: "",
-    observation: "",
-    error: "tool 'shell.exec' is outside the configured scope",
-    error_category: "scope_violation",
-    executor: "harn",
-  } }
+  return { call ->
+    return {
+      ok: false,
+      status: "error",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: nil,
+      rendered_result: "",
+      observation: "",
+      error: "tool 'shell.exec' is outside the configured scope",
+      error_category: "scope_violation",
+      executor: "harn",
+    }
+  }
 }
 
 fn envelope(name, call_id, session_id) {

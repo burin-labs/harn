@@ -16,5 +16,7 @@ pipeline test(task) {
   __io_println(json_stringify(jq(api, ".users[] | select(not .active) | .name")))
   __io_println(json_stringify(jq_first(api, "{ name: .users[0].name, age: .users[0].age }")))
   __io_println(json_stringify(jq(api, ".meta.count, .meta.next")))
-  __io_println(json_stringify(jq(api, ".. | select(type == \"object\" and .email != null) | .email")))
+  __io_println(
+    json_stringify(jq(api, ".. | select(type == \"object\" and .email != null) | .email")),
+  )
 }

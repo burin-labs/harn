@@ -23,7 +23,12 @@ import { llm_has_explicit_routing_owner } from "std/llm/options"
  * @api_stability: experimental
  */
 pub fn agent_monologue_actuation_config(value = nil) -> MonologueActuationConfig {
-  const defaults: MonologueActuationConfig = {enabled: false, max_firings: 1, read_only_turns: 4, write_tool: ""}
+  const defaults: MonologueActuationConfig = {
+    enabled: false,
+    max_firings: 1,
+    read_only_turns: 4,
+    write_tool: "",
+  }
   if value == nil {
     return defaults
   }
@@ -32,27 +37,37 @@ pub fn agent_monologue_actuation_config(value = nil) -> MonologueActuationConfig
   }
   if type_of(value) != "dict" {
     throw "agent_loop: stall_diagnostics.monologue_actuation must be a bool, dict, or nil; got "
-      + type_of(value)
+      + type_of(
+      value,
+    )
   }
   const enabled = value?.enabled
   if enabled != nil && type_of(enabled) != "bool" {
     throw "agent_loop: stall_diagnostics.monologue_actuation.enabled must be a bool; got "
-      + type_of(enabled)
+      + type_of(
+      enabled,
+    )
   }
   const max_firings = value?.max_firings
   if max_firings != nil && (type_of(max_firings) != "int" || max_firings < 1) {
     throw "agent_loop: stall_diagnostics.monologue_actuation.max_firings must be a positive int; got "
-      + type_of(max_firings)
+      + type_of(
+      max_firings,
+    )
   }
   const read_only_turns = value?.read_only_turns
   if read_only_turns != nil && (type_of(read_only_turns) != "int" || read_only_turns < 1) {
     throw "agent_loop: stall_diagnostics.monologue_actuation.read_only_turns must be a positive int; got "
-      + type_of(read_only_turns)
+      + type_of(
+      read_only_turns,
+    )
   }
   const write_tool = value?.write_tool
   if write_tool != nil && type_of(write_tool) != "string" {
     throw "agent_loop: stall_diagnostics.monologue_actuation.write_tool must be a string; got "
-      + type_of(write_tool)
+      + type_of(
+      write_tool,
+    )
   }
   return {
     enabled: enabled ?? true,
@@ -127,7 +142,8 @@ pub fn agent_monologue_actuation_observe_completed_dispatch(
 
 fn __agent_monologue_actuation_route_suppression(options) -> string {
   if options?._llm_caller != nil
-    && !(options?._llm_caller_transport?.forwards_assistant_prefill ?? false) {
+    && !(options?._llm_caller_transport?.forwards_assistant_prefill
+    ?? false) {
     return "external_llm_caller_unsupported"
   }
   if llm_has_explicit_routing_owner(options) || options?.equivalent_failover != nil {
@@ -256,7 +272,9 @@ pub fn agent_monologue_actuation_take(
       firing_count: cleared.firing_count,
       max_firings: config.max_firings,
     }
-  } else if trigger == "read_only_streak" && commit_tool_name == "" {
+  } else if trigger == "read_only_streak"
+    && commit_tool_name
+    == "" {
     {
       state: cleared,
       applied: false,
@@ -321,7 +339,9 @@ pub fn agent_monologue_actuation_take_for_turn(
   prefill_available: bool,
   paradigm = nil,
 ) -> MonologueActuationDecision {
-  const config = agent_monologue_actuation_config(turn_options?.stall_diagnostics?.monologue_actuation)
+  const config = agent_monologue_actuation_config(
+    turn_options?.stall_diagnostics?.monologue_actuation,
+  )
   return agent_monologue_actuation_take(
     session_id,
     iteration,

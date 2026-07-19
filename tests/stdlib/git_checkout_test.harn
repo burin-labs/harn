@@ -94,11 +94,23 @@ fn checked_git(repo, args) {
 }
 
 pipeline test_checkout_plan_is_canonical(task) {
-  const options: GitCheckoutOptions = {base_branch: "main", remote: "upstream", dirty_policy: "stash", stash_name: "fixture-stash"}
+  const options: GitCheckoutOptions = {
+    base_branch: "main",
+    remote: "upstream",
+    dirty_policy: "stash",
+    stash_name: "fixture-stash",
+  }
   const plan = git_checkout_plan(options)
   assert_eq(
     plan.find({ step -> step.kind == "fetch" }).argv,
-    ["git", "fetch", "upstream", "--no-tags", "--quiet", "+refs/heads/main:refs/remotes/upstream/main"],
+    [
+      "git",
+      "fetch",
+      "upstream",
+      "--no-tags",
+      "--quiet",
+      "+refs/heads/main:refs/remotes/upstream/main",
+    ],
   )
   assert_eq(
     plan.find({ step -> step.kind == "create" }).argv,
@@ -201,7 +213,12 @@ pipeline test_real_checkout_ignores_stale_fetch_configuration(task) {
     consumer,
     ["config", "remote.origin.fetch", "+refs/heads/stale:refs/remotes/origin/stale"],
   )
-  const options: GitCheckoutOptions = {repo: consumer, remote: "origin", base_branch: "main", dirty_policy: "refuse"}
+  const options: GitCheckoutOptions = {
+    repo: consumer,
+    remote: "origin",
+    base_branch: "main",
+    dirty_policy: "refuse",
+  }
   const receipt = git_checkout_sync(options)
   assert(receipt.success)
   assert(receipt.steps.any({ step -> step.kind == "create" }))

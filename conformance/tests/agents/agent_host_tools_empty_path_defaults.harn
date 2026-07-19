@@ -7,7 +7,10 @@ fn main(harness: Harness) {
   harness.fs.write_text(path_join(root, "needle.txt"), "alpha needle\n")
   const tools = agent_read_tools(nil, {root: root, cwd: root})
   const listed = agent_dispatch_tool_call({name: "list_directory", arguments: {path: ""}}, tools)
-  const searched = agent_dispatch_tool_call({name: "search_files", arguments: {path: "", pattern: "needle"}}, tools)
+  const searched = agent_dispatch_tool_call(
+    {name: "search_files", arguments: {path: "", pattern: "needle"}},
+    tools,
+  )
   __io_println(listed.ok)
   __io_println(searched.ok)
   __io_println(contains(listed.rendered_result, "needle.txt"))

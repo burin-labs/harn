@@ -1,5 +1,9 @@
 pipeline test(task) {
-  tool create_user(user: {name: string, age?: int}, tags: list<string>, prefs: dict<string, int>) -> {ok: bool, names: list<string>} {
+  tool create_user(
+    user: {name: string, age?: int},
+    tags: list<string>,
+    prefs: dict<string, int>,
+  ) -> {ok: bool, names: list<string>} {
     return {ok: user.name != "" && prefs["missing"] == nil, names: tags}
   }
   const tool_def = tool_find(create_user, "create_user")

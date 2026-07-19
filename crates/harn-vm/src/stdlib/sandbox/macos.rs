@@ -154,6 +154,14 @@ fn render_profile_with_extra_read_roots(
     package_manager_read_roots: &[std::path::PathBuf],
     developer_toolchain_cache_roots: &[std::path::PathBuf],
 ) -> String {
+    // Callers may provide roots outside the normal policy-root builders (for
+    // example, an isolated toolchain cache in a test or an embedder-owned
+    // cache). Normalize them here as well so macOS aliases such as
+    // `/var/folders` and `/private/var/folders` cannot make a broad preset
+    // allow miss a narrower read-only deny.
+    let developer_toolchain_read_roots = normalize_profile_roots(developer_toolchain_read_roots);
+    let package_manager_read_roots = normalize_profile_roots(package_manager_read_roots);
+    let developer_toolchain_cache_roots = normalize_profile_roots(developer_toolchain_cache_roots);
     let roots = process_sandbox_roots(policy);
     let read_only_roots = process_sandbox_readonly_roots(policy);
     let policy_read_roots = process_sandbox_policy_read_roots(policy);
@@ -239,16 +247,25 @@ fn render_profile_with_extra_read_roots(
             .iter()
             .chain(package_manager_read_roots.iter())
         {
-            profile.push_str(&format!(
-                "(deny file-write* (subpath \"{}\"))\n",
-                sandbox_profile_escape(&root.display().to_string())
-            ));
+            for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+                profile.push_str(&format!(
+                    "(deny file-write* (subpath \"{}\"))\n",
+                    sandbox_profile_escape(&path)
+                ));
+            }
         }
     }
     if policy_allows_network(policy) {
         profile.push_str("(allow network*)\n");
     }
     profile
+}
+
+fn normalize_profile_roots(roots: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    roots
+        .iter()
+        .map(|root| super::normalize_for_policy(root))
+        .collect()
 }
 
 fn preset_read_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
@@ -296,6 +313,25 @@ fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
 
 fn sandbox_profile_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// macOS exposes `/tmp` and parts of `/var` through both logical and
+/// `/private` paths. Seatbelt evaluates those spellings independently, so a
+/// writable alias can bypass a deny rule emitted for only one spelling.
+fn sandbox_profile_path_aliases(path: &str) -> Vec<String> {
+    let mut aliases = vec![path.to_string()];
+    if path == "/tmp" || path.starts_with("/tmp/") || path == "/var" || path.starts_with("/var/") {
+        aliases.push(format!("/private{path}"));
+    } else if path == "/private/tmp"
+        || path.starts_with("/private/tmp/")
+        || path == "/private/var"
+        || path.starts_with("/private/var/")
+    {
+        aliases.push(path.replacen("/private", "", 1));
+    }
+    aliases.sort_unstable();
+    aliases.dedup();
+    aliases
 }
 
 fn standard_device_profile_rules() -> &'static str {
@@ -497,16 +533,28 @@ mod tests {
             return;
         }
         let cargo_home = tempfile::TempDir::new().expect("temp CARGO_HOME");
-        let registry = cargo_home.path().join("registry");
+        // macOS resolves /var/folders through /private/var/folders. Use the
+        // canonical spelling for every rule and disable the broad UserTemp
+        // grant so only the explicit toolchain-cache root can authorize writes.
+        let cargo_home_path =
+            std::fs::canonicalize(cargo_home.path()).expect("canonical CARGO_HOME");
+        let registry = cargo_home_path.join("registry");
         std::fs::create_dir_all(&registry).expect("registry dir");
-        let config = cargo_home.path().join("config.toml");
+        let config = cargo_home_path.join("config.toml");
         std::fs::write(&config, "[net]\noffline = true\n").expect("cargo config");
 
         let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
         policy.workspace_roots.clear();
+        policy.process_sandbox.presets = Some(
+            ProcessSandboxPreset::default_presets()
+                .iter()
+                .copied()
+                .filter(|preset| *preset != ProcessSandboxPreset::UserTemp)
+                .collect(),
+        );
         let profile = render_profile_with_extra_read_roots(
             &policy,
-            &[cargo_home.path().to_path_buf()],
+            &[cargo_home_path],
             &[config.clone()],
             std::slice::from_ref(&registry),
         );
@@ -1019,6 +1067,44 @@ mod tests {
             vendor_deny > write_allow,
             "deny for the nested read-only root must come after the broad write allow \
              so last-match-wins keeps it unwritable: {profile}"
+        );
+    }
+
+    #[test]
+    fn extra_write_root_grant_survives_last_match_wins_deny_block() {
+        // A caller-declared out-of-jail write grant (`harn run --write-root
+        // <dir>`) arrives as an extra workspace root beyond the primary. It must
+        // get its own file-write allow that the trailing read-only deny block
+        // never cancels: the deny block iterates ONLY read-only and
+        // package-manager roots, so a write grant that leaked into either list
+        // would be silently un-granted under sandbox-exec's last-match-wins.
+        let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+        policy.workspace_roots = vec!["/ws".to_string(), "/out/coordination".to_string()];
+        // A disjoint read-only root that DOES earn a trailing deny — the control
+        // proving the deny block still fires without touching the write grant.
+        policy.read_only_roots = vec!["/ref/shared".to_string()];
+        let profile = render_profile(&policy);
+
+        assert!(
+            profile.contains("(allow file-write* (subpath \"/out/coordination\"))"),
+            "extra write-root grant should get its own write allow: {profile}"
+        );
+        assert!(
+            !profile.contains("(deny file-write* (subpath \"/out/coordination\"))"),
+            "extra write-root grant must never be re-denied by the deny block: {profile}"
+        );
+        let grant_allow = profile
+            .lines()
+            .position(|line| line == "(allow file-write* (subpath \"/out/coordination\"))")
+            .expect("write allow for the grant");
+        let readonly_deny = profile
+            .lines()
+            .position(|line| line == "(deny file-write* (subpath \"/ref/shared\"))")
+            .expect("deny for the disjoint read-only root");
+        assert!(
+            readonly_deny > grant_allow,
+            "read-only deny must still land after the write allows so the grant \
+             stays writable while the read-only root stays hermetic: {profile}"
         );
     }
 

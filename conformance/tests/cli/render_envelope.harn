@@ -1,7 +1,9 @@
 import { envelope } from "std/cli/render"
 
 fn main(harness: Harness) {
-  const env = envelope({schema_version: 1, api_stability: "stable", payload: {ok: true, items: [1, 2, 3]}})
+  const env = envelope(
+    {schema_version: 1, api_stability: "stable", payload: {ok: true, items: [1, 2, 3]}},
+  )
   // schemaVersion must come first, then apiStability, then payload.
   // We assert by serializing — json_stringify preserves insertion order.
   harness.stdio.println(json_stringify(env))

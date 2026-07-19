@@ -61,7 +61,12 @@ pipeline default() {
         nil,
         options(
           session,
-          {prefill: "top-level", llm_options: {prefill: "nested"}, max_iterations: 1, final_wrapup: true},
+          {
+            prefill: "top-level",
+            llm_options: {prefill: "nested"},
+            max_iterations: 1,
+            final_wrapup: true,
+          },
         ),
       )
       const calls = llm_mock_calls()

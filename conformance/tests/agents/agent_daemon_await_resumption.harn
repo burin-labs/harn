@@ -11,7 +11,13 @@ pipeline test(task) {
         fn() { return agent_loop(
           "Poll for background work",
           nil,
-          {provider: "mock", daemon: true, max_iterations: 1, wake_interval_ms: 1, session_id: session_id},
+          {
+            provider: "mock",
+            daemon: true,
+            max_iterations: 1,
+            wake_interval_ms: 1,
+            session_id: session_id,
+          },
         ) },
       )
       const audit = captured.events.filter(

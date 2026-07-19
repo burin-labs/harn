@@ -1,0 +1,757 @@
+import "std/agent/loop_foundation"
+import "std/agent/loop_resource_dispatch"
+import "std/agent/loop_result_status"
+import "std/agent/loop_support"
+import "std/agent/loop_tool_calls"
+
+pub fn __sync_tool_search_state(opts, turn_opts) {
+  if turn_opts?._tool_search_client == nil {
+    return opts
+  }
+  return opts + {_tool_search_client: turn_opts._tool_search_client}
+}
+
+// A successful annotated workspace mutation advances the repair write epoch.
+pub const __REPAIR_EDIT_KINDS = ["edit", "write", "scaffold", "delete", "mutation", "mutate"]
+
+pub fn __turn_made_edit(dispatch, tools) -> bool {
+  if dispatch == nil {
+    return false
+  }
+  for name in __tool_names_by_status(dispatch, true) {
+    const entry = __tool_registry_entry(tools, name)
+    const annotations = agent_tool_entry_annotations(entry)
+    const kind = lowercase(
+      to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""),
+    )
+    if contains(__REPAIR_EDIT_KINDS, kind) {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn __agent_loop_verify_closure_exists(turn_opts) -> bool {
+  return turn_opts?.verify_completion != nil || turn_opts?.verify_completion_judge != nil
+}
+
+pub fn __agent_loop_post_edit_reverify_mandated(
+  repair_cfg,
+  turn_opts,
+  stall_state,
+  dispatch,
+  tools,
+) -> bool {
+  const has_live_failure = stall_state.last_diagnostic_class == "fail" || stall_state.reverify_owed
+  return repair_cfg.post_edit_reverify
+    && __agent_loop_verify_closure_exists(turn_opts)
+    && has_live_failure
+    && __turn_made_edit(dispatch, tools)
+}
+
+// Terminal statuses the reserved-verify guard may intercept: a run that ran out
+// of iteration/wall-clock/cost runway (`budget_exhausted`) or was stopped as a
+// thrash (`stuck`). Other terminals (suspended / verify_capped / scope_alert /
+// done) are deliberate and must not be reinterpreted.
+pub const __RESERVED_VERIFY_TERMINAL_STATUSES = ["budget_exhausted", "stuck"]
+
+/**
+ * __agent_loop_should_spend_reserve decides whether the reserved terminal-verify
+ * guard should run a final verify(+repair) before the run terminates. It fires
+ * ONLY when the guard is enabled, the run is terminating on a budget/stuck
+ * boundary, the transcript still has an UNVERIFIED source write (the model
+ * edited then ran out of runway without a passing verification), a
+ * `verify_completion`/`verify_completion_judge` closure exists to run, and the
+ * shared verify-attempt cap has not been hit. Default OFF: when
+ * `reserved_terminal_verify` is false this always returns false, so behavior is
+ * byte-identical to today. The `write_unverified` signal REUSES the existing
+ * post-edit re-verify bookkeeping (it is true whenever a turn made a workspace
+ * edit that no passing verification has cleared), the same notion the in-loop
+ * `reverify_owed` mandate keys on. This is the budget-exit counterpart to the
+ * loop-cap `iteration >= current_max` done-conversion (#3629), which only fires
+ * when an in-loop reverify ALREADY confirmed green; this guard runs the verifier
+ * on the terminal budget/stuck break where NO reverify fired. The guard verifies
+ * first and only spends a reserve iteration on a repair turn when the verify
+ * comes back red and reserve remains, so this predicate gates the verify.
+ */
+/**
+ * Every terminal path must seal a NON-EMPTY, typed stop reason so downstream
+ * forensics never has to infer a stop from an absent value (#4525). Several
+ * inner breaks set `final_status` (e.g. "budget_exhausted") but leave
+ * `stop_reason` unstamped; sealing `stop_reason ?? ""` then wrote an empty
+ * string that read as "missing" to the eval completion-contract. Fall back to
+ * the already-typed `final_status`; only a truly clean natural finish (both
+ * empty) seals as "completed".
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_sealed_stop_reason(stop_reason, final_status) -> string {
+  const explicit = to_string(stop_reason ?? "")
+  if explicit != "" {
+    return explicit
+  }
+  if to_string(final_status ?? "") != "" {
+    return to_string(final_status)
+  }
+  return "completed"
+}
+
+pub fn __agent_loop_should_spend_reserve(
+  repair_cfg,
+  turn_opts,
+  final_status,
+  write_unverified: bool,
+  made_source_write: bool,
+  verify_allowed: bool,
+) -> bool {
+  const terminal = contains(__RESERVED_VERIFY_TERMINAL_STATUSES, final_status)
+  const closure = __agent_loop_verify_closure_exists(turn_opts)
+  // Existing case: an unverified source write ran out of runway.
+  const write_path = repair_cfg.reserved_terminal_verify && write_unverified
+  // #4525 case: a genuine ZERO-write terminal — no pending unverified write AND
+  // nothing was ever written — so the completion gate (its `no_source_write`
+  // rung) never got an evaluation pass before the run sealed. Default OFF: when
+  // `zero_write_terminal_verify` is false this adds nothing and behavior is
+  // byte-identical to today.
+  const zero_write_path = repair_cfg.zero_write_terminal_verify
+    && !write_unverified
+    && !made_source_write
+  return terminal && verify_allowed && closure && (write_path || zero_write_path)
+}
+
+pub fn __merge_tool_names(existing, additions) {
+  let merged = existing ?? []
+  const values = additions ?? []
+  for name in values {
+    if name != "" && !contains(merged, name) {
+      merged = merged.push(name)
+    }
+  }
+  return merged
+}
+
+pub fn __merge_hook_dict(base, patch, label) {
+  if patch == nil {
+    return base
+  }
+  if type_of(patch) != "dict" {
+    throw "agent_loop: post_turn_callback `" + label + "` must be a dict"
+  }
+  return base + patch
+}
+
+pub fn __strip_internal_keys(patch) {
+  if patch == nil {
+    return patch
+  }
+  if type_of(patch) != "dict" {
+    return patch
+  }
+  let clean = {}
+  for key in patch.keys() {
+    if !starts_with(key, "_") {
+      clean = clean + {[key]: patch[key]}
+    }
+  }
+  return clean
+}
+
+pub fn __apply_post_turn_options(opts, outcome) {
+  let updated = opts
+  const next_patch = __strip_internal_keys(outcome?.next_options)
+  updated = __merge_hook_dict(updated, next_patch, "next_options")
+  const narrowing = outcome?.narrowing
+  if narrowing != nil {
+    updated = updated
+      + {
+      _tool_surface_narrowing_history: narrowing?.history ?? [],
+      _tool_surface_narrowed_tools: narrowing?.narrowed_tools,
+    }
+  }
+  const llm_patch = outcome?.llm_options
+  if llm_patch != nil {
+    if type_of(llm_patch) != "dict" {
+      throw "agent_loop: post_turn_callback `llm_options` must be a dict"
+    }
+    const base_llm_options = updated?.llm_options ?? {}
+    const route_patch_has_provider = contains(llm_patch.keys(), "provider")
+    const route_patch_has_model = contains(llm_patch.keys(), "model")
+    const route_patch_seen = route_patch_has_provider || route_patch_has_model
+    updated = updated
+      + {
+      llm_options: base_llm_options + llm_patch,
+      _agent_loop_last_llm_route_patch_seen: route_patch_seen,
+      _agent_loop_last_llm_route_patch_complete: route_patch_has_provider && route_patch_has_model,
+    }
+  }
+  return updated
+}
+
+pub fn __next_text_only_count(tool_count, consecutive_text_only) {
+  if tool_count == 0 {
+    return consecutive_text_only + 1
+  }
+  return 0
+}
+
+/**
+ * "Turns since meaningful progress" — a decaying churn signal that, unlike
+ * `__next_text_only_count`, does NOT fully reset on a single tool dispatch.
+ * Meaningful progress = at least one SUCCESSFUL tool this turn (a mutating
+ * or verify call that actually applied), not a rejected/no-op one. A turn
+ * with no successful tool increments; a turn that made progress decays the
+ * streak by one. This keeps mixed prose+tool churn (a successful call every
+ * few turns interleaved with toolless narration) from evading the
+ * escalating progress nudge the way the zeroing counter does.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __next_progress_count(made_progress, turns_since_progress) {
+  if made_progress {
+    return if turns_since_progress > 0 {
+      turns_since_progress - 1
+    } else {
+      0
+    }
+  }
+  return turns_since_progress + 1
+}
+
+/**
+ * Escalating, depth-keyed copy for the toolless/no-progress churn nudge
+ * (M1-1). Bounded: `__agent_loop_run` only invokes this below the hard
+ * `max_nudges` stop, so it never nudges forever, and only when the
+ * content-specific text-mode nudge (fence / missing-call recovery) did NOT fire
+ * this turn — the content nudge takes precedence so a turn is never
+ * double-injected; this streak nudge is the fallback for toolless churn.
+ * Depth is `turns_since_progress`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
+  const action = if has_tools {
+    "Emit exactly one well-formed " + paradigm.call_noun + " now, or state your final answer "
+      + paradigm
+      .final_answer
+      + " and stop."
+  } else {
+    "Make concrete progress in your reply now, or state your final answer and stop."
+  }
+  if depth >= 4 {
+    // The "stuck in a narration loop / Do not restate the plan" framing is only
+    // truthful when the recent turns were PURE PROSE. When the model IS issuing
+    // real tool calls (edits/looks/searches/runs) but the loop's progress signal
+    // still has not advanced, accusing it of narrating is wrong and unhelpful —
+    // it is making changes that are not landing. Steer it to a DIFFERENT change
+    // instead of telling it to stop narrating.
+    if made_tool_calls {
+      return "You have made no progress for "
+        + to_string(depth)
+        + " turns — your tool calls are not advancing the task. Stop repeating the same kind of change: re-read the failing output, target a DIFFERENT location, and make one concrete change. "
+        + action
+    }
+    return "You have made no progress for "
+      + to_string(depth)
+      + " turns — you are stuck in a narration loop. "
+      + action
+      + " Do not restate the plan."
+  }
+  if depth >= 3 {
+    return "Still no progress after "
+      + to_string(depth)
+      + " turns. "
+      + action
+  }
+  return "No progress last turn. " + action
+}
+
+/**
+ * Build the `iteration_info` payload for the `iteration_end` event from
+ * the LLM result plus the loop's per-iteration aggregates. Carries `provider`,
+ * `model`, `response_ms`, token counts, and `thinking_chars` so live
+ * pulse-check consumers (fleet hooks, ACP clients) can attribute
+ * latency and surface "still working" indicators without re-parsing
+ * the transcript JSONL. Empty/missing fields are dropped so the event
+ * stays small for providers that don't report telemetry.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates = nil) {
+  const telemetry = llm_result?.provider_telemetry ?? {}
+  const thinking = llm_result?.thinking ?? ""
+  const thinking_chars = if type_of(thinking) == "string" {
+    len(thinking)
+  } else {
+    0
+  }
+  const extra = aggregates ?? {}
+  return {
+    tool_count: tool_count,
+    text: visible_text,
+    provider: llm_result?.provider ?? "",
+    model: llm_result?.model ?? "",
+    response_ms: telemetry?.client_wall_ms ?? 0,
+    input_tokens: llm_result?.input_tokens ?? 0,
+    output_tokens: llm_result?.output_tokens ?? 0,
+    thinking_chars: thinking_chars,
+  }
+    + extra
+}
+
+pub fn __agent_loop_elapsed_ms(start_ms) {
+  const elapsed = __agent_loop_clock_now_ms() - start_ms
+  if elapsed < 0 {
+    return 0
+  }
+  return elapsed
+}
+
+pub fn __agent_loop_cost_usd(totals) {
+  const value = to_float(totals?.cost_usd ?? 0.0)
+  if value == nil {
+    return 0.0
+  }
+  return value
+}
+
+pub fn __agent_loop_budget_aggregates(session_id, totals, loop_start_ms) {
+  const resolved_totals = totals ?? agent_session_totals(session_id)
+  return {
+    cost_usd: __agent_loop_cost_usd(resolved_totals),
+    wall_clock_ms: __agent_loop_elapsed_ms(loop_start_ms),
+  }
+}
+
+pub fn __agent_loop_iteration_info(
+  session_id,
+  llm_result,
+  tool_count,
+  visible_text,
+  totals,
+  loop_start_ms,
+) {
+  return __iteration_info_payload(
+    llm_result,
+    tool_count,
+    visible_text,
+    __agent_loop_budget_aggregates(session_id, totals, loop_start_ms),
+  )
+}
+
+pub fn __agent_loop_budget_exhaustion(
+  session_id,
+  budget,
+  iteration,
+  totals,
+  loop_start_ms,
+  max_iterations,
+) {
+  const aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
+  if budget?.wall_clock_ms != nil && aggregates.wall_clock_ms >= budget.wall_clock_ms {
+    return aggregates
+      + {
+      exhausted: true,
+      kind: "wall_clock",
+      iteration: iteration,
+      max_iterations: max_iterations,
+    }
+  }
+  if budget?.total_cost_usd != nil && aggregates.cost_usd >= budget.total_cost_usd {
+    return aggregates
+      + {
+      exhausted: true,
+      kind: "total_cost",
+      iteration: iteration,
+      max_iterations: max_iterations,
+    }
+  }
+  return aggregates
+    + {
+    exhausted: false,
+    kind: "",
+    iteration: iteration,
+    max_iterations: max_iterations,
+  }
+}
+
+pub fn __agent_loop_emit_budget_exhausted(session_id, exhaustion) {
+  agent_emit_event(
+    session_id,
+    "budget_exhausted",
+    {
+      kind: exhaustion?.kind ?? "budget_exhausted",
+      max_iterations: exhaustion?.max_iterations ?? 0,
+      iteration: exhaustion?.iteration ?? 0,
+      cost_usd: exhaustion?.cost_usd ?? 0.0,
+      wall_clock_ms: exhaustion?.wall_clock_ms ?? 0,
+    },
+  )
+}
+
+pub fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason) {
+  return decisions.push(
+    {
+      iteration: iteration,
+      action: "stop",
+      old_limit: current_max,
+      new_limit: current_max,
+      reason: reason,
+      status: "budget_exhausted",
+    },
+  )
+}
+
+pub fn __agent_loop_record_terminal_callback_continue(decisions, iteration, old_limit, new_limit) {
+  return decisions.push(
+    {
+      iteration: iteration,
+      action: "extend",
+      old_limit: old_limit,
+      new_limit: new_limit,
+      reason: "terminal_callback_continue",
+      status: "",
+    },
+  )
+}
+
+pub fn __agent_loop_state_budget_fields(
+  session_id,
+  totals,
+  loop_start_ms,
+  budget,
+  consecutive_failure_count,
+) {
+  const aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
+  const failure_config = __agent_loop_consecutive_failure_config(budget)
+  return {
+    wall_clock_ms: aggregates.wall_clock_ms,
+    wall_clock_limit_ms: budget?.wall_clock_ms,
+    cost_usd: aggregates.cost_usd,
+    total_cost_limit_usd: budget?.total_cost_usd,
+    consecutive_failures: consecutive_failure_count,
+    consecutive_failure_limit: failure_config?.max,
+  }
+}
+
+pub fn __agent_loop_failure_matches_kind(error, wanted) {
+  const category = to_string(error?.category ?? "")
+  const reason = to_string(error?.reason ?? "")
+  const kind = to_string(error?.kind ?? "")
+  const status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
+  if wanted == "transient" {
+    return kind == "transient" || category == "transient_network" || category == "timeout"
+      || reason
+      == "timeout"
+  }
+  if wanted == "rate_limit" {
+    return kind == "rate_limit" || category == "rate_limit" || category == "rate_limited"
+      || reason
+      == "rate_limit"
+      || status == 429
+  }
+  if wanted == "provider_5xx" {
+    return kind == "provider_5xx" || category == "server_error" || category == "overloaded"
+      || reason
+      == "server_error"
+      || (status >= 500 && status < 600)
+  }
+  return category == wanted || reason == wanted || kind == wanted
+}
+
+pub fn __agent_loop_consecutive_failure_config(budget) {
+  const config = budget?.consecutive_failures
+  if type_of(config) != "dict" {
+    return nil
+  }
+  return config
+}
+
+pub fn __agent_loop_tracks_failure(error, config) {
+  if config == nil {
+    return false
+  }
+  for kind in config?.kinds ?? ["transient", "rate_limit", "provider_5xx"] {
+    if __agent_loop_failure_matches_kind(error, kind) {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn __agent_loop_is_escalation_transport_failure(error) {
+  const status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
+  if status >= 400 && status < 500 && status != 429 {
+    return false
+  }
+  const category = to_string(error?.category ?? "")
+  const reason = to_string(error?.reason ?? "")
+  const kind = to_string(error?.kind ?? "")
+  if category == "circuit_open" || reason == "circuit_open" || kind == "circuit_open" {
+    return true
+  }
+  return __agent_loop_failure_matches_kind(error, "transient")
+    || __agent_loop_failure_matches_kind(
+    error,
+    "rate_limit",
+  )
+    || __agent_loop_failure_matches_kind(error, "provider_5xx")
+}
+
+pub fn __agent_loop_transport_abort_error(error) {
+  if type_of(error) == "dict" {
+    return error + {escalation_aborted_provider_transport: true}
+  }
+  return {message: to_string(error), escalation_aborted_provider_transport: true}
+}
+
+/**
+ * Surface a NON-tracked provider failure as an observable event instead of a
+ * silent `break`. Mirrors the tracked-failure branch's `iteration_end` event
+ * so any provider_error (including a fast pre-dispatch escalation failure) is
+ * always visible in the transcript, carrying the provider/model/status/error
+ * that caused it. The dispatch_skipped/skip_reason shape matches the tracked
+ * branch so existing consumers parse it uniformly.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_emit_provider_error(
+  session_id,
+  iteration_index,
+  call,
+  llm_opts,
+  loop_start_ms,
+  escalation_fallback,
+  skip_reason_override,
+) {
+  const aggregates = __agent_loop_budget_aggregates(session_id, nil, loop_start_ms)
+  const skip_reason = if skip_reason_override != "" {
+    skip_reason_override
+  } else if escalation_fallback {
+    "escalation_provider_failure"
+  } else {
+    "provider_failure"
+  }
+  agent_emit_event(
+    session_id,
+    "iteration_end",
+    {
+      iteration: iteration_index + 1,
+      iteration_info: aggregates
+        + {
+        dispatch_skipped: true,
+        skip_reason: skip_reason,
+        provider_error: call?.error ?? {},
+        provider: to_string(llm_opts?.provider ?? ""),
+        model: to_string(llm_opts?.model ?? ""),
+        provider_status: to_string(call?.status ?? ""),
+        provider_error_message: to_string(call?.error?.message ?? call?.error ?? ""),
+        consecutive_failures: 0,
+        escalation_fallback: escalation_fallback,
+        escalation_transport_abort: skip_reason == "escalation_aborted_provider_transport",
+      },
+    },
+  )
+}
+
+/**
+ * Mode filter table for `__agent_loop_checkpoint`. Each row encodes the
+ * invariant for one seam: which bridge modes are eligible to drain, and
+ * whether the host should pull the agent_inbox feedback queue.
+ *
+ *   iteration_start, post_tool_dispatch, iteration_end → drain `interrupt_immediate`
+ *     and `finish_step`; the model will see whatever lands on its next
+ *     prompt build, so both modes get the same opportunity here.
+ *   pre_tool_dispatch → drain `interrupt_immediate` only. This is the
+ *     "stop before the tool fires" seam — `finish_step` semantics
+ *     would defeat the point (it means "after the current tool batch").
+ *     If anything arrives, the caller skips the pending tool batch.
+ *   pre_compact, post_compact → bracket the compactor with an
+ *     agent_inbox drain so async producers (tool completions, MCP
+ *     notifications, command-policy feedback) land in the transcript
+ *     before the summarizer sees it and the next prompt is built.
+ *   daemon_idle_pre, daemon_idle_post → drain `interrupt_immediate`
+ *     only; the daemon path doesn't queue `finish_step`-mode injections.
+ *   loop_exit → drain `audit_only`. The other two modes were already
+ *     drained earlier in the loop body. `audit_only` reminders land in
+ *     the transcript at this seam but are NEVER rendered into a model
+ *     prompt — no further LLM call runs after `loop_exit` (harn#2212).
+ *     Hosts that need the model to see a reminder before the agent
+ *     terminates must use `finish_step` (drained at every iteration
+ *     boundary, including the last `iteration_end` before the loop breaks).
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_checkpoint_modes(kind) {
+  if kind == "pre_tool_dispatch" || kind == "daemon_idle_pre" || kind == "daemon_idle_post" {
+    return {
+      immediate: true,
+      finish_step: false,
+      audit_only: false,
+      inbox: false,
+      typed_delivery: nil,
+    }
+  }
+  if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START
+    || kind
+    == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH
+    || kind == "iteration_end" {
+    const typed_delivery = if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START {
+      __AGENT_LOOP_HOST_INJECTION_TURN_BOUNDARY
+    } else if kind == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH {
+      __AGENT_LOOP_HOST_INJECTION_AFTER_NEXT_TOOL_CALL
+    } else {
+      nil
+    }
+    return {
+      immediate: true,
+      finish_step: true,
+      audit_only: false,
+      inbox: false,
+      typed_delivery: typed_delivery,
+    }
+  }
+  if kind == "pre_compact" || kind == "post_compact" {
+    return {
+      immediate: false,
+      finish_step: false,
+      audit_only: false,
+      inbox: true,
+      typed_delivery: nil,
+    }
+  }
+  if kind == "loop_exit" {
+    return {
+      immediate: false,
+      finish_step: false,
+      audit_only: true,
+      inbox: false,
+      typed_delivery: nil,
+    }
+  }
+  return {
+    immediate: false,
+    finish_step: false,
+    audit_only: false,
+    inbox: false,
+    typed_delivery: nil,
+  }
+}
+
+/**
+ * Single source of truth for "the loop is at a safe injection seam."
+ * Every drain site in the agent loop body and the daemon idle path
+ * routes through here so plugin authors and replayers see one canonical
+ * event (`LoopCheckpoint`) instead of having to enumerate inline calls.
+ *
+ * Returns a result dict carrying `delivered` (bridge injections drained
+ * at this seam), `inbox_delivered` (inbox feedback notes drained), and
+ * `dispatch_skipped` (`pre_tool_dispatch` short-circuit: an
+ * `interrupt_immediate` arrival here means the pending tool batch is
+ * cancelled and the loop iterates once more so the LLM sees the
+ * injection before the tool would have fired). Callers branch on
+ * `delivered` for the "continue if a steer arrived" behavior the
+ * stalled-done-judge and post-turn paths rely on.
+ *
+ * @effects: [host, agent]
+ * @errors: []
+ */
+pub fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
+  const modes = __agent_loop_checkpoint_modes(kind)
+  let delivered = 0
+  if modes.immediate {
+    const result = agent_session_drain_bridge_injections(session_id, "interrupt_immediate")
+    delivered = delivered + (result?.delivered ?? 0)
+  }
+  const immediate_count = delivered
+  if modes.finish_step {
+    const result = agent_session_drain_bridge_injections(session_id, "finish_step")
+    delivered = delivered + (result?.delivered ?? 0)
+  }
+  if modes.audit_only {
+    const result = agent_session_drain_bridge_injections(session_id, "audit_only")
+    delivered = delivered + (result?.delivered ?? 0)
+  }
+  let typed_delivered = 0
+  if modes.typed_delivery != nil {
+    const pending = agent_session_drain_host_injections(session_id, modes.typed_delivery, kind)
+    typed_delivered = len(pending ?? [])
+  }
+  let inbox_delivered = 0
+  if modes.inbox {
+    const pending = agent_session_drain_feedback(session_id)
+    for note in pending {
+      agent_session_inject_feedback(session_id, note.kind, note.content)
+      inbox_delivered = inbox_delivered + 1
+    }
+  }
+  const dispatch_skipped = kind == "pre_tool_dispatch" && immediate_count > 0
+  let iteration = to_int(opts?.iteration ?? 0)
+  agent_emit_event(
+    session_id,
+    "loop_checkpoint",
+    {
+      iteration: iteration,
+      kind: kind,
+      delivered: delivered,
+      inbox_delivered: inbox_delivered,
+      typed_delivered: typed_delivered,
+      dispatch_skipped: dispatch_skipped,
+    },
+  )
+  if kind == "iteration_end" {
+    const mock_queue = llm_mock_snapshot()
+    if mock_queue.schema_version > 0 || len(keys(mock_queue.queue_remaining)) > 0 {
+      agent_emit_event(
+        session_id,
+        "typed_checkpoint",
+        mock_queue + {kind: "llm_mock_queue", iteration: iteration},
+      )
+    }
+  }
+  __host_fire_session_hook(
+    "loop_checkpoint",
+    {
+      session_id: session_id,
+      iteration: iteration,
+      kind: kind,
+      delivered: delivered,
+      inbox_delivered: inbox_delivered,
+      typed_delivered: typed_delivered,
+      dispatch_skipped: dispatch_skipped,
+    },
+  )
+  return {
+    delivered: delivered,
+    inbox_delivered: inbox_delivered,
+    typed_delivered: typed_delivered,
+    dispatch_skipped: dispatch_skipped,
+    kind: kind,
+  }
+}
+
+pub fn __agent_loop_fire_resume_continuity(session, opts) {
+  const payload = opts?._resume_continuity
+  if type_of(payload) != "dict" {
+    return opts
+  }
+  let _ = agent_reminder_providers_fire(
+    session.session_id,
+    "worker_resumed",
+    payload
+      + {
+      session_id: session.session_id,
+      session: {id: session.session_id},
+      turn: payload?.turn ?? 0,
+      iteration: payload?.iteration ?? 0,
+    },
+    opts,
+  )
+  return omit(opts, ["_resume_continuity"])
+}

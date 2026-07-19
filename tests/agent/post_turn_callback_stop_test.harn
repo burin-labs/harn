@@ -12,7 +12,9 @@ pipeline test_post_turn_policy_stop_bypasses_completion_verify(task) {
       llm_text("This turn should be unreachable. ##DONE##"),
     ],
     { ->
-      const verify_calls = shared_cell({scope: "task_group", key: "post-turn-stop-verify-calls", initial: 0})
+      const verify_calls = shared_cell(
+        {scope: "task_group", key: "post-turn-stop-verify-calls", initial: 0},
+      )
       const result = agent_loop(
         "Finish the task.",
         nil,
@@ -31,7 +33,11 @@ pipeline test_post_turn_policy_stop_bypasses_completion_verify(task) {
           },
           post_turn_callback: { info ->
             if info.iteration == 0 {
-              return {stop: true, stop_reason: "pace_cutoff", message: "Run stopped by host policy."}
+              return {
+                stop: true,
+                stop_reason: "pace_cutoff",
+                message: "Run stopped by host policy.",
+              }
             }
             return nil
           },
@@ -54,7 +60,9 @@ pipeline test_post_turn_policy_stop_can_request_completion_verify(task) {
   with_llm_script(
     [llm_text("Policy wants an external completion check."), llm_text("Verified now. ##DONE##")],
     { ->
-      const policy_verify_calls = shared_cell({scope: "task_group", key: "post-turn-stop-opt-in-verify-calls", initial: 0})
+      const policy_verify_calls = shared_cell(
+        {scope: "task_group", key: "post-turn-stop-opt-in-verify-calls", initial: 0},
+      )
       const result = agent_loop(
         "Finish the task.",
         nil,

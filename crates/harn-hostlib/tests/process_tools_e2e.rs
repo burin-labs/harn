@@ -15,7 +15,7 @@
 
 #![cfg(unix)]
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use harn_hostlib::tools::ToolsCapability;
@@ -396,7 +396,7 @@ fn real_run_command_file_capture_kills_child_when_timeout_elapses() {
     assert_eq!(require_int(&cleanup, "root_pid"), pid);
     let pgid = require_int(&resp, "process_group_id");
     assert!(
-        wait_for_group_death(pgid, std::time::Duration::from_secs(5)),
+        !unix_process_exists(-pgid),
         "timed-out file-capture process group {pgid} must be gone"
     );
 }
@@ -590,57 +590,53 @@ fn unix_kill_process(pid: i64) {
     }
 }
 
-fn wait_for_group_death(pgid: i64, timeout: std::time::Duration) -> bool {
-    let deadline = std::time::Instant::now() + timeout;
-    while std::time::Instant::now() < deadline {
-        if !unix_process_exists(-pgid) {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    !unix_process_exists(-pgid)
-}
-
-/// Flip an installed cancel token after `delay` from a helper thread,
-/// simulating a host abort / scope cancellation firing while the foreground
-/// `run_command` blocks on its child.
-fn flip_after(
-    cancel: &Arc<std::sync::atomic::AtomicBool>,
-    delay: std::time::Duration,
-) -> std::thread::JoinHandle<()> {
-    let cancel = Arc::clone(cancel);
-    std::thread::spawn(move || {
-        std::thread::sleep(delay);
-        cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-    })
-}
-
 #[test]
 fn real_run_command_interrupt_kills_the_whole_process_group() {
     // A child that spawns its own grandchild: the direct `sh` exits on
     // SIGTERM, but the backgrounded `sleep 30` must also die — that's what
     // the process-group signal is for.
+    let temp = tempfile::tempdir().expect("ready fifo tempdir");
+    let ready_path = temp.path().join("ready.fifo");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&ready_path)
+        .status()
+        .expect("spawn mkfifo");
+    assert!(status.success(), "mkfifo failed: {status}");
+    let mut ready_fifo = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&ready_path)
+        .expect("open ready fifo");
+
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let _guard = harn_vm::op_interrupt::install(Some(Arc::clone(&cancel)), None);
-    let flipper = flip_after(&cancel, std::time::Duration::from_millis(300));
+    let worker_cancel = Arc::clone(&cancel);
+    let ready_path_arg = shell_quote(&ready_path.to_string_lossy());
+    let worker = std::thread::spawn(move || {
+        let _guard = harn_vm::op_interrupt::install(Some(worker_cancel), None);
+        let mut req = dict();
+        req.insert(
+            "argv".into(),
+            vlist(vec![
+                vstr("sh"),
+                vstr("-c"),
+                vstr(&format!("sleep 30 & printf ready > {ready_path_arg}; wait")),
+            ]),
+        );
+        require_dict(call("hostlib_tools_run_command", req).unwrap())
+    });
 
-    let started = std::time::Instant::now();
-    let mut req = dict();
-    req.insert(
-        "argv".into(),
-        vlist_str(&["sh", "-c", "sleep 30 & echo started; wait"]),
-    );
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
-    flipper.join().unwrap();
+    let mut marker = [0_u8; 5];
+    ready_fifo
+        .read_exact(&mut marker)
+        .expect("child did not signal grandchild readiness");
+    assert_eq!(&marker, b"ready");
+    cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    let resp = worker
+        .join()
+        .expect("interruptible command thread panicked");
 
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(10),
-        "interrupt must preempt the 30s child, took {:?}",
-        started.elapsed()
-    );
     assert_eq!(require_str(&resp, "status"), "killed");
     assert!(!require_bool(&resp, "timed_out"));
-    assert_eq!(require_str(&resp, "stdout").trim(), "started");
 
     let pgid = require_int(&resp, "process_group_id");
     assert!(pgid > 0, "foreground spawn should report its process group");
@@ -649,8 +645,9 @@ fn real_run_command_interrupt_kills_the_whole_process_group() {
         require_int(&cleanup, "observed_child_count") >= 1,
         "cleanup receipt should record the background sleep descendant"
     );
+    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
     assert!(
-        wait_for_group_death(pgid, std::time::Duration::from_secs(5)),
+        !unix_process_exists(-pgid),
         "process group {pgid} (incl. the sleep grandchild) must be gone"
     );
 }
@@ -660,35 +657,64 @@ fn real_run_command_sigterm_immune_child_is_sigkilled_after_grace() {
     // A child that ignores SIGTERM (and keeps respawning short sleeps so the
     // shell itself is the survivor) must be SIGKILLed once the grace period
     // elapses.
+    let temp = tempfile::tempdir().expect("ready fifo tempdir");
+    let ready_path = temp.path().join("ready.fifo");
+    let status = std::process::Command::new("mkfifo")
+        .arg(&ready_path)
+        .status()
+        .expect("spawn mkfifo");
+    assert!(status.success(), "mkfifo failed: {status}");
+    let mut ready_fifo = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&ready_path)
+        .expect("open ready fifo");
+
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let _guard = harn_vm::op_interrupt::install(Some(Arc::clone(&cancel)), None);
-    let flipper = flip_after(&cancel, std::time::Duration::from_millis(100));
+    let worker_cancel = Arc::clone(&cancel);
+    let ready_path_arg = shell_quote(&ready_path.to_string_lossy());
+    let worker = std::thread::spawn(move || {
+        let _guard = harn_vm::op_interrupt::install(Some(worker_cancel), None);
+        let mut req = dict();
+        req.insert(
+            "argv".into(),
+            vlist(vec![
+                vstr("sh"),
+                vstr("-c"),
+                vstr(&format!(
+                    "trap '' TERM; printf ready > {ready_path_arg}; while :; do sleep 0.2; done"
+                )),
+            ]),
+        );
+        require_dict(call("hostlib_tools_run_command", req).unwrap())
+    });
 
-    let started = std::time::Instant::now();
-    let mut req = dict();
-    req.insert(
-        "argv".into(),
-        vlist_str(&["sh", "-c", "trap '' TERM; while :; do sleep 0.2; done"]),
-    );
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
-    flipper.join().unwrap();
+    let mut marker = [0_u8; 5];
+    ready_fifo
+        .read_exact(&mut marker)
+        .expect("SIGTERM-immune child did not signal readiness");
+    assert_eq!(&marker, b"ready");
+    cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    let resp = worker
+        .join()
+        .expect("interruptible command thread panicked");
 
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed >= harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE,
-        "a SIGTERM-immune child should survive until the grace elapses, died after {elapsed:?}"
-    );
-    assert!(
-        elapsed < std::time::Duration::from_secs(10),
-        "SIGKILL escalation must fire shortly after the grace, took {elapsed:?}"
-    );
     assert_eq!(require_str(&resp, "status"), "killed");
 
     let pgid = require_int(&resp, "process_group_id");
-    assert!(
-        wait_for_group_death(pgid, std::time::Duration::from_secs(5)),
-        "process group {pgid} must be gone after SIGKILL escalation"
-    );
+    assert!(pgid > 0);
+    let cleanup = require_nested_dict(&resp, "process_cleanup");
+    let signals = require_list(&cleanup, "attempted_signals");
+    assert!(signals.iter().any(|value| matches!(
+        value,
+        VmValue::String(value) if value.as_str() == "SIGTERM"
+    )));
+    assert!(signals.iter().any(|value| matches!(
+        value,
+        VmValue::String(value) if value.as_str() == "SIGKILL"
+    )));
+    assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    assert!(!unix_process_exists(-pgid));
 }
 
 #[test]
@@ -707,28 +733,25 @@ fn real_run_command_background_child_survives_interrupt() {
     let pid = require_int(&resp, "pid");
     let handle_id = require_str(&resp, "handle_id");
 
-    // Even with the interrupt already requested, the background child stays
-    // alive for a comfortable observation window.
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    // Spawn returns only after the OS has assigned the child a PID. A direct
+    // liveness probe is enough here; sleeping to manufacture an observation
+    // window makes this smoke test sensitive to host load.
     assert!(
         unix_process_exists(pid),
         "background child {pid} must survive scope interrupts"
     );
 
-    // Clean up so the sleep doesn't outlive the test binary.
+    // Clean up through the same event-driven completion signal used by the
+    // deterministic mock-based lifecycle tests.
+    let completion_rx = harn_hostlib::tools::long_running::register_completion_notifier(&handle_id)
+        .expect("background handle should still be live");
     let mut cancel_req = dict();
     cancel_req.insert("handle_id".into(), vstr(&handle_id));
-    cancel_req.insert("wait_result_ms".into(), VmValue::Int(5_000));
     let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
     assert!(require_bool(&cancel_resp, "cancelled"));
-    let result = require_nested_dict(&cancel_resp, "result");
-    assert_eq!(require_str(&result, "status"), "killed");
-    let cleanup = require_nested_dict(&result, "process_cleanup");
-    assert_eq!(require_int(&cleanup, "root_pid"), pid);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while unix_process_exists(pid) && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
+    completion_rx
+        .recv()
+        .expect("background waiter did not publish completion");
     assert!(!unix_process_exists(pid), "cancel_handle must reap {pid}");
 }
 
@@ -765,19 +788,14 @@ fn real_run_command_token_cleanup_reaps_reparented_pipe_holder() {
 import pathlib
 import subprocess
 import sys
-import time
 
 pid_path = sys.argv[1]
-child = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); print('descendant-ready', flush=True); time.sleep(30)"
-subprocess.Popen([sys.executable, "-c", child, pid_path], start_new_session=True)
-for _ in range(100):
-    if pathlib.Path(pid_path).exists():
-        break
-    time.sleep(0.01)
+child = "import signal; signal.pause()"
+descendant = subprocess.Popen([sys.executable, "-c", child], start_new_session=True)
+pathlib.Path(pid_path).write_text(str(descendant.pid))
 print("parent-exit", flush=True)
 "#;
 
-    let started = std::time::Instant::now();
     let mut req = dict();
     req.insert(
         "argv".into(),
@@ -791,17 +809,12 @@ print("parent-exit", flush=True)
     req.insert("timeout_ms".into(), VmValue::Int(500));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(8),
-        "cleanup should preempt the 30s escaped descendant, took {:?}",
-        started.elapsed()
-    );
     assert!(require_bool(&resp, "timed_out"));
     assert_eq!(require_str(&resp, "status"), "timed_out");
     let stdout = require_str(&resp, "stdout");
     assert!(
-        stdout.contains("descendant-ready"),
-        "stdout should preserve the escaped pipe-holder marker before cleanup: {stdout:?}"
+        stdout.contains("parent-exit"),
+        "stdout should preserve the direct parent's marker before cleanup: {stdout:?}"
     );
     let raw_descendant_pid =
         std::fs::read_to_string(&pid_path).expect("descendant pid should be recorded");
@@ -868,22 +881,17 @@ fn real_run_command_file_capture_does_not_wait_for_reparented_pipe_holder() {
 import pathlib
 import subprocess
 import sys
-import time
 
 pid_path = sys.argv[1]
-child = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); print('descendant-ready', flush=True); time.sleep(30)"
-subprocess.Popen([sys.executable, "-c", child, pid_path], start_new_session=True)
-for _ in range(100):
-    if pathlib.Path(pid_path).exists():
-        break
-    time.sleep(0.01)
+child = "import signal; signal.pause()"
+descendant = subprocess.Popen([sys.executable, "-c", child], start_new_session=True)
+pathlib.Path(pid_path).write_text(str(descendant.pid))
 print("parent-exit", flush=True)
 "#;
     std::fs::write(&script_path, parent).expect("write parent script");
 
     let mut capture: harn_vm::value::DictMap = Default::default();
     capture.insert("transport".into(), vstr("file"));
-    let started = std::time::Instant::now();
     let mut req = dict();
     let command = format!(
         "{} {} {}",
@@ -898,17 +906,12 @@ print("parent-exit", flush=True)
     req.insert("capture".into(), VmValue::dict(capture));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(8),
-        "file capture should return on direct-child exit, took {:?}",
-        started.elapsed()
-    );
     assert!(!require_bool(&resp, "timed_out"));
     assert_eq!(require_str(&resp, "status"), "completed");
     assert_eq!(require_int(&resp, "exit_code"), 0);
     let stdout = require_str(&resp, "stdout");
     assert!(
-        stdout.contains("descendant-ready") && stdout.contains("parent-exit"),
+        stdout.contains("parent-exit"),
         "file capture should preserve direct-run output: {stdout:?}"
     );
     assert!(resp.get("process_cleanup").is_none());

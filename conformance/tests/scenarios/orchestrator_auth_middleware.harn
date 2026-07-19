@@ -27,7 +27,11 @@ pipeline test(task) {
   assert(url != nil, "listener URL did not appear in log")
   const body = "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-123\"}}"
   const json_headers = {"Content-Type": "application/json"}
-  const unauth = harness.net.request("POST", url + "/a2a/review", {body: body, headers: json_headers})
+  const unauth = harness.net.request(
+    "POST",
+    url + "/a2a/review",
+    {body: body, headers: json_headers},
+  )
   __io_println(unauth.status == 401)
   const ts = to_string(to_int(harness.clock.timestamp()))
   const wrong_hmac = harness.net.request(

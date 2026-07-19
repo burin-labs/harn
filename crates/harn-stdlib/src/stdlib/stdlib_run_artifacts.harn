@@ -1,10 +1,12 @@
 // std/run_artifacts - directory-backed run artifact helpers for harnesses.
 import {
   StructuredReadFailure,
+  TypedReadResult,
   is_dir,
   read_json,
   read_json_result,
   read_json_typed,
+  read_json_typed_result,
   write_json,
   write_lines,
 } from "std/fs"
@@ -130,7 +132,14 @@ fn __run_artifacts_standard_paths(run: {dir: string, ...rest}) -> RunArtifactPat
 }
 
 fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) -> RunArtifactsRun {
-  const base = {kind: kind, namespace: namespace, run_id: run_id, root: root, dir: dir, modified: modified}
+  const base = {
+    kind: kind,
+    namespace: namespace,
+    run_id: run_id,
+    root: root,
+    dir: dir,
+    modified: modified,
+  }
   return base + {paths: __run_artifacts_standard_paths(base)}
 }
 
@@ -184,6 +193,25 @@ pub fn run_artifact_write_json(
 }
 
 /**
+ * Validate and atomically replace a JSON artifact through the typed contract.
+ * The destination is unchanged when schema validation fails.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: [validation, fs, SchemaValidationFailure]
+ */
+pub fn run_artifact_write_json_typed<T>(
+  run: RunArtifactsRun,
+  name: string,
+  value: unknown,
+  schema: Schema<T>,
+  options: RunArtifactWriteOptions = {},
+) -> T {
+  const validated = schema_expect(value, schema)
+  write_json(run_artifact_path(run, name), validated, options ?? {})
+  return validated
+}
+
+/**
  * Read a required JSON artifact, throwing a typed JSON read failure.
  *
  * @effects: [fs.read]
@@ -200,8 +228,28 @@ pub fn run_artifact_read_json(run: RunArtifactsRun, name: string) -> unknown {
  * @effects: [fs.read]
  * @errors: [validation, StructuredReadFailure, SchemaValidationFailure]
  */
-pub fn run_artifact_read_json_typed<T>(run: RunArtifactsRun, name: string, schema: Schema<T>) -> T {
-  return read_json_typed(run_artifact_path(run, name), schema)
+pub fn run_artifact_read_json_typed<T>(
+  run: RunArtifactsRun,
+  name: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> T {
+  return read_json_typed(run_artifact_path(run, name), schema, apply_defaults)
+}
+
+/**
+ * Read and validate an optional JSON artifact without erasing read or schema failures.
+ *
+ * @effects: [fs.read]
+ * @errors: [validation]
+ */
+pub fn run_artifact_read_json_typed_result<T>(
+  run: RunArtifactsRun,
+  name: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> TypedReadResult<T> {
+  return read_json_typed_result(run_artifact_path(run, name), schema, apply_defaults)
 }
 
 /**
@@ -319,7 +367,9 @@ pub fn run_artifacts_list(
     }
     if is_ok(info) && (unwrap(info)?.is_dir ?? false) {
       const stat = unwrap(info)
-      rows = rows.push(__run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified))
+      rows = rows.push(
+        __run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified),
+      )
     }
   }
   return rows.sort_by(

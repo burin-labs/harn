@@ -26,7 +26,8 @@ pipeline test(task) {
     "https://idp.example/device",
     {
       status: 200,
-      body: "{\"device_code\":\"DEV-PENDING\",\"user_code\":\"USER-PEND\",\"verification_uri\":\"https://idp.example/activate\",\"interval\":2,\"expires_in\":900}",
+      body:
+        "{\"device_code\":\"DEV-PENDING\",\"user_code\":\"USER-PEND\",\"verification_uri\":\"https://idp.example/activate\",\"interval\":2,\"expires_in\":900}",
       headers: {"content-type": "application/json"},
     },
   )
@@ -53,7 +54,10 @@ pipeline test(task) {
       ],
     },
   )
-  const token_set = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
+  const token_set = device_flow(
+    provider,
+    {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }},
+  )
   assert_eq(
     token_set.access_token,
     "OK-PEND",

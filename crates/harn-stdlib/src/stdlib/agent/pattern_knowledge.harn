@@ -118,7 +118,11 @@ fn pl_state_file(project_root: string) -> string {
 }
 
 fn pl_migration_marker(options = nil) -> string {
-  return path_join(pl_memory_root(options), pl_namespace(options), ".burin-session-store-migrated-v1.json")
+  return path_join(
+    pl_memory_root(options),
+    pl_namespace(options),
+    ".burin-session-store-migrated-v1.json",
+  )
 }
 
 fn pl_read_jsonl_payloads(path: string) -> list {
@@ -375,7 +379,12 @@ fn pl_observation_from_legacy(record: dict, options = nil) -> dict {
 }
 
 fn pl_store_observation(record: dict, options = nil) -> dict {
-  return pl_store_record("observation", "observation:" + record.id, record, options + {id: record.id})?.value
+  return pl_store_record(
+    "observation",
+    "observation:" + record.id,
+    record,
+    options + {id: record.id},
+  )?.value
 }
 
 /**
@@ -538,8 +547,14 @@ fn pl_make_prompt_proposal(
 ) -> dict {
   const words = key.split("-")
   const title = pl_title_from_words(words)
-  const description = "Reusable guidance learned from " + to_string(len(observations)) + " similar prompts."
-  const when_to_use = "Use when the request matches these recurring prompt terms: " + key.replace("-", ", ") + "."
+  const description = "Reusable guidance learned from " + to_string(len(observations))
+    + " similar prompts."
+  const when_to_use = "Use when the request matches these recurring prompt terms: "
+    + key.replace(
+    "-",
+    ", ",
+  )
+    + "."
   const sequence = pl_representative_tool_sequence(observations)
   return {
     id: id,
@@ -577,7 +592,12 @@ fn pl_make_tool_proposal(
   const title = "Repeated " + join(sequence, " -> ") + " workflow"
   const description = "Reusable guidance learned from " + to_string(len(observations))
     + " runs with the same tool sequence."
-  const when_to_use = "Use when the task is likely to follow this tool sequence: " + join(sequence, " -> ") + "."
+  const when_to_use = "Use when the task is likely to follow this tool sequence: "
+    + join(
+    sequence,
+    " -> ",
+  )
+    + "."
   return {
     id: id,
     kind: "skill",
@@ -645,7 +665,9 @@ fn pl_frontmatter_value(body: string, key: string) -> string {
       let value = trimmed[len(prefix):].trim()
       if len(value) >= 2
         && ((value.starts_with("\"") && value.ends_with("\""))
-        || (value.starts_with("'") && value.ends_with("'"))) {
+        || (value.starts_with("'")
+        && value
+        .ends_with("'"))) {
         value = value[1:len(value) - 1]
       }
       return value.replace("\\\"", "\"").replace("\\\\", "\\")
@@ -717,7 +739,9 @@ fn pl_sorted_proposal_insert(proposals: list, proposal: dict) -> list {
   let inserted = false
   for existing in proposals {
     const before = proposal.support > (existing?.support ?? 0)
-      || (proposal.support == (existing?.support ?? 0) && proposal.id < existing.id)
+      || (proposal.support
+      == (existing?.support ?? 0)
+      && proposal.id < existing.id)
     if before && !inserted {
       out = out + [proposal]
       inserted = true
@@ -746,13 +770,25 @@ pub fn pattern_learning_refresh(options = nil) -> list {
   const now = pl_now(options)
   const support_threshold = options?.support_threshold ?? DEFAULT_SUPPORT_THRESHOLD
   const window_days = options?.window_days ?? DEFAULT_WINDOW_DAYS
-  const observations = pl_recent_observations(pattern_learning_observations(options), now, window_days)
+  const observations = pl_recent_observations(
+    pattern_learning_observations(options),
+    now,
+    window_days,
+  )
   const existing = pl_existing_pending_by_id(options)
   let prompt_groups = {}
   let tool_groups = {}
   for observation in observations {
-    prompt_groups = pl_push_group(prompt_groups, pl_prompt_cluster_key(observation.prompt), observation)
-    tool_groups = pl_push_group(tool_groups, pl_tool_sequence_key(observation.tool_sequence), observation)
+    prompt_groups = pl_push_group(
+      prompt_groups,
+      pl_prompt_cluster_key(observation.prompt),
+      observation,
+    )
+    tool_groups = pl_push_group(
+      tool_groups,
+      pl_tool_sequence_key(observation.tool_sequence),
+      observation,
+    )
   }
   let proposals = []
   for key in keys(prompt_groups).sort() {
@@ -783,7 +819,11 @@ pub fn pattern_learning_refresh(options = nil) -> list {
       proposals = pl_sorted_proposal_insert(proposals, proposal)
     }
   }
-  memory_forget(pl_namespace(options), {tag: "pattern_learning:pending"}, pl_memory_options(options))
+  memory_forget(
+    pl_namespace(options),
+    {tag: "pattern_learning:pending"},
+    pl_memory_options(options),
+  )
   for proposal in proposals {
     pl_store_record(
       "pending",
@@ -882,7 +922,10 @@ fn pl_score_skill(skill_entry: dict, query_words: list) -> dict {
   if len(query_words) == 0 {
     return {learned_skill: skill_entry, score: 0.0, reason: "project learned skill"}
   }
-  const haystack = join([skill_entry.name, skill_entry.description, skill_entry.when_to_use, skill_entry.body], " ")
+  const haystack = join(
+    [skill_entry.name, skill_entry.description, skill_entry.when_to_use, skill_entry.body],
+    " ",
+  )
   const skill_words = pl_significant_words(haystack)
   let overlap = []
   for word in query_words {
@@ -908,7 +951,10 @@ fn pl_insert_match(matches: list, item: dict) -> list {
   let inserted = false
   for existing in matches {
     const before = item.score > existing.score
-      || (item.score == existing.score && item.learned_skill.name < existing.learned_skill.name)
+      || (item.score == existing.score
+      && item.learned_skill.name
+      < existing
+      .learned_skill.name)
     if before && !inserted {
       out = out + [item]
       inserted = true
@@ -978,7 +1024,10 @@ fn pattern_learning_context_inner(
       ", ",
     )
     lines = lines
-      + ["<provenance_chip>Loaded learned skills: " + loaded + "</provenance_chip>", "<learned_skills>"]
+      + [
+      "<provenance_chip>Loaded learned skills: " + loaded + "</provenance_chip>",
+      "<learned_skills>",
+    ]
     for candidate in matches {
       lines = lines
         + [
@@ -1104,7 +1153,12 @@ pub fn pattern_learning_reject(id: string, options = nil) -> dict {
   memory_forget(pl_namespace(options), {key: "pending:" + clean}, pl_memory_options(options))
   const state = pattern_learning_state(options)
   const suppressed = (state?.suppressed_until ?? {})
-    + {[clean]: pl_add_days_iso(pl_now(options), options?.suppression_days ?? DEFAULT_SUPPRESSION_DAYS)}
+    + {
+    [clean]: pl_add_days_iso(
+      pl_now(options),
+      options?.suppression_days ?? DEFAULT_SUPPRESSION_DAYS,
+    ),
+  }
   pl_replace_state(state + {suppressed_until: suppressed}, options)
   return {rejected: true}
 }
@@ -1142,7 +1196,10 @@ fn pl_migrate_observations(options = nil) -> nil {
 
 fn pl_migrate_pending(options = nil) -> nil {
   const project = pl_project_root(options)
-  const pending = pl_project_value(pl_read_jsonl_payloads(pl_pending_file(project)), {generatedAt: "", proposals: []})
+  const pending = pl_project_value(
+    pl_read_jsonl_payloads(pl_pending_file(project)),
+    {generatedAt: "", proposals: []},
+  )
   for proposal in pending?.proposals ?? [] {
     const normalized = {
       id: pl_text(proposal?.id),

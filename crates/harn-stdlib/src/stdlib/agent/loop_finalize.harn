@@ -1,0 +1,154 @@
+import "std/agent/loop_resource_dispatch"
+import "std/agent/loop_result_status"
+import "std/agent/loop_support"
+import "std/agent/loop_turn_options"
+import "std/agent/loop_turn_scope"
+
+/*
+ * Terminal bookkeeping lives outside the turn engine so the engine can stay
+ * focused on one iteration's control flow. The state record is deliberately
+ * assembled by loop_run: it keeps this boundary explicit without making the
+ * Harn module depend on a second, parallel result schema.
+ */
+pub fn __agent_loop_finalize_session(message, session, state) -> dict {
+  let final_status = state.final_status
+  let stop_reason = state.stop_reason
+  let budget_exhausted_emitted = state.budget_exhausted_emitted
+  let budget_decisions = state.budget_decisions
+  if final_status == "budget_exhausted" && !budget_exhausted_emitted {
+    const terminal_exhaustion = __agent_loop_budget_aggregates(
+      session.session_id,
+      nil,
+      state.loop_start_ms,
+    )
+      + {
+      exhausted: true,
+      kind: stop_reason ?? "max_iterations",
+      iteration: state.iteration,
+      max_iterations: state.current_max,
+    }
+    __agent_loop_emit_budget_exhausted(session.session_id, terminal_exhaustion)
+    budget_exhausted_emitted = true
+    budget_decisions = __agent_loop_record_budget_stop(
+      budget_decisions,
+      state.iteration,
+      state.current_max,
+      terminal_exhaustion.kind,
+    )
+  }
+  const opts = state.opts
+  const suspend_result = state.suspend_result
+  const terminal_error = state.terminal_error
+  const wrapup_enabled = opts?.final_wrapup ?? true
+  // A no-tool terminal normally skips wrap-up (nothing to summarize), but a
+  // host that supplied its own directive is explicitly asking for sad-path
+  // coverage — including the zero-write terminals where the user is most owed
+  // a truthful closing message — so honor it even at last_tool_count == 0.
+  const wrapup_tools_ok = state.last_tool_count > 0
+    || __agent_loop_has_host_wrapup_directive(opts)
+  if wrapup_enabled
+    && suspend_result == nil
+    && terminal_error == nil
+    && wrapup_tools_ok
+    && __agent_loop_wrapup_eligible_status(final_status) {
+    let _ = try {
+      __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, state.iteration)
+    }
+  }
+  if opts?.daemon && final_status != "" {
+    agent_daemon_snapshot(session, opts, final_status, state.iteration)
+  }
+  try {
+    __host_drain_file_edits(session.session_id)
+  } catch (e) {
+    nil
+  }
+  __agent_loop_checkpoint(session.session_id, "loop_exit", {iteration: state.iteration})
+  __drain_audit_flushes(state.audit_background_tasks)
+  const result = agent_session_finalize(
+    session.session_id,
+    {
+      final_status: final_status,
+      stop_reason: __agent_loop_sealed_stop_reason(stop_reason, final_status),
+      iterations: state.iteration,
+      error: terminal_error,
+    },
+  )
+  return {result: result, budget_decisions: budget_decisions}
+}
+
+pub fn __agent_loop_project_final_result(result, message, session, state) -> dict {
+  const opts = state.opts
+  const final_status = state.final_status
+  const stop_reason = state.stop_reason
+  const suspend_result = state.suspend_result
+  const terminal_error = state.terminal_error
+  const terminated_ok = terminal_error == nil
+    && suspend_result == nil
+    && (final_status == "" || final_status == "done")
+  const final_stall_state = if terminated_ok {
+    agent_stall_clear_current_failure(state.stall_state)
+  } else {
+    state.stall_state
+  }
+  const result_with_stalls = agent_stall_apply_result(
+    result,
+    state.stall_enabled_seen,
+    final_stall_state,
+  )
+  const enforced = if suspend_result != nil {
+    result_with_stalls
+  } else {
+    agent_required_tools_enforce(result_with_stalls, opts)
+  }
+  let final_result = enforced
+  if opts?.verify_completion_judge != nil {
+    final_result = final_result
+      + {
+      completion_judge: {
+        invocations: state.verify_completion_judge_invocations,
+        vetoes: state.verify_completion_judge_vetoes,
+        max_invocations: agent_verify_completion_judge_cap(opts?.verify_completion_judge),
+        cap_reached: final_status == "verify_capped",
+      },
+    }
+  }
+  if opts?.done_judge != nil {
+    final_result = final_result
+      + {
+      done_judge: {
+        invocations: state.done_judge_invocations,
+        vetoes: state.done_judge_vetoes,
+        max_invocations: agent_done_judge_cap(opts?.done_judge),
+        cap_reached: final_status == "verify_capped" && stop_reason == "done_judge_cap_reached",
+      },
+    }
+  }
+  const budget = state.budget
+  if budget.expose_decisions {
+    final_result = final_result
+      + {
+      adaptive_budget: {
+        mode: budget.mode,
+        initial: budget.initial,
+        max: budget.max,
+        final_limit: state.current_max,
+        extensions_used: state.extensions_used,
+        decisions: state.budget_decisions,
+      },
+    }
+  }
+  if suspend_result != nil {
+    final_result = final_result + suspend_result
+  }
+  if terminated_ok && opts?.output_schema != nil {
+    final_result = __agent_loop_apply_output_schema(
+      final_result,
+      opts,
+      session,
+      message,
+      state.iteration,
+    )
+  }
+  return final_result
+}

@@ -15,14 +15,25 @@ pipeline test() {
     assert(contains(pin_kinds(), k), "default pin_policy kinds are valid taxonomy members")
   }
   // Explicit caller pin_policy wins over the pack row.
-  const overridden = agent_preset("merge_captain", {pin_policy: {kinds: ["decision"], preserve_on_compact: false}})
+  const overridden = agent_preset(
+    "merge_captain",
+    {pin_policy: {kinds: ["decision"], preserve_on_compact: false}},
+  )
   assert_eq(overridden.pin_policy.kinds, ["decision"], "caller pin_policy kinds win over the pack")
-  assert(!overridden.pin_policy.preserve_on_compact, "caller preserve_on_compact wins over the pack")
+  assert(
+    !overridden.pin_policy.preserve_on_compact,
+    "caller preserve_on_compact wins over the pack",
+  )
   // A kind without a pin_policy pack row leaves the option absent.
   assert(agent_preset("audit")?.pin_policy == nil, "no pin_policy pack row leaves it absent")
   // Registration rejects an unknown pin kind in pin_policy.kinds.
   assert_throws(
-    { -> return agent_preset_register("bad_pins", {family: "generic", pack: {pin_policy: {kinds: ["goals"]}}}) },
+    { ->
+      return agent_preset_register(
+        "bad_pins",
+        {family: "generic", pack: {pin_policy: {kinds: ["goals"]}}},
+      )
+    },
     "unknown pin kind in pin_policy.kinds must throw",
   )
   // A valid custom pin_policy registers and fills through.

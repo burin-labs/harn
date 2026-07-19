@@ -35,7 +35,10 @@ pipeline default() {
   // 3. ambiguity abstention: two artifacts identical on every signal -> abstain.
   const a = mk("a", "src", "fresh")
   const b = mk("b", "src", "fresh")
-  const amb = context_artifact_select_one([a, b], {role: "implementer", language: "rust", dir: "src"})
+  const amb = context_artifact_select_one(
+    [a, b],
+    {role: "implementer", language: "rust", dir: "src"},
+  )
   __io_println(amb.reason)
   __io_println(len(amb.candidates))
   // 4. staleness suppression: a stale, more-specific artifact is suppressed in
@@ -49,7 +52,10 @@ pipeline default() {
   __io_println(sup.reason)
   __io_println(sup.artifact.id)
   // 5. all candidates stale -> staleness reason, inject nothing.
-  const allStale = context_artifact_select_one([staleDeep], {role: "implementer", language: "rust", dir: "src/parser"})
+  const allStale = context_artifact_select_one(
+    [staleDeep],
+    {role: "implementer", language: "rust", dir: "src/parser"},
+  )
   __io_println(allStale.reason)
   // 6. empty input -> no_context_artifacts.
   const none = context_artifact_select_one([], {})

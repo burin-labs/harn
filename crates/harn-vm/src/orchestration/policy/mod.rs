@@ -360,14 +360,13 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         return reject_policy(format!("builtin '{name}' exceeds network.http ceiling"));
     }
     match name {
-        "find_text"
+        "find_text" | "find_evidence"
             if !policy_allows_capability(&policy, "workspace", "read_text")
                 || !policy_allows_capability(&policy, "workspace", "list") =>
         {
-            return reject_policy(
-                "builtin 'find_text' exceeds workspace.read_text/workspace.list ceiling"
-                    .to_string(),
-            );
+            return reject_policy(format!(
+                "builtin '{name}' exceeds workspace.read_text/workspace.list ceiling"
+            ));
         }
         "read_file"
         | "read_file_result"
@@ -1250,6 +1249,7 @@ mod approval_policy_tests {
         for name in [
             "read_lines",
             "find_text",
+            "find_evidence",
             "walk_dir",
             "glob",
             "project_context_profile_native",

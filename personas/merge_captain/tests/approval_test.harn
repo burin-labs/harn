@@ -97,7 +97,11 @@ pipeline test_gate_autopilot_partial_blocks(task) {
 }
 
 pipeline test_gate_autopilot_full_passes(task) {
-  const policy = {enabled: true, require_human_for: ["force_push"], autopilot_action_kinds: ["semantic_repair"]}
+  const policy = {
+    enabled: true,
+    require_human_for: ["force_push"],
+    autopilot_action_kinds: ["semantic_repair"],
+  }
   const bundle = _bundle(["semantic_repair"])
   const decision = gate(policy, bundle, false)
   assert(decision.allowed)

@@ -193,7 +193,12 @@ pub fn context_maintenance_receipt(
   const affected_paths = __cm_paths(opts)
   const source_id = __cm_source_id(opts)
   const dedupe_key = opts?.dedupe_key
-    ?? context_maintenance_dedupe_key(resolved_job_id, lifecycle_event, affected_paths, source_id)
+    ?? context_maintenance_dedupe_key(
+    resolved_job_id,
+    lifecycle_event,
+    affected_paths,
+    source_id,
+  )
   const run_id = opts?.run_id ?? ("ctx_run_" + substring(sha256(dedupe_key), 0, 16))
   return filter_nil(
     {
@@ -290,7 +295,10 @@ pub fn context_maintenance_replay_decision(receipt: ContextMaintenanceJobReceipt
       receipt: context_maintenance_transition(
         receipt,
         "skipped",
-        {replay: {mode: "skip", determinism_key: receipt.dedupe_key, reason: reason}, error: reason},
+        {
+          replay: {mode: "skip", determinism_key: receipt.dedupe_key, reason: reason},
+          error: reason,
+        },
       ),
     }
   }

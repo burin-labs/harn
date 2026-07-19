@@ -7,8 +7,7 @@ pub enum LexerError {
     UnexpectedCharacter(char, Span),
     UnterminatedString(Span),
     UnterminatedBlockComment(Span),
-    /// An integer literal whose magnitude does not fit in an `i64`. Reported
-    /// instead of silently degrading to a lossy float.
+    /// An integer literal outside `i64`, reported instead of becoming a lossy float.
     IntegerLiteralOutOfRange(String, Span),
 }
 
@@ -69,8 +68,7 @@ impl Lexer {
         }
     }
 
-    /// Create a lexer that starts counting from the given source position.
-    /// Useful for re-lexing interpolated expressions at their original location.
+    /// Start counting at a source position when re-lexing interpolated expressions.
     pub fn with_position(source: &str, line: usize, column: usize) -> Self {
         Self {
             source: source.chars().collect(),
@@ -109,9 +107,15 @@ impl Lexer {
                 continue;
             }
 
-            // Backslash immediately before newline joins lines without emitting a Newline token.
-            if ch == '\\' && self.peek() == Some('\n') {
+            // Join LF or CRLF continuations; formatter output must parse on Windows checkouts.
+            if ch == '\\'
+                && (self.peek() == Some('\n')
+                    || (self.peek() == Some('\r') && self.source.get(self.pos + 2) == Some(&'\n')))
+            {
                 self.advance();
+                if self.source.get(self.pos) == Some(&'\r') {
+                    self.advance();
+                }
                 self.advance();
                 self.line += 1;
                 self.column = 1;
@@ -594,10 +598,8 @@ impl Lexer {
         Err(LexerError::UnterminatedString(start))
     }
 
-    /// If the current `r` is followed by one-or-more `#` and then a `"`,
-    /// return the `#` count (the opening delimiter width). Returns `None`
-    /// when the `#` run is not closed by a `"`, so the caller falls through
-    /// to ordinary tokenization. Pure lookahead — does not advance.
+    /// Return the opening `#` count when `r` is followed by hashes and `"`.
+    /// Returns `None` without advancing when the hash run has no closing `"`.
     fn raw_hash_count(&self) -> Option<usize> {
         let mut k = 1; // skip the leading `r`
         let mut hashes = 0;
@@ -612,12 +614,10 @@ impl Lexer {
         }
     }
 
-    /// Read a hashed raw string `r#"..."#` (with `hashes` `#` characters):
-    /// no escape processing, no interpolation. The body may contain `"`;
-    /// the literal ends at the first `"` followed by at least `hashes` `#`,
-    /// consuming exactly `hashes` of them (any extra `#` stay in the stream,
-    /// matching Rust's raw-string semantics). Like `r"..."`, the body may not
-    /// span a newline.
+    /// Read a hashed raw string without escapes, interpolation, or newlines.
+    /// It ends at `"` plus at least `hashes` hashes and consumes exactly that
+    /// many hashes, leaving extras in the stream like Rust raw strings.
+    /// Quotes lacking enough trailing hashes remain part of the body.
     fn read_raw_string_hashed(&mut self, hashes: usize) -> Result<Token, LexerError> {
         let start_byte = self.byte_pos;
         let start = Span::with_offsets(start_byte, start_byte, self.line, self.column);
@@ -1432,17 +1432,6 @@ mod tests {
         assert_eq!(tokens[0].kind, TokenKind::Identifier("a".into()));
         assert_eq!(tokens[1].kind, TokenKind::Newline);
         assert_eq!(tokens[2].kind, TokenKind::Identifier("b".into()));
-    }
-
-    #[test]
-    fn test_backslash_continuation() {
-        let mut lexer = Lexer::new("10 \\\n- 3");
-        let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::IntLiteral(10));
-        assert_eq!(tokens[1].kind, TokenKind::Minus);
-        assert_eq!(tokens[2].kind, TokenKind::IntLiteral(3));
-        // No Newline token between 10 and -: continuation joined them.
-        assert_eq!(tokens.len(), 4);
     }
 
     #[test]

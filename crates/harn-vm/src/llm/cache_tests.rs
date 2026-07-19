@@ -409,4 +409,24 @@ mod cache_key_identity_tests {
         let with = key("hello", dict(with_stop));
         assert_ne!(without, with, "stop must participate in the cache key");
     }
+
+    #[test]
+    fn differing_mock_scopes_produce_different_keys() {
+        let mut main = base_options();
+        main.insert(
+            crate::value::intern_key("mock_scope"),
+            VmValue::String(arcstr::ArcStr::from("agent.main")),
+        );
+        let mut judge = base_options();
+        judge.insert(
+            crate::value::intern_key("mock_scope"),
+            VmValue::String(arcstr::ArcStr::from("completion.judge")),
+        );
+
+        assert_ne!(
+            key("same prompt", dict(main)),
+            key("same prompt", dict(judge)),
+            "logical mock scopes must not share a cache entry"
+        );
+    }
 }

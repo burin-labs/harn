@@ -41,7 +41,10 @@ fn fake_request() {
 fn main(_harness: Harness) {
   const req = fake_request()
   // 1. Content negotiation against a simulated `Accept` header.
-  const chosen = http_choose(req.headers.Accept, ["application/xml", "application/json", "text/plain"])
+  const chosen = http_choose(
+    req.headers.Accept,
+    ["application/xml", "application/json", "text/plain"],
+  )
   __io_println("chose: ${chosen}")
   // 2. Compute a strong ETag from the serialized payload. The codec's
   //    router-side ETag middleware mirrors this for the auto path;

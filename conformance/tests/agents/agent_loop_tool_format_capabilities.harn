@@ -36,7 +36,12 @@ fn run_format(options) {
     "Report the selected format.",
     nil,
     options
-      + {tools: sample_tools(), llm_caller: format_echo_caller(), max_iterations: 1, done_judge: false},
+      + {
+      tools: sample_tools(),
+      llm_caller: format_echo_caller(),
+      max_iterations: 1,
+      done_judge: false,
+    },
   )
 }
 
@@ -70,7 +75,9 @@ tool_mode_parity = "native_unreliable"
   const preferred_session = "tool-format-preferred-" + uuid()
   const preferred = agent_capture_events(
     preferred_session,
-    fn() { return run_format({provider: "testcatalog", model: "catalogued-native", session_id: preferred_session}) },
+    fn() { return run_format(
+      {provider: "testcatalog", model: "catalogued-native", session_id: preferred_session},
+    ) },
   )
   __io_println(preferred.result.text)
   __io_println(len(events_of(preferred.events, "capability_gap")))
@@ -78,7 +85,12 @@ tool_mode_parity = "native_unreliable"
   const auto = agent_capture_events(
     auto_session,
     fn() { return run_format(
-      {provider: "testcatalog", model: "catalogued-native", session_id: auto_session, tool_format: "auto"},
+      {
+        provider: "testcatalog",
+        model: "catalogued-native",
+        session_id: auto_session,
+        tool_format: "auto",
+      },
     ) },
   )
   __io_println(auto.result.text)
@@ -86,7 +98,9 @@ tool_mode_parity = "native_unreliable"
   const fallback_session = "tool-format-fallback-" + uuid()
   const fallback = agent_capture_events(
     fallback_session,
-    fn() { return run_format({provider: "testcatalog", model: "uncatalogued-model", session_id: fallback_session}) },
+    fn() { return run_format(
+      {provider: "testcatalog", model: "uncatalogued-model", session_id: fallback_session},
+    ) },
   )
   // An uncatalogued model has no preferred_tool_format, so resolution falls
   // back to the GLOBAL text-channel default (now fenced-json, `json`) and emits

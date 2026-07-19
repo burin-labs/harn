@@ -42,7 +42,12 @@ fn lane_test_tools() {
     "run_codemod",
     "glob",
   ] {
-    tools = tool_define(tools, name, "tool " + name, {handler: { _args -> "ok:" + name }, parameters: {}})
+    tools = tool_define(
+      tools,
+      name,
+      "tool " + name,
+      {handler: { _args -> "ok:" + name }, parameters: {}},
+    )
   }
   return tools
 }
@@ -158,12 +163,16 @@ pipeline default() {
         session,
         fn() { return agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts) },
       )
-      const verdict_events = captured.events.filter({ event -> event.type == "scope_classifier_verdict" })
+      const verdict_events = captured.events.filter(
+        { event -> event.type == "scope_classifier_verdict" },
+      )
       __io_println("D.status=" + captured.result.status)
       __io_println("D.verdict_count=" + to_string(len(verdict_events)))
       __io_println(
         "D.evidence_names_lane="
-          + to_string(contains(verdict_events[0].evidence, "lane=explicit_patch")),
+          + to_string(
+          contains(verdict_events[0].evidence, "lane=explicit_patch"),
+        ),
       )
       __io_println("D.label=" + verdict_events[0].label)
     },

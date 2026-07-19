@@ -2,7 +2,9 @@ import { parse, parser } from "std/cli/argparse"
 import { assert_eq } from "std/testing"
 
 pipeline test(task) {
-  const spec = parser({name: "demo", args: [{name: "model", kind: "flag", short: "-m", long: "--model"}]})
+  const spec = parser(
+    {name: "demo", args: [{name: "model", kind: "flag", short: "-m", long: "--model"}]},
+  )
   const a = unwrap(parse(spec, ["-m", "claude-opus"]))
   const b = unwrap(parse(spec, ["--model", "claude-haiku"]))
   const c = unwrap(parse(spec, ["--model=claude-sonnet"]))

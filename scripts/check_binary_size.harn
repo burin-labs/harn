@@ -293,7 +293,9 @@ pipeline main(task) {
      * binary whose size we checked so the script is safe to run before a
      * packaging step. The scratch dir lives in the workspace (the runtime
      * sandbox only permits writes inside the workspace root). */
-    const mk = harness.process.spawn_captured({cmd: "mktemp", args: ["-d", "harn-binary-size.XXXXXX"]})
+    const mk = harness.process.spawn_captured(
+      {cmd: "mktemp", args: ["-d", "harn-binary-size.XXXXXX"]},
+    )
     if !mk.success {
       __io_eprintln("error: could not create temp directory")
       return 1

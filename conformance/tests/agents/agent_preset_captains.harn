@@ -54,18 +54,25 @@ pipeline default() {
   // (5) Caller-supplied audit/telemetry sinks compose into the stack.
   const audit_sink = { _record -> nil }
   const telemetry_sink = { _span -> nil }
-  const merge_with_sinks = agent_preset("merge_captain", {audit_sink: audit_sink, telemetry: telemetry_sink})
+  const merge_with_sinks = agent_preset(
+    "merge_captain",
+    {audit_sink: audit_sink, telemetry: telemetry_sink},
+  )
   __io_println(merge_with_sinks?.tool_caller != nil)
   // (6) Caller-supplied cheap-default + frontier escalation builds
   // the with_routing-backed llm_caller.
-  const cheap = { _call -> {
-    ok: true,
-    value: {text: "cheap", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
-  } }
-  const frontier = { _call -> {
-    ok: true,
-    value: {text: "frontier", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
-  } }
+  const cheap = { _call ->
+    {
+      ok: true,
+      value: {text: "cheap", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  const frontier = { _call ->
+    {
+      ok: true,
+      value: {text: "frontier", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
   const escalate = { _call -> false }
   const routed = agent_preset(
     "release_captain",
@@ -74,7 +81,10 @@ pipeline default() {
   __io_println(routed?.llm_caller != nil)
   // (7) Caller-supplied tool_caller wins outright over preset-built layers.
   const custom_caller = { call, next -> next(call) }
-  const overridden = agent_preset("merge_captain", {tool_caller: custom_caller, audit_sink: audit_sink})
+  const overridden = agent_preset(
+    "merge_captain",
+    {tool_caller: custom_caller, audit_sink: audit_sink},
+  )
   __io_println(overridden.tool_caller == custom_caller)
   // (8) merge_captain default consent ALLOWS read-annotated tools and
   // BLOCKS unannotated/write tools. Drive a real agent_loop through
@@ -152,7 +162,13 @@ pipeline default() {
       const release_dry = preset_agent(
         "release_captain",
         "Preview the action.",
-        {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, dry_run: true},
+        {
+          provider: "mock",
+          tools: registry,
+          tool_format: "native",
+          max_iterations: 3,
+          dry_run: true,
+        },
       )
       __io_println(release_dry.status)
       __io_println(contains(release_dry.tools.successful, "delete"))
@@ -181,7 +197,13 @@ pipeline default() {
       const merge_no_consent = preset_agent(
         "merge_captain",
         "Delete with consent disabled.",
-        {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, consent: false},
+        {
+          provider: "mock",
+          tools: registry,
+          tool_format: "native",
+          max_iterations: 3,
+          consent: false,
+        },
       )
       __io_println(merge_no_consent.status)
       __io_println(contains(merge_no_consent.tools.successful, "delete"))

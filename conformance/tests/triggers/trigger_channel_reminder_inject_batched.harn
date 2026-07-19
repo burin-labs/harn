@@ -24,7 +24,8 @@ pipeline test(task) {
       handler: ReminderInject(
         {
           target: target_session,
-          body: "Batch {{ batch[0].provider_payload.payload.seq }}-{{ batch[1].provider_payload.payload.seq }}-{{ batch[2].provider_payload.payload.seq }} landed.",
+          body:
+            "Batch {{ batch[0].provider_payload.payload.seq }}-{{ batch[1].provider_payload.payload.seq }}-{{ batch[2].provider_payload.payload.seq }} landed.",
           tags: ["batched_reminder"],
         },
       ),
@@ -42,7 +43,10 @@ pipeline test(task) {
   )
   const _ = emit_channel("ch.reminder.batched.input", {seq: 1})
   const _ = emit_channel("ch.reminder.batched.input", {seq: 2})
-  const before = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
+  const before = transcript_events_by_kind(
+    agent_session_snapshot(target_session),
+    "system_reminder",
+  )
   __io_println("before-threshold:" + to_string(len(before)))
   // Threshold-fire path: the third emit closes the batch and dispatches once.
   const _ = emit_channel("ch.reminder.batched.input", {seq: 3})
@@ -55,7 +59,10 @@ pipeline test(task) {
   const _ = emit_channel("ch.reminder.batched.input", {seq: 4})
   const _ = emit_channel("ch.reminder.batched.input", {seq: 5})
   const _ = emit_channel("ch.reminder.batched.input", {seq: 6})
-  const after_second = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
+  const after_second = transcript_events_by_kind(
+    agent_session_snapshot(target_session),
+    "system_reminder",
+  )
   __io_println("after-second-batch:" + to_string(len(after_second)))
   unmock_time()
 }

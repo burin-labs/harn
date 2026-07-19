@@ -42,7 +42,11 @@ pipeline default() {
   )
   __io_println(env.tool_format)
   const defaulted = workflow_stage_agent_options(
-    {has_tools: false, model_policy: {}, host: {env_tool_format: "", default_tool_format: "native"}},
+    {
+      has_tools: false,
+      model_policy: {},
+      host: {env_tool_format: "", default_tool_format: "native"},
+    },
   )
   __io_println(defaulted.tool_format)
   __io_println(defaulted.run_agent_loop)

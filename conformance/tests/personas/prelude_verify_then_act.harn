@@ -8,7 +8,11 @@ pipeline test(task) {
     started_at: "2026-05-03T00:00:00Z",
     completed_at: "2026-05-03T00:00:00Z",
   }
-  const accepted = verify_then_act(fn() { return Ok({clean: true}) }, fn() { return "merged" }, receipt_options)
+  const accepted = verify_then_act(
+    fn() { return Ok({clean: true}) },
+    fn() { return "merged" },
+    receipt_options,
+  )
   __io_println(accepted.status)
   __io_println(accepted.verified)
   __io_println(accepted.acted)

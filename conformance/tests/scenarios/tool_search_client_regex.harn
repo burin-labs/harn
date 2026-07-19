@@ -38,7 +38,11 @@ pipeline test(task) {
     registry,
     "run_shell",
     "Run a shell command",
-    {parameters: {cmd: {type: "string"}}, defer_loading: true, handler: { args -> "ran: " + args.cmd }},
+    {
+      parameters: {cmd: {type: "string"}},
+      defer_loading: true,
+      handler: { args -> "ran: " + args.cmd },
+    },
   )
   // Turn 1: model runs a regex alternation.
   with_llm_script(
@@ -47,7 +51,10 @@ pipeline test(task) {
         text: "Looking up edit/create tools via regex.",
         tool_calls: [{id: "rgx1", name: "__harn_tool_search", arguments: {query: "edit|create"}}],
       },
-      {text: "Editing now.", tool_calls: [{id: "t2", name: "edit_file", arguments: {path: "hello.txt"}}]},
+      {
+        text: "Editing now.",
+        tool_calls: [{id: "t2", name: "edit_file", arguments: {path: "hello.txt"}}],
+      },
       llm_text("<done>##DONE##</done>"),
     ],
     { ->

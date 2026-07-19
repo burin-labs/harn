@@ -243,16 +243,14 @@ async fn acp_inline_mode_rejects_slash_invocations_with_friendly_error() {
         }))
         .await;
 
-    let update = recv_json(&mut rx).await;
-    assert_eq!(update["method"], "session/update");
-    assert!(
-        update["params"]["update"]["content"]["_meta"]["harn"]["visible_delta"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("Slash commands require `--pipeline"),
-        "expected friendly inline-mode diagnostic, got: {update}"
-    );
+    // The friendly diagnostic is a terminal failure, so it arrives as exactly
+    // one typed JSON-RPC error and never as an assistant `agent_message_chunk`.
     let error = recv_json(&mut rx).await;
+    assert_eq!(
+        error["method"],
+        serde_json::Value::Null,
+        "no session/update precedes the error"
+    );
     assert_eq!(error["id"], 2);
     assert!(
         error["error"]["message"]
@@ -261,6 +259,11 @@ async fn acp_inline_mode_rejects_slash_invocations_with_friendly_error() {
             .contains("Slash commands require `--pipeline"),
         "expected friendly inline-mode error message, got: {error}"
     );
+    assert_eq!(
+        error["error"]["data"]["schema"],
+        ACP_PROMPT_ERROR_DATA_SCHEMA
+    );
+    assert_eq!(error["error"]["data"]["terminalClass"], "generic_throw");
 }
 
 /// Hot-reload: when the pipeline source changes between prompts, the

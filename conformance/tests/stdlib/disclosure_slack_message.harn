@@ -5,7 +5,11 @@ pipeline default() {
   const config = {
     identities: {
       "user:kenneth": {name: "Kenneth Sinder", email: "kenneth@example.com"},
-      "agent:merge-captain": {name: "Merge Captain", label: "Merge Captain", email: "merge-captain@bots.example"},
+      "agent:merge-captain": {
+        name: "Merge Captain",
+        label: "Merge Captain",
+        email: "merge-captain@bots.example",
+      },
     },
     surfaces: {slack: {customize_icon_emoji: ":harn:"}},
   }

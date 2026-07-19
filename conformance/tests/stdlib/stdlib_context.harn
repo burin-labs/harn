@@ -15,7 +15,9 @@ pipeline default() {
   __io_println(contains(prompt?.prompt, "[repo]"))
   // The prompt wraps the task in a <workflow_task> / <label> /
   // <instructions> block. Assert both pieces are present.
-  __io_println(contains(prompt?.prompt, "<label>Work</label>") && contains(prompt?.prompt, "Fix it"))
+  __io_println(
+    contains(prompt?.prompt, "<label>Work</label>") && contains(prompt?.prompt, "Fix it"),
+  )
   const raw = context_render({sections: [{name: "raw", content: "Visible"}]})
   __io_println(raw)
   const added = context_add(context([section("one", "1")]), section("two", "2"))

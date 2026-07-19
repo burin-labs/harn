@@ -176,7 +176,9 @@ pipeline main(task) {
   /* The runtime sandbox only permits writes inside the workspace root, so
    * the profile JSON lives there (and is removed afterward) rather than
    * under the system temp dir the Python version used. */
-  const mk = harness.process.spawn_captured({cmd: "mktemp", args: ["-d", "harn-vm-rss-soak-XXXXXX"]})
+  const mk = harness.process.spawn_captured(
+    {cmd: "mktemp", args: ["-d", "harn-vm-rss-soak-XXXXXX"]},
+  )
   if !mk.success {
     __io_eprintln("error: could not create temp directory")
     return 1
@@ -186,7 +188,13 @@ pipeline main(task) {
   const argv_prefix = harn_bench_argv()
   const bin = argv_prefix[0]
   const bench_args = argv_prefix.slice(1, argv_prefix.count)
-    + [FIXTURE, "--iterations", "${iterations}", "--profile-json", report_path]
+    + [
+    FIXTURE,
+    "--iterations",
+    "${iterations}",
+    "--profile-json",
+    report_path,
+  ]
   const bench = harness.process.spawn_captured({cmd: bin, args: bench_args})
   /* Python inherits stdout/stderr for the bench child, so its (timing,
    * nondeterministic) output streams through. Re-emit the captured streams

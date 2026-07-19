@@ -3,7 +3,9 @@ import { AgentLoopOptions } from "std/agent/options"
 
 pipeline default() {
   const seen = shared_cell({scope: "task_group", key: "route-tool-format-seen", initial: ""})
-  const post_turn_count = shared_cell({scope: "task_group", key: "route-tool-format-post-turn", initial: 0})
+  const post_turn_count = shared_cell(
+    {scope: "task_group", key: "route-tool-format-post-turn", initial: 0},
+  )
   const caller = { call ->
     const prior = shared_snapshot(seen)
     const provider = to_string(call?.opts?.provider ?? "")
@@ -13,7 +15,10 @@ pipeline default() {
     if contains(prior.value, "openrouter:") {
       return {ok: true, value: {text: "DONE", tool_calls: [], provider: provider, model: model}}
     }
-    return {ok: true, value: {text: "keep working", tool_calls: [], provider: provider, model: model}}
+    return {
+      ok: true,
+      value: {text: "keep working", tool_calls: [], provider: provider, model: model},
+    }
   }
   const post_turn = { _payload ->
     const count = shared_snapshot(post_turn_count)

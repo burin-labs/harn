@@ -10,7 +10,9 @@ pipeline default() {
   __io_println(len(after_first))
   __io_println(after_first[0].kind)
   __io_println(after_first[0].payload.n)
-  const filtered = event_log.read({topic: "tests.read", from_cursor: second - 1, kind_prefix: "alpha.", limit: 10})
+  const filtered = event_log.read(
+    {topic: "tests.read", from_cursor: second - 1, kind_prefix: "alpha.", limit: 10},
+  )
   __io_println(len(filtered))
   __io_println(filtered[0].kind)
   __io_println(filtered[0].cursor)

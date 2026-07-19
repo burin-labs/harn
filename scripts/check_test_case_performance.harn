@@ -38,7 +38,8 @@ pub fn percentile(values: list<int>, percent: int) -> int {
 pub fn parse_diagnose_output(text: string) -> dict {
   let samples = []
   let failures = []
-  const pattern = r"(?m)^\[harn test diag\] (ok|FAIL) (.+) setup=(\d+)ms compile=(\d+)ms execute=(\d+)ms teardown=(\d+)ms(?: [^\n]*)? total=(\d+)ms$"
+  const pattern =
+    r"(?m)^\[harn test diag\] (ok|FAIL) (.+) setup=(\d+)ms compile=(\d+)ms execute=(\d+)ms teardown=(\d+)ms(?: [^\n]*)? total=(\d+)ms$"
   for capture in regex_captures(pattern, text) {
     const groups = capture.groups
     const sample = {
@@ -94,7 +95,10 @@ pub fn parse_time_output(text: string) -> dict {
     user_ms: number(user_s) * 1000.0,
     sys_ms: number(sys_s) * 1000.0,
     max_rss_kb: max_rss_kb,
-    major_faults: captured_int(text, [r"Major \(requiring I/O\) page faults:\s*(\d+)", r"^\s*(\d+)\s+page faults$"]),
+    major_faults: captured_int(
+      text,
+      [r"Major \(requiring I/O\) page faults:\s*(\d+)", r"^\s*(\d+)\s+page faults$"],
+    ),
     minor_faults: captured_int(
       text,
       [r"Minor \(reclaiming a frame\) page faults:\s*(\d+)", r"^\s*(\d+)\s+page reclaims$"],
@@ -107,8 +111,14 @@ pub fn parse_time_output(text: string) -> dict {
       text,
       [r"Involuntary context switches:\s*(\d+)", r"^\s*(\d+)\s+involuntary context switches$"],
     ),
-    fs_inputs: captured_int(text, [r"File system inputs:\s*(\d+)", r"^\s*(\d+)\s+block input operations$"]),
-    fs_outputs: captured_int(text, [r"File system outputs:\s*(\d+)", r"^\s*(\d+)\s+block output operations$"]),
+    fs_inputs: captured_int(
+      text,
+      [r"File system inputs:\s*(\d+)", r"^\s*(\d+)\s+block input operations$"],
+    ),
+    fs_outputs: captured_int(
+      text,
+      [r"File system outputs:\s*(\d+)", r"^\s*(\d+)\s+block output operations$"],
+    ),
   }
 }
 
@@ -134,8 +144,14 @@ pub fn aggregate_runs(runs: list<dict>) -> dict {
     }
     major_faults = major_faults + int_number(run.time.major_faults)
     minor_faults = minor_faults + int_number(run.time.minor_faults)
-    voluntary_context_switches = voluntary_context_switches + int_number(run.time.voluntary_context_switches)
-    involuntary_context_switches = involuntary_context_switches + int_number(run.time.involuntary_context_switches)
+    voluntary_context_switches = voluntary_context_switches
+      + int_number(
+      run.time.voluntary_context_switches,
+    )
+    involuntary_context_switches = involuntary_context_switches
+      + int_number(
+      run.time.involuntary_context_switches,
+    )
     fs_inputs = fs_inputs + int_number(run.time.fs_inputs)
     fs_outputs = fs_outputs + int_number(run.time.fs_outputs)
     for sample in run.diagnose.samples {
@@ -210,7 +226,9 @@ pub fn evaluate_metrics(metrics: dict, baseline: dict) -> dict {
     const actual = number(metrics.telemetry[name])
     if reference > 0.0 && actual > reference * telemetry_factor {
       warnings = warnings
-        + ["telemetry ${name}=${actual} exceeded ${telemetry_factor}x reference ${reference}"]
+        + [
+        "telemetry ${name}=${actual} exceeded ${telemetry_factor}x reference ${reference}",
+      ]
     }
   }
   return {ok: failures.count == 0, failures: failures, warnings: warnings, limits: limits}
@@ -287,7 +305,8 @@ fn materialize_suite(root: string, index: int) -> string {
   mkdir(generation_root)
   mkdir(packages)
   mkdir(tests)
-  let lock_body = "# Generated performance fixture.\nversion = 4\ngenerator_version = \"performance-check\"\nprotocol_artifact_version = \"performance-check\"\n"
+  let lock_body =
+    "# Generated performance fixture.\nversion = 4\ngenerator_version = \"performance-check\"\nprotocol_artifact_version = \"performance-check\"\n"
   for item in range(0, 128) {
     lock_body = lock_body + "# deterministic-padding-${item}=abcdefghijklmnopqrstuvwxyz0123456789\n"
   }
@@ -306,7 +325,8 @@ fn materialize_suite(root: string, index: int) -> string {
     path_join(suite, "support.harn"),
     "pub fn helper(value: int) -> int { return value + 1 }\n",
   )
-  let source = "import { with_temp_dir } from \"std/testing\"\nimport { helper } from \"../support.harn\"\n\n"
+  let source =
+    "import { with_temp_dir } from \"std/testing\"\nimport { helper } from \"../support.harn\"\n\n"
   for case_index in range(0, CASES_PER_SUITE) {
     source = source
       + "@test\npipeline perf_${index}_${case_index}(task) {\n  assert_eq(helper(${case_index}), ${case_index + 1})\n}\n\n"
@@ -316,7 +336,8 @@ fn materialize_suite(root: string, index: int) -> string {
   return test_file
 }
 
-const GNU_TIME_FORMAT = "real %e\nuser %U\nsys %S\nMaximum resident set size (kbytes): %M\nMajor (requiring I/O) page faults: %F\nMinor (reclaiming a frame) page faults: %R\nVoluntary context switches: %w\nInvoluntary context switches: %c\nFile system inputs: %I\nFile system outputs: %O"
+const GNU_TIME_FORMAT =
+  "real %e\nuser %U\nsys %S\nMaximum resident set size (kbytes): %M\nMajor (requiring I/O) page faults: %F\nMinor (reclaiming a frame) page faults: %R\nVoluntary context switches: %w\nInvoluntary context switches: %c\nFile system inputs: %I\nFile system outputs: %O"
 
 pub fn time_args(platform: string) -> list<string> {
   return if platform == "macos" {
@@ -344,7 +365,16 @@ fn run_parallel(root: string, platform: string, test_files: list<string>) -> dic
     const stderr_path = path_join(run_root, "stderr.txt")
     const status_path = path_join(run_root, "status.txt")
     const argv = prefix
-      + ["test", "--parallel", "--jobs", "4", "--diagnose", "--timeout", "5000", test_files[index]]
+      + [
+      "test",
+      "--parallel",
+      "--jobs",
+      "4",
+      "--diagnose",
+      "--timeout",
+      "5000",
+      test_files[index],
+    ]
     script = script
       + "(HOME="
       + shell_quote(home)
@@ -360,7 +390,8 @@ fn run_parallel(root: string, platform: string, test_files: list<string>) -> dic
       + shell_quote(status_path)
       + "; exit \"$code\") &\npids=\"$pids $!\"\n"
   }
-  script = script + "failed=0\nfor pid in $pids; do wait \"$pid\" || failed=1; done\nexit \"$failed\"\n"
+  script = script
+    + "failed=0\nfor pid in $pids; do wait \"$pid\" || failed=1; done\nexit \"$failed\"\n"
   const fanout = harness.process.spawn_captured({cmd: "sh", args: ["-c", script]})
   let runs = []
   let errors = []
@@ -384,7 +415,9 @@ fn run_parallel(root: string, platform: string, test_files: list<string>) -> dic
     }
     if diagnose.samples.count != CASES_PER_SUITE {
       errors = errors
-        + ["run ${index} emitted ${diagnose.samples.count}/${CASES_PER_SUITE} diagnostic samples"]
+        + [
+        "run ${index} emitted ${diagnose.samples.count}/${CASES_PER_SUITE} diagnostic samples",
+      ]
     }
     if diagnose.failures.count > 0 {
       errors = errors + ["run ${index} reported failing tests: ${diagnose.failures.join(", ")}"]
@@ -452,6 +485,8 @@ pipeline main(task) {
     }
     return 1
   }
-  __io_println("parallel test-case performance: OK platform=${platform} tests=${metrics.test_count}")
+  __io_println(
+    "parallel test-case performance: OK platform=${platform} tests=${metrics.test_count}",
+  )
   return 0
 }

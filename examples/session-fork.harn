@@ -10,7 +10,10 @@
 pipeline main(task) {
   const base = agent_session_open()
   agent_session_inject(base, {role: "user", content: "Plan a weekend in Kyoto."})
-  agent_session_inject(base, {role: "assistant", content: "Day 1: Fushimi Inari. Day 2: Arashiyama."})
+  agent_session_inject(
+    base,
+    {role: "assistant", content: "Day 1: Fushimi Inari. Day 2: Arashiyama."},
+  )
   // Fork two counterfactual branches from the same starting point.
   const rainy = agent_session_fork(base)
   const sunny = agent_session_fork(base)

@@ -36,7 +36,11 @@ pipeline default() {
     store_opts + {now: "2026-05-23T10:00:02Z"},
   )
   const provider_opts = {
-    reminders: {config: {project_facts: {root: root, namespace: namespace, max_facts: 5, min_confidence: 0.5}}},
+    reminders: {
+      config: {
+        project_facts: {root: root, namespace: namespace, max_facts: 5, min_confidence: 0.5},
+      },
+    },
   }
   const session = agent_session_open("reminder-provider-project-facts")
   agent_session_reset(session)
@@ -64,7 +68,10 @@ pipeline default() {
   __io_println(contains(reminder.body, "Low-confidence facts"))
   __io_println(contains(reminder.body, "decision"))
   __io_println(contains(reminder.body, "confidence 0.91"))
-  const refresh_opts = provider_opts + {reminders: provider_opts.reminders + {providers: ["-token_pressure"]}}
+  const refresh_opts = provider_opts
+    + {
+    reminders: provider_opts.reminders + {providers: ["-token_pressure"]},
+  }
   const below_refresh = agent_reminder_providers_fire(
     session,
     "on_budget_threshold",
@@ -106,13 +113,22 @@ pipeline default() {
     {
       reminders: {
         config: {
-          project_facts: {root: root, namespace: namespace, max_facts: 5, min_confidence: 0.0, kind_filter: ["constraint"]},
+          project_facts: {
+            root: root,
+            namespace: namespace,
+            max_facts: 5,
+            min_confidence: 0.0,
+            kind_filter: ["constraint"],
+          },
         },
       },
     },
   )
   __io_println(kind_only.fired_count)
-  const kind_reminder = transcript_events_by_kind(agent_session_snapshot(kind_session), "system_reminder")[0].reminder
+  const kind_reminder = transcript_events_by_kind(
+    agent_session_snapshot(kind_session),
+    "system_reminder",
+  )[0].reminder
   __io_println(contains(kind_reminder.body, "Project facts reminder runs synchronously"))
   __io_println(contains(kind_reminder.body, "Memory module reuses the BM25 scorer"))
   const disabled_session = agent_session_open("reminder-provider-project-facts-disabled")
@@ -122,7 +138,10 @@ pipeline default() {
     "session_start",
     {session: {id: disabled_session}, task: "irrelevant"},
     {
-      reminders: {providers: ["-project_facts"], config: {project_facts: {root: root, namespace: namespace}}},
+      reminders: {
+        providers: ["-project_facts"],
+        config: {project_facts: {root: root, namespace: namespace}},
+      },
     },
   )
   __io_println(disabled.fired_count)

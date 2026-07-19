@@ -23,7 +23,8 @@ pipeline test_insert_at_anchor_atom_picks_insert_at_anchor(task) {
     {
       kind: "insert_at_anchor",
       path: "src/lib.rs",
-      query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
+      query:
+        "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
       position: "last_child",
       content: "#[test]\nfn added() {}",
     },

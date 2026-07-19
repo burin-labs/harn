@@ -1001,6 +1001,10 @@ paths: {}
 
     #[tokio::test]
     async fn scaffold_openapi_package_passes_local_package_gates() {
+        // Runs a pipeline through the process-global run-event stdout path, so it
+        // serializes with the run module's sink tests to stay parallel-safe.
+        let _run_event_sink =
+            crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
         let tmp = tempfile::tempdir().unwrap();
         let harn_openapi = fake_harn_openapi_repo(tmp.path());
         let rev = run_git(&harn_openapi, &["rev-parse", "HEAD"]);

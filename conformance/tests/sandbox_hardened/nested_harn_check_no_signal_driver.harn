@@ -11,7 +11,10 @@ import "../_common"
  */
 pipeline default() {
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
   const root = path_join(harness.fs.temp_dir(), "nested-harn-check-" + uuid_v7())
   harness.fs.mkdir(root)
   const script = path_join(root, "child.harn")
@@ -24,7 +27,12 @@ pipeline default() {
       side_effect_level: "process_exec",
       process_sandbox: {read_roots: [harn_bin_dir]},
     },
-    { -> return command_run([harn_bin, "check", script], {cwd: root, capture: {max_inline_bytes: 200000}}) },
+    { ->
+      return command_run(
+        [harn_bin, "check", script],
+        {cwd: root, capture: {max_inline_bytes: 200000}},
+      )
+    },
   )
   __io_println(result.success)
   __io_println(!contains(result.stderr, "failed to create UnixStream"))

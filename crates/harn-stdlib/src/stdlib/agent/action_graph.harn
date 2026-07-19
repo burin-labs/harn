@@ -119,12 +119,17 @@ fn __action_graph_tool_class(tools, phase) {
 
 fn __action_graph_phase(raw, fallback_phase, tools, instruction) {
   const explicit = lowercase(
-    trim(raw?.phase ?? raw?.kind ?? raw?.type ?? raw?.category ?? raw?.mode ?? fallback_phase ?? ""),
+    trim(
+      raw?.phase ?? raw?.kind ?? raw?.type ?? raw?.category ?? raw?.mode ?? fallback_phase ?? "",
+    ),
   )
   if contains(["research", "discover", "analyze", "analysis", "investigate"], explicit) {
     return "research"
   }
-  if contains(["verify", "verification", "test", "check", "evaluate", "evaluator", "qa"], explicit) {
+  if contains(
+    ["verify", "verification", "test", "check", "evaluate", "evaluator", "qa"],
+    explicit,
+  ) {
     return "verify"
   }
   if contains(["execute", "act", "implementation", "implement", "apply", "fix", "edit"], explicit) {
@@ -377,7 +382,9 @@ fn __action_graph_batch_prompt(batch) {
   }
   for action in batch.actions {
     const title = action?.title ?? action?.instruction ?? action?.id
-    const exact_command = __action_graph_non_empty_string(action?.command ?? action?.metadata?.command)
+    const exact_command = __action_graph_non_empty_string(
+      action?.command ?? action?.metadata?.command,
+    )
     const detail = if exact_command != nil {
       (action?.instruction ?? title) + " Run exactly `${exact_command}`."
     } else {
@@ -511,11 +518,16 @@ fn __action_graph_batch_context_kinds(batch, template) {
 fn __action_graph_batch_node(batch, template) {
   const local_verification = __action_graph_batch_verification(batch)
   const model_policy = template?.model_policy ?? {}
-  const output_kind = __action_graph_output_kind(template, __action_graph_batch_output_kind(batch.phase))
+  const output_kind = __action_graph_output_kind(
+    template,
+    __action_graph_batch_output_kind(batch.phase),
+  )
   const output_contract = (template?.output_contract ?? {}) + {output_kinds: [output_kind]}
   const target_paths = __action_graph_batch_target_paths(batch)
   const context_policy = (template?.context_policy ?? {})
-    + {include_kinds: __action_graph_batch_context_kinds(batch, template)}
+    + {
+    include_kinds: __action_graph_batch_context_kinds(batch, template),
+  }
   let metadata = template?.metadata ?? {}
   if local_verification != nil {
     metadata = metadata + {workflow_verification_scope: "local_only"}
@@ -570,18 +582,28 @@ fn __action_graph_terminal_node(plan, phase, template) {
     )
   }
   const output_contract = (template?.output_contract ?? {})
-    + {output_kinds: [__action_graph_output_kind(template, default_output)]}
+    + {
+    output_kinds: [__action_graph_output_kind(template, default_output)],
+  }
   const context_policy = (template?.context_policy ?? {})
     + {
     include_kinds: template?.context_policy?.include_kinds
-      ?? ["plan", "summary", "artifact", "verification_result"],
+      ?? [
+      "plan",
+      "summary",
+      "artifact",
+      "verification_result",
+    ],
   }
   return (template ?? {})
     + filter_nil(
     {
       kind: node_kind,
       task_label: uppercase(phase),
-      system: __action_graph_node_system(template?.system, __action_graph_terminal_prompt(plan, phase)),
+      system: __action_graph_node_system(
+        template?.system,
+        __action_graph_terminal_prompt(plan, phase),
+      ),
       verify: verify_payload,
       output_contract: output_contract,
       context_policy: context_policy,
@@ -609,7 +631,15 @@ pub fn action_graph(raw, options = nil) {
     }
     const tools = __action_graph_tool_list(dict)
     const title = __action_graph_first_string(
-      [dict?.title, dict?.name, dict?.label, dict?.action, dict?.task, dict?.instruction, dict?.summary],
+      [
+        dict?.title,
+        dict?.name,
+        dict?.label,
+        dict?.action,
+        dict?.task,
+        dict?.instruction,
+        dict?.summary,
+      ],
     )
       ?? format("Action {}", index + 1)
     const instruction = __action_graph_first_string(
@@ -625,7 +655,9 @@ pub fn action_graph(raw, options = nil) {
       ],
     )
       ?? title
-    const source_id = __action_graph_first_string([dict?.id, dict?.action_id, dict?.name, dict?.label])
+    const source_id = __action_graph_first_string(
+      [dict?.id, dict?.action_id, dict?.name, dict?.label],
+    )
     const phase = __action_graph_phase(dict, dict?.phase ?? options?.phase, tools, instruction)
     const canonical_id = format("action-{}", index + 1)
     staged = staged
@@ -639,7 +671,9 @@ pub fn action_graph(raw, options = nil) {
         depends_on: __action_graph_dependency_refs(dict),
         tools: tools,
         tool_class: dict?.tool_class ?? __action_graph_tool_class(tools, phase),
-        metadata: filter_nil({source_id: source_id, source_phase: dict?.phase ?? dict?.kind ?? dict?.type}),
+        metadata: filter_nil(
+          {source_id: source_id, source_phase: dict?.phase ?? dict?.kind ?? dict?.type},
+        ),
       },
     ]
     aliases = __action_graph_merge_aliases(
@@ -738,7 +772,9 @@ pub fn action_graph_batches(graph, completed = nil) {
       ready = [remaining[0]]
       blocked = remaining[1:]
     }
-    const phase = if ready[0]?.phase == "research" || ready[0]?.phase == "execute" || ready[0]?.phase == "verify" {
+    const phase = if ready[0]?.phase == "research" || ready[0]?.phase == "execute"
+      || ready[0]?.phase
+      == "verify" {
       ready[0].phase
     } else {
       "execute"
@@ -808,7 +844,9 @@ pub fn action_graph_render(graph) {
       }
       const label = action?.title ?? action?.instruction ?? action.id
       phase_lines = phase_lines
-        + ["- [" + action.id + "] " + label + " [" + action.tool_class + "]" + deps]
+        + [
+        "- [" + action.id + "] " + label + " [" + action.tool_class + "]" + deps,
+      ]
     }
     if len(phase_lines) > 0 {
       lines = lines + ["", "## " + uppercase(phase)]

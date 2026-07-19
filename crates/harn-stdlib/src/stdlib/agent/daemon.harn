@@ -77,7 +77,10 @@ fn __agent_daemon_raw_resume_conditions(opts, timeout_ms) {
 }
 
 fn __agent_daemon_await_resumption(session, opts, iteration, timeout_ms) {
-  const request = agent_await_resumption("daemon idle", __agent_daemon_raw_resume_conditions(opts, timeout_ms))
+  const request = agent_await_resumption(
+    "daemon idle",
+    __agent_daemon_raw_resume_conditions(opts, timeout_ms),
+  )
   agent_emit_event(
     session.session_id,
     "tool_call_audit",

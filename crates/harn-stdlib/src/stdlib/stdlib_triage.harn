@@ -103,7 +103,8 @@ fn __triage_compact(text, limit = 120) {
 }
 
 fn __triage_payload(input) {
-  return input?.provider_payload ?? input?.raw_payload ?? input?.payload ?? input?.raw ?? input ?? {}
+  return input?.provider_payload ?? input?.raw_payload ?? input?.payload ?? input?.raw ?? input
+    ?? {}
 }
 
 fn __triage_provider(input, payload, options) {
@@ -160,7 +161,9 @@ fn __triage_slack_source_url(input, payload) {
     return explicit
   }
   const team = __triage_first([payload?.team_id, input?.team_id])
-  const channel = __triage_first([payload?.channel, payload?.channel_id, input?.channel, input?.channel_id])
+  const channel = __triage_first(
+    [payload?.channel, payload?.channel_id, input?.channel, input?.channel_id],
+  )
   const ts = __triage_first([payload?.ts, payload?.thread_ts, payload?.event_ts, input?.ts])
   if channel != nil && ts != nil {
     let link = "slack://channel?id=" + url_encode(channel) + "&message=" + url_encode(ts)
@@ -187,7 +190,9 @@ fn __triage_notion_source_url(payload) {
   if explicit != nil {
     return explicit
   }
-  const entity_id = __triage_first([payload?.entity_id, payload?.polled?.entity_id, payload?.source_id])
+  const entity_id = __triage_first(
+    [payload?.entity_id, payload?.polled?.entity_id, payload?.source_id],
+  )
   if entity_id != nil {
     return "https://www.notion.so/" + replace(entity_id, "-", "")
   }
@@ -195,7 +200,9 @@ fn __triage_notion_source_url(payload) {
 }
 
 fn __triage_source_url(provider, input, payload, options) {
-  const explicit = __triage_first([options?.source_url, input?.source_url, input?.url, input?.deep_link])
+  const explicit = __triage_first(
+    [options?.source_url, input?.source_url, input?.url, input?.deep_link],
+  )
   if explicit != nil {
     return explicit
   }
@@ -212,7 +219,9 @@ fn __triage_source_url(provider, input, payload, options) {
 }
 
 fn __triage_source_id(provider, source_url, input, payload, options) {
-  const explicit = __triage_first([options?.source_id, input?.source_id, payload?.source_id, payload?.id])
+  const explicit = __triage_first(
+    [options?.source_id, input?.source_id, payload?.source_id, payload?.id],
+  )
   if explicit != nil {
     return explicit
   }
@@ -232,7 +241,9 @@ fn __triage_source_id(provider, source_url, input, payload, options) {
       ?? source_url
   }
   if provider == "slack" {
-    const channel = __triage_first([payload?.channel, payload?.channel_id, input?.channel, input?.channel_id])
+    const channel = __triage_first(
+      [payload?.channel, payload?.channel_id, input?.channel, input?.channel_id],
+    )
     const ts = __triage_first([payload?.ts, payload?.thread_ts, payload?.event_ts, input?.ts])
     if channel != nil && ts != nil {
       return channel + ":" + ts
@@ -378,18 +389,26 @@ fn __triage_github_summary(payload, source_kind) {
   const prefix = repo != nil ? repo + ": " : ""
   if payload?.issue != nil {
     return prefix + "Issue #" + __triage_text(payload.issue.number) + ": "
-      + __triage_compact(payload.issue.title, 96)
+      + __triage_compact(
+      payload.issue.title,
+      96,
+    )
   }
   if payload?.pull_request != nil {
     return prefix + "PR #" + __triage_text(payload.pull_request.number) + ": "
-      + __triage_compact(payload.pull_request.title, 96)
+      + __triage_compact(
+      payload.pull_request.title,
+      96,
+    )
   }
   if payload?.comment != nil {
     return prefix + "Comment: " + __triage_compact(payload.comment.body, 96)
   }
   if payload?.workflow_run != nil {
     return prefix + "Workflow " + __triage_text(payload.workflow_run.name ?? source_kind) + " "
-      + __triage_text(payload.workflow_run.conclusion ?? payload.workflow_run.status)
+      + __triage_text(
+      payload.workflow_run.conclusion ?? payload.workflow_run.status,
+    )
   }
   return prefix + "GitHub " + source_kind
 }
@@ -577,7 +596,8 @@ pub fn triage_validate(event: TriageEvent) -> TriageEvent {
   for intent in event.action_intents ?? [] {
     const effect = __triage_text(intent.effect)
     if effect != "navigation" && !(intent.requires_approval ?? false) {
-      throw "std/triage: write action intent `" + __triage_text(intent.kind) + "` must require approval"
+      throw "std/triage: write action intent `" + __triage_text(intent.kind)
+        + "` must require approval"
     }
   }
   return event
@@ -604,7 +624,12 @@ pub fn triage_normalize(input, options = nil) -> TriageEvent {
   }
   const source_id = __triage_text(__triage_source_id(provider, source_url, input, payload, opts))
   const dedupe_key = opts.dedupe_key ?? input?.triage_dedupe_key
-    ?? triage_dedupe_key(provider, source_kind, source_url, source_id)
+    ?? triage_dedupe_key(
+    provider,
+    source_kind,
+    source_url,
+    source_id,
+  )
   const summary = __triage_text(__triage_summary(provider, source_kind, input, payload, opts))
   const event = {
     schema: TRIAGE_EVENT_SCHEMA,
@@ -618,7 +643,10 @@ pub fn triage_normalize(input, options = nil) -> TriageEvent {
     actors: __triage_actors(provider, input, payload, opts),
     summary: summary,
     why_it_matters: opts.why_it_matters ?? input?.why_it_matters ?? __triage_default_why(provider),
-    proposed_action: opts.proposed_action ?? input?.proposed_action ?? __triage_default_action(provider),
+    proposed_action: opts.proposed_action ?? input?.proposed_action
+      ?? __triage_default_action(
+      provider,
+    ),
     urgency: opts.urgency ?? input?.urgency ?? "normal",
     priority: opts.priority ?? input?.priority ?? "p3",
     confidence: opts.confidence ?? input?.confidence ?? 0.85,
@@ -626,7 +654,10 @@ pub fn triage_normalize(input, options = nil) -> TriageEvent {
     dedupe_key: dedupe_key,
     privacy: __triage_privacy(input, opts),
     action_intents: opts.action_intents ?? input?.action_intents
-      ?? __triage_default_action_intents(dedupe_key, source_url),
+      ?? __triage_default_action_intents(
+      dedupe_key,
+      source_url,
+    ),
     raw_payload: payload,
   }
   return triage_validate(event)
@@ -659,7 +690,10 @@ pub fn triage_dedupe_events(events: list) -> list<TriageEvent> {
  */
 pub fn triage_emit(input, options = nil) -> TriageEmitReceipt {
   const opts = options ?? {}
-  const event = input?.schema == TRIAGE_EVENT_SCHEMA ? triage_validate(input) : triage_normalize(input, opts)
+  const event = input?.schema == TRIAGE_EVENT_SCHEMA ? triage_validate(input) : triage_normalize(
+    input,
+    opts,
+  )
   const topic = opts.topic ?? TRIAGE_EVENT_TOPIC
   const event_log_id = event_log.emit(
     topic,

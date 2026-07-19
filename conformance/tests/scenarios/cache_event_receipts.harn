@@ -31,7 +31,10 @@ pipeline default() {
       if ev?.type == "cache_hit" {
         const _ = atomic_add(hits, 1)
         const _ = atomic_set(last_hit_tokens, to_int(ev?.payload?.metrics?.tokens_saved ?? 0))
-        const _ = atomic_set(last_hit_calls_avoided, to_int(ev?.payload?.metrics?.model_calls_avoided ?? 0))
+        const _ = atomic_set(
+          last_hit_calls_avoided,
+          to_int(ev?.payload?.metrics?.model_calls_avoided ?? 0),
+        )
       }
       if ev?.type == "cache_miss" {
         const _ = atomic_add(misses, 1)

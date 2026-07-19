@@ -196,7 +196,12 @@ pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
     last_error = unwrap_err(outcome)
     attempt = attempt + 1
     if attempt < resolved.max_attempts {
-      const delay = __backoff_delay(resolved.base_ms, attempt - 1, resolved.multiplier, resolved.cap_ms)
+      const delay = __backoff_delay(
+        resolved.base_ms,
+        attempt - 1,
+        resolved.multiplier,
+        resolved.cap_ms,
+      )
       harness.clock.sleep_ms(delay)
     }
   }

@@ -51,7 +51,11 @@ pipeline test(task) {
   ]
   const query = normalize_model_catalog_query(
     {
-      where: ["tier=frontier,strengths=coding", "open_weight=false", "tool_support.parity=native_unreliable"],
+      where: [
+        "tier=frontier,strengths=coding",
+        "open_weight=false",
+        "tool_support.parity=native_unreliable",
+      ],
       sort: "pricing.input",
       columns: "id,pricing.input,pricing.cache_read,tool_support.parity_notes",
     },

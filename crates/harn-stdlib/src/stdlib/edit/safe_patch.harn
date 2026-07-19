@@ -63,7 +63,15 @@ fn __edit_lifecycle_reject_fields(kind, rejection, fields = nil) {
   return (fields ?? {}).merge(
     {
       result: "rejected",
-      errors: [{code: code, message: reason, reason: reason, cause: rejection?.cause, lifecycle_hook: kind}],
+      errors: [
+        {
+          code: code,
+          message: reason,
+          reason: reason,
+          cause: rejection?.cause,
+          lifecycle_hook: kind,
+        },
+      ],
       rejection: {hook: kind, code: code, reason: reason, cause: rejection?.cause},
     },
   )
@@ -92,7 +100,10 @@ fn __edit_lifecycle_pre_apply(options, action) {
     if type_of(verdict.rewrite) != "dict" {
       return {
         ok: false,
-        rejection: {code: "pre_apply_invalid_rewrite", reason: "pre_apply rewrite must be a request dict"},
+        rejection: {
+          code: "pre_apply_invalid_rewrite",
+          reason: "pre_apply rewrite must be a request dict",
+        },
         verdict: verdict,
         request: request,
       }
@@ -131,14 +142,22 @@ fn __edit_lifecycle_post_apply(options, context) {
   const verdict = try {
     hooks.post_apply(context)
   } catch {
-    return {ok: false, rejection: {code: "post_apply_failed", reason: "post_apply hook failed"}, warnings: []}
+    return {
+      ok: false,
+      rejection: {code: "post_apply_failed", reason: "post_apply hook failed"},
+      warnings: [],
+    }
   }
   const rejection = __edit_lifecycle_rejection("post_apply", verdict)
   if rejection != nil {
     return {ok: false, rejection: rejection, verdict: verdict, warnings: []}
   }
   if type_of(verdict) == "dict" && verdict?.advisory != nil {
-    return {ok: true, verdict: verdict, warnings: [{code: "post_apply_advisory", message: verdict.advisory}]}
+    return {
+      ok: true,
+      verdict: verdict,
+      warnings: [{code: "post_apply_advisory", message: verdict.advisory}],
+    }
   }
   return {ok: true, verdict: verdict, warnings: []}
 }
@@ -165,7 +184,13 @@ fn __edit_lifecycle_snapshot(path, options) {
       snapshot_id: snapshot_id,
     }
   }
-  return {ok: true, session_id: session_id, snapshot_id: snapshot_id, path: path, captured: captured}
+  return {
+    ok: true,
+    session_id: session_id,
+    snapshot_id: snapshot_id,
+    path: path,
+    captured: captured,
+  }
 }
 
 fn __edit_lifecycle_restore(snapshot, options, path) {
@@ -191,7 +216,12 @@ fn __edit_lifecycle_restore(snapshot, options, path) {
     }
   }
   hostlib_fs_drop_snapshot({session_id: snapshot.session_id, snapshot_id: snapshot.snapshot_id})
-  return {ok: restore_ok, restored: restored, skipped_paths_with_reasons: skipped, on_rollback: hook_result}
+  return {
+    ok: restore_ok,
+    restored: restored,
+    skipped_paths_with_reasons: skipped,
+    on_rollback: hook_result,
+  }
 }
 
 fn __edit_lifecycle_drop_snapshot(snapshot) {
@@ -239,7 +269,8 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
   const matched = result == "applied" || result == "no_op"
   const failed_idx = extra?.failed_hunk_index
   const bytes_written = extra?.bytes_written ?? 0
-  if result == "applied" || result == "no_op" || result == "stale_base" || result == "hunk_conflict" {
+  if result == "applied" || result == "no_op" || result == "stale_base"
+    || result == "hunk_conflict" {
     hostlib_fs_emit_safe_text_patch_result(
       {
         session_id: ctx.session_id,

@@ -8,7 +8,8 @@ pipeline default() {
   const rows = sqlite_query(mem, "select id, body from notes where id = ?", [1])
   __io_println("mem.row=" + to_string(rows[0].id) + ":" + rows[0].body)
   __io_println(
-    "mem.miss=" + to_string(sqlite_query_one(mem, "select id from notes where id = ?", [99]) == nil),
+    "mem.miss="
+      + to_string(sqlite_query_one(mem, "select id from notes where id = ?", [99]) == nil),
   )
   const rollback = try {
     sqlite_transaction(
@@ -40,7 +41,11 @@ pipeline default() {
       sqlite_release_savepoint(tx, "before_inner")
     },
   )
-  const savepoint_count = sqlite_query_one(mem, "select count(*) as n from notes where id in (?, ?)", [3, 4])
+  const savepoint_count = sqlite_query_one(
+    mem,
+    "select count(*) as n from notes where id in (?, ?)",
+    [3, 4],
+  )
   __io_println("savepoint.count=" + to_string(savepoint_count.n))
   const root = path_join(harness.fs.temp_dir(), "harn-sqlite-hostlib-" + uuid())
   const db_path = path_join(root, "state", "app.sqlite")

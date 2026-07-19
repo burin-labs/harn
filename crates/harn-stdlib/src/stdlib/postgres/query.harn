@@ -91,7 +91,8 @@ fn __normalize_query(query, expected_mode = nil) {
     throw __query_error_prefix(query) + "mode must be one of one, many, exec"
   }
   if expected_mode != nil && query?.mode != nil && query.mode != expected_mode {
-    throw __query_error_prefix(query) + "mode " + query.mode + " cannot run through " + expected_mode
+    throw __query_error_prefix(query) + "mode " + query.mode + " cannot run through "
+      + expected_mode
   }
   const options = query?.options
   if options != nil && type_of(options) != "dict" {
@@ -131,7 +132,11 @@ fn __render_placeholder(key: string, value, params: list<any>, positions: dict) 
     return {sql: "$" + to_string(existing), params: params, positions: positions}
   }
   const next = len(params) + 1
-  return {sql: "$" + to_string(next), params: params.push(value), positions: positions + {[key]: next}}
+  return {
+    sql: "$" + to_string(next),
+    params: params.push(value),
+    positions: positions + {[key]: next},
+  }
 }
 
 fn __render_sql_template(template: string, values: dict) {
@@ -286,7 +291,9 @@ pub fn named_raw_sql(
   if type_of(template) != "string" || trim(template) == "" {
     throw __query_error_prefix({name: name}) + "sql must be a non-empty string"
   }
-  return __normalize_query({name: name, mode: mode, sql: template, params: params, options: options})
+  return __normalize_query(
+    {name: name, mode: mode, sql: template, params: params, options: options},
+  )
 }
 
 /**
@@ -737,6 +744,7 @@ pub fn nullable_timestamptz_json(name: string) -> PgSqlFragment {
   const column = __qualified_column(name)
   const alias = __column_alias(name)
   return __sql_fragment(
-    "CASE WHEN " + column + " IS NULL THEN NULL ELSE to_json(" + column + ")#>>'{}' END AS " + alias,
+    "CASE WHEN " + column + " IS NULL THEN NULL ELSE to_json(" + column + ")#>>'{}' END AS "
+      + alias,
   )
 }

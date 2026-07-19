@@ -43,7 +43,10 @@ pipeline main() {
   with_llm_script(
     [llm_text("background summary")],
     { ->
-      const handle = sub_agent_run("Summarize in the background.", {provider: "mock", background: true})
+      const handle = sub_agent_run(
+        "Summarize in the background.",
+        {provider: "mock", background: true},
+      )
       __io_println(handle?.mode == "sub_agent")
       const done = wait_agent(handle)
       __io_println(done?.status == "completed")

@@ -156,7 +156,10 @@ fn __workflow_microcompact_artifact(artifact, cap_tokens) {
     return artifact
   }
   return artifact
-    + {text: __workflow_microcompact_text(artifact.text, max_chars), estimated_tokens: cap_tokens}
+    + {
+    text: __workflow_microcompact_text(artifact.text, max_chars),
+    estimated_tokens: cap_tokens,
+  }
 }
 
 fn __workflow_microcompact_artifacts(artifacts, policy) {
@@ -340,7 +343,10 @@ pub fn workflow_select_artifacts_adaptive(artifacts = nil, policy = nil) {
  */
 pub fn workflow_select_stage_artifacts(config = nil) {
   const opts = config ?? {}
-  const policy = workflow_stage_context_policy(opts?.context_policy ?? {}, opts?.input_contract ?? {})
+  const policy = workflow_stage_context_policy(
+    opts?.context_policy ?? {},
+    opts?.input_contract ?? {},
+  )
   return {
     context_policy: policy,
     artifacts: workflow_select_artifacts_adaptive(opts?.artifacts ?? [], policy),

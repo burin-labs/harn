@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process;
 
-use harn_fmt::{format_source_opts, FmtOptions};
+use harn_fmt::{format_source_opts, line_width_violations, FmtOptions};
 use harn_parser::DiagnosticCode as Code;
 use serde::Serialize;
 
@@ -161,6 +161,17 @@ fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> FmtFileReport
         Err(error) => return fmt_error(path, "format", format!("{path}: {error}")),
     };
 
+    if let Some(violation) = line_width_violations(&formatted, opts.line_width).first() {
+        return fmt_error(
+            path,
+            "line_width",
+            format!(
+                "{path}: formatted line {} is {} columns wide (maximum {})",
+                violation.line, violation.width, opts.line_width
+            ),
+        );
+    }
+
     if mode.is_check() {
         if source != formatted {
             return FmtFileReport {
@@ -299,5 +310,28 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             "[{ id: \"zig\" }]\n"
         );
+    }
+
+    #[test]
+    fn width_overflow_is_reported_without_rewriting_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.harn");
+        let source = "fn t() { return an_identifier_that_cannot_fit }\n";
+        std::fs::write(&path, source).unwrap();
+
+        let report = fmt_targets_report(
+            &[path.to_str().unwrap()],
+            FmtMode::Write,
+            &FmtOptions {
+                line_width: 20,
+                ..FmtOptions::default()
+            },
+        );
+
+        assert_eq!(report.summary.errors, 1);
+        let file = report.files.first().expect("file report");
+        assert_eq!(file.diagnostics[0].code, "line_width");
+        assert!(file.diagnostics[0].message.contains("maximum 20"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
     }
 }

@@ -23,7 +23,10 @@ pipeline main(task) {
     anchor_changed[0]?.metadata?.current?.primary == "/workspace/lib",
     "AnchorChanged records new primary",
   )
-  const unchanged = agent_session_reanchor(session, {primary: "/workspace/lib", anchored_at: "2026-05-23T00:00:10Z"})
+  const unchanged = agent_session_reanchor(
+    session,
+    {primary: "/workspace/lib", anchored_at: "2026-05-23T00:00:10Z"},
+  )
   assert(unchanged.ok, "second reanchor reports ok")
   assert(!unchanged.changed, "no-op reanchor reports unchanged")
   const snap2 = agent_session_snapshot(session)

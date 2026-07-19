@@ -168,7 +168,11 @@ fn exercise_post_401(harness: Harness) {
     "https://api.example.test/me",
     {
       responses: [
-        {status: 401, body: "{\"error\":\"token expired\"}", headers: {"content-type": "application/json"}},
+        {
+          status: 401,
+          body: "{\"error\":\"token expired\"}",
+          headers: {"content-type": "application/json"},
+        },
         {status: 200, body: "{\"user\":\"agent\"}", headers: {"content-type": "application/json"}},
       ],
     },

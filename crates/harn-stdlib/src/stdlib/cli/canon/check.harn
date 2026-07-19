@@ -168,7 +168,10 @@ fn main(harness: Harness) -> int {
     },
   )
   const result = canon_evaluate_slice(slice, __options(plan, slice))
-  const feedback = canon_feedback_text(result, {header: safe_string(plan["feedback_header"], "harn-canon feedback")})
+  const feedback = canon_feedback_text(
+    result,
+    {header: safe_string(plan["feedback_header"], "harn-canon feedback")},
+  )
   const report = __report(plan, result, feedback)
   const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {

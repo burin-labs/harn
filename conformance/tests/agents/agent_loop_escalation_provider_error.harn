@@ -67,14 +67,25 @@ fn escalation_fallback_case() {
         ok: false,
         status: "provider_error",
         stop_reason: "provider_error",
-        error: {status: 503, message: "escalated provider unavailable", provider: "escalated", model: "frontier"},
+        error: {
+          status: 503,
+          message: "escalated provider unavailable",
+          provider: "escalated",
+          model: "frontier",
+        },
       }
     }
     let count = shared_snapshot(turn)
     if count.value >= 2 {
-      return {ok: true, value: {text: "wrapping up DONE", tool_calls: [], provider: "mock", model: "cheap"}}
+      return {
+        ok: true,
+        value: {text: "wrapping up DONE", tool_calls: [], provider: "mock", model: "cheap"},
+      }
     }
-    return {ok: true, value: {text: "still working on it", tool_calls: [], provider: "mock", model: "cheap"}}
+    return {
+      ok: true,
+      value: {text: "still working on it", tool_calls: [], provider: "mock", model: "cheap"},
+    }
   }
   // Escalate exactly once: after the FIRST turn, switch the provider to the
   // escalation target. Subsequent turns leave the provider as-is, so the
@@ -114,7 +125,9 @@ fn escalation_fallback_case() {
   __io_println("esc_event_provider=" + to_string(perr?.iteration_info?.provider ?? ""))
   __io_println("esc_event_model=" + to_string(perr?.iteration_info?.model ?? ""))
   __io_println("esc_event_status=" + to_string(perr?.iteration_info?.provider_status ?? ""))
-  __io_println("esc_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false))
+  __io_println(
+    "esc_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false),
+  )
   // (c) The provider/tool_format call sequence proves:
   //     primary:text -> escalated:native (failed) -> primary:text again
   //     (the fallback retry) -> primary:text (completion).
@@ -138,12 +151,14 @@ fn escalation_fallback_case() {
 // -------------------------------------------------------------------------------------------------
 
 fn primary_provider_error_case() {
-  const caller = { _call -> return {
-    ok: false,
-    status: "provider_error",
-    stop_reason: "provider_error",
-    error: {status: 500, message: "primary down", provider: "mock", model: "cheap"},
-  } }
+  const caller = { _call ->
+    return {
+      ok: false,
+      status: "provider_error",
+      stop_reason: "provider_error",
+      error: {status: 500, message: "primary down", provider: "mock", model: "cheap"},
+    }
+  }
   const session = "esc-primary-err-" + uuid()
   const captured = agent_capture_events(
     session,
@@ -198,7 +213,10 @@ fn escalation_transient_transport_abort_case() {
         },
       }
     }
-    return {ok: true, value: {text: "still working", tool_calls: [], provider: "mock", model: "cheap"}}
+    return {
+      ok: true,
+      value: {text: "still working", tool_calls: [], provider: "mock", model: "cheap"},
+    }
   }
   const post_turn = { _payload ->
     let count = shared_snapshot(turn)

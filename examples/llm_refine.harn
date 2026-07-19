@@ -11,7 +11,8 @@ pipeline default() {
   llm_mock_clear()
   llm_mock(
     {
-      text: "Summarize the article in 3 bullet points, each under 12 words.\nDIFF: tightened length, added bullet structure",
+      text:
+        "Summarize the article in 3 bullet points, each under 12 words.\nDIFF: tightened length, added bullet structure",
     },
   )
   const result = refine_prompt(

@@ -37,8 +37,16 @@ pipeline test_job_groups_are_typed_and_ordered_by_p90(task) {
     12,
     {
       jobs: [
-        {name: "Rust test", started_at: "2026-07-18T00:00:00Z", completed_at: "2026-07-18T00:10:00Z"},
-        {name: "Audit scripts", started_at: "2026-07-18T00:00:00Z", completed_at: "2026-07-18T00:04:00Z"},
+        {
+          name: "Rust test",
+          started_at: "2026-07-18T00:00:00Z",
+          completed_at: "2026-07-18T00:10:00Z",
+        },
+        {
+          name: "Audit scripts",
+          started_at: "2026-07-18T00:00:00Z",
+          completed_at: "2026-07-18T00:04:00Z",
+        },
         {name: "", started_at: "2026-07-18T00:00:00Z", completed_at: "2026-07-18T00:01:00Z"},
       ],
     },
@@ -47,8 +55,16 @@ pipeline test_job_groups_are_typed_and_ordered_by_p90(task) {
     13,
     {
       jobs: [
-        {name: "Rust test", started_at: "2026-07-18T01:00:00Z", completed_at: "2026-07-18T01:12:00Z"},
-        {name: "Audit scripts", started_at: "2026-07-18T01:00:00Z", completed_at: "2026-07-18T01:05:00Z"},
+        {
+          name: "Rust test",
+          started_at: "2026-07-18T01:00:00Z",
+          completed_at: "2026-07-18T01:12:00Z",
+        },
+        {
+          name: "Audit scripts",
+          started_at: "2026-07-18T01:00:00Z",
+          completed_at: "2026-07-18T01:05:00Z",
+        },
       ],
     },
   )

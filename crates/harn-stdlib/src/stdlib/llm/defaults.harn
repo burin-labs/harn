@@ -401,7 +401,13 @@ pub fn pack_for(opts) {
   if opts?.prompt != nil && opts?.max_tokens == nil && !__has_key(result, "max_tokens") {
     const recommended = try {
       recommend_max_output_tokens(
-        {prompt: opts.prompt, system: opts?.system ?? "", model: model, task_kind: task, headroom: 0.1},
+        {
+          prompt: opts.prompt,
+          system: opts?.system ?? "",
+          model: model,
+          task_kind: task,
+          headroom: 0.1,
+        },
       )
     }
     if !is_err(recommended) {

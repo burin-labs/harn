@@ -72,7 +72,10 @@ pipeline test(task) {
   assert(restart.success && restart_pid != "", "failed to restart orchestrator")
   const restart_url = wait_for_listener_url(harness, path_join(root, "orchestrator-restart.log"))
   assert(restart_url != nil, "restart listener URL did not appear in log")
-  assert(wait_for_readyz(harness, restart_url, restart_pid), "restart listener did not become ready")
+  assert(
+    wait_for_readyz(harness, restart_url, restart_pid),
+    "restart listener did not become ready",
+  )
   const state_dir = path_join(root, "state")
   const config_path = path_join(root, "harn.toml")
   const queue = shell_at(

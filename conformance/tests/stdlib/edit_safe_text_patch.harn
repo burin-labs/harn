@@ -34,7 +34,10 @@ pipeline default() {
     {
       path: multi_path,
       expected_hash: multi_pre,
-      hunks: [{old_text: "return 1", new_text: "return 11"}, {old_text: "return 3", new_text: "return 33"}],
+      hunks: [
+        {old_text: "return 1", new_text: "return 11"},
+        {old_text: "return 3", new_text: "return 33"},
+      ],
     },
   )
   __io_println(multi_result.result)
@@ -102,7 +105,9 @@ pipeline default() {
   // 5) Optional `expected_hash` — when omitted the call still applies and
   //    reports `current_hash` so callers can adopt the API incrementally.
   const optional_path = write_fixture(root, "optional.txt", "x = 1\n")
-  const optional_result = edit_safe_text_patch({path: optional_path, hunks: [{old_text: "x = 1", new_text: "x = 2"}]})
+  const optional_result = edit_safe_text_patch(
+    {path: optional_path, hunks: [{old_text: "x = 1", new_text: "x = 2"}]},
+  )
   __io_println(optional_result.result)
   __io_println(optional_result.expected_hash == nil)
   __io_println(starts_with(optional_result.current_hash, "sha256:"))
@@ -152,7 +157,9 @@ pipeline default() {
     {
       path: rewrite_path,
       hunks: [{old_text: "alpha", new_text: "ignored"}],
-      pre_apply: fn(req) { return {rewrite: req.merge({hunks: [{old_text: "alpha", new_text: "rewritten"}]})} },
+      pre_apply: fn(req) { return {
+        rewrite: req.merge({hunks: [{old_text: "alpha", new_text: "rewritten"}]}),
+      } },
     },
   )
   __io_println(rewrite_result.result)
@@ -219,7 +226,10 @@ pipeline default() {
   //    the epic targets.
   const staged_path = write_fixture(root, "staged.txt", "v1\n")
   const staged_pre = "sha256:" + sha256("v1\n")
-  const staged_session = "harn-edit-safe-text-patch-" + to_string(harness.random.gen_range(100000, 999999))
+  const staged_session = "harn-edit-safe-text-patch-"
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   hostlib_fs_set_mode({session_id: staged_session, mode: "staged", root: root})
   // Sibling agent stages a competing write — overlay hash diverges from disk.
   hostlib_tools_write_file({session_id: staged_session, path: staged_path, content: "competing\n"})
@@ -242,7 +252,9 @@ pipeline default() {
     {
       path: staged_path,
       expected_hash: retry_read.sha256,
-      hunks: [{old_text: "competing", new_text: "winner", options: {allow_lazy_placeholders: true}}],
+      hunks: [
+        {old_text: "competing", new_text: "winner", options: {allow_lazy_placeholders: true}},
+      ],
       session_id: staged_session,
     },
   )

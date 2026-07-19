@@ -76,7 +76,11 @@ pipeline test_dirty_pr_comments(task) {
 
 pipeline test_behind_branch_updates(task) {
   const policy = _policy({})
-  const obs = from_github(_pr({behind_by: 4, mergeable_state: "behind"}), _checks(true), policy.required_checks)
+  const obs = from_github(
+    _pr({behind_by: 4, mergeable_state: "behind"}),
+    _checks(true),
+    policy.required_checks,
+  )
   const result = classify(obs, policy, "discovered")
   assert_eq(result.state, "behind")
   assert_eq(result.action, "update_branch")
@@ -124,7 +128,11 @@ pipeline test_pending_checks_wait(task) {
 
 pipeline test_merged_observation_marks_merged(task) {
   const policy = _policy({})
-  const obs = from_github(_pr({merged: true, state: "closed"}), _checks(true), policy.required_checks)
+  const obs = from_github(
+    _pr({merged: true, state: "closed"}),
+    _checks(true),
+    policy.required_checks,
+  )
   const result = classify(obs, policy, "merge_group_running")
   assert_eq(result.state, "merged")
   assert_eq(result.action, "mark_merged")
@@ -160,6 +168,9 @@ pipeline test_verify_rejects_illegal_edge(task) {
 }
 
 pipeline test_verify_accepts_legal_edge(task) {
-  const edge = verify("waiting_checks", {state: "queued", action: "wait", reason: "x", evidence: {}})
+  const edge = verify(
+    "waiting_checks",
+    {state: "queued", action: "wait", reason: "x", evidence: {}},
+  )
   assert(edge.ok)
 }

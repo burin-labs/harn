@@ -23,7 +23,9 @@ fn attempt_write(harness: Harness, target: string) -> dict {
 pipeline test(task) {
   harness.fs.mkdir(".harn")
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   // Shape 1: blanket `requires_human` flag flips the whole policy into
   // needs-human, even when the resolved tier is `act_auto`.
   const blanket_agent = "needs-human-blanket-" + unique

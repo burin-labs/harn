@@ -1,0 +1,528 @@
+import {
+  LlmCallerTransport,
+  __normalize_llm_caller_transport,
+  __validate_llm_caller,
+} from "std/agent/caller_transport"
+import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
+import "std/agent/options_types"
+import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
+import { agent_reasoning_apply } from "std/agent/reasoning"
+import { AgentLoopRetryOptions, agent_apply_default_retry } from "std/agent/retry"
+import { agent_scratchpad_options } from "std/agent/scratchpad"
+import { pack_for } from "std/llm/defaults"
+import { project_context_profile } from "std/project"
+
+pub fn __profile_defaults(profile) {
+  if profile == "tool_using" {
+    return {max_iterations: 50, max_nudges: 8, tool_retries: 0, schema_retries: 0}
+  }
+  if profile == "researcher" {
+    return {max_iterations: 30, max_nudges: 4, tool_retries: 0, schema_retries: 0}
+  }
+  if profile == "verifier" {
+    return {max_iterations: 5, max_nudges: 0, tool_retries: 0, schema_retries: 3}
+  }
+  if profile == "completer" {
+    return {max_iterations: 1, max_nudges: 0, tool_retries: 0, schema_retries: 0}
+  }
+  throw "agent_loop: profile must be one of tool_using, researcher, verifier, completer"
+}
+
+pub fn __completion_judge_defaults(value, opts) {
+  if type_of(value) == "bool" && value {
+    return {
+      system: completion_judge_system_prompt(opts),
+      feedback_fallback: completion_judge_feedback_prompt(opts),
+    }
+  }
+  return value
+}
+
+pub fn __has_key(opts, key) {
+  return contains(opts.keys(), key)
+}
+
+pub fn __judge_enabled(value) {
+  if value == nil {
+    return false
+  }
+  if type_of(value) == "bool" {
+    return value
+  }
+  if type_of(value) == "dict" {
+    const enabled = value?.enabled
+    if enabled == nil {
+      return true
+    }
+    return enabled
+  }
+  return true
+}
+
+pub fn __client_tool_search_requested(value) {
+  return type_of(value) == "dict" && value?.mode == "client"
+}
+
+pub fn __fallback_tool_format() {
+  // GLOBAL DEFAULT: a text-channel model with no pinned tool_format falls back
+  // to fenced-json (`json`), not heredoc (`text`). A JSON string can't carry a
+  // raw newline, so `<<EOF` content delimiters never collide with the call
+  // wrapper — eliminating the heredoc `line 0: <<` leak class structurally. The
+  // reverse safety valve is a per-model `preferred_tool_format = "text"` pin or
+  // an explicit `tool_format: "text"` request, both of which still yield heredoc.
+  return "json"
+}
+
+fn __tool_format_auto(value) {
+  if value == nil {
+    return true
+  }
+  const text = lowercase(trim(to_string(value)))
+  return text == "" || text == "auto"
+}
+
+pub fn __explicit_tool_format(opts) {
+  if !__has_key(opts, "tool_format") || __tool_format_auto(opts?.tool_format) {
+    return nil
+  }
+  return lowercase(trim(to_string(opts.tool_format)))
+}
+
+fn __explicit_provider(opts) {
+  const provider = trim(to_string(opts?.provider ?? ""))
+  if provider == "" || lowercase(provider) == "auto" {
+    return nil
+  }
+  return provider
+}
+
+fn __resolved_model_id(model) -> string {
+  const resolved = try {
+    llm_resolve_model(model)
+  }
+  if is_err(resolved) {
+    return to_string(model)
+  }
+  return to_string(unwrap(resolved)?.id ?? model)
+}
+
+fn __tool_format_pair(opts) -> {provider: string, model: string}? {
+  const raw_model = opts?.model
+  if raw_model == nil || trim(to_string(raw_model)) == "" {
+    return nil
+  }
+  const provider = __explicit_provider(opts)
+  if provider != nil {
+    return {provider: provider, model: __resolved_model_id(raw_model)}
+  }
+  const resolved = try {
+    llm_resolve_model(raw_model)
+  }
+  if is_err(resolved) {
+    return nil
+  }
+  const info = unwrap(resolved)
+  const inferred_provider = trim(to_string(info?.provider ?? ""))
+  const model = trim(to_string(info?.id ?? ""))
+  if inferred_provider == "" || model == "" {
+    return nil
+  }
+  return {provider: inferred_provider, model: model}
+}
+
+fn __valid_tool_format(value) {
+  const format = lowercase(trim(to_string(value ?? "")))
+  if format == "native" || format == "text" || format == "json" {
+    return format
+  }
+  return nil
+}
+
+/**
+ * True when a (already-validated) tool_format rides the TEXT channel — the
+ * assistant's visible content — rather than the provider's native tool-calling
+ * channel. Both `text` (tagged/heredoc) and `json` (fenced-JSON) are
+ * text-channel formats, so the parity gates treat them identically: a
+ * `native_only` model rejects either, a `text_only` model accepts either.
+ * This is the single source of truth for that classification on the harn side,
+ * mirroring `llm_config::tool_format_channel` in the runtime.
+ */
+fn __tool_format_is_text_channel(format) {
+  return format == "text" || format == "json"
+}
+
+/**
+ * Reject an explicit `tool_format` that is neither `native`, `text`, `json`,
+ * nor a recognized auto sentinel. Without this, a typo like `"nativ"` or a
+ * wrong value like `"tool_use"` silently flows through resolution
+ * (`source: "explicit"`, no override event), and every downstream branch that
+ * gates on `tool_format == "native"` reads it as `false` — so the agent
+ * silently runs the text protocol instead of either honoring the request or
+ * failing loudly. This is the "never silently half-supported" gate for the
+ * single knob harness authors touch most. `auto`/`""`/nil are handled before
+ * this is reached and never land here.
+ *
+ * @effects: []
+ * @errors: [agent_loop_invalid_tool_format]
+ * @api_stability: experimental
+ */
+fn __validate_explicit_tool_format(value) {
+  if __valid_tool_format(value) == nil {
+    throw "agent_loop: `tool_format` must be one of native, text, json, auto (or omitted); got "
+      + to_string(
+      value,
+    )
+  }
+}
+
+/**
+ * Reject a tool_format the catalog marks as *impossible* for this model
+ * (`native_only` asked for `text`, or `text_only` asked for `native`). Unlike
+ * the `*_unreliable` parity classes — which stay a recoverable warning the
+ * harness author can override with a reason — the `*_only` classes mean the
+ * requested side does not work at all, so honoring the request would silently
+ * produce a broken request envelope. Rejecting here turns a silent quirk into
+ * a loud, actionable error.
+ *
+ * Escape hatch: a non-empty `tool_format_override_reason` lets a probe / matrix
+ * harness force the marked-impossible side deliberately. That keeps the "never
+ * SILENTLY half-supported" invariant — the only way past the gate is an
+ * explicit, recorded acknowledgment, mirroring the `*_unreliable` reason path.
+ *
+ * @effects: []
+ * @errors: [agent_loop_unsupported_tool_format]
+ * @api_stability: experimental
+ */
+fn __validate_tool_format_parity(pair, requested, parity, override_reason) {
+  const requested_format = __valid_tool_format(requested)
+  if requested_format == nil || pair == nil {
+    return
+  }
+  if override_reason != nil {
+    return
+  }
+  const catalog_parity = __catalog_parity(parity)
+  if catalog_parity == "native_only" && __tool_format_is_text_channel(requested_format) {
+    throw "agent_loop: tool_format \""
+      + requested_format
+      + "\" is unsupported for "
+      + pair.provider
+      + ":"
+      + pair.model
+      + " (catalog parity native_only — this model only does native tool calling). "
+      + "Pass tool_format_override_reason to force it deliberately."
+  }
+  if catalog_parity == "text_only" && requested_format == "native" {
+    throw "agent_loop: tool_format \"native\" is unsupported for "
+      + pair.provider
+      + ":"
+      + pair.model
+      + " (catalog parity text_only — this model only does text tool calling). "
+      + "Pass tool_format_override_reason to force it deliberately."
+  }
+}
+
+fn __optional_text(value) {
+  if value == nil {
+    return nil
+  }
+  const text = trim(to_string(value))
+  if text == "" {
+    return nil
+  }
+  return text
+}
+
+fn __catalog_parity(value) {
+  const text = __optional_text(value)
+  if text == nil {
+    return "unknown"
+  }
+  return lowercase(text)
+}
+
+fn __parity_recommended_tool_format(parity) {
+  if parity == "native_unreliable" || parity == "text_only" {
+    return "text"
+  }
+  if parity == "text_unreliable" || parity == "native_only" {
+    return "native"
+  }
+  return nil
+}
+
+/**
+ * Pick the concrete tool_format to steer a parity-forbidden explicit pin to,
+ * mirroring the Rust `validate_tool_format_with_caps` target selection exactly:
+ * use the route's declared `preferred_tool_format` when it rides the
+ * recommended (opposite) channel, otherwise fall back to that channel's
+ * canonical name (`json` for the text channel, `native` for the native
+ * channel). Keeping these two implementations in lockstep is what guarantees
+ * the loop's prompt and the provider wire request agree on the tool dialect.
+ */
+fn __steer_tool_format(parity, preferred) {
+  const recommended_channel = __parity_recommended_tool_format(parity)
+  if recommended_channel == nil {
+    return nil
+  }
+  const recommended_is_text = __tool_format_is_text_channel(recommended_channel)
+  if preferred != nil && __tool_format_is_text_channel(preferred) == recommended_is_text {
+    return preferred
+  }
+  return if recommended_is_text {
+    "json"
+  } else {
+    "native"
+  }
+}
+
+fn __parity_conflicts_with_requested(parity, requested) {
+  if parity == "native_unreliable" {
+    return requested == "native"
+  }
+  if parity == "text_unreliable" {
+    return requested == "text"
+  }
+  if parity == "native_only" {
+    return __tool_format_is_text_channel(requested)
+  }
+  if parity == "text_only" {
+    return requested == "native"
+  }
+  return false
+}
+
+fn __tool_format_override_event(pair, requested, preferred, parity, override_reason) {
+  if pair == nil {
+    return nil
+  }
+  const requested_format = __valid_tool_format(requested)
+  if requested_format == nil {
+    return nil
+  }
+  const catalog_parity = __catalog_parity(parity)
+  const recommended = preferred ?? __parity_recommended_tool_format(catalog_parity)
+  if recommended == nil {
+    return nil
+  }
+  const conflicts_with_recommendation = requested_format != recommended
+  const conflicts_with_parity = __parity_conflicts_with_requested(catalog_parity, requested_format)
+  if !conflicts_with_recommendation && !conflicts_with_parity {
+    return nil
+  }
+  const event = {
+    provider: pair.provider,
+    model: pair.model,
+    requested_format: requested_format,
+    recommended_format: recommended,
+    catalog_parity: catalog_parity,
+  }
+  if override_reason != nil {
+    return event + {override_reason: override_reason}
+  }
+  return event
+}
+
+/**
+ * Render one `tool_format_override` event as the CLI's single-line warning.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_format_override_warning_text(event) {
+  if event == nil {
+    return nil
+  }
+  const payload = event?.metadata ?? event
+  const {provider = "unknown", model = "unknown"} = payload ?? {}
+  const requested = payload?.requested_format ?? "unknown"
+  const recommended = payload?.recommended_format ?? "unknown"
+  const parity = payload?.catalog_parity ?? "unknown"
+  const override_reason = trim(to_string(payload?.override_reason ?? ""))
+  const needs_reason = (parity == "native_unreliable" && requested == "native")
+    || (parity
+    == "text_unreliable"
+    && requested == "text")
+  let line = "warning: tool_format override: "
+    + provider
+    + ":"
+    + model
+    + " requested "
+    + requested
+    + " over recommended "
+    + recommended
+    + " (parity: "
+    + parity
+    + ")"
+  if override_reason != "" {
+    line = line + "; reason: " + override_reason
+  } else if needs_reason {
+    line = line + "; missing --override-reason while forcing the catalog-marked unreliable side"
+  }
+  return line
+}
+
+/**
+ * Render the first `tool_format_override` event in an event list, if present.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_first_tool_format_override_warning_text(events) {
+  for event in events {
+    if event?.kind == "tool_format_override" || event?.type == "tool_format_override" {
+      return agent_tool_format_override_warning_text(event)
+    }
+  }
+  return nil
+}
+
+fn __capability_gap_event(pair, requested, fallback) {
+  return {
+    level: "warning",
+    capability: "preferred_tool_format",
+    provider: pair.provider,
+    model: pair.model,
+    requested_tool_format: requested,
+    fallback_tool_format: fallback,
+    message:
+      "No preferred_tool_format recommendation for provider/model; using fallback tool_format.",
+  }
+}
+
+/**
+ * Resolve the effective agent tool format without mutating the caller's
+ * options. `tool_format: "auto"` is intentionally treated the same as an
+ * omitted value.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_format_resolution(options = nil) {
+  const opts = options ?? {}
+  const explicit = __explicit_tool_format(opts)
+  if explicit != nil {
+    __validate_explicit_tool_format(explicit)
+    const pair = __tool_format_pair(opts)
+    let preferred = nil
+    let parity = nil
+    if pair != nil {
+      const caps = try {
+        provider_capabilities(pair.provider, pair.model)
+      }
+      if !is_err(caps) {
+        const resolved_caps = unwrap(caps)
+        preferred = __valid_tool_format(resolved_caps?.preferred_tool_format)
+        parity = resolved_caps?.tool_mode_parity
+      }
+    }
+    const override_reason = __optional_text(opts?.tool_format_override_reason)
+    __validate_tool_format_parity(pair, explicit, parity, override_reason)
+    const override_event = __tool_format_override_event(
+      pair,
+      explicit,
+      preferred,
+      parity,
+      override_reason,
+    )
+    // Parity steering must match the wire. The Rust `extract_llm_options`
+    // capability gate silently rewrites a tool-bearing request whose channel
+    // the route's `tool_mode_parity` forbids (e.g. `native` on a
+    // `native_unreliable` route like deepseek-v3.2) to the route's safe
+    // channel. If we honored the explicit pin verbatim here, the loop would
+    // build a prompt for the requested channel (native instructions, native
+    // tool schemas) while the wire actually ships the steered channel with no
+    // matching tool surface — the model then sees no usable tool contract and
+    // improvises unparseable prose. Steer the resolved format the same way the
+    // wire does so the prompt and the provider request agree. An explicit
+    // `tool_format_override_reason` opts out (the author is forcing a known-risky
+    // channel deliberately, and the Rust gate is bypassed in mock/replay too).
+    const steered = if override_reason == nil
+      && __parity_conflicts_with_requested(
+      __catalog_parity(parity),
+      explicit,
+    ) {
+      __steer_tool_format(__catalog_parity(parity), preferred)
+    } else {
+      nil
+    }
+    if steered != nil {
+      return {
+        tool_format: steered,
+        source: "explicit_parity_steered",
+        capability_gap_event: nil,
+        tool_format_override_event: override_event,
+      }
+    }
+    return {
+      tool_format: explicit,
+      source: "explicit",
+      capability_gap_event: nil,
+      tool_format_override_event: override_event,
+    }
+  }
+  const pair = __tool_format_pair(opts)
+  if pair != nil {
+    const caps = try {
+      provider_capabilities(pair.provider, pair.model)
+    }
+    if !is_err(caps) {
+      const preferred = __valid_tool_format(unwrap(caps)?.preferred_tool_format)
+      if preferred != nil {
+        return {
+          tool_format: preferred,
+          source: "capabilities",
+          provider: pair.provider,
+          model: pair.model,
+          capability_gap_event: nil,
+          tool_format_override_event: nil,
+        }
+      }
+    }
+    const fallback = __fallback_tool_format()
+    return {
+      tool_format: fallback,
+      source: "fallback",
+      provider: pair.provider,
+      model: pair.model,
+      capability_gap_event: __capability_gap_event(pair, opts?.tool_format, fallback),
+      tool_format_override_event: nil,
+    }
+  }
+  if __has_key(opts, "tool_format") {
+    return {
+      tool_format: __fallback_tool_format(),
+      source: "fallback",
+      capability_gap_event: nil,
+      tool_format_override_event: nil,
+    }
+  }
+  return {
+    tool_format: nil,
+    source: "unresolved",
+    capability_gap_event: nil,
+    tool_format_override_event: nil,
+  }
+}
+
+// Mirror the Rust gate's target selection: prefer the route's declared
+// `preferred_tool_format` when it rides the recommended channel (so
+// deepseek-v3.2's explicit `text` carve-out is honored over a bare
+// `text`/`native` channel name), else fall back to the channel name.
+/**
+ * Return the concrete tool format a prompt-building helper should use.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_format(options = nil) {
+  const resolved = agent_tool_format_resolution(options)
+  if resolved.tool_format != nil {
+    return resolved.tool_format
+  }
+  return __fallback_tool_format()
+}

@@ -56,17 +56,23 @@ fn tools() {
     "escalate",
     "Hand off to another captain",
     {
-      handler: { args -> return json_stringify(
-        {
-          __handoff: {
-            source_persona: "merge_captain",
-            target_persona_or_human: {kind: "persona", id: "review_captain", label: "review_captain"},
-            task: to_string(args?.task ?? ""),
-            reason: "needs human eyes",
-            requested_capabilities: ["review"],
+      handler: { args ->
+        return json_stringify(
+          {
+            __handoff: {
+              source_persona: "merge_captain",
+              target_persona_or_human: {
+                kind: "persona",
+                id: "review_captain",
+                label: "review_captain",
+              },
+              task: to_string(args?.task ?? ""),
+              reason: "needs human eyes",
+              requested_capabilities: ["review"],
+            },
           },
-        },
-      ) },
+        )
+      },
       parameters: {task: {type: "string"}},
     },
   )

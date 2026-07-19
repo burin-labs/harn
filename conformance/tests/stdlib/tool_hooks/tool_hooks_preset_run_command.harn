@@ -102,7 +102,12 @@ pipeline default() {
   __io_println(registered_denied.rule_id)
   /* Passthrough-with-audit: matched, tagged, still ran. */
   const audit_wrapper = preset_run_command(
-    {stacks: ["python"], registry: registry, mode: tool_hooks_mode_passthrough_only_audit, inner: inner},
+    {
+      stacks: ["python"],
+      registry: registry,
+      mode: tool_hooks_mode_passthrough_only_audit,
+      inner: inner,
+    },
   )
   const audited = audit_wrapper({command: "find . -name 'x'"})
   __io_println(audited.action)

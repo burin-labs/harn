@@ -265,9 +265,13 @@ fn __render_report_markdown(report: dict) -> string {
 fn __render_plan_human(report: dict) -> string {
   const catalog = __safe_dict(report["catalog"])
   let out = "provider tool-call scorecard plan: routes="
-    + to_string(__safe_int(report["route_count"], 0))
+    + to_string(
+    __safe_int(report["route_count"], 0),
+  )
     + " unscorecardable_providers="
-    + to_string(__safe_int(report["unscorecardable_provider_count"], 0))
+    + to_string(
+    __safe_int(report["unscorecardable_provider_count"], 0),
+  )
     + " cases="
     + to_string(__safe_int(report["case_count"], 0))
     + " required="
@@ -350,7 +354,9 @@ fn __render_plan_human(report: dict) -> string {
       + " readiness_commands="
       + to_string(__safe_int(provider["readiness_command_count"], 0))
       + " batch_manifest_requests="
-      + to_string(__safe_int(provider["batch_manifest_request_count"], 0))
+      + to_string(
+      __safe_int(provider["batch_manifest_request_count"], 0),
+    )
       + " not_applicable="
       + to_string(__safe_int(provider["not_applicable_case_count"], 0))
       + "\n"
@@ -384,7 +390,9 @@ fn __render_plan_markdown(report: dict) -> string {
   let out = "# Provider Tool-Call Scorecard Plan\n\n"
   out = out + "- Routes: " + to_string(__safe_int(report["route_count"], 0)) + "\n"
   out = out + "- Unscorecardable providers: "
-    + to_string(__safe_int(report["unscorecardable_provider_count"], 0))
+    + to_string(
+    __safe_int(report["unscorecardable_provider_count"], 0),
+  )
     + "\n"
   out = out + "- Cases: " + to_string(__safe_int(report["case_count"], 0)) + "\n"
   out = out + "- Required cases: "
@@ -397,13 +405,19 @@ fn __render_plan_markdown(report: dict) -> string {
     + to_string(__safe_int(report["live_tool_probe_case_count"], 0))
     + "\n"
   out = out + "- Offline request checks: "
-    + to_string(__safe_int(report["offline_request_case_count"], 0))
+    + to_string(
+    __safe_int(report["offline_request_case_count"], 0),
+  )
     + "\n"
   out = out + "- Not applicable cases: "
-    + to_string(__safe_int(report["not_applicable_case_count"], 0))
+    + to_string(
+    __safe_int(report["not_applicable_case_count"], 0),
+  )
     + "\n"
   out = out + "- Batch manifest requests: "
-    + to_string(__safe_int(report["batch_manifest_request_count"], 0))
+    + to_string(
+    __safe_int(report["batch_manifest_request_count"], 0),
+  )
     + "\n"
   out = out + "- Readiness commands: "
     + to_string(__safe_int(report["readiness_command_count"], 0))

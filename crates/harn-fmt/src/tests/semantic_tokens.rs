@@ -221,6 +221,14 @@ fn semantic_token_allowances_are_narrow() {
     let without_semicolon = "fn f() {\n  let a = 1\n  let b = 2\n}\n";
     let with_semicolon = "fn f() {\n  let a = 1; let b = 2\n}\n";
     assert!(assert_same_semantic_tokens(with_semicolon, without_semicolon).is_err());
+
+    let crlf = "// comment\r\nfn f() {\r\n}\r\n";
+    let lf = "// comment\nfn f() {\n}\n";
+    assert_same_semantic_tokens(crlf, lf).unwrap();
+
+    let block_crlf = "/* first\r\n * second\r\n */\r\nfn f() {\r\n}\r\n";
+    let block_lf = "/* first\n * second\n */\nfn f() {\n}\n";
+    assert_same_semantic_tokens(block_crlf, block_lf).unwrap();
 }
 
 fn semantic_tokens(source: &str) -> Result<Vec<TokenKind>, String> {
@@ -275,9 +283,24 @@ fn semantic_tokens(source: &str) -> Result<Vec<TokenKind>, String> {
                     })
                     .collect(),
             )),
+            TokenKind::LineComment { text, is_doc } => Some(TokenKind::LineComment {
+                text: text.trim_end_matches('\r').to_owned(),
+                is_doc,
+            }),
+            TokenKind::BlockComment { text, is_doc } => Some(TokenKind::BlockComment {
+                text: normalize_comment_line_endings(text),
+                is_doc,
+            }),
             kind => Some(kind),
         })
         .collect())
+}
+
+/// Block-comment line endings are layout, not source semantics. The formatter
+/// emits canonical LF output, so the corpus audit must compare block-comment
+/// content after normalizing platform-specific line endings.
+fn normalize_comment_line_endings(text: String) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {

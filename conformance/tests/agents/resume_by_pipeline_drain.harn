@@ -13,7 +13,10 @@ pipeline default() {
   const RB = ResumeBy()
   pipeline_on_finish(
     { harness, return_value ->
-      const result = RB.pipeline_drain(harness, {handle: "worker://triage/drain", reason: "deferred to drain"})
+      const result = RB.pipeline_drain(
+        harness,
+        {handle: "worker://triage/drain", reason: "deferred to drain"},
+      )
       const audits = lifecycle_audit_log_take()
       harness.stdio.println("handled=" + to_string(result.handled))
       harness.stdio.println("mechanism=" + result.mechanism)

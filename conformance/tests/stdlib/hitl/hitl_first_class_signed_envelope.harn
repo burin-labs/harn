@@ -10,7 +10,10 @@ pipeline test(task) {
   mock_host_response(
     "hitl",
     "approval",
-    [{approved: true, reviewer: "alice", reason: "ok"}, {approved: true, reviewer: "bob", reason: "ok"}],
+    [
+      {approved: true, reviewer: "alice", reason: "ok"},
+      {approved: true, reviewer: "bob", reason: "ok"},
+    ],
   )
   const real_record = request_approval(action: "deploy", quorum: 2, reviewers: ["alice", "bob"])
   // Forged record: same shape, but no VM-minted signatures.

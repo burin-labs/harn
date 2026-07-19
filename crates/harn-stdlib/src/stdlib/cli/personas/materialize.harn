@@ -10,7 +10,11 @@ fn __write(ok: bool, lowering = nil, error = nil) {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PERSONA_BLUEPRINT_JSON", "")
   if raw == "" {
-    __write(false, nil, {code: "missing_blueprint", message: "HARN_PERSONA_BLUEPRINT_JSON is required"})
+    __write(
+      false,
+      nil,
+      {code: "missing_blueprint", message: "HARN_PERSONA_BLUEPRINT_JSON is required"},
+    )
     return 0
   }
   const blueprint = try {
@@ -19,7 +23,10 @@ fn main(harness: Harness) -> int {
     __write(
       false,
       nil,
-      {code: "invalid_blueprint_json", message: "persona blueprint must be valid JSON: " + to_string(e)},
+      {
+        code: "invalid_blueprint_json",
+        message: "persona blueprint must be valid JSON: " + to_string(e),
+      },
     )
     return 0
   }

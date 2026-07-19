@@ -52,7 +52,11 @@ pipeline default() {
     opts + {id: "coord-reply-1"},
   )
   __io_println(reply.message.reply_to == request.id)
-  const inbox_b = coord_inbox("workspace", "ops", opts + {consumer_id: "agent-B", reply_to: request.id})
+  const inbox_b = coord_inbox(
+    "workspace",
+    "ops",
+    opts + {consumer_id: "agent-B", reply_to: request.id},
+  )
   __io_println(len(inbox_b.messages))
   __io_println(inbox_b.messages[0].subject)
   __io_println(inbox_b.messages[0].reply_to)

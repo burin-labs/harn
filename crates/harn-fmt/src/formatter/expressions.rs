@@ -6,6 +6,30 @@ use crate::helpers::*;
 use super::Formatter;
 
 impl Formatter<'_> {
+    pub(super) fn format_require_stmt(
+        &self,
+        condition: &SNode,
+        message: Option<&SNode>,
+        indent: usize,
+        column: usize,
+    ) -> String {
+        let cond = self.format_expr(condition, indent, column + 8);
+        let Some(message) = message else {
+            return format!("require {cond}");
+        };
+        let message_col = column_after(column + 8, &cond) + 2;
+        let message = self.format_expr(message, indent, message_col);
+        let inline = format!("require {cond}, {message}");
+        if cond.contains('\n')
+            || message.contains('\n')
+            || column + text_width(&inline) > self.line_width
+        {
+            format!("require {cond},\n{}{}", "  ".repeat(indent + 1), message)
+        } else {
+            inline
+        }
+    }
+
     /// Comments that sat between a multi-line chain object and its
     /// `.method(...)` segment, rendered one per line with `pad` indentation
     /// (empty when there are none). Claims only full-line, non-doc comments
@@ -35,7 +59,7 @@ impl Formatter<'_> {
     /// node renders inline, `indent` does not show up in the output. When the
     /// node wraps onto multiple lines, its closing delimiter aligns to
     /// `indent` and its inner contents land at `indent + 1`.
-    pub(crate) fn format_expr(&self, node: &SNode, indent: usize) -> String {
+    pub(crate) fn format_expr(&self, node: &SNode, indent: usize, column: usize) -> String {
         match &node.node {
             Node::StringLiteral(s) => {
                 if node.span.line != node.span.end_line {
@@ -69,8 +93,11 @@ impl Formatter<'_> {
             Node::Identifier(name) => name.clone(),
             Node::DurationLiteral(ms) => format_duration(*ms),
             Node::BinaryOp { op, left, right } => {
-                let mut l = self.format_expr(left, indent);
-                let mut r = self.format_expr(right, indent);
+                if op == "+" && plus_chain_depth(left) >= 64 {
+                    return self.format_deep_plus_chain(node, indent, column);
+                }
+                let mut l = self.format_expr(left, indent, column);
+                let mut r = self.format_expr(right, indent, column_after(column, &l));
                 let op_str = if op == "not_in" {
                     "not in"
                 } else {
@@ -85,8 +112,8 @@ impl Formatter<'_> {
                 }
 
                 let inline = format!("{l} {op_str} {r}");
-                let should_break =
-                    left.span.line < right.span.line || indent * 2 + inline.len() > self.line_width;
+                let should_break = left.span.line < right.span.line
+                    || column + text_width(&inline) > self.line_width;
 
                 if should_break {
                     let pad = "  ".repeat(indent + 1);
@@ -113,7 +140,7 @@ impl Formatter<'_> {
                 }
             }
             Node::UnaryOp { op, operand } => {
-                let expr = self.format_expr(operand, indent);
+                let expr = self.format_expr(operand, indent, column + text_width(op));
                 if needs_parens_as_unary_operand(&operand.node) {
                     format!("{op}({expr})")
                 } else {
@@ -121,7 +148,7 @@ impl Formatter<'_> {
                 }
             }
             Node::TryOperator { operand } => {
-                let expr = self.format_expr(operand, indent);
+                let expr = self.format_expr(operand, indent, column);
                 if needs_parens_as_postfix_object(&operand.node) {
                     format!("({expr})?")
                 } else {
@@ -129,7 +156,7 @@ impl Formatter<'_> {
                 }
             }
             Node::NonNullAssert { operand } => {
-                let expr = self.format_expr(operand, indent);
+                let expr = self.format_expr(operand, indent, column);
                 if needs_parens_as_postfix_object(&operand.node) {
                     format!("({expr})!")
                 } else {
@@ -137,7 +164,7 @@ impl Formatter<'_> {
                 }
             }
             Node::TryStar { operand } => {
-                let expr = self.format_expr(operand, indent);
+                let expr = self.format_expr(operand, indent, column + 5);
                 if needs_parens_as_unary_operand(&operand.node) {
                     format!("try* ({expr})")
                 } else {
@@ -161,8 +188,11 @@ impl Formatter<'_> {
                             .join(", ")
                     )
                 };
-                let args_str =
-                    self.format_call_args(args, name.len() + type_args_str.len() + 1, indent);
+                let args_str = self.format_call_args(
+                    args,
+                    column + text_width(name) + text_width(&type_args_str) + 1,
+                    indent,
+                );
                 format!("{name}{type_args_str}({args_str})")
             }
             Node::MethodCall {
@@ -170,14 +200,15 @@ impl Formatter<'_> {
                 method,
                 args,
             } => {
-                let mut obj = self.format_expr(object, indent);
+                let mut obj = self.format_expr(object, indent, column);
                 if needs_parens_as_postfix_object(&object.node) {
                     obj = format!("({obj})");
                 }
                 let pad = "  ".repeat(indent + 1);
                 let lead = self.chain_segment_comments(object, args, node, &pad);
-                let wrap = self.chain_wraps(&obj, &lead, method.len() + 2, indent);
-                let prefix_len = self.chain_prefix_len(&obj, method.len() + 2, indent, wrap);
+                let wrap = self.chain_wraps(&obj, &lead, text_width(method) + 2, column);
+                let prefix_len =
+                    self.chain_prefix_len(&obj, text_width(method) + 2, column, indent, wrap);
                 let args_str =
                     self.format_call_args(args, prefix_len, self.chain_args_indent(indent, wrap));
                 if wrap {
@@ -191,15 +222,16 @@ impl Formatter<'_> {
                 method,
                 args,
             } => {
-                let mut obj = self.format_expr(object, indent);
+                let mut obj = self.format_expr(object, indent, column);
                 if needs_parens_as_postfix_object(&object.node) {
                     obj = format!("({obj})");
                 }
                 // Same rule as `MethodCall`; `?.` is one column wider.
                 let pad = "  ".repeat(indent + 1);
                 let lead = self.chain_segment_comments(object, args, node, &pad);
-                let wrap = self.chain_wraps(&obj, &lead, method.len() + 3, indent);
-                let prefix_len = self.chain_prefix_len(&obj, method.len() + 3, indent, wrap);
+                let wrap = self.chain_wraps(&obj, &lead, text_width(method) + 3, column);
+                let prefix_len =
+                    self.chain_prefix_len(&obj, text_width(method) + 3, column, indent, wrap);
                 let args_str =
                     self.format_call_args(args, prefix_len, self.chain_args_indent(indent, wrap));
                 if wrap {
@@ -209,47 +241,59 @@ impl Formatter<'_> {
                 }
             }
             Node::PropertyAccess { object, property } => {
-                let mut obj = self.format_expr(object, indent);
+                let mut obj = self.format_expr(object, indent, column);
                 if needs_parens_as_postfix_object(&object.node) {
                     obj = format!("({obj})");
                 }
-                format!("{obj}.{property}")
+                let suffix = format!(".{property}");
+                if column_after(column, &obj) + text_width(&suffix) > self.line_width {
+                    format!("{obj}\n{}{}", "  ".repeat(indent + 1), suffix)
+                } else {
+                    format!("{obj}{suffix}")
+                }
             }
             Node::OptionalPropertyAccess { object, property } => {
-                let mut obj = self.format_expr(object, indent);
+                let mut obj = self.format_expr(object, indent, column);
                 if needs_parens_as_postfix_object(&object.node) {
                     obj = format!("({obj})");
                 }
-                format!("{obj}?.{property}")
+                let suffix = format!("?.{property}");
+                if column_after(column, &obj) + text_width(&suffix) > self.line_width {
+                    format!("{obj}\n{}{}", "  ".repeat(indent + 1), suffix)
+                } else {
+                    format!("{obj}{suffix}")
+                }
             }
             Node::SubscriptAccess { object, index } => {
-                let mut obj = self.format_expr(object, indent);
+                let mut obj = self.format_expr(object, indent, column);
                 if needs_parens_as_postfix_object(&object.node) {
                     obj = format!("({obj})");
                 }
-                let idx = self.format_expr(index, indent);
+                let idx = self.format_expr(index, indent, column_after(column, &obj) + 1);
                 format!("{obj}[{idx}]")
             }
             Node::OptionalSubscriptAccess { object, index } => {
-                let mut obj = self.format_expr(object, indent);
+                let mut obj = self.format_expr(object, indent, column);
                 if needs_parens_as_postfix_object(&object.node) {
                     obj = format!("({obj})");
                 }
-                let idx = self.format_expr(index, indent);
+                let idx = self.format_expr(index, indent, column_after(column, &obj) + 3);
                 format!("{obj}?.[{idx}]")
             }
             Node::SliceAccess { object, start, end } => {
-                let mut obj = self.format_expr(object, indent);
+                let mut obj = self.format_expr(object, indent, column);
                 if needs_parens_as_postfix_object(&object.node) {
                     obj = format!("({obj})");
                 }
                 let s = start
                     .as_ref()
-                    .map(|n| self.format_expr(n, indent))
+                    .map(|n| self.format_expr(n, indent, column_after(column, &obj) + 1))
                     .unwrap_or_default();
                 let e = end
                     .as_ref()
-                    .map(|n| self.format_expr(n, indent))
+                    .map(|n| {
+                        self.format_expr(n, indent, column_after(column, &obj) + text_width(&s) + 2)
+                    })
                     .unwrap_or_default();
                 format!("{obj}[{s}:{e}]")
             }
@@ -261,16 +305,24 @@ impl Formatter<'_> {
                 // A range bound to a ternary part must be parenthesized: a bare
                 // range as the condition would swallow the `?:` into its end
                 // bound, and as a branch it simply fails to re-parse.
-                let cond = paren_if_range(self.format_expr(condition, indent), &condition.node);
-                let t = paren_if_range(self.format_expr(true_expr, indent), &true_expr.node);
-                let f = paren_if_range(self.format_expr(false_expr, indent), &false_expr.node);
+                let cond =
+                    paren_if_range(self.format_expr(condition, indent, column), &condition.node);
+                let t_col = column_after(column, &cond) + 3;
+                let t = paren_if_range(self.format_expr(true_expr, indent, t_col), &true_expr.node);
+                let f_col = column_after(t_col, &t) + 3;
+                let f = paren_if_range(
+                    self.format_expr(false_expr, indent, f_col),
+                    &false_expr.node,
+                );
                 format!("{cond} ? {t} : {f}")
             }
             Node::Assignment {
                 target, value, op, ..
             } => {
-                let t = self.format_expr(target, indent);
-                let v = self.format_expr(value, indent);
+                let t = self.format_expr(target, indent, column);
+                let v_col = column_after(column, &t)
+                    + op.as_deref().map_or(3, |operator| text_width(operator) + 3);
+                let v = self.format_expr(value, indent, v_col);
                 if let Some(op) = op {
                     format!("{t} {op}= {v}")
                 } else {
@@ -284,7 +336,7 @@ impl Formatter<'_> {
                 let items = elems
                     .iter()
                     .map(|e| {
-                        let body = self.format_expr(e, indent + 1);
+                        let body = self.format_expr(e, indent + 1, wrapped_item_column(indent));
                         let item = self.commented_item(
                             body,
                             from_line,
@@ -296,13 +348,13 @@ impl Formatter<'_> {
                         item
                     })
                     .collect::<Vec<_>>();
-                let items = self.format_comma_sequence_commented(items, 1, indent);
+                let items = self.format_comma_sequence_commented(items, column + 1, indent);
                 format!("[{items}]")
             }
             Node::DictLiteral(entries) => {
                 let items = self.format_dict_entry_list(
                     entries,
-                    1,
+                    column + 1,
                     indent,
                     (node.span.line, node.span.end_line),
                 );
@@ -315,8 +367,9 @@ impl Formatter<'_> {
             } => {
                 // A range bound that is itself a range needs parens; `a to b to c`
                 // is non-associative and would not re-parse.
-                let s = paren_if_range(self.format_expr(start, indent), &start.node);
-                let e = paren_if_range(self.format_expr(end, indent), &end.node);
+                let s = paren_if_range(self.format_expr(start, indent, column), &start.node);
+                let end_col = column_after(column, &s) + 4;
+                let e = paren_if_range(self.format_expr(end, indent, end_col), &end.node);
                 if *inclusive {
                     format!("{s} to {e}")
                 } else {
@@ -336,11 +389,12 @@ impl Formatter<'_> {
                         return_type.as_ref(),
                         throws.as_ref(),
                         body,
+                        column,
                         indent,
                         node.span.line,
                     )
                 } else {
-                    self.format_arrow_closure(params, body, indent, node.span.line)
+                    self.format_arrow_closure(params, body, column, indent, node.span.line)
                 }
             }
             Node::EnumConstruct {
@@ -351,8 +405,11 @@ impl Formatter<'_> {
                 if args.is_empty() {
                     format!("{enum_name}.{variant}")
                 } else {
-                    let args_str =
-                        self.format_call_args(args, enum_name.len() + variant.len() + 2, indent);
+                    let args_str = self.format_call_args(
+                        args,
+                        column + text_width(enum_name) + text_width(variant) + 2,
+                        indent,
+                    );
                     format!("{enum_name}.{variant}({args_str})")
                 }
             }
@@ -362,7 +419,7 @@ impl Formatter<'_> {
             } => {
                 let items = self.format_dict_entry_list(
                     fields,
-                    struct_name.len() + 2,
+                    column + text_width(struct_name) + 2,
                     indent,
                     (node.span.line, node.span.end_line),
                 );
@@ -379,29 +436,29 @@ impl Formatter<'_> {
             }
             Node::YieldExpr { value } => {
                 if let Some(val) = value {
-                    format!("yield {}", self.format_expr(val, indent))
+                    format!("yield {}", self.format_expr(val, indent, column + 6))
                 } else {
                     "yield".to_string()
                 }
             }
             Node::EmitExpr { value } => {
-                format!("emit {}", self.format_expr(value, indent))
+                format!("emit {}", self.format_expr(value, indent, column + 5))
             }
             Node::ReturnStmt { value } => {
                 if let Some(val) = value {
-                    format!("return {}", self.format_expr(val, indent))
+                    format!("return {}", self.format_expr(val, indent, column + 7))
                 } else {
                     "return".to_string()
                 }
             }
             Node::ThrowStmt { value } => {
-                format!("throw {}", self.format_expr(value, indent))
+                format!("throw {}", self.format_expr(value, indent, column + 6))
             }
             Node::BreakStmt => "break".to_string(),
             Node::ContinueStmt => "continue".to_string(),
             Node::Block(stmts) => self.format_block_expr("block {", stmts, indent, node.span.line),
             Node::MatchExpr { value, arms } => {
-                let val = self.format_expr(value, indent);
+                let val = self.format_expr(value, indent, column + 6);
                 let mut result = format!("match {val} {{\n");
                 let arm_indent = indent + 1;
                 let mut arm_from_line = node.span.line;
@@ -416,14 +473,25 @@ impl Formatter<'_> {
                         arm.pattern.span.line,
                         arm_indent,
                     ));
-                    let pattern = self.format_expr(&arm.pattern, arm_indent);
+                    let pattern = self.format_expr(&arm.pattern, arm_indent, arm_indent * 2);
                     let guard_str = if let Some(ref guard) = arm.guard {
-                        format!(" if {}", self.format_expr(guard, arm_indent))
+                        format!(
+                            " if {}",
+                            self.format_expr(
+                                guard,
+                                arm_indent,
+                                arm_indent * 2 + text_width(&pattern) + 4,
+                            )
+                        )
                     } else {
                         String::new()
                     };
                     if arm.body.len() == 1 && is_simple_expr(&arm.body[0]) {
-                        let expr = self.format_expr(&arm.body[0], arm_indent);
+                        let expr = self.format_expr(
+                            &arm.body[0],
+                            arm_indent,
+                            arm_indent * 2 + text_width(&pattern) + text_width(&guard_str) + 4,
+                        );
                         result.push_str(&indent_str);
                         result.push_str(&format!("{pattern}{guard_str} -> {{ {expr} }}"));
                         // Keep a same-line comment on the arm (`1 -> { x } // c`)
@@ -464,7 +532,7 @@ impl Formatter<'_> {
                 condition,
                 else_body,
             } => {
-                let cond = self.format_expr(condition, indent);
+                let cond = self.format_expr(condition, indent, column + 6);
                 self.format_block_expr(
                     &format!("guard {cond} else {{"),
                     else_body,
@@ -473,20 +541,15 @@ impl Formatter<'_> {
                 )
             }
             Node::RequireStmt { condition, message } => {
-                let cond = self.format_expr(condition, indent);
-                if let Some(message) = message {
-                    format!("require {cond}, {}", self.format_expr(message, indent))
-                } else {
-                    format!("require {cond}")
-                }
+                self.format_require_stmt(condition, message.as_deref(), indent, column)
             }
             Node::DeadlineBlock { duration, body } => {
-                let dur = self.format_expr(duration, indent);
+                let dur = self.format_expr(duration, indent, column + 9);
                 self.format_block_expr(&format!("deadline {dur} {{"), body, indent, node.span.line)
             }
             Node::MutexBlock { key, body } => match key {
                 Some(key_expr) => {
-                    let k = self.format_expr(key_expr, indent);
+                    let k = self.format_expr(key_expr, indent, column + 6);
                     self.format_block_expr(&format!("mutex({k}) {{"), body, indent, node.span.line)
                 }
                 None => self.format_block_expr("mutex {", body, indent, node.span.line),
@@ -498,7 +561,7 @@ impl Formatter<'_> {
                 else_body,
                 else_span,
             } => {
-                let cond = self.format_expr(condition, indent);
+                let cond = self.format_expr(condition, indent, column + 5);
                 let inner = indent + 1;
                 let mut result = format!("if {cond} {{\n");
                 result.push_str(&self.format_body_string_bounded(
@@ -515,7 +578,7 @@ impl Formatter<'_> {
                     if eb.len() == 1 && matches!(eb[0].node, Node::IfElse { .. }) {
                         result.push_str(&close);
                         result.push_str("} else ");
-                        result.push_str(&self.format_expr(&eb[0], indent));
+                        result.push_str(&self.format_expr(&eb[0], indent, column + 7));
                     } else {
                         result.push_str(&close);
                         result.push_str("} else {\n");
@@ -541,7 +604,8 @@ impl Formatter<'_> {
                 body,
             } => {
                 let pat = format_pattern(pattern);
-                let iter_str = self.format_expr(iterable, indent);
+                let iter_col = column + 4 + text_width(&pat) + 4;
+                let iter_str = self.format_expr(iterable, indent, iter_col);
                 self.format_block_expr(
                     &format!("for {pat} in {iter_str} {{"),
                     body,
@@ -550,11 +614,11 @@ impl Formatter<'_> {
                 )
             }
             Node::WhileLoop { condition, body } => {
-                let cond = self.format_expr(condition, indent);
+                let cond = self.format_expr(condition, indent, column + 6);
                 self.format_block_expr(&format!("while {cond} {{"), body, indent, node.span.line)
             }
             Node::Retry { count, body } => {
-                let cnt = self.format_expr(count, indent);
+                let cnt = self.format_expr(count, indent, column + 6);
                 self.format_block_expr(&format!("retry {cnt} {{"), body, indent, node.span.line)
             }
             Node::CostRoute { options, body } => {
@@ -562,7 +626,7 @@ impl Formatter<'_> {
                 let close = "  ".repeat(indent);
                 let mut result = String::from("cost_route {\n");
                 for (key, value) in options {
-                    let value = self.format_expr(value, inner);
+                    let value = self.format_expr(value, inner, inner * 2 + text_width(key) + 2);
                     result.push_str(&"  ".repeat(inner));
                     result.push_str(&format!("{key}: {value}\n"));
                 }
@@ -629,20 +693,44 @@ impl Formatter<'_> {
                 body,
                 options,
             } => {
-                let e = self.format_expr(expr, indent);
                 let keyword = match mode {
                     ParallelMode::Count => "parallel",
                     ParallelMode::Each | ParallelMode::EachStream => "parallel each",
                     ParallelMode::Settle => "parallel settle",
                 };
+                let e = self.format_expr(expr, indent, column + text_width(keyword) + 1);
                 let options_clause = if options.is_empty() {
                     String::new()
                 } else {
                     let formatted: Vec<String> = options
                         .iter()
-                        .map(|(key, value)| format!("{key}: {}", self.format_expr(value, indent)))
+                        .map(|(key, value)| {
+                            format!(
+                                "{key}: {}",
+                                self.format_expr(value, indent, column + text_width(keyword) + 1)
+                            )
+                        })
                         .collect();
-                    format!(" with {{ {} }}", formatted.join(", "))
+                    let inline = format!(" with {{ {} }}", formatted.join(", "));
+                    let inline_opening = if let Some(var) = variable {
+                        format!("{keyword} {e}{inline} {{ {var} ->")
+                    } else {
+                        format!("{keyword} {e}{inline} {{")
+                    };
+                    if column + text_width(&inline_opening) <= self.line_width {
+                        inline
+                    } else {
+                        let item_indent = "  ".repeat(indent + 1);
+                        let close_indent = "  ".repeat(indent);
+                        format!(
+                            " with {{\n{}\n{close_indent}}}",
+                            formatted
+                                .iter()
+                                .map(|item| format!("{item_indent}{item},"))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        )
+                    }
                 };
                 let opening = if let Some(var) = variable {
                     format!("{keyword} {e}{options_clause} {{ {var} ->")
@@ -682,6 +770,7 @@ impl Formatter<'_> {
                     return_type,
                     throws,
                     where_clauses,
+                    column,
                     indent,
                 );
                 self.format_block_expr(&format!("{sig} {{"), body, indent, node.span.line)
@@ -696,14 +785,22 @@ impl Formatter<'_> {
                 is_pub,
             } => {
                 let pub_prefix = if *is_pub { "pub " } else { "" };
-                let ret = if let Some(rt) = return_type {
-                    format!(" -> {}", format_type_expr(rt))
-                } else {
-                    String::new()
-                };
+                let ret_inline = return_type
+                    .as_ref()
+                    .map(|rt| format!(" -> {}", format_type_expr(rt)))
+                    .unwrap_or_default();
                 let throws_str = format_throws_clause(throws);
-                let prefix_len = indent * 2 + pub_prefix.len() + 5 + name.len() + 1;
-                let params_str = self.format_typed_params_wrapped(params, prefix_len, indent);
+                let params_col = column + text_width(pub_prefix) + 5 + text_width(name) + 1;
+                let suffix_len = text_width(&ret_inline) + text_width(&throws_str) + 2;
+                let params_str =
+                    self.format_typed_params_wrapped(params, params_col + suffix_len, indent);
+                let ret = self.format_return_type(
+                    return_type,
+                    params_col,
+                    &params_str,
+                    indent,
+                    text_width(&throws_str) + 2,
+                );
                 let mut effective_body = Vec::new();
                 if let Some(desc) = description {
                     let escaped = escape_string(desc);
@@ -731,7 +828,7 @@ impl Formatter<'_> {
                 let close_indent_str = "  ".repeat(indent);
                 let mut inner = String::new();
                 for (field_name, field_expr) in fields {
-                    let expr_str = self.format_expr(field_expr, indent + 1);
+                    let expr_str = self.format_expr(field_expr, indent + 1, (indent + 1) * 2);
                     inner.push_str(&item_indent_str);
                     inner.push_str(field_name);
                     inner.push(' ');
@@ -740,7 +837,7 @@ impl Formatter<'_> {
                 }
                 format!("{pub_prefix}skill {name} {{\n{inner}{close_indent_str}}}")
             }
-            Node::EvalPackDecl { .. } => self.format_expr_or_stmt(node, indent),
+            Node::EvalPackDecl { .. } => self.format_expr_or_stmt(node, indent, column),
             Node::LetBinding {
                 pattern,
                 type_ann,
@@ -748,9 +845,11 @@ impl Formatter<'_> {
                 ..
             } => {
                 let pat = format_pattern(pattern);
-                let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value, indent);
-                format!("let {pat}{type_str} = {val}")
+                let type_col = column + text_width("let ") + text_width(&pat) + 2;
+                let type_str = format_type_ann_wrapped(type_ann, indent, type_col, self.line_width);
+                let prefix = format!("let {pat}{type_str} = ");
+                let val = self.format_expr(value, indent, column_after(column, &prefix));
+                self.format_prefixed_value(&prefix, &val, indent, column)
             }
             Node::ConstBinding {
                 pattern,
@@ -759,9 +858,11 @@ impl Formatter<'_> {
                 ..
             } => {
                 let pat = format_pattern(pattern);
-                let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value, indent);
-                format!("const {pat}{type_str} = {val}")
+                let type_col = column + text_width("const ") + text_width(&pat) + 2;
+                let type_str = format_type_ann_wrapped(type_ann, indent, type_col, self.line_width);
+                let prefix = format!("const {pat}{type_str} = ");
+                let val = self.format_expr(value, indent, column_after(column, &prefix));
+                self.format_prefixed_value(&prefix, &val, indent, column)
             }
             Node::ImportDecl { path, is_pub } => {
                 let prefix = if *is_pub { "pub " } else { "" };
@@ -773,7 +874,12 @@ impl Formatter<'_> {
                 is_pub,
             } => {
                 let prefix = if *is_pub { "pub " } else { "" };
-                let line = self.format_selective_import_names(names, path, indent);
+                let line = self.format_selective_import_names(
+                    names,
+                    path,
+                    column + text_width(prefix),
+                    indent,
+                );
                 format!("{prefix}{line}")
             }
             Node::EnumDecl { name, .. } => format!("/* enum {name} */"),
@@ -802,7 +908,11 @@ impl Formatter<'_> {
                 let body_indent = case_indent + 1;
                 let case_pad = "  ".repeat(case_indent);
                 for case in cases {
-                    let ch = self.format_expr(&case.channel, case_indent);
+                    let ch = self.format_expr(
+                        &case.channel,
+                        case_indent,
+                        case_indent * 2 + text_width(&case.variable) + 6,
+                    );
                     result.push_str(&format!("{case_pad}{} from {ch} {{\n", case.variable));
                     result.push_str(&self.format_body_string(
                         &case.body,
@@ -813,7 +923,7 @@ impl Formatter<'_> {
                     result.push_str("}\n");
                 }
                 if let Some((dur, body)) = timeout {
-                    let d = self.format_expr(dur, case_indent);
+                    let d = self.format_expr(dur, case_indent, case_indent * 2 + 8);
                     result.push_str(&format!("{case_pad}timeout {d} {{\n"));
                     result.push_str(&self.format_body_string(body, body_indent, dur.span.end_line));
                     result.push_str(&case_pad);
@@ -830,21 +940,29 @@ impl Formatter<'_> {
                 result.push('}');
                 result
             }
-            Node::Spread(inner) => format!("...{}", self.format_expr(inner, indent)),
+            Node::Spread(inner) => format!("...{}", self.format_expr(inner, indent, column + 3)),
             Node::AttributedDecl { attributes, inner } => {
                 let attrs = format_attributes(attributes);
-                format!("{}{}", attrs, self.format_expr(inner, indent))
+                format!(
+                    "{}{}",
+                    attrs,
+                    self.format_expr(inner, indent, column + text_width(&attrs))
+                )
             }
             Node::OrPattern(alternatives) => alternatives
                 .iter()
-                .map(|p| self.format_expr(p, indent))
+                .map(|p| self.format_expr(p, indent, column))
                 .collect::<Vec<_>>()
                 .join(" | "),
             Node::HitlExpr { kind, args } => {
                 let arg_strs: Vec<String> = args
                     .iter()
                     .map(|arg| {
-                        let value = self.format_expr(&arg.value, indent);
+                        let value = self.format_expr(
+                            &arg.value,
+                            indent,
+                            column + text_width(kind.as_keyword()) + 1,
+                        );
                         match &arg.name {
                             Some(name) => format!("{name}: {value}"),
                             None => value,
@@ -860,6 +978,7 @@ impl Formatter<'_> {
         &self,
         params: &[TypedParam],
         body: &[SNode],
+        column: usize,
         indent: usize,
         block_from_line: usize,
     ) -> String {
@@ -868,11 +987,21 @@ impl Formatter<'_> {
             && is_simple_expr(&body[0])
             && !self.body_carries_comment(body, block_from_line)
         {
-            let expr = self.format_expr(&body[0], indent);
-            if params.is_empty() {
+            let expr = self.format_expr(&body[0], indent, column + text_width(&params_str) + 4);
+            let inline = if params.is_empty() {
                 format!("{{ -> {expr} }}")
             } else {
                 format!("{{ {params_str} -> {expr} }}")
+            };
+            if !inline.contains('\n') && column + text_width(&inline) <= self.line_width {
+                inline
+            } else {
+                let opening = if params.is_empty() {
+                    "{ ->".to_string()
+                } else {
+                    format!("{{ {params_str} ->")
+                };
+                self.format_block_expr(&opening, body, indent, block_from_line)
             }
         } else {
             let opening = if params.is_empty() {
@@ -884,12 +1013,53 @@ impl Formatter<'_> {
         }
     }
 
+    /// Render unusually deep left-associative `+` chains without recursing once
+    /// per operand. Generated Harn fixtures commonly concatenate source text;
+    /// keeping that path iterative prevents a valid fixture from exhausting
+    /// the host thread's default stack.
+    fn format_deep_plus_chain(&self, root: &SNode, indent: usize, column: usize) -> String {
+        let mut terms: Vec<&SNode> = Vec::new();
+        let mut cursor = root;
+        loop {
+            match &cursor.node {
+                Node::BinaryOp { op, left, right } if op == "+" => {
+                    terms.push(right.as_ref());
+                    cursor = left.as_ref();
+                }
+                _ => {
+                    terms.push(cursor);
+                    break;
+                }
+            }
+        }
+        terms.reverse();
+
+        let mut output = self.format_expr(terms[0], indent, column);
+        for term in terms.into_iter().skip(1) {
+            let mut right = self.format_expr(term, indent, column_after(column, &output) + 3);
+            if child_needs_parens("+", &term.node, true) {
+                right = format!("({right})");
+            }
+            let current_col = column_after(column, &output);
+            if current_col + 3 + last_line_width(&right) > self.line_width {
+                output.push('\n');
+                output.push_str(&"  ".repeat(indent + 1));
+                output.push_str("+ ");
+            } else {
+                output.push_str(" + ");
+            }
+            output.push_str(&right);
+        }
+        output
+    }
+
     fn format_fn_closure(
         &self,
         params: &[TypedParam],
         return_type: Option<&TypeExpr>,
         throws: Option<&TypeExpr>,
         body: &[SNode],
+        column: usize,
         indent: usize,
         block_from_line: usize,
     ) -> String {
@@ -904,7 +1074,7 @@ impl Formatter<'_> {
             && is_simple_expr(&body[0])
             && !self.body_carries_comment(body, block_from_line)
         {
-            let expr = self.format_expr(&body[0], indent);
+            let expr = self.format_expr(&body[0], indent, column + text_width(&params_str) + 4);
             format!("fn({params_str}){return_str}{throws_str} {{ {expr} }}")
         } else {
             self.format_block_expr(
@@ -916,18 +1086,18 @@ impl Formatter<'_> {
         }
     }
 
-    fn format_dict_key(&self, node: &SNode, indent: usize) -> String {
+    fn format_dict_key(&self, node: &SNode, indent: usize, column: usize) -> String {
         match &node.node {
             Node::StringLiteral(s) if is_identifier(s) => s.clone(),
             Node::StringLiteral(s) => format!("\"{}\"", escape_string(s)),
-            _ => format!("[{}]", self.format_expr(node, indent)),
+            _ => format!("[{}]", self.format_expr(node, indent, column + 1)),
         }
     }
 
     pub(super) fn format_dict_entry_list(
         &self,
         entries: &[harn_parser::DictEntry],
-        prefix_len: usize,
+        prefix_col: usize,
         indent: usize,
         (open_line, close_line): (usize, usize),
     ) -> String {
@@ -938,11 +1108,20 @@ impl Formatter<'_> {
             .iter()
             .map(|e| {
                 let body = if let Node::Spread(inner) = &e.value.node {
-                    format!("...{}", self.format_expr(inner, indent + 1))
+                    format!(
+                        "...{}",
+                        self.format_expr(inner, indent + 1, wrapped_item_column(indent) + 2)
+                    )
                 } else {
-                    let k = self.format_dict_key(&e.key, indent + 1);
-                    let v = self.format_expr(&e.value, indent + 1);
-                    format!("{k}: {v}")
+                    let item_col = wrapped_item_column(indent);
+                    let k = self.format_dict_key(&e.key, indent + 1, item_col);
+                    let value_col = item_col + text_width(&k) + 2;
+                    let v = self.format_expr(&e.value, indent + 1, value_col);
+                    if !v.contains('\n') && value_col + text_width(&v) > self.line_width {
+                        format!("{k}:\n{}{}", "  ".repeat(indent + 2), v)
+                    } else {
+                        format!("{k}: {v}")
+                    }
                 };
                 let item = self.commented_item(
                     body,
@@ -955,6 +1134,19 @@ impl Formatter<'_> {
                 item
             })
             .collect::<Vec<_>>();
-        self.format_comma_sequence_commented(items, prefix_len, indent)
+        self.format_comma_sequence_commented(items, prefix_col, indent)
     }
+}
+
+fn plus_chain_depth(node: &SNode) -> usize {
+    let mut depth = 0;
+    let mut cursor = node;
+    while let Node::BinaryOp { op, left, .. } = &cursor.node {
+        if op != "+" {
+            break;
+        }
+        depth += 1;
+        cursor = left.as_ref();
+    }
+    depth
 }

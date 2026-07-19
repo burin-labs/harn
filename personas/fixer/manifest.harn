@@ -15,7 +15,13 @@ fn fixer_manifest() {
       "Map every remediation atom to an std/edit AST primitive (apply_node, insert_at_anchor, rename_symbol); only drop to safe_text_patch when the language is unsupported or the change is text-shaped.",
       "Record a receipt so the fix is auditable as its own shipping event.",
     ],
-    required_capabilities: ["git.get_diff", "project.scan", "runtime.approved_plan", "runtime.dry_run", "runtime.record_run"],
+    required_capabilities: [
+      "git.get_diff",
+      "project.scan",
+      "runtime.approved_plan",
+      "runtime.dry_run",
+      "runtime.record_run",
+    ],
     edit_strategy: {
       prefer: ["edit_apply_node", "edit_insert_at_anchor", "edit_rename_symbol"],
       preview: "edit_dry_run",
@@ -36,13 +42,15 @@ pub fn remediation_plan_for_demo() {
     {
       kind: "rewrite_node",
       path: "src/lib.rs",
-      query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
+      query:
+        "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
       replacement: "{ format!(\"hi {name}!\") }",
     },
     {
       kind: "insert_at_anchor",
       path: "src/lib.rs",
-      query: "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
+      query:
+        "(mod_item name: (identifier) @name (#eq? @name \"tests\") body: (declaration_list) @anchor)",
       position: "last_child",
       content: "#[test]\nfn covers_remediation() {}",
     },

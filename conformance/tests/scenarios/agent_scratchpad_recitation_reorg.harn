@@ -11,7 +11,10 @@ fn observe_tools() {
     tools,
     "observe",
     "Return a deterministic observation.",
-    {handler: fn(_args) { return "observed-value-42" }, parameters: {type: "object", properties: {}}},
+    {
+      handler: fn(_args) { return "observed-value-42" },
+      parameters: {type: "object", properties: {}},
+    },
   )
   return tools
 }
@@ -42,20 +45,30 @@ pipeline default() {
       const calls = llm_mock_calls()
       __io_println("status:" + result.status)
       __io_println("calls:" + to_string(len(calls)))
-      __io_println("first_has_scratchpad:" + to_string(contains(calls[0].system, "## Agent scratchpad")))
+      __io_println(
+        "first_has_scratchpad:" + to_string(contains(calls[0].system, "## Agent scratchpad")),
+      )
       __io_println(
         "first_tail:"
-          + to_string(ends_with(calls[0].system, "user:initial (user_input): Initial task")),
+          + to_string(
+          ends_with(calls[0].system, "user:initial (user_input): Initial task"),
+        ),
       )
       __io_println(
         "reorg_prompt:"
-          + to_string(contains(calls[1].messages[0].content, "Reorganize the live agent scratchpad")),
+          + to_string(
+          contains(calls[1].messages[0].content, "Reorganize the live agent scratchpad"),
+        ),
       )
       __io_println(
         "second_has_fact:"
-          + to_string(contains(calls[2].system, "observe returned observed-value-42")),
+          + to_string(
+          contains(calls[2].system, "observe returned observed-value-42"),
+        ),
       )
-      __io_println("second_has_source:" + to_string(contains(calls[2].system, "[source_ref: turn:3]")))
+      __io_println(
+        "second_has_source:" + to_string(contains(calls[2].system, "[source_ref: turn:3]")),
+      )
       __io_println("snapshot_fact:" + result.transcript.metadata.agent_scratchpad.facts[0].text)
     },
   )

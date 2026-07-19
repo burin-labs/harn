@@ -36,7 +36,12 @@ pipeline default() {
   const events = captured.events.filter({ event -> event.type == "progress_reported" })
   require len(events) == 1, "schema progress fixture emits one event"
   const event = events[0]
-  const payload = {message: event.message, entries: event.entries, replace: event.replace, metadata: event.metadata}
+  const payload = {
+    message: event.message,
+    entries: event.entries,
+    replace: event.replace,
+    metadata: event.metadata,
+  }
   const event_report = agent_progress_event_report(event)
   const payload_report = agent_progress_payload_report(payload)
   const bad_payload = agent_progress_payload_report(

@@ -134,7 +134,9 @@ fn __request_schema() -> dict {
       ),
       manifest: schema_object(
         {
-          metadata: schema_object({provider: schema_string(), model: schema_string(), max_tokens: schema_int()}),
+          metadata: schema_object(
+            {provider: schema_string(), model: schema_string(), max_tokens: schema_int()},
+          ),
         },
       ),
       trial: schema_int(),
@@ -156,7 +158,15 @@ fn __materialize(
   harness.fs.write_text(blueprint_path, json_stringify_pretty(blueprint))
   const result = command_run(
     {
-      argv: ["harn", "persona", "materialize", "--blueprint", blueprint_path, "--output-root", output_root],
+      argv: [
+        "harn",
+        "persona",
+        "materialize",
+        "--blueprint",
+        blueprint_path,
+        "--output-root",
+        output_root,
+      ],
       timeout_ms: 120000,
     },
     {capture: {max_inline_bytes: 65536}},
@@ -220,7 +230,16 @@ fn __fire(
   const trigger_id = trigger.id
   const result = command_run(
     {
-      argv: ["harn", "orchestrator", "fire", trigger_id, "--config", manifest_path, "--state-dir", state_dir],
+      argv: [
+        "harn",
+        "orchestrator",
+        "fire",
+        trigger_id,
+        "--config",
+        manifest_path,
+        "--state-dir",
+        state_dir,
+      ],
       timeout_ms: 120000,
     },
     {capture: {max_inline_bytes: 65536}},
@@ -322,7 +341,11 @@ fn main(harness: Harness) -> int {
     request.manifest.metadata.max_tokens,
   )
   const compile_verdict = persona_prompt_eval_verdict(receipt, expected)
-  let materialized: PersonaPromptMaterializeResult = {ok: false, failure_bucket: "compile_rejected", failures: []}
+  let materialized: PersonaPromptMaterializeResult = {
+    ok: false,
+    failure_bucket: "compile_rejected",
+    failures: [],
+  }
   let fired: PersonaPromptFireResult = {ok: false, failure_bucket: "compile_rejected", failures: []}
   if compile_verdict.pass {
     const execution = __execute_compiled(harness, receipt, case_id, trial)

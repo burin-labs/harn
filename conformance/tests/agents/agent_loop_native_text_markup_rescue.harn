@@ -24,7 +24,8 @@ fn lookup_tools() {
   return tools
 }
 
-const MARKUP_TURN = "<tool_call>\n<function=lookup>\n<parameter=query>\nfollow-up evidence\n</parameter>\n</function>\n</tool_call>"
+const MARKUP_TURN =
+  "<tool_call>\n<function=lookup>\n<parameter=query>\nfollow-up evidence\n</parameter>\n</function>\n</tool_call>"
 
 pipeline main() {
   // Default policy (reject): the markup turn must continue the loop with

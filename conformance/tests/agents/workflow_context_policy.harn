@@ -31,7 +31,13 @@ pipeline default() {
     [
       {id: "low", kind: "summary", priority: 1, relevance: 1.0, estimated_tokens: 10},
       {id: "pin", kind: "summary", priority: 0, relevance: 0.0, estimated_tokens: 10},
-      {id: "verify", kind: "verification_result", priority: 2, relevance: 0.1, estimated_tokens: 10},
+      {
+        id: "verify",
+        kind: "verification_result",
+        priority: 2,
+        relevance: 0.1,
+        estimated_tokens: 10,
+      },
     ],
     {pinned_ids: ["pin"], prioritize_kinds: ["verification_result"], max_artifacts: 2},
   )
@@ -64,7 +70,15 @@ pipeline default() {
   __io_println(contains(ids(adaptive), "dup-high"))
   __io_println(!contains(ids(adaptive), "dup-low"))
   const oversized = workflow_select_artifacts_adaptive(
-    [{id: "big", kind: "summary", text: "0123456789".repeat(300), estimated_tokens: 1000, priority: 1}],
+    [
+      {
+        id: "big",
+        kind: "summary",
+        text: "0123456789".repeat(300),
+        estimated_tokens: 1000,
+        priority: 1,
+      },
+    ],
     {max_tokens: 400},
   )
   __io_println(oversized[0].estimated_tokens == 400)

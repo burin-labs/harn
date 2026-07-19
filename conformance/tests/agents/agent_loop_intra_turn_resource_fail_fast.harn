@@ -55,7 +55,9 @@ fn edit_tools(
       handler: { args ->
         if args?.fail_noop ?? false {
           return "Error: [Edit rejected] old_string not found. Your edit was NOT applied to "
-            + to_string(args?.path ?? "")
+            + to_string(
+            args?.path ?? "",
+          )
             + " "
             + to_string(args?.marker ?? "")
         }
@@ -68,7 +70,8 @@ fn edit_tools(
           throw "rejected " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
         }
         if args?.fail_return ?? false {
-          return "Error: rejected " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
+          return "Error: rejected " + to_string(args?.path ?? "") + " "
+            + to_string(args?.marker ?? "")
         }
         if args?.diagnostics ?? false {
           return "## Diagnostics (2 errors, via zig ast-check)\n"
@@ -82,15 +85,31 @@ fn edit_tools(
         path: {type: "string", description: "Workspace-relative path"},
         marker: {type: "string", description: "Probe marker"},
         action: {type: "string", description: "Logical edit action", required: false},
-        range_start: {type: "integer", description: "Start offset for range-based edits", required: false},
-        range_end: {type: "integer", description: "End offset for range-based edits", required: false},
+        range_start: {
+          type: "integer",
+          description: "Start offset for range-based edits",
+          required: false,
+        },
+        range_end: {
+          type: "integer",
+          description: "End offset for range-based edits",
+          required: false,
+        },
         anchor: {type: "string", description: "Anchor text for anchored edits", required: false},
-        old_string: {type: "string", description: "Old text for replacement edits", required: false},
+        old_string: {
+          type: "string",
+          description: "Old text for replacement edits",
+          required: false,
+        },
         function_name: {type: "string", description: "Target function name", required: false},
         symbol_name: {type: "string", description: "Target symbol name", required: false},
         name: {type: "string", description: "Generic target name", required: false},
         fail: {type: "boolean", description: "Whether this call rejects", required: false},
-        fail_return: {type: "boolean", description: "Whether this call returns a product-level error", required: false},
+        fail_return: {
+          type: "boolean",
+          description: "Whether this call returns a product-level error",
+          required: false,
+        },
         fail_noop: {
           type: "boolean",
           description: "Whether this call fails WITHOUT mutating (applied: false)",
@@ -438,9 +457,12 @@ fn run_scripted(calls, opts = {}) {
             tool_caller: { envelope, next ->
               const result = next(envelope)
               const args = envelope?.tool_args ?? {}
-              const mutation_status = if (args?.fail_noop ?? false) || (args?.fail_return ?? false) {
+              const mutation_status = if (args?.fail_noop ?? false)
+                || (args?.fail_return ?? false) {
                 "not_applied"
-              } else if (args?.fail_applied ?? false) || (args?.diagnostics ?? false) {
+              } else if (args?.fail_applied ?? false)
+                || (args?.diagnostics
+                ?? false) {
                 "applied"
               } else if result?.ok ?? result?.success ?? false {
                 "applied"
@@ -462,11 +484,16 @@ fn run_scripted(calls, opts = {}) {
 
 fn has_tool_update(events, status: string, category: string, text: string) -> bool {
   return events.find(
-    { event -> return event.type == "tool_call_update"
-      && to_string(event.tool_call_id ?? "") != ""
-      && event.status == status
-      && event.error_category == category
-      && contains(to_string(event.error ?? event.raw_output ?? ""), text) },
+    { event ->
+      return event.type == "tool_call_update"
+        && to_string(event.tool_call_id ?? "") != ""
+        && event.status == status
+        && event.error_category == category
+        && contains(
+        to_string(event.error ?? event.raw_output ?? ""),
+        text,
+      )
+    },
   )
     != nil
 }
@@ -497,7 +524,10 @@ pipeline main() {
     "same-resource skips should steer to one current-file recovery edit",
   )
   assert(
-    !contains(defaulted.transcript, "same assistant response failed for the same workspace resource"),
+    !contains(
+      defaulted.transcript,
+      "same assistant response failed for the same workspace resource",
+    ),
     "same-resource skip wording should not imply every skipped sibling failed",
   )
   assert(
@@ -527,7 +557,8 @@ pipeline main() {
     "opaque mutating failures should preserve an unknown mutation status",
   )
   assert(
-    defaulted_receipt.next_expected_action == "read_current_resource_then_issue_one_reanchored_call",
+    defaulted_receipt.next_expected_action
+      == "read_current_resource_then_issue_one_reanchored_call",
     "receipt should expose the recovery action as structured data",
   )
   // Burin exposes this metadata as `policy`; Harn must treat it as resource annotations.
@@ -538,7 +569,10 @@ pipeline main() {
   __io_println(contains(policy_metadata.transcript, "applied src/b.zig other"))
   // Burin's runtime policy stores path params directly on the policy dict,
   // not under `arg_schema`; this must still be keyed.
-  const burin_policy_metadata = run_scripted(same_file_failure_batch(), {tools: edit_tools("burin_policy")})
+  const burin_policy_metadata = run_scripted(
+    same_file_failure_batch(),
+    {tools: edit_tools("burin_policy")},
+  )
   __io_println(burin_policy_metadata.result.status)
   __io_println(contains(burin_policy_metadata.transcript, "skipped dependent `edit` call"))
   __io_println(!contains(burin_policy_metadata.transcript, "applied src/a.zig second"))
@@ -550,7 +584,9 @@ pipeline main() {
     {
       tools: edit_tools("none"),
       policy: {
-        tool_annotations: {edit: {kind: "edit", side_effect_level: "workspace_write", path_params: ["path"]}},
+        tool_annotations: {
+          edit: {kind: "edit", side_effect_level: "workspace_write", path_params: ["path"]},
+        },
       },
     },
   )
@@ -670,7 +706,10 @@ pipeline main() {
     "same-range edits must not become independent just because the edit action differs",
   )
   assert(
-    !contains(same_range_different_action.transcript, "applied src/a.zig different-action-same-range"),
+    !contains(
+      same_range_different_action.transcript,
+      "applied src/a.zig different-action-same-range",
+    ),
     "the later same-file same-range/different-action edit must not run after a mutating failure",
   )
   const same_alias_target = run_scripted(

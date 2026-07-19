@@ -151,7 +151,9 @@ pub fn agent_chat_wait_for_user_tools(registry = nil) {
       },
       returns: {type: "object"},
       annotations: {readOnlyHint: true, destructiveHint: false, idempotentHint: true},
-      handler: { args -> return {stop_reason: "wait_for_user", question: to_string(args?.question ?? "")} },
+      handler: { args ->
+        return {stop_reason: "wait_for_user", question: to_string(args?.question ?? "")}
+      },
     },
   )
 }
@@ -190,7 +192,12 @@ pub fn agent_chat_route_input(line, state = nil, handlers = nil) {
     return {kind: "exit", reason: "operator_exit", command: command, state: current}
   }
   if command == "/help" || command == "/?" {
-    return {kind: "handled", command: command, message: __chat_default_help(handlers), state: current}
+    return {
+      kind: "handled",
+      command: command,
+      message: __chat_default_help(handlers),
+      state: current,
+    }
   }
   const handler = if type_of(handlers) == "dict" {
     handlers[command]
@@ -233,7 +240,8 @@ fn __chat_normalize_user_decision(decision, state) {
   if type_of(decision) != "dict" {
     throw "agent_chat_loop: on_user_input must return a dict, string, or nil"
   }
-  const kind = decision?.kind ?? if decision?.message != nil {
+  const kind = decision?.kind
+    ?? if decision?.message != nil {
     "send"
   } else {
     "handled"

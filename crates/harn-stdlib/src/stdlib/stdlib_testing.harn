@@ -129,7 +129,9 @@ pub fn host_calls() {
  * @errors: []
  */
 pub fn host_calls_for(cap: string, op: string) {
-  return host_mock_calls().filter({ call -> return call?.capability == cap && call?.operation == op })
+  return host_mock_calls().filter(
+    { call -> return call?.capability == cap && call?.operation == op },
+  )
 }
 
 /**
@@ -297,6 +299,88 @@ fn __testing_is_callable(value) -> bool {
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
+pub type ScriptedArgvStep<T> = {argv: list<string>, result: T}
+
+pub type ScriptedArgv<T> = {
+  run: fn(list<string>) -> T,
+  calls: fn() -> list<list<string>>,
+  remaining: fn() -> list<list<string>>,
+  assert_consumed: fn() -> nil,
+}
+
+/**
+ * Build one typed `scripted_argv` step.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn argv_step<T>(argv: list<string>, result: T) -> ScriptedArgvStep<T> {
+  return {argv: argv, result: result}
+}
+
+fn __testing_argv_remaining<T>(
+  entries: list<ScriptedArgvStep<T>>,
+  cursor: int,
+) -> list<list<string>> {
+  let out = []
+  let index = cursor
+  while index < len(entries) {
+    const entry = entries[index]
+    if entry != nil {
+      out = out.push(entry.argv)
+    }
+    index = index + 1
+  }
+  return out
+}
+
+/**
+ * Build a strict in-process adapter for code that accepts an argv command
+ * runner. Entries are consumed in order. Every attempted argv is recorded;
+ * an out-of-order or extra command throws without consuming the expected
+ * entry. Call `assert_consumed()` after the behavior under test to reject
+ * missing commands.
+ *
+ * @effects: []
+ * @errors: [unexpected_command, unconsumed_commands]
+ * @example: const commands = scripted_argv<dict>([argv_step(["tool", "status"], {ok: true})])
+ */
+pub fn scripted_argv<T>(entries: list<ScriptedArgvStep<T>>) -> ScriptedArgv<T> {
+  let cursor = 0
+  let calls = []
+  return {
+    run: fn(argv) {
+      calls = calls.push(argv)
+      if cursor >= len(entries) {
+        throw "scripted_argv: unexpected command after script was consumed: " + to_string(argv)
+      }
+      const expected = entries[cursor]
+      if expected == nil {
+        throw "scripted_argv: internal cursor invariant failed"
+      }
+      if argv != expected.argv {
+        throw "scripted_argv: unexpected command "
+          + to_string(argv)
+          + "; expected "
+          + to_string(expected.argv)
+      }
+      cursor = cursor + 1
+      return expected.result
+    },
+    calls: fn() { return calls },
+    remaining: fn() { return __testing_argv_remaining(entries, cursor) },
+    assert_consumed: fn() {
+      const remaining = __testing_argv_remaining(entries, cursor)
+      require len(remaining) == 0,
+        "scripted_argv: expected every command to be consumed; remaining: "
+        + to_string(
+        remaining,
+      )
+      return nil
+    },
+  }
+}
+
 fn __testing_step_event_record(ctx) {
   let record = {
     event: ctx?.event,
@@ -351,7 +435,9 @@ fn __testing_golden_match(expected, actual) -> bool {
   if expected == "<ms>" {
     const kind = type_of(actual)
     return kind == "int" || kind == "float"
-      || (kind == "string" && len(regex_captures("^[0-9]+$", actual)) == 1)
+      || (kind == "string"
+      && len(regex_captures("^[0-9]+$", actual))
+      == 1)
   }
   if expected == "<uuid>" {
     return type_of(actual) == "string"
@@ -560,7 +646,9 @@ pub fn assert_steps_ran(expected_names, message = nil) {
     actual = actual.push(event.step_name)
   }
   for name in expected_names {
-    require contains(actual, name), (message ?? "step '") + name + "' not callable: not annotated `@step`"
+    require contains(actual, name),
+      (message ?? "step '") + name
+      + "' not callable: not annotated `@step`"
   }
   require actual == expected_names, message ?? "step order mismatch"
   return actual
@@ -634,8 +722,11 @@ pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
 pub fn assert_receipt_field(receipt, path: string, expected, message = nil) {
   const actual = json_pointer(receipt, path)
   const diff = value_diff(actual, expected)
-  require diff == nil, message
-    ?? ("assert_receipt_field: the receipt field " + path + " does not match.\n" + to_string(diff))
+  require diff == nil,
+    message
+    ?? ("assert_receipt_field: the receipt field " + path
+    + " does not match.\n"
+    + to_string(diff))
   return actual
 }
 
@@ -654,9 +745,12 @@ pub fn assert_receipt_field(receipt, path: string, expected, message = nil) {
  * @example: assert_golden_transcript(events, [{kind: "step", at: "<ms>"}])
  */
 pub fn assert_golden_transcript(actual, golden, message = nil) {
-  require __testing_golden_match(golden, actual), message
+  require __testing_golden_match(golden, actual),
+    message
     ?? ("assert_golden_transcript: the value does not match the golden.\n    golden    "
-    + to_string(golden)
+    + to_string(
+    golden,
+  )
     + "\n    actual    "
     + to_string(actual))
   return actual
@@ -817,9 +911,12 @@ pub fn assert_throws(body, message = nil) -> any {
 pub fn assert_error_contains(body, substring: string, message = nil) -> any {
   const captured = assert_throws(body, message)
   const rendered = to_string(captured)
-  require contains(rendered, substring), message
+  require contains(rendered, substring),
+    message
     ?? ("assert_error_contains: expected thrown error to contain "
-    + to_string(substring)
+    + to_string(
+    substring,
+  )
     + ", got: "
     + rendered)
   return captured
@@ -842,7 +939,12 @@ pub fn assert_no_throw(body, message = nil) -> any {
   try {
     value = body()
   } catch (e) {
-    require false, message ?? ("assert_no_throw: expected the body not to throw, but it threw: " + to_string(e))
+    require false,
+      message
+      ?? ("assert_no_throw: expected the body not to throw, but it threw: "
+      + to_string(
+      e,
+    ))
   }
   return value
 }
@@ -932,8 +1034,11 @@ pub fn assert_false(value: bool, message = nil) -> nil {
  * @example: assert_contains([1, 2, 3], 2)
  */
 pub fn assert_contains(haystack: string | list, needle: any, message = nil) -> any {
-  require contains(haystack, needle), message
-    ?? ("assert_contains: expected " + to_string(haystack) + " to contain " + to_string(needle))
+  require contains(haystack, needle),
+    message
+    ?? ("assert_contains: expected " + to_string(haystack)
+    + " to contain "
+    + to_string(needle))
   return haystack
 }
 
@@ -1169,15 +1274,24 @@ pub fn assert_snapshot(name: string, actual: string, options = nil) -> string {
     return actual
   }
   if !harness.fs.exists(path) {
-    require false, "snapshot '" + name + "' does not exist at " + path + __testing_snapshot_guidance("create it")
+    require false,
+      "snapshot '" + name + "' does not exist at " + path
+      + __testing_snapshot_guidance(
+      "create it",
+    )
     return actual
   }
   const golden = harness.fs.read_text(path)
   if golden == normalized {
     return actual
   }
-  const diff = unified_diff(golden, normalized, {from_label: "snapshot (" + name + ")", to_label: "actual"})
-  require false, "snapshot '"
+  const diff = unified_diff(
+    golden,
+    normalized,
+    {from_label: "snapshot (" + name + ")", to_label: "actual"},
+  )
+  require false,
+    "snapshot '"
     + name
     + "' mismatch at "
     + path

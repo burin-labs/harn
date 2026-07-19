@@ -14,9 +14,12 @@ fn delegated_tools() {
         )
         require !child?.ok, "nested sub-agent must fail closed"
         require child?.budget_exceeded, "nested sub-agent should report budget exhaustion"
-        require child.error?.category == "budget_exceeded", "nested sub-agent should classify the denial"
-        require contains(child.error?.message ?? "", "sub_agent_run"), "nested sub-agent denial should name the guarded descent"
-        require contains(json_stringify(child?.transcript ?? {}), "nested_execution_budget_denied"), "nested sub-agent transcript should record the denial"
+        require child.error?.category == "budget_exceeded",
+          "nested sub-agent should classify the denial"
+        require contains(child.error?.message ?? "", "sub_agent_run"),
+          "nested sub-agent denial should name the guarded descent"
+        require contains(json_stringify(child?.transcript ?? {}), "nested_execution_budget_denied"),
+          "nested sub-agent transcript should record the denial"
         return "denied"
       },
       parameters: {},
@@ -60,7 +63,12 @@ pipeline main() {
           edges: [],
         },
       )
-      const workflow = workflow_execute("Nested workflow stage should be rejected.", flow, [], {max_steps: 1})
+      const workflow = workflow_execute(
+        "Nested workflow stage should be rejected.",
+        flow,
+        [],
+        {max_steps: 1},
+      )
       const stage = workflow?.run?.stages[0]
       const artifact = stage?.artifacts[0]?.data
       __io_println(stage?.status == "failed")

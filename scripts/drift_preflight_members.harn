@@ -22,7 +22,10 @@ const REGISTRY = "scripts/generated_artifacts.toml"
 
 fn arg_spec() {
   return parser(
-    {name: "drift_preflight_members", args: [{kind: "flag", name: "tier", long: "--tier", default: ""}]},
+    {
+      name: "drift_preflight_members",
+      args: [{kind: "flag", name: "tier", long: "--tier", default: ""}],
+    },
   )
 }
 

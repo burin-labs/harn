@@ -232,7 +232,11 @@ pub fn llm_risk_classifier(opts) -> string {
   const cfg = __guardrails_validate_llm_config(opts ?? {})
   const scan_fn = { payload, context ->
     const payload_text = json_stringify(payload)
-    const envelope = llm_call_safe(payload_text, cfg.meta_prompt, __guardrails_classifier_options(cfg))
+    const envelope = llm_call_safe(
+      payload_text,
+      cfg.meta_prompt,
+      __guardrails_classifier_options(cfg),
+    )
     const raw_text = __guardrails_extract_text(envelope)
     const verdict = __guardrails_parse_verdict(raw_text)
     if len(to_string(verdict.error ?? "")) > 0 {

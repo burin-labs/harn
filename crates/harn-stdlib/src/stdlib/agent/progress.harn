@@ -3,7 +3,8 @@ import "std/schema"
 
 const __AGENT_PROGRESS_DEFAULT_TOOL_NAME = "agent_progress"
 
-const __AGENT_PROGRESS_DEFAULT_TOOL_DESCRIPTION = "Report concise task progress to the host without ending the turn."
+const __AGENT_PROGRESS_DEFAULT_TOOL_DESCRIPTION =
+  "Report concise task progress to the host without ending the turn."
 
 /**
  * Schema for one normalized task-list entry in a progress report.

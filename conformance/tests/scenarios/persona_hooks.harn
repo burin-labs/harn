@@ -38,7 +38,9 @@ fn admin_merge(ctx) -> string {
           session_id: "persona-hooks-composition",
         },
       )
-      const saw_tool_hook = json_stringify(transcript_messages(result?.transcript)).contains("permission_denied")
+      const saw_tool_hook = json_stringify(transcript_messages(result?.transcript)).contains(
+        "permission_denied",
+      )
       return "merge:" + ctx + ":" + to_string(saw_tool_hook)
     },
   )

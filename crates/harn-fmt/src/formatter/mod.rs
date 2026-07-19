@@ -141,7 +141,7 @@ impl<'a> Formatter<'a> {
                     indent_level,
                 ));
             }
-            let expr = self.format_expr_or_stmt(n, indent_level);
+            let expr = self.format_expr_or_stmt(n, indent_level, indent_level * 2);
             out.push_str(&indent_str);
             out.push_str(&expr);
             if let Some(trail) = self.take_trailing_comment_for_line(n.span.end_line) {
@@ -160,6 +160,26 @@ impl<'a> Formatter<'a> {
             out.push_str(&self.render_comments_in_range(range_start, end_line, indent_level));
         }
         out
+    }
+
+    pub(super) fn format_prefixed_value(
+        &self,
+        prefix: &str,
+        value: &str,
+        indent: usize,
+        column: usize,
+    ) -> String {
+        let first_value_line = value.lines().next().unwrap_or_default();
+        if column_after(column, prefix) + text_width(first_value_line) > self.line_width {
+            format!(
+                "{}\n{}{}",
+                prefix.trim_end(),
+                "  ".repeat(indent + 1),
+                value
+            )
+        } else {
+            format!("{prefix}{value}")
+        }
     }
 
     pub(super) fn format_block_expr(
@@ -207,12 +227,12 @@ impl<'a> Formatter<'a> {
     pub(super) fn format_comma_sequence(
         &self,
         rendered: Vec<String>,
-        prefix_len: usize,
+        prefix_col: usize,
         indent: usize,
     ) -> String {
         let inline = rendered.join(", ");
         let should_wrap = !rendered.is_empty()
-            && (inline.contains('\n') || prefix_len + inline.len() + 1 > self.line_width);
+            && (inline.contains('\n') || prefix_col + text_width(&inline) + 1 > self.line_width);
         if !should_wrap {
             return inline;
         }
@@ -237,7 +257,7 @@ impl<'a> Formatter<'a> {
     pub(super) fn format_comma_sequence_commented(
         &self,
         items: Vec<CommentedItem>,
-        prefix_len: usize,
+        prefix_col: usize,
         indent: usize,
     ) -> String {
         let has_comments = items
@@ -245,7 +265,7 @@ impl<'a> Formatter<'a> {
             .any(|item| !item.leading.is_empty() || item.trailing.is_some());
         if !has_comments {
             let rendered = items.into_iter().map(|item| item.body).collect();
-            return self.format_comma_sequence(rendered, prefix_len, indent);
+            return self.format_comma_sequence(rendered, prefix_col, indent);
         }
         let item_indent = "  ".repeat(indent + 1);
         let close_indent = "  ".repeat(indent);
@@ -303,19 +323,70 @@ impl<'a> Formatter<'a> {
     pub(super) fn format_typed_params_wrapped(
         &self,
         params: &[TypedParam],
-        prefix_len: usize,
+        prefix_col: usize,
         indent: usize,
     ) -> String {
-        self.format_comma_sequence(render_typed_params(params), prefix_len, indent)
+        let item_indent_col = 2 * (indent + 1);
+        let rendered = params
+            .iter()
+            .map(|param| {
+                let rest = if param.rest { "..." } else { "" };
+                let default = param
+                    .default_value
+                    .as_ref()
+                    .map(|value| format!(" = {}", format_inline_expr(value)))
+                    .unwrap_or_default();
+                let mut value = if let Some(type_expr) = &param.type_expr {
+                    let type_prefix_col =
+                        item_indent_col + text_width(rest) + text_width(&param.name) + 2;
+                    let type_expr = format_type_expr_wrapped_with_suffix(
+                        type_expr,
+                        indent + 1,
+                        type_prefix_col,
+                        self.line_width,
+                        text_width(&default) + 1,
+                    );
+                    format!("{rest}{}: {type_expr}", param.name)
+                } else {
+                    format!("{rest}{}", param.name)
+                };
+                value.push_str(&default);
+                value
+            })
+            .collect();
+        self.format_comma_sequence(rendered, prefix_col, indent)
+    }
+
+    pub(super) fn format_return_type(
+        &self,
+        return_type: &Option<harn_parser::TypeExpr>,
+        params_col: usize,
+        params: &str,
+        indent: usize,
+        trailing_width: usize,
+    ) -> String {
+        let Some(return_type) = return_type else {
+            return String::new();
+        };
+        let return_col = column_after(params_col, params) + 1 + text_width(" -> ");
+        format!(
+            " -> {}",
+            format_type_expr_wrapped(
+                return_type,
+                indent,
+                return_col + trailing_width,
+                self.line_width,
+            )
+        )
     }
 
     pub(super) fn format_string_list_wrapped(
         &self,
         items: &[String],
-        prefix_len: usize,
+        prefix_col: usize,
         indent: usize,
     ) -> String {
-        self.format_comma_sequence(items.to_vec(), prefix_len, indent)
+        self.format_comma_sequence(items.to_vec(), prefix_col, indent)
     }
 
     /// Whether a chained call moves onto its own line.
@@ -333,22 +404,18 @@ impl<'a> Formatter<'a> {
     ///
     /// `head_len` is the width of `.method(` (or `?.method(`).
     ///
-    /// The overflow test is a lower bound, not the true column: `last_line_width`
-    /// measures the expression fragment, and the formatter does not track what
-    /// precedes it on the line (`let x = `, `return `, …). So a head can still
-    /// overflow undetected. Widening that is a formatter-wide change — it needs
-    /// the current column threaded through `format_expr` — and is tracked
-    /// separately; counting the indent is strictly closer than counting nothing.
+    /// `column` is the absolute column at which the receiver starts, so the
+    /// decision accounts for prefixes such as `let x = ` and `return `.
     pub(super) fn chain_wraps(
         &self,
         obj: &str,
         lead: &str,
         head_len: usize,
-        indent: usize,
+        column: usize,
     ) -> bool {
         obj.contains('\n')
             || !lead.is_empty()
-            || indent * 2 + last_line_width(obj) + head_len > self.line_width
+            || column + last_line_width(obj) + head_len > self.line_width
     }
 
     /// Column the arguments of a chained call start at.
@@ -359,13 +426,14 @@ impl<'a> Formatter<'a> {
         &self,
         obj: &str,
         head_len: usize,
+        column: usize,
         indent: usize,
         wraps: bool,
     ) -> usize {
         if wraps {
             (indent + 1) * 2 + head_len
         } else {
-            indent * 2 + last_line_width(obj) + head_len
+            column + last_line_width(obj) + head_len
         }
     }
 
@@ -385,7 +453,7 @@ impl<'a> Formatter<'a> {
     pub(super) fn format_call_args(
         &self,
         args: &[SNode],
-        prefix_len: usize,
+        prefix_col: usize,
         indent: usize,
     ) -> String {
         // Each arg may itself wrap; if it does, it will land at `indent + 1`
@@ -393,9 +461,9 @@ impl<'a> Formatter<'a> {
         // aligned correctly.
         let rendered = args
             .iter()
-            .map(|arg| self.format_expr(arg, indent + 1))
+            .map(|arg| self.format_expr(arg, indent + 1, wrapped_item_column(indent)))
             .collect::<Vec<_>>();
-        self.format_comma_sequence(rendered, prefix_len, indent)
+        self.format_comma_sequence(rendered, prefix_col, indent)
     }
 
     /// Format selective import names, wrapping when they exceed `line_width`.
@@ -403,13 +471,14 @@ impl<'a> Formatter<'a> {
         &self,
         names: &[String],
         path: &str,
+        column: usize,
         indent: usize,
     ) -> String {
         let mut sorted_names = names.to_vec();
         sorted_names.sort();
         let inline = sorted_names.join(", ");
-        let prefix_len = indent * 2 + 9; // "import { "
-        let total = prefix_len + inline.len() + " } ".len() + 6 + path.len() + 1;
+        let prefix_col = column + 9; // "import { "
+        let total = prefix_col + text_width(&inline) + text_width(" } ") + 6 + text_width(path) + 1;
         if total > self.line_width {
             let item_indent = "  ".repeat(indent + 1);
             let close_indent = "  ".repeat(indent);
@@ -488,14 +557,14 @@ impl<'a> Formatter<'a> {
         return_type: &Option<harn_parser::TypeExpr>,
         throws: &Option<harn_parser::TypeExpr>,
         where_clauses: &[harn_parser::WhereClause],
+        column: usize,
         indent_level: usize,
     ) -> String {
         let generics = format_type_params(type_params);
-        let ret = if let Some(rt) = return_type {
-            format!(" -> {}", format_type_expr(rt))
-        } else {
-            String::new()
-        };
+        let ret_inline = return_type
+            .as_ref()
+            .map(|rt| format!(" -> {}", format_type_expr(rt)))
+            .unwrap_or_default();
         let throws_str = format_throws_clause(throws);
         let where_str = format_where_clauses(where_clauses);
         // The wrap decision must budget for the WHOLE line, not just what
@@ -505,11 +574,21 @@ impl<'a> Formatter<'a> {
         //
         // The closing `)` is NOT counted here — `format_comma_sequence` already
         // adds it. Counting it twice wraps a signature that fits exactly.
-        let suffix_len =
-            ret.len() + throws_str.len() + where_str.len() + SIGNATURE_BODY_BRACE_WIDTH;
-        let prefix_len =
-            indent_level * 2 + pub_prefix.len() + 3 + name.len() + generics.len() + 1 + suffix_len;
-        let params_str = self.format_typed_params_wrapped(params, prefix_len, indent_level);
+        let suffix_len = text_width(&ret_inline)
+            + text_width(&throws_str)
+            + text_width(&where_str)
+            + SIGNATURE_BODY_BRACE_WIDTH;
+        let params_col =
+            column + text_width(pub_prefix) + 3 + text_width(name) + text_width(&generics) + 1;
+        let prefix_col = params_col + suffix_len;
+        let params_str = self.format_typed_params_wrapped(params, prefix_col, indent_level);
+        let ret = self.format_return_type(
+            return_type,
+            params_col,
+            &params_str,
+            indent_level,
+            text_width(&throws_str) + text_width(&where_str) + SIGNATURE_BODY_BRACE_WIDTH,
+        );
         format!("{pub_prefix}fn {name}{generics}({params_str}){ret}{throws_str}{where_str}")
     }
 

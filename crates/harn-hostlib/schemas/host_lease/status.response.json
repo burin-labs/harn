@@ -8,6 +8,7 @@
     "schema_version": {"type": "integer", "minimum": 1},
     "host": {"type": "string", "minLength": 1},
     "resource_class": {"type": "string", "enum": ["whole-machine", "rust-heavy"]},
+    "domain": {"type": "string", "minLength": 1},
     "observed_at_ms": {"type": "integer"},
     "active": {
       "oneOf": [
@@ -15,15 +16,23 @@
         {"$ref": "#/$defs/Handle"}
       ]
     },
-    "recovered_stale_lease": {"type": "boolean"}
+    "recovered_stale_lease": {"type": "boolean"},
+    "recovered": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/Handle"}
+      ]
+    }
   },
   "required": [
     "schema_version",
     "host",
     "resource_class",
+    "domain",
     "observed_at_ms",
     "active",
-    "recovered_stale_lease"
+    "recovered_stale_lease",
+    "recovered"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -33,6 +42,7 @@
         "schema_version": {"type": "integer", "minimum": 1},
         "host": {"type": "string", "minLength": 1},
         "resource_class": {"type": "string", "enum": ["whole-machine", "rust-heavy"]},
+        "domain": {"type": "string", "minLength": 1},
         "lease_id": {"type": "string", "minLength": 1},
         "owner": {"type": "string", "minLength": 1},
         "priority_class": {
@@ -54,6 +64,7 @@
         "schema_version",
         "host",
         "resource_class",
+        "domain",
         "lease_id",
         "owner",
         "priority_class",

@@ -1,12 +1,4 @@
-fn record_elicit_event(harness: Harness, state_file: string, event) {
-  if state_file == "" {
-    return nil
-  }
-  harness.fs.append(state_file, json_stringify(event) + "\n")
-}
-
 pipeline default() {
-  const state_file = harness.env.get_or("HARN_MCP_ELICIT_STATE_FILE", "")
   mcp_server_metadata(
     {
       name: "harn-http-elicit-test",
@@ -22,7 +14,6 @@ pipeline default() {
     {
       parameters: {prompt: "string"},
       handler: { args ->
-        record_elicit_event(harness, state_file, {kind: "tool_call", name: "ask", arguments: args})
         const response = mcp_elicit(
           {
             message: args.prompt ?? "Choose environment",
@@ -33,7 +24,6 @@ pipeline default() {
             },
           },
         )
-        record_elicit_event(harness, state_file, {kind: "elicit_response", response: response})
         const content = response.content ?? {}
         return to_string(response.action ?? "") + ":" + to_string(content.env ?? "") + ":"
           + to_string(content.confirm ?? "")

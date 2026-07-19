@@ -95,7 +95,11 @@ fn __pii_patterns() -> list {
     {type: "PHONE", regex: "\\+[1-9]\\d{6,14}"},
     {type: "PHONE", regex: "\\(?\\d{3}\\)?[-.\\s]\\d{3}[-.\\s]\\d{4}"},
     {type: "US_SSN", regex: "\\b\\d{3}-\\d{2}-\\d{4}\\b"},
-    {type: "CREDIT_CARD", regex: "\\b(?:\\d[ -]?){12,18}\\d\\b", validate: { m -> __pii_luhn_valid(m) }},
+    {
+      type: "CREDIT_CARD",
+      regex: "\\b(?:\\d[ -]?){12,18}\\d\\b",
+      validate: { m -> __pii_luhn_valid(m) },
+    },
     {
       type: "IBAN",
       regex: "\\b[A-Z]{2}\\d{2}(?:\\s?[A-Z0-9]){11,30}\\b",
@@ -112,7 +116,8 @@ fn __pii_patterns() -> list {
 // Comprehensive IPv6 matcher covering full and `::`-compressed forms. Kept as a
 // named constant because the alternation is long; sourced from the widely-used
 // reference pattern.
-const __PII_IPV6_REGEX = "(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,7}:|(?:[A-Fa-f0-9]{1,4}:){1,6}:[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,5}(?::[A-Fa-f0-9]{1,4}){1,2}|(?:[A-Fa-f0-9]{1,4}:){1,4}(?::[A-Fa-f0-9]{1,4}){1,3}|(?:[A-Fa-f0-9]{1,4}:){1,3}(?::[A-Fa-f0-9]{1,4}){1,4}|(?:[A-Fa-f0-9]{1,4}:){1,2}(?::[A-Fa-f0-9]{1,4}){1,5}|[A-Fa-f0-9]{1,4}:(?::[A-Fa-f0-9]{1,4}){1,6}|:(?:(?::[A-Fa-f0-9]{1,4}){1,7}|:)"
+const __PII_IPV6_REGEX =
+  "(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,7}:|(?:[A-Fa-f0-9]{1,4}:){1,6}:[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,5}(?::[A-Fa-f0-9]{1,4}){1,2}|(?:[A-Fa-f0-9]{1,4}:){1,4}(?::[A-Fa-f0-9]{1,4}){1,3}|(?:[A-Fa-f0-9]{1,4}:){1,3}(?::[A-Fa-f0-9]{1,4}){1,4}|(?:[A-Fa-f0-9]{1,4}:){1,2}(?::[A-Fa-f0-9]{1,4}){1,5}|[A-Fa-f0-9]{1,4}:(?::[A-Fa-f0-9]{1,4}){1,6}|:(?:(?::[A-Fa-f0-9]{1,4}){1,7}|:)"
 
 /**
  * Return the PII entity types this engine detects.
@@ -176,7 +181,9 @@ pub fn pii_detect(text, options = nil) -> list {
           pattern.validate(value) ? true : false
         }
         if accepted {
-          found = found.push({type: pattern.type, value: value, start: capture.start, end: capture.end})
+          found = found.push(
+            {type: pattern.type, value: value, start: capture.start, end: capture.end},
+          )
         }
       }
     }

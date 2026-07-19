@@ -204,10 +204,20 @@ fn inspect_qa(task_dir: string, input_findings: list, print_lines: bool) -> dict
     const question = trim(string_value(entry?.question))
     const answer_present = entry?.answer != nil
     if question == "" {
-      findings = record(findings, "FAIL", "qa.jsonl entry " + to_string(index) + " missing question", print_lines)
+      findings = record(
+        findings,
+        "FAIL",
+        "qa.jsonl entry " + to_string(index) + " missing question",
+        print_lines,
+      )
     }
     if !answer_present {
-      findings = record(findings, "FAIL", "qa.jsonl entry " + to_string(index) + " missing answer", print_lines)
+      findings = record(
+        findings,
+        "FAIL",
+        "qa.jsonl entry " + to_string(index) + " missing answer",
+        print_lines,
+      )
     }
     const answered_at = string_value(entry?.answered_at)
     if answered_at != "" && last_answered_at != "" && answered_at < last_answered_at {
@@ -222,7 +232,12 @@ fn inspect_qa(task_dir: string, input_findings: list, print_lines: bool) -> dict
       last_answered_at = answered_at
     }
   }
-  findings = record(findings, "OK", "qa.jsonl loaded " + to_string(len(qa)) + " entries", print_lines)
+  findings = record(
+    findings,
+    "OK",
+    "qa.jsonl loaded " + to_string(len(qa)) + " entries",
+    print_lines,
+  )
   return {findings: findings, qa: qa}
 }
 
@@ -256,7 +271,12 @@ fn inspect_terminal_state(task_dir: string, input_findings: list, print_lines: b
         }
       }
       if len(missing) > 0 {
-        findings = record(findings, "FAIL", "plan.json missing keys: " + join(missing, ", "), print_lines)
+        findings = record(
+          findings,
+          "FAIL",
+          "plan.json missing keys: " + join(missing, ", "),
+          print_lines,
+        )
       } else {
         findings = record(findings, "OK", "plan.json has required plan keys", print_lines)
       }
@@ -300,7 +320,12 @@ fn inspect_llm_mock(task_dir: string, input_findings: list, print_lines: bool) -
     if prompt != "" {
       const marker_count = len(split(prompt, "## Question-at-a-time planner")) - 1
       if marker_count == 1 {
-        findings = record(findings, "OK", "llm-mock call " + to_string(index) + " has one system prompt", print_lines)
+        findings = record(
+          findings,
+          "OK",
+          "llm-mock call " + to_string(index) + " has one system prompt",
+          print_lines,
+        )
       } else if marker_count == 0 {
         findings = record(
           findings,
@@ -329,7 +354,10 @@ fn inspect_llm_mock(task_dir: string, input_findings: list, print_lines: bool) -
         findings,
         "FAIL",
         "llm-mock call " + to_string(index) + " has multiple terminal tools: "
-          + join(terminal_names, ", "),
+          + join(
+          terminal_names,
+          ", ",
+        ),
         print_lines,
       )
     }
@@ -337,7 +365,12 @@ fn inspect_llm_mock(task_dir: string, input_findings: list, print_lines: bool) -
       findings = record(findings, "FAIL", "last assistant message has no tool_call", print_lines)
     }
   }
-  return record(findings, "OK", "llm-mock.jsonl loaded " + to_string(len(rows)) + " calls", print_lines)
+  return record(
+    findings,
+    "OK",
+    "llm-mock.jsonl loaded " + to_string(len(rows)) + " calls",
+    print_lines,
+  )
 }
 
 fn inspect_step_transcript(task_dir: string, input_findings: list, print_lines: bool) -> list {
@@ -377,7 +410,12 @@ fn inspect_step_transcript(task_dir: string, input_findings: list, print_lines: 
     )
   }
   if len(terminal) == 1 {
-    return record(findings, "OK", "step transcript terminal tool is " + (terminal[0] ?? ""), print_lines)
+    return record(
+      findings,
+      "OK",
+      "step transcript terminal tool is " + (terminal[0] ?? ""),
+      print_lines,
+    )
   }
   return record(findings, "WARN", "step transcript has no terminal tool", print_lines)
 }
@@ -395,7 +433,12 @@ fn inspect_last_prompt(
   }
   const body = harness.fs.read_text(path) ?? ""
   if body.contains("- Q: \n") || body.contains("  A: \n") {
-    findings = record(findings, "FAIL", "last-prompt.txt contains an empty Q/A interpolation", print_lines)
+    findings = record(
+      findings,
+      "FAIL",
+      "last-prompt.txt contains an empty Q/A interpolation",
+      print_lines,
+    )
   }
   let missing: list<string> = []
   for entry in qa {

@@ -2,6 +2,7 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -135,7 +136,33 @@ pub struct PackageSnapshot {
     _lease: File,
 }
 
+/// Generation leases retained by lazy path resolution.
+///
+/// A bare `PathBuf` cannot carry the lease that makes a path beneath a package
+/// generation valid. Lazy resolution therefore promotes a selected snapshot
+/// to this process-lifetime registry before returning such a path. Harn CLI
+/// processes are command-scoped, so this is also the command lifetime; long-
+/// lived processes retain every generation whose paths they may have cached.
+static PROCESS_PACKAGE_SNAPSHOTS: OnceLock<Mutex<Vec<PackageSnapshot>>> = OnceLock::new();
+
 impl PackageSnapshot {
+    /// Retain this generation for the rest of the process.
+    ///
+    /// Repeated resolution against the same project generation reuses the
+    /// existing lease instead of consuming another file descriptor.
+    pub(crate) fn retain_for_process(self) {
+        let snapshots = PROCESS_PACKAGE_SNAPSHOTS.get_or_init(|| Mutex::new(Vec::new()));
+        let mut snapshots = snapshots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if snapshots.iter().any(|snapshot| {
+            snapshot.project_root == self.project_root && snapshot.generation == self.generation
+        }) {
+            return;
+        }
+        snapshots.push(self);
+    }
+
     /// Duplicate this snapshot while retaining the same generation lease.
     pub fn retained_clone(&self) -> Result<Self, PackageSnapshotError> {
         Ok(Self {

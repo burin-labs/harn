@@ -103,7 +103,10 @@ pipeline test_review_captain_preset_carries_overlay_policy_pack(task) {
   const pack = opts?.overlay_policy
   assert(pack != nil, "review_captain preset ships an overlay_policy pack row")
   const fragment = overlay_context_fragment(pack.rows, pack.mode)
-  assert(contains(fragment.body, "Batch related read-only"), "pack row renders the agent-mode nudge")
+  assert(
+    contains(fragment.body, "Batch related read-only"),
+    "pack row renders the agent-mode nudge",
+  )
 }
 
 pipeline test_explicit_preset_overlay_policy_wins_over_pack_default(task) {

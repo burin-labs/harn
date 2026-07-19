@@ -17,7 +17,10 @@ pipeline test(task) {
     websocket_connect(server.url + "/secure", {timeout_ms: ws_timeout_ms})
   }
   assert(is_err(unauthorized), "bearer route rejects missing auth")
-  const secure_client = websocket_connect(server.url + "/secure", {timeout_ms: ws_timeout_ms, auth: {bearer: "secret"}})
+  const secure_client = websocket_connect(
+    server.url + "/secure",
+    {timeout_ms: ws_timeout_ms, auth: {bearer: "secret"}},
+  )
   const secure_server = websocket_accept(server, ws_timeout_ms) ?? {}
   assert_eq(secure_server.path, "/secure")
   assert(websocket_close(secure_client))
@@ -55,7 +58,10 @@ pipeline test(task) {
   }
   assert(is_err(limited), "server max_message_bytes rejects large frames")
   assert(websocket_close(limited_client))
-  const backpressure_client = websocket_connect(server.url + "/backpressure", {timeout_ms: ws_timeout_ms})
+  const backpressure_client = websocket_connect(
+    server.url + "/backpressure",
+    {timeout_ms: ws_timeout_ms},
+  )
   const backpressure_conn = websocket_accept(server, ws_timeout_ms) ?? {}
   const saturated = try {
     websocket_send(backpressure_conn, "blocked", {})

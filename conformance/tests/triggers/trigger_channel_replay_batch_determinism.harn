@@ -22,9 +22,13 @@ fn handle_batch(event) {
 }
 
 pipeline default() {
-  const audit = event_log.subscribe({topic: "lifecycle.channel.audit", kind_prefix: "channel_emit_receipt"})
+  const audit = event_log.subscribe(
+    {topic: "lifecycle.channel.audit", kind_prefix: "channel_emit_receipt"},
+  )
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const _ = trigger_register(
     {
       id: "channel-replay-batch-" + unique,

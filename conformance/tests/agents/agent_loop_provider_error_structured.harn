@@ -24,12 +24,16 @@ pipeline main() {
       {
         error: {
           category: "generic",
-          message: "ollama HTTP 400 [invalid_request]: Value looks like object, but can't find closing '}' symbol",
+          message:
+            "ollama HTTP 400 [invalid_request]: Value looks like object, but can't find closing '}' symbol",
         },
       },
     ],
     { ->
-      const transcript_dir = path_join(harness.fs.temp_dir(), "harn-agent-loop-provider-error-" + uuid())
+      const transcript_dir = path_join(
+        harness.fs.temp_dir(),
+        "harn-agent-loop-provider-error-" + uuid(),
+      )
       const opts: AgentLoopOptions = {
         provider: "mock",
         model: "qwen-local",

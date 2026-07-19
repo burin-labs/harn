@@ -28,7 +28,11 @@ pipeline test(task) {
     description "Review existing code for correctness"
     when_to_use "User asks to review/audit"
   }
-  const registry = skill_define(draft, "review_skill", skill_find(review_skill, "review_skill") ?? {})
+  const registry = skill_define(
+    draft,
+    "review_skill",
+    skill_find(review_skill, "review_skill") ?? {},
+  )
   // Turn 0: a tool call forces post_turn_callback to fire, giving
   // us a hook to inject a runtime user message that pivots intent.
   with_llm_script(

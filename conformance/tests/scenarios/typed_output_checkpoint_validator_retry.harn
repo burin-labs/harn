@@ -28,7 +28,12 @@ pipeline default() {
           "merge_captain.next_action",
           "Choose the next Merge Captain action.",
           schema,
-          {provider: "mock", session_id: session_id, validator_retries: 1, repair: {enabled: false}},
+          {
+            provider: "mock",
+            session_id: session_id,
+            validator_retries: 1,
+            repair: {enabled: false},
+          },
           fn(data) {
             let errors = []
             if data.confidence < 0.7 {
@@ -48,7 +53,9 @@ pipeline default() {
       __io_println(checkpoint.checkpoint_attempts)
       __io_println(checkpoint.extracted_json)
       __io_println(len(checkpoint.validator_failures))
-      __io_println(contains(llm_mock_calls()[1].messages[0].content, "confidence must be at least 0.7"))
+      __io_println(
+        contains(llm_mock_calls()[1].messages[0].content, "confidence must be at least 0.7"),
+      )
       __io_println(captured.events[0].type)
       __io_println(captured.events[0].checkpoint.final_accepted)
       const trace = agent_trace()

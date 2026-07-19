@@ -471,7 +471,13 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
   if verdict.kind == "error" {
     tool_hooks_emit_audit(
       "tool_hook_classifier_verdict",
-      __classifier_audit_payload(classifier_cfg, original_command, verdict, cache_hit, "passthrough"),
+      __classifier_audit_payload(
+        classifier_cfg,
+        original_command,
+        verdict,
+        cache_hit,
+        "passthrough",
+      ),
     )
     return __preset_no_match(args, inner)
   }
@@ -480,7 +486,13 @@ fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
   if verdict.kind == "allow" || verdict.confidence < classifier_cfg.threshold {
     tool_hooks_emit_audit(
       "tool_hook_classifier_verdict",
-      __classifier_audit_payload(classifier_cfg, original_command, verdict, cache_hit, "passthrough"),
+      __classifier_audit_payload(
+        classifier_cfg,
+        original_command,
+        verdict,
+        cache_hit,
+        "passthrough",
+      ),
     )
     return __preset_no_match(args, inner)
   }

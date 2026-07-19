@@ -4,8 +4,16 @@ pipeline default() {
   const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
   const config = {
     identities: {
-      "user:kenneth": {name: "Kenneth Sinder", email: "kenneth@example.com", github: "kennethsinder"},
-      "agent:merge-captain": {name: "Merge Captain", email: "merge-captain@bots.example", github: "merge-captain-bot"},
+      "user:kenneth": {
+        name: "Kenneth Sinder",
+        email: "kenneth@example.com",
+        github: "kennethsinder",
+      },
+      "agent:merge-captain": {
+        name: "Merge Captain",
+        email: "merge-captain@bots.example",
+        github: "merge-captain-bot",
+      },
     },
   }
   const options = {project: false, env: false, config: config}

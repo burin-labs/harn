@@ -18,7 +18,11 @@ pipeline default() {
       harness.handoff_to("nightly-drain", {note: "two"})
       harness.handoff_to("nightly-drain", {note: "three"})
       const snapshot = harness.unsettled_state()
-      const result = harness.spawn_settlement_agent(snapshot, return_value, {drain_budget_iterations: 1})
+      const result = harness.spawn_settlement_agent(
+        snapshot,
+        return_value,
+        {drain_budget_iterations: 1},
+      )
       const audits = lifecycle_audit_log_take()
       harness.stdio.println("status=" + result.status)
       harness.stdio.println("iterations=" + to_string(result.iterations))

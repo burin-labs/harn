@@ -27,8 +27,18 @@ pipeline test_pin_default_taxonomy_unchanged(task) {
 pipeline test_pin_accepts_registered_kinds(task) {
   // A caller taxonomy (burin's structural working-set kinds) is accepted for a
   // pin() call via register_kinds instead of throwing.
-  const kinds = ["guardrails", "task_contract", "file_view", "remaining_failures", "verification_hud"]
-  const p = pin("guardrails", "Never delete AGENTS.md.", {register_kinds: kinds, role_hint: "system"})
+  const kinds = [
+    "guardrails",
+    "task_contract",
+    "file_view",
+    "remaining_failures",
+    "verification_hud",
+  ]
+  const p = pin(
+    "guardrails",
+    "Never delete AGENTS.md.",
+    {register_kinds: kinds, role_hint: "system"},
+  )
   assert_eq(p.kind, "guardrails")
   assert_eq(p.role_hint, "system")
   // An unregistered kind is still rejected even when a taxonomy is supplied.
@@ -63,7 +73,10 @@ pipeline test_pin_reminder_default_shape_unchanged(task) {
 
 pipeline test_pin_reminder_opts_apply(task) {
   const p = pin("goal", "0123456789ABCDEF", {dedupe_key: "pin/goal"})
-  const r = pin_reminder(p, {max_body: 8, propagate: "session", tag_namespace: "burin_structural_working_set"})
+  const r = pin_reminder(
+    p,
+    {max_body: 8, propagate: "session", tag_namespace: "burin_structural_working_set"},
+  )
   assert_eq(r.propagate, "session")
   assert_eq(r.tags, ["burin_structural_working_set", "pin", "goal"])
   assert(r.body.contains("[pin reminder truncated]"), "over-long body clamped with marker")
@@ -87,7 +100,10 @@ pipeline test_pin_compaction_policy_default_unchanged(task) {
   const policy = pin_compaction_policy(pins)
   assert_eq(policy.mode, "pins")
   assert_eq(policy.author, "pins")
-  assert(contains(policy.preserve, "Preserve the pinned goal: Ship the migration"), "goal preserved")
+  assert(
+    contains(policy.preserve, "Preserve the pinned goal: Ship the migration"),
+    "goal preserved",
+  )
   assert(
     contains(policy.preserve, "Preserve the pinned constraint: No new deps"),
     "constraint preserved",

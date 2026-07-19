@@ -22,13 +22,16 @@ fn __composition_mcp_tool(entry) {
     return false
   }
   if entry?.executor == "mcp_server" || entry?._mcp_server != nil || entry?.mcp_server != nil
-    || entry?._mcp_tool_name != nil {
+    || entry
+    ?._mcp_tool_name
+    != nil {
     return true
   }
   const function = entry?.function
   if type_of(function) == "dict" {
     return function?.executor == "mcp_server" || function?._mcp_server != nil
-      || function?.mcp_server != nil
+      || function?.mcp_server
+      != nil
       || function?._mcp_tool_name != nil
   }
   return false
@@ -107,7 +110,8 @@ fn __composition_dispatch_value(result, name) {
   if result?.ok ?? false {
     return result?.result
   }
-  throw result?.error ?? result?.rendered_result ?? ("composition_mcp_execute: tool failed: " + name)
+  throw result?.error ?? result?.rendered_result
+    ?? ("composition_mcp_execute: tool failed: " + name)
 }
 
 fn __composition_mcp_reduced_result(report, opts) {
@@ -189,13 +193,21 @@ pub fn composition_mcp_execute(snippet, tools = nil, options = nil) {
   const opts = options ?? {}
   const source_tools = opts?.tools ?? tools
   const registry = __composition_mcp_registry(source_tools)
-  const manifest = opts?.manifest ?? composition_binding_manifest(registry, opts?.manifest_options ?? opts)
+  const manifest = opts?.manifest
+    ?? composition_binding_manifest(
+    registry,
+    opts?.manifest_options ?? opts,
+  )
   const dispatch_opts = opts?.dispatch_options ?? opts
   const dispatch = { name, input ->
     let result = agent_dispatch_tool_call({name: name, arguments: input}, registry, dispatch_opts)
     return __composition_dispatch_value(result, name)
   }
-  const report = composition_execute(snippet, manifest, __composition_execute_options(opts, dispatch))
+  const report = composition_execute(
+    snippet,
+    manifest,
+    __composition_execute_options(opts, dispatch),
+  )
   return __composition_mcp_reduced_result(report, opts)
 }
 
@@ -213,10 +225,15 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
     "harn.code.search_examples",
     "Search curated examples for governed composition snippets",
     {
-      parameters: {query: {type: "string", required: false}, limit: {type: "integer", required: false}},
+      parameters: {
+        query: {type: "string", required: false},
+        limit: {type: "integer", required: false},
+      },
       returns: {type: "array"},
       annotations: {kind: "search", side_effect_level: "read_only", inline_result: true},
-      handler: { args -> return composition_search_examples(args?.query ?? "", args?.limit ?? opts?.limit ?? 10) },
+      handler: { args ->
+        return composition_search_examples(args?.query ?? "", args?.limit ?? opts?.limit ?? 10)
+      },
     },
   )
   tools = tool_define(
@@ -273,7 +290,11 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
       handler: { args ->
         const call_args = args ?? {}
         if call_args?.tools != nil || opts?.tools != nil {
-          return composition_mcp_execute(call_args.snippet, call_args?.tools ?? opts?.tools, opts + call_args)
+          return composition_mcp_execute(
+            call_args.snippet,
+            call_args?.tools ?? opts?.tools,
+            opts + call_args,
+          )
         }
         return composition_execute(call_args.snippet, call_args.manifest, opts + call_args)
       },

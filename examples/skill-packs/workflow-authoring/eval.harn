@@ -32,7 +32,12 @@ pipeline default() {
   if opts.provider == "fake" {
     bundle_text = golden_text
   } else {
-    const opts_dict = {provider: opts.provider, model: opts.model, temperature: 0.0, max_tokens: 4000}
+    const opts_dict = {
+      provider: opts.provider,
+      model: opts.model,
+      temperature: 0.0,
+      max_tokens: 4000,
+    }
     const response = llm_call(case.user_prompt, case.system_prompt, opts_dict)
     bundle_text = extract_block(response.text, "bundle")
     if bundle_text == "" {
@@ -156,7 +161,9 @@ fn check_scalar_fields(bundle: dict, want: dict) -> list<string> {
     out = out + ["policy.catchup.mode != " + want.catchup_mode]
   }
   if contains(want_keys, "required_worktree_policy")
-    && bundle.environment.worktree_policy != want.required_worktree_policy {
+    && bundle.environment.worktree_policy
+    != want
+    .required_worktree_policy {
     out = out + ["environment.worktree_policy != " + want.required_worktree_policy]
   }
   return out
@@ -167,7 +174,11 @@ fn check_collection_fields(bundle: dict, want: dict) -> list<string> {
   let out = []
   if contains(want_keys, "required_node_ids") {
     out = out
-      + missing_members(want.required_node_ids, keys(bundle.workflow.nodes), "workflow.nodes missing ")
+      + missing_members(
+      want.required_node_ids,
+      keys(bundle.workflow.nodes),
+      "workflow.nodes missing ",
+    )
   }
   if contains(want_keys, "required_trigger_kinds") {
     out = out

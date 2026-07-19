@@ -60,7 +60,14 @@ pub fn workspace_packages_from_metadata(meta: dict, root: string) -> list<Worksp
 fn load_workspace_packages(root: string) -> list<WorkspacePackage> {
   const raw = command_stdout(
     "cargo",
-    ["metadata", "--no-deps", "--format-version", "1", "--manifest-path", path_join(root, "Cargo.toml")],
+    [
+      "metadata",
+      "--no-deps",
+      "--format-version",
+      "1",
+      "--manifest-path",
+      path_join(root, "Cargo.toml"),
+    ],
   )
   return workspace_packages_from_metadata(json_parse(raw), root)
 }
@@ -146,7 +153,14 @@ fn arg_spec() {
       name: "nextest_filters_from_paths",
       args: [
         {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
-        {kind: "positional", name: "paths", parse: "string", required: false, variadic: true, default: []},
+        {
+          kind: "positional",
+          name: "paths",
+          parse: "string",
+          required: false,
+          variadic: true,
+          default: [],
+        },
       ],
     },
   )

@@ -368,9 +368,9 @@ pub fn summarize_hook_timing_worktrees(events: list<HookTimingEvent>) -> list<Ho
 }
 
 fn observation_window(events: list<HookTimingEvent>) -> string {
-  const timestamps = events.filter({ event -> event.ts != nil }).map({ event -> event.ts ?? "" }).to_list().sort_by(
-    { value -> value },
-  )
+  const timestamps = events.filter({ event -> event.ts != nil }).map({ event -> event.ts ?? "" })
+    .to_list()
+    .sort_by({ value -> value })
   if timestamps.count == 0 {
     return "unknown"
   }
@@ -378,15 +378,21 @@ fn observation_window(events: list<HookTimingEvent>) -> string {
 }
 
 pub fn derive_hook_timing_budgets(events: list<HookTimingEvent>) -> HookTimingBudgetReport {
-  const successful = events.filter({ event -> (event.exit_code ?? 0) == 0 && event.profile != "legacy" }).to_list()
+  const successful = events.filter(
+    { event -> (event.exit_code ?? 0) == 0 && event.profile != "legacy" },
+  )
+    .to_list()
   let limits: dict<string, HookTimingBudget> = {}
   for group in summarize_hook_timings(successful) {
     if group.count < 4 {
       continue
     }
     const samples = successful.filter(
-      { event -> event.repository == group.repository && event.profile == group.profile
-        && event.hook == group.hook },
+      { event ->
+        event.repository == group.repository && event.profile == group.profile
+          && event.hook
+          == group.hook
+      },
     )
       .to_list()
     const surface = "hook/" + group.repository + "/" + group.profile + "/" + group.hook
@@ -442,7 +448,9 @@ pub fn filter_hook_timings(
 
 fn render_group(group: HookTimingGroup) -> string {
   return "- " + group.repository + " " + group.profile + " " + group.hook + ": total="
-    + to_string(group.total_ms)
+    + to_string(
+    group.total_ms,
+  )
     + "ms"
     + " count="
     + to_string(group.count)
@@ -461,7 +469,8 @@ fn render_group(group: HookTimingGroup) -> string {
 }
 
 fn render_phase_group(group: HookTimingPhaseGroup) -> string {
-  return "- " + group.repository + " " + group.profile + " " + group.hook + "/" + group.phase + ": total="
+  return "- " + group.repository + " " + group.profile + " " + group.hook + "/" + group.phase
+    + ": total="
     + to_string(group.total_ms)
     + "ms count="
     + to_string(group.count)
@@ -475,7 +484,9 @@ fn render_phase_group(group: HookTimingPhaseGroup) -> string {
 }
 
 fn render_worktree_group(group: HookTimingGroup) -> string {
-  return "- " + group.repository + " " + (group.repo ?? "unknown") + " " + group.profile + " " + group.hook
+  return "- " + group.repository + " " + (group.repo ?? "unknown") + " " + group.profile + " "
+    + group
+    .hook
     + ": total="
     + to_string(group.total_ms)
     + "ms count="
@@ -490,7 +501,9 @@ fn render_worktree_group(group: HookTimingGroup) -> string {
 
 fn render_event(event: HookTimingEvent) -> string {
   let line = "- " + event.repository + " " + event.profile + " " + event.hook + ": "
-    + to_string(event.duration_ms)
+    + to_string(
+    event.duration_ms,
+  )
     + "ms"
   if event.exit_code != nil {
     line = line + " exit=" + to_string(event.exit_code)

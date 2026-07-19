@@ -35,7 +35,10 @@ pipeline test(task) {
     token_type: "Bearer",
   }
   store.set("mockExpiredRefresh", stored)
-  const cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
+  const cli = client(
+    provider,
+    {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store},
+  )
   http_mock_clear()
   http_mock(
     "POST",
@@ -67,7 +70,11 @@ pipeline test(task) {
   // owns the (now-useless) previous credential and can re-run
   // authorization without losing scope/expiry metadata for audit.
   const after = store.get("mockExpiredRefresh")
-  assert_eq(after.access_token, "ACCESS-STALE", "storage access token unchanged after failed refresh")
+  assert_eq(
+    after.access_token,
+    "ACCESS-STALE",
+    "storage access token unchanged after failed refresh",
+  )
   assert_eq(
     after.refresh_token,
     "REFRESH-DEAD",

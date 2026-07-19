@@ -6,7 +6,9 @@
 //! wrapping args at the wrong depth, and measuring a prefix instead of a line.
 
 use super::assert_roundtrip;
-use crate::{format_source, format_source_opts, FmtOptions, LINE_WIDTH_DEFAULT};
+use crate::{
+    format_source, format_source_opts, line_width_violations, FmtOptions, LINE_WIDTH_DEFAULT,
+};
 
 fn formatted(source: &str) -> String {
     format_source(source).unwrap()
@@ -21,6 +23,86 @@ fn assert_within_line_width(source: &str) {
             LINE_WIDTH_DEFAULT,
             line.chars().count(),
         );
+    }
+}
+
+#[test]
+fn formatted_repository_corpus_has_no_breakable_width_overflow() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("harn-fmt lives two levels below the repository root");
+    let roots = [
+        "crates/harn-stdlib/src/stdlib",
+        "conformance/tests",
+        "experiments",
+        "scripts",
+        "crates/harn-cli/assets/demo",
+        "personas",
+        "tests",
+        "examples",
+        "evals",
+    ];
+    let skipped = [
+        "semicolon_statements.harn",
+        "semicolon_if_else_invalid.harn",
+        "semicolon_try_catch_invalid.harn",
+        "semicolon_empty_statement_invalid.harn",
+        "import_broken_module_lib.harn",
+    ];
+
+    let mut files = Vec::new();
+    for root in roots {
+        collect_harn_files(&repo_root.join(root), &skipped, &mut files);
+    }
+    files.sort();
+
+    for path in files {
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        let formatted = format_source(&source)
+            .unwrap_or_else(|error| panic!("failed to format {}: {error}", path.display()));
+        let reformatted = format_source(&formatted).unwrap_or_else(|error| {
+            panic!("formatted {} is not parseable: {error}", path.display())
+        });
+        assert_eq!(
+            reformatted,
+            formatted,
+            "formatted {} is not idempotent",
+            path.display()
+        );
+        let violations = line_width_violations(&formatted, LINE_WIDTH_DEFAULT);
+        assert!(
+            violations.is_empty(),
+            "{} has breakable width overflow: {:?}",
+            path.display(),
+            violations
+        );
+    }
+}
+
+fn collect_harn_files(
+    root: &std::path::Path,
+    skipped: &[&str],
+    files: &mut Vec<std::path::PathBuf>,
+) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_harn_files(&path, skipped, files);
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "harn")
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_none_or(|name| !skipped.contains(&name))
+        {
+            files.push(path);
+        }
     }
 }
 
@@ -143,6 +225,17 @@ fn signature_that_fits_exactly_is_not_wrapped() {
 }
 
 #[test]
+fn deep_plus_chains_format_without_recursive_stack_growth() {
+    let terms = (0..80)
+        .map(|index| format!("part_{index}"))
+        .collect::<Vec<_>>();
+    let source = format!("fn t() {{\n  return {}\n}}\n", terms.join(" + "));
+    let out = formatted(&source);
+    assert_within_line_width(&out);
+    assert_roundtrip(&source);
+}
+
+#[test]
 fn signature_one_column_over_does_wrap() {
     let source =
         "fn __verification_gate_classification(value, current_hashes: dict, hashes_available: booly) -> dict {\n  return {}\n}\n";
@@ -157,6 +250,21 @@ fn signature_one_column_over_does_wrap() {
 #[test]
 fn signature_without_return_type_still_respects_width() {
     let source = "pub fn configure_the_ratchet(counts: dict, baseline: CountBaseline, vocabulary: RatchetVocabulary) {\n  log(\"x\")\n}\n";
+    assert_within_line_width(source);
+}
+
+#[test]
+fn expression_prefix_counts_toward_line_width() {
+    assert_within_line_width(
+        "fn t() {\n  let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(arg_one, arg_two, arg_three)?.map(item)\n}\n",
+    );
+}
+
+#[test]
+fn require_messages_wrap_after_the_condition() {
+    let source = "fn t() {\n  require true, \"this diagnostic message is intentionally just long enough to require a continuation line\"\n}\n";
+    let out = formatted(source);
+    assert!(out.contains("require true,\n"), "{out}");
     assert_within_line_width(source);
 }
 

@@ -9,7 +9,8 @@ fn __step_judge_schema() {
     properties: {
       verdict: {
         type: "string",
-        description: "Use `pass` if the response advances the task acceptably, `revise` to request regeneration.",
+        description:
+          "Use `pass` if the response advances the task acceptably, `revise` to request regeneration.",
       },
       reasoning: {type: "string"},
       critique: {type: "string"},
@@ -71,7 +72,16 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
   const system = step_judge_system_prompt({rubric: judge_cfg?.rubric ?? "default"})
   const user = step_judge_user_prompt(payload)
   const schema = __step_judge_schema()
-  const ran = __judge_run_checkpoint(harness, judge_cfg, opts, payload, "agent.step_judge", system, user, schema)
+  const ran = __judge_run_checkpoint(
+    harness,
+    judge_cfg,
+    opts,
+    payload,
+    "agent.step_judge",
+    system,
+    user,
+    schema,
+  )
   const checkpoint = ran.checkpoint
   const duration_ms = ran.duration_ms
   if !checkpoint.ok {
@@ -110,7 +120,8 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
   const result = checkpoint.data
   const {reasoning = "", critique = "", confidence = 1.0} = result ?? {}
   const pass_verdicts = ["pass", "yes", "ok", "advance", "proceed", "approve"]
-  const feedback_default = judge_cfg?.feedback_fallback ?? "The previous response should be revised."
+  const feedback_default = judge_cfg?.feedback_fallback
+    ?? "The previous response should be revised."
   const outcome = __judge_classify_verdict(
     result?.verdict ?? "revise",
     pass_verdicts,

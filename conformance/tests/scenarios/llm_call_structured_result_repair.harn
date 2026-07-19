@@ -9,7 +9,11 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"note\": \"missing verdict\"}"), llm_text("{\"verdict\": \"PASS\"}")],
     { ->
-      const r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0, repair: {enabled: true}})
+      const r = llm_call_structured_result(
+        "Grade",
+        schema,
+        {provider: "mock", retries: 0, repair: {enabled: true}},
+      )
       __io_println(r.ok)
       __io_println(r.data.verdict)
       __io_println(r.repaired)

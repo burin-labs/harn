@@ -13,7 +13,10 @@ pipeline default() {
       required_verification_green: true,
     },
   )
-  const receipt = convergence_guard_receipt(decision, {iteration: 4, session_id: "convergence-receipt"})
+  const receipt = convergence_guard_receipt(
+    decision,
+    {iteration: 4, session_id: "convergence-receipt"},
+  )
   const schema = agent_convergence_guard_receipt_schema()
   __io_println(receipt.schema)
   __io_println(receipt.status)

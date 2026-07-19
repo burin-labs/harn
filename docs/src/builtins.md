@@ -625,6 +625,7 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 | `walk_dir(path, options?)` | path: string, options: dict | list or handle dict | Recursively list files/directories. Options: `max_depth`, `follow_symlinks`, `long_running`/`background` |
 | `glob(pattern, base_or_options?, options?)` / `harness.fs.glob(pattern, base_or_options?, options?)` | pattern: string, base: string or options: dict | list or handle dict | Match files under a base directory. Set `long_running`/`background` in options to return a handle |
 | `find_text(root, pattern, options?)` / `harness.fs.find_text(root, pattern, options?)` | root: string, pattern: string, options: dict | list, bool, int, or handle dict | Search files under a root and return `{path, line, col, column, text}` hits. Options: `mode` (`hits`, `exists`, `count`), `preset` (`default`, `source`, `all`), `include`, `exclude`/`ignore`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `parallel`, `follow_symlinks`, `include_hidden`, `respect_gitignore`, `case_sensitive`/`case_insensitive`, `fixed_strings`, `max_matches`, `long_running`/`background` |
+| `find_evidence(roots, patterns, options?)` | roots: list, patterns: list, options: dict | receipt or handle dict | Walk labeled roots once for labeled literal patterns. Returns deterministic path-relative hits and settled per-root status. Options: `preset`, `include`, `exclude`/`ignore`, `max_depth`, `max_filesize`/`max_file_size`, `threads`, `follow_symlinks`, `include_hidden`, `respect_gitignore`, ASCII `case_insensitive`, `max_matches`, `max_matches_per_root`, `long_running`/`background` |
 | `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
 | `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
 | `temp_dir()` | none | string | System temporary directory path |
@@ -1795,6 +1796,7 @@ emitted by the resolver:
 | `supervisor_state(handle_or_id)` | handle or string | dict | Return supervisor children, status, restart counts, last errors, wait reasons, active leases, next restart times, and metrics |
 | `supervisor_events(handle_or_id)` | handle or string | list | Return lifecycle events for started, stopped, failed, restarted, suppressed, escalated, and shutdown activity |
 | `supervisor_metrics(handle_or_id)` | handle or string | dict | Return aggregate lifecycle counters |
+| `supervisor_wait(handle_or_id)` | handle or string | dict | Await the terminal lifecycle transition and return the final supervisor state |
 | `supervisor_stop(handle_or_id, timeout?)` | handle or string, duration | dict | Request cooperative child cancellation, wait for drain, then force-abort remaining children |
 
 ### Atomics
@@ -1899,9 +1901,11 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |
 | `tiktoken_tokenizer_info(model)` | model: string | dict | Return `{model, model_family, source, exact, known_model_family, encoder}` for the encoder or heuristic fallback used by a model ID |
 | `llm_mock(config)` | config: dict | nil | Queue one legacy v0 mock response. Supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message?, retry_after_ms?}` or provider envelopes `error: {status, kind, reason?, message?, retry_after_ms?}`. v0 entries always use the shared default scope. |
-| `llm_mock_load_jsonl(text)` | text: string | dict | Parse and atomically replace the deterministic fixture store from a complete JSONL document. Returns `{schema_version, strict_scopes, count, scopes}`. The caller owns filesystem reads; malformed text leaves the active fixture unchanged. |
-| `llm_mock_calls()` | — | list | Return list of `{messages, system, tools}` for all calls made to the mock provider |
-| `llm_mock_receipts()` | — | list | Return the scope-consumption receipts `{scope, matched, entry_id, consume}`, one per mock-provider dispatch while a fixture is active |
+| `llm_mock_load_jsonl(text)` | text: string | dict | Parse and atomically replace the deterministic fixture store from a complete JSONL document. Returns producer-owned `{schema_version, strict_scopes, count, scopes, warnings}` facts. The caller owns filesystem reads; malformed text leaves the active fixture unchanged. |
+| `llm_mock_snapshot()` | — | dict | Return the pure queue snapshot `{schema, schema_version, strict_scopes, queue_remaining, warnings}` for turn-end checkpoints. |
+| `llm_mock_known_scopes()` | — | list | Return Harn's advisory purpose vocabulary. Fixture scopes remain open strings, so custom scopes are still valid. |
+| `llm_mock_calls()` | — | list | Return calls made to the mock provider, including each call's `mock_scope`, messages, system, and tools |
+| `llm_mock_receipts()` | — | list | Return typed receipts `{id, requested_scope, resolved_scope, matched, consume, fell_through, remaining}`, one per mock-provider dispatch while a fixture is active |
 | `llm_mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
 
 FIFO mocks (no `match` field) are consumed in order. Pattern-matched mocks
@@ -1952,11 +1956,16 @@ llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"
 // concurrent main/judge calls; strictScopes forbids default fallback.
 const fixture = """
 {"schemaVersion":1,"strictScopes":true}
-{"id":"main-1","scope":"main","consume":"once","text":"Implement the change."}
-{"id":"judge-1","scope":"judge","consume":"sticky","match":"*","text":"PASS"}
+{"id":"main-1","scope":"agent.main","consume":"once","text":"Implement the change."}
+{"id":"judge-1","scope":"completion.judge","consume":"sticky","match":"*","text":"PASS"}
 """
 const loaded = llm_mock_load_jsonl(fixture)
 assert_eq(loaded.count, 2)
+
+// Requested scopes match first. With strictScopes false, only `default` is a
+// legal fallback; an unknown scope never consumes another purpose's queue.
+const snapshot = llm_mock_snapshot()
+assert_eq(snapshot.queue_remaining.agent.main, 1)
 
 // Inspect what was sent
 const calls = llm_mock_calls()

@@ -4,7 +4,9 @@ pipeline default() {
   const gen = { i -> {id: i} }
   // 1. host signal selects a winner.
   const r1 = best_of_n_candidates({k: 3, generate: gen, select_callback: { c -> 1 }})
-  __io_println("${r1.reason} idx=${r1.selected_index} id=${r1.candidate.id} n=${len(r1.candidates)}")
+  __io_println(
+    "${r1.reason} idx=${r1.selected_index} id=${r1.candidate.id} n=${len(r1.candidates)}",
+  )
   // 2. nil winner -> deterministic fallthrough to the last candidate.
   const r2 = best_of_n_candidates({k: 3, generate: gen, select_callback: { c -> nil }})
   __io_println("${r2.reason} idx=${r2.selected_index}")

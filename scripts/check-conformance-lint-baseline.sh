@@ -19,7 +19,10 @@ while IFS= read -r -d '' file; do
   else
     files+=("$file")
   fi
-done < <(find "$fixture_root" -name '*.harn' -print0)
+# A conformance run creates state directories named `.harn`. They are not
+# source files and should never become synthetic `__CHECK_FAILED__` baseline
+# entries; restrict the lint corpus to actual files.
+done < <(find "$fixture_root" -type f -name '*.harn' -print0)
 
 : > "$tmp/raw.tsv"
 batch_index=0
@@ -91,10 +94,8 @@ run_check_batch() {
   elif ((check_status != 0)) \
     && jq -e '.schemaVersion == 1 and .data == null and (.error | type == "object")' \
       "$report" >/dev/null 2>&1; then
-    # A target class the CLI does not collect (currently files literally named
-    # `.harn`) still owns one failed-check row per requested file. Keeping those
-    # files in one exceptional batch preserves the historical baseline without
-    # restoring per-file process amplification.
+    # A real file literally named `.harn` is not a collected source target,
+    # while a `.harn` directory is generated runtime state excluded above.
     while IFS= read -r relative; do
       [[ -n $relative ]] && printf '%s\t%s\n' "$relative" '__CHECK_FAILED__' >> "$tmp/raw.tsv"
     done < "$requested_paths"

@@ -56,7 +56,10 @@ pipeline test_target_path_detector_ignores_urls(task) {
 }
 
 pipeline test_classify_reports_reason(task) {
-  const verdict = agent_lane_classify(default_lane_rows(), "Patch src/widget.py to fix the off-by-one.")
+  const verdict = agent_lane_classify(
+    default_lane_rows(),
+    "Patch src/widget.py to fix the off-by-one.",
+  )
   assert_eq(verdict.lane, "explicit_patch")
   assert_eq(verdict.matched, true)
   assert_eq(verdict.reason, "matched_row")
@@ -162,10 +165,25 @@ pipeline test_hard_keep_survives_narrowing(task) {
 
 pipeline test_tool_kinds_resolve_against_registry_annotations(task) {
   let tools = tool_registry()
-  tools = tool_define(tools, "look", "Read.", {annotations: {kind: "read"}, handler: { _a -> "ok" }})
-  tools = tool_define(tools, "edit", "Write.", {annotations: {kind: "write"}, handler: { _a -> "ok" }})
+  tools = tool_define(
+    tools,
+    "look",
+    "Read.",
+    {annotations: {kind: "read"}, handler: { _a -> "ok" }},
+  )
+  tools = tool_define(
+    tools,
+    "edit",
+    "Write.",
+    {annotations: {kind: "write"}, handler: { _a -> "ok" }},
+  )
   const rows = [{name: "read_only", tool_kinds: ["read"]}, {default: true, name: "general"}]
-  const result = lane_policy(rows, "anything", {tools: tools}, {classifier: { _t, _r -> "read_only" }})
+  const result = lane_policy(
+    rows,
+    "anything",
+    {tools: tools},
+    {classifier: { _t, _r -> "read_only" }},
+  )
   let kept = []
   for entry in result.tools.tools {
     kept = kept.push(entry.name)
@@ -212,7 +230,11 @@ pipeline test_stage_gate_parity_lane_policy_unchanged(task) {
   for name in ["look", "search", "edit", "run", "git", "run_codemod", "glob"] {
     tools = tool_define(tools, name, "tool " + name, {handler: { _a -> "ok" }})
   }
-  const narrowed = lane_policy(default_lane_rows(), "Fix the off-by-one in src/widget.py.", {tools: tools})
+  const narrowed = lane_policy(
+    default_lane_rows(),
+    "Fix the off-by-one in src/widget.py.",
+    {tools: tools},
+  )
   assert_eq(narrowed._lane_verdict.lane, "explicit_patch")
   let kept = []
   for entry in narrowed.tools.tools {
@@ -242,7 +264,12 @@ pipeline test_stage_gate_inert_without_marker(task) {
 }
 
 pipeline test_stage_gate_label_roundtrips(task) {
-  const gate = {allowed_kinds: ["edit"], allowed_tools: ["edit", "look"], lane: "repair_local", stage: "repair"}
+  const gate = {
+    allowed_kinds: ["edit"],
+    allowed_tools: ["edit", "look"],
+    lane: "repair_local",
+    stage: "repair",
+  }
   const label = stage_gate_label("Patch the bug.", gate)
   assert(label.contains("[lane_gate lane=repair_local stage=repair"), "marker rendered into label")
   const recovered = stage_gate_parse(label)
@@ -372,7 +399,12 @@ pipeline test_stage_gate_custom_prefix_roundtrips(task) {
   // A host prefix (burin-code's existing "[burin_gate ") round-trips through
   // label -> parse when the SAME prefix is supplied to both.
   const opts = {prefix: "[burin_gate "}
-  const gate = {allowed_kinds: ["edit"], allowed_tools: ["edit", "look"], lane: "repair_local", stage: "repair"}
+  const gate = {
+    allowed_kinds: ["edit"],
+    allowed_tools: ["edit", "look"],
+    lane: "repair_local",
+    stage: "repair",
+  }
   const label = stage_gate_label("Patch the bug.", gate, opts)
   assert(label.contains("[burin_gate lane=repair_local stage=repair"), "custom prefix rendered")
   assert(!label.contains("[lane_gate "), "default prefix not present under a custom prefix")

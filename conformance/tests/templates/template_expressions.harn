@@ -1,6 +1,9 @@
 pipeline default() {
   __io_println(
-    render("fixtures/template/expressions.prompt", {count: 0, name: "x", active: false, role: "guest"}),
+    render(
+      "fixtures/template/expressions.prompt",
+      {count: 0, name: "x", active: false, role: "guest"},
+    ),
   )
   __io_println("---")
   __io_println(

@@ -24,7 +24,10 @@ const PROTECTED_PATHS = [
   "crates/harn-vm/src/orchestration/compaction.rs",
 ]
 
-const EXCLUDED_PROTECTED_FILES = ["crates/harn-vm/src/llm/api/transport.rs", "crates/harn-vm/src/llm/api/options.rs"]
+const EXCLUDED_PROTECTED_FILES = [
+  "crates/harn-vm/src/llm/api/transport.rs",
+  "crates/harn-vm/src/llm/api/options.rs",
+]
 
 /**
  * 1-based line number of char offset `offset` in `text` — mirrors Python's

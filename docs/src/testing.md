@@ -268,6 +268,35 @@ with_mocks(
 )
 ```
 
+### Scripted argv adapters
+
+Use `scripted_argv<T>(steps)` when production code accepts an argv runner and a
+test should stay entirely in process. Build each typed step with
+`argv_step(argv, result)`. The adapter consumes steps in order, records every
+attempted command, rejects an unexpected command immediately, and exposes an
+exact-consumption assertion:
+
+```harn
+import { argv_step, scripted_argv } from "std/testing"
+
+const commands = scripted_argv<dict>(
+  [
+    argv_step(["tool", "status"], {success: true, stdout: "ready"}),
+    argv_step(["tool", "apply"], {success: true, stdout: "updated"}),
+  ],
+)
+
+assert_eq(commands.run(["tool", "status"]).stdout, "ready")
+assert_eq(commands.run(["tool", "apply"]).stdout, "updated")
+commands.assert_consumed()
+assert_eq(commands.calls(), [["tool", "status"], ["tool", "apply"]])
+```
+
+`remaining()` reports the unconsumed argv lists without changing state. A
+failed out-of-order attempt is present in `calls()` but does not consume the
+next expected entry, so the failure can be inspected without hiding follow-on
+omissions.
+
 ### Golden-file snapshots (`assert_snapshot`)
 
 `assert_snapshot(name, actual, options?)` pins a string against a committed

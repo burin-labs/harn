@@ -76,9 +76,15 @@ fn __input_guardrail_schema() {
   return {
     type: "object",
     properties: {
-      tripwire: {type: "boolean", description: "True only when the request should stop before the agent loop."},
+      tripwire: {
+        type: "boolean",
+        description: "True only when the request should stop before the agent loop.",
+      },
       reason: {type: "string", description: "Concrete reason for the tripwire or allow decision."},
-      label: {type: "string", description: "Short policy label such as safe, pii, prompt_injection, or abuse."},
+      label: {
+        type: "string",
+        description: "Short policy label such as safe, pii, prompt_injection, or abuse.",
+      },
       confidence: {type: "number", description: "Confidence from 0.0 to 1.0."},
     },
     required: ["tripwire", "reason"],
@@ -261,7 +267,11 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
         if error_category(err) == "cancelled" {
           throw err
         }
-        return __agent_input_guardrail_fail_open(err, opts, {classifier_kind: classifier_kind, model: model})
+        return __agent_input_guardrail_fail_open(
+          err,
+          opts,
+          {classifier_kind: classifier_kind, model: model},
+        )
       }
       return __agent_input_guardrail_normalize(
         unwrap(custom),
@@ -275,6 +285,7 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
       max_tokens: opts?.max_tokens ?? 256,
       temperature: opts?.temperature ?? 0.0,
       session_id: payload?.session_id ?? "",
+      mock_scope: opts?.mock_scope ?? "agent.input_guardrail",
     }
     if model != "" {
       llm_opts = llm_opts + {model: model}
@@ -310,7 +321,12 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
   }
   return {
     input_guardrail: guardrail,
-    _input_guardrail: {enabled: enabled, classifier_kind: classifier_kind, model: model, provider: provider},
+    _input_guardrail: {
+      enabled: enabled,
+      classifier_kind: classifier_kind,
+      model: model,
+      provider: provider,
+    },
   }
 }
 

@@ -227,7 +227,9 @@ fn __render_per_task_table(summary) {
     lines = lines
       + [
       "| `" + row.task_id + "` | " + to_string(row.n) + " | " + __pct(row.pass_rate) + " | "
-        + __pct(row.parse_rate)
+        + __pct(
+        row.parse_rate,
+      )
         + " | "
         + __pct(row.validate_rate)
         + " | "
@@ -261,7 +263,9 @@ fn __render_overall_table(summaries) {
     lines = lines
       + [
       "| `" + s.strategy + "` | " + to_string(o.trials) + " | " + __pct(o.pass) + " | "
-        + __pct(o.validate)
+        + __pct(
+        o.validate,
+      )
         + " | "
         + __pct(o.workflow)
         + " | "
@@ -303,7 +307,9 @@ fn __render_per_model_table(model, label, summaries) {
     lines = lines
       + [
       "| `" + s.strategy + "` | " + to_string(o.trials) + " | " + __pct(o.pass) + " | "
-        + __pct(o.validate)
+        + __pct(
+        o.validate,
+      )
         + " | "
         + __pct(o.workflow)
         + " | "

@@ -9,6 +9,390 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.28
+
+### Changed
+
+- **Versioned scoped LLM mock fixtures (#4984).** JSONL fixtures now install
+  atomically with stable IDs, explicit scopes, once/sticky consumption, strict
+  fallback control, typed receipts, queue snapshots, and Harn-owned purpose
+  routing while preserving headerless v0 replay.
+- Added an event-driven `supervisor_wait` builtin so workflows and conformance
+  tests can await terminal supervisor state without timing-based polling.
+
+### Fixed
+
+- **The formatter now wraps long inline shape types inside function and tool
+  parameters.** Nested schema-bearing shapes no longer produce unavoidable
+  line-width failures when a signature has only one parameter.
+
+## v0.10.27
+
+### Added
+
+- **Host leases support independent named domains and typed recovery evidence (#5205).**
+  Lease acquire, status, renewal, release, CLI, and `std/host_lease` contracts
+  now carry a domain. Stale recovery returns the exact prior handle and its
+  metadata, so orchestration can recover deterministically without sidecars or
+  process-table heuristics.
+- `std/host_lease` can atomically replace metadata on an active token while
+  retaining its cancellation-safe cleanup guard.
+- Add a strict, typed `std/testing::scripted_argv` adapter for deterministic
+  in-process command tests with call recording and exact-consumption checks.
+- **Typed run-artifact and command receipt contracts.** `std/run_artifacts` now supports typed Result reads and
+  schema-validated atomic JSON replacement, while `std/command` exports normalized result and durable step shapes for
+  harness adapters.
+
+### Changed
+
+- Modularize the largest Harn and Rust runtime modules into focused files while
+  preserving their public behavior and reducing source-length maintenance friction.
+
+### Fixed
+
+- **HARN-NAM-002 now suggests reordered snake_case names.** Undefined call-target diagnostics now recognize transposed
+  identifier segments, such as `parse_json` → `json_parse`, alongside ordinary typos (#4879).
+- **Sandboxed toolchain caches now preserve read-only package configuration.** macOS process profiles normalize
+  caller-supplied cache roots before applying write grants and denies.
+- Make HTTP MCP elicitation conformance assert the synchronous tool result instead of waiting on a duplicate
+  filesystem side channel.
+
+## v0.10.26
+
+### Breaking
+
+- A failed `session/prompt` now emits exactly one terminal JSON-RPC error and no
+  longer prepends an assistant `agent_message_chunk` carrying `Error: <message>`.
+  Clients that rendered the error prose as assistant content must read the typed
+  `error.data` instead. The `harn.acp.prompt_error.v1` payload gains optional
+  `category`, `kind`, `reason`, `code`, `retryable`, `retryAfterMs`, `provider`,
+  and `model` fields projected from the structured failure, so hosts branch on the
+  route that actually failed rather than the session's model selection or the
+  error prose. Provider/model recorded by a routing fallback are no longer
+  overwritten with the base route.
+
+### Added
+
+- Add pure typed `std/changelog` primitives for deterministic fragment
+  assembly, structural section parsing, and idempotent `Unreleased` merging.
+- Added a one-pass labeled multi-root evidence search with deterministic typed
+  receipts, bounded parallelism, independent root failures, match budgets, and
+  cancellable background execution.
+- `harn run` / `harn time run` now print one precise stderr line naming the
+  delta when a `--write-root` or `--read-only-root` grant (or
+  `--allow-process-network`) widens the still-active sandbox, e.g.
+  `sandbox active; extra write root: /path`. Routine grant-scoped runs no
+  longer emit the blanket `--no-sandbox` filesystem/process/egress warning,
+  which stays reserved for the full `--no-sandbox` escape hatch.
+
+### Fixed
+
+- **Formatter layout now accounts for the complete emitting line (#4892).**
+  Wrapped expressions include declaration, return, chain, collection, and
+  signature prefixes in their width budget, and the formatter verifies the
+  repository Harn corpus against the configured line-width invariant.
+- Conformance scenarios that read an incrementally written state file no longer race the writer. The copy-pasted
+  wait-for-existence helper is replaced by a single shared `wait_for_file_content` in
+  `conformance/tests/_common.harn` that polls until the content the caller actually reads is present (an NDJSON
+  file exists after its first appended line, so an existence wait could release while later lines were still
+  unwritten). The three affected scenarios now wait on their real precondition and report a descriptive timeout.
+- **`runtime.pipeline_input` is memoized per agent-loop iteration (#5190).** Context assembly re-fetched it
+  from the host on every shard — ~20 identical round-trips per turn. The dispatch boundary now serves it from a
+  per-turn memo that clears at each `iteration_start`, so the host is hit once per turn while a value that
+  legitimately changes between turns (e.g. a mid-session model switch) is still observed. No call site changes.
+- Accept CRLF after explicit Harn line continuations so formatter-produced wrapped expressions parse identically on
+  Windows checkouts.
+- Restore the legacy `std/cli` parser compatibility surface removed in v0.10.25; existing
+  `parse_args` and `help_text` callers continue to work while new code uses `std/cli/argparse`.
+- Keep the macOS toolchain-cache sandbox probe outside preset-writable temp aliases so it tests
+  the intended cache/config boundary.
+
+## v0.10.25
+
+### Breaking
+
+- **LoRA promotion now requires a finalized executed training receipt (#4977).**
+  `harn models lora promote` accepts `--train-receipt` rather than planning
+  manifests, binds promotion IDs to Harn-normalized trainer-environment
+  attestations, and rejects missing or mismatched provenance unless an explicit
+  audited `--trainer-provenance-exception` is supplied.
+- **`std/cli/argparse` now returns native typed results (#5026).** The canonical
+  parser separates options from trailing arguments, decodes primitive values,
+  and validates `Schema<T>` contracts with distinct argv and schema failures;
+  callers must replace the former optional `ok`/`err` envelope. The duplicate
+  `std/cli::parse_args` parser has been removed; migrate declarations and
+  callers to `std/cli/argparse`.
+- **`std/semver` now accepts only canonical numeric components (#5041).**
+  `parse`, `is_v_semver`, and the release-branch helper reject leading zeroes
+  while retaining `0`; `max_canonical_tag` selects the greatest canonical
+  release tag numerically and ignores invalid, prerelease, build, and
+  overflowing tags. The module now exports typed `Version` and `BumpKind`
+  contracts and requires string inputs at its public boundary.
+
+### Added
+
+- `harn models list` now provides typed catalog filters, deterministic
+  pricing/context sorting, selected human-table columns, and complete JSON rows
+  including tool-parity notes and prompt-cache pricing.
+- Add atomic, scoped JSONL mock-fixture loading through the Harn runtime so hosts share one validated fixture contract.
+- **Read-only host lease status is available to Harn scripts (#5002).** The
+  `std/host_lease` wrapper reports whether a named local resource is free,
+  active, or stale without acquiring, renewing, or releasing its lease.
+- **LLM model execution receipts now have one secret-free Harn contract (#5018).**
+  `std/llm/catalog.execution_contract` resolves the effective route and emits
+  stable provider, model, tool-format, taxonomy, wire-model, and validated
+  generation-default facts without serializing arbitrary operator overlays.
+- **Live agent sessions now durably journal transcript mutations and hydrate their
+  canonical history after restart (#5019).** Session replay preserves producer
+  event identity, compactions, removals, and terminal lifecycle evidence without
+  a separate persistence owner.
+- **Typed pipeline parameters and complete public API linting (#5044).**
+  Pipelines now preserve optional parameter annotations through parsing,
+  typechecking, compilation, fingerprints, schemas, graph output, WASM, and
+  editor tooling. Public pipelines use the same module-exported typed callable
+  boundary as functions across lazy and server dispatch; runtime guards expand
+  aliases and preserve optional-field nilability. Packages can enable
+  `require_public_api_types` to require explicit parameter and return contracts
+  on every public function and pipeline, with the same policy available from
+  the CLI and editor diagnostics.
+- **No-build `make check-drift` runs the source-reading drift/manifest guards in seconds
+  as a "before you declare clean" preflight (#5061).** Its member set is derived
+  from a `[preflight.dispatch]` table in `scripts/generated_artifacts.toml`
+  (each `check-*` classified `source` / `binary` / `excluded`), and
+  `make check-generated-registry` fails unless every `check-*` target is
+  classified — so the preflight can never silently omit a guard. Use
+  `make check-drift-binary` for guards whose verdict depends on current binary
+  semantics (they need a freshly built binary). Both resolve one deliberate
+  interpreter and fail instead of building implicitly; `make all` remains the
+  full gate.
+- Add `std/agent/verdict`: a typed three-valued disposition (`pass` / `fail` /
+  `indeterminate`) for judges and gates. A `pass` carries an unforgeable
+  proof-of-execution receipt — a module-private type no caller can name or
+  construct — minted only from the host's own record of an unfiltered test plan
+  discovered and executed at the active workspace root. Explicit commands,
+  filtered partial plans, and authored passing-looking output cannot mint a
+  positive verdict. A judge that cannot decide yields `indeterminate`, which an
+  exhaustive `match` forces every consumer to handle rather than silently
+  treating an unavailable check as success.
+- Add `persona materialize --compile-receipt` to revalidate and install an accepted,
+  reviewed prompt compiler receipt without another model call.
+- Add an explicit `harn run --allow-process-network` option for network-capable child commands without disabling the
+  worktree sandbox.
+- **`harn check --strict` now makes every warning fatal without changing the
+  typed report.** The CLI flag monotonically composes with `[check].strict`,
+  `--strict-types`, parallel checks, JSON output, and the persistent result
+  cache, so harnesses can enforce zero-warning gates without decoding Harn's
+  JSON themselves (#5083).
+- Apply reviewed persona compile receipts into verified project activations with one idempotent command.
+- Monologue-actuation checkpoints now identify the resolved workspace-write tool,
+  including an explicit empty identity when no writer is available.
+- **Host-supplied terminal wrap-up directive and context (#5163).** When the
+  agent loop terminates mid-tool-use (budget/turn exhaustion, stuck, or
+  verify-capped), an embedder can now pass its own wrap-up directive and a
+  structured context dict via `opts.wrapup_directive` / `opts.wrapup_context`.
+  The loop composes the host directive with an outcome-authority constraint
+  (the terminal outcome is stated as fact and the wrap-up narrates it rather
+  than re-adjudicating it, so a run that did not succeed cannot claim success)
+  plus the shared response-protocol tail. The host directive is delivered as a
+  trailing user message and the wrap-up system prompt is left byte-identical to
+  the loop's turns, so the whole system+history prefix is reused by the prompt
+  cache. A host directive also opts a zero-write terminal into a wrap-up turn,
+  where a truthful closing message is most owed. Without a host directive the
+  loop's existing generic wrap-up behavior is unchanged.
+- Added a resumable, spend-guarded persona prompt eval pack that measures one-shot compile yield, canonical
+  materialization, synthetic daemon dispatch, cost, reliability, and paired confidence intervals on frozen tune and
+  holdout prompts. A reusable `std/eval/stats` integrity check rejects incomplete fingerprints and mixed harness
+  generations before comparison.
+- Added `scripts/check_feature_drift.sh`, an advisory diagnostic that reports
+  Cargo feature drift a lockfile diff cannot see: packages whose version is
+  unchanged between a baseline ref and the working tree but whose resolved
+  feature set differs. Cargo unifies features across the whole graph, so a
+  dependency bump can change the behavior of a crate whose version never moved.
+- `std/git` now provides `git_checkout_sync` and `git_checkout_plan` for exact-ref
+  checkout normalization with explicit dirty-tree policy, canonical argv steps,
+  typed failure and recovery receipts, and deterministic injected-runner tests.
+- **Harn workflows can hold cancellation-safe machine resource scopes.**
+  `std/host_lease::with_host_lease` now owns typed acquire, deferral, and
+  release receipts around an arbitrary Harn callback, waits on cross-process
+  lease notifications in bounded slices, and binds cleanup to a reusable
+  VM-owned `resource_guard` so task cancellation, exceptions, frame teardown,
+  and VM drop cannot strand a live-process lease (#4556).
+
+### Changed
+
+- Module artifact cache lookups now hash only the module's own compilation inputs instead of
+  repeatedly walking its full transitive import graph, reducing cold-process startup work for large
+  Harn programs.
+- Replace legacy inclusion, exclusion, and grandfathering terminology across maintained code and documentation while
+  preserving spellings owned by external APIs and immutable release history.
+- **Catalog-declared local runtime lifecycle is now the single source of truth
+  for `harn local` and provider probes (#4930).** Harn can enumerate and score
+  TGI without a parallel provider list, explicitly preserves user-owned generic
+  endpoints, and validates lifecycle ownership as typed catalog data.
+- Speed up embedded-asset verification by sharing one baseline build while retaining
+  independent persona and portal rebuild proofs.
+- Make native Windows CI reuse its nightly-built target cache instead of cold-compiling under a mismatched compiler wrapper.
+- The bytecode cache now uses maintained `postcard` serialization for entry
+  chunks and module artifacts. Existing cache files are invalidated by schema
+  version 6 and regenerated automatically.
+- Conformance fixtures that assert overload routing and error shapes no longer wait through the
+  production provider cooldown on every test run.
+- `harn check --independent` preserves one-file module semantics for fixture
+  corpora while sharing one bounded worker process; `lint-harn` now uses it
+  instead of rebuilding CLI state for every conformance fixture.
+- Run the environment-neutral Rust suite, security proof, Harn conformance, and
+  audit consumers in parallel after one shared behavior build, reducing
+  merge-queue critical-path latency without reducing proof coverage.
+- Upgraded the Cargo dependencies whose latest releases sit outside Dependabot's
+  7-day cooldown: `aes-gcm` 0.10 -> 0.11, `tokio-tungstenite` 0.29 -> 0.30, and
+  `tree-sitter-swift` 0.7.2 -> 0.7.3. The OAuth file-storage backend now builds
+  AES-GCM keys and nonces through `From`/`TryFrom` instead of the deprecated
+  `Array::from_slice`; the on-disk envelope format is unchanged.
+- `harn provider tool-scorecard --plan-from-catalog` now emits per-route
+  readiness probe commands and trust-state metadata, and live scorecards classify
+  routes as trusted, needing review, or quarantined.
+
+### Fixed
+
+- **`harn fmt` no longer reformats readable code into worse layout (#4878).**
+  A method call written across several lines was split apart — `v.push(X { .. })`
+  became `v` / `.push(` with the argument indented level with the call that owned
+  it and the closing paren orphaned below the receiver — because the wrap
+  decision was keyed on newlines in the *source* rather than on the width of the
+  formatted result. Layout no longer depends on where the author pressed return.
+  A chained call now wraps for exactly three reasons: the formatted receiver is
+  multi-line, a comment sits between the segments, or the call head overflows the
+  line width.
+- **Function signatures are no longer joined past the line width (#4878).**
+  The wrap decision counted only what preceded the parameters, so the closing
+  paren, the return type, any `throws`/`where` clause, and the opening brace of
+  the body were all spent for free — emitting lines past the declared width
+  while much shorter calls were split. The declared width is now a named
+  constant (`LINE_WIDTH_DEFAULT`).
+- **Formatter preserves comments at sibling block boundaries (#4890).** Trailing comments in `if`/`else` and
+  `try`/`catch`/`finally` branches now remain in the block where they were written.
+- Preserve comments on fields of importable record type aliases when formatting Harn source.
+- Make `std/testing.with_temp_dir` create scratch directories inside the active workspace sandbox.
+- **`harn run -e` source cleanup (#5052).** Clean up invocation-owned inline source files after compile and runtime
+  failures without touching user-authored files.
+- Run pending `finally` and deferred cleanup when evaluating a `return` or
+  `throw` operand raises, while preserving cleanup-error precedence.
+- Serialize fresh file-backed SQLite journal and schema initialization across Harn processes while keeping
+  ready WAL opens lock-free.
+- Persona prompt compilation now models cron and external triggers as exclusive
+  structured-output variants, preventing strict providers from filling both source
+  shapes with placeholders. OpenAI strict-schema compatibility preserves closed
+  discriminated variants by lowering them to the provider's supported `anyOf` and
+  single-value `enum` subset instead of dropping the union. The lowering now
+  accepts only string discriminator tags and preserves `const` plus `enum`
+  intersections without broadening them.
+  Deterministic persona materialization no longer loads the prompt-only LLM
+  checkpoint and candidate schema, avoiding stack exhaustion in embedded callers.
+- Preserve priced LLM call costs in structured-output usage, typed checkpoints, and provider response events.
+- Agent event-log sinks now expose a causal flush barrier, eliminating
+  scheduler-dependent polling when replay consumers need durable events. ACP
+  and A2A await the barrier before clearing sinks, retain persistence failures
+  alongside cancellation, and schedule SQLite checkpoints off async executors.
+- Serialize transient SQLite connection setup and readiness checks with schema initialization so concurrent
+  shared-memory opens cannot race on schema locks.
+- Reuse the immutable provider catalog across model and capability lookups,
+  cutting the exhaustive request-catalog audit from tens of seconds to under a second.
+- Keep Cargo build-script scratch isolated per worktree so concurrent development
+  builds cannot race over generated `OUT_DIR` files.
+- **Custom agent-loop callers can explicitly preserve safe assistant-prefill recoveries (#5110).**
+  Undeclared callers remain fail-closed, while declared forwarding callers can use bounded monologue actuation when
+  the provider supports it.
+- Bind provider tool-probe campaign reports and catalog routes to the target
+  Harn runtime, forward an explicit provider overlay to every probe, and
+  require explicit credential-file configuration.
+- Make llama.cpp tool probes force their single tool with the server's supported
+  scalar mode, report each streamed call once, and fail duplicate-call fixtures
+  instead of issuing false-green receipts.
+- Project activated installed-package persona triggers and their local
+  predicates into the guarded runtime while keeping unactivated packages inert.
+- Make protocol artifact generation and repository checks use an explicit source root internally,
+  preventing concurrent in-process commands and tests from observing another execution's working
+  directory.
+- Make Windows pull-request CI select the Rust crates affected by a change instead
+  of compiling the full workspace when Git and Cargo spell the checkout differently.
+- Reject selective imports of absent symbols during strict checks and editor analysis instead of deferring the
+  failure to runtime.
+- Corrected documentation that described runtime behavior which had since
+  changed. The published guidance (`harn-quickref`, OAuth storage, tool
+  middleware, llm handlers) said closures capture **by value**, so a captured
+  binding could not accumulate across calls — that has not been true since
+  closures switched to reference capture. The quickref also said top-level
+  mutable state could not be shared across functions; it can. Guidance to reach
+  for `atomic` counters in middleware stands, but for the accurate reason:
+  `parallel`/`spawn` branches share one captured cell, so a read-modify-write
+  races (HARN-LNT-064). Internal comments carrying the same false claim, the
+  inverted `let`/`const` mutability descriptions left by the keyword
+  re-platform, and three `cli/eval` doc-blocks describing `exit()` as calling
+  `std::process::exit` were corrected to match the runtime. No behavior change.
+- Prevent concurrent session-store writers from bypassing SQLite's busy policy during deferred
+  transaction upgrades, and surface exhausted lock contention as a typed `resource_busy` error.
+- **Bench JSON percentile tests no longer depend on lossy float parsing (#5136).**
+  Floating-point statistics are now compared with a tolerance, so transitive
+  activation of `serde_json/float_roundtrip` cannot break the Rust test gate.
+- The default macOS/Linux process sandbox now grants developer-toolchain build caches, so `go build`/`go test`
+  (GOCACHE, GOMODCACHE) and `cargo build`/`cargo fetch` (`~/.cargo/registry`, `~/.cargo/git`) can write their caches
+  instead of failing with a misleading "package X is not in std" or "failed to create directory … Operation not
+  permitted".
+- Added an `environment` error category, and an OS-sandbox process denial is now classified as an environment/config
+  gap — not the workload's code defect — when a developer-toolchain cache env var resolves outside the sandbox jail
+  and the denial names that path, so embedders never blame the model for a provisioning gap.
+- Warm Linux release builds now upload cargo-bloat attribution even when the binary-size budget fails.
+- Deduplicate the VM's async-opcode state machine across release callers while keeping its future stack-resident.
+- **Task cancellation is now a resource-cleanup barrier.** `cancel(handle)` and
+  the forced-abort branch of `cancel_graceful` wait for the aborted future to
+  tear down its VM before returning, so owned channels, permits, host leases,
+  and future resource guards cannot remain observably live after cancellation.
+- Fix long-running command cancellation so a waited terminal result always includes its cleanup receipt.
+- Made Rust test gates ignore ambient egress-policy configuration, removed a
+  load-sensitive millisecond timeout proof, and replaced a nested Cargo sandbox
+  test with a direct capability check.
+- **Provider catalog: Moonshot Kimi K3 tool-mode parity resolved and the rejected forced tool-choice mode removed.**
+  A 2026-07-18 credentialed probe (direct Moonshot `/v1`, N=2) upgraded K3's
+  `tool_mode_parity` from `unknown` to `interchangeable` and dropped `required`
+  from its `allowed_tool_choice_modes`: K3 always reasons, so Moonshot rejects a
+  forced `tool_choice` with HTTP 400 "incompatible with thinking enabled". That
+  400 bills nothing, so the reported "empty completion / 0 tokens" Kimi
+  agent-loop drops were a forced-tool-choice rejection, not a native-emission
+  drop. Native+auto and the Harn text channel both carried a
+  backslash/quote/unicode large-string argument byte-exact (2/2) for K3, so the
+  modes are interchangeable; the general `*kimi*` (k2.5/k2.6) rule stays pinned
+  to native because the k2.6 text channel over-ran its budget in the reasoning
+  channel and never emitted the tool call.
+- **Provider catalog: Fireworks `minimax-m3` tool-mode parity resolved.**
+  The same credentialed probe (direct Fireworks `/v1`, N=2) upgraded the
+  `minimax-m3` route from `unknown` to `interchangeable`: native emitted
+  byte-exact on both `tool_choice: auto` and `required` (2/2) and the text
+  channel parsed byte-exact (2/2).
+- Fixed the release-gate default-path self-test depending on unset ambient Cargo directories.
+- Fixed the release workflow contract test lagging the pinned artifact download action.
+- Fixed the Rust test-lane self-test depending on an unset ambient Cargo job limit.
+- Fixed workspace test runs starving hostlib cases that intentionally launch
+  nested Cargo builds. Those real discovered-plan tests now share one bounded
+  nextest slot without weakening the suite-wide timeout.
+
+### Security
+
+- A hermetic session profile no longer leaks the parent environment into spawned
+  child processes. The profile's contract is that no credential crosses into a
+  child, but most spawn seams built their `Command` without consulting
+  `security::resolve_env`, so children inherited every variable the session held —
+  credentials included. Affected seams included the `process.exec` / `process.spawn`
+  host ops, `spawn_captured`, `exec_opts` / `exec_at_opts`, the workflow `verify`
+  node, the eval-pack runner, the LLM routing verifier, and — most significantly —
+  the spawner behind the agent's own `run_command` tool, which scrubbed secrets
+  with a name-pattern denylist rather than the profile's allowlist.
+
+  The environment is now closed at the sandbox funnel (`std_command_for`,
+  `tokio_command_for`, `command_output`) that every one of those seams already
+  routes through, so a new spawn site cannot silently opt out of the contract.
+  Callers still layer their own `env` / `env_remove` on top. Sessions with no
+  profile — the default, and currently every session — are unchanged.
+
 ## v0.10.24
 
 ### Added
