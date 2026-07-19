@@ -271,6 +271,12 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-cli/src/commands/portal/run_analysis.rs",
   "crates/harn-cli/src/commands/portal/util.rs",
   "crates/harn-cli/src/commands/run/mod.rs",
+  // The script MCP HTTP server bounds how long a queued server-to-client
+  // request may wait for a real network client to open its event stream
+  // (`SESSION_STREAM_GRACE`); the external client's arrival time is host
+  // wall-clock state, same shape as the allowlisted `connect/callback.rs`
+  // browser-callback wait.
+  "crates/harn-cli/src/commands/serve.rs",
   "crates/harn-cli/src/commands/supervisor.rs",
   "crates/harn-cli/src/commands/test/mod.rs",
   "crates/harn-cli/src/commands/test/conformance.rs",

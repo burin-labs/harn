@@ -436,44 +436,52 @@ struct ScriptMcpJob {
     request: JsonValue,
     response_tx: oneshot::Sender<Option<JsonValue>>,
     /// Per-session elicitation bus to install before invoking the
-    /// handler. `None` for clients that haven't opened the SSE stream
-    /// yet — `mcp_elicit(...)` will fail loudly in that case rather
-    /// than silently hanging.
+    /// handler. The bus lives for the whole session, so a request that
+    /// arrives before the client opens its event stream still gets one;
+    /// its outbound requests queue until the stream registers (or fail
+    /// loudly after `SESSION_STREAM_GRACE` if it never does).
     bus: Option<harn_vm::mcp_elicit::ElicitationBus>,
 }
+
+/// How long a queued server-to-client request (e.g. `elicitation/create`)
+/// may wait for the client to open its event stream before it fails
+/// loudly. Only a client that never opens a stream reaches this bound;
+/// the ordinary POST-vs-GET arrival race resolves as soon as the GET
+/// lands, with no timing dependence.
+const SESSION_STREAM_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Default)]
 struct ScriptSessionState {
     stream_tx: Option<UnboundedSender<JsonValue>>,
-    bus: Option<harn_vm::mcp_elicit::ElicitationBus>,
 }
 
 #[derive(Clone)]
 struct SharedScriptSession {
     inner: Arc<Mutex<ScriptSessionState>>,
+    /// Session-lifetime bus for server-to-client requests. Created with
+    /// the session — NOT with the event stream — so a `tools/call` POST
+    /// that outruns the client's GET can still elicit; the delivery task
+    /// holds the payload until the stream registers.
+    bus: harn_vm::mcp_elicit::ElicitationBus,
+    stream_watch: tokio::sync::watch::Sender<Option<UnboundedSender<JsonValue>>>,
 }
 
 impl SharedScriptSession {
     fn new() -> Self {
+        let (stream_watch, watch_rx) = tokio::sync::watch::channel(None);
+        let (outbound_tx, outbound_rx) = tokio_mpsc::unbounded_channel::<JsonValue>();
+        let bus = harn_vm::mcp_elicit::ElicitationBus::new(outbound_tx);
+        tokio::spawn(deliver_session_requests(outbound_rx, watch_rx, bus.clone()));
         Self {
             inner: Arc::new(Mutex::new(ScriptSessionState::default())),
+            bus,
+            stream_watch,
         }
     }
 
     fn set_stream_tx(&self, tx: Option<UnboundedSender<JsonValue>>) {
-        let mut state = self.inner.lock().expect("session poisoned");
-        match tx {
-            Some(tx) => {
-                state.bus = Some(harn_vm::mcp_elicit::ElicitationBus::new(
-                    forward_to_session_stream(tx.clone()),
-                ));
-                state.stream_tx = Some(tx);
-            }
-            None => {
-                state.bus = None;
-                state.stream_tx = None;
-            }
-        }
+        self.inner.lock().expect("session poisoned").stream_tx = tx.clone();
+        let _ = self.stream_watch.send(tx);
     }
 
     fn stream_tx(&self) -> Option<UnboundedSender<JsonValue>> {
@@ -484,27 +492,70 @@ impl SharedScriptSession {
             .clone()
     }
 
-    fn bus(&self) -> Option<harn_vm::mcp_elicit::ElicitationBus> {
-        self.inner.lock().expect("session poisoned").bus.clone()
+    fn bus(&self) -> harn_vm::mcp_elicit::ElicitationBus {
+        self.bus.clone()
     }
 }
 
-/// Bridge an `mpsc::UnboundedSender<JsonValue>` (what the elicitation
-/// bus expects) onto a `futures::channel::mpsc::UnboundedSender<JsonValue>`
-/// (what the SSE response stream consumes). One spawn-per-session is
-/// fine — the channel is closed when the SSE stream drops.
-fn forward_to_session_stream(
-    sse_tx: UnboundedSender<JsonValue>,
-) -> tokio_mpsc::UnboundedSender<JsonValue> {
-    let (tx, mut rx) = tokio_mpsc::unbounded_channel::<JsonValue>();
-    tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if sse_tx.unbounded_send(msg).is_err() {
-                break;
+/// Per-session delivery task: forward the bus's outbound server-to-client
+/// requests onto whichever event stream the session currently has. A
+/// payload that arrives while no stream is open waits — event-driven, via
+/// the `watch` channel — for one to register instead of failing, which
+/// closes the POST-vs-GET arrival race that made loopback elicitation
+/// scenarios flaky under CI load. If no stream registers within
+/// `SESSION_STREAM_GRACE`, the pending request is failed loudly by
+/// synthesizing a JSON-RPC error response back onto the bus.
+async fn deliver_session_requests(
+    mut outbound: tokio_mpsc::UnboundedReceiver<JsonValue>,
+    mut stream_watch: tokio::sync::watch::Receiver<Option<UnboundedSender<JsonValue>>>,
+    bus: harn_vm::mcp_elicit::ElicitationBus,
+) {
+    while let Some(msg) = outbound.recv().await {
+        if stream_watch.borrow().is_none() {
+            eprintln!(
+                "[harn] queueing a server-to-client request until the client opens its event stream"
+            );
+        }
+        let deadline = tokio::time::Instant::now() + SESSION_STREAM_GRACE;
+        let mut delivered = false;
+        loop {
+            let target = stream_watch.borrow().clone();
+            if let Some(tx) = target {
+                if tx.unbounded_send(msg.clone()).is_ok() {
+                    delivered = true;
+                    break;
+                }
+                // The stream this sender belonged to closed; wait for a
+                // reconnect below rather than dropping the payload.
+            }
+            match tokio::time::timeout_at(deadline, stream_watch.changed()).await {
+                Ok(Ok(())) => continue,
+                // Session dropped or grace expired: stop waiting.
+                Ok(Err(_)) | Err(_) => break,
             }
         }
-    });
-    tx
+        if !delivered {
+            if let Some(error) = undeliverable_client_request_error(&msg) {
+                let _ = bus.route_response(&error);
+            }
+        }
+    }
+}
+
+/// Synthesize the JSON-RPC error response that wakes a pending
+/// server-to-client request whose payload could not be delivered because
+/// the client never opened an event stream. Notifications (no id) have
+/// no waiter to wake and are dropped.
+fn undeliverable_client_request_error(msg: &JsonValue) -> Option<JsonValue> {
+    let id = msg.get("id")?.clone();
+    Some(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": -32001,
+            "message": "client never opened an event stream; server-to-client request undeliverable",
+        },
+    }))
 }
 
 impl ScriptMcpRuntime {
@@ -595,9 +646,7 @@ async fn script_http_post_request(
     // JSON-RPC etiquette we *never* reply to a response — even a stale
     // one with no matching pending — so this path is fully terminal.
     if looks_like_response(&request) {
-        if let Some(bus) = session.bus() {
-            let _ = bus.route_response(&request);
-        }
+        let _ = session.bus().route_response(&request);
         let mut http = StatusCode::ACCEPTED.into_response();
         attach_script_http_headers(&mut http, created.then_some(session_id.as_str()));
         return http;
@@ -615,7 +664,7 @@ async fn script_http_post_request(
         return http;
     }
 
-    let job_bus = session.bus();
+    let job_bus = Some(session.bus());
     match state.runtime.call(request, job_bus).await {
         Ok(Some(response)) => {
             let mut http = Json(response).into_response();
@@ -757,9 +806,7 @@ async fn script_legacy_sse_message(
     // a tool handler awaiting `mcp_elicit(...)` wakes up. As above we
     // never reply to a response, even a stale one.
     if looks_like_response(&request) {
-        if let Some(bus) = session.bus() {
-            let _ = bus.route_response(&request);
-        }
+        let _ = session.bus().route_response(&request);
         return StatusCode::ACCEPTED.into_response();
     }
     if let Err(response) = authorize_script_rpc(
@@ -780,7 +827,7 @@ async fn script_legacy_sse_message(
         }
         return StatusCode::GONE.into_response();
     }
-    let job_bus = session.bus();
+    let job_bus = Some(session.bus());
     match state.runtime.call(request, job_bus).await {
         Ok(Some(response)) => {
             if let Some(tx) = session.stream_tx() {
