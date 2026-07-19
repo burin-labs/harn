@@ -685,6 +685,16 @@ mod tests {
         }
     }
 
+    fn assert_json_f64_near(value: &serde_json::Value, field: &str, expected: f64) {
+        let actual = value[field]
+            .as_f64()
+            .unwrap_or_else(|| panic!("expected {field} to be a number"));
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "{field} was {actual}, expected {expected}"
+        );
+    }
+
     #[test]
     fn bench_report_summarizes_runs() {
         let report = render_bench_report(
@@ -754,10 +764,10 @@ mod tests {
         assert_eq!(value["path"], "examples/demo.harn");
         assert_eq!(value["iterations"].as_array().unwrap().len(), 2);
         assert_eq!(value["iterations"][0]["iteration"], 1);
-        assert_eq!(value["mean_ms"], 12.0);
-        assert_eq!(value["p50_ms"], 12.0);
-        assert_eq!(value["p95_ms"], 13.8);
-        assert_eq!(value["stddev_ms"], 2.0);
+        assert_json_f64_near(&value, "mean_ms", 12.0);
+        assert_json_f64_near(&value, "p50_ms", 12.0);
+        assert_json_f64_near(&value, "p95_ms", 13.8);
+        assert_json_f64_near(&value, "stddev_ms", 2.0);
         assert!(value["rollup"]["by_kind"].is_array());
     }
 
