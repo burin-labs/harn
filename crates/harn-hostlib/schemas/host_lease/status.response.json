@@ -7,6 +7,7 @@
   "properties": {
     "schema_version": {"type": "integer", "minimum": 1},
     "host": {"type": "string", "minLength": 1},
+    "resource_class": {"type": "string", "enum": ["whole-machine", "rust-heavy"]},
     "observed_at_ms": {"type": "integer"},
     "active": {
       "oneOf": [
@@ -19,6 +20,7 @@
   "required": [
     "schema_version",
     "host",
+    "resource_class",
     "observed_at_ms",
     "active",
     "recovered_stale_lease"
@@ -30,6 +32,7 @@
       "properties": {
         "schema_version": {"type": "integer", "minimum": 1},
         "host": {"type": "string", "minLength": 1},
+        "resource_class": {"type": "string", "enum": ["whole-machine", "rust-heavy"]},
         "lease_id": {"type": "string", "minLength": 1},
         "owner": {"type": "string", "minLength": 1},
         "priority_class": {
@@ -50,6 +53,7 @@
       "required": [
         "schema_version",
         "host",
+        "resource_class",
         "lease_id",
         "owner",
         "priority_class",

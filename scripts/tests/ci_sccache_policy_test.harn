@@ -50,6 +50,19 @@ fn workflow() {
     "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
     "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
   )
+  const rust_with_flags = {...rust, env: {...rust.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"}}
+  const rust_test_base = persistent_job(
+    gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
+    "workspace-behavior",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+  )
+  const rust_test = {
+    ...rust_test_base,
+    env: {...rust_test_base.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
+    "runs-on": gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
+    needs: ["changes", "rust-builds"],
+  }
   return {
     jobs: {
       "package-audit": persistent_job(
@@ -59,20 +72,29 @@ fn workflow() {
         "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
       ),
       "rust-builds": {
-        ...rust,
+        ...rust_with_flags,
         strategy: {
           matrix: {
             include: [
-              {runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
-              {runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-behavior"},
+              {kind: "lint", runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
+              {kind: "behavior", runner: "blacksmith-8vcpu-ubuntu-2404", cache_key: "workspace-behavior"},
             ],
           },
         },
-        steps: rust.steps
+        steps: rust_with_flags.steps
           + [
-          {name: "Build portable behavior payload", env: {CARGO_BUILD_JOBS: "4"}},
-          {name: "Run full environment-neutral test suite", env: {CARGO_BUILD_JOBS: "4"}},
+          {
+            name: "Build portable behavior payload",
+            id: "release-audit-behavior-build",
+            if: "matrix.kind == 'behavior'",
+            env: {CARGO_BUILD_JOBS: "4"},
+          },
         ],
+      },
+      "rust-test": {
+        ...rust_test,
+        steps: rust_test.steps
+          + [{name: "Run full environment-neutral test suite", env: {CARGO_BUILD_JOBS: "4"}}],
       },
     },
   }

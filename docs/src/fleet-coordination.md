@@ -141,8 +141,31 @@ externally executed work can use the fleet claim lease directly.
 ## Reserving a host
 
 Fleet claims describe work ownership. They do not reserve CPU, GPU, or another
-exclusive machine resource. Use `harn host lease` when independent Harn
-processes must serialize work on one host:
+exclusive machine resource. Harn workflows should use the cancellation-safe
+`std/host_lease::with_host_lease` scope when independent processes must
+serialize multi-step work on one host:
+
+```harn
+import { with_host_lease } from "std/host_lease"
+
+const result = with_host_lease(
+  {
+    owner: "release-audit",
+    resource_class: "rust-heavy",
+    priority_class: "ci-verify",
+    wait_timeout_ms: 20 * 60 * 1000,
+  },
+  { _handle -> run_release_audit() },
+)
+```
+
+The VM atomically adopts an opaque cleanup guard with every successful
+acquisition. Normal returns and exceptions write an explicit typed release
+receipt; forced task cancellation, frame teardown, and VM drop invoke the same
+idempotent cleanup through guard lifetime. Acquisition waits in bounded slices
+on registry notifications rather than sleeping or parsing process tables.
+
+Use the `harn host lease` CLI adapter for non-Harn commands:
 
 ```bash
 harn host lease acquire \

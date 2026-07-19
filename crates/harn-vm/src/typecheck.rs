@@ -146,6 +146,7 @@ fn matches_type_with_generics(
             "atomic" => matches!(value, VmValue::Atomic(_)),
             "rng" => matches!(value, VmValue::Rng(_)),
             "sync_permit" => matches!(value, VmValue::SyncPermit(_)),
+            "resource_guard" => matches!(value, VmValue::ResourceGuard(_)),
             "mcp_client" => matches!(value, VmValue::McpClient(_)),
             "verdict_receipt" => matches!(value, VmValue::VerdictReceipt(_)),
             "pair" => matches!(value, VmValue::Pair(_)),
