@@ -1,5 +1,11 @@
+import { AgentLoopOptions } from "std/agent/options"
 import { FacadeTarget } from "pub_type_schema_runtime_facade"
-import { DirectTarget } from "pub_type_schema_runtime_lib"
+import {
+  DirectTarget,
+  GenericNested,
+  ImportedNested,
+  OpenExtras,
+} from "pub_type_schema_runtime_lib"
 
 fn direct_ok(value: unknown) -> bool {
   return schema_is(value, DirectTarget)
@@ -21,4 +27,14 @@ pipeline default() {
   __io_println(facade_schema.required)
   __io_println(schema_is({label: "via-facade"}, FacadeTarget))
   __io_println(schema_is({label: 12}, FacadeTarget))
+  __io_println(
+    schema_of(ImportedNested).properties.transport.properties.forwards_assistant_prefill.union[0]
+      .type,
+  )
+  __io_println(
+    schema_of(GenericNested).properties.value.properties.forwards_assistant_prefill.union[0].type,
+  )
+  __io_println(schema_of(OpenExtras).additional_properties.type)
+  __io_println(schema_is({model: "gpt-5"}, AgentLoopOptions))
+  __io_println(schema_is({model: 5}, AgentLoopOptions))
 }

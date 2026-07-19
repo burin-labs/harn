@@ -1,0 +1,277 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import {
+  command_cancel,
+  command_result_fail,
+  command_run,
+  command_step,
+  command_wait,
+} from "std/command"
+import { gha_error } from "std/gha"
+
+const DEFAULT_STEP_TIMEOUT_MS = 120000
+
+const DEFAULT_WATCH_TIMEOUT_MS = 15000
+
+const CAPTURE = {max_inline_bytes: 65536}
+
+pub type ReleaseSmokeConfig = {
+  candidate: string,
+  platform: string,
+  root: string,
+  step_timeout_ms: int,
+  watch_timeout_ms: int,
+  watch_target?: string,
+}
+
+pub type ReleaseSmokeReport = {platform: string, steps: list, failed: list, success: bool}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "release-smoke",
+      args: [
+        {kind: "flag", name: "candidate", long: "--candidate", parse: "string", required: true},
+        {
+          kind: "flag",
+          name: "step_timeout_ms",
+          long: "--step-timeout-ms",
+          parse: "int",
+          default: DEFAULT_STEP_TIMEOUT_MS,
+        },
+        {
+          kind: "flag",
+          name: "watch_timeout_ms",
+          long: "--watch-timeout-ms",
+          parse: "int",
+          default: DEFAULT_WATCH_TIMEOUT_MS,
+        },
+      ],
+    },
+  )
+}
+
+fn usage() -> string {
+  return "usage: harn run scripts/release_smoke.harn -- --candidate PATH [--step-timeout-ms MS] [--watch-timeout-ms MS]"
+}
+
+fn display_platform(value: string) -> string {
+  if value == "darwin" {
+    return "macos"
+  }
+  return value
+}
+
+fn command_specs(candidate: string) -> list {
+  return [
+    {name: "harn --version", argv: [candidate, "--version"]},
+    {name: "harn --help", argv: [candidate, "--help"]},
+    {
+      name: "harn check tests/smoke/hello.harn",
+      argv: [candidate, "check", "tests/smoke/hello.harn"],
+    },
+    {name: "harn fmt --check tests/smoke", argv: [candidate, "fmt", "--check", "tests/smoke"]},
+    {name: "harn package check tests/smoke", argv: [candidate, "package", "check", "tests/smoke"]},
+    {
+      name: "harn check --provider-matrix",
+      argv: [candidate, "check", "--provider-matrix", "--format", "markdown"],
+    },
+    {name: "harn run tests/smoke/hello.harn", argv: [candidate, "run", "tests/smoke/hello.harn"]},
+    {
+      name: "harn run tests/smoke/quickstart.harn",
+      argv: [candidate, "run", "tests/smoke/quickstart.harn"],
+    },
+    {
+      name: "harn run tests/smoke/process.harn",
+      argv: [candidate, "run", "tests/smoke/process.harn"],
+    },
+    {
+      name: "harn run tests/smoke/mock_workflow.harn",
+      argv: [candidate, "run", "tests/smoke/mock_workflow.harn"],
+    },
+    {
+      name: "harn run tests/smoke/agent_loop.harn",
+      argv: [candidate, "run", "tests/smoke/agent_loop.harn"],
+    },
+  ]
+}
+
+fn command_options(config: ReleaseSmokeConfig, runner) {
+  return {
+    cwd: config.root,
+    env: {HARN_LLM_CALLS_DISABLED: "1"},
+    timeout_ms: config.step_timeout_ms,
+    capture: CAPTURE,
+    runner: runner,
+  }
+}
+
+fn watch_ready(output: string) -> bool {
+  return contains(output, "watching ") && contains(output, " for .harn changes")
+}
+
+fn result_output(result) -> string {
+  const combined = to_string(result?.combined ?? "")
+  if combined != "" {
+    return combined
+  }
+  return to_string(result?.stdout ?? "") + to_string(result?.stderr ?? "")
+}
+
+fn first_result_output(results: list) -> string {
+  for result in results {
+    const output = result_output(result)
+    if output != "" {
+      return output
+    }
+  }
+  return ""
+}
+
+fn watch_step(config: ReleaseSmokeConfig, adapters) {
+  const start_fn = adapters?.start ?? { spec, options -> command_run(spec, options) }
+  const wait_fn = adapters?.wait ?? { started, options -> command_wait(started, options) }
+  const cancel_fn = adapters?.cancel ?? { started, options -> command_cancel(started, options) }
+  const target = config.watch_target
+  if target == nil {
+    return command_result_fail(2, "release-smoke: watch_target is required")
+      + {
+      name: "harn watch boot",
+      timed_out: false,
+    }
+  }
+  const started = start_fn(
+    [config.candidate, "watch", target],
+    {cwd: config.root, env: {HARN_LLM_CALLS_DISABLED: "1"}, background: true, capture: CAPTURE},
+  )
+  if started?.handle_id == nil {
+    return command_result_fail(started?.exit_code ?? 1, result_output(started))
+      + {
+      name: "harn watch boot",
+      timed_out: started?.timed_out ?? false,
+    }
+  }
+  const waited = wait_fn(started, {timeout_ms: config.watch_timeout_ms})
+  const cancelled = cancel_fn(
+    started,
+    {wait_result_ms: 5000, timed_out: waited?.status == "running"},
+  )
+  const final_result = cancelled?.result ?? waited
+  const output = first_result_output([final_result, waited, started])
+  const ready = watch_ready(output)
+  const cleanup_ok = cancelled?.cancelled ?? (waited?.status != "running")
+  if ready && cleanup_ok {
+    return {
+      name: "harn watch boot",
+      success: true,
+      ok: true,
+      status: "completed",
+      exit_code: 0,
+      timed_out: false,
+      stdout: output,
+      stderr: "",
+      started: started,
+      waited: waited,
+      cancel: cancelled,
+    }
+  }
+  const reason = if !ready {
+    "watch exited or reached its deadline before reporting readiness"
+  } else {
+    "watch process group did not cancel cleanly"
+  }
+  return command_result_fail(final_result?.exit_code ?? 1, reason + "\n" + output)
+    + {
+    name: "harn watch boot",
+    status: !ready && waited?.status == "running" ? "timed_out" : "failed",
+    timed_out: !ready && waited?.status == "running",
+    started: started,
+    waited: waited,
+    cancel: cancelled,
+  }
+}
+
+/** Execute every release capability and retain an attributable result for each one. */
+pub fn run_release_smoke(config: ReleaseSmokeConfig, adapters = nil) -> ReleaseSmokeReport {
+  const runner = adapters?.run ?? { spec, options -> command_run(spec, options) }
+  let steps = []
+  for spec in command_specs(config.candidate) {
+    steps = steps + [command_step(spec.name, spec.argv, command_options(config, runner))]
+  }
+  steps = steps + [watch_step(config, adapters ?? {})]
+  const failed = steps.filter({ step -> !(step?.success ?? false) })
+  return {platform: config.platform, steps: steps, failed: failed, success: failed.count == 0}
+}
+
+fn render_report(report: ReleaseSmokeReport) {
+  for step in report.steps {
+    harness.stdio.println("::group::[${report.platform}] ${step.name}")
+    const output = result_output(step)
+    const noisy_success = step.name == "harn --help" || step.name == "harn check --provider-matrix"
+    if trim(output) != "" && (!(step?.success ?? false) || !noisy_success) {
+      harness.stdio.println(trim(output))
+    }
+    harness.stdio.println("::endgroup::")
+    if !(step?.success ?? false) {
+      const detail = if step?.timed_out ?? false {
+        "timed out"
+      } else {
+        "failed (exit ${step?.exit_code ?? "unknown"})"
+      }
+      gha_error(
+        "release-smoke (${report.platform}): ${step.name} ${detail}",
+        {title: "release-smoke: ${report.platform}/${step.name}"},
+      )
+    }
+  }
+  if report.success {
+    harness.stdio.println("release-smoke (${report.platform}): all capabilities ok")
+  } else {
+    gha_error(
+      "release-smoke (${report.platform}): ${report.failed.count} capability check(s) regressed",
+      {title: "release-smoke: ${report.platform}"},
+    )
+  }
+}
+
+fn main(harness: Harness) -> int {
+  if help_requested(argv) {
+    harness.stdio.println(usage())
+    return 0
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.stdio.eprintln(usage())
+    return 2
+  }
+  const options = unwrap(parsed_result).options
+  const step_timeout_ms = to_int(options.step_timeout_ms) ?? 0
+  const watch_timeout_ms = to_int(options.watch_timeout_ms) ?? 0
+  if step_timeout_ms <= 0 || watch_timeout_ms <= 0 {
+    harness.stdio.eprintln("release-smoke: timeout values must be positive")
+    return 2
+  }
+  const root = path_normalize(path_join(source_dir(), ".."))
+  const temp = harness.fs.mkdtemp_in_workspace("release-smoke-")
+  const watch_target = path_join(temp, "watch_target.harn")
+  harness.fs.write_text(
+    watch_target,
+    "fn main(harness: Harness) {\n  harness.stdio.println(\"watch boot\")\n}\n",
+  )
+  const report = try {
+    run_release_smoke(
+      {
+        candidate: to_string(options.candidate),
+        platform: display_platform(platform()),
+        root: root,
+        step_timeout_ms: step_timeout_ms,
+        watch_timeout_ms: watch_timeout_ms,
+        watch_target: watch_target,
+      },
+    )
+  } finally {
+    harness.fs.delete(temp)
+  }
+  render_report(report)
+  return report.success ? 0 : 1
+}

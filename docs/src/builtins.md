@@ -207,7 +207,8 @@ The lazy `std/schema` module provides ergonomic builders such as
 `schema_strict_object(...)`, `schema_union(...)`, `schema_validator(...)`,
 `get_typed_result(...)`, `get_typed_report(...)`, `get_typed_issues(...)`,
 `get_typed_value(...)`, `parse_json_typed_report(...)`,
-`parse_json_typed(...)`, and `is_type(...)`.
+`parse_json_typed(...)`, `validation_rule(...)`, `schema_contract(...)`,
+`schema_contract_check(...)`, and `is_type(...)`.
 Use `schema_closed_object(...)` / `schema_strict_object(...)` for option bags,
 receipts, structured LLM outputs, and host-contract payloads where unexpected
 keys should fail closed.
@@ -219,8 +220,39 @@ import { parse_json_typed } from "std/schema"
 
 type User = {name: string}
 
-const user: User = parse_json_typed("{\"name\":\"Ada\"}", User, {name: "fallback"})
-log(user.name)
+const user = parse_json_typed("{\"name\":\"Ada\"}", User, {name: "fallback"})
+log(user?.name)
+```
+
+Use `SchemaContract<T>` when a structurally valid value also has relational
+invariants. Each named rule receives the validated `T` and returns an ordered
+list of `ValidationIssue`s; an empty list passes. A typed closure can capture
+any context the rule needs. The non-throwing checker distinguishes
+`schema_invalid`, `rule_failed`, and `rule_error` while preserving the defaulted
+`T` on success:
+
+```harn
+import {
+  SchemaContractFailure,
+  ValidationIssue,
+  schema_contract,
+  schema_contract_check,
+  validation_issue,
+  validation_rule,
+} from "std/schema"
+
+type Receipt = {id: string, version: int}
+
+const receipt = schema_contract(
+  schema_of(Receipt),
+  [
+    validation_rule("id_version", fn(value: Receipt) -> list<ValidationIssue> {
+      if starts_with(value.id, "v" + to_string(value.version) + "-") { return [] }
+      return [validation_issue("receipt.id_version", "id must encode version", "id")]
+    }),
+  ],
+)
+const checked: Result<Receipt, SchemaContractFailure> = schema_contract_check(input, receipt)
 ```
 
 Composition helpers:

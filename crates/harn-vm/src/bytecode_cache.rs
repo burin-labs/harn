@@ -67,7 +67,9 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// layout changes in a backwards-incompatible way.
 /// v5: `ModuleArtifact` gained `public_type_names` (`pub type` exports).
 /// v6: payload encoding replaced with postcard.
-pub const SCHEMA_VERSION: u32 = 6;
+/// v7: exported type schemas moved from eager JSON strings to an initializer
+/// chunk that resolves imported aliases in the module environment.
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.

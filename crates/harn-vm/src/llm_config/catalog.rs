@@ -922,7 +922,9 @@ pub enum ToolFormatChannel {
 pub fn tool_format_channel(format: &str) -> Option<ToolFormatChannel> {
     match format {
         "native" => Some(ToolFormatChannel::Native),
-        "text" | "json" => Some(ToolFormatChannel::Text),
+        // `adaptive` is an opt-in permissive text-channel union (DEFAULT-OFF:
+        // no route resolves to it; reachable only via an explicit pin/request).
+        "text" | "json" | "adaptive" => Some(ToolFormatChannel::Text),
         _ => None,
     }
 }

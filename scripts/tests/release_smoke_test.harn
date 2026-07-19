@@ -1,0 +1,142 @@
+import { command_result_fail, command_result_ok } from "std/command"
+import { run_release_smoke } from "../release_smoke.harn"
+
+fn config() {
+  return {
+    candidate: "/candidate/harn",
+    platform: "test",
+    root: "/workspace",
+    step_timeout_ms: 100,
+    watch_timeout_ms: 50,
+    watch_target: "/workspace/watch.harn",
+  }
+}
+
+fn ready_adapters(command_runner = nil) {
+  return {
+    run: command_runner ?? { _spec, _options -> command_result_ok("ok") },
+    start: { _spec, _options -> command_result_ok("", {status: "running", handle_id: "watch-1"}) },
+    wait: { _started, _options ->
+      {
+        success: false,
+        ok: false,
+        status: "running",
+        exit_code: nil,
+        stdout: "watching /workspace for .harn changes\n",
+        stderr: "",
+      }
+    },
+    cancel: { _started, options ->
+      {
+        cancelled: true,
+        observed_timed_out: options.timed_out,
+        result: command_result_fail(
+          1,
+          "",
+          {status: "cancelled", stdout: "watching /workspace for .harn changes\n"},
+        ),
+      }
+    },
+  }
+}
+
+@test
+pipeline test_success_runs_every_capability_and_cancels_watch(task) {
+  const report = run_release_smoke(config(), ready_adapters())
+  assert_eq(report.success, true)
+  assert_eq(report.steps.count, 12)
+  assert_eq(report.failed.count, 0)
+  assert_eq(report.steps[11].cancel.observed_timed_out, true)
+}
+
+@test
+pipeline test_command_failure_is_attributable_and_does_not_stop_aggregation(task) {
+  let calls = 0
+  const adapters = ready_adapters(
+    { _spec, _options ->
+      calls = calls + 1
+      if calls == 3 {
+        return command_result_fail(7, "check failed")
+      }
+      return command_result_ok("ok")
+    },
+  )
+  const report = run_release_smoke(config(), adapters)
+  assert_eq(calls, 11)
+  assert_eq(report.failed.count, 1)
+  assert_eq(report.failed[0].name, "harn check tests/smoke/hello.harn")
+  assert_eq(report.failed[0].exit_code, 7)
+}
+
+@test
+pipeline test_multiple_failures_are_aggregated_in_source_order(task) {
+  let calls = 0
+  const adapters = ready_adapters(
+    { _spec, _options ->
+      calls = calls + 1
+      if calls == 2 || calls == 6 {
+        return command_result_fail(calls, "failed")
+      }
+      return command_result_ok("ok")
+    },
+  )
+  const report = run_release_smoke(config(), adapters)
+  assert_eq(report.failed.count, 2)
+  assert_eq(report.failed[0].name, "harn --help")
+  assert_eq(report.failed[1].name, "harn check --provider-matrix")
+}
+
+@test
+pipeline test_timeout_is_preserved_without_wall_clock_waiting(task) {
+  const adapters = ready_adapters(
+    { _spec, _options ->
+      {
+        success: false,
+        ok: false,
+        status: "timed_out",
+        exit_code: 124,
+        timed_out: true,
+        stdout: "",
+        stderr: "deadline",
+      }
+    },
+  )
+  const report = run_release_smoke(config(), adapters)
+  assert_eq(report.failed.count, 11)
+  assert_eq(report.failed[0].status, "timed_out")
+  assert_eq(report.failed[0].timed_out, true)
+}
+
+@test
+pipeline test_watch_deadline_without_readiness_fails_after_cancellation(task) {
+  const adapters = ready_adapters()
+    + {
+    wait: { _started, _options ->
+      {success: false, status: "running", stdout: "", stderr: "", exit_code: nil}
+    },
+    cancel: { _started, _options ->
+      {cancelled: true, result: command_result_fail(1, "stopped", {status: "cancelled"})}
+    },
+  }
+  const report = run_release_smoke(config(), adapters)
+  assert_eq(report.failed.count, 1)
+  assert_eq(report.failed[0].name, "harn watch boot")
+  assert_eq(report.failed[0].timed_out, true)
+}
+
+@test
+pipeline test_watch_early_exit_and_cleanup_failure_are_distinct_failures(task) {
+  const early_exit = ready_adapters()
+    + {
+    wait: { _started, _options -> command_result_fail(9, "watch crashed") },
+    cancel: { _started, _options -> {cancelled: false} },
+  }
+  const early_report = run_release_smoke(config(), early_exit)
+  assert_eq(early_report.failed[0].timed_out, false)
+  assert_eq(contains(early_report.failed[0].stderr, "before reporting readiness"), true)
+  const cleanup_failure = ready_adapters()
+    + {cancel: { _started, _options -> {cancelled: false} }}
+  const cleanup_report = run_release_smoke(config(), cleanup_failure)
+  assert_eq(cleanup_report.failed.count, 1)
+  assert_eq(contains(cleanup_report.failed[0].stderr, "did not cancel cleanly"), true)
+}

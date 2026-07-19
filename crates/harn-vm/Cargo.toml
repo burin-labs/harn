@@ -8,6 +8,10 @@ repository.workspace = true
 homepage.workspace = true
 description = "Async bytecode virtual machine for the Harn programming language"
 
+[[bin]]
+name = "harn-test-echo-env"
+path = "src/bin/harn_test_echo_env.rs"
+
 # cargo-machete text-matches crate names; `md-5` is imported as `md5::*` and
 # the renamed form trips the heuristic. Keep it in the ignore list.
 [package.metadata.cargo-machete]

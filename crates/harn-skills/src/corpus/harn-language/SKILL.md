@@ -48,6 +48,9 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 ## Types and boundaries
 
 - Treat `unknown` as the type for untrusted inputs.
+- Use `SchemaContract<T>` for deterministic cross-field rules after structural
+  validation. Capture typed context in the rule closure; do not replace it with
+  an open dictionary.
 - Narrow `unknown` with `type_of`, `schema_is`, or validated helpers.
 - Use `any` only as an explicit escape hatch.
 - Do not erase types merely to silence the typechecker.

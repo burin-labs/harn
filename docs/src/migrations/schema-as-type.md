@@ -104,15 +104,14 @@ const r = llm_call(prompt, nil, {
 
 ## Caveats
 
-- `schema_of(T)` lowers at compile time. `T` must be a top-level
-  `type` alias visible to the compiler. Dynamic construction
+- `schema_of(T)` materializes top-level aliases across file and embedded
+  standard-library module boundaries. Dynamic construction
   (`let T = ...`) falls back to the runtime `schema_of` builtin, which
   is a dict-passthrough — it does not look up alias names at runtime.
 - The compiler-level alias emitter handles shapes, lists,
-  `dict<string, V>`, literal-string/int unions, and nested aliases.
-  Shapes containing `Applied<T>` (generic containers) or `fn` types
-  emit a best-effort `{type: "closure"}` placeholder; prefer raw
-  schema dicts there.
+  `dict<string, V>`, literal-string/int unions, functions, nested aliases,
+  applied generic aliases, and open-record tails. Imported aliases may be used
+  directly or embedded in a consumer-owned alias.
 - `response.data` of `llm_call(..., {output_schema: T})` is not yet
   automatically narrowed to `T` by the type checker. Use
   `if schema_is(r.data, T) { ... }` in the interim — the narrowing

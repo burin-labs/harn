@@ -1015,6 +1015,8 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | `read_json_result(path)` | Read JSON as `Result<unknown, StructuredReadFailure>` without erasing failure kind, path, or parser location |
 | `read_json_typed<T>(path, schema: Schema<T>, apply_defaults?) -> T` | Read required JSON and validate it against a schema, throwing the typed read or schema failure |
 | `read_json_typed_result<T>(path, schema: Schema<T>, apply_defaults?)` | Read and schema-validate JSON as `TypedReadResult<T>`, whose error is `TypedReadFailure` |
+| `read_json_contract<T>(path, contract: SchemaContract<T>) -> T` | Read required JSON through structural validation and named rules |
+| `read_json_contract_result<T>(path, contract: SchemaContract<T>)` | Preserve read, schema, rule-violation, and broken-rule failures in one typed result |
 | `write_json(path, value, options?)` | Write JSON with optional `{pretty, trailing_newline, ensure_parent}` |
 | `read_yaml(path, fallback?)` / `write_yaml(path, value, options?)` | YAML file helpers |
 | `read_toml(path, fallback?)` / `write_toml(path, value, options?)` | TOML file helpers |
@@ -1035,9 +1037,10 @@ Evidence search's optional case-insensitive mode folds ASCII letters.
 `"absent" | "unreadable" | "malformed" | "recursion_limit"`; only callers that
 explicitly treat absence as optional should default that case.
 `SchemaValidationFailure` contains `{kind: "schema_invalid", path, detail,
-issues}`. `TypedReadFailure` is the owner alias for
-`StructuredReadFailure | SchemaValidationFailure` across JSON, YAML, and TOML
-typed readers.
+issues}`. Contract reads add `ContractValidationFailure`, whose kind is
+`schema_invalid`, `rule_failed`, or `rule_error`. It retains the path, format,
+and typed validation issues. `TypedReadFailure` is the owner alias for all read,
+schema, and rule failures.
 
 ```harn
 import { read_json, relative_path, write_json } from "std/fs"
@@ -1076,7 +1079,11 @@ support boundary.
 | `run_artifacts_list(kind, options?)` | List recent run directories newest-first with `{root?, namespace?, limit?}` |
 | `run_artifact_path(run, name)` | Resolve a relative artifact path inside `run.dir`, rejecting absolute paths and `..` traversal |
 | `run_artifact_write_json(run, name, value, options?)` | Write JSON through `std/fs.write_json` conventions |
-| `run_artifact_write_json_typed<T>(run, name, value, schema, options?)` | Validate and atomically replace JSON, leaving the prior artifact unchanged on contract failure |
+| `run_artifact_write_json_contract_result<T>(run, name, value, contract, options?)` | Validate structural and relational rules before replacing JSON; leave the destination unchanged on failure |
+| `run_artifact_write_json_contract<T>(run, name, value, contract, options?)` | Throwing convenience wrapper over the same validate-before-write boundary |
+| `run_artifact_read_json_contract_result<T>(run, name, contract)` | Read contract-bound JSON without erasing read, schema, or rule failures |
+| `run_artifact_read_json_contract<T>(run, name, contract)` | Read required contract-bound JSON and throw its typed failure |
+| `run_artifact_write_json_typed<T>(run, name, value, schema, options?)` | Validate JSON before writing, leaving the prior artifact unchanged on contract failure |
 | `run_artifact_read_json(run, name)` | Read a required JSON artifact through `std/fs.read_json` |
 | `run_artifact_read_json_typed<T>(run, name, schema, apply_defaults?)` | Read required JSON and validate the consumer-owned artifact shape |
 | `run_artifact_read_json_typed_result<T>(run, name, schema, apply_defaults?)` | Read optional JSON as a typed Result that preserves read and schema failure details |
@@ -1765,9 +1772,11 @@ fn describe(t: SmartTarget) -> string {
 }
 ```
 
-Type aliases are erased at runtime — the imported name carries no value,
-but the type checker resolves it across the module boundary. A type alias
-without `pub` stays module-private; importing it is an error.
+Type annotations are erased from ordinary values, but an imported public alias
+materializes a schema when used with `schema_of`, a schema guard, or a
+schema-valued option. Reflection resolves nested imports and behaves the same
+for filesystem and embedded standard-library modules. A type alias without
+`pub` stays module-private; importing it is an error.
 
 ### Public re-exports
 

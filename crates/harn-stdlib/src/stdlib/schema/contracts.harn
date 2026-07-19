@@ -1,0 +1,21 @@
+pub type ValidationIssue = {
+  code: string,
+  message: string,
+  path?: string,
+  rule?: string,
+  metadata?: dict,
+}
+
+pub type ValidationRule<T> = {name: string, check: fn(T) -> list<ValidationIssue>}
+
+pub type SchemaContract<T> = {
+  schema: Schema<T>,
+  rules: list<ValidationRule<T>>,
+  apply_defaults: bool,
+}
+
+pub type SchemaContractFailure = {
+  kind: "schema_invalid" | "rule_failed" | "rule_error",
+  detail: string,
+  issues: list<ValidationIssue>,
+}

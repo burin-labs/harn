@@ -91,7 +91,7 @@ fn acquire_blocks_second_owner_until_release() {
 }
 
 #[test]
-fn immediate_transaction_allows_exactly_one_race_winner() {
+fn immediate_transaction_allows_one_race_winner() {
     let temp = TempDir::new().unwrap();
     let store = Arc::new(store(&temp));
     let worker_count = 12;
@@ -113,13 +113,24 @@ fn immediate_transaction_allows_exactly_one_race_winner() {
         .into_iter()
         .map(|worker| worker.join().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(
-        statuses
-            .iter()
-            .filter(|status| **status == HostLeaseAcquireStatus::Acquired)
-            .count(),
-        1
+    let initial_winners = statuses
+        .iter()
+        .filter(|status| **status == HostLeaseAcquireStatus::Acquired)
+        .count();
+    assert!(
+        initial_winners <= 1,
+        "at most one race winner: {statuses:?}"
     );
+
+    // `try_acquire` deliberately reports a transient SQLite writer conflict as
+    // a typed deferral. If every thread observes that conflict, a serialized
+    // retry must still make progress once the race has drained.
+    if initial_winners == 0 {
+        assert_eq!(
+            store.try_acquire(request("recovery")).unwrap().status,
+            HostLeaseAcquireStatus::Acquired
+        );
+    }
 }
 
 #[test]

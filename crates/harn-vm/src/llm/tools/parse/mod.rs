@@ -5,6 +5,7 @@
 //! and the `TextToolParseResult` shape; everything else is a local helper
 //! (ident parser, TS literal parser, heredoc skipper, native-JSON fallback).
 
+mod adaptive;
 mod bare;
 mod fenced_json;
 mod harmony;
@@ -41,6 +42,11 @@ pub(crate) enum TextToolFormat {
     Tagged,
     /// The fenced-JSON grammar (```` ```tool ```` + a single `{name,args}`).
     FencedJson,
+    /// Opt-in permissive union: every text-channel lane, plus dialects the
+    /// pinned grammars miss (tool-name-as-key), each accepted only when it maps
+    /// unambiguously to exactly one presented tool. DEFAULT-OFF — no catalog
+    /// route resolves here; reachable only via an explicit `tool_format` pin.
+    Adaptive,
 }
 
 impl TextToolFormat {
@@ -54,6 +60,7 @@ impl TextToolFormat {
     pub(crate) fn from_option(tool_format: &str) -> Self {
         match tool_format {
             "json" => TextToolFormat::FencedJson,
+            "adaptive" => TextToolFormat::Adaptive,
             // "text", "native", "auto", "", and unknown values all read text.
             _ => TextToolFormat::Tagged,
         }
@@ -75,6 +82,7 @@ pub(crate) fn parse_text_tool_calls_in_format(
     match format {
         TextToolFormat::Tagged => parse_text_tool_calls_with_tools(text, tools_val),
         TextToolFormat::FencedJson => parse_fenced_json_tool_calls(text),
+        TextToolFormat::Adaptive => adaptive::parse_adaptive_tool_calls(text, tools_val),
     }
 }
 

@@ -86,13 +86,19 @@ These drive `cargo`, `git`, codesigning, and release plumbing. They are
 idiomatic shell glue around external build tools; porting offers little and
 risks release/build reliability:
 
-`release_ship.sh`, `release_gate.sh`, `release_smoke.sh`,
+`release_ship.sh`, `release_gate.sh`,
 `verify_crate_packages.sh`, `dev_setup.sh`, `sign_local_macos.sh`,
 `generate_sdk_clients.sh`, `prune_stale_targets.sh`, `bench_*.sh`,
 `smoke_installed_binary.sh`, `stress_subprocess_tests.sh`,
 `measure_lean_embedding.sh`, `build_docs_site.sh`, `configure_merge_drivers.sh`,
 `ensure_portal_deps.sh`, `portal_demo.sh`, `demo_local_a2a_dispatch.sh`, `install.sh`,
 `.githooks/*`, `.github/scripts/*.sh`.
+
+`smoke_installed_binary.sh` is intentionally a bootstrap wrapper: it identifies
+the installed release and checks out that tag's fixtures before Harn can run.
+Once the candidate starts, `release_smoke.harn` owns command deadlines, output
+inspection, failure aggregation, and process-group cleanup through
+`std/command`; bootstrap shell must not grow a second lifecycle implementation.
 
 ## Toolchain groundwork landed for this cutover
 

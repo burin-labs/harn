@@ -41,6 +41,9 @@ pub use lifecycle_receipts::*;
 mod command_policy;
 pub use command_policy::*;
 
+mod tool_precheck;
+pub use tool_precheck::*;
+
 mod compaction;
 pub use compaction::*;
 

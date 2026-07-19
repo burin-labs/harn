@@ -1359,7 +1359,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let caps = lookup("llamacpp", "unsloth/Qwen3.6-35B-A3B-GGUF");
         assert!(!caps.thinking_modes.is_empty());
         assert!(caps.preserve_thinking);
-        assert!(!caps.native_tools);
+        assert!(caps.native_tools); // re-promoted native 2026-07-18 (harn#5162)
         assert!(caps.text_tool_wire_format_supported);
         assert_eq!(caps.server_parser, "none");
     }

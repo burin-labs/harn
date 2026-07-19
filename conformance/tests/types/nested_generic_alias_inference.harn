@@ -1,14 +1,14 @@
 type Receipt = {id: string}
 
-type Verdict = {ok: bool}
+type RuleResult = {ok: bool}
 
 type Step<T> = {value: T}
 
 type MaybeStep<T> = {value: T?}
 
-type RefinementCheck<T> = {name: string, validate: fn(T, dict) -> Verdict}
+type ValidationRule<T> = {name: string, validate: fn(T, dict) -> RuleResult}
 
-type RefinedSchema<T> = {base: T, refinements: list<RefinementCheck<T>>}
+type SchemaContract<T> = {base: T, rules: list<ValidationRule<T>>}
 
 fn int_step() -> Step<int> {
   return {value: 1}
@@ -22,31 +22,31 @@ fn maybe_values<T>(_steps: list<MaybeStep<T>>) -> list<T> {
   return []
 }
 
-fn validate_receipt(receipt: Receipt, _context: dict) -> Verdict {
+fn validate_receipt(receipt: Receipt, _context: dict) -> RuleResult {
   return {ok: receipt.id != ""}
 }
 
-fn refinement<T>(name: string, validate: fn(T, dict) -> Verdict) -> RefinementCheck<T> {
+fn validation_rule<T>(name: string, validate: fn(T, dict) -> RuleResult) -> ValidationRule<T> {
   return {name: name, validate: validate}
 }
 
-fn receipt_schema() -> RefinedSchema<Receipt> {
-  return {base: {id: "r-1"}, refinements: [refinement("has-id", validate_receipt)]}
+fn receipt_contract() -> SchemaContract<Receipt> {
+  return {base: {id: "r-1"}, rules: [validation_rule("has-id", validate_receipt)]}
 }
 
-fn artifacts<T>(_contract: RefinedSchema<T>) -> list<T> {
+fn artifacts<T>(_contract: SchemaContract<T>) -> list<T> {
   return []
 }
 
-fn artifact_groups<T>(_contracts: list<RefinedSchema<T>>) -> list<T> {
+fn artifact_groups<T>(_contracts: list<SchemaContract<T>>) -> list<T> {
   return []
 }
 
 pipeline test(task) {
   const ints: list<int> = values([int_step()])
   const nullable_ints: list<int> = maybe_values([{value: 1}])
-  const receipts: list<Receipt> = artifacts(receipt_schema())
-  const grouped_receipts: list<Receipt> = artifact_groups([receipt_schema()])
+  const receipts: list<Receipt> = artifacts(receipt_contract())
+  const grouped_receipts: list<Receipt> = artifact_groups([receipt_contract()])
   const explicit_empty: list<int> = values<int>([])
   __io_println(
     "nested aliases inferred: ${ints.count + nullable_ints.count + receipts.count + grouped_receipts.count + explicit_empty.count}",

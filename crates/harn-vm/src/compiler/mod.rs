@@ -1,4 +1,4 @@
-use harn_parser::{Node, SNode, TypeExpr};
+use harn_parser::{Node, SNode, TypeExpr, TypeParam};
 
 mod bindings;
 mod catalogs;
@@ -13,6 +13,7 @@ mod optimizer;
 mod patterns;
 mod pipe;
 mod pipelines;
+mod schema_types;
 mod state;
 mod statements;
 #[cfg(test)]
@@ -107,6 +108,14 @@ enum FinallyEntry {
     CatchBarrier,
 }
 
+#[derive(Clone, Debug)]
+struct TypeAliasDefinition {
+    type_params: Vec<TypeParam>,
+    /// `None` marks a selectively imported name. If typechecking accepted it
+    /// in a type expression, its runtime schema binding is the definition.
+    body: Option<TypeExpr>,
+}
+
 /// Tracks loop context for break/continue compilation.
 struct LoopContext {
     /// Offset of the loop start (for continue).
@@ -196,9 +205,10 @@ pub struct Compiler {
     temp_counter: usize,
     /// Number of lexical block scopes currently active in this compiled frame.
     scope_depth: usize,
-    /// Top-level `type` aliases, used to lower `schema_of(T)` and
-    /// `output_schema: T` into constant JSON-Schema dicts at compile time.
-    type_aliases: std::collections::HashMap<String, TypeExpr>,
+    /// Top-level and selectively imported type names used to materialize
+    /// schema expressions. Imported names remain runtime references so module
+    /// initialization can compose them after imports are bound.
+    type_aliases: std::collections::HashMap<String, TypeAliasDefinition>,
     /// Lightweight compiler-side type facts used only for conservative
     /// bytecode specialization. This mirrors lexical scopes and is separate
     /// from the parser's diagnostic type checker so compile-only callers keep
@@ -276,8 +286,7 @@ impl Compiler {
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
             Node::Identifier(name) => {
-                if let Some(schema) = self.schema_value_for_alias(name) {
-                    self.emit_vm_value_literal(&schema);
+                if self.emit_schema_for_alias(name) {
                     return Ok(());
                 }
                 self.emit_get_binding(name);
@@ -678,9 +687,10 @@ impl Compiler {
             // Metadata-only declarations: enum names, struct/interface
             // layouts, and type aliases are pre-scanned, so they emit no
             // bytecode and leave the operand stack untouched. Type-alias names
-            // in expression position lower directly to schema constants in the
-            // `Identifier` arm above; eagerly binding every alias at top level
-            // bloats large module init chunks past the VM's 64 KiB jump limit.
+            // in expression position lower to schema expressions in the
+            // `Identifier` arm above; exported aliases use a separate compact
+            // initializer so ordinary module init chunks stay within the VM's
+            // 64 KiB jump limit.
             // `produces_value` classifies them as non-value-producing to match;
             // contexts that require a block to yield a value (last statement of
             // a block, match-arm body) emit their own `Nil` placeholder.

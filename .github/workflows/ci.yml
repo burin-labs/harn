@@ -751,7 +751,7 @@ jobs:
                 .github/workflows/build-release-binaries.yml \
                 .github/workflows/release-smoke.yml \
                 scripts/release_runner_matrix.sh \
-                scripts/release_smoke.sh \
+                scripts/release_smoke.harn \
                 scripts/smoke_installed_binary.sh > "$policy_diff" 2>/dev/null; then
                 echo "windows: native policy diff against $diff_base failed; running Windows smoke defensively."
                 run_windows=true
@@ -1001,7 +1001,7 @@ jobs:
                 .github/workflows/build-release-binaries.yml \
                 .github/workflows/release-smoke.yml \
                 scripts/release_runner_matrix.sh \
-                scripts/release_smoke.sh \
+                scripts/release_smoke.harn \
                 scripts/smoke_installed_binary.sh > "$policy_diff" 2>/dev/null; then
                 echo "macos: native policy diff against $diff_base failed; running macOS check defensively."
                 run_macos=true

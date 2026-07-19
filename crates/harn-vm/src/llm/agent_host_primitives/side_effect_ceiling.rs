@@ -16,6 +16,10 @@ use super::host_permission::{
     request_host_permission, HostPermissionOutcome, HostPermissionRequest,
 };
 
+// Returned by value exactly once per side-effect-ceiling denial (a cold path),
+// so the size asymmetry between `Allowed` and the denial-carrying `Denied`
+// variant is not worth an extra heap indirection on `ToolDenial`.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum SideEffectPermissionOutcome {
     Allowed {
         policy_decision: serde_json::Value,

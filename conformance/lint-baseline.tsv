@@ -29,11 +29,15 @@
 2	agents/reserved_terminal_verify_guard.harn	HARN-LNT-049
 10	agents/stall_delivered_fix_trigger.harn	HARN-LNT-025
 11	agents/stall_stale_diagnostics_advisory.harn	HARN-LNT-025
+9	agents/stall_success_repeat_breaker.harn	HARN-LNT-025
 16	agents/stall_verify_state_axis.harn	HARN-LNT-025
 4	agents/suspend_continue_transcript_false.harn	HARN-LNT-014
 2	agents/suspend_nested.harn	HARN-LNT-014
 5	agents/thrash_hard_stop_recovery.harn	HARN-LNT-018
 1	agents/tool_call_paradigm.harn	HARN-LNT-049
+7	agents/tool_precheck.harn	HARN-LNT-025
+1	agents/tool_precheck.harn	HARN-LNT-032
+2	agents/tool_precheck.harn	HARN-LNT-049
 1	agents/worker_retriggerable.harn	HARN-LNT-014
 1	agents/worker_retriggerable.harn	HARN-LNT-018
 3	agents/workflow_executor_agent_loop.harn	HARN-LNT-018
@@ -187,7 +191,6 @@
 1	types/recursive_type_param_annotation.harn	HARN-LNT-049
 1	types/schema_as_type_llm.harn	HARN-LNT-020
 1	types/schema_as_type_narrow_data.harn	HARN-LNT-020
-14	types/schema_runtime_helpers.harn	HARN-LNT-018
 1	types/struct_basic.harn	HARN-LNT-020
 1	types/type_narrowing_early_exit.harn	HARN-LNT-014
 1	types/variance_fn_param_contravariant.harn	HARN-LNT-014

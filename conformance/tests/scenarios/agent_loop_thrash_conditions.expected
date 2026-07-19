@@ -1,5 +1,6 @@
 same_obs=repeated_same_observation
-polling=,trips=0
+polling=repeated_success,trips=3
+varied=,trips=0
 same_err=repeated_error
 distinct_err=,trips=0
 monologue=no_progress_monologue
