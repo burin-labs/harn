@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::PathBuf;
 use std::process;
 
 use harn_vm::llm::capabilities::ProviderCapabilityMatrixRow;
@@ -11,8 +11,6 @@ use crate::format::escape_md;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 
 pub(crate) const PROVIDER_MATRIX_SCHEMA_VERSION: u32 = 1;
-const DEFAULT_TOOL_MODE_PARITY_OVERLAY_PATH: &str =
-    ".harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml";
 
 const FEATURES: &[&str] = &[
     "thinking",
@@ -41,7 +39,7 @@ const FEATURES: &[&str] = &[
 
 pub(crate) fn run(format: CheckOutputFormat, filter: Option<&str>, deprecated_json_format: bool) {
     let rows = filtered_rows(filter);
-    let catalog = load_catalog_for_docs().unwrap_or_else(|error| {
+    let catalog = load_catalog_for_docs(&[]).unwrap_or_else(|error| {
         eprintln!("error: {error}");
         process::exit(2);
     });
@@ -52,9 +50,12 @@ pub(crate) fn run(format: CheckOutputFormat, filter: Option<&str>, deprecated_js
     }
 }
 
-pub(crate) fn load_catalog_for_docs() -> Result<ProviderCatalogArtifact, String> {
+pub(crate) fn load_catalog_for_docs(
+    empirical_paths: &[PathBuf],
+) -> Result<ProviderCatalogArtifact, String> {
     let mut catalog = harn_vm::provider_catalog::artifact();
-    if let Some(overlay) = load_default_tool_mode_parity_overlay()? {
+    for path in empirical_paths {
+        let overlay = tool_mode_parity::read_overlay(path)?;
         apply_empirical_parity_overlay(&mut catalog, &overlay);
     }
     Ok(catalog)
@@ -110,7 +111,7 @@ pub(crate) fn generate_markdown(
     }
     out.push_str("\n## Tool-format recommendations by catalog model\n\n");
     out.push_str(
-        "This section starts from the checked-in provider catalog. Recommended format follows the live capability matrix, and the empirical columns are layered from `.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml` when that overlay exists locally. Rows without sampled benchmark evidence show catalog capability notes when present, otherwise `data not yet collected`.\n\n",
+        "This section starts from the checked-in provider catalog. Recommended format follows the live capability matrix. Empirical columns are layered only when `--empirical <path>` is supplied; checked-in output is therefore reproducible from the repository alone. Rows without sampled benchmark evidence show catalog capability notes when present, otherwise `data not yet collected`.\n\n",
     );
     out.push_str(
         "| Provider | Model | Recommended format | Parity | Native pass | Text pass | Samples | Last evaluated | Confidence | Evidence |\n",
@@ -161,14 +162,6 @@ pub(crate) fn filtered_rows(filter: Option<&str>) -> Vec<ProviderCapabilityMatri
     rows.into_iter()
         .filter(|row| row_supports_feature(row, &normalized))
         .collect()
-}
-
-fn load_default_tool_mode_parity_overlay() -> Result<Option<ToolModeParityOverlay>, String> {
-    let path = Path::new(DEFAULT_TOOL_MODE_PARITY_OVERLAY_PATH);
-    if !path.exists() {
-        return Ok(None);
-    }
-    tool_mode_parity::read_overlay(path).map(Some)
 }
 
 fn apply_empirical_parity_overlay(
@@ -479,6 +472,57 @@ fn markdown_cell(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empirical_overlay_is_applied_only_when_explicitly_requested() {
+        let tempdir = tempfile::tempdir().expect("create temporary overlay directory");
+        let path = tempdir.path().join("parity.toml");
+        let overlay = ToolModeParityOverlay {
+            schema_version: 1,
+            generated_at: "2026-07-19T00:00:00Z".to_string(),
+            fixture_suite: "coding-agent".to_string(),
+            rows: vec![
+                crate::commands::tool_mode_parity::ToolModeParityOverlayRow {
+                    provider: "llamacpp".to_string(),
+                    model: "qwen3.6-35b-a3b".to_string(),
+                    tool_mode_parity: "text_better".to_string(),
+                    preferred_tool_format: "json".to_string(),
+                    confidence: "high".to_string(),
+                    sample_size: 12,
+                    last_updated: "2026-07-19T00:00:00Z".to_string(),
+                    evidence_path: "receipt".to_string(),
+                    verifier_divergence_rate: 0.5,
+                    native: Default::default(),
+                    text: Default::default(),
+                },
+            ],
+        };
+        tool_mode_parity::write_overlay(&path, &overlay).expect("write parity overlay");
+
+        let baseline = load_catalog_for_docs(&[]).expect("load baseline catalog");
+        let baseline_model = baseline
+            .models
+            .iter()
+            .find(|model| model.id == "qwen3.6-35b-a3b")
+            .expect("catalogued llama.cpp model");
+        assert!(baseline_model.tool_support.empirical_parity.is_none());
+
+        let with_overlay = load_catalog_for_docs(std::slice::from_ref(&path))
+            .expect("load catalog with explicit overlay");
+        let sampled_model = with_overlay
+            .models
+            .iter()
+            .find(|model| model.id == "qwen3.6-35b-a3b")
+            .expect("catalogued llama.cpp model");
+        assert_eq!(
+            sampled_model
+                .tool_support
+                .empirical_parity
+                .as_ref()
+                .map(|parity| parity.preferred_format.as_str()),
+            Some("json")
+        );
+    }
 
     #[test]
     fn json_schema_filter_only_keeps_supported_rows() {

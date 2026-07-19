@@ -114,6 +114,9 @@ pub(crate) struct ProvidersMatrixArgs {
     /// Print the generated markdown to stdout instead of writing it.
     #[arg(long)]
     pub stdout: bool,
+    /// Layer one or more explicit coding-agent parity overlays onto the matrix.
+    #[arg(long = "empirical", value_name = "PATH")]
+    pub empirical: Vec<PathBuf>,
     /// Only include matrix rows that support the named feature.
     #[arg(long)]
     pub filter: Option<String>,

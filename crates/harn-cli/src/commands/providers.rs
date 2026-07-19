@@ -55,7 +55,7 @@ pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), Strin
 
 pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
     let rows = crate::commands::check::provider_matrix::filtered_rows(args.filter.as_deref());
-    let catalog = crate::commands::check::provider_matrix::load_catalog_for_docs()?;
+    let catalog = crate::commands::check::provider_matrix::load_catalog_for_docs(&args.empirical)?;
     let generated = crate::commands::check::provider_matrix::generate_markdown(&rows, &catalog);
     if args.check {
         match fs::read_to_string(&args.output) {

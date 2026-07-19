@@ -127,6 +127,15 @@ harn provider catalog matrix
 harn provider catalog matrix --check
 ```
 
+Matrix generation is hermetic by default. To inspect local coding-agent parity
+receipts without changing checked-in output, pass them explicitly:
+
+```bash
+harn provider catalog matrix \
+  --empirical .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml \
+  --stdout
+```
+
 `make gen-provider-catalog` and `make check-provider-catalog` route through the
 same source-fragment graph as `harn provider catalog generate`, so stale
 embedded snapshots from the running binary cannot influence checked-in output.
