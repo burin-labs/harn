@@ -1426,11 +1426,13 @@ tool_format = "native"
 # Use the llamacpp provider for local qwen3.x.
 
 # llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
-# No `tool_format` pin: this non-native-quant id matches the `*qwen3.6*`
-# text-channel capability row's `json` (fenced-JSON) default. json's ```tool
-# fence sidesteps the reserved <tool_call> token (so the reserved-token remap
-# stays correct) and is delimiter-safe vs heredoc. To force heredoc, set
-# `tool_format = "text"`.
+# No `tool_format` pin on any llama.cpp qwen3.6 alias: they all inherit the
+# `*qwen3.6*` capability row's native default (re-promoted 2026-07-18 — see that
+# row's tool_mode_parity_notes and harn#5162), matching the mlx/vLLM siblings
+# that serve the same weights. To force the text channel instead, set
+# `tool_format = "text"` (heredoc) or `"json"` (fenced-JSON, whose ```tool fence
+# sidesteps the reserved <tool_call> token so the reserved-token remap stays
+# correct).
 [aliases."llamacpp-qwen3.6"]
 id = "qwen3.6-35b-a3b"
 provider = "llamacpp"
@@ -1438,17 +1440,14 @@ provider = "llamacpp"
 [aliases."llamacpp-qwen3.6-q4"]
 id = "qwen3.6-35b-a3b-ud-q4-k-xl"
 provider = "llamacpp"
-tool_format = "json"
 
 [aliases."local-qwen3.6"]
 id = "qwen3.6-35b-a3b-ud-q4-k-xl"
 provider = "llamacpp"
-tool_format = "json"
 
 [aliases."local-qwen3.6-gguf"]
 id = "qwen3.6-35b-a3b-ud-q4-k-xl"
 provider = "llamacpp"
-tool_format = "json"
 
 # MLX (Apple Silicon). Local MLX routes use the coding-tuned Qwen3.6-35B-A3B
 # MoE served via `mlx_lm.server` (burin #2717). Keep every MLX alias pointed at
