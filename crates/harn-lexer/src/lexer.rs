@@ -109,13 +109,24 @@ impl Lexer {
                 continue;
             }
 
-            // Backslash immediately before newline joins lines without emitting a Newline token.
-            if ch == '\\' && self.peek() == Some('\n') {
-                self.advance();
-                self.advance();
-                self.line += 1;
-                self.column = 1;
-                continue;
+            // Backslash immediately before a newline joins lines without emitting a Newline
+            // token. Accept both LF and CRLF source so checked-out embedded Harn remains
+            // equivalent on Windows.
+            if ch == '\\' {
+                let newline_len = match (self.peek(), self.source.get(self.pos + 2)) {
+                    (Some('\n'), _) => Some(1),
+                    (Some('\r'), Some('\n')) => Some(2),
+                    _ => None,
+                };
+                if let Some(newline_len) = newline_len {
+                    self.advance();
+                    for _ in 0..newline_len {
+                        self.advance();
+                    }
+                    self.line += 1;
+                    self.column = 1;
+                    continue;
+                }
             }
 
             if ch == '\n' {
@@ -1436,12 +1447,22 @@ mod tests {
 
     #[test]
     fn test_backslash_continuation() {
-        let mut lexer = Lexer::new("10 \\\n- 3");
+        let mut lexer = Lexer::new(concat!("10 \\", "\n- 3"));
         let tokens = lexer.tokenize().unwrap();
         assert_eq!(tokens[0].kind, TokenKind::IntLiteral(10));
         assert_eq!(tokens[1].kind, TokenKind::Minus);
         assert_eq!(tokens[2].kind, TokenKind::IntLiteral(3));
         // No Newline token between 10 and -: continuation joined them.
+        assert_eq!(tokens.len(), 4);
+    }
+
+    #[test]
+    fn test_backslash_continuation_crlf() {
+        let mut lexer = Lexer::new(concat!("10 \\", "\r\n- 3"));
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::IntLiteral(10));
+        assert_eq!(tokens[1].kind, TokenKind::Minus);
+        assert_eq!(tokens[2].kind, TokenKind::IntLiteral(3));
         assert_eq!(tokens.len(), 4);
     }
 
