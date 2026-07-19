@@ -1,8 +1,10 @@
 import "std/agent/loop_call_resolution"
+import "std/agent/loop_finalize"
 import "std/agent/loop_foundation"
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
+import "std/agent/loop_terminal"
 import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
@@ -69,7 +71,6 @@ pub fn __agent_loop_run(message, session, initial_opts) {
     } else {
       0
     }
-    let in_terminal_verify_reserve = false
     let terminal_callback_continues = 0
     while true {
       while iteration < current_max {
@@ -1377,258 +1378,102 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           break
         }
       }
-      if final_status == "" && iteration >= current_max && stop_reason == nil {
-        final_status = "budget_exhausted"
-        stop_reason = stop_reason ?? "max_iterations"
-      }
-      if __agent_loop_should_spend_reserve(
-        __reserve_cfg,
-        opts,
-        final_status,
-        terminal_write_unverified,
-        made_source_write,
-        verify_attempts < max_verify_attempts,
-      ) {
-        in_terminal_verify_reserve = true
-        const reserve_kind = if terminal_write_unverified {
-          "reserved_terminal_verify"
-        } else {
-          "zero_write_terminal_verify"
-        }
-        const terminal_verdict = agent_verify_or_continue(
-          session,
-          opts
-            + {
-            _done_judge_due: false,
-            _done_judge_invocations: done_judge_invocations,
-            _verify_completion_judge_invocations: verify_completion_judge_invocations,
-          },
-          reserve_kind,
-          "",
-          iteration,
-        )
-        if terminal_verdict?.verify_completion_judge_invoked ?? false {
-          verify_completion_judge_invocations = verify_completion_judge_invocations + 1
-        }
-        if !terminal_verdict.vetoed {
-          terminal_write_unverified = false
-          stall_state = stall_state + {reverify_owed: false}
-          final_status = "done"
-          stop_reason = reserve_kind
-          agent_emit_event(
-            session.session_id,
-            "reserved_terminal_verify",
-            {kind: reserve_kind, phase: "verify_passed", iteration: iteration},
-          )
-          break
-        }
-        verify_attempts = verify_attempts + 1
-        if terminal_verdict?.verify_completion_judge_invoked ?? false {
-          verify_completion_judge_vetoes = verify_completion_judge_vetoes + 1
-        }
-        agent_emit_event(
-          session.session_id,
-          "reserved_terminal_verify",
-          {
-            kind: reserve_kind,
-            phase: "verify_failed",
-            iteration: iteration,
-            terminal_status: final_status,
-          },
-        )
-        if terminal_verify_reserve_remaining > 0 && verify_attempts < max_verify_attempts {
-          terminal_verify_reserve_remaining = terminal_verify_reserve_remaining - 1
-          agent_emit_event(
-            session.session_id,
-            "reserved_terminal_verify",
-            {
-              kind: reserve_kind,
-              phase: "grant",
-              reserve_remaining: terminal_verify_reserve_remaining,
-              iteration: iteration,
-              prior_status: final_status,
-            },
-          )
-          current_max = current_max + 1
-          final_status = ""
-          stop_reason = nil
-          budget_exhausted_emitted = false
-          continue
-        }
-        stop_reason = reserve_kind + "_failed"
-      }
-      if final_status != "" && suspend_result == nil && terminal_error == nil
-        && terminal_callback_continues
-        == 0
-        && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
-        const terminal_outcome = agent_compute_terminal_callback(
-          session,
-          opts,
-          {
-            iteration: iteration,
-            final_status: final_status,
-            stop_reason: stop_reason ?? "",
-            max_iterations: current_max,
-            iteration_budget: budget,
-            session_successful_tools: successful_tools_seen,
-            session_rejected_tools: rejected_tools_seen,
-          },
-        )
-        if terminal_outcome.kind == "continue" {
-          terminal_callback_continues = terminal_callback_continues + 1
-          opts = __apply_post_turn_options(opts, terminal_outcome)
-          const old_limit = current_max
-          const extra = __agent_loop_terminal_callback_extend_by(budget)
-          current_max = max(current_max, iteration + extra)
-          budget_decisions = __agent_loop_record_terminal_callback_continue(
-            budget_decisions,
-            iteration,
-            old_limit,
-            current_max,
-          )
-          agent_emit_event(
-            session.session_id,
-            "loop_control_decision",
-            {
-              iteration: iteration,
-              action: "extend",
-              old_limit: old_limit,
-              new_limit: current_max,
-              reason: "terminal_callback_continue",
-              status: "",
-            },
-          )
-          final_status = ""
-          stop_reason = nil
-          budget_exhausted_emitted = false
-          continue
-        }
+      const terminal_boundary = __agent_loop_terminal_boundary(
+        session,
+        {
+          opts: opts,
+          final_status: final_status,
+          stop_reason: stop_reason,
+          reserve_cfg: __reserve_cfg,
+          terminal_write_unverified: terminal_write_unverified,
+          made_source_write: made_source_write,
+          terminal_verify_reserve_remaining: terminal_verify_reserve_remaining,
+          verify_attempts: verify_attempts,
+          max_verify_attempts: max_verify_attempts,
+          verify_completion_judge_invocations: verify_completion_judge_invocations,
+          verify_completion_judge_vetoes: verify_completion_judge_vetoes,
+          done_judge_invocations: done_judge_invocations,
+          iteration: iteration,
+          current_max: current_max,
+          budget: budget,
+          budget_exhausted_emitted: budget_exhausted_emitted,
+          budget_decisions: budget_decisions,
+          terminal_callback_continues: terminal_callback_continues,
+          suspend_result: suspend_result,
+          terminal_error: terminal_error,
+          stall_state: stall_state,
+          successful_tools_seen: successful_tools_seen,
+          rejected_tools_seen: rejected_tools_seen,
+        },
+      )
+      opts = terminal_boundary.opts
+      final_status = terminal_boundary.final_status
+      stop_reason = terminal_boundary.stop_reason
+      terminal_write_unverified = terminal_boundary.terminal_write_unverified
+      stall_state = terminal_boundary.stall_state
+      terminal_verify_reserve_remaining = terminal_boundary.terminal_verify_reserve_remaining
+      verify_attempts = terminal_boundary.verify_attempts
+      verify_completion_judge_invocations = terminal_boundary.verify_completion_judge_invocations
+      verify_completion_judge_vetoes = terminal_boundary.verify_completion_judge_vetoes
+      current_max = terminal_boundary.current_max
+      budget_exhausted_emitted = terminal_boundary.budget_exhausted_emitted
+      budget_decisions = terminal_boundary.budget_decisions
+      terminal_callback_continues = terminal_boundary.terminal_callback_continues
+      if terminal_boundary.action == "continue" {
+        continue
       }
       break
     }
-    if final_status == "budget_exhausted" && !budget_exhausted_emitted {
-      const terminal_exhaustion = __agent_loop_budget_aggregates(
-        session.session_id,
-        nil,
-        loop_start_ms,
-      )
-        + {
-        exhausted: true,
-        kind: stop_reason ?? "max_iterations",
-        iteration: iteration,
-        max_iterations: current_max,
-      }
-      __agent_loop_emit_budget_exhausted(session.session_id, terminal_exhaustion)
-      budget_exhausted_emitted = true
-      budget_decisions = __agent_loop_record_budget_stop(
-        budget_decisions,
-        iteration,
-        current_max,
-        terminal_exhaustion.kind,
-      )
-    }
-    const wrapup_enabled = opts?.final_wrapup ?? true
-    // A no-tool terminal normally skips wrap-up (nothing to summarize), but a
-    // host that supplied its own directive is explicitly asking for sad-path
-    // coverage — including the zero-write terminals where the user is most owed
-    // a truthful closing message — so honor it even at last_tool_count == 0.
-    const wrapup_tools_ok = last_tool_count > 0 || __agent_loop_has_host_wrapup_directive(opts)
-    if wrapup_enabled
-      && suspend_result == nil
-      && terminal_error == nil
-      && wrapup_tools_ok
-      && __agent_loop_wrapup_eligible_status(final_status) {
-      let _ = try {
-        __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, iteration)
-      }
-    }
-    if opts?.daemon && final_status != "" {
-      agent_daemon_snapshot(session, opts, final_status, iteration)
-    }
-    try {
-      __host_drain_file_edits(session.session_id)
-    } catch (e) {
-      nil
-    }
-    __agent_loop_checkpoint(session.session_id, "loop_exit", {iteration: iteration})
-    __drain_audit_flushes(audit_background_tasks)
-    audit_background_tasks = []
-    const result = agent_session_finalize(
-      session.session_id,
+    const finalized = __agent_loop_finalize_session(
+      message,
+      session,
       {
+        opts: opts,
         final_status: final_status,
-        stop_reason: __agent_loop_sealed_stop_reason(stop_reason, final_status),
-        iterations: iteration,
-        error: terminal_error,
+        stop_reason: stop_reason,
+        iteration: iteration,
+        loop_start_ms: loop_start_ms,
+        suspend_result: suspend_result,
+        terminal_error: terminal_error,
+        audit_background_tasks: audit_background_tasks,
+        budget: budget,
+        budget_exhausted_emitted: budget_exhausted_emitted,
+        budget_decisions: budget_decisions,
+        current_max: current_max,
+        extensions_used: extensions_used,
+        last_tool_count: last_tool_count,
+        stall_state: stall_state,
+        stall_enabled_seen: stall_enabled_seen,
+        verify_completion_judge_invocations: verify_completion_judge_invocations,
+        verify_completion_judge_vetoes: verify_completion_judge_vetoes,
+        done_judge_invocations: done_judge_invocations,
+        done_judge_vetoes: done_judge_vetoes,
       },
     )
     session_finalized = true
-    const terminated_ok = terminal_error == nil
-      && suspend_result == nil
-      && (final_status == "" || final_status == "done")
-    const final_stall_state = if terminated_ok {
-      agent_stall_clear_current_failure(stall_state)
-    } else {
-      stall_state
-    }
-    const result_with_stalls = agent_stall_apply_result(
-      result,
-      stall_enabled_seen,
-      final_stall_state,
+    const final_result = __agent_loop_project_final_result(
+      finalized.result,
+      message,
+      session,
+      {
+        opts: opts,
+        final_status: final_status,
+        stop_reason: stop_reason,
+        iteration: iteration,
+        suspend_result: suspend_result,
+        terminal_error: terminal_error,
+        budget: budget,
+        budget_decisions: finalized.budget_decisions,
+        current_max: current_max,
+        extensions_used: extensions_used,
+        stall_state: stall_state,
+        stall_enabled_seen: stall_enabled_seen,
+        verify_completion_judge_invocations: verify_completion_judge_invocations,
+        verify_completion_judge_vetoes: verify_completion_judge_vetoes,
+        done_judge_invocations: done_judge_invocations,
+        done_judge_vetoes: done_judge_vetoes,
+      },
     )
-    const enforced = if suspend_result != nil {
-      result_with_stalls
-    } else {
-      agent_required_tools_enforce(result_with_stalls, opts)
-    }
-    let final_result = enforced
-    if opts?.verify_completion_judge != nil {
-      final_result = final_result
-        + {
-        completion_judge: {
-          invocations: verify_completion_judge_invocations,
-          vetoes: verify_completion_judge_vetoes,
-          max_invocations: agent_verify_completion_judge_cap(opts?.verify_completion_judge),
-          cap_reached: final_status == "verify_capped",
-        },
-      }
-    }
-    if opts?.done_judge != nil {
-      final_result = final_result
-        + {
-        done_judge: {
-          invocations: done_judge_invocations,
-          vetoes: done_judge_vetoes,
-          max_invocations: agent_done_judge_cap(opts?.done_judge),
-          cap_reached: final_status == "verify_capped" && stop_reason == "done_judge_cap_reached",
-        },
-      }
-    }
-    if budget.expose_decisions {
-      final_result = final_result
-        + {
-        adaptive_budget: {
-          mode: budget.mode,
-          initial: budget.initial,
-          max: budget.max,
-          final_limit: current_max,
-          extensions_used: extensions_used,
-          decisions: budget_decisions,
-        },
-      }
-    }
-    if suspend_result != nil {
-      final_result = final_result + suspend_result
-    }
-    if terminated_ok && opts?.output_schema != nil {
-      final_result = __agent_loop_apply_output_schema(
-        final_result,
-        opts,
-        session,
-        message,
-        iteration,
-      )
-    }
     final_result
   }
   if is_err(run) {
@@ -1640,97 +1485,3 @@ pub fn __agent_loop_run(message, session, initial_opts) {
   }
   return unwrap(run)
 }
-// Same terminal-verify machinery, two entry conditions: an unverified
-// source write (existing) vs a genuine zero-write no-show (#4525). The
-// wire event stays `reserved_terminal_verify` (payload-preserving by
-// design — no new wire kind); `reserve_kind` tags the payload `kind` and
-// the sealed stop_reason so forensics can separate the two mechanisms.
-// Monotonic: true once any turn made a workspace source write, never reset.
-// Distinguishes a genuine ZERO-write terminal (the #4525 no-show) from a
-// run that wrote and then verified green (terminal_write_unverified also
-// false, but not zero-write).
-// Same terminal-verify machinery, two entry conditions: an unverified
-// source write (existing) vs a genuine zero-write no-show (#4525). Label
-// the events/stop reason by which fired so forensics can separate the
-// mechanisms.
-// Verify-state payload for a host `progress_signal` callback (seam 1).
-// Carries the prior turn's dispatch (the results the callback classifies)
-// — inert unless a progress_signal is configured on stall_diagnostics.
-// Read-only stance runs LAST so neither a skill activation nor a
-// tool-search promotion can re-admit mutating tools while armed.
-// The invalid `agent_await_resumption` call was never dispatched, so
-// if the model emitted it as a native tool_use block the feedback
-// inject would orphan it; repair pairing first.
-// Guard the same orphan invariant: if this stalled turn carried an
-// undispatched native tool_use, pair it before the stall feedback
-// lands. No-op (returns 0) for the common text-only stall.
-// `replace` already discarded the vetoed assistant turn (and any
-// tool_use it carried); a non-replace veto keeps the turn, so the
-// critique inject must repair pairing first or a native tool_use
-// on this turn is orphaned before the next provider call.
-// Reserved terminal-verify guard (default OFF). `terminal_write_unverified`
-// tracks whether the transcript has a source write that no passing
-// verification has cleared; `terminal_verify_reserve_remaining` is the
-// held-back iteration allowance the main loop cannot consume — it is only
-// granted (as a bounded extension of `current_max`) when the loop would
-// otherwise terminate on a budget/stuck boundary with an unverified red
-// edit, so the run runs a final verify(+repair) instead of stopping blind.
-// A genuine PASSING verification this turn (the diagnostic fold cleared the
-// current-failure model to "pass" on a non-edit turn) is real evidence the
-// workspace is green, so the reserved guard's unverified-write debt is
-// satisfied. Edit turns that report "pass" are the edit's own success, not
-// a verification, and the fold keeps the failure model armed there.
-// Reserved terminal-verify bookkeeping: any successful source edit leaves
-// the transcript with an unverified write until a verification passes.
-// Broader twin of `reverify_owed` (which arms only after a PRIOR failure);
-// the reserved guard fires on ANY unverified edit so a model that writes
-// source then exhausts budget without ever testing is still caught. Cleared
-// at every verify-pass point below (mirrors the `reverify_owed: false`
-// clears) and on a passing diagnostic fold above.
-// The iteration-count boundary (`while iteration < current_max` falling
-// through) terminates without setting `final_status`; resolve it to the
-// real budget terminal here so the reserved-verify guard below sees an
-// accurate status before deciding whether to spend the reserve.
-// Reserved terminal-verify guard (default OFF). The inner loop has stopped.
-// If the run is terminating on a budget/stuck boundary while a source write
-// is still unverified, run the declared verifier ONCE here (verify-first).
-// A green build completes the run `done`; a red build surfaces the actual
-// verifier failure (never a silent `budget_exhausted`) and, if reserve
-// iterations remain, grants exactly one bounded repair turn before
-// re-verifying on the next terminal pass. The reserve lives OUTSIDE the
-// main `current_max`, so normal iterations cannot consume it, and it is
-// hard-capped so it can never loop forever. This is the budget-exit
-// counterpart to #3629's loop-cap done-conversion (which fires only when an
-// in-loop reverify ALREADY confirmed green). When OFF the reserve is 0 and
-// this whole block is a no-op — byte-identical to today.
-// Green: the unverified write is now verified; complete the run.
-// Red: the verify RAN and its failure is surfaced (feedback already
-// injected by agent_verify_or_continue), so the run can never end blind.
-// Spend one reserve iteration on a bounded repair turn; the model reads
-// the injected verify failure and edits, then we re-verify next pass.
-// Reserve exhausted: keep the terminal status but stamp that the verify
-// ran and failed, so the terminal reflects the real (red) build state.
-// Whether THIS turn actually issued tool calls. When it did, the
-// "narration loop" framing is false (the model is acting, not narrating)
-// so the nudge steers toward a DIFFERENT change instead.
-// Capture the PRIMARY provider/model once, before any post-turn escalation
-// can rebind `opts`. A failed escalated turn falls back to this for one
-// retry instead of unwinding the whole loop into a fake success.
-// Non-tracked provider failure. A fast pre-dispatch escalation failure must not
-// unwind the loop while ACP returns the prior cheap-model text as a fake
-// success. Two fixes, always correct:
-//   1. Always emit an observable provider_error `iteration_end` event.
-//   2. If this was an ESCALATED turn (current provider/model differs
-//      from the captured primary) and we have not already retried the
-//      primary for this failure, degrade to the PRIMARY provider for
-//      one more turn instead of unwinding into a fake success.
-// Rebind opts back to the primary provider/model and retry one turn.
-// Recoverable: emergency-compact the transcript and retry the turn
-// before treating overflow as a failure. The agent must keep working
-// on a large repo, not die when the prompt outgrows the window.
-// A SUCCESSFUL terminal hand-back (clean done / a passing verify_completion)
-// must not report a stale current_failure: a run can complete without ever
-// flowing a passing verification result through the fold. Clear the
-// current-failure model on the successful-termination signal (mirrors the
-// host's `final_status.is_empty() || == "done"` success predicate) before
-// projecting it; a stuck / exhausted / suspended run keeps the failure.
