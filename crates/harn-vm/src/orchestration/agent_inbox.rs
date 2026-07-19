@@ -491,6 +491,36 @@ mod tests {
         assert!(!result);
     }
 
+    // Command-hold determinism proof: a partial advance below the deadline must
+    // NOT spuriously wake the park (a decision re-entry must fire only at its
+    // scheduled deadline), and an entry arriving mid-park wakes it immediately
+    // even though the deadline has not elapsed. One `PausedClock` drives both.
+    #[tokio::test]
+    async fn wait_async_holds_through_partial_advance_then_wakes_on_entry() {
+        let sid = fresh_session_id();
+        let clock = PausedClock::new(OffsetDateTime::UNIX_EPOCH);
+        let waiter_sid = sid.clone();
+        let waiter_clock = clock.clone();
+        let waiter = tokio::spawn(async move {
+            wait_async(&waiter_sid, Duration::from_millis(100), &*waiter_clock).await
+        });
+        // Yield so the waiter installs its notify watch before we drive time.
+        tokio::task::yield_now().await;
+        // Below-deadline advance with no entry: the park must stay parked.
+        clock.advance(Duration::from_millis(40));
+        tokio::task::yield_now().await;
+        assert!(
+            !waiter.is_finished(),
+            "park must not spuriously wake before its deadline"
+        );
+        // An entry mid-park wakes it immediately with `true`, deadline unreached.
+        push(&sid, "tool_progress", "tick", "test");
+        assert!(
+            waiter.await.expect("join"),
+            "an inbox entry mid-park wakes the hold before the deadline"
+        );
+    }
+
     #[test]
     fn pending_count_tracks_pushes_and_drains() {
         let sid = fresh_session_id();

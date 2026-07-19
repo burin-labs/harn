@@ -34,6 +34,7 @@ const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assista
 const HOST_SESSION_RECORD_TOOL_RESULTS: &str = "__host_agent_session_record_tool_results";
 const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
+const HOST_SESSION_AWAIT_INBOX: &str = "__host_agent_session_await_inbox";
 const HOST_SESSION_DRAIN_HOST_INJECTIONS: &str = "__host_agent_session_drain_host_injections";
 const HOST_SESSION_DRAIN_BRIDGE_INJECTIONS: &str = "__host_agent_session_drain_bridge_injections";
 const HOST_SESSION_PUSH_BRIDGE_INJECTION: &str = "__host_agent_session_push_bridge_injection";
@@ -2190,6 +2191,61 @@ fn host_agent_session_drain_feedback_builtin(
     })
     .collect::<Vec<_>>();
     Ok(VmValue::List(std::sync::Arc::new(drained)))
+}
+
+/// Park the calling turn until `session_id` has a queued `agent_inbox` entry OR
+/// `timeout_ms` elapses on the harness clock. Returns `true` when woken by an
+/// entry, `false` on the deadline. This is the command-hold's re-entry
+/// primitive: the loop parks here (zero inference) between decision re-entries.
+///
+/// Determinism: the timeout sleep uses the SAME harness clock the loop reads for
+/// its decision deadlines (a `PausedClock` under `Harness::test`), so one
+/// `advance()` drives both the deadline math and this park — deterministic
+/// replay with no real sleeps. Do NOT drive command-hold tests with `mock_time`:
+/// `MockAwareClock::sleep` returns instantly under a mock, which would make this
+/// park time out immediately and silently break the hold. Use `Harness::test` /
+/// `PausedClock`.
+///
+/// Wake set is deliberately INCLUSIVE: it wakes on ANY queued entry (progress,
+/// terminal, user interrupt, peer message), never a kind-filtered subset. A
+/// future refactor must never narrow the wake condition — kind-filtering belongs
+/// only where the loop BUILDS the digest, never at the wake decision.
+#[harn_builtin(
+    sig = "__host_agent_session_await_inbox(session_id: string, timeout_ms: int) -> bool",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
+async fn host_agent_session_await_inbox(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_AWAIT_INBOX}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let timeout_ms = args.get(1).and_then(value_as_i64).unwrap_or(0).max(0) as u64;
+    // Recover the harness clock the loop already reads for deadline math (a
+    // PausedClock under Harness::test); fall back to a real clock for embedders
+    // without an installed harness. Globals are shared into the child VM.
+    let clock: Arc<dyn harn_clock::Clock> = {
+        let vm = ctx.child_vm();
+        match vm.global("harness") {
+            Some(VmValue::Harness(handle)) => handle.inner().clock().clone(),
+            _ => Arc::new(harn_clock::RealClock::new()),
+        }
+    };
+    let woke = crate::orchestration::agent_inbox::wait_async(
+        &session_id,
+        std::time::Duration::from_millis(timeout_ms),
+        &*clock,
+    )
+    .await;
+    Ok(VmValue::Bool(woke))
 }
 
 /// Drain queued typed host injections for a delivery seam and append them to the
