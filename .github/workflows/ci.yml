@@ -29,13 +29,6 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  runner-availability:
-    name: Detect self-hosted runner availability
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@51a98eb52e4b189cb56a0ed91ccaff8bd2562779
-    secrets:
-      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
   # Decide whether the heavy Linux Rust lanes (rust-builds, audit-scripts) need
   # to run at all.
   #
@@ -289,8 +282,8 @@ jobs:
 
   fmt:
     name: Format check
-    # Runs `make fmt-check`; no compilation, no cache benefit, and no reason to
-    # wait for a scarce self-hosted runner.
+    # Runs `make fmt-check`; no compilation and no cache benefit, so the
+    # smallest hosted runner is the right home.
     needs: changes
     if: needs.changes.outputs.merge_group_proven != 'true'
     runs-on: ubuntu-latest
@@ -353,7 +346,7 @@ jobs:
 
   lint-md:
     name: Markdown lint
-    # Single ~5 s Action step; no point contending for self-hosted runners.
+    # Single ~5 s Action step; the smallest hosted runner is plenty.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -1058,13 +1051,13 @@ jobs:
 
   macos:
     name: Rust on macOS (deny-warnings build + lint)
-    # Prefer an idle self-hosted macOS runner to reduce merge/release queue
-    # latency; if the local pool is busy or inaccessible, fall through to
-    # GitHub-hosted macOS instead of queueing behind active eval/development
-    # work on the shared Mac.
-    runs-on: ${{ needs.runner-availability.outputs.macos == 'true' && fromJSON('["self-hosted", "macOS", "harn-ci"]') || 'macos-latest' }}
+    # Hosted runners only: this is a public repo, so GitHub-hosted macOS
+    # minutes are free, and routing CI to a self-hosted machine contends with
+    # local development work on that machine. Keep every lane on hosted
+    # runners rather than probing a self-hosted pool.
+    runs-on: macos-latest
     timeout-minutes: 60
-    needs: [macos-plan, runner-availability]
+    needs: macos-plan
     # macOS coverage stays off the default PR / merge-queue critical path, but
     # runs before merge for changes that touch macOS-gated process, sandbox,
     # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
@@ -1267,7 +1260,6 @@ jobs:
     if: always()
     needs:
       [
-        runner-availability,
         changes,
         fmt,
         package-audit,
@@ -1296,7 +1288,6 @@ jobs:
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
-            ["Runner availability"]="${{ needs['runner-availability'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
@@ -1478,8 +1469,8 @@ jobs:
     # deploy silently skipped, and no later non-docs push ever re-fired it. This
     # decouples docs delivery from the rest of CI so that can't recur.
     needs: [docs-site]
-    # Single `curl` to the Render deploy hook; running it on a self-hosted
-    # runner adds no value.
+    # Single `curl` to the Render deploy hook; the smallest hosted runner
+    # is plenty.
     runs-on: ubuntu-latest
     # `always()` keeps the job evaluable even if `docs-site` were ever skipped
     # (the actions/runner#2205 quirk); the explicit success check is the gate.
