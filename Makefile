@@ -4,6 +4,9 @@
 HARN_BIN ?=
 HARN_PROTOCOL_ARTIFACT_VERSION ?=
 HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
+# Rust tests start from a known security-policy environment. Focused tests may
+# still seed these variables explicitly after process startup.
+HARN_RUST_TEST_ENV = env -u HARN_EGRESS_ALLOW -u HARN_EGRESS_DENY -u HARN_EGRESS_DEFAULT -u HARN_EGRESS_BLOCK_PRIVATE -u HARN_EGRESS_ALLOW_LOOPBACK HARN_LLM_CALLS_DISABLED=1
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
 HARN_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --,$(HARN_BIN_CMD) --)
@@ -102,11 +105,11 @@ check-dependabot-groups:
 # (cargo test has no profile support, so it will run all tests).
 test:
 	@if command -v cargo-nextest >/dev/null 2>&1; then \
-		HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run --workspace; \
+		$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --workspace; \
 	else \
 		echo "cargo-nextest not installed; falling back to cargo test --workspace"; \
 		echo "hint: run 'make setup' or 'cargo install cargo-nextest --locked'"; \
-		HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test --workspace; \
+		$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace; \
 	fi
 
 # Run only the tests in crates affected by the changes vs AFFECTED_BASE
@@ -127,18 +130,18 @@ test-affected:
 		exit 0; \
 	fi; \
 	echo "make test-affected: cargo nextest run $$args"; \
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run $$args
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $$args
 
 # Run the slow E2E / smoke suite: subprocess-spawning CLI surface tests,
 # signal handling, MCP server launch, real ProcessHandle smoke tests, etc.
 # Runs on schedule (nightly), manually, and on PRs with the `e2e` label.
 # Requires cargo-nextest (no plain `cargo test` fallback for profile support).
 test-e2e:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run --workspace --profile e2e --run-ignored all
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --workspace --profile e2e --run-ignored all
 
 # Run the baseline Cargo workspace test command explicitly.
 test-cargo:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test --workspace
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace
 
 # Compatibility alias for the smarter default `make test`.
 test-fast:
@@ -183,9 +186,9 @@ protocol-conformance:
 # already covers.
 mcp-rc-conformance:
 	@echo "=== MCP RC harness: harn-mcp-rc-compat suite (client / generic_server / legacy_compat / artifacts) ==="
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test -p harn-mcp-rc-compat --tests
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test -p harn-mcp-rc-compat --tests
 	@echo "=== MCP RC harness: orchestrator server (harn-cli mcp_rc_compat_tests) ==="
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test -p harn-cli --lib mcp_rc_compat_tests
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test -p harn-cli --lib mcp_rc_compat_tests
 
 replay-oracle:
 	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) orchestrator replay-oracle

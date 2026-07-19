@@ -488,102 +488,51 @@ mod tests {
         );
     }
 
-    /// End-to-end regression: `cargo build --offline` of a crate with a
-    /// dependency must unpack that dependency's sources into CARGO_HOME under
-    /// the sandbox. Before the fix the package-manager preset held
-    /// `.cargo/registry` read-only, so unpack failed with "failed to create
-    /// directory .../registry/src/...: Operation not permitted"; after, the
-    /// toolchain cache preset grants the write. Uses an isolated CARGO_HOME with
-    /// pre-fetched crates (sources removed to force re-extraction), so it never
-    /// touches the developer's real `~/.cargo`. Skips where cargo is missing or
-    /// the crate is not already cached (no network in the sandbox test).
+    /// The toolchain-cache roots must be writable while package configuration
+    /// stays read-only. A direct filesystem probe proves the policy boundary
+    /// without nesting Cargo, consulting a registry, or compiling a fixture.
     #[test]
-    fn sandbox_exec_profile_allows_cargo_build_to_unpack_registry() {
+    fn sandbox_exec_profile_scopes_toolchain_cache_writes() {
         if !Path::new(SANDBOX_EXEC_PATH).exists() {
             return;
         }
-        let Some(cargo) = ["/opt/homebrew/bin/cargo", "/usr/local/bin/cargo"]
-            .into_iter()
-            .map(std::path::PathBuf::from)
-            .chain(
-                std::env::var_os("HOME")
-                    .map(|home| std::path::PathBuf::from(home).join(".cargo/bin/cargo")),
-            )
-            .find(|path| path.exists())
-        else {
-            return;
-        };
-
-        let project = tempfile::TempDir::new().expect("temp cargo project");
-        std::fs::write(
-            project.path().join("Cargo.toml"),
-            "[package]\nname = \"reprocrate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
-             [dependencies]\ncfg-if = \"1\"\n",
-        )
-        .expect("write Cargo.toml");
-        std::fs::create_dir_all(project.path().join("src")).expect("src dir");
-        std::fs::write(project.path().join("src/main.rs"), "fn main() {}\n").expect("write main");
-
-        // Populate an isolated CARGO_HOME unsandboxed; if the crate is not
-        // cacheable offline (no network), skip rather than flake.
         let cargo_home = tempfile::TempDir::new().expect("temp CARGO_HOME");
-        let fetched = Command::new(&cargo)
-            .args(["fetch", "--manifest-path"])
-            .arg(project.path().join("Cargo.toml"))
-            .env("CARGO_HOME", cargo_home.path())
-            .output()
-            .expect("run cargo fetch");
-        if !fetched.status.success() {
-            return;
-        }
-        // Force re-extraction so the build must WRITE registry/src.
-        let _ = std::fs::remove_dir_all(cargo_home.path().join("registry/src"));
+        let registry = cargo_home.path().join("registry");
+        std::fs::create_dir_all(&registry).expect("registry dir");
+        let config = cargo_home.path().join("config.toml");
+        std::fs::write(&config, "[net]\noffline = true\n").expect("cargo config");
 
-        // Default presets: CARGO_HOME here is an arbitrary temp dir, so model it
-        // as the developer-toolchain cache write root (registry/git) the real
-        // preset grants for `~/.cargo`, and keep the CARGO_HOME root config
-        // read-only via the package-manager slot.
         let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
-        policy.workspace_roots = vec![project.path().to_string_lossy().into_owned()];
-        // The real DeveloperToolchains read roots (so the rustup shim can read
-        // ~/.rustup and ~/.cargo/bin), PLUS the temp CARGO_HOME so cargo can read
-        // its registry cache/index. The temp CARGO_HOME's registry/git are the
-        // cache-write roots the real preset grants for ~/.cargo.
-        let home = std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"));
-        let mut toolchain_read = super::super::developer_toolchain_read_roots_for_home(&home);
-        toolchain_read.push(cargo_home.path().to_path_buf());
-        let cache_roots = vec![
-            cargo_home.path().join("registry"),
-            cargo_home.path().join("git"),
-            cargo_home.path().join(".package-cache"),
-        ];
-        let package_roots = vec![cargo_home.path().join("config.toml")];
+        policy.workspace_roots.clear();
         let profile = render_profile_with_extra_read_roots(
             &policy,
-            &toolchain_read,
-            &package_roots,
-            &cache_roots,
+            &[cargo_home.path().to_path_buf()],
+            &[config.clone()],
+            std::slice::from_ref(&registry),
         );
 
-        let output = Command::new(SANDBOX_EXEC_PATH)
+        let cache_probe = registry.join("write-probe");
+        let cache_output = Command::new(SANDBOX_EXEC_PATH)
             .args(["-p", &profile, "--"])
-            .arg(&cargo)
-            .args(["build", "--offline"])
-            // Run inside the project (a workspace root): cargo needs an
-            // accessible cwd, and inheriting the test's repo cwd is outside the
-            // jail.
-            .current_dir(project.path())
-            .env("CARGO_HOME", cargo_home.path())
+            .arg("/usr/bin/touch")
+            .arg(&cache_probe)
             .output()
-            .expect("run sandboxed cargo build");
-        let stderr = String::from_utf8_lossy(&output.stderr);
+            .expect("run cache write probe");
         assert!(
-            output.status.success(),
-            "cargo build must unpack registry sources under the sandbox\nstderr:\n{stderr}"
+            cache_output.status.success(),
+            "toolchain cache must be writable: {}",
+            String::from_utf8_lossy(&cache_output.stderr)
         );
+
+        let config_output = Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", &profile, "--"])
+            .arg("/usr/bin/touch")
+            .arg(&config)
+            .output()
+            .expect("run config write probe");
         assert!(
-            !stderr.contains("Operation not permitted"),
-            "cargo build must not be denied writing its registry cache: {stderr}"
+            !config_output.status.success(),
+            "package configuration must stay read-only"
         );
     }
 
