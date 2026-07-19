@@ -876,19 +876,15 @@ impl Compiler {
         Ok(())
     }
 
-    /// Collect pending finally bodies from the top of the stack down to
-    /// (but not including) the innermost `CatchBarrier`. Used by `throw`
-    /// lowering: throws caught locally don't unwind past the catch, so
-    /// finallys behind the barrier aren't on the throw's exit path.
-    pub(super) fn pending_finallys_until_barrier(&self) -> Vec<Vec<SNode>> {
-        let mut out = Vec::new();
-        for entry in self.finally_bodies.iter().rev() {
-            match entry {
-                FinallyEntry::CatchBarrier => break,
-                FinallyEntry::Finally(body) => out.push(body.clone()),
-            }
-        }
-        out
+    /// Whether a pending finally lies above the innermost `CatchBarrier`.
+    /// A locally caught throw stops at the barrier, so cleanup entries below
+    /// it are not part of that throw's exit path.
+    pub(super) fn has_pending_finally_until_barrier(&self) -> bool {
+        self.finally_bodies
+            .iter()
+            .rev()
+            .take_while(|entry| !matches!(entry, FinallyEntry::CatchBarrier))
+            .any(|entry| matches!(entry, FinallyEntry::Finally(_)))
     }
 
     /// True if there are any pending finally bodies (not just barriers).

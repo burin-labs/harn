@@ -562,10 +562,10 @@ impl Compiler {
         value: &Option<Box<SNode>>,
     ) -> Result<(), CompileError> {
         if self.has_pending_finally() {
-            // Inside try-finally: save value to a temp, run pending
-            // finallys, then restore and return.
+            // The operand must finish before a return begins. Protect its
+            // evaluation so a dynamic throw still takes the throw-unwind path.
             if let Some(val) = value {
-                self.compile_node(val)?;
+                self.compile_transfer_operand(val)?;
             } else {
                 self.chunk.emit(Op::Nil, self.line);
             }
