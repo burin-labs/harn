@@ -1,5 +1,12 @@
 type ProjectFingerprint = {
-  primary_language: "rust" | "typescript" | "python" | "go" | "swift" | "ruby" | "mixed" | "unknown",
+  primary_language: "rust" \
+    | "typescript" \
+    | "python" \
+    | "go" \
+    | "swift" \
+    | "ruby" \
+    | "mixed" \
+    | "unknown",
   languages: list<string>,
   frameworks: list<string>,
   package_manager: string?,

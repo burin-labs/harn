@@ -326,7 +326,35 @@ impl<'a> Formatter<'a> {
         prefix_col: usize,
         indent: usize,
     ) -> String {
-        self.format_comma_sequence(render_typed_params(params), prefix_col, indent)
+        let item_indent_col = 2 * (indent + 1);
+        let rendered = params
+            .iter()
+            .map(|param| {
+                let rest = if param.rest { "..." } else { "" };
+                let default = param
+                    .default_value
+                    .as_ref()
+                    .map(|value| format!(" = {}", format_inline_expr(value)))
+                    .unwrap_or_default();
+                let mut value = if let Some(type_expr) = &param.type_expr {
+                    let type_prefix_col =
+                        item_indent_col + text_width(rest) + text_width(&param.name) + 2;
+                    let type_expr = format_type_expr_wrapped_with_suffix(
+                        type_expr,
+                        indent + 1,
+                        type_prefix_col,
+                        self.line_width,
+                        text_width(&default) + 1,
+                    );
+                    format!("{rest}{}: {type_expr}", param.name)
+                } else {
+                    format!("{rest}{}", param.name)
+                };
+                value.push_str(&default);
+                value
+            })
+            .collect();
+        self.format_comma_sequence(rendered, prefix_col, indent)
     }
 
     pub(super) fn format_return_type(
