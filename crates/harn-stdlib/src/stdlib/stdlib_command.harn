@@ -3,6 +3,28 @@ import { write_stderr, write_stdout } from "std/io"
 import { shell_quote } from "std/runtime"
 import { truncate_text } from "std/text"
 
+/** Common fields guaranteed by normalized command results. */
+pub type CommandResult = {
+  success: bool,
+  ok: bool,
+  status: string,
+  exit_code: int?,
+  stdout: string,
+  stderr: string,
+  ...rest,
+}
+
+/** Portable command-step fields suitable for durable receipts. */
+pub type CommandStepReceipt = {
+  name: string,
+  command?: string | list<string>,
+  success: bool,
+  status: string,
+  exit_code?: int?,
+  classification?: unknown,
+  recovery_hint?: string,
+}
+
 fn __command_options(options) {
   return options ?? {}
 }
@@ -146,7 +168,7 @@ fn __command_combined(result) -> string {
   return stdout + stderr
 }
 
-fn __command_normalize_result(result) {
+fn __command_normalize_result(result) -> CommandResult {
   const raw = result ?? {}
   const success = __command_success(raw)
   const status = if raw?.status != nil {
@@ -186,7 +208,7 @@ fn __command_normalize_result(result) {
  * @effects: [process]
  * @errors: []
  */
-pub fn command_run(spec, options = nil) -> dict {
+pub fn command_run(spec, options = nil) -> CommandResult {
   const _ = hostlib_enable("tools:deterministic")
   return __command_normalize_result(hostlib_tools_run_command(__command_request(spec, options)))
 }
@@ -220,7 +242,7 @@ fn __command_wait_request(locator, options) {
  * @errors: []
  * @example: command_wait(result, {timeout_ms: 1000})
  */
-pub fn command_wait(locator, options = nil) -> dict {
+pub fn command_wait(locator, options = nil) -> CommandResult {
   const _ = hostlib_enable("tools:deterministic")
   return __command_normalize_result(
     hostlib_tools_wait_command(__command_wait_request(locator, options)),
@@ -1411,7 +1433,7 @@ pub fn command_try(attempts, options = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn command_result_ok(stdout: string = "", extra = nil) -> dict {
+pub fn command_result_ok(stdout: string = "", extra = nil) -> CommandResult {
   const base = extra ?? {}
   return base
     + {
@@ -1430,7 +1452,7 @@ pub fn command_result_ok(stdout: string = "", extra = nil) -> dict {
  * @effects: []
  * @errors: []
  */
-pub fn command_result_fail(exit_code: int = 1, stderr: string = "", extra = nil) -> dict {
+pub fn command_result_fail(exit_code: int = 1, stderr: string = "", extra = nil) -> CommandResult {
   const base = extra ?? {}
   return base
     + {

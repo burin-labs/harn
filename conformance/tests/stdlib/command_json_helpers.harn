@@ -1,4 +1,6 @@
 import {
+  CommandResult,
+  CommandStepReceipt,
   command_json,
   command_json_step,
   command_result_fail,
@@ -6,6 +8,8 @@ import {
   command_try,
 } from "std/command"
 import { assert_error_contains } from "std/testing"
+
+type CommandAudit = {execution: list<CommandStepReceipt>}
 
 fn json_runner(text) {
   return { _spec, _options -> return command_result_ok(text) }
@@ -23,6 +27,21 @@ fn no_newline_echo(text) {
 }
 
 pipeline default() {
+  const normalized_ok: CommandResult = command_result_ok("ready", {adapter: "mock"})
+  require normalized_ok.success, "normalized command success"
+  require normalized_ok.adapter == "mock", "normalized command adapter fields"
+  const portable_step: CommandStepReceipt = {
+    name: "probe",
+    command: ["tool", "--json"],
+    success: true,
+    status: "completed",
+    exit_code: 0,
+    classification: {kind: "clean"},
+    adapter: "mock",
+  }
+  const command_audit = schema_expect({execution: [portable_step]}, schema_of(CommandAudit))
+  require command_audit.execution[0].name == "probe", "portable command step name"
+  require command_audit.execution[0].adapter == "mock", "portable command step adapter fields"
   const direct = command_json(
     no_newline_echo("{\"direct\":true}"),
     {capture: {max_inline_bytes: 100}},

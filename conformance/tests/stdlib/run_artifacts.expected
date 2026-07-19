@@ -5,6 +5,11 @@ true
 facts.json
 ok
 2
+true
+before
+1
+schema_invalid
+true
 absent
 malformed
 true
