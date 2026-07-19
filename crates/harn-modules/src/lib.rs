@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::package_imports::{acquire_package_snapshots, resolve_import_path_with_snapshots};
 use crate::package_snapshot::PackageSnapshot;
 use harn_lexer::Span;
-use harn_parser::{BindingPattern, Node, Parser, SNode};
+use harn_parser::{Node, Parser, SNode};
 
 pub mod asset_paths;
 mod declarations;
@@ -16,6 +16,7 @@ pub mod personas;
 pub mod project_config;
 mod stdlib;
 
+use declarations::pattern_names;
 pub use declarations::{public_declarations, DefKind, PublicDeclaration};
 pub use package_imports::{
     resolve_import_path, resolve_import_path_with_guard, resolve_import_path_with_snapshot,
@@ -1376,21 +1377,6 @@ fn decl_site(file: &Path, span: Span, name: &str, kind: DefKind) -> DefSite {
         file: file.to_path_buf(),
         kind,
         span,
-    }
-}
-
-fn pattern_names(pattern: &BindingPattern) -> Vec<String> {
-    match pattern {
-        BindingPattern::Identifier(name) => vec![name.clone()],
-        BindingPattern::Dict(fields) => fields
-            .iter()
-            .filter_map(|field| field.alias.as_ref().or(Some(&field.key)).cloned())
-            .collect(),
-        BindingPattern::List(elements) => elements
-            .iter()
-            .map(|element| element.name.clone())
-            .collect(),
-        BindingPattern::Pair(a, b) => vec![a.clone(), b.clone()],
     }
 }
 

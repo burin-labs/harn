@@ -98,7 +98,7 @@ fn declaration(name: &str, kind: DefKind) -> Vec<PublicDeclaration> {
     }]
 }
 
-fn pattern_names(pattern: &BindingPattern) -> Vec<String> {
+pub(crate) fn pattern_names(pattern: &BindingPattern) -> Vec<String> {
     match pattern {
         BindingPattern::Identifier(name) => vec![name.clone()],
         BindingPattern::Dict(fields) => fields
