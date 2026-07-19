@@ -145,9 +145,9 @@ fn workflow_state_path(target: &WorkflowTarget) -> PathBuf {
 }
 
 fn now_rfc3339() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| uuid::Uuid::now_v7().to_string())
+    // Was `unwrap_or_else(|_| Uuid::now_v7().to_string())`, which emitted a
+    // UUID where a timestamp was expected; the shared helper emits the epoch.
+    harn_clock::system_now_rfc3339()
 }
 
 fn load_state(target: &WorkflowTarget) -> Result<WorkflowMailboxState, String> {

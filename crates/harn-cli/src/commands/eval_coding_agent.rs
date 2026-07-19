@@ -1322,7 +1322,7 @@ fn load_env_files(paths: &[PathBuf]) -> Result<(EnvOverlay, Vec<LoadedEnvKey>), 
     let mut loaded = Vec::new();
     let mut touched = BTreeSet::new();
     for path in paths {
-        let path = expand_home(path);
+        let path = harn_vm::user_dirs::expand_home_path(path);
         let raw = fs::read_to_string(&path)
             .map_err(|error| format!("failed to read env file {}: {error}", path.display()))?;
         for (line_no, line) in raw.lines().enumerate() {
@@ -1377,19 +1377,6 @@ fn unquote_env_value(value: &str) -> String {
         }
     }
     value.to_string()
-}
-
-fn expand_home(path: &Path) -> PathBuf {
-    let raw = path.to_string_lossy();
-    if raw == "~" {
-        return harn_vm::user_dirs::home_dir().unwrap_or_else(|| path.to_path_buf());
-    }
-    if let Some(rest) = raw.strip_prefix("~/") {
-        if let Some(home) = harn_vm::user_dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    path.to_path_buf()
 }
 
 #[cfg(test)]

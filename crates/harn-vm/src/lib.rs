@@ -48,7 +48,7 @@ pub mod connectors;
 pub mod corrections;
 pub mod coverage;
 pub(crate) mod durable_rate_limit;
-pub(crate) mod duration_parse;
+pub mod duration_parse;
 pub mod egress;
 pub mod event_log;
 pub mod events;

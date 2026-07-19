@@ -153,12 +153,8 @@ pub(super) fn adapter_name_from_input(input: &str) -> String {
 }
 
 pub(super) fn expand_home(value: &str) -> String {
-    if let Some(rest) = value.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest).display().to_string();
-        }
-    }
-    value.to_string()
+    // Was a bare `$HOME` read, which resolved to nothing on Windows.
+    harn_vm::user_dirs::expand_home(value).display().to_string()
 }
 
 pub(super) fn normalize_lora_method(raw: &str) -> Result<String, String> {

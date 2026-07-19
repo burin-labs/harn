@@ -751,7 +751,7 @@ pub fn annotation_to_friction_event(
         timestamp: annotation
             .timestamp
             .clone()
-            .unwrap_or_else(crate::orchestration::now_rfc3339),
+            .unwrap_or_else(crate::orchestration::now_unix_seconds_text),
     })
 }
 

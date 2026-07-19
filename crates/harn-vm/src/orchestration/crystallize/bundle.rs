@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use super::super::{now_rfc3339, ReplayTraceRun};
+use super::super::{now_unix_seconds_text, ReplayTraceRun};
 use super::api::load_crystallization_trace;
 use super::shadow::{find_sequence_start, shadow_candidate};
 use super::types::{
@@ -454,7 +454,7 @@ pub fn build_crystallization_bundle(
         author,
         rollout_policy,
         rollback_target: selected.and_then(|candidate| candidate.promotion.rollback_target.clone()),
-        created_at: now_rfc3339(),
+        created_at: now_unix_seconds_text(),
         workflow_version,
         package_name,
         sample_count: selected
@@ -531,7 +531,7 @@ pub fn build_crystallization_bundle(
     let manifest = CrystallizationBundleManifest {
         schema: BUNDLE_SCHEMA.to_string(),
         schema_version: BUNDLE_SCHEMA_VERSION,
-        generated_at: now_rfc3339(),
+        generated_at: now_unix_seconds_text(),
         generator: BundleGenerator::default(),
         kind,
         candidate_id: selected

@@ -18,8 +18,9 @@ use wait_timeout::ChildExt;
 
 use super::super::{
     evaluate_context_pack_suggestion_expectations, generate_context_pack_suggestions, new_id,
-    normalize_friction_events_json, now_rfc3339, parse_json_value, run_persona_eval_ladder,
-    ContextPackSuggestionExpectation, ContextPackSuggestionOptions, FrictionEvent,
+    normalize_friction_events_json, now_unix_seconds_text, parse_json_value,
+    run_persona_eval_ladder, ContextPackSuggestionExpectation, ContextPackSuggestionOptions,
+    FrictionEvent,
 };
 use super::diff::diff_run_records;
 use super::json::{clarifying_max_questions, clarifying_min_questions, normalize_question_text};

@@ -212,7 +212,7 @@ async fn daemon_trigger_builtin(
         daemon.next_event_seq = next_seq;
         daemon.pending_events.push_back(QueuedDaemonEvent {
             seq: next_seq,
-            enqueued_at: crate::orchestration::now_rfc3339(),
+            enqueued_at: crate::orchestration::now_unix_seconds_text(),
             payload: crate::llm::vm_value_to_json(payload),
         });
         persist_daemon_meta(&daemon)?;

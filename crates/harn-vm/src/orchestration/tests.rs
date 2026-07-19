@@ -229,7 +229,7 @@ fn artifact_selection_honors_budget_and_priority() {
             kind: "summary".to_string(),
             text: Some("short".to_string()),
             relevance: Some(0.9),
-            created_at: now_rfc3339(),
+            created_at: now_unix_seconds_text(),
             ..Default::default()
         }
         .normalize(),
@@ -239,7 +239,7 @@ fn artifact_selection_honors_budget_and_priority() {
             kind: "summary".to_string(),
             text: Some("this is a much larger artifact body".to_string()),
             relevance: Some(1.0),
-            created_at: now_rfc3339(),
+            created_at: now_unix_seconds_text(),
             ..Default::default()
         }
         .normalize(),
@@ -249,7 +249,7 @@ fn artifact_selection_honors_budget_and_priority() {
             kind: "summary".to_string(),
             text: Some("tiny".to_string()),
             relevance: Some(0.5),
-            created_at: now_rfc3339(),
+            created_at: now_unix_seconds_text(),
             ..Default::default()
         }
         .normalize(),

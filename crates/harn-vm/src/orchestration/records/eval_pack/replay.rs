@@ -412,7 +412,7 @@ pub fn replay_fixture_from_run(run: &RunRecord) -> ReplayFixture {
         source_run_id: run.id.clone(),
         workflow_id: run.workflow_id.clone(),
         workflow_name: run.workflow_name.clone(),
-        created_at: now_rfc3339(),
+        created_at: now_unix_seconds_text(),
         eval_kind: Some("replay".to_string()),
         clarifying_question: None,
         expected_status: run.status.clone(),

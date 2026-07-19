@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value as JsonValue};
 
-use super::super::{now_rfc3339, ReplayAllowlistRule, ReplayFixture, ReplayTraceRun, RunRecord};
+use super::super::{
+    now_unix_seconds_text, ReplayAllowlistRule, ReplayFixture, ReplayTraceRun, RunRecord,
+};
 use super::codegen::{generate_eval_pack, generate_harn_code, rejected_workflow_stub};
 use super::normalize::{
     action_signature, cluster_key_for_candidate, constants_for_action,
@@ -98,7 +100,7 @@ pub fn crystallize_traces(
 
     let mut report = CrystallizationReport {
         version: 1,
-        generated_at: now_rfc3339(),
+        generated_at: now_unix_seconds_text(),
         source_trace_count: normalized.len(),
         excluded_trace_count: excluded_mining.len() + excluded_shadow.len(),
         selected_candidate_id: selected.map(|candidate| candidate.id.clone()),
@@ -200,7 +202,7 @@ pub fn synthesize_candidate_from_trace(
 
     let mut report = CrystallizationReport {
         version: 1,
-        generated_at: now_rfc3339(),
+        generated_at: now_unix_seconds_text(),
         source_trace_count: 1,
         excluded_trace_count: excluded_shadow.len(),
         selected_candidate_id: selected_id,
@@ -396,7 +398,7 @@ fn build_single_trace_candidate(
                 .collect(),
             author: options.author.clone(),
             approver: options.approver.clone(),
-            created_at: now_rfc3339(),
+            created_at: now_unix_seconds_text(),
             version: "0.1.0".to_string(),
             package_name,
             capability_set: capabilities,

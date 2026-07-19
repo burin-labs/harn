@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use harn_vm::event_log::LogEvent;
 use serde_json::{json, Value as JsonValue};
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::package::CollectedTriggerHandler;
@@ -27,9 +26,7 @@ pub(super) fn parse_trust_query_timestamp(raw: &str) -> Result<OffsetDateTime, S
 }
 
 pub(super) fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+    harn_vm::clock::system_now_rfc3339()
 }
 
 /// Emit a `notifications/progress` update from a built-in tool when the

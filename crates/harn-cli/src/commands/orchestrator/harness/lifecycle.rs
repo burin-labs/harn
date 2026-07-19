@@ -123,7 +123,7 @@ async fn orchestrator_lifecycle(
         max_outstanding: pump_config.max_outstanding.max(1),
     };
 
-    let startup_started_at = now_rfc3339()?;
+    let startup_started_at = now_rfc3339();
     let (admin_reload, mut reload_rx) = AdminReloadHandle::channel();
 
     eprintln!("[harn] orchestrator manifest: {}", config_path.display());

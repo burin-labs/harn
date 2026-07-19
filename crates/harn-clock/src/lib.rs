@@ -56,6 +56,44 @@ pub fn now_wall_ms(clock: &dyn Clock) -> i64 {
     offset_datetime_to_ms(clock.now_utc())
 }
 
+// ── RFC3339 rendering ──────────────────────────────────────────────────────────
+
+/// Rendered fallback for the unreachable formatting failure in
+/// [`format_rfc3339`]. Chosen over an empty string so consumers that parse
+/// these timestamps back always receive syntactically valid RFC3339.
+const EPOCH_RFC3339: &str = "1970-01-01T00:00:00Z";
+
+/// Render `ts` as an RFC3339 timestamp.
+///
+/// Returns `String` rather than `Result` deliberately. `time`'s RFC3339
+/// formatter only fails for years outside `0000..=9999` or for UTC offsets
+/// with sub-minute precision — neither is reachable for a wall-clock UTC
+/// `OffsetDateTime` produced by a [`Clock`]. Making every call site thread an
+/// error it can never observe bought nothing, so the unreachable branch
+/// resolves to [`EPOCH_RFC3339`] instead of panicking on `unwrap`.
+pub fn format_rfc3339(ts: OffsetDateTime) -> String {
+    ts.format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| EPOCH_RFC3339.to_string())
+}
+
+/// Current wall-clock UTC time as RFC3339, read through `clock`.
+///
+/// Prefer this over [`system_now_rfc3339`] wherever a `Clock` is already in
+/// scope: it makes the timestamp deterministic under [`PausedClock`].
+pub fn now_rfc3339(clock: &dyn Clock) -> String {
+    format_rfc3339(clock.now_utc())
+}
+
+/// Current wall-clock UTC time as RFC3339, read straight from the system
+/// clock.
+///
+/// The escape hatch for call sites that have no [`Clock`] in scope and where
+/// threading one through would mean invasive plumbing. Anything that *can*
+/// reach a `Clock` should call [`now_rfc3339`] instead so tests can pause it.
+pub fn system_now_rfc3339() -> String {
+    format_rfc3339(OffsetDateTime::now_utc())
+}
+
 // ── Real clock ─────────────────────────────────────────────────────────────────
 
 /// Production clock. Reads `OffsetDateTime::now_utc()` and
@@ -419,5 +457,27 @@ mod tests {
         let observed = now_wall_ms(clock.as_ref());
         let expected = epoch().unix_timestamp_nanos() / 1_000_000;
         assert_eq!(observed, expected as i64);
+    }
+
+    #[test]
+    fn format_rfc3339_renders_utc_with_z_suffix() {
+        assert_eq!(format_rfc3339(epoch()), "2023-11-14T22:13:20Z");
+    }
+
+    #[tokio::test]
+    async fn now_rfc3339_is_deterministic_under_a_paused_clock() {
+        // The whole point of routing the ~20 hand-rolled `now_rfc3339` copies
+        // through here: a paused clock now pins the rendered timestamp.
+        let clock = PausedClock::new(epoch());
+        assert_eq!(now_rfc3339(clock.as_ref()), "2023-11-14T22:13:20Z");
+        clock.advance(Duration::from_secs(1));
+        assert_eq!(now_rfc3339(clock.as_ref()), "2023-11-14T22:13:21Z");
+    }
+
+    #[test]
+    fn system_now_rfc3339_is_parseable_back() {
+        let rendered = system_now_rfc3339();
+        OffsetDateTime::parse(&rendered, &time::format_description::well_known::Rfc3339)
+            .expect("system_now_rfc3339 must emit valid RFC3339");
     }
 }

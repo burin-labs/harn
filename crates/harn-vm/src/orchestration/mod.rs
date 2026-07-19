@@ -6,7 +6,15 @@ use serde::{Deserialize, Serialize};
 use crate::llm::vm_value_to_json;
 use crate::value::{VmError, VmValue};
 
-pub(crate) fn now_rfc3339() -> String {
+/// Current time as a decimal Unix-seconds string.
+///
+/// Renamed from `now_rfc3339`, which it never was: the orchestration records
+/// it stamps (`created_at`, `generated_at`, `selected_at`) carry values like
+/// `"1753000000"`, not RFC3339. Correcting the *format* would change the shape
+/// of already-persisted records, so the name is corrected here instead — both
+/// to stop the next reader assuming RFC3339 and to keep this from being folded
+/// into `harn_clock::system_now_rfc3339` as if it were another copy.
+pub(crate) fn now_unix_seconds_text() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)

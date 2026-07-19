@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{new_id, now_rfc3339, parse_json_payload};
+use super::{new_id, now_unix_seconds_text, parse_json_payload};
 use crate::llm::vm_value_to_json;
 use crate::redact::{RedactionPolicy, REDACTED_PLACEHOLDER};
 use crate::value::{VmError, VmValue};
@@ -280,7 +280,7 @@ pub fn normalize_friction_event_json(json: serde_json::Value) -> Result<Friction
         event.id = new_id("friction");
     }
     if event.timestamp.is_empty() {
-        event.timestamp = now_rfc3339();
+        event.timestamp = now_unix_seconds_text();
     }
     event.kind = event.kind.trim().to_ascii_lowercase();
     if event.kind.is_empty() {
@@ -503,7 +503,7 @@ fn build_suggestion(
             "Review required before enabling this context pack for future runs.".to_string(),
         ],
         source_event_ids,
-        created_at: now_rfc3339(),
+        created_at: now_unix_seconds_text(),
         metadata: BTreeMap::new(),
     }
 }

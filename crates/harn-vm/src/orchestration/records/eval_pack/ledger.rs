@@ -423,7 +423,7 @@ fn eval_ledger_provenance(
     EvalLedgerProvenance {
         commit,
         branch,
-        ts: now_rfc3339(),
+        ts: now_unix_seconds_text(),
         harn_version: crate::bytecode_cache::HARN_VERSION.to_string(),
         host: env_string(&["HOSTNAME", "COMPUTERNAME"]).unwrap_or_else(|| "unknown".to_string()),
     }

@@ -129,7 +129,7 @@ struct LoadedSpec {
 
 async fn load_spec(spec: &str) -> Result<LoadedSpec, PackageError> {
     if crate::format::looks_like_windows_drive_path(spec) {
-        return loaded_spec_from_bytes(read_spec_path(&expand_tilde(spec))?);
+        return loaded_spec_from_bytes(read_spec_path(&harn_vm::user_dirs::expand_home(spec))?);
     }
     let (source_label, bytes) = match Url::parse(spec) {
         Ok(url) => match url.scheme() {
@@ -147,7 +147,7 @@ async fn load_spec(spec: &str) -> Result<LoadedSpec, PackageError> {
                 .into());
             }
         },
-        Err(_) => read_spec_path(&expand_tilde(spec))?,
+        Err(_) => read_spec_path(&harn_vm::user_dirs::expand_home(spec))?,
     };
 
     loaded_spec_from_bytes((source_label, bytes))
@@ -302,14 +302,14 @@ fn resolve_harn_openapi(
 fn harn_openapi_candidates(args: &PackageScaffoldOpenapiArgs) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(git) = args.harn_openapi_git.as_deref() {
-        let path = expand_tilde(git);
+        let path = harn_vm::user_dirs::expand_home(git);
         if path.exists() {
             candidates.push(path);
         }
     }
     if let Ok(raw) = std::env::var("HARN_OPENAPI_PATH") {
         if !raw.trim().is_empty() {
-            candidates.push(expand_tilde(raw.trim()));
+            candidates.push(harn_vm::user_dirs::expand_home(raw.trim()));
         }
     }
     if let Ok(cwd) = std::env::current_dir() {
@@ -323,7 +323,7 @@ fn harn_openapi_candidates(args: &PackageScaffoldOpenapiArgs) -> Vec<PathBuf> {
 }
 
 fn resolve_local_harn_openapi(path: &Path) -> Result<String, PackageError> {
-    let root = expand_tilde_path(path);
+    let root = harn_vm::user_dirs::expand_home_path(path);
     let lib = root.join("src/lib.harn");
     if !lib.is_file() {
         return Err(format!(
@@ -916,24 +916,6 @@ fn is_harn_reserved(value: &str) -> bool {
             | "body"
             | "client"
     )
-}
-
-fn expand_tilde(raw: &str) -> PathBuf {
-    if raw == "~" {
-        return harn_vm::user_dirs::home_dir().unwrap_or_else(|| PathBuf::from(raw));
-    }
-    if let Some(rest) = raw.strip_prefix("~/") {
-        if let Some(home) = harn_vm::user_dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(raw)
-}
-
-fn expand_tilde_path(path: &Path) -> PathBuf {
-    path.to_str()
-        .map(expand_tilde)
-        .unwrap_or_else(|| path.to_path_buf())
 }
 
 #[cfg(test)]

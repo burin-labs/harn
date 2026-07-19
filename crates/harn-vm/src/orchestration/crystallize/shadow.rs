@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 use serde_json::Value as JsonValue;
 
 use super::super::{
-    now_rfc3339, run_replay_oracle_trace, ReplayExpectation, ReplayOracleReport, ReplayOracleTrace,
+    now_unix_seconds_text, run_replay_oracle_trace, ReplayExpectation, ReplayOracleReport,
+    ReplayOracleTrace,
 };
 use super::normalize::action_signature;
 use super::types::{
@@ -69,7 +70,7 @@ pub(super) fn refresh_promotion_metadata(
             vec![PromotionApprovalRecord {
                 actor: approver.clone(),
                 decision: "approved_for_shadow_promotion".to_string(),
-                recorded_at: now_rfc3339(),
+                recorded_at: now_unix_seconds_text(),
                 reason: Some("approver supplied in crystallization options".to_string()),
             }]
         })

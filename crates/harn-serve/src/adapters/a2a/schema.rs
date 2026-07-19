@@ -932,9 +932,9 @@ pub(super) fn a2a_artifact_from_harn_artifact(artifact: &JsonValue) -> JsonValue
 /// stamp each A2A `Artifact.metadata.timestamp` so downstream consumers
 /// can order outputs even when several artifacts share a task.
 pub(super) fn current_timestamp_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| String::new())
+    // Was `unwrap_or_else(|_| String::new())`; the shared helper falls back to
+    // the epoch instead so an A2A envelope never carries an empty timestamp.
+    harn_clock::system_now_rfc3339()
 }
 
 /// Wrap a tool call's `raw_output` in an A2A `Artifact`. The stable id

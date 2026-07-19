@@ -154,7 +154,7 @@ pub fn record_completed_turn_checkpoint(
         }
         let checkpoint = SessionTurnCheckpoint {
             checkpoint_id: format!("turn_{}", uuid::Uuid::now_v7().simple()),
-            completed_at: crate::orchestration::now_rfc3339(),
+            completed_at: crate::orchestration::now_unix_seconds_text(),
             before_message_count,
             after_message_count,
             before_transcript,
