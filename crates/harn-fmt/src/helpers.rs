@@ -434,8 +434,19 @@ pub(crate) fn format_type_expr_wrapped(
     prefix_len: usize,
     line_width: usize,
 ) -> String {
+    format_type_expr_wrapped_with_suffix(te, indent, prefix_len, line_width, 0)
+}
+
+/// Wrap a type while reserving columns appended to its final physical line.
+pub(crate) fn format_type_expr_wrapped_with_suffix(
+    te: &TypeExpr,
+    indent: usize,
+    prefix_len: usize,
+    line_width: usize,
+    suffix_width: usize,
+) -> String {
     let inline = format_type_expr(te);
-    if prefix_len + text_width(&inline) <= line_width {
+    if prefix_len + text_width(&inline) + suffix_width <= line_width {
         return inline;
     }
     match te {
@@ -445,62 +456,108 @@ pub(crate) fn format_type_expr_wrapped(
         }
         TypeExpr::List(inner) => format!(
             "list<{}>",
-            format_type_expr_wrapped(inner, indent, prefix_len + 6, line_width)
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 6,
+                line_width,
+                suffix_width + 1,
+            )
         ),
         TypeExpr::Iter(inner) => format!(
             "iter<{}>",
-            format_type_expr_wrapped(inner, indent, prefix_len + 6, line_width)
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 6,
+                line_width,
+                suffix_width + 1,
+            )
         ),
         TypeExpr::Generator(inner) => format!(
             "Generator<{}>",
-            format_type_expr_wrapped(inner, indent, prefix_len + 11, line_width)
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 11,
+                line_width,
+                suffix_width + 1,
+            )
         ),
         TypeExpr::Stream(inner) => format!(
             "Stream<{}>",
-            format_type_expr_wrapped(inner, indent, prefix_len + 8, line_width)
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 8,
+                line_width,
+                suffix_width + 1,
+            )
         ),
-        TypeExpr::DictType(key, value) => format!(
-            "dict<{}, {}>",
-            format_type_expr_wrapped(key, indent, prefix_len + 6, line_width),
-            format_type_expr_wrapped(value, indent, prefix_len + 8, line_width)
-        ),
+        TypeExpr::DictType(key, value) => {
+            format_applied_type_wrapped("dict", &[key.as_ref(), value.as_ref()], indent, line_width)
+        }
         TypeExpr::Applied { name, args } => {
-            let item_indent = "  ".repeat(indent + 1);
-            let close_indent = "  ".repeat(indent);
-            let wrapped_args = args
-                .iter()
-                .enumerate()
-                .map(|(index, arg)| {
-                    let value = format_type_expr_wrapped(
-                        arg,
-                        indent + 1,
-                        item_indent.chars().count(),
-                        line_width,
-                    );
-                    let comma = if index + 1 < args.len() { "," } else { "" };
-                    format!("{item_indent}{value}{comma}")
-                })
-                .collect::<Vec<_>>();
-            format!("{name}<\n{}\n{close_indent}>", wrapped_args.join("\n"))
+            let args = args.iter().collect::<Vec<_>>();
+            format_applied_type_wrapped(name, &args, indent, line_width)
         }
         TypeExpr::Owned(inner) => format!(
             "owned<{}>",
-            format_type_expr_wrapped(inner, indent, prefix_len + 7, line_width)
+            format_type_expr_wrapped_with_suffix(
+                inner,
+                indent,
+                prefix_len + 7,
+                line_width,
+                suffix_width + 1,
+            )
         ),
         TypeExpr::Union(types) => {
             if let Some(inner) = optional_sugar_inner(types) {
                 // The wrapped variant follows the inline form for `T?`;
                 // the inner type may still wrap if it is itself a shape.
-                let inner_str = format_type_expr_wrapped(inner, indent, prefix_len, line_width);
+                let inner_str = format_type_expr_wrapped_with_suffix(
+                    inner,
+                    indent,
+                    prefix_len,
+                    line_width,
+                    suffix_width + 1,
+                );
                 return format!("{inner_str}?");
             }
-            format_type_union_wrapped(types, "|", indent, prefix_len, line_width)
+            format_type_union_wrapped(types, "|", indent, prefix_len, line_width, suffix_width)
         }
         TypeExpr::Intersection(types) => {
-            format_type_union_wrapped(types, "&", indent, prefix_len, line_width)
+            format_type_union_wrapped(types, "&", indent, prefix_len, line_width, suffix_width)
         }
         _ => inline,
     }
+}
+
+fn format_applied_type_wrapped(
+    name: &str,
+    args: &[&TypeExpr],
+    indent: usize,
+    line_width: usize,
+) -> String {
+    let item_indent = "  ".repeat(indent + 1);
+    let close_indent = "  ".repeat(indent);
+    let wrapped_args = args
+        .iter()
+        .enumerate()
+        .map(|(index, arg)| {
+            let has_comma = index + 1 < args.len();
+            let value = format_type_expr_wrapped_with_suffix(
+                arg,
+                indent + 1,
+                text_width(&item_indent),
+                line_width,
+                usize::from(has_comma),
+            );
+            let comma = if has_comma { "," } else { "" };
+            format!("{item_indent}{value}{comma}")
+        })
+        .collect::<Vec<_>>();
+    format!("{name}<\n{}\n{close_indent}>", wrapped_args.join("\n"))
 }
 
 fn format_type_union_wrapped(
@@ -509,6 +566,7 @@ fn format_type_union_wrapped(
     indent: usize,
     prefix_len: usize,
     line_width: usize,
+    suffix_width: usize,
 ) -> String {
     let mut rendered = types.iter().enumerate().map(|(index, arm)| {
         let arm_prefix = if index == 0 {
@@ -516,7 +574,12 @@ fn format_type_union_wrapped(
         } else {
             (indent + 1) * 2 + separator.chars().count() + 1
         };
-        format_type_expr_wrapped(arm, indent, arm_prefix, line_width)
+        let arm_suffix = if index + 1 < types.len() {
+            2 // ` \\` continuation marker
+        } else {
+            suffix_width
+        };
+        format_type_expr_wrapped_with_suffix(arm, indent, arm_prefix, line_width, arm_suffix)
     });
     let Some(first) = rendered.next() else {
         return String::new();
@@ -576,7 +639,13 @@ fn format_shape_wrapped(
             // own indent, not the outer one.
             let prefix_len =
                 text_width(&pad_inner) + text_width(f.name.as_str()) + text_width(opt) + 2;
-            let value = format_type_expr_wrapped(&f.type_expr, indent + 1, prefix_len, line_width);
+            let value = format_type_expr_wrapped_with_suffix(
+                &f.type_expr,
+                indent + 1,
+                prefix_len,
+                line_width,
+                1,
+            );
             format!("{pad_inner}{}{opt}: {value},", f.name)
         })
         .collect();
@@ -597,15 +666,26 @@ fn format_open_shape_wrapped(
             let opt = if f.optional { "?" } else { "" };
             let prefix_len =
                 text_width(&pad_inner) + text_width(f.name.as_str()) + text_width(opt) + 2;
-            let value = format_type_expr_wrapped(&f.type_expr, indent + 1, prefix_len, line_width);
+            let value = format_type_expr_wrapped_with_suffix(
+                &f.type_expr,
+                indent + 1,
+                prefix_len,
+                line_width,
+                1,
+            );
             format!("{pad_inner}{}{opt}: {value},", f.name)
         })
         .collect::<Vec<_>>();
-    lines.extend(
-        rests
-            .iter()
-            .map(|rest| format!("{pad_inner}...{},", format_type_expr(rest))),
-    );
+    lines.extend(rests.iter().map(|rest| {
+        let value = format_type_expr_wrapped_with_suffix(
+            rest,
+            indent + 1,
+            text_width(&pad_inner) + 3,
+            line_width,
+            1,
+        );
+        format!("{pad_inner}...{value},")
+    }));
     format!("{{\n{}\n{pad_close}}}", lines.join("\n"))
 }
 
