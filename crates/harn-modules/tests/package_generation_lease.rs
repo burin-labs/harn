@@ -51,21 +51,30 @@ fn collect(root: &Path, current: &str) {
         if entry.file_name() == current || !entry.path().is_dir() {
             continue;
         }
-        let lease = File::options()
+        let lease = match File::options()
             .read(true)
             .write(true)
             .open(entry.path().join(GENERATION_LEASE_FILE))
-            .unwrap();
+        {
+            Ok(lease) => lease,
+            Err(error) if lock_is_contended(&error) => continue,
+            Err(error) => panic!("failed to inspect generation lease: {error}"),
+        };
         match lease.try_lock_exclusive() {
             Ok(()) => {
                 FileExt::unlock(&lease).unwrap();
                 drop(lease);
                 fs::remove_dir_all(entry.path()).unwrap();
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) if lock_is_contended(&error) => {}
             Err(error) => panic!("failed to inspect generation lease: {error}"),
         }
     }
+}
+
+fn lock_is_contended(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::WouldBlock
+        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
 }
 
 fn child(root: &Path) {
