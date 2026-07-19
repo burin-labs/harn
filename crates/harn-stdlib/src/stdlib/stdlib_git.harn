@@ -1,3 +1,12 @@
+pub import {
+  GitCheckoutDirtyPolicy,
+  GitCheckoutOptions,
+  GitCheckoutReceipt,
+  GitCheckoutStep,
+  GitCheckoutStepReceipt,
+  git_checkout_plan,
+} from "std/git/checkout"
+import { git_checkout_run } from "std/git/checkout"
 /**
  * std/git — typed local git operations with audit receipts.
  *
@@ -437,7 +446,7 @@ fn __git_run_options(repo, options) -> dict {
  * fast instead of hanging a TTY-less runtime. Caller `env` keys win,
  * and `env_mode: "merge"` keeps inherited PATH/HOME/credentials.
  */
-fn __git_with_repo(repo, options) -> dict {
+fn __git_with_repo(repo, options) -> GitRunOptions {
   const opts = options ?? {}
   return opts + {repo: repo}
 }
@@ -810,6 +819,21 @@ pub fn git_fetch(remote = "origin", repo = ".", refspecs: list<string> = []) -> 
   return git.fetch(repo, __git_ref_arg(remote, "remote"), __git_string_list(refspecs, "refspecs"))
 }
 
+/**
+ * Synchronize a checkout to an exact remote base ref and return every decision
+ * and command as a typed receipt. An injected runner receives the same
+ * `GitCheckoutStep` values production executes, so fixtures cannot drift from
+ * the canonical argv plan.
+ *
+ * @effects: [process]
+ * @errors: [ValueError]
+ */
+pub fn git_checkout_sync(options: GitCheckoutOptions) -> GitCheckoutReceipt {
+  const repo = git_repo_path(options.repo ?? ".")
+  const runner = options.runner ?? fn(step) { return git_run(step.argv.slice(1), {repo: repo}) }
+  return git_checkout_run(options + {repo: repo, runner: runner})
+}
+
 fn __git_list_contains(values, needle) -> bool {
   if type_of(values) == "string" {
     return values == needle
@@ -1111,7 +1135,7 @@ pub fn git_run_tool(
   operation: GitToolOperation,
   args: GitToolRunArgs = {},
   options: GitToolCatalogOptions = {},
-) {
+) -> unknown {
   const opts = options
   const request = args
   const op = __git_non_empty_string(operation, "operation")

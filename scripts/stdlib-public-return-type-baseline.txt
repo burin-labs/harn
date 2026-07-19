@@ -886,7 +886,6 @@ crates/harn-stdlib/src/stdlib/stdlib_fs.harn::write_yaml
 crates/harn-stdlib/src/stdlib/stdlib_gha.harn::gha_error
 crates/harn-stdlib/src/stdlib/stdlib_gha.harn::gha_notice
 crates/harn-stdlib/src/stdlib/stdlib_gha.harn::gha_warning
-crates/harn-stdlib/src/stdlib/stdlib_git.harn::git_run_tool
 crates/harn-stdlib/src/stdlib/stdlib_git.harn::git_toolbox_tools
 crates/harn-stdlib/src/stdlib/stdlib_git.harn::git_tools
 crates/harn-stdlib/src/stdlib/stdlib_graphql.harn::graphql_assert_ok

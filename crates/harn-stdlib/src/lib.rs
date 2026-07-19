@@ -224,6 +224,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "host" => "stdlib/stdlib_host.harn",
     "host_lease" => "stdlib/stdlib_host_lease.harn",
     "git" => "stdlib/stdlib_git.harn",
+    "git/checkout" => "stdlib/git/checkout.harn",
     "hitl" => "stdlib/stdlib_hitl.harn",
     "trust" => "stdlib/stdlib_trust.harn",
     "corrections" => "stdlib/stdlib_corrections.harn",
