@@ -361,7 +361,7 @@ async fn finish_daemon_stop(state: Arc<parking_lot::Mutex<DaemonState>>) -> Resu
     if let Some(handle) = cancelled_handle {
         let _ = handle.await;
     }
-    crate::llm::agent_session_host::abandon_agent_session(&session_id).await?;
+    crate::llm::agent_session_host::cancellation::abandon_agent_session(&session_id).await?;
     {
         let mut daemon = state.lock();
         daemon.status = "stopped".to_string();

@@ -1,9 +1,6 @@
 use serde_json::json;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 
 use crate::agent_events::AgentEvent;
-use crate::value::VmDictExt;
 
 use super::{
     assistant_message_from_llm_result, canonical_acp_stop_reason, canonical_provider_stop_reason,
@@ -16,98 +13,6 @@ use super::{
 
 #[path = "agent_session_host_mock_dispatch_tests.rs"]
 mod mock_dispatch;
-
-#[tokio::test(flavor = "current_thread")]
-async fn abandoned_finalize_flushes_once_and_fires_native_cleanup_once() {
-    crate::agent_sessions::reset_session_store();
-    let root = tempfile::tempdir().expect("temp root");
-    let session_id = "abandoned-finalize";
-    let mut options = crate::value::DictMap::new();
-    options.put_str("root", root.path().to_string_lossy().as_ref());
-    let prepared = crate::agent_session_journal::prepare(
-        session_id,
-        &options,
-        "run-abandoned".to_string(),
-        "turn-abandoned".to_string(),
-    )
-    .await
-    .expect("prepare journal");
-    crate::agent_sessions::open_or_create(Some(session_id.to_string()));
-    crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
-    crate::agent_sessions::inject_message(
-        session_id,
-        crate::stdlib::json_to_vm_value(&json!({
-            "role": "user",
-            "content": "persist before cancellation",
-        })),
-    )
-    .expect("enqueue transcript mutation");
-
-    let cleanup_count = Arc::new(AtomicUsize::new(0));
-    let observed_count = cleanup_count.clone();
-    let _registration =
-        crate::llm::agent_runtime::register_session_end_hook(Arc::new(move |ended_session_id| {
-            if ended_session_id == session_id {
-                observed_count.fetch_add(1, Ordering::SeqCst);
-            }
-        }));
-
-    super::abandon_agent_session(session_id)
-        .await
-        .expect("first abandonment");
-    super::abandon_agent_session(session_id)
-        .await
-        .expect("idempotent second abandonment");
-
-    assert!(!crate::agent_sessions::has_journal(session_id));
-    assert_eq!(cleanup_count.load(Ordering::SeqCst), 1);
-    let store = crate::stdlib::session_store::open_canonical_agent_session(root.path(), session_id)
-        .await
-        .expect("open canonical session");
-    let events = crate::stdlib::session_store::read_all_events(&store, session_id)
-        .await
-        .expect("read canonical events");
-    assert_eq!(events.len(), 1);
-    assert!(events[0]
-        .payload
-        .to_string()
-        .contains("persist before cancellation"));
-    crate::agent_sessions::reset_session_store();
-}
-
-#[test]
-fn cancelled_nested_guard_does_not_pop_callers_policy() {
-    use crate::orchestration::{
-        clear_execution_policy_stacks, current_execution_policy, enter_nested_execution_policy,
-        pop_execution_policy, push_execution_policy, swap_execution_policy_stack, CapabilityPolicy,
-        NestedExecutionKind,
-    };
-
-    clear_execution_policy_stacks();
-    push_execution_policy(CapabilityPolicy {
-        recursion_limit: Some(4),
-        ..Default::default()
-    });
-    let nested =
-        enter_nested_execution_policy(None, NestedExecutionKind::AgentLoop, "cancelled-session")
-            .expect("enter nested policy");
-    let abandoned_stack = swap_execution_policy_stack(Vec::new());
-    push_execution_policy(CapabilityPolicy {
-        recursion_limit: Some(99),
-        ..Default::default()
-    });
-
-    drop(super::CancelSafeNestedExecutionGuard::new(nested));
-    assert_eq!(
-        current_execution_policy().and_then(|policy| policy.recursion_limit),
-        Some(99),
-        "dropping a cancelled session must not pop the caller's unrelated policy"
-    );
-
-    pop_execution_policy();
-    drop(abandoned_stack);
-    clear_execution_policy_stacks();
-}
 
 /// Execution policy that annotates the file-provenance test vocabulary so
 /// `current_tool_annotations` resolves `kind` / side effects the way the live

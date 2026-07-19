@@ -59,7 +59,6 @@
 //! and track the last `system_prompt`, the last `tool_schemas`, and every
 //! `message` up to (but not including) the matching `provider_call_request`.
 
-use std::cell::RefCell;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -77,39 +76,13 @@ use super::agent_tools::next_call_id;
 
 mod raw_tool_receipts;
 mod served_context_receipts;
+mod transcript_ambient;
 
-thread_local! {
-    /// Last-emitted hash for the current transcript's system prompt and
-    /// tool schemas. Used to dedup identical payloads across turns so we
-    /// write them once per stage instead of once per request.
-    static LAST_SYSTEM_PROMPT_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
-    static LAST_TOOL_SCHEMAS_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
-    static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-}
-
-/// Per-agent transcript routing and deduplication state. It is swapped with
-/// the rest of the ambient execution scope so cancellation or sibling tasks
-/// cannot leak a pushed transcript directory across executions.
-#[derive(Clone, Default)]
-pub(crate) struct LlmTranscriptAmbient {
-    system_prompt_hash: Option<u64>,
-    tool_schemas_hash: Option<u64>,
-    transcript_dirs: Vec<String>,
-}
-
-pub(crate) fn swap_llm_transcript_ambient(
-    replacement: LlmTranscriptAmbient,
-) -> LlmTranscriptAmbient {
-    LlmTranscriptAmbient {
-        system_prompt_hash: LAST_SYSTEM_PROMPT_HASH.with(|slot| {
-            std::mem::replace(&mut *slot.borrow_mut(), replacement.system_prompt_hash)
-        }),
-        tool_schemas_hash: LAST_TOOL_SCHEMAS_HASH
-            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.tool_schemas_hash)),
-        transcript_dirs: TRANSCRIPT_DIR_STACK
-            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.transcript_dirs)),
-    }
-}
+use transcript_ambient::{current_transcript_dir, system_prompt_changed, tool_schemas_changed};
+pub(crate) use transcript_ambient::{
+    pop_llm_transcript_dir, push_llm_transcript_dir, swap_llm_transcript_ambient,
+    LlmTranscriptAmbient,
+};
 
 tokio::task_local! {
     static RAW_PROVIDER_CAPTURE_CONTEXT: RawProviderCaptureContext;
@@ -144,36 +117,6 @@ where
 
 pub(crate) fn current_raw_provider_capture_context() -> Option<RawProviderCaptureContext> {
     RAW_PROVIDER_CAPTURE_CONTEXT.try_with(Clone::clone).ok()
-}
-
-fn reset_transcript_dedup() {
-    LAST_SYSTEM_PROMPT_HASH.with(|hash| *hash.borrow_mut() = None);
-    LAST_TOOL_SCHEMAS_HASH.with(|hash| *hash.borrow_mut() = None);
-}
-
-pub(super) fn push_llm_transcript_dir(dir: &str) {
-    if dir.trim().is_empty() {
-        return;
-    }
-    TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(dir.to_string()));
-    reset_transcript_dedup();
-}
-
-pub(super) fn pop_llm_transcript_dir() {
-    TRANSCRIPT_DIR_STACK.with(|stack| {
-        stack.borrow_mut().pop();
-    });
-    reset_transcript_dedup();
-}
-
-fn current_transcript_dir() -> Option<String> {
-    let stacked = TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().last().cloned());
-    if stacked.is_some() {
-        return stacked;
-    }
-    std::env::var("HARN_LLM_TRANSCRIPT_DIR")
-        .ok()
-        .filter(|d| !d.is_empty())
 }
 
 fn hash_str(value: &str) -> u64 {
@@ -1504,15 +1447,7 @@ fn emit_system_prompt_if_changed(system: Option<&str>) {
     let content = system.unwrap_or("");
     let current = hash_str(content);
     let content_hash = served_context_receipts::stable_redacted_string_hash(content);
-    let changed = LAST_SYSTEM_PROMPT_HASH.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        if slot.as_ref() == Some(&current) {
-            false
-        } else {
-            *slot = Some(current);
-            true
-        }
-    });
+    let changed = system_prompt_changed(current);
     if !changed {
         return;
     }
@@ -1530,15 +1465,7 @@ fn emit_tool_schemas_if_changed(schemas: &[crate::llm::tools::ToolSchema]) {
     let value = serde_json::to_value(schemas).unwrap_or(serde_json::Value::Null);
     let current = hash_json(&value);
     let content_hash = served_context_receipts::stable_redacted_json_hash(&value);
-    let changed = LAST_TOOL_SCHEMAS_HASH.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        if slot.as_ref() == Some(&current) {
-            false
-        } else {
-            *slot = Some(current);
-            true
-        }
-    });
+    let changed = tool_schemas_changed(current);
     if !changed {
         return;
     }
@@ -3251,80 +3178,6 @@ mod retry_tests {
             Some("/tmp/harn-transcript-a")
         );
         pop_llm_transcript_dir();
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn transcript_dir_is_isolated_across_interleaving_and_cancelled_tasks() {
-        use std::future::pending;
-
-        use crate::orchestration::{scope_ambient, AmbientExecutionScope};
-
-        let saved = swap_llm_transcript_ambient(LlmTranscriptAmbient::default());
-        push_llm_transcript_dir("/tmp/harn-transcript-parent");
-
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let run_child = |dir: &'static str| {
-                    tokio::task::spawn_local(scope_ambient(
-                        AmbientExecutionScope::default(),
-                        async move {
-                            push_llm_transcript_dir(dir);
-                            tokio::task::yield_now().await;
-                            tokio::task::yield_now().await;
-                            let observed = current_transcript_dir();
-                            pop_llm_transcript_dir();
-                            observed
-                        },
-                    ))
-                };
-
-                let alpha = run_child("/tmp/harn-transcript-alpha");
-                let beta = run_child("/tmp/harn-transcript-beta");
-                assert_eq!(
-                    alpha.await.expect("alpha task"),
-                    Some("/tmp/harn-transcript-alpha".to_string())
-                );
-                assert_eq!(
-                    beta.await.expect("beta task"),
-                    Some("/tmp/harn-transcript-beta".to_string())
-                );
-                assert_eq!(
-                    current_transcript_dir().as_deref(),
-                    Some("/tmp/harn-transcript-parent"),
-                    "interleaved child polls must restore the parent transcript directory"
-                );
-
-                let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
-                let cancelled = tokio::task::spawn_local(scope_ambient(
-                    AmbientExecutionScope::default(),
-                    async move {
-                        push_llm_transcript_dir("/tmp/harn-transcript-cancelled");
-                        let _ = entered_tx.send(());
-                        pending::<()>().await;
-                    },
-                ));
-                entered_rx.await.expect("cancelled task entered its scope");
-                assert_eq!(
-                    current_transcript_dir().as_deref(),
-                    Some("/tmp/harn-transcript-parent"),
-                    "a suspended child poll must restore the parent transcript directory"
-                );
-                cancelled.abort();
-                let error = cancelled
-                    .await
-                    .expect_err("aborted transcript task should report cancellation");
-                assert!(error.is_cancelled(), "unexpected join error: {error}");
-                assert_eq!(
-                    current_transcript_dir().as_deref(),
-                    Some("/tmp/harn-transcript-parent"),
-                    "cancelling a task with an unpopped directory must preserve the parent"
-                );
-            })
-            .await;
-
-        pop_llm_transcript_dir();
-        let _ = swap_llm_transcript_ambient(saved);
     }
 
     #[test]
