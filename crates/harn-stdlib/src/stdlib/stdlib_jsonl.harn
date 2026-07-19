@@ -1,93 +1,255 @@
-// std/jsonl — JSON-lines stream helpers (read/parse/write/append).
-//
-// Replaces the recurring "read_file → split('\n') → trim → skip blanks
-// → json_parse with try/is_ok" dance every harness writes when consuming
-// transcript / event-log files. All readers default to lenient mode
-// (skip parse errors) so a single malformed line doesn't poison the
-// run; flip `strict: true` to surface them instead.
-//
-// Import with: import { read_jsonl, parse_jsonl, write_jsonl, append_jsonl } from "std/jsonl"
-/** Lenient-by-default options for the JSONL readers. */
-type ReadJsonlOptions = {strict?: bool, max_records?: int, on_error?: any}
+// std/jsonl - bounded JSON Lines readers and simple writers.
+import { FileLine, FileLinePageOptions, FsFailure, read_lines_page_result } from "std/fs"
+import { SchemaContract, ValidationIssue, schema_contract_check } from "std/schema"
 
-fn __read_options(options) {
+pub type ReadJsonlOptions = {strict?: bool, max_records?: int, max_bytes?: int, on_error?: any}
+
+type ResolvedReadJsonlOptions = {strict: bool, max_records: int, max_bytes: int, on_error?: any}
+
+pub type JsonlCursor = {offset: int, line: int}
+
+pub type JsonlPageOptions = {cursor?: JsonlCursor, max_records?: int, max_bytes?: int}
+
+pub type JsonlRecord<T> = {line: int, offset: int, raw: string, value: T}
+
+pub type JsonlRecordFailureKind = "malformed" | "schema_invalid" | "rule_failed" | "rule_error"
+
+pub type JsonlRecordFailure = {
+  kind: JsonlRecordFailureKind,
+  line: int,
+  offset: int,
+  raw: string,
+  detail: string,
+  issues?: list<ValidationIssue>,
+}
+
+pub type JsonlPage<T> = {
+  records: list<JsonlRecord<T>>,
+  issues: list<JsonlRecordFailure>,
+  next_cursor: JsonlCursor,
+  done: bool,
+}
+
+pub type JsonlPageResult<T> = Result<JsonlPage<T>, FsFailure>
+
+fn __read_options(options) -> ResolvedReadJsonlOptions {
   const opts = options ?? {}
   return {
-    strict: opts?.strict ?? false,
-    max_records: to_int(opts?.max_records) ?? 0,
-    on_error: opts?.on_error,
+    strict: opts.strict ?? false,
+    max_records: to_int(opts.max_records) ?? 0,
+    max_bytes: to_int(opts.max_bytes) ?? 1048576,
+    on_error: opts.on_error,
   }
 }
 
-fn __parse_line(text: string, opts, out_in: list, dropped_in: int) -> dict {
-  const trimmed = trim(text)
-  if trimmed == "" {
-    return {out: out_in, dropped: dropped_in, halt: false}
+fn __page_options(options: JsonlPageOptions) -> FileLinePageOptions {
+  const opts = options ?? {}
+  const cursor = opts.cursor ?? {offset: 0, line: 1}
+  return {
+    offset: cursor.offset,
+    line: cursor.line,
+    max_lines: opts.max_records ?? 256,
+    max_bytes: opts.max_bytes ?? 1048576,
+  }
+}
+
+fn __malformed(line: FileLine, failure) -> JsonlRecordFailure {
+  return {
+    kind: "malformed",
+    line: line.line,
+    offset: line.offset,
+    raw: line.text,
+    detail: failure?.message ?? to_string(failure),
+  }
+}
+
+fn __parse_line(line: FileLine) -> Result<JsonlRecord<unknown>?, JsonlRecordFailure> {
+  if trim(line.text) == "" {
+    return Ok(nil)
   }
   const parsed = try {
-    json_parse(trimmed)
+    json_parse(line.text)
   }
-  if is_ok(parsed) {
-    return {out: out_in + [unwrap(parsed)], dropped: dropped_in, halt: false}
+  if !is_ok(parsed) {
+    return Err(__malformed(line, unwrap_err(parsed)))
   }
-  if opts.strict {
-    throw {error: "json_parse_failed", line: trimmed, reason: unwrap_err(parsed)}
-  }
-  if opts.on_error != nil {
-    opts.on_error(trimmed, unwrap_err(parsed))
-  }
-  return {out: out_in, dropped: dropped_in + 1, halt: false}
+  return Ok({line: line.line, offset: line.offset, raw: line.text, value: unwrap(parsed)})
 }
 
 /**
- * Parse a JSONL string into list<dict>. Blank lines are skipped; malformed
- * lines are dropped silently unless `strict: true`. When `max_records > 0`,
- * parsing stops after that many successes.
+ * Read one bounded page of JSONL records and preserve malformed rows as issues.
+ *
+ * Resume with `page.next_cursor`. Each page holds at most `max_records`
+ * physical lines and `max_bytes` source bytes. Blank lines advance the cursor
+ * without producing records.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_jsonl_page_result(
+  path: string,
+  options: JsonlPageOptions = {},
+) -> JsonlPageResult<unknown> {
+  const source = read_lines_page_result(path, __page_options(options))
+  if !is_ok(source) {
+    return Err(unwrap_err(source))
+  }
+  const lines = unwrap(source)
+  let records: list<JsonlRecord<unknown>> = []
+  let issues: list<JsonlRecordFailure> = []
+  for line in lines.lines {
+    const parsed = __parse_line(line)
+    if !is_ok(parsed) {
+      issues = issues + [unwrap_err(parsed)]
+    } else if unwrap(parsed) != nil {
+      records = records + [unwrap(parsed)]
+    }
+  }
+  return Ok(
+    {
+      records: records,
+      issues: issues,
+      next_cursor: {offset: lines.next_offset, line: lines.next_line},
+      done: lines.done,
+    },
+  )
+}
+
+/**
+ * Throwing form of `read_jsonl_page_result`.
+ *
+ * @effects: [fs.read]
+ * @errors: [FsFailure]
+ */
+pub fn read_jsonl_page(path: string, options: JsonlPageOptions = {}) -> JsonlPage<unknown> {
+  return unwrap(read_jsonl_page_result(path, options))
+}
+
+fn __contract_failure(record: JsonlRecord<unknown>, failure) -> JsonlRecordFailure {
+  return {
+    kind: failure.kind,
+    line: record.line,
+    offset: record.offset,
+    raw: record.raw,
+    detail: failure.detail,
+    issues: failure.issues,
+  }
+}
+
+/**
+ * Read one bounded JSONL page and apply a structural schema plus named rules to
+ * every valid JSON record.
+ *
+ * Malformed JSON, structural failures, rule violations, and broken rule
+ * implementations remain distinct in `page.issues`.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_jsonl_contract_page_result<T>(
+  path: string,
+  contract: SchemaContract<T>,
+  options: JsonlPageOptions = {},
+) -> JsonlPageResult<T> {
+  const raw = read_jsonl_page_result(path, options)
+  if !is_ok(raw) {
+    return Err(unwrap_err(raw))
+  }
+  const page = unwrap(raw)
+  let records: list<JsonlRecord<T>> = []
+  let issues = page.issues
+  for record in page.records {
+    const checked = schema_contract_check(record.value, contract)
+    if !is_ok(checked) {
+      issues = issues + [__contract_failure(record, unwrap_err(checked))]
+      continue
+    }
+    records = records
+      + [
+      {line: record.line, offset: record.offset, raw: record.raw, value: unwrap(checked)},
+    ]
+  }
+  return Ok({records: records, issues: issues, next_cursor: page.next_cursor, done: page.done})
+}
+
+/**
+ * Throwing form of `read_jsonl_contract_page_result`.
+ *
+ * @effects: [fs.read]
+ * @errors: [FsFailure]
+ */
+pub fn read_jsonl_contract_page<T>(
+  path: string,
+  contract: SchemaContract<T>,
+  options: JsonlPageOptions = {},
+) -> JsonlPage<T> {
+  return unwrap(read_jsonl_contract_page_result(path, contract, options))
+}
+
+/**
+ * Parse an in-memory JSONL string. Use `read_jsonl_page_result` for files that
+ * may grow beyond a safe in-memory size.
  *
  * @effects: []
- * @errors: []
+ * @errors: [JsonlRecordFailure]
  */
 pub fn parse_jsonl(text: string, options: ReadJsonlOptions = {}) -> list {
-  const opts = __read_options(options)
-  const body = text ?? ""
-  if body == "" {
-    return []
-  }
-  let out = []
-  let dropped = 0
-  for line in split(body, "\n") {
-    if opts.max_records > 0 && len(out) >= opts.max_records {
-      break
-    }
-    const outcome = __parse_line(line, opts, out, dropped)
-    out = outcome.out
-    dropped = outcome.dropped
-  }
-  return out
+  return fold_jsonl(text, [], fn(records, record, _index) { return records + [record] }, options)
 }
 
 /**
- * Read a JSONL file from disk and return list<dict>. Missing files yield
- * the empty list (use `file_exists` first if you need to distinguish
- * absent from empty). Pass `strict: true` to surface parse errors.
+ * Materialize a JSONL file for compatibility with list-oriented callers.
  *
- * @effects: []
- * @errors: []
+ * The file is still read in bounded pages. Prefer `read_jsonl_page_result` or
+ * `fold_jsonl_file` when the complete result need not reside in memory.
+ *
+ * @effects: [fs.read]
+ * @errors: [FsFailure, JsonlRecordFailure]
  */
 pub fn read_jsonl(path: string, options: ReadJsonlOptions = {}) -> list {
-  if !harness.fs.exists(path) {
-    return []
-  }
-  const raw = try {
-    harness.fs.read_text(path)
-  }
-  if !is_ok(raw) {
-    if (options ?? {}).strict {
-      throw {error: "read_failed", path: path, reason: unwrap_err(raw)}
+  const opts = __read_options(options)
+  let out = []
+  let cursor: JsonlCursor = {offset: 0, line: 1}
+  while true {
+    const remaining: int = if opts.max_records > 0 {
+      opts.max_records - len(out)
+    } else {
+      256
     }
-    return []
+    if remaining <= 0 {
+      break
+    }
+    const page_records: int = min(256, remaining)
+    const page_options: JsonlPageOptions = {
+      cursor: cursor,
+      max_records: page_records,
+      max_bytes: opts.max_bytes,
+    }
+    const page = read_jsonl_page_result(path, page_options)
+    if !is_ok(page) {
+      if opts.strict {
+        throw unwrap_err(page)
+      }
+      return out
+    }
+    const value = unwrap(page)
+    for issue in value.issues {
+      if opts.strict {
+        throw issue
+      }
+      if opts.on_error != nil {
+        opts.on_error(issue.raw, issue)
+      }
+    }
+    for record in value.records {
+      out = out + [record.value]
+    }
+    cursor = value.next_cursor
+    if value.done {
+      break
+    }
   }
-  return parse_jsonl(unwrap(raw), options)
+  return out
 }
 
 fn __serialize(items: list) -> string {
@@ -99,24 +261,21 @@ fn __serialize(items: list) -> string {
 }
 
 /**
- * Write a list of items to `path` as JSON-lines. The file is fully
- * replaced. Returns the count of items written.
+ * Replace a JSONL file and return the number of records written.
  *
- * @effects: []
- * @errors: []
+ * @effects: [fs.write]
+ * @errors: [FsFailure]
  */
 pub fn write_jsonl(path: string, items: list) -> int {
-  const body = __serialize(items)
-  harness.fs.write_text(path, body)
+  harness.fs.write_text(path, __serialize(items))
   return len(items ?? [])
 }
 
 /**
- * Append a single item to `path` as a JSONL record. Creates the file if
- * absent. Returns the byte count appended (newline included).
+ * Append one JSONL record and return the byte count including its newline.
  *
- * @effects: []
- * @errors: []
+ * @effects: [fs.write]
+ * @errors: [FsFailure]
  */
 pub fn append_jsonl(path: string, item) -> int {
   const line = json_stringify(item) + "\n"
@@ -125,44 +284,81 @@ pub fn append_jsonl(path: string, item) -> int {
 }
 
 /**
- * Stream-fold over JSONL content. `reducer` is invoked as
- * `reducer(state, record, index)` for each successfully parsed record;
- * the final state is returned. Replaces the bespoke `for event in events
- * { state = fold(state, event) }` loops harness authors hand-write.
+ * Fold already-loaded JSONL content without materializing parsed records.
  *
  * @effects: []
- * @errors: []
+ * @errors: [JsonlRecordFailure]
  */
 pub fn fold_jsonl(text: string, initial, reducer, options: ReadJsonlOptions = {}) -> any {
   const opts = __read_options(options)
   let state = initial
   let index = 0
-  const body = text ?? ""
-  if body == "" {
-    return state
-  }
-  for line in split(body, "\n") {
-    const trimmed = trim(line)
-    if trimmed == "" {
-      continue
-    }
+  let line_number = 1
+  let offset = 0
+  for text_line in split(text ?? "", "\n") {
     if opts.max_records > 0 && index >= opts.max_records {
       break
     }
-    const parsed = try {
-      json_parse(trimmed)
-    }
-    if is_ok(parsed) {
-      state = reducer(state, unwrap(parsed), index)
+    const line: FileLine = {line: line_number, offset: offset, text: text_line}
+    const parsed = __parse_line(line)
+    if !is_ok(parsed) {
+      const failure = unwrap_err(parsed)
+      if opts.strict {
+        throw failure
+      }
+      if opts.on_error != nil {
+        opts.on_error(line.text, failure)
+      }
+    } else if unwrap(parsed) != nil {
+      state = reducer(state, unwrap(parsed).value, index)
       index = index + 1
-      continue
     }
-    if opts.strict {
-      throw {error: "json_parse_failed", line: trimmed, reason: unwrap_err(parsed)}
-    }
-    if opts.on_error != nil {
-      opts.on_error(trimmed, unwrap_err(parsed))
-    }
+    line_number = line_number + 1
+    offset = offset + len(text_line) + 1
   }
   return state
+}
+
+/**
+ * Fold a JSONL file through bounded pages.
+ *
+ * @effects: [fs.read]
+ * @errors: [FsFailure, JsonlRecordFailure]
+ */
+pub fn fold_jsonl_file(path: string, initial, reducer, options: ReadJsonlOptions = {}) -> any {
+  const opts = __read_options(options)
+  let state = initial
+  let index = 0
+  let cursor: JsonlCursor = {offset: 0, line: 1}
+  while true {
+    const page_options: JsonlPageOptions = {
+      cursor: cursor,
+      max_records: 256,
+      max_bytes: opts.max_bytes,
+    }
+    const page = read_jsonl_page_result(path, page_options)
+    if !is_ok(page) {
+      throw unwrap_err(page)
+    }
+    const value = unwrap(page)
+    for issue in value.issues {
+      if opts.strict {
+        throw issue
+      }
+      if opts.on_error != nil {
+        opts.on_error(issue.raw, issue)
+      }
+    }
+    for record in value.records {
+      if opts.max_records > 0 && index >= opts.max_records {
+        return state
+      }
+      state = reducer(state, record.value, index)
+      index = index + 1
+    }
+    cursor = value.next_cursor
+    if value.done {
+      return state
+    }
+  }
 }
