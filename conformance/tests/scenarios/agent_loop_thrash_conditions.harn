@@ -72,7 +72,18 @@ pipeline default() {
   require same_obs.pattern == "repeated_same_observation",
     "byte-identical observation must trip at threshold"
   __io_println("same_obs=" + same_obs.pattern)
-  // Polling exemption: same action, CHANGING observation each turn -> no trip.
+  // harn#5249 REFINEMENT of the changing-observation rule. The old invariant
+  // assumed "changing observation always == progress", so a same-action repeat
+  // with a changing observation never tripped. Real evidence disproves the
+  // premise: a passing verify command's OWN stdout carries per-run volatile
+  // spans (e.g. `node --test` prints "✔ adds (0.49ms)" / "ℹ duration_ms 96.15"
+  // that differ every run), so a model re-running an already-green verify churns
+  // the observation byte-for-byte exactly like legitimate polling — byte
+  // identity cannot separate a stuck re-run from real progress. So a CONSECUTIVE
+  // IDENTICAL non-exempt action that keeps SUCCEEDING with no intervening edit
+  // now trips `repeated_success` soft-first, even as the observation churns.
+  // Real polling in production is exempt by tool (poll_command /
+  // read_command_output / wait_command), so this does not nag genuine waits.
   const polling = run_actions(
     cfg,
     [
@@ -84,8 +95,25 @@ pipeline default() {
       {calls: call("poll", {job: "j"}), prev: ok_dispatch("poll", "pending-5")},
     ],
   )
-  require polling.trips == 0, "changing observation (polling) must never trip"
+  require polling.pattern == "repeated_success",
+    "identical non-exempt repeat-success trips even as the observation churns"
   __io_println("polling=" + polling.pattern + ",trips=" + to_string(polling.trips))
+  // Guard preserved: changing observation alone NEVER trips absent identical
+  // repetition. A varied action (different args each turn) resets the streak, so
+  // a moving observation across DIFFERENT calls stays exempt.
+  const varied = run_actions(
+    cfg,
+    [
+      {calls: call("poll", {job: "a"}), prev: nil},
+      {calls: call("poll", {job: "b"}), prev: ok_dispatch("poll", "pending-1")},
+      {calls: call("poll", {job: "c"}), prev: ok_dispatch("poll", "pending-2")},
+      {calls: call("poll", {job: "d"}), prev: ok_dispatch("poll", "pending-3")},
+      {calls: call("poll", {job: "e"}), prev: ok_dispatch("poll", "pending-4")},
+      {calls: call("poll", {job: "f"}), prev: ok_dispatch("poll", "pending-5")},
+    ],
+  )
+  require varied.trips == 0, "different args/actions never trip (no identical repetition)"
+  __io_println("varied=" + varied.pattern + ",trips=" + to_string(varied.trips))
   // 2. Same action -> same error, 3x -> repeated_error.
   const same_err = run_actions(
     cfg,

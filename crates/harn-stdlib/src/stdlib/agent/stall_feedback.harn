@@ -1,0 +1,111 @@
+// Human-readable nudge text for a tripped stall condition.
+//
+// Split out of stall_observation.harn so the detector's per-turn fold and the
+// per-pattern feedback copy stay separate concerns. This module is pure: it maps
+// a normalized AgentStallWarning to the sentence injected back to the model. The
+// detector owns WHEN to trip; this owns WHAT the nudge says.
+import { AgentStallWarning } from "std/agent/stall_types"
+
+/**
+ * Render the typed nudge for a tripped stall pattern. The repair-family patterns
+ * ground their nudge in the actual diagnostic; the plain-repeat patterns name
+ * the productive exits (change evidence, conclude, or hand a wait to the
+ * harness). A hard-stop warning escalates the wording; everything else is a soft
+ * strategy-shift nudge.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
+  const pattern = warning.pattern
+  const count = to_string(warning.count)
+  // Evidence-aware repair loop: a strategy-shift nudge grounded in the actual
+  // diagnostic, not a blind "you repeated yourself" counter. This fires when
+  // the same failure has survived `stuck_same_diagnostic_after` repair turns
+  // with no intervening successful edit (or with edits that did not change the
+  // failure), so the right move is to change approach, not to retry harder.
+  if pattern == "stuck_same_diagnostic" {
+    const snippet = to_string(warning.diagnostic_snippet ?? "")
+    const evidence = if snippet != "" {
+      " The failing evidence is unchanged:\n" + snippet
+    } else {
+      ""
+    }
+    return "Repair diagnostic: the same failure has persisted across "
+      + count
+      + " repair turns without changing."
+      + evidence
+      + "\nStop retrying the same fix. Re-read the relevant code, form a NEW hypothesis "
+      + "about the root cause, or gather different evidence before editing again. If you "
+      + "cannot make progress, report this specific blocker instead of repeating."
+  }
+  // Delivered-fix trigger (#burin-cutover seam 3): a repair WAS delivered for
+  // this exact failure and it STILL did not land — a stronger stuck signal than
+  // an untouched same-failure repeat, so the nudge is blunter.
+  if pattern == "delivered_fix_not_landing" {
+    const snippet = to_string(warning.diagnostic_snippet ?? "")
+    const evidence = if snippet != "" {
+      " The failing evidence is unchanged:\n" + snippet
+    } else {
+      ""
+    }
+    return "Repair diagnostic: a fix was delivered for this failure but it did NOT land — the same failure has recurred across "
+      + count
+      + " turns despite the attempted remediation."
+      + evidence
+      + "\nThe current approach is not working. Do NOT re-apply the same fix. Re-read the"
+      + " root cause from scratch, form a materially different hypothesis, or report this"
+      + " specific blocker instead of repeating."
+  }
+  // Per-turn action-signal intake (#burin-cutover seam 4): the host flagged THIS
+  // turn as a flailing action (desperation write / truncated read / oscillating
+  // edit) — a strong single-turn stuck signal, so the nudge is direct.
+  if pattern == "flailing_action" {
+    return "Loop detector: this turn performed a flailing action (a desperation write, a"
+      + " truncated/partial read, or an oscillating edit) — a strong single-turn signal that"
+      + " the run is stuck. Stop repeating the current approach. Re-read the relevant code,"
+      + " form a NEW hypothesis about the root cause, or report the specific blocker instead"
+      + " of acting reflexively."
+  }
+  const core = if pattern == "repeated_same_observation" {
+    "the action `" + warning.tool_name + "` produced the same observation " + count
+      + " times in a row"
+  } else if pattern == "repeated_success" {
+    "the action `" + warning.tool_name + "` already succeeded and you re-ran it " + count
+      + " times with no intervening change — re-running it will not produce a new result; "
+      + "state your conclusion, take a different action, or hand the wait to the harness"
+  } else if pattern == "repeated_error" {
+    "the action `" + warning.tool_name + "` failed with the same error " + count + " times in a row"
+  } else if pattern == "no_progress_monologue" {
+    count + " consecutive assistant messages made no progress (no tool call)"
+  } else if pattern == "errored_no_tool_call" {
+    "your previous turn ended with a provider error and emitted no tool call ("
+      + count
+      + " in a row) — re-emit the intended tool call"
+  } else if pattern == "no_net_progress_hard_cap" {
+    count
+      + " failing verification turns occurred without a clean passing verify"
+  } else if pattern
+    == "turns_since_clean_verify_floor" {
+    count
+      + " turns elapsed since the last clean verification without a passing verify"
+  } else if pattern == "ping_pong" {
+    "the loop is ping-ponging between two actions (" + count + " cycles)"
+  } else if pattern
+    == "repeated_context_window_error" {
+    "the run hit a context-window error " + count + " times in a row"
+  } else {
+    "the last " + count + " tool calls repeated `" + warning.tool_name
+      + "` with identical arguments"
+  }
+  if warning.hard_stop {
+    return "Loop detector (hard stop): "
+      + core
+      + ". "
+      + to_string(warning.consecutive_trips)
+      + " trips with no recovery — stop and report the blocker instead of repeating."
+  }
+  return "Stall diagnostic: "
+    + core
+    + ". Use different evidence, finish, or explain why repeating is necessary before doing so again."
+}
