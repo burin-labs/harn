@@ -163,86 +163,45 @@ fn __agent_files(project_name: string, harn_range: string) -> list {
     + "  run_agent_app(harness)\n"
     + "}\n"
   const app_harn = "import { agent_host_tools } from \"std/agent/host_tools\"\n"
-    + "import { agent_preset } from \"std/agent/presets\"\n"
-    + "\n"
+    + "import { agent_preset } from \"std/agent/presets\"\n" + "\n"
     + "pub fn load_instructions(harness: Harness) -> string {\n"
     + "  const path = path_join(cwd(), \"agent\", \"instructions.md\")\n"
-    + "  if harness.fs.exists(path) {\n"
-    + "    return harness.fs.read_text(path)\n"
-    + "  }\n"
-    + "  return \"Review the workspace carefully.\"\n"
-    + "}\n"
-    + "\n"
-    + "pub fn agent_app_tools(root) {\n"
-    + "  return agent_host_tools(\n"
-    + "    nil,\n"
-    + "    {\n"
-    + "      root: root,\n"
-    + "      cwd: root,\n"
+    + "  if harness.fs.exists(path) {\n" + "    return harness.fs.read_text(path)\n" + "  }\n"
+    + "  return \"Review the workspace carefully.\"\n" + "}\n" + "\n"
+    + "pub fn agent_app_tools(root) {\n" + "  return agent_host_tools(\n" + "    nil,\n" + "    {\n"
+    + "      root: root,\n" + "      cwd: root,\n"
     + "      enabled_tools: [\"list_directory\", \"read_file\", \"search_files\"],\n"
     + "      max_inline_bytes: 6000,\n"
     + "      search_exclude_globs: [\".git/**\", \".harn/**\", \"target/**\", \"node_modules/**\"],\n"
-    + "    },\n"
-    + "  )\n"
-    + "}\n"
-    + "\n"
+    + "    },\n" + "  )\n" + "}\n" + "\n"
     + "// Agent-loop failures are values, so diagnostics and process status must derive\n"
-    + "// from the same terminal status.\n"
-    + "pub fn agent_result_exit_code(result) -> int {\n"
-    + "  if (result?.status ?? \"\") == \"done\" {\n"
-    + "    return 0\n"
-    + "  }\n"
-    + "  return 1\n"
-    + "}\n"
-    + "\n"
-    + "pub fn emit_agent_result(harness: Harness, result) -> int {\n"
-    + "  const text = result?.visible_text ?? result?.text ?? \"\"\n"
-    + "  if text != \"\" {\n"
-    + "    harness.stdio.println(text)\n"
-    + "  }\n"
+    + "// from the same terminal status.\n" + "pub fn agent_result_exit_code(result) -> int {\n"
+    + "  if (result?.status ?? \"\") == \"done\" {\n" + "    return 0\n" + "  }\n" + "  return 1\n"
+    + "}\n" + "\n" + "pub fn emit_agent_result(harness: Harness, result) -> int {\n"
+    + "  const text = result?.visible_text ?? result?.text ?? \"\"\n" + "  if text != \"\" {\n"
+    + "    harness.stdio.println(text)\n" + "  }\n"
     + "  const exit_code = agent_result_exit_code(result)\n"
-    + "  const status = result?.status ?? \"unknown\"\n"
-    + "  if exit_code == 0 {\n"
-    + "    return exit_code\n"
-    + "  }\n"
+    + "  const status = result?.status ?? \"unknown\"\n" + "  if exit_code == 0 {\n"
+    + "    return exit_code\n" + "  }\n"
     + "  harness.stdio.eprintln(\"agent did not complete (status: \" + status + \")\")\n"
-    + "  const message = result?.error?.message ?? \"\"\n"
-    + "  if message != \"\" {\n"
-    + "    harness.stdio.eprintln(message)\n"
-    + "  }\n"
-    + "  return exit_code\n"
-    + "}\n"
-    + "\n"
+    + "  const message = result?.error?.message ?? \"\"\n" + "  if message != \"\" {\n"
+    + "    harness.stdio.eprintln(message)\n" + "  }\n" + "  return exit_code\n" + "}\n" + "\n"
     + "pub fn run_agent_app_with_options(harness: Harness, options = nil) {\n"
     + "  const opts = options ?? {}\n"
     + "  const task = opts?.task ?? harness.env.get_or(\"HARN_TASK\", \"Review this workspace\")\n"
     + "  const instructions = opts?.instructions ?? load_instructions(harness)\n"
     + "  const tools = opts?.tools ?? agent_app_tools(cwd())\n"
-    + "  const audit_opts = agent_preset(\n"
-    + "    \"audit\",\n"
-    + "    {\n"
-    + "      system: instructions,\n"
-    + "      tools: tools,\n"
+    + "  const audit_opts = agent_preset(\n" + "    \"audit\",\n" + "    {\n"
+    + "      system: instructions,\n" + "      tools: tools,\n"
     + "      max_iterations: opts?.max_iterations ?? 6,\n"
     + "      loop_until_done: opts?.loop_until_done ?? true,\n"
-    + "      llm_options: opts?.llm_options ?? {temperature: 0},\n"
-    + "    },\n"
-    + "  )\n"
+    + "      llm_options: opts?.llm_options ?? {temperature: 0},\n" + "    },\n" + "  )\n"
     + "  const result = agent_loop(task, audit_opts?.system, audit_opts)\n"
-    + "  if opts?.emit_result ?? true {\n"
-    + "    emit_agent_result(harness, result)\n"
-    + "  }\n"
-    + "  return result\n"
-    + "}\n"
-    + "\n"
-    + "pub fn run_agent_app(harness: Harness) {\n"
+    + "  if opts?.emit_result ?? true {\n" + "    emit_agent_result(harness, result)\n" + "  }\n"
+    + "  return result\n" + "}\n" + "\n" + "pub fn run_agent_app(harness: Harness) {\n"
     + "  const result = run_agent_app_with_options(harness, {emit_result: false})\n"
-    + "  const exit_code = emit_agent_result(harness, result)\n"
-    + "  if exit_code != 0 {\n"
-    + "    exit(exit_code)\n"
-    + "  }\n"
-    + "  return result\n"
-    + "}\n"
+    + "  const exit_code = emit_agent_result(harness, result)\n" + "  if exit_code != 0 {\n"
+    + "    exit(exit_code)\n" + "  }\n" + "  return result\n" + "}\n"
   const instructions = "# Agent Instructions\n"
     + "\n"
     + "You are a careful workspace agent. Inspect before answering, keep changes scoped,\n"
@@ -260,7 +219,8 @@ fn __agent_files(project_name: string, harn_range: string) -> list {
     + "\n"
     + "Start by listing the relevant files, then inspect the narrowest source files\n"
     + "needed to answer. Report facts with file paths and keep recommendations small.\n"
-  const test_harn = "import { agent_result_exit_code, run_agent_app_with_options } from \"../agent/app\"\n"
+  const test_harn =
+    "import { agent_result_exit_code, run_agent_app_with_options } from \"../agent/app\"\n"
     + "\n"
     + "pipeline test_agent_smoke(task) {\n"
     + "  llm_mock_clear()\n"
@@ -393,7 +353,11 @@ fn __chat_files(project_name: string, harn_range: string) -> list {
     + "```\n"
     + "\n"
     + "Inside the chat loop, type `/clear` to reset local history and `/exit` to quit.\n"
-  return [["harn.toml", __chat_manifest(project_name)], ["main.harn", main_harn], ["README.md", readme]]
+  return [
+    ["harn.toml", __chat_manifest(project_name)],
+    ["main.harn", main_harn],
+    ["README.md", readme],
+  ]
 }
 
 fn __mcp_files(project_name: string, harn_range: string) -> list {
@@ -792,8 +756,9 @@ fn __print_next_steps(harness: Harness, name: string, template: string) {
     harness.stdio.println("  harn serve mcp main.harn # expose the starter MCP server")
   } else if template == "pipeline-lab" {
     harness.stdio.println("  harn playground --task \"Explain this repo\"    # run the lab")
-    harness.stdio
-      .println("  harn playground --watch --task \"Refine the prompt\"  # live iteration")
+    harness.stdio.println(
+      "  harn playground --watch --task \"Refine the prompt\"  # live iteration",
+    )
   } else {
     // basic | agent | eval | package | connector
     harness.stdio.println("  harn run main.harn       # run the program")
@@ -816,8 +781,7 @@ fn main(harness: Harness) {
   const template = harness.env.get_or("HARN_INIT_TEMPLATE", "basic")
   const harn_range = harness.env.get_or("HARN_INIT_HARN_RANGE", "")
   if dir == "" || harn_range == "" {
-    harness.stdio
-      .eprintln("init: HARN_INIT_DIR and HARN_INIT_HARN_RANGE must be set")
+    harness.stdio.eprintln("init: HARN_INIT_DIR and HARN_INIT_HARN_RANGE must be set")
     exit(2)
   }
   if name != "" {

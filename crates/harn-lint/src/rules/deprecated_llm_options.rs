@@ -69,6 +69,7 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             visit_node(condition, diagnostics);
             visit_nodes(then_body, diagnostics);

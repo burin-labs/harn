@@ -2,10 +2,14 @@ import { verification_diagnostic_delta } from "std/verification"
 
 pipeline test(task) {
   const prior_shifted = {
-    diagnostics: [{path: "src/a.tx", line: 10, column: 2, code: "E1", message: "error E1: missing Foo"}],
+    diagnostics: [
+      {path: "src/a.tx", line: 10, column: 2, code: "E1", message: "error E1: missing Foo"},
+    ],
   }
   const current_shifted = {
-    diagnostics: [{path: "src/a.tx", line: 99, column: 7, code: "E1", message: "error E1: missing Foo"}],
+    diagnostics: [
+      {path: "src/a.tx", line: 99, column: 7, code: "E1", message: "error E1: missing Foo"},
+    ],
   }
   const same = verification_diagnostic_delta(
     prior_shifted,
@@ -39,11 +43,17 @@ pipeline test(task) {
   assert_eq(cleared.status, "cleared")
   assert_eq(cleared.progress_credit, true)
   assert_eq(cleared.current.signatures, [])
-  const advisory = verification_diagnostic_delta({diagnostics: ["A"]}, {diagnostics: [], feedsGates: false})
+  const advisory = verification_diagnostic_delta(
+    {diagnostics: ["A"]},
+    {diagnostics: [], feedsGates: false},
+  )
   assert_eq(advisory.status, "advisory")
   assert_eq(advisory.progress_credit, false)
   assert_eq(advisory.feedsGates, false)
-  const previous_advisory = verification_diagnostic_delta({failureSignature: "A", feedsGates: false}, {failureSignature: "B"})
+  const previous_advisory = verification_diagnostic_delta(
+    {failureSignature: "A", feedsGates: false},
+    {failureSignature: "B"},
+  )
   assert_eq(previous_advisory.status, "initialized")
   assert_eq(previous_advisory.progress_credit, false)
   const replaced = verification_diagnostic_delta(

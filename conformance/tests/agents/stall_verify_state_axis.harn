@@ -70,12 +70,21 @@ pipeline default() {
   assert(!agent_stall_no_net_progress({enabled: true}, base_state), "parity: guard off => false")
   // Guard ON + a failing same-diagnostic streak past the extend-after => true.
   const failing = base_state
-    + {last_diagnostic_class: "fail", same_diagnostic_streak: 3, failing_verify_turns: 3}
-  const sig_cfg = {enabled: true, no_net_progress_extend_guard: true, no_net_progress_extend_after: 3}
+    + {
+    last_diagnostic_class: "fail",
+    same_diagnostic_streak: 3,
+    failing_verify_turns: 3,
+  }
+  const sig_cfg = {
+    enabled: true,
+    no_net_progress_extend_guard: true,
+    no_net_progress_extend_after: 3,
+  }
   assert(agent_stall_no_net_progress(sig_cfg, failing), "parity: signature axis still fires")
   // The SAME stalled-write state, with NO progress_signal and the guard off, does
   // NOT cut — proving the verify-state cut is what the seam adds, not preexisting.
-  const stalled_writes = base_state + {verify_turns_since_advance: 9, verify_wrote_since_advance: true}
+  const stalled_writes = base_state
+    + {verify_turns_since_advance: 9, verify_wrote_since_advance: true}
   assert(
     !agent_stall_no_net_progress({enabled: true}, stalled_writes),
     "parity: no verify-state cut without callback",

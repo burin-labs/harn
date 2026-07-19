@@ -58,6 +58,39 @@ pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
   )
 }
 
+/**
+ * Poll a file until `check(content)` returns a non-nil value, then return
+ * that value. `check` receives the file's current text and returns nil to keep
+ * waiting or any value to stop.
+ *
+ * This closes the wait-for-existence / read-for-content race: a file written
+ * incrementally — an NDJSON state log, a JSON document flushed in parts, a
+ * port file — exists on disk before its content is complete, so a caller that
+ * reads content must wait on the content it actually needs, not merely on the
+ * inode. A bare existence wait releases as soon as the first byte lands and
+ * the later read then observes a half-written file (a missing NDJSON line, an
+ * unparseable object). State the real precondition in `check` instead, and the
+ * timeout is reported against that condition rather than mere existence.
+ *
+ * Polls every 50ms for up to 15s (like [[wait_for_log_match]]): the content is
+ * written while the already-ready server handles the request, so it lands fast,
+ * and staying below the per-scenario harness timeout means a genuine stall
+ * surfaces the caller's descriptive `require` rather than a generic scenario
+ * timeout. Returns nil on timeout; callers that need the content as a hard
+ * prereq should follow with a descriptive `require`.
+ */
+pub fn wait_for_file_content(harness: Harness, path, check) {
+  return poll_until(
+    { ->
+      if !harness.fs.exists(path) {
+        return nil
+      }
+      return check(harness.fs.read_text(path))
+    },
+    {timeout_ms: 15000, interval_ms: 50},
+  )
+}
+
 fn log_contains(harness: Harness, log_path, needle) {
   if harness.fs.exists(log_path) {
     const log = exec("cat", log_path).stdout
@@ -83,7 +116,10 @@ fn log_contains(harness: Harness, log_path, needle) {
  * signal as a hard prereq should fail with a descriptive `require`.
  */
 pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
-  return poll_until({ -> log_contains(harness, log_path, needle) }, {timeout_ms: 30000, interval_ms: 50})
+  return poll_until(
+    { -> log_contains(harness, log_path, needle) },
+    {timeout_ms: 30000, interval_ms: 50},
+  )
     ?? false
 }
 

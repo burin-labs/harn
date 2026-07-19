@@ -169,7 +169,13 @@ pub fn selected_packages(
   const all_crates = workspace.all_crates ?? []
   let hits = global_hits(files, global_paths)
   if hits.count > 0 {
-    return {mode: "full", selected: all_crates, global_hits: hits, directly_changed: [], unowned: []}
+    return {
+      mode: "full",
+      selected: all_crates,
+      global_hits: hits,
+      directly_changed: [],
+      unowned: [],
+    }
   }
   let directly_changed: list<string> = []
   let unowned: list<string> = []
@@ -253,8 +259,7 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/affected-crates.harn -- [--base REF] [--output filter|packages|args]",
     )
     return nil
@@ -272,21 +277,18 @@ fn main(harness: Harness) {
   const global_paths = load_global_path_prefixes(harness)
   let files = changed_files(base)
   if files.count == 0 {
-    harness.stdio
-      .eprintln("affected-crates: no files changed vs " + base + "; selecting nothing.")
+    harness.stdio.eprintln("affected-crates: no files changed vs " + base + "; selecting nothing.")
     return nil
   }
   const selection = selected_packages(files, workspace, root, global_paths)
   if selection.mode == "full" {
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "affected-crates: global/workspace-level change detected ("
         + preview(selection.global_hits, 5)
         + "); selecting the FULL workspace (no pruning).",
     )
   } else if selection.mode == "empty" {
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "affected-crates: changed files touch no Rust crate (e.g. "
         + preview(selection.unowned, 3)
         + "); selecting nothing.",
@@ -300,14 +302,13 @@ fn main(harness: Harness) {
         pruned = pruned + [crate]
       }
     }
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "affected-crates: directly changed: " + (selection.directly_changed ?? []).join(", "),
     )
-    harness.stdio
-      .eprintln("affected-crates: selected (changed + rdeps closure): " + selected.join(", "))
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
+      "affected-crates: selected (changed + rdeps closure): " + selected.join(", "),
+    )
+    harness.stdio.eprintln(
       "affected-crates: pruned (not selected): "
         + if pruned.count == 0 {
         "(none)"
@@ -316,10 +317,12 @@ fn main(harness: Harness) {
       },
     )
     if (selection.unowned ?? []).count > 0 {
-      harness.stdio
-        .eprintln(
+      harness.stdio.eprintln(
         "affected-crates: note: non-crate files also changed (not test-relevant at the crate level): "
-          + preview(selection.unowned, 8),
+          + preview(
+          selection.unowned,
+          8,
+        ),
       )
     }
   }

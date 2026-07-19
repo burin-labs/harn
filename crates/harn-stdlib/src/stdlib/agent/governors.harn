@@ -168,7 +168,8 @@ const CONVERGENCE_GUARD_DEFAULT_THRESHOLD = 1
 const CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS = 2
 
 fn __convergence_guard_threshold(value) -> int {
-  const parsed = to_int(value ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD) ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD
+  const parsed = to_int(value ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD)
+    ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD
   if parsed <= 0 {
     return CONVERGENCE_GUARD_DEFAULT_THRESHOLD
   }
@@ -273,12 +274,21 @@ fn __convergence_guard_none(reason: string, evidence: dict) -> dict {
 }
 
 fn __convergence_guard_recovery() -> dict {
-  return {verb: "stop_on_green", args: {stop_reason: "convergence_guard:finalization_runaway_on_green"}}
+  return {
+    verb: "stop_on_green",
+    args: {stop_reason: "convergence_guard:finalization_runaway_on_green"},
+  }
 }
 
 fn __convergence_guard_finalization(reason: string, evidence: dict) -> dict {
   const recovery = __convergence_guard_recovery()
-  const receipt = __convergence_guard_receipt("finalization_runaway_on_green", 0.95, reason, evidence, recovery)
+  const receipt = __convergence_guard_receipt(
+    "finalization_runaway_on_green",
+    0.95,
+    reason,
+    evidence,
+    recovery,
+  )
   return {
     shape: "finalization_runaway_on_green",
     confidence: 0.95,
@@ -523,7 +533,8 @@ pub fn governor_pace_decision(policy: GovernorPolicy, obs: dict) -> dict {
   const over_estimate = elapsed >= expected_total + checkpoint
   const extends_used = to_int(obs?.extends_used ?? 0) ?? 0
   const pace_checks_used = to_int(obs?.pace_checks_used ?? 0) ?? 0
-  const extend_max = to_int(policy.extend_max ?? GOVERNOR_PACE_EXTEND_MAX) ?? GOVERNOR_PACE_EXTEND_MAX
+  const extend_max = to_int(policy.extend_max ?? GOVERNOR_PACE_EXTEND_MAX)
+    ?? GOVERNOR_PACE_EXTEND_MAX
   const pace_check_max = to_int(policy.pace_check_max ?? GOVERNOR_PACE_CHECK_MAX_INJECTIONS)
     ?? GOVERNOR_PACE_CHECK_MAX_INJECTIONS
   if !over_estimate {
@@ -532,7 +543,11 @@ pub fn governor_pace_decision(policy: GovernorPolicy, obs: dict) -> dict {
     if extends_used >= extend_max {
       return {action: "cut", reason: "extend_budget_exhausted"}
     }
-    return {action: "extend", new_budget_ms: elapsed + checkpoint, reason: "progress_within_estimate"}
+    return {
+      action: "extend",
+      new_budget_ms: elapsed + checkpoint,
+      reason: "progress_within_estimate",
+    }
   }
   // Progressing but past the estimate. Inject a bounded recalibration check-in;
   // once the pace_check budget is spent, cut.
@@ -595,7 +610,11 @@ const GOVERNOR_RECOGNIZED_SIGNALS = ["iterations", "tokens", "cost"]
 fn __governor_observe(policy: GovernorPolicy, payload: dict) -> dict {
   const signal = to_string(policy.signal ?? "iterations")
   if !contains(GOVERNOR_RECOGNIZED_SIGNALS, signal) {
-    throw "agent_loop: governor `policy.signal` must be one of " + join(GOVERNOR_RECOGNIZED_SIGNALS, ", ")
+    throw "agent_loop: governor `policy.signal` must be one of "
+      + join(
+      GOVERNOR_RECOGNIZED_SIGNALS,
+      ", ",
+    )
       + "; got "
       + json_stringify(signal)
   }
@@ -684,7 +703,10 @@ pub fn governor_post_turn(policy: GovernorPolicy) {
     if !__governor_shape_ok(payload) {
       {
         message: "Budget governor: DISABLED — the live post-turn payload is missing one of "
-          + join(GOVERNOR_REQUIRED_PAYLOAD_KEYS, ", ")
+          + join(
+          GOVERNOR_REQUIRED_PAYLOAD_KEYS,
+          ", ",
+        )
           + ". Stopping rather than running an unmetered budget.",
         stop: true,
         stop_reason: "budget_governor:payload_shape_drift",
@@ -856,7 +878,8 @@ pub fn governors_selftest() -> dict {
     }
   }
   if len(missing) > 0 {
-    throw "governors_selftest: live post_turn payload is missing required keys: " + join(missing, ", ")
+    throw "governors_selftest: live post_turn payload is missing required keys: "
+      + join(missing, ", ")
   }
   // signal=iterations reads ONLY payload.iteration, so this is pure (no live
   // session). budget 5 turns, iteration 4 -> 5 turns consumed -> fraction 1.0

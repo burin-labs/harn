@@ -7,13 +7,16 @@ pipeline main() {
       {role: "assistant", content: "four"},
     ],
   )
-  const with_keeper = transcript
-    .inject_reminder(
+  const with_keeper = transcript.inject_reminder(
     base,
-    {body: "preserved across compaction", dedupe_key: "keeper", ttl_turns: 5, preserve_on_compact: true},
+    {
+      body: "preserved across compaction",
+      dedupe_key: "keeper",
+      ttl_turns: 5,
+      preserve_on_compact: true,
+    },
   ).transcript
-  const with_discard = transcript
-    .inject_reminder(
+  const with_discard = transcript.inject_reminder(
     with_keeper,
     {
       body: "discarded during compaction",
@@ -22,7 +25,10 @@ pipeline main() {
       preserve_on_compact: false,
     },
   ).transcript
-  const compacted = transcript_compact(with_discard, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  const compacted = transcript_compact(
+    with_discard,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
   __io_println(len(reminders))
   __io_println(reminders[0].reminder.body)

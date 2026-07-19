@@ -12,7 +12,8 @@ pipeline default() {
     [
       {
         match: "*atomic factual claims*",
-        text: "{\"claims\": [\"Paris is the capital of France.\", \"Paris has 10 million residents.\"]}",
+        text:
+          "{\"claims\": [\"Paris is the capital of France.\", \"Paris has 10 million residents.\"]}",
       },
       {
         match: "*capital of France*",

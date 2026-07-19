@@ -5,6 +5,116 @@ use parking_lot::Mutex;
 
 use super::{VmError, VmValue};
 
+type VmResourceRelease = Box<dyn FnOnce() -> Result<VmValue, String> + Send + 'static>;
+
+struct VmResourceGuardState {
+    release: Option<VmResourceRelease>,
+    result: Option<Result<VmValue, String>>,
+}
+
+/// A host-owned resource whose cleanup is bound to VM value lifetime.
+///
+/// The explicit [`Self::release`] path returns a typed host receipt. If a
+/// script abandons the value through an exception, cancellation, frame
+/// teardown, or VM drop, `Drop` invokes the same idempotent callback and
+/// discards only the unreportable cleanup result.
+pub struct VmResourceGuardHandle {
+    label: Arc<str>,
+    state: Mutex<VmResourceGuardState>,
+}
+
+impl VmResourceGuardHandle {
+    /// Construct a guard and atomically attach its one-shot release callback.
+    pub fn new(
+        label: impl Into<Arc<str>>,
+        release: impl FnOnce() -> Result<VmValue, String> + Send + 'static,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            state: Mutex::new(VmResourceGuardState {
+                release: Some(Box::new(release)),
+                result: None,
+            }),
+        }
+    }
+
+    /// Stable diagnostic label without exposing resource authority.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Release exactly once and replay the first typed result to later calls.
+    pub fn release(&self) -> Result<VmValue, VmError> {
+        let mut state = self.state.lock();
+        if let Some(result) = &state.result {
+            return result.clone().map_err(VmError::Runtime);
+        }
+        let release = state
+            .release
+            .take()
+            .expect("resource guard without callback or cached result");
+        let result = release();
+        state.result = Some(result.clone());
+        result.map_err(VmError::Runtime)
+    }
+
+    /// Whether cleanup has already produced its terminal result.
+    pub fn is_released(&self) -> bool {
+        self.state.lock().result.is_some()
+    }
+}
+
+impl std::fmt::Debug for VmResourceGuardHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VmResourceGuardHandle")
+            .field("label", &self.label)
+            .field("released", &self.is_released())
+            .finish()
+    }
+}
+
+impl Drop for VmResourceGuardHandle {
+    fn drop(&mut self) {
+        let _ = self.release();
+    }
+}
+
+#[cfg(test)]
+mod resource_guard_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    #[test]
+    fn explicit_release_is_replayed_without_repeating_cleanup() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let guard = VmResourceGuardHandle::new("fixture", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok(VmValue::string("released"))
+        });
+
+        assert_eq!(guard.release().unwrap().display(), "released");
+        assert_eq!(guard.release().unwrap().display(), "released");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        drop(guard);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn drop_runs_abandoned_resource_cleanup() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let guard = VmResourceGuardHandle::new("fixture", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok(VmValue::Nil)
+        });
+
+        drop(guard);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+}
+
 /// The raw join handle type for spawned tasks.
 pub type VmJoinHandle = tokio::task::JoinHandle<Result<(VmValue, String), VmError>>;
 
@@ -88,6 +198,48 @@ impl std::fmt::Debug for VmRngHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("VmRngHandle { .. }")
     }
+}
+
+/// A host-minted proof-of-execution receipt: the payload of a positive
+/// `Verdict`. Constructed ONLY by the verdict issuance capability
+/// (`harness.verdict.issue`) from the host-owned record of a REAL, unfiltered,
+/// workspace-discovered `run_test` execution — resolved by its opaque
+/// `result_handle`, whose disposition the host froze at execution time.
+/// Issuance reads no caller-supplied filesystem
+/// bytes, so a caller can forge neither the receipt's TYPE (no literal syntax,
+/// no public builtin hands back the bare handle) nor its PROVENANCE (an authored
+/// file has no handle in the execution store). It is refused by the durable
+/// serialization seams, so a positive verdict cannot be minted, forged, or
+/// replayed by asserting scalars or fabricating evidence. The content hash + run
+/// identity close the tamper and cross-run-replay classes: the hash fingerprints
+/// the bytes the host captured, and consumers reject a receipt whose
+/// `execution_scope` differs from the active run.
+#[derive(Debug, Clone)]
+pub struct VmVerdictReceipt {
+    /// Stable identity of the attested execution — the `run_test` `result_handle`
+    /// the host recorded the run under.
+    pub artifact_id: Arc<str>,
+    /// `sha256:HEX` of the output the host captured from the real execution,
+    /// snapshotted when the run was recorded.
+    pub content_hash: Arc<str>,
+    /// Identity of the host-discovered test plan that selected the command.
+    pub plan_id: Arc<str>,
+    /// Hash of the active workspace root the plan was discovered within.
+    pub workspace_hash: Arc<str>,
+    /// Hash of the exact argv selected and executed by the host.
+    pub command_hash: Arc<str>,
+    /// Passing and total checked-unit counts the host COMPUTED from the real
+    /// execution, never a caller scalar. `passed > 0` is required to mint.
+    pub passed: u32,
+    pub total: u32,
+    /// The execution scope that PRODUCED the evidence — captured at `run_test`
+    /// record time, not at receipt-mint time. `verdict_all` rejects receipts
+    /// whose `execution_scope` differ (cross-run replay) AND requires the active
+    /// scope to still equal it, so a receipt cannot be replayed into a later run.
+    pub execution_scope: Arc<str>,
+    /// Optional subject identity (which unit-of-work the evidence attests). Folded
+    /// in when the artifact carries it; when absent it is a NAMED limit (PR body).
+    pub subject: Option<Arc<str>>,
 }
 
 /// A held synchronization permit for mutex/semaphore/gate primitives.

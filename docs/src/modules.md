@@ -78,10 +78,10 @@ require **no import statement**. You can call them directly from top-level
 code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
-described below (`std/text`, `std/json`, `std/math`, `std/collections`,
+described below (`std/text`, `std/json`, `std/math`, `std/collections`, `std/changelog`,
 `std/ansi`, `std/table`, `std/diff`, `std/path`, `std/fs`, `std/os`,
 `std/slug`, `std/edit`, `std/identity`, `std/disclosure`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
-`std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
+`std/llm/envelope`, `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
 `std/agent/fact`, `std/agent/probe`, `std/agent/scratchpad`,
 `std/runtime`, `std/command`, `std/gha`, `std/tui`, `std/git`,
@@ -107,6 +107,7 @@ import "std/agents"
 import "std/agent/user"
 import { retry_predicate_with_backoff } from "std/async"
 import "std/cache"
+import "std/changelog"
 import "std/collections"
 import "std/connectors/shared"
 import "std/context"
@@ -119,6 +120,7 @@ import "std/experiments"
 import "std/git"
 import "std/json"
 import "std/llm/budget"
+import "std/llm/envelope"
 import "std/llm/prompts"
 import "std/math"
 import "std/monitors"
@@ -141,6 +143,23 @@ import "std/vision"
 ```harn
 import { provider_catalog } from "std/oauth/providers"
 ```
+
+### std/changelog
+
+Pure typed changelog transformations for release harnesses:
+
+| Function | Description |
+|---|---|
+| `changelog_parse_fragment(filename, body, categories)` | Validate and parse one `<id>.<category>.md` fragment |
+| `changelog_order_fragments(fragments, categories)` | Order fragments by category, natural ID, and filename without integer overflow |
+| `changelog_assemble_fragments(fragments, categories)` | Normalize fragment bodies and render deterministic `###` category sections |
+| `changelog_parse_sections(text)` | Parse exact `##` sections outside fenced code blocks with UTF-8 byte offsets |
+| `changelog_find_section(text, heading)` | Return one named section or a typed missing/duplicate-heading failure |
+| `changelog_merge_unreleased(text, assembled, categories)` | Merge assembled content into `## Unreleased` while preserving authored content and newline style |
+
+The module performs no filesystem, Git, process, versioning, or publication
+work. Callers retain those policies and pass their category definitions
+explicitly.
 
 ### std/async
 
@@ -734,6 +753,38 @@ Options accept `store: "namespace"` or
 `store: {backend: "sqlite"|"fs", namespace?, path?}`, plus `ttl`,
 `ttl_seconds`, `max_age_seconds`, and `max_entries`.
 
+### std/llm/envelope
+
+The canonical `llm_call` response contract — one rigid snake_case
+envelope with all accounting owned by `usage` and a typed `outcome`
+classification. Import the typed aliases when annotating call sites, and
+the predicates to branch on the outcome without re-deriving it:
+
+| Export | Kind | Description |
+|---|---|---|
+| `LlmResponse` | type | The full `llm_call` response envelope |
+| `LlmUsage` | type | Single owner of all call accounting (tokens, cost, prompt-cache, serving tier) |
+| `LlmOutcome` / `LlmOutcomeKind` | type | Typed `{kind, billed}` classification and its `kind` vocabulary |
+| `LlmToolCall` | type | A dispatchable tool call from the merged channel |
+| `LlmStreamChunk` | type | One streamed chunk from `llm_stream_call` (terminal chunk carries `stop_reason`) |
+| `llm_response_is_empty(response)` | fn | True when the call committed nothing usable (`outcome.kind == "empty"`) |
+| `llm_response_is_billed_empty(response)` | fn | True for the billed-noncommittal class — provider charged tokens and committed nothing usable |
+| `llm_response_is_truncated(response)` | fn | True when generation was cut on an output-token limit |
+
+See [llm_call](llm/llm_call.md#return-value) for the full envelope
+field reference.
+
+### std/llm/caller
+
+The blessed default caller stack (the call plane's front door):
+
+| Function | Description |
+|---|---|
+| `llm_caller(opts?)` | The blessed default caller stack: `with_retry(default_llm_caller(), opts?.retry ?? {})` with typed reserved-status classification and billed-empty re-dispatch |
+| `default_llm_caller()` | The bottom of every middleware composition: one `llm_call` folded into the canonical caller envelope |
+| `LlmCallerRequest` (type) | One request through a caller stack: `{prompt, system?, opts?}` |
+| `LlmCaller` (type) | A composable caller: `fn(LlmCallerRequest) -> dict` — middleware wraps one and returns another |
+
 ### std/llm/handlers
 
 LLM call wrappers and middleware helpers:
@@ -974,6 +1025,10 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | `relative_path(root, path)` | Return a slash-normalized path relative to `root` when possible |
 | `is_file(path)` / `is_dir(path)` | Return type-aware existence checks |
 | `file_size(path)` | Return file size in bytes, or `nil` when unavailable |
+| `search_evidence(roots, patterns, options?)` | Walk each labeled root once, match every labeled literal with one multi-pattern matcher, and return deterministic path-relative hits plus per-root settlement and truncation receipts |
+| `search_evidence_background(roots, patterns, options?)` | Run the same search through the cancellable long-running operation lifecycle |
+
+Evidence search's optional case-insensitive mode folds ASCII letters.
 
 `StructuredReadFailure` contains `{kind, format, path, detail, line?, column?}`. Its closed
 `kind` union is
@@ -992,6 +1047,13 @@ write_json(path, {status: "ok"}, {pretty: true})
 log(read_json(path).status)
 log(relative_path(temp_dir(), path))
 ```
+
+Evidence results expose caller labels rather than root paths, so persisted
+reports can stay stable and avoid machine-local checkout paths. Hits are sorted
+by root ID, pattern ID, relative path, line, and column regardless of `threads`.
+One missing or unreadable root yields a partial receipt without discarding other
+roots. `max_matches` is global; `max_matches_per_root` prevents one root from
+consuming unbounded memory before deterministic global truncation.
 
 ### std/run_artifacts
 
@@ -1014,8 +1076,10 @@ support boundary.
 | `run_artifacts_list(kind, options?)` | List recent run directories newest-first with `{root?, namespace?, limit?}` |
 | `run_artifact_path(run, name)` | Resolve a relative artifact path inside `run.dir`, rejecting absolute paths and `..` traversal |
 | `run_artifact_write_json(run, name, value, options?)` | Write JSON through `std/fs.write_json` conventions |
+| `run_artifact_write_json_typed<T>(run, name, value, schema, options?)` | Validate and atomically replace JSON, leaving the prior artifact unchanged on contract failure |
 | `run_artifact_read_json(run, name)` | Read a required JSON artifact through `std/fs.read_json` |
-| `run_artifact_read_json_typed<T>(run, name, schema)` | Read required JSON and validate the consumer-owned artifact shape |
+| `run_artifact_read_json_typed<T>(run, name, schema, apply_defaults?)` | Read required JSON and validate the consumer-owned artifact shape |
+| `run_artifact_read_json_typed_result<T>(run, name, schema, apply_defaults?)` | Read optional JSON as a typed Result that preserves read and schema failure details |
 | `run_artifact_read_json_result(run, name)` | Read an optional JSON artifact while preserving typed failure detail |
 | `run_artifact_write_text(run, name, text, options?)` | Write text with parent-directory and trailing-newline behavior |
 | `run_artifact_read_text(run, name, fallback?)` | Read text with a fallback for missing or unreadable files |
@@ -1091,6 +1155,10 @@ compact recovery context:
 | `command_failure_text(result, options?)` | Render a compact failure block with status, exit code, and capped stdout/stderr |
 | `command_result_ok(stdout?, extra?)` | Build a normalized success result for tests and harness adapters |
 | `command_result_fail(exit_code?, stderr?, extra?)` | Build a normalized failure result for tests and harness adapters |
+
+`CommandResult` names the common normalized result fields, while
+`CommandStepReceipt` names the portable command-step fields used by durable
+audit and recovery artifacts. Both preserve additional adapter-owned fields.
 
 `spec` is either an argv list, such as `["git", "status", "--short"]`, or a
 dict with `argv`, `cwd`, `env`, `env_mode`, `stdin`, `timeout_ms`, `capture`,
@@ -1283,11 +1351,23 @@ operations that should not require a generic shell or `run_command` tool.
 | `git_switch(branch, repo?, options?)` | Switch to a branch/ref, with optional `create`, `force_create`, `detach`, or `discard_changes` |
 | `git_pull_ff_only(repo?, remote?, branch?, options?)` | Run `git pull --ff-only` with optional quiet/prune flags |
 | `git_fetch(remote?, repo?, refspecs?)` | Fetch from an existing remote using the receipt-producing `git.fetch` builtin |
+| `git_checkout_sync(options)` | Apply an exact-ref checkout transaction with explicit dirty-tree policy and a typed aggregate receipt |
+| `git_checkout_plan(options)` | Return the canonical labeled argv plan consumed by execution and fixture runners |
 | `git_tool_catalog(options?)` | Return searchable metadata for available git operations |
 | `git_find_tool(query, options?)` | Rank git operations for a natural-language query with a deterministic lexical scorer |
 | `git_run_tool(operation, args?, options?)` | Dispatch one catalogued git operation by id; mutating operations require `include_mutations: true` |
 | `git_tools(registry?, options?)` | Build an agent tool registry from selected granular git helpers |
 | `git_toolbox_tools(registry?, options?)` | Build a compact `find_git_tool` / `run_git_tool` registry for small/local models |
+
+Receipt-producing helpers export their canonical contracts, including
+`GitReceipt`, the operation-specific `GitStatusReceipt`,
+`GitLsRemoteReceipt`, `GitFetchReceipt`, `GitPushReceipt`, worktree receipts,
+and their typed `data` records. The receipt `schema` and each specialized
+`operation`/`action` literal are stable discriminants. Core audit fields and
+operation data are stable for durable orchestration; `command_policy`,
+`approval`, captured output text, and new status/category values are diagnostic
+and may grow additively. Compose adapters with these aliases instead of copying
+their record shapes or widening them to `dict`.
 
 `git_tools(...)` defaults to read-only helpers (`git_status`,
 `git_current_branch`, `git_log`, `git_diff`, `git_branch_list`, and
@@ -1296,6 +1376,35 @@ operations that should not require a generic shell or `run_command` tool.
 harnesses can expose just the git operations a model should be allowed to call.
 Pass `defer_loading`, `namespace`, or `tool_config` to make the generated tools
 participate in the existing Tool Vault / `tool_search` flow.
+
+Automation that must normalize a checkout should use `git_checkout_sync`
+instead of maintaining separate command labels and execution branches. The
+transaction fetches only the requested base ref, creates a missing local base
+from that fetched remote-tracking ref, fast-forwards without a second broad
+fetch, and verifies the final branch and clean-tree postconditions.
+
+```harn,ignore
+import { git_checkout_sync } from "std/git"
+
+const receipt = git_checkout_sync({
+  repo: repo_root,
+  remote: "origin",
+  base_branch: "main",
+  dirty_policy: "stash",
+  stash_name: "release-preflight-" + run_id,
+})
+if !receipt.success {
+  throw receipt.failure_kind + ": " + receipt.recovery
+}
+```
+
+Use `dirty_policy: "refuse"` when mutation must stop on local evidence,
+`"preserve"` for cleanup that should leave a dirty checkout untouched, or
+`"stash"` with a stable name to continue while retaining manual recovery.
+Stashes are deliberately not popped automatically: a later failure cannot
+silently mix preserved changes into a different checkout state. Tests can pass
+`runner: fn(step) { ... }`; the callback receives the same `kind`, `label`, and
+`argv` values used by production.
 
 ```harn,ignore
 import { git_tools } from "std/git"

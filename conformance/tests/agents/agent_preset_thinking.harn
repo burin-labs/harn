@@ -4,7 +4,9 @@ import { agent_preset } from "std/agent/presets"
 pipeline default() {
   // Presets install a small automatic reasoning policy; agent_loop_options
   // lowers that through the shared provider-aware policy implementation.
-  const audit_anthropic = agent_loop_options(agent_preset("audit", {provider: "anthropic", model: "claude-opus-4-7"}))
+  const audit_anthropic = agent_loop_options(
+    agent_preset("audit", {provider: "anthropic", model: "claude-opus-4-7"}),
+  )
   __io_println(audit_anthropic.thinking.mode)
   __io_println(audit_anthropic.thinking.level)
   __io_println(audit_anthropic._agent_reasoning_policy_applied.policy)
@@ -23,7 +25,9 @@ pipeline default() {
   __io_println(audit_openai.thinking.mode)
   __io_println(audit_openai.thinking.level)
   // verify preset prefers low effort on effort-capable providers.
-  const verify_openai = agent_loop_options(agent_preset("verify", {provider: "openai", model: "o3"}))
+  const verify_openai = agent_loop_options(
+    agent_preset("verify", {provider: "openai", model: "o3"}),
+  )
   __io_println(verify_openai.thinking.mode)
   __io_println(verify_openai.thinking.level)
   // Model with no advertised thinking modes leaves thinking unset.
@@ -32,6 +36,8 @@ pipeline default() {
   )
   __io_println(audit_unknown?.thinking == nil)
   // summary preset prefers disabled mode when supported, else nothing.
-  const summary_anthropic = agent_loop_options(agent_preset("summary", {provider: "anthropic", model: "claude-opus-4-7"}))
+  const summary_anthropic = agent_loop_options(
+    agent_preset("summary", {provider: "anthropic", model: "claude-opus-4-7"}),
+  )
   __io_println(summary_anthropic?.thinking == nil || summary_anthropic.thinking.mode == "disabled")
 }

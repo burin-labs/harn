@@ -43,7 +43,8 @@ const HEADER = "<!-- Generated from spec/chapters/*.md by scripts/sync_language_
 // Markers delimiting the generated chapter list inside docs/src/SUMMARY.md.
 // Everything between them is rewritten by this script; everything else in
 // SUMMARY.md is hand-edited and preserved verbatim.
-const SUMMARY_BEGIN = "<!-- BEGIN generated: language-spec chapters (scripts/sync_language_spec.harn) -->"
+const SUMMARY_BEGIN =
+  "<!-- BEGIN generated: language-spec chapters (scripts/sync_language_spec.harn) -->"
 
 const SUMMARY_END = "<!-- END generated: language-spec chapters -->"
 
@@ -119,7 +120,8 @@ pub fn render_index() -> string {
     return HEADER
   }
   const overview = harness.fs.read_text(overview_path).trim()
-  let toc = "\n\n## Specification chapters\n\nThe language specification is organized into the chapters below.\n\n"
+  let toc =
+    "\n\n## Specification chapters\n\nThe language specification is organized into the chapters below.\n\n"
   let i = 0
   for path in chapters {
     if i == 0 {

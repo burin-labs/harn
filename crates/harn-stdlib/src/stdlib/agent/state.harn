@@ -24,6 +24,17 @@ pub fn agent_session_finalize(session_id, status) {
 }
 
 /**
+ * Persist the session's queued canonical transcript mutations.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_session_flush(session_id) -> nil {
+  return __host_agent_session_flush(session_id)
+}
+
+/**
  * agent_session_messages.
  *
  * @effects: [host]
@@ -127,8 +138,8 @@ pub fn agent_reminder_providers_fire(session_id, event, payload = nil, opts = ni
 pub fn agent_session_record_usage(session_id, llm_result, opts = nil, iteration = 0) {
   const totals = __host_agent_session_record_usage(session_id, llm_result)
   const llm = llm_result?.llm ?? {}
-  const input_tokens = __agent_usage_int(llm?.input_tokens ?? llm_result?.input_tokens)
-  const output_tokens = __agent_usage_int(llm?.output_tokens ?? llm_result?.output_tokens)
+  const input_tokens = __agent_usage_int(llm?.input_tokens ?? llm_result?.usage?.input_tokens)
+  const output_tokens = __agent_usage_int(llm?.output_tokens ?? llm_result?.usage?.output_tokens)
   agent_reminder_providers_fire(
     session_id,
     "on_budget_threshold",

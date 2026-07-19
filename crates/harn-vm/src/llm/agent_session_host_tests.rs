@@ -456,7 +456,6 @@ fn gpt_oss_harmony_leak_persists_clean_tool_call_without_dirty_reasoning() {
         "provider": "fireworks",
         "model": "gpt-oss-120b",
         "text": dirty,
-        "prose": dirty,
         "_agent_tool_format": "native",
         "native_tool_calls": [],
         "tool_calls": [{
@@ -1527,8 +1526,9 @@ fn session_totals_expose_cumulative_input_and_output_token_split() {
         "cumulative cache-write tokens are exposed separately"
     );
     assert_eq!(
-        json["cache_creation_input_tokens"], 12,
-        "cache_creation_input_tokens aliases cache_write_tokens"
+        json.get("cache_creation_input_tokens"),
+        None,
+        "the cache_write_tokens alias must not be emitted (ingest still accepts it)"
     );
 }
 
@@ -1572,7 +1572,6 @@ fn record_usage_accumulates_cache_tokens_from_top_level_and_nested_usage() {
     let returned_json = vm_to_json(&returned);
     assert_eq!(returned_json["cache_read_tokens"], 100);
     assert_eq!(returned_json["cache_write_tokens"], 15);
-    assert_eq!(returned_json["cache_creation_input_tokens"], 15);
 
     let totals = super::host_agent_session_totals_builtin(
         &[crate::value::VmValue::string(&session_id)],
@@ -1584,5 +1583,4 @@ fn record_usage_accumulates_cache_tokens_from_top_level_and_nested_usage() {
     assert_eq!(json["output_tokens"], 35);
     assert_eq!(json["cache_read_tokens"], 100);
     assert_eq!(json["cache_write_tokens"], 15);
-    assert_eq!(json["cache_creation_input_tokens"], 15);
 }

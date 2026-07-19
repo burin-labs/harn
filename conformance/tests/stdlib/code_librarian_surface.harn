@@ -8,10 +8,14 @@ import "std/code_librarian"
 fn seed_corpus(root: string) {
   harness.fs.mkdir(root)
   harness.fs.mkdir(path_join(root, "src"))
-  harness.fs
-    .write_text(path_join(root, "src/a.rs"), "pub fn alpha() {}\npub fn beta() { alpha(); }\n")
-  harness.fs
-    .write_text(path_join(root, "src/b.rs"), "pub fn gamma() {}\npub fn driver() { gamma(); }\n")
+  harness.fs.write_text(
+    path_join(root, "src/a.rs"),
+    "pub fn alpha() {}\npub fn beta() { alpha(); }\n",
+  )
+  harness.fs.write_text(
+    path_join(root, "src/b.rs"),
+    "pub fn gamma() {}\npub fn driver() { gamma(); }\n",
+  )
 }
 
 pipeline default() {
@@ -22,7 +26,9 @@ pipeline default() {
   seed_corpus(root)
   const _ = hostlib_code_index_rebuild({root: root})
   // 1) Cypher pass-through returns rows + overlay nil on base.
-  const cy: LibrarianCypherResult = code_librarian_query("MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path")
+  const cy: LibrarianCypherResult = code_librarian_query(
+    "MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path",
+  )
   __io_println(len(cy.rows) == 1 && cy.rows[0].path == "src/a.rs")
   __io_println(cy.overlay == nil)
   // 2) outline returns typed symbols + import edges for known files.
@@ -53,7 +59,9 @@ pipeline default() {
   __io_println(!unknown_fresh.known)
   // 9) file_hash_snapshot returns the direct path->hash map expected by
   //    verification_diagnostic_classify plus missing-path metadata.
-  const hash_snapshot: LibrarianFileHashSnapshot = code_librarian_file_hash_snapshot(["src/a.rs", "src/does-not-exist.rs"])
+  const hash_snapshot: LibrarianFileHashSnapshot = code_librarian_file_hash_snapshot(
+    ["src/a.rs", "src/does-not-exist.rs"],
+  )
   __io_println(hash_snapshot.seq == 0)
   __io_println(hash_snapshot.snapshot["src/a.rs"] != nil)
   __io_println(hash_snapshot.missing[0] == "src/does-not-exist.rs")

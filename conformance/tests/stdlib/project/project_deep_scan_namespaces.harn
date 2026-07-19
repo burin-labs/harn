@@ -18,7 +18,11 @@ pipeline test(task) {
           tiers: ["ambient", "enriched"],
           incremental: true,
           depth: nil,
-          enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+          },
         },
       )
       const beta = project_deep_scan(
@@ -28,7 +32,11 @@ pipeline test(task) {
           tiers: ["ambient", "enriched"],
           incremental: true,
           depth: nil,
-          enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+          },
         },
       )
       const alpha_cached = project_deep_scan(
@@ -38,7 +46,11 @@ pipeline test(task) {
           tiers: ["ambient", "enriched"],
           incremental: true,
           depth: nil,
-          enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+          },
         },
       )
       const beta_cached = project_deep_scan(
@@ -48,7 +60,11 @@ pipeline test(task) {
           tiers: ["ambient", "enriched"],
           incremental: true,
           depth: nil,
-          enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+          },
         },
       )
       __io_println(alpha["."].enriched.purpose == "alpha root")

@@ -54,7 +54,7 @@ Flag reference:
 | `--process-record <path>` / `--process-replay <path>` | Record or replay subprocess invocations |
 | `--process-wasi <dir>` | Resolve subprocesses against a directory of WASI (`wasm32-wasi`) modules — see [WASI subprocess sandbox](#wasi-subprocess-sandbox) |
 | `--network deny` (default) / `--network real` | Egress policy |
-| `--allow-host <h-or-cidr>` | Whitelist a destination. Repeatable |
+| `--allow-host <h-or-cidr>` | Allowlist a destination. Repeatable |
 | `--emit-diff <path>` | Write a unified-style diff of overlay writes to `path` |
 | `--emit-tape <path>` | Write the unified event tape to `path` (sidecar at `path.cas/`) |
 | `--runtime paused-tokio` (default) / `--runtime des` | Tokio runtime mode. `des` pins everything to a single OS thread for bit-exact tape replay; see [DES runtime mode](./des-mode.md) |

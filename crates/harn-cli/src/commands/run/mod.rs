@@ -13,20 +13,25 @@ use serde::Serialize;
 
 use crate::commands::time::{self, PhaseRecord, RunTiming};
 use crate::package;
-use crate::parse_source_file;
 use crate::skill_loader::{
     canonicalize_cli_dirs, emit_loader_warnings, install_skills_global, load_skills,
     SkillLoaderInputs,
 };
 
+mod eval_source;
 mod explain_cost;
 pub mod harnpack;
 mod interrupts;
 pub mod json_events;
 mod lifecycle;
+mod llm_mock;
 mod manifest_runtime;
 mod sandbox;
 
+use self::eval_source::create_eval_temp_file;
+pub(crate) use self::eval_source::prepare_eval_temp_file;
+#[cfg(test)]
+use self::eval_source::{eval_source_for_code, split_eval_header};
 use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
 use self::interrupts::{
     install_signal_shutdown_handler, start_run_deadline_watchdog, RunDeadlineGuard,
@@ -34,6 +39,7 @@ use self::interrupts::{
 use self::json_events::NdjsonEmitter;
 pub use self::lifecycle::RunProfileOptions;
 use self::lifecycle::{RunExecution, TerminalRun};
+pub use self::llm_mock::*;
 pub(crate) use self::manifest_runtime::connect_mcp_servers;
 #[cfg(test)]
 use self::sandbox::default_run_capability_policy;
@@ -327,7 +333,13 @@ pub(crate) fn compile_or_load_chunk_with_timing(
 
     let typecheck_start = Instant::now();
     let mut had_type_error = false;
-    let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
+    let type_diagnostics = match typecheck_with_imports(&program, Path::new(path), &source) {
+        Ok(diagnostics) => diagnostics,
+        Err(error) => {
+            stderr.push_str(&format!("error: {error}\n"));
+            return None;
+        }
+    };
     for diag in &type_diagnostics {
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {
@@ -453,140 +465,13 @@ fn typecheck_with_imports(
     program: &[harn_parser::SNode],
     path: &Path,
     source: &str,
-) -> Vec<harn_parser::TypeDiagnostic> {
-    if let Err(error) = package::ensure_dependencies_materialized(path) {
-        eprintln!("error: {error}");
-        process::exit(1);
-    }
+) -> Result<Vec<harn_parser::TypeDiagnostic>, String> {
+    package::ensure_dependencies_materialized(path)?;
     let checker = crate::typecheck_imports::checker_with_resolved_imports(
         harn_parser::TypeChecker::new(),
         path,
     );
-    checker.check_with_source(program, source)
-}
-
-/// Build the wrapped source and temp file backing a `harn run -e` invocation.
-///
-/// `import` is a top-level declaration in Harn, so the leading prefix of
-/// import lines (with surrounding blanks/comments) is hoisted out of the
-/// `pipeline main(task) { ... }` wrapper. The temp file is created in the
-/// current working directory so relative imports (`import "./lib"`) and
-/// `harn.toml` discovery resolve against the user's project, not the
-/// system temp dir. If the CWD is unwritable we fall back to the system
-/// temp dir with a stderr warning — pure-expression `-e` still works,
-/// but relative imports will fail to resolve.
-pub(crate) fn prepare_eval_temp_file(
-    code: &str,
-) -> Result<(String, tempfile::NamedTempFile), String> {
-    let wrapped = eval_source_for_code(code);
-    let tmp = create_eval_temp_file()?;
-    Ok((wrapped, tmp))
-}
-
-fn eval_source_for_code(code: &str) -> String {
-    if eval_code_parses_as_program(code) {
-        return code.to_string();
-    }
-    let (header, body) = split_eval_header(code);
-    if header.is_empty() {
-        format!("pipeline main(task) {{\n{body}\n}}")
-    } else {
-        format!("{header}\npipeline main(task) {{\n{body}\n}}")
-    }
-}
-
-fn eval_code_parses_as_program(code: &str) -> bool {
-    harn_parser::parse_source(code)
-        .map(|program| {
-            program.iter().any(|node| {
-                let (_, inner) = harn_parser::peel_attributes(node);
-                matches!(&inner.node, harn_parser::Node::Pipeline { .. })
-            })
-        })
-        .unwrap_or(false)
-}
-
-/// Try to place the `-e` temp file in the current working directory so
-/// relative imports and `harn.toml` discovery resolve against the user's
-/// project. Fall back to the system temp dir on failure (with a warning),
-/// so pure-expression `-e` keeps working in read-only contexts.
-fn create_eval_temp_file() -> Result<tempfile::NamedTempFile, String> {
-    if let Some(dir) = std::env::current_dir().ok().as_deref() {
-        // Hidden prefix on Unix so editors / tree-walkers are less likely
-        // to pick the file up during its short lifetime.
-        match tempfile::Builder::new()
-            .prefix(".harn-eval-")
-            .suffix(".harn")
-            .tempfile_in(dir)
-        {
-            Ok(tmp) => return Ok(tmp),
-            Err(error) => eprintln!(
-                "warning: harn run -e: could not create temp file in {}: {error}; \
-                 relative imports will not resolve",
-                dir.display()
-            ),
-        }
-    }
-    tempfile::Builder::new()
-        .prefix("harn-eval-")
-        .suffix(".harn")
-        .tempfile()
-        .map_err(|e| format!("failed to create temp file for -e: {e}"))
-}
-
-/// Split the `-e` input into a header (top-level imports + leading
-/// blanks/comments) and a body (everything else, to be wrapped in
-/// `pipeline main(task)`). The header may be empty.
-///
-/// Lines whose first non-whitespace token is `import` or `pub import`
-/// are treated as imports. Scanning stops at the first non-blank,
-/// non-comment, non-import line.
-fn split_eval_header(code: &str) -> (String, String) {
-    let mut header_end = 0usize;
-    let mut last_kept = 0usize;
-    for (idx, line) in code.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with("//") {
-            header_end = idx + 1;
-            continue;
-        }
-        let is_import = trimmed.starts_with("import ")
-            || trimmed.starts_with("import\t")
-            || trimmed.starts_with("import\"")
-            || trimmed.starts_with("pub import ")
-            || trimmed.starts_with("pub import\t");
-        if is_import {
-            header_end = idx + 1;
-            last_kept = idx + 1;
-        } else {
-            break;
-        }
-    }
-    if last_kept == 0 {
-        return (String::new(), code.to_string());
-    }
-    let mut header_lines: Vec<&str> = Vec::new();
-    let mut body_lines: Vec<&str> = Vec::new();
-    for (idx, line) in code.lines().enumerate() {
-        if idx < header_end {
-            header_lines.push(line);
-        } else {
-            body_lines.push(line);
-        }
-    }
-    (header_lines.join("\n"), body_lines.join("\n"))
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum CliLlmMockMode {
-    #[default]
-    Off,
-    Replay {
-        fixture_path: PathBuf,
-    },
-    Record {
-        fixture_path: PathBuf,
-    },
+    Ok(checker.check_with_source(program, source))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -628,53 +513,6 @@ pub struct RunOutcome {
     pub exit_code: i32,
 }
 
-pub fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), String> {
-    harn_vm::llm::clear_cli_llm_mock_mode();
-    match mode {
-        CliLlmMockMode::Off => Ok(()),
-        CliLlmMockMode::Replay { fixture_path } => {
-            let fixture = harn_vm::llm::load_llm_mocks_jsonl(fixture_path)?;
-            harn_vm::llm::install_cli_llm_mock_fixture(fixture);
-            Ok(())
-        }
-        CliLlmMockMode::Record { .. } => {
-            harn_vm::llm::enable_cli_llm_mock_recording();
-            Ok(())
-        }
-    }
-}
-
-pub fn persist_cli_llm_mock_recording(mode: &CliLlmMockMode) -> Result<(), String> {
-    let CliLlmMockMode::Record { fixture_path } = mode else {
-        harn_vm::llm::clear_cli_llm_mock_mode();
-        return Ok(());
-    };
-    if let Some(parent) = fixture_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|error| {
-                format!(
-                    "failed to create fixture directory {}: {error}",
-                    parent.display()
-                )
-            })?;
-        }
-    }
-
-    let lines = harn_vm::llm::take_cli_llm_recordings()
-        .into_iter()
-        .map(harn_vm::llm::serialize_llm_mock)
-        .collect::<Result<Vec<_>, _>>()?;
-    let body = if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    };
-    let result = fs::write(fixture_path, body)
-        .map_err(|error| format!("failed to write {}: {error}", fixture_path.display()));
-    harn_vm::llm::clear_cli_llm_mock_mode();
-    result
-}
-
 pub(crate) async fn run_file(
     path: &str,
     trace: bool,
@@ -684,7 +522,7 @@ pub(crate) async fn run_file(
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
 ) {
-    run_file_with_skill_dirs(
+    let exit_code = run_file_with_skill_dirs(
         path,
         trace,
         denied_builtins,
@@ -700,9 +538,12 @@ pub(crate) async fn run_file(
         HarnpackRunOptions::default(),
     )
     .await;
+    if exit_code != 0 {
+        process::exit(exit_code);
+    }
 }
 
-pub(crate) fn run_explain_cost_file_with_skill_dirs(path: &str) {
+pub(crate) fn run_explain_cost_file_with_skill_dirs(path: &str) -> i32 {
     let outcome = execute_explain_cost(path);
     if !outcome.stderr.is_empty() {
         io::stderr().write_all(outcome.stderr.as_bytes()).ok();
@@ -710,9 +551,7 @@ pub(crate) fn run_explain_cost_file_with_skill_dirs(path: &str) {
     if !outcome.stdout.is_empty() {
         io::stdout().write_all(outcome.stdout.as_bytes()).ok();
     }
-    if outcome.exit_code != 0 {
-        process::exit(outcome.exit_code);
-    }
+    outcome.exit_code
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -730,7 +569,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     aux: RunAuxOptions,
     control: RunControlOptions,
     harnpack: HarnpackRunOptions,
-) {
+) -> i32 {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let interrupt_tokens = install_signal_shutdown_handler();
     let deadline_guard = control
@@ -778,9 +617,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     {
         exit_code = 124;
     }
-    if exit_code != 0 {
-        process::exit(exit_code);
-    }
+    exit_code
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -797,7 +634,7 @@ pub(crate) async fn run_resume_with_skill_dirs(
     json: Option<RunJsonOptions>,
     aux: RunAuxOptions,
     control: RunControlOptions,
-) {
+) -> i32 {
     let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
 
 pipeline main(task) {
@@ -810,14 +647,17 @@ pipeline main(task) {
   return wait_agent(handle)
 }
 "#;
-    let tmp = create_eval_temp_file().unwrap_or_else(|e| {
-        eprintln!("error: {e}");
-        process::exit(1);
-    });
+    let tmp = match create_eval_temp_file() {
+        Ok(tmp) => tmp,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    };
     let tmp_path = tmp.path().to_path_buf();
     if let Err(error) = fs::write(&tmp_path, source) {
         eprintln!("error: failed to write temp file for --resume: {error}");
-        process::exit(1);
+        return 1;
     }
     let mut argv = Vec::with_capacity(resume_argv.len() + 1);
     argv.push(target.to_string());
@@ -838,17 +678,47 @@ pipeline main(task) {
         control,
         HarnpackRunOptions::default(),
     )
-    .await;
+    .await
 }
 
 pub fn execute_explain_cost(path: &str) -> RunOutcome {
     let stdout = String::new();
     let mut stderr = String::new();
 
-    let (source, program) = parse_source_file(path);
+    let source = match fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            stderr.push_str(&format!("Error reading {path}: {error}\n"));
+            return RunOutcome {
+                stdout,
+                stderr,
+                exit_code: 1,
+            };
+        }
+    };
+    let program = match parse_source_for_run(path, &source, &mut stderr) {
+        Some(program) => program,
+        None => {
+            return RunOutcome {
+                stdout,
+                stderr,
+                exit_code: 1,
+            };
+        }
+    };
 
     let mut had_type_error = false;
-    let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
+    let type_diagnostics = match typecheck_with_imports(&program, Path::new(path), &source) {
+        Ok(diagnostics) => diagnostics,
+        Err(error) => {
+            stderr.push_str(&format!("error: {error}\n"));
+            return RunOutcome {
+                stdout,
+                stderr,
+                exit_code: 1,
+            };
+        }
+    };
     for diag in &type_diagnostics {
         let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
         if matches!(diag.severity, DiagnosticSeverity::Error) {

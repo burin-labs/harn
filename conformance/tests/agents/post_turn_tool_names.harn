@@ -46,24 +46,26 @@ pipeline default() {
         {
           loop_until_done: true,
           max_iterations: 1,
-          post_turn_callback: { info -> return {
-            message: "tool_names="
-              + join(info.tool_names, ",")
-              + " successful="
-              + join(info.successful_tool_names, ",")
-              + " rejected="
-              + join(info.rejected_tool_names, ",")
-              + " available="
-              + join(info.available_tool_names, ",")
-              + " provider="
-              + to_string(info.provider)
-              + " format="
-              + to_string(info.tool_format)
-              + " count="
-              + to_string(info.tool_count),
-            stop: true,
-            stop_reason: "captured",
-          } },
+          post_turn_callback: { info ->
+            return {
+              message: "tool_names="
+                + join(info.tool_names, ",")
+                + " successful="
+                + join(info.successful_tool_names, ",")
+                + " rejected="
+                + join(info.rejected_tool_names, ",")
+                + " available="
+                + join(info.available_tool_names, ",")
+                + " provider="
+                + to_string(info.provider)
+                + " format="
+                + to_string(info.tool_format)
+                + " count="
+                + to_string(info.tool_count),
+              stop: true,
+              stop_reason: "captured",
+            }
+          },
           provider: "mock",
           tool_format: "native",
           tools: tools(),

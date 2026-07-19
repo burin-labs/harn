@@ -16,9 +16,12 @@ pipeline main() {
   ]
   const manifest = composition_binding_manifest(source_tools)
   const execute = tool_find(tools, "harn.code.execute_composition")
-  const report = execute
-    .handler(
-    {snippet: "return read_file({path: \"README.md\"}).text", manifest: manifest, run_id: "profile-run"},
+  const report = execute.handler(
+    {
+      snippet: "return read_file({path: \"README.md\"}).text",
+      manifest: manifest,
+      run_id: "profile-run",
+    },
   )
   __io_println(report.ok)
   __io_println(report.child_calls[0].tool_name)

@@ -44,7 +44,14 @@ fn shrinking_error_set_case() {
     }
     return {
       ok: true,
-      value: {text: text, tool_calls: [], provider: "mock", model: "cheap", input_tokens: 1, output_tokens: 1},
+      value: {
+        text: text,
+        tool_calls: [],
+        provider: "mock",
+        model: "cheap",
+        input_tokens: 1,
+        output_tokens: 1,
+      },
     }
   }
   const session = "contract-shrink-" + uuid()

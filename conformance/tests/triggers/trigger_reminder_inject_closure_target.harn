@@ -13,7 +13,9 @@ pipeline test(task) {
   agent_session_reset(acme_session)
   agent_session_reset(widget_session)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const handle: TriggerHandle = trigger_register(
     {
       id: "trigger-reminder-inject-closure-" + unique,
@@ -61,8 +63,14 @@ pipeline test(task) {
   )
   __io_println(to_acme.result?.target_session_id == acme_session)
   __io_println(to_widget.result?.target_session_id == widget_session)
-  const acme_reminders = transcript_events_by_kind(agent_session_snapshot(acme_session), "system_reminder")
-  const widget_reminders = transcript_events_by_kind(agent_session_snapshot(widget_session), "system_reminder")
+  const acme_reminders = transcript_events_by_kind(
+    agent_session_snapshot(acme_session),
+    "system_reminder",
+  )
+  const widget_reminders = transcript_events_by_kind(
+    agent_session_snapshot(widget_session),
+    "system_reminder",
+  )
   __io_println(len(acme_reminders))
   __io_println(len(widget_reminders))
   __io_println(acme_reminders[0].reminder.body)

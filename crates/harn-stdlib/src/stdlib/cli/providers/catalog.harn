@@ -31,8 +31,9 @@
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_PROVIDER_CATALOG_PAYLOAD_JSON", "")
   if raw == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_PROVIDER_CATALOG_PAYLOAD_JSON not set by dispatch shim")
+    harness.stdio.eprintln(
+      "internal error: HARN_PROVIDER_CATALOG_PAYLOAD_JSON not set by dispatch shim",
+    )
     return 70
   }
   // Forward the bytes verbatim — see docstring for why we avoid a

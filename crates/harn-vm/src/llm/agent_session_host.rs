@@ -51,9 +51,12 @@ const HOST_SESSION_PROJECT_TURN: &str = "__host_agent_session_project_turn";
 const HOST_SESSION_CLAIM_TOOL_FORMAT: &str = "__host_agent_session_claim_tool_format";
 const HOST_DAEMON_SNAPSHOT: &str = "__host_agent_daemon_snapshot";
 const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
-const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
 const HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK: &str = "__host_agent_record_native_tool_fallback";
 const HOST_AGENT_RECORD_COMPACTION: &str = "__host_agent_record_compaction";
+
+pub(crate) mod cancellation;
+use cancellation::CancelSafeNestedExecutionGuard;
+mod live_transcript_journal;
 
 /// Session-keyed record for Harn-driven agent loops. The Harn loop owns
 /// iteration and decision logic; this struct holds only session-scoped
@@ -102,8 +105,7 @@ struct AgentHostSession {
     /// Pops the per-session capability policy off the execution stack
     /// on drop. Declared last so it Drops last in `AgentHostSession`'s
     /// natural field-order drop, after every other cleanup completes.
-    #[allow(dead_code, reason = "held for Drop side effect")]
-    nested_policy_guard: Option<NestedExecutionGuard>,
+    nested_policy_guard: Option<CancelSafeNestedExecutionGuard>,
 }
 
 /// Tracks which scoped policy stacks were pushed for a guarded tool
@@ -390,11 +392,10 @@ async fn host_agent_session_init(
         .or_else(crate::agent_sessions::current_session_id)
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
 
-    // Open the session record up front so hook tape capture works even
-    // when `user_prompt_submit` vetoes the turn — the resulting blocked
-    // result still surfaces a transcript with `hook_call`/`hook_vetoed`
-    // entries.
-    let prompt_session_id = crate::agent_sessions::open_or_create(Some(session_id.clone()));
+    let initialized =
+        live_transcript_journal::initialize(&session_id, &opts_map, system.clone()).await?;
+    let has_canonical_history = initialized.has_canonical_history;
+    let prompt_session_id = initialized.session_id;
 
     let prompt_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::UserPromptSubmit.as_str(),
@@ -410,6 +411,12 @@ async fn host_agent_session_init(
         )
         .await?
     {
+        live_transcript_journal::flush_init_terminal(
+            &prompt_session_id,
+            "blocked",
+            "user_prompt_submit_blocked",
+        )
+        .await?;
         let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
         return Ok(agent_init_control_done(
             &prompt_session_id,
@@ -423,6 +430,12 @@ async fn host_agent_session_init(
         AutonomyCheck::NoBudget => None,
         AutonomyCheck::Approved(config) => Some(config),
         AutonomyCheck::Denied(result) => {
+            live_transcript_journal::flush_init_terminal(
+                &prompt_session_id,
+                "blocked",
+                "autonomy_budget_denied",
+            )
+            .await?;
             return Ok(agent_init_control_done(
                 &session_id,
                 &message,
@@ -441,9 +454,15 @@ async fn host_agent_session_init(
     }
 
     let nested_policy_guard = match install_session_nested_budget(&opts_map, &resolved) {
-        Ok(guard) => Some(guard),
+        Ok(guard) => Some(CancelSafeNestedExecutionGuard::new(guard)),
         Err(error) => {
             let denial = build_nested_budget_denial(&resolved, &message, &error);
+            live_transcript_journal::flush_init_terminal(
+                &resolved,
+                "blocked",
+                "nested_policy_denied",
+            )
+            .await?;
             return Ok(agent_init_control_done(
                 &resolved,
                 &message,
@@ -485,8 +504,12 @@ async fn host_agent_session_init(
     // exactly as `llm_call`'s `messages` array would. The caller owns this
     // history — it is transient seeding, not session persistence. See
     // `seed_history_messages`.
-    let seeded_history = seed_history_messages(&opts_map)?;
-    let has_history = !seeded_history.is_empty();
+    let seeded_history = if has_canonical_history {
+        Vec::new()
+    } else {
+        seed_history_messages(&opts_map)?
+    };
+    let has_history = has_canonical_history || !seeded_history.is_empty();
     for history_msg in seeded_history {
         crate::agent_sessions::inject_message(&resolved, history_msg).map_err(VmError::Runtime)?;
     }
@@ -567,6 +590,7 @@ async fn host_agent_session_init(
         super::reminder_providers::options_map_to_json(&opts_map),
     )
     .await?;
+    crate::agent_session_journal::flush(&resolved).await?;
 
     let mut control = crate::value::DictMap::new();
     control.put_str("session_id", resolved);
@@ -696,7 +720,7 @@ async fn host_agent_session_finalize(
     let mut terminal_error = opt_json(&status_dict, "error");
     let iterations = opt_int(&status_dict, "iterations").unwrap_or(0);
 
-    let session = AGENT_HOST_SESSIONS
+    let mut session = AGENT_HOST_SESSIONS
         .with(|sessions| sessions.borrow_mut().remove(&session_id))
         .ok_or_else(|| {
             VmError::Runtime(format!(
@@ -788,12 +812,7 @@ async fn host_agent_session_finalize(
 
     // Pair with the push in init so subsequent loops see the right stack.
     crate::agent_sessions::pop_current_session();
-    // Fire registered native session-end hooks (e.g. cancelling orphaned
-    // long-running handles) after the session has been removed from
-    // the active map so hooks observe a fully-quiesced session.
-    super::agent_runtime::fire_session_end_hooks(&session_id, canonical_status != "suspended");
-
-    let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or(session.tool_mode);
+    let tool_mode = opt_str(&status_dict, "tool_mode").unwrap_or_else(|| session.tool_mode.clone());
     let acp_stop_reason = canonical_acp_stop_reason(
         &final_status,
         iterations,
@@ -825,6 +844,15 @@ async fn host_agent_session_finalize(
         crate::agent_sessions::append_event(&session_id, transcript_event)
             .map_err(VmError::Runtime)?;
     }
+    live_transcript_journal::flush_terminal(
+        &session_id,
+        &canonical_status,
+        &stop_reason,
+        terminal_class.map(super::agent_terminal_class::AgentTerminalClass::as_str),
+        terminal_error.as_ref(),
+    )
+    .await?;
+    cancellation::finish_agent_session(&mut session, &session_id, canonical_status != "suspended");
     let snapshot = crate::agent_sessions::transcript(&session_id);
     let transcript_json = snapshot
         .as_ref()
@@ -874,7 +902,6 @@ async fn host_agent_session_finalize(
             "output_tokens": session.output_tokens,
             "cache_read_tokens": session.cache_read_tokens,
             "cache_write_tokens": session.cache_write_tokens,
-            "cache_creation_input_tokens": session.cache_write_tokens,
         },
         "tools": {
             "calls": session.tool_calls,
@@ -928,8 +955,7 @@ pub(crate) fn canonical_acp_stop_reason(
 
 pub(crate) fn canonical_provider_stop_reason(last_llm_stop_reason: Option<&str>) -> &'static str {
     match last_llm_stop_reason {
-        Some(reason) if reason.eq_ignore_ascii_case("max_tokens") => "max_tokens",
-        Some(reason) if reason.eq_ignore_ascii_case("length") => "max_tokens",
+        Some(reason) if super::api::result::stop_reason_is_length(reason) => "max_tokens",
         Some(reason) if reason.eq_ignore_ascii_case("refusal") => "refusal",
         _ => "end_turn",
     }
@@ -1998,8 +2024,11 @@ fn host_agent_session_record_usage_builtin(
     let usage_block = dict_get(&llm_result, "usage")
         .cloned()
         .unwrap_or(VmValue::Nil);
-    let input_tokens = first_dict_i64(&[&llm_block, &llm_result], &["input_tokens"]);
-    let output_tokens = first_dict_i64(&[&llm_block, &llm_result], &["output_tokens"]);
+    // Probe order: agent-loop result block, canonical envelope `usage`, then
+    // top-level for legacy recordings that predate the canonical envelope.
+    let input_tokens = first_dict_i64(&[&llm_block, &usage_block, &llm_result], &["input_tokens"]);
+    let output_tokens =
+        first_dict_i64(&[&llm_block, &usage_block, &llm_result], &["output_tokens"]);
     let usage_sources = [&llm_result, &usage_block, &llm_block];
     let cache_read_tokens =
         first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_read_tokens);
@@ -2058,7 +2087,6 @@ fn host_agent_session_record_usage_builtin(
                 "output_tokens": output_tokens,
                 "cache_read_tokens": cache_read_tokens,
                 "cache_write_tokens": cache_write_tokens,
-                "cache_creation_input_tokens": cache_write_tokens,
                 "provider": provider,
                 "model": model,
                 "cost_usd": cost,
@@ -2083,10 +2111,6 @@ fn host_agent_session_record_usage_builtin(
     );
     out.insert(
         crate::value::intern_key("cache_write_tokens"),
-        VmValue::Int(totals.3),
-    );
-    out.insert(
-        crate::value::intern_key("cache_creation_input_tokens"),
         VmValue::Int(totals.3),
     );
     Ok(VmValue::dict(out))
@@ -2268,10 +2292,6 @@ fn host_agent_session_totals_builtin(
     );
     out.insert(
         crate::value::intern_key("cache_write_tokens"),
-        VmValue::Int(totals.5),
-    );
-    out.insert(
-        crate::value::intern_key("cache_creation_input_tokens"),
         VmValue::Int(totals.5),
     );
     Ok(VmValue::dict(out))
@@ -2674,72 +2694,6 @@ fn host_agent_budget_pre_call_builtin(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     Ok(VmValue::Bool(false))
-}
-
-/// Emit an agent event and record transcript-backed event types.
-#[harn_builtin(
-    sig = "__host_agent_emit_event(session_id: string, event_type: string, payload: dict) -> nil",
-    kind = "async",
-    category = "agent.host",
-    runtime_only = true
-)]
-async fn host_agent_emit_event(
-    ctx: crate::vm::AsyncBuiltinCtx,
-    args: Vec<VmValue>,
-) -> Result<VmValue, VmError> {
-    let session_id = match args.first() {
-        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-        _ => {
-            return Err(VmError::Runtime(format!(
-                "{HOST_AGENT_EMIT_EVENT}: session_id must be a non-empty string"
-            )))
-        }
-    };
-    let event_type = match args.get(1) {
-        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-        _ => {
-            return Err(VmError::Runtime(format!(
-                "{HOST_AGENT_EMIT_EVENT}: event_type must be a non-empty string"
-            )))
-        }
-    };
-    let payload_value = args.get(2).cloned().unwrap_or(VmValue::Nil);
-    let payload = vm_to_json(&payload_value);
-    let event =
-        crate::agent_events::AgentEvent::from_host_payload(&session_id, &event_type, &payload)?;
-    if matches!(
-        event_type.as_str(),
-        "tool_search_query"
-            | "tool_search_result"
-            | "typed_checkpoint"
-            | "skill_narrow"
-            | "agent_loop_stall_warning"
-            | "tool_format_override"
-            | "tool_call_audit"
-            | "budget_exhausted"
-            | "budget_circuit_breaker"
-            | "loop_stuck"
-            | "reserved_terminal_verify"
-            | "context_overflow_recovery"
-            | "loop_checkpoint"
-    ) {
-        let role = if matches!(
-            event_type.as_str(),
-            "tool_search_result" | "tool_call_audit"
-        ) {
-            "tool"
-        } else {
-            "assistant"
-        };
-        let transcript_event =
-            super::helpers::transcript_event(&event_type, role, "internal", "", Some(payload));
-        if crate::agent_sessions::exists(&session_id) {
-            crate::agent_sessions::append_event(&session_id, transcript_event)
-                .map_err(VmError::Runtime)?;
-        }
-    }
-    crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &event).await;
-    Ok(VmValue::Nil)
 }
 
 /// Record a native→text tool-call fallback as a transcript event and trace counter.
@@ -3762,7 +3716,6 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     // async
     &HOST_AGENT_SESSION_INIT_DEF,
     &HOST_AGENT_SESSION_FINALIZE_DEF,
-    &HOST_AGENT_EMIT_EVENT_DEF,
     &HOST_SKILL_SCORE_DEF,
     &HOST_AUTONOMY_BUDGET_CHECK_DEF,
     &HOST_AGENT_SESSION_DRAIN_BRIDGE_INJECTIONS_DEF,
@@ -3776,6 +3729,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
 
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     register_builtin_defs(vm, HOST_SESSION_BUILTINS);
+    live_transcript_journal::register_live_transcript_journal_primitives(vm);
 }
 
 #[cfg(test)]

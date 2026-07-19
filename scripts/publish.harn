@@ -1,0 +1,388 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { command_run } from "std/command"
+import { truncate_text } from "std/text"
+import {
+  PublishPlanPackage,
+  publish_plan_order,
+  publish_plan_packages_from_metadata,
+  publish_plan_version,
+} from "./publish_plan.harn"
+
+pub type RegistryProbeStatus = "visible" | "missing" | "error"
+
+pub type RegistryProbe = {status: RegistryProbeStatus, detail?: string}
+
+pub type PublishFailureCategory = "already_present" | "propagation" | "rate_limited" | "permanent"
+
+pub type PublishAttempt = {success: bool, output?: string}
+
+pub type PublishFailure = {name: string, category: PublishFailureCategory, detail: string}
+
+pub type PublishReceipt = {
+  ok: bool,
+  version: string,
+  published: list<string>,
+  already_present: list<string>,
+  waiting: list<string>,
+  failed: list<PublishFailure>,
+  remaining: list<string>,
+}
+
+pub type PublishAdapters = {
+  probe: fn(string, string) -> RegistryProbe,
+  publish: fn(PublishPlanPackage) -> PublishAttempt,
+  wait: fn(int) -> nil,
+}
+
+pub type PublishRecoveryOptions = {
+  backoff_ms?: list<int>,
+  max_publish_attempts?: int,
+  rate_limit_delay_ms?: int,
+}
+
+type RegistryWait = {ok: bool, waited: bool, detail: string}
+
+fn package_by_name(packages: list<PublishPlanPackage>, name: string) -> PublishPlanPackage {
+  for package in packages {
+    if package.name == name {
+      return package
+    }
+  }
+  throw "publish recovery references unknown package: " + name
+}
+
+fn add_unique(values: list<string>, value: string) -> list<string> {
+  if values.contains(value) {
+    return values
+  }
+  return values + [value]
+}
+
+fn remaining_names(
+  order: list<string>,
+  published: list<string>,
+  already_present: list<string>,
+  failed_name: string,
+) -> list<string> {
+  return order.filter(
+    { name -> name != failed_name && !published.contains(name) && !already_present.contains(name) },
+  )
+    .to_list()
+}
+
+fn failed_receipt(
+  version: string,
+  order: list<string>,
+  published: list<string>,
+  already_present: list<string>,
+  waiting: list<string>,
+  failure: PublishFailure,
+) -> PublishReceipt {
+  return {
+    ok: false,
+    version: version,
+    published: published,
+    already_present: already_present,
+    waiting: waiting,
+    failed: [failure],
+    remaining: remaining_names(order, published, already_present, failure.name),
+  }
+}
+
+fn wait_until_visible(
+  name: string,
+  version: string,
+  probe: fn(string, string) -> RegistryProbe,
+  wait: fn(int) -> nil,
+  backoff_ms: list<int>,
+) -> RegistryWait {
+  let last = probe(name, version)
+  if last.status == "visible" {
+    return {ok: true, waited: false, detail: "visible"}
+  }
+  for delay in backoff_ms {
+    wait(delay)
+    last = probe(name, version)
+    if last.status == "visible" {
+      return {ok: true, waited: true, detail: "visible"}
+    }
+  }
+  return {
+    ok: false,
+    waited: len(backoff_ms) > 0,
+    detail: last.detail ?? "registry entry did not become selectable",
+  }
+}
+
+/** Classify Cargo publication output without treating unknown failures as retryable. */
+pub fn publish_failure_category(output: string) -> PublishFailureCategory {
+  const text = output.lower()
+  if text.contains("already exists on crates.io index")
+    || (text.contains("crate version")
+    && text
+    .contains("already uploaded")) {
+    return "already_present"
+  }
+  if text.contains("429") || text.contains("too many requests") {
+    return "rate_limited"
+  }
+  if text.contains("packages remain in plan")
+    || text.contains(
+    "timeout while waiting for published dependencies",
+  )
+    || text.contains("timed out waiting for")
+    || text.contains(
+    "failed to select a version for the requirement",
+  ) {
+    return "propagation"
+  }
+  return "permanent"
+}
+
+/**
+ * Resume a workspace publication directly from the unpublished dependency DAG.
+ * Registry, Cargo, and waiting are injected so recovery tests never sleep.
+ */
+pub fn publish_recover(
+  packages: list<PublishPlanPackage>,
+  adapters: PublishAdapters,
+  options: PublishRecoveryOptions = {},
+) -> PublishReceipt {
+  const version = publish_plan_version(packages)
+  const order = publish_plan_order(packages)
+  const opts = options ?? {}
+  const backoff_ms = opts.backoff_ms ?? [2000, 5000, 10000, 20000, 30000, 60000]
+  const max_publish_attempts = opts.max_publish_attempts ?? 3
+  const rate_limit_delay_ms = opts.rate_limit_delay_ms ?? 120000
+  if max_publish_attempts <= 0 {
+    throw "publish recovery max_publish_attempts must be positive"
+  }
+  let published: list<string> = []
+  let already_present: list<string> = []
+  let waiting: list<string> = []
+  for name in order {
+    const package = package_by_name(packages, name)
+    const existing = adapters.probe(name, version)
+    if existing.status == "visible" {
+      already_present = already_present + [name]
+      continue
+    }
+    for dep in package.deps {
+      if !published.contains(dep) {
+        continue
+      }
+      const visibility = wait_until_visible(dep, version, adapters.probe, adapters.wait, backoff_ms)
+      if visibility.waited {
+        waiting = add_unique(waiting, dep)
+      }
+      if !visibility.ok {
+        return failed_receipt(
+          version,
+          order,
+          published,
+          already_present,
+          waiting,
+          {
+            name: name,
+            category: "propagation",
+            detail: "dependency " + dep + ": " + visibility.detail,
+          },
+        )
+      }
+    }
+    let attempt_number = 1
+    let completed = false
+    while attempt_number <= max_publish_attempts {
+      const attempt = adapters.publish(package)
+      if attempt.success {
+        published = published + [name]
+        completed = true
+        break
+      }
+      const output = attempt.output ?? "cargo publish failed without output"
+      const category = publish_failure_category(output)
+      if category == "already_present" || adapters.probe(name, version).status == "visible" {
+        already_present = already_present + [name]
+        completed = true
+        break
+      }
+      if category == "permanent" || attempt_number == max_publish_attempts {
+        return failed_receipt(
+          version,
+          order,
+          published,
+          already_present,
+          waiting,
+          {name: name, category: category, detail: truncate_text(output, 1000)},
+        )
+      }
+      if category == "rate_limited" {
+        adapters.wait(rate_limit_delay_ms)
+      } else {
+        for dep in package.deps {
+          if !published.contains(dep) {
+            continue
+          }
+          const visibility = wait_until_visible(
+            dep,
+            version,
+            adapters.probe,
+            adapters.wait,
+            backoff_ms,
+          )
+          if visibility.waited {
+            waiting = add_unique(waiting, dep)
+          }
+          if !visibility.ok {
+            return failed_receipt(
+              version,
+              order,
+              published,
+              already_present,
+              waiting,
+              {
+                name: name,
+                category: "propagation",
+                detail: "dependency " + dep + ": " + visibility.detail,
+              },
+            )
+          }
+        }
+      }
+      attempt_number = attempt_number + 1
+    }
+    if !completed {
+      return failed_receipt(
+        version,
+        order,
+        published,
+        already_present,
+        waiting,
+        {name: name, category: "permanent", detail: "publish attempts exhausted"},
+      )
+    }
+  }
+  return {
+    ok: true,
+    version: version,
+    published: published,
+    already_present: already_present,
+    waiting: waiting,
+    failed: [],
+    remaining: [],
+  }
+}
+
+fn crates_io_probe(name: string, version: string) -> RegistryProbe {
+  const response: {status: int, ...rest} = harness.net.get(
+    "https://crates.io/api/v1/crates/" + name + "/" + version,
+    {
+      headers: {"User-Agent": "harn-release-publish"},
+      timeout_ms: 15000,
+      retry: {max: 2, backoff_ms: 1000},
+    },
+  )
+  if response.status == 200 {
+    return {status: "visible"}
+  }
+  if response.status == 404 {
+    return {status: "missing"}
+  }
+  return {status: "error", detail: "crates.io returned HTTP " + to_string(response.status)}
+}
+
+fn command_output(result: dict) -> string {
+  return result.stdout + result.stderr
+}
+
+fn publish_argv(package: PublishPlanPackage, verify: bool, allow_dirty: bool) -> list<string> {
+  let args = ["cargo", "publish", "-p", package.name]
+  if !verify {
+    args = args + ["--no-verify"]
+  }
+  if allow_dirty {
+    args = args + ["--allow-dirty"]
+  }
+  return args
+}
+
+fn tree_requires_allow_dirty() -> bool {
+  const diff = command_run(["git", "diff", "--quiet", "--ignore-submodules", "HEAD", "--"])
+  if !diff.success {
+    return true
+  }
+  return harness.fs.exists("crates/harn-cli/generated/cli-bytecode-manifest.json")
+    || harness.fs.exists(
+    "crates/harn-cli/portal-dist",
+  )
+}
+
+fn load_publish_packages() -> list<PublishPlanPackage> {
+  const metadata = command_run(["cargo", "metadata", "--format-version", "1", "--no-deps"])
+  if !metadata.success {
+    throw "cargo metadata failed: " + command_output(metadata)
+  }
+  return publish_plan_packages_from_metadata(json_parse(metadata.stdout))
+}
+
+fn arg_spec() {
+  return parser(
+    {name: "publish", args: [{kind: "flag", name: "dry_run", long: "--dry-run", parse: "bool"}]},
+  )
+}
+
+fn print_receipt(receipt: PublishReceipt) -> nil {
+  harness.stdio.println(json_stringify(receipt))
+  return nil
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println("usage: harn run --no-sandbox scripts/publish.harn -- [--dry-run]")
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    exit(2)
+  }
+  const dry_run = unwrap(parsed_result).options.dry_run ?? false
+  const packages = load_publish_packages()
+  const version = publish_plan_version(packages)
+  const verify = harness.env.get("HARN_PUBLISH_VERIFY") == "1"
+  const allow_dirty = tree_requires_allow_dirty()
+  harness.stdio.println("Publishing workspace at version " + version)
+  if dry_run {
+    let args = ["cargo", "publish", "--workspace", "--dry-run", "--no-verify"]
+    if allow_dirty {
+      args = args + ["--allow-dirty"]
+    }
+    const result = command_run(args)
+    harness.stdio.write(result.stdout)
+    harness.stdio.write(result.stderr)
+    if !result.success {
+      exit(result.exit_code ?? 1)
+    }
+    return nil
+  }
+  const adapters: PublishAdapters = {
+    probe: crates_io_probe,
+    publish: { package ->
+      const result = command_run(publish_argv(package, verify, allow_dirty))
+      harness.stdio.write(result.stdout)
+      harness.stdio.write(result.stderr)
+      return {success: result.success, output: command_output(result)}
+    },
+    wait: { delay_ms ->
+      harness.clock.sleep_ms(delay_ms)
+      return nil
+    },
+  }
+  const receipt = publish_recover(packages, adapters)
+  print_receipt(receipt)
+  if !receipt.ok {
+    exit(1)
+  }
+  harness.stdio.println("Workspace publish complete")
+  return nil
+}

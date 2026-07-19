@@ -76,7 +76,11 @@ fn __front_matter_fragment(harness: Harness, path, text) {
   const meta_text = substring(rest, 0, marker)
   const body = substring(rest, marker + len("\n---\n"))
   const meta = toml_parse(meta_text)
-  return __fragment_from_config(harness, meta + {body: body, path: path, source_path: path}, dirname(path))
+  return __fragment_from_config(
+    harness,
+    meta + {body: body, path: path, source_path: path},
+    dirname(path),
+  )
 }
 
 fn __load_one(harness: Harness, path) {
@@ -90,7 +94,10 @@ fn __load_one(harness: Harness, path) {
       const base_dir = dirname(path)
       let library = __empty_library()
       for fragment_config in data.prompt_fragments {
-        library = prompt_library_define(library, __fragment_from_config(harness, fragment_config, base_dir))
+        library = prompt_library_define(
+          library,
+          __fragment_from_config(harness, fragment_config, base_dir),
+        )
       }
       return library
     }
@@ -304,7 +311,11 @@ fn __choose_kmeans(points, options) {
   const requested = options?.k
   if requested != nil {
     const result = kmeans(points, requested, {max_iterations: options?.max_iterations ?? 100})
-    return {k: requested, result: result, silhouette: __silhouette(points, result.assignments, requested)}
+    return {
+      k: requested,
+      result: result,
+      silhouette: __silhouette(points, result.assignments, requested),
+    }
   }
   if n < 4 {
     const result = kmeans(points, 1, {max_iterations: options?.max_iterations ?? 100})
@@ -556,7 +567,11 @@ pub fn prompt_library_suggest(library, ctx = nil) {
 pub fn prompt_library_api(library) {
   return {
     inject: fn(id, bindings = nil) { return prompt_library_inject(library, id, bindings) },
-    inject_cluster: fn(filters = nil, bindings = nil) { return prompt_library_inject_cluster(library, filters, bindings) },
+    inject_cluster: fn(filters = nil, bindings = nil) { return prompt_library_inject_cluster(
+      library,
+      filters,
+      bindings,
+    ) },
     payload: fn(id, bindings = nil) { return prompt_library_payload(library, id, bindings) },
     suggest: fn(ctx = nil) { return prompt_library_suggest(library, ctx) },
     list: fn(filters = nil) { return prompt_library_list(library, filters) },
@@ -583,8 +598,7 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
     if tenant == nil || type_of(conversation) != "dict" || conversation?.tenant_id == tenant {
       const text = __conversation_text(conversation)
       const snippet = __token_prefix(text, max_prefix_tokens)
-      records = records
-        .push(
+      records = records.push(
         {
           id: __conversation_id(conversation, index),
           tenant_id: if type_of(conversation) == "dict" {
@@ -631,8 +645,7 @@ pub fn prompt_library_hotspots(conversations, options = nil) {
         if monthly >= min_monthly_savings {
           const scope = tenant ?? "default"
           const id = "kmeans-" + scope + "-" + substring(sha256(prefix.text), 0, 12)
-          proposals = proposals
-            .push(
+          proposals = proposals.push(
             prompt_fragment(
               id,
               prefix.text,
@@ -671,8 +684,7 @@ pub fn prompt_library_review_queue(library, filters = nil) {
   const review_status = filters?.status ?? "pending_review"
   const review_filters = base_filters + {provenance: "kmeans", status: review_status}
   for fragment in prompt_library_list(library, review_filters) {
-    queue = queue
-      .push(
+    queue = queue.push(
       {
         id: fragment.id,
         title: fragment.title,

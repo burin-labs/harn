@@ -788,6 +788,7 @@ impl TypeChecker {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 let refs = self.extract_refinements(condition, scope);
                 let mut then_scope = scope.child();

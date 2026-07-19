@@ -1455,7 +1455,7 @@ fn test_post_loop_read_sees_invalidated_narrowing() {
 #[test]
 fn test_type_of_narrows_full_runtime_tag_vocabulary() {
     // Tags from the canonical runtime registry (duration, set, decimal, …)
-    // narrow the same way the historical whitelist (list, dict, …) did.
+    // narrow the same way the historical allowlist (list, dict, …) did.
     // Regression: `type_of(x) == "duration"` silently failed to narrow
     // because the typechecker kept its own 12-tag copy of the registry.
     let errs = errors(

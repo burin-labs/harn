@@ -38,6 +38,22 @@ impl crate::agent_events::AgentEventSink for CapturingAgentEventSink {
         if event.session_id() != self.session_id {
             return;
         }
+        // Fixture records and queue checkpoints are harness audit telemetry,
+        // not application checkpoints. Keep them on the external event
+        // stream without changing the stable `agent_capture_events` contract
+        // that captures events a Harn program emitted for its own workflow.
+        let harness_mock_telemetry = match event {
+            crate::agent_events::AgentEvent::TypedCheckpoint { checkpoint, .. } => {
+                matches!(
+                    checkpoint.get("kind").and_then(serde_json::Value::as_str),
+                    Some("llm_mock_fixture_consumption") | Some("llm_mock_queue")
+                )
+            }
+            _ => false,
+        };
+        if harness_mock_telemetry {
+            return;
+        }
         if let Ok(mut events) = self.events.lock() {
             events.push(event.clone());
         }

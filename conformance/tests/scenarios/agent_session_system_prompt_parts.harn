@@ -16,7 +16,10 @@ pipeline default() {
       const direct = llm_call(
         "direct prompt",
         "Direct base.",
-        {provider: "mock", system_preamble: system_preamble("Direct preamble.", {label: "Direct contract"})},
+        {
+          provider: "mock",
+          system_preamble: system_preamble("Direct preamble.", {label: "Direct contract"}),
+        },
       )
       __io_println(len(transcript_messages(direct.transcript)))
       __io_println(len(events_by_kind(direct.transcript, "system_prompt")))
@@ -28,7 +31,9 @@ pipeline default() {
   with_llm_script(
     [],
     { ->
-      const sid = "system-prompt-continuation-session"
+      // Durable session journals outlive a fixture process; isolate the
+      // continuation scenario from prior runs with a fresh id.
+      const sid = "system-prompt-continuation-session-" + uuid()
       const opts = with_system_prompt_parts(
         {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
         [
@@ -60,7 +65,9 @@ pipeline default() {
       )
       __io_println(agent_session_system_prompt(sid)?.contains("Persistent contract."))
       __io_println(
-        resumed_without_prompt.transcript.metadata.system_prompt.content.contains("Persistent contract."),
+        resumed_without_prompt.transcript.metadata.system_prompt.content.contains(
+          "Persistent contract.",
+        ),
       )
     },
   )

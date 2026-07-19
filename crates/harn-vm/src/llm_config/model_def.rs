@@ -644,7 +644,7 @@ pub struct ModelLadderDef {
 /// optional: when omitted it is inferred from the model id (or the call's base
 /// provider) at lowering time.
 ///
-/// `options` carries per-step sampling/timeout overrides (same whitelist as
+/// `options` carries per-step sampling/timeout overrides (same allowlist as
 /// inline `models:` steps); catalog ladders honor them identically instead of
 /// silently dropping them. `when`, `family`, and `capabilities` are
 /// informational to Harn's own ladder lowering (they do not affect transport
@@ -664,7 +664,7 @@ pub struct ModelLadderStepDef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<String>,
     /// Per-step sampling/timeout overrides (temperature, max_tokens, top_p,
-    /// seed, timeout_ms, fast, ...), same whitelist as inline `models:` steps.
+    /// seed, timeout_ms, fast, ...), same allowlist as inline `models:` steps.
     /// Absent from serialized output when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<BTreeMap<String, toml::Value>>,

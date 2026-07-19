@@ -10,7 +10,11 @@ pipeline main(task) {
   const public_messages = agent_session_snapshot(public_session).messages
   __io_println(public_messages[0].role)
   __io_println(!contains(public_messages[0].content, "runtime_feedback"))
-  const control = agent_session_init("task", nil, {provider: "mock", session_id: "prefill-feedback-host"})
+  const control = agent_session_init(
+    "task",
+    nil,
+    {provider: "mock", session_id: "prefill-feedback-host"},
+  )
   agent_session_inject_feedback(control.session_id, "prefill_assistant", "<done>##DONE##</done>")
   const host_messages = agent_session_snapshot(control.session_id).messages
   __io_println(host_messages[1].role)

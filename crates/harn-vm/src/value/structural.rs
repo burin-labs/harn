@@ -241,6 +241,7 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Channel(_), VmValue::Channel(_)) => false, // channels are never equal
         (VmValue::Rng(_), VmValue::Rng(_)) => false,
         (VmValue::SyncPermit(_), VmValue::SyncPermit(_)) => false,
+        (VmValue::ResourceGuard(_), VmValue::ResourceGuard(_)) => false,
         (VmValue::Atomic(a), VmValue::Atomic(b)) => {
             a.value.load(Ordering::SeqCst) == b.value.load(Ordering::SeqCst)
         }

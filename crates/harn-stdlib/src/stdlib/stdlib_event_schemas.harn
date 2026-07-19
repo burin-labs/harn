@@ -178,4 +178,17 @@ type GitHubInstallationRepositoriesEventPayload = {
  * Referencing every payload record here also keeps this schema module free of
  * `unused-type` lint noise.
  */
-type GitHubEventPayload = GitHubIssuesEventPayload | GitHubPullRequestEventPayload | GitHubIssueCommentEventPayload | GitHubPullRequestReviewEventPayload | GitHubPushEventPayload | GitHubWorkflowRunEventPayload | GitHubDeploymentStatusEventPayload | GitHubCheckRunEventPayload | GitHubCheckSuiteEventPayload | GitHubStatusEventPayload | GitHubMergeGroupEventPayload | GitHubInstallationEventPayload | GitHubInstallationRepositoriesEventPayload | GitHubEventCommon
+type GitHubEventPayload = GitHubIssuesEventPayload \
+  | GitHubPullRequestEventPayload \
+  | GitHubIssueCommentEventPayload \
+  | GitHubPullRequestReviewEventPayload \
+  | GitHubPushEventPayload \
+  | GitHubWorkflowRunEventPayload \
+  | GitHubDeploymentStatusEventPayload \
+  | GitHubCheckRunEventPayload \
+  | GitHubCheckSuiteEventPayload \
+  | GitHubStatusEventPayload \
+  | GitHubMergeGroupEventPayload \
+  | GitHubInstallationEventPayload \
+  | GitHubInstallationRepositoriesEventPayload \
+  | GitHubEventCommon

@@ -119,10 +119,14 @@ pub fn strip_block(block, fn_name) -> dict {
   while j < m {
     const line = kept[j]
     const is_blank_star = _block_line_content(line) == "" && lstrip_ws(line).starts_with("*")
-      && !lstrip_ws(line).starts_with("*/")
+      && !lstrip_ws(
+      line,
+    )
+      .starts_with("*/")
     if is_blank_star {
       const prev_blank_or_open = len(cleaned) == 0
-        || _block_line_content(cleaned[len(cleaned) - 1]) == ""
+        || _block_line_content(cleaned[len(cleaned) - 1])
+        == ""
       const next_is_close = j + 1 < m && lstrip_ws(kept[j + 1]).starts_with("*/")
       const last_is_open = len(cleaned) > 0
         && lstrip_ws(cleaned[len(cleaned) - 1]).starts_with("/**")

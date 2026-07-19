@@ -1142,7 +1142,7 @@ pub(crate) fn ensure_manifest_exists(manifest_path: &Path) -> Result<String, Pac
     Ok("[package]\nname = \"my-project\"\nversion = \"0.1.0\"\n".to_string())
 }
 
-pub(crate) fn upsert_dependency_in_manifest(
+pub(crate) fn upsert_dependency_in_manifest_locked(
     manifest_path: &Path,
     alias: &str,
     dependency: &Dependency,
@@ -1177,10 +1177,10 @@ pub(crate) fn upsert_dependency_in_manifest(
     } else {
         lines.insert(end, rendered);
     }
-    write_manifest_content(manifest_path, &(lines.join("\n") + "\n"))
+    write_manifest_content_locked(manifest_path, &(lines.join("\n") + "\n"))
 }
 
-pub(crate) fn remove_dependency_from_manifest(
+pub(crate) fn remove_dependency_from_manifest_locked(
     manifest_path: &Path,
     alias: &str,
 ) -> Result<bool, PackageError> {
@@ -1211,7 +1211,7 @@ pub(crate) fn remove_dependency_from_manifest(
         })
         .collect();
     if removed {
-        write_manifest_content(manifest_path, &(lines.join("\n") + "\n"))?;
+        write_manifest_content_locked(manifest_path, &(lines.join("\n") + "\n"))?;
     }
     Ok(removed)
 }
@@ -1229,7 +1229,7 @@ pub(crate) fn install_packages_impl(
     )
 }
 
-pub(crate) fn install_packages_in(
+pub(crate) fn install_packages_in_locked(
     workspace: &PackageWorkspace,
     frozen: bool,
     refetch: Option<&str>,
@@ -1328,10 +1328,10 @@ fn print_install_error_json(action: &str, error: &PackageError) {
         serde_json::to_string_pretty(&body).unwrap_or_default()
     );
 }
-
 pub fn lock_packages() {
     let result = (|| -> Result<usize, PackageError> {
         let workspace = PackageWorkspace::from_current_dir()?;
+        let _mutation_lock = acquire_package_mutation_lock(&workspace)?;
         let ctx = workspace.load_manifest_context()?;
         let existing = LockFile::load(&ctx.lock_path())?;
         let lock = build_lockfile(&workspace, &ctx, existing.as_ref(), None, true, true, false)?;
@@ -1347,7 +1347,6 @@ pub fn lock_packages() {
         }
     }
 }
-
 pub fn update_packages(alias: Option<&str>, all: bool, json: bool) {
     let result = PackageWorkspace::from_current_dir()
         .and_then(|workspace| update_packages_in(&workspace, alias, all));
@@ -1359,6 +1358,7 @@ pub(crate) fn update_packages_in(
     alias: Option<&str>,
     all: bool,
 ) -> Result<usize, PackageError> {
+    let _mutation_lock = acquire_package_mutation_lock(workspace)?;
     if !all && alias.is_none() {
         return Err("specify a dependency alias or pass --all"
             .to_string()
@@ -1392,7 +1392,6 @@ fn print_update_packages_result(result: Result<usize, PackageError>, json: bool)
         }
     }
 }
-
 pub fn remove_package(alias: &str) {
     let result = PackageWorkspace::from_current_dir()
         .and_then(|workspace| remove_package_in(&workspace, alias));
@@ -1403,6 +1402,7 @@ pub(crate) fn remove_package_in(
     workspace: &PackageWorkspace,
     alias: &str,
 ) -> Result<bool, PackageError> {
+    let _mutation_lock = acquire_package_mutation_lock(workspace)?;
     validate_package_alias(alias)?;
     let ctx = workspace.load_manifest_context()?;
     let removed = remove_dependency_from_manifest(&ctx.manifest_path(), alias)?;
@@ -1642,7 +1642,6 @@ pub fn add_package_with_registry(
         }
     }
 }
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn add_package_to(
     workspace: &PackageWorkspace,
@@ -1655,6 +1654,7 @@ pub(crate) fn add_package_to(
     local_path: Option<&str>,
     registry: Option<&str>,
 ) -> Result<(String, usize), PackageError> {
+    let _mutation_lock = acquire_package_mutation_lock(workspace)?;
     let manifest_path = workspace.manifest_dir().join(MANIFEST);
     let (alias, dependency) = normalize_add_request_in(
         workspace,
@@ -1670,7 +1670,7 @@ pub(crate) fn add_package_to(
         },
     )?;
     upsert_dependency_in_manifest(&manifest_path, &alias, &dependency)?;
-    let installed = install_packages_in(workspace, false, None, false)?;
+    let installed = install_packages_in_locked(workspace, false, None, false)?;
     Ok((alias, installed))
 }
 

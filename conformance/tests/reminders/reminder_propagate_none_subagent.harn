@@ -7,10 +7,12 @@ fn parent_tools(child_session) {
     "delegate_child",
     "Run a child sub-agent",
     {
-      handler: { _args -> sub_agent_run(
-        "Child task.",
-        {provider: "mock", session_id: child_session, max_iterations: 1, done_judge: nil},
-      ) },
+      handler: { _args ->
+        sub_agent_run(
+          "Child task.",
+          {provider: "mock", session_id: child_session, max_iterations: 1, done_judge: nil},
+        )
+      },
       parameters: {},
       returns: {type: "object"},
     },
@@ -49,7 +51,10 @@ pipeline main() {
           done_judge: nil,
         },
       )
-      const child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
+      const child_reminders = transcript_events_by_kind(
+        agent_session_snapshot(child),
+        "system_reminder",
+      )
       __io_println(len(child_reminders))
     },
   )

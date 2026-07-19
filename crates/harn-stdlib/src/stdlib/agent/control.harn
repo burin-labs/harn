@@ -174,7 +174,9 @@ fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
   const action = command?.action ?? "none"
   if action != "none" && action != "extend" && action != "stop" {
     throw "agent_loop: loop_control action must be \"none\", \"extend\", or \"stop\"; got "
-      + to_string(action)
+      + to_string(
+      action,
+    )
   }
   const by = command?.by ?? 0
   if type_of(by) != "int" {
@@ -184,7 +186,13 @@ fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
   if type_of(until) != "int" {
     throw "agent_loop: loop_control `until` must be an integer; got " + type_of(until)
   }
-  return {action: action, by: by, until: until, reason: command?.reason ?? "", status: command?.status ?? ""}
+  return {
+    action: action,
+    by: by,
+    until: until,
+    reason: command?.reason ?? "",
+    status: command?.status ?? "",
+  }
 }
 
 /**
@@ -194,7 +202,11 @@ fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_loop_control_invoke(opts, budget: AgentLoopBudget, state: AgentLoopState) -> AgentLoopCommand {
+pub fn agent_loop_control_invoke(
+  opts,
+  budget: AgentLoopBudget,
+  state: AgentLoopState,
+) -> AgentLoopCommand {
   const policy = opts?.loop_control
   if policy != nil {
     return __agent_interpret_loop_command(policy(state))
@@ -237,8 +249,7 @@ fn __agent_record_budget_decision(
   reason: string,
   status: string,
 ) -> list<AgentLoopBudgetDecision> {
-  return decisions
-    .push(
+  return decisions.push(
     {
       iteration: iteration,
       action: action,
@@ -304,7 +315,12 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
   // suppresses the extension when there WAS activity to begin with — a thrash —
   // never when there is genuinely no activity (that case is already "no progress").
   const no_net_advance = progress_changed && (args.progress_no_net_advance ?? false)
-  const progress_summary = __agent_progress_summary_text(completion_vetoed, tool_count, visible_text, no_net_advance)
+  const progress_summary = __agent_progress_summary_text(
+    completion_vetoed,
+    tool_count,
+    visible_text,
+    no_net_advance,
+  )
   return __agent_loop_state(
     {
       iteration: args.iteration,

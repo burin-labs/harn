@@ -33,7 +33,10 @@ fn exercise_backend(label, store, expect_kind) {
   store.set("secondary", secondary)
   require_token(label + ".get(primary)", store.get("primary"), "tok-primary")
   require_token(label + ".get(secondary)", store.get("secondary"), "tok-secondary")
-  const locked = store.with_refresh_lock("primary", { -> store.get("primary").access_token + "-locked" })
+  const locked = store.with_refresh_lock(
+    "primary",
+    { -> store.get("primary").access_token + "-locked" },
+  )
   if locked != "tok-primary-locked" {
     throw label + ".with_refresh_lock: expected tok-primary-locked, got " + to_string(locked)
   }
@@ -123,7 +126,10 @@ fn exercise_custom() {
       id: "test-vault-locked",
     },
   )
-  const locked_result = locked.with_refresh_lock("vault-key", { -> locked_inner.get("lock-marker").access_token })
+  const locked_result = locked.with_refresh_lock(
+    "vault-key",
+    { -> locked_inner.get("lock-marker").access_token },
+  )
   if locked_result != "vault-key-via-custom-lock" {
     throw "custom.with_refresh_lock: hook did not wrap the body, got " + to_string(locked_result)
   }
@@ -202,8 +208,7 @@ fn exercise_namespace(harness: Harness) {
   require_token("namespace.file", s.get("ns"), "ns-tok")
   s.delete("ns")
   const inner = memory()
-  const cs = ns
-    .custom(
+  const cs = ns.custom(
     {
       get: { key -> inner.get(key) },
       set: { key, tok, ttl = nil -> inner.set(key, tok, ttl) },

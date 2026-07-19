@@ -35,7 +35,8 @@ pipeline default() {
         ) },
       )
       const judges = judge_events(captured.events)
-      require len(judges) == 2, "done_judge cadence should fire on every second completion candidate"
+      require len(judges) == 2,
+        "done_judge cadence should fire on every second completion candidate"
       __io_println(captured.result.status)
       __io_println(captured.result.visible_text)
       __io_println(captured.result.llm.iterations)

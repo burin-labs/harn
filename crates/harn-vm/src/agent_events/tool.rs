@@ -192,6 +192,9 @@ impl ToolCallErrorCategory {
             // is ever recorded as a tool event, `HostBridgeError` is the honest
             // wire bucket.
             | Internal::Internal
+            // A host environment/infrastructure gap (e.g. a toolchain root
+            // outside the sandbox) is host-side, not the tool's fault.
+            | Internal::Environment
             | Internal::Generic => Self::HostBridgeError,
         }
     }

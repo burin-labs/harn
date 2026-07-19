@@ -27,14 +27,15 @@ compiler_tag : u8        bitmask of active CompilerOptions
 kind         : u8        1 = entry chunk, 2 = module artifact
 source_hash  : [u8; 32]   sha256(entry source)
 import_hash  : [u8; 32]   sha256(sorted import graph contents)
-payload      : bincode-serialized payload (Chunk or ModuleArtifact, per kind)
+payload      : postcard-serialized payload (Chunk or ModuleArtifact, per kind)
 ```
 
 Mismatch on any of magic / schema / harn_version / source_hash /
 import_hash triggers a silent recompile and rewrite. A future Harn
 release that bumps the schema can simply increment `SCHEMA_VERSION`
 in `crates/harn-vm/src/bytecode_cache.rs`; older binaries reject the
-file as a header mismatch instead of panicking inside `bincode`.
+file as a header mismatch instead of attempting to decode an incompatible
+payload.
 
 ## Cache directory
 

@@ -13,7 +13,11 @@ pipeline default() {
   const RB = ResumeBy()
   pipeline_on_finish(
     { harness, return_value ->
-      const suspension = {handle: "worker://triage/parent", reason: "waiting on parent decision", conditions: nil}
+      const suspension = {
+        handle: "worker://triage/parent",
+        reason: "waiting on parent decision",
+        conditions: nil,
+      }
       const result = RB.parent_llm(harness, suspension)
       const audits = lifecycle_audit_log_take()
       harness.stdio.println("handled=" + to_string(result.handled))

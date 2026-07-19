@@ -17,7 +17,11 @@ pipeline test(task) {
   __io_println(json_validate("whatever", any_schema))
   __io_println(json_validate(42, any_schema))
   // Dict with required keys
-  const schema = {type: "dict", required: ["name", "age"], properties: {name: {type: "string"}, age: {type: "int"}}}
+  const schema = {
+    type: "dict",
+    required: ["name", "age"],
+    properties: {name: {type: "string"}, age: {type: "int"}},
+  }
   const data = {name: "alice", age: 30}
   __io_println(json_validate(data, schema))
   // Nested dict validation

@@ -111,7 +111,11 @@ pipeline test(task) {
   const int_overflow = "999999999999999999999999999999999999999"
   assert_eq(
     parse(spec, ["input.harn", "--count", int_overflow]),
-    argv_failure("invalid_value", "count", "argument 'count' expected int, got '" + int_overflow + "'"),
+    argv_failure(
+      "invalid_value",
+      "count",
+      "argument 'count' expected int, got '" + int_overflow + "'",
+    ),
   )
   assert_eq(
     parse(spec, ["input.harn", "--count", "1", "--ratio", "1e999999", "--enabled", "true"]),
@@ -124,14 +128,25 @@ pipeline test(task) {
     },
   )
   assert_eq(
-    parse_typed(extra_spec, ["input.harn", "--extra"], schema_closed_object({input: schema_string()})),
+    parse_typed(
+      extra_spec,
+      ["input.harn", "--extra"],
+      schema_closed_object({input: schema_string()}),
+    ),
     Err(
       {
         kind: "cli_parse_failure",
         stage: "schema",
         code: "schema_mismatch",
         message: "at root: unexpected key 'extra'",
-        issues: [{stage: "schema", code: "schema.validation", message: "unexpected key 'extra'", path: "root"}],
+        issues: [
+          {
+            stage: "schema",
+            code: "schema.validation",
+            message: "unexpected key 'extra'",
+            path: "root",
+          },
+        ],
       },
     ),
   )
@@ -160,7 +175,16 @@ pipeline test(task) {
       parser(
         {
           name: "required-default",
-          args: [{name: "count", kind: "flag", long: "--count", required: true, parse: "int", default: 1}],
+          args: [
+            {
+              name: "count",
+              kind: "flag",
+              long: "--count",
+              required: true,
+              parse: "int",
+              default: 1,
+            },
+          ],
         },
       ),
       [],
@@ -184,14 +208,23 @@ pipeline test(task) {
   const alias_precedence = parser(
     {
       name: "alias-precedence",
-      args: [{name: "count", kind: "positional", parse: "int"}, {name: "lucky", kind: "switch", short: "-7"}],
+      args: [
+        {name: "count", kind: "positional", parse: "int"},
+        {name: "lucky", kind: "switch", short: "-7"},
+      ],
     },
   )
-  assert_eq(parse(alias_precedence, ["-7", "-2"]), Ok({options: {lucky: true, count: -2}, rest: []}))
+  assert_eq(
+    parse(alias_precedence, ["-7", "-2"]),
+    Ok({options: {lucky: true, count: -2}, rest: []}),
+  )
   const split_alias_spec = parser(
     {
       name: "split-alias",
-      args: [{name: "output", kind: "flag", long: "--output"}, {name: "json", kind: "switch", long: "--json"}],
+      args: [
+        {name: "output", kind: "flag", long: "--output"},
+        {name: "json", kind: "switch", long: "--json"},
+      ],
     },
   )
   assert_eq(
@@ -204,28 +237,41 @@ pipeline test(task) {
   )
   assert_eq(
     assert_throws(
-      { -> parser(
-        {
-          name: "bad-alias",
-          args: [{name: "first", kind: "switch", long: "--same"}, {name: "second", kind: "switch", long: "--same"}],
-        },
-      ) },
+      { ->
+        parser(
+          {
+            name: "bad-alias",
+            args: [
+              {name: "first", kind: "switch", long: "--same"},
+              {name: "second", kind: "switch", long: "--same"},
+            ],
+          },
+        )
+      },
     ),
     "std/cli/argparse: duplicate flag alias '--same'",
   )
   const invalid_specs = [
     {
-      spec: {name: "bad", args: [{name: "count", kind: "flag", long: "--count", parse: "int", default: "1"}]},
+      spec: {
+        name: "bad",
+        args: [{name: "count", kind: "flag", long: "--count", parse: "int", default: "1"}],
+      },
       message: "std/cli/argparse: default for arg 'count' must be int",
     },
     {
-      spec: {name: "bad", args: [{name: "verbose", kind: "switch", long: "--verbose", default: "yes"}]},
+      spec: {
+        name: "bad",
+        args: [{name: "verbose", kind: "switch", long: "--verbose", default: "yes"}],
+      },
       message: "std/cli/argparse: default for arg 'verbose' must be bool",
     },
     {
       spec: {
         name: "bad",
-        args: [{name: "count", kind: "flag", long: "--count", parse: "int", multi: true, default: 1}],
+        args: [
+          {name: "count", kind: "flag", long: "--count", parse: "int", multi: true, default: 1},
+        ],
       },
       message: "std/cli/argparse: default for arg 'count' must be list<int>",
     },
@@ -239,9 +285,13 @@ pipeline test(task) {
     {
       spec: {
         name: "bad",
-        args: [{name: "maybe", kind: "positional", required: false}, {name: "required", kind: "positional"}],
+        args: [
+          {name: "maybe", kind: "positional", required: false},
+          {name: "required", kind: "positional"},
+        ],
       },
-      message: "std/cli/argparse: required positional arg 'required' cannot follow an optional positional",
+      message:
+        "std/cli/argparse: required positional arg 'required' cannot follow an optional positional",
     },
   ]
   for invalid_spec in invalid_specs {

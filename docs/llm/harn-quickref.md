@@ -516,7 +516,8 @@ Common operators:
 | `stream.throttle(s, per_sec)` / `stream.debounce(s, window_ms)` | Basic emission pacing and burst coalescing. |
 
 `llm_stream_call(prompt, system?, options?)` returns
-`Stream<{delta, visible_delta, partial, role, finish_reason}>`. It accepts the
+`Stream<{delta, visible_delta, partial, role, stop_reason}>` (typed as
+`LlmStreamChunk` from `std/llm/envelope`). It accepts the
 same options as `llm_call`; the `stream` option is still only the provider
 transport toggle. Use `visible_delta` for UI rendering because it hides open
 internal `<think>` blocks. Breaking out of consumption drops the stream and
@@ -1123,13 +1124,20 @@ for source-controlled fragments no typed helper covers.
 
 ```harn
 const response = llm_call(prompt, system, options)
-log(response.prose)          // unwrapped prose (text minus tags)
-log(response.text)           // raw provider text (may include tags)
-log(response.canonical_text) // canonical tagged reconstruction
-log(response.input_tokens)
-log(response.output_tokens)
+log(response.text)           // the public answer (after tool/protocol projection)
+log(response.raw_text)       // pre-projection source (protocol tags intact)
+log(response.visible_text)   // sanitized human-visible output
+log(response.canonical_text) // canonical replay form of a tagged response
+log(response.usage.input_tokens)
+log(response.usage.output_tokens)
+log(response.outcome.kind)   // "complete" | "tool_use" | "truncated" | "refused" | "paused" | "empty"
 log(response.logprobs)       // present when requested and returned
 ```
+
+All call accounting lives under `usage` and the typed `outcome`
+classifies what the call produced — branch on `outcome`, never on the
+provider-native `stop_reason`. The full contract is `LlmResponse` from
+`std/llm/envelope`.
 
 ### `llm_call` options
 
@@ -1144,6 +1152,7 @@ from `std/agent/options`.
 | `provider` | string | `"auto"` | Explicit provider wins. `"auto"` infers from `model`; see the resolution table below. |
 | `model` | string | (inferred) | Use catalog aliases such as `local-gemma4-e4b` for OpenAI-compatible local servers; use `ollama:gemma4:e4b` for Ollama. |
 | `model_role` | string | nil | Fill missing call options from `[model_roles.<role>]` before normal routing. Explicit options win. `model_role: "merge"` / `"fast_apply"` also reads `HARN_LLM_MERGE_*` and `HARN_LLM_FAST_APPLY_*` provider/model/route-policy overrides. |
+| `mock_scope` | string | `"default"` | Logical purpose bucket used only by deterministic mock-fixture replay. V1 fixtures match it before optional `default` fallback; real providers ignore it. |
 | `max_tokens` | int | 16384 | |
 | `temperature` | float | provider default | |
 | `logprobs` | bool | false | Request token log probabilities when the selected provider route supports them. |
@@ -1748,7 +1757,7 @@ const r = llm_call(prompt, sys, {
   output_format: {kind: "json_schema", schema: schema, strict: true},
 })
 log(r.data.verdict)
-log(r.input_tokens)
+log(r.usage.input_tokens)
 ```
 
 Schema-as-type (a `type` alias drives both the schema and the
@@ -3987,7 +3996,8 @@ budget behavior without forking the loop:
 
 ```harn,ignore
 import { AgentLoopOptions } from "std/agent/options"
-import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
+import {default_llm_caller} from "std/llm/caller"
+import {with_retry, with_fallback, compose} from "std/llm/handlers"
 
 const caller = compose([
   with_retry({max_attempts: 4, backoff: "exponential"}),

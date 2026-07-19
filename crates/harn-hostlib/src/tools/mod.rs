@@ -46,12 +46,13 @@ mod cancel_handle;
 mod diagnostics;
 mod file_io;
 mod git;
-mod inspect_test_results;
+pub(crate) mod inspect_test_results;
 mod lang;
+mod list_handles;
 pub mod long_running;
 mod manage_packages;
 mod outline;
-mod payload;
+pub(crate) mod payload;
 pub mod permissions;
 mod proc;
 mod read_command_output;
@@ -60,7 +61,7 @@ mod run_build_command;
 mod run_command;
 pub(crate) use run_command::policy_blocked_response as policy_blocked_run_command_response;
 pub(crate) use run_command::request_is_background as run_command_request_is_background;
-mod run_test;
+pub(crate) mod run_test;
 mod search;
 mod test_parsers;
 mod toolchain_facts;
@@ -162,6 +163,12 @@ impl HostlibCapability for ToolsCapability {
             cancel_handle::NAME,
             "cancel_handle",
             cancel_handle::handle,
+        );
+        registry.register_gated_fn(
+            "tools",
+            list_handles::NAME,
+            "list_handles",
+            list_handles::handle,
         );
         registry.register_gated_fn(
             "tools",

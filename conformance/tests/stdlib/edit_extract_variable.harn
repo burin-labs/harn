@@ -26,10 +26,13 @@ pipeline default() {
   )
   harness.fs.mkdir(root)
   // 1) Rust dry-run: preview the extraction without touching disk.
-  const rs_body = "fn calc() -> i64 {\n    let result = compute(2) + compute(3);\n    return result;\n}\n"
+  const rs_body =
+    "fn calc() -> i64 {\n    let result = compute(2) + compute(3);\n    return result;\n}\n"
   const rs_path = write_fixture(root, "calc.rs", rs_body)
   const rs_range = range_of(rs_body, 1, "compute(2)")
-  const preview = edit_extract_variable({path: rs_path, range: rs_range, new_name: "first", dry_run: true})
+  const preview = edit_extract_variable(
+    {path: rs_path, range: rs_range, new_name: "first", dry_run: true},
+  )
   __io_println(preview.result)
   __io_println(preview.ok)
   __io_println(preview.dry_run)
@@ -60,7 +63,11 @@ pipeline default() {
   // 4) Unsupported language: Java has no inferable local-declaration form.
   const java_path = write_fixture(root, "Calc.java", "int x = compute(2) + compute(3);\n")
   const unsupported = edit_extract_variable(
-    {path: java_path, range: {start_line: 0, start_col: 8, end_line: 0, end_col: 18}, new_name: "first"},
+    {
+      path: java_path,
+      range: {start_line: 0, start_col: 8, end_line: 0, end_col: 18},
+      new_name: "first",
+    },
   )
   __io_println(unsupported.result)
   __io_println(unsupported.errors[0].code)

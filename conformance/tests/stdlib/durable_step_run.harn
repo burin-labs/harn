@@ -2,13 +2,15 @@ import "../_common"
 
 pipeline default() {
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
   const root = path_join(harness.fs.temp_dir(), "harn-durable-step-" + uuid_v7())
   const state = path_join(root, "state")
   const script = path_join(root, "durable_step_child.harn")
   harness.fs.mkdir(root)
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     script,
     "fn main(harness: Harness) {\n"
       + "  let counter = path_join(cwd(), \"counter.txt\")\n"
@@ -27,9 +29,36 @@ pipeline default() {
       + "  __io_println(\"records=\" + to_string(len(records)))\n"
       + "}\n",
   )
-  const first = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "alice")
-  const second = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "alice")
-  const mismatch = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "bob")
+  const first = exec_at(
+    root,
+    "env",
+    "HARN_STATE_DIR=" + state,
+    harn_bin,
+    "run",
+    script,
+    "--",
+    "alice",
+  )
+  const second = exec_at(
+    root,
+    "env",
+    "HARN_STATE_DIR=" + state,
+    harn_bin,
+    "run",
+    script,
+    "--",
+    "alice",
+  )
+  const mismatch = exec_at(
+    root,
+    "env",
+    "HARN_STATE_DIR=" + state,
+    harn_bin,
+    "run",
+    script,
+    "--",
+    "bob",
+  )
   __io_println(first.success)
   __io_println(contains(first.stdout, "loaded=alice"))
   __io_println(contains(first.stdout, "value_counter=1"))

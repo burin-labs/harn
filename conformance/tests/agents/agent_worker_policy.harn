@@ -42,7 +42,11 @@ pipeline main() {
       tools: write_tools(),
       tool_format: "native",
       max_iterations: 1,
-      policy: {tools: ["read_only"], capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"},
+      policy: {
+        tools: ["read_only"],
+        capabilities: {workspace: ["read_text"]},
+        side_effect_level: "read_only",
+      },
     },
   )
   __io_println(read_only_denied?.tools?.rejected[0] == "write_note")

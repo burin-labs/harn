@@ -77,8 +77,7 @@ fn __format_md(groups, results_dir: string) {
   lines = lines.push("")
   lines = lines.push("## Cells")
   lines = lines.push("")
-  lines = lines
-    .push("| Cell | Runs | Pass | Pass% | Cost USD | Input tok | Output tok |")
+  lines = lines.push("| Cell | Runs | Pass | Pass% | Cost USD | Input tok | Output tok |")
   lines = lines.push("|---|---:|---:|---:|---:|---:|---:|")
   const cell_order = ["baseline-cheap", "symmetric-cheap", "asymmetric", "symmetric-strong"]
   let baseline_pass_rate = nil
@@ -88,10 +87,11 @@ fn __format_md(groups, results_dir: string) {
       if cell == "baseline-cheap" {
         baseline_pass_rate = stats.pass_rate_pct
       }
-      lines = lines
-        .push(
+      lines = lines.push(
         "| " + cell + " | " + to_string(stats.runs) + " | " + to_string(stats.passed) + " | "
-          + to_string(stats.pass_rate_pct)
+          + to_string(
+          stats.pass_rate_pct,
+        )
           + "% | "
           + to_string(stats.cost_usd)
           + " | "
@@ -131,10 +131,11 @@ fn __format_md(groups, results_dir: string) {
     lines = lines.push("|---|---:|---:|---:|---:|")
     for cell in probe_cells {
       const stats = __cell_stats(groups[cell])
-      lines = lines
-        .push(
+      lines = lines.push(
         "| " + cell + " | " + to_string(stats.runs) + " | " + to_string(stats.passed) + " | "
-          + to_string(stats.pass_rate_pct)
+          + to_string(
+          stats.pass_rate_pct,
+        )
           + "% | "
           + to_string(stats.cost_usd)
           + " |",
@@ -149,7 +150,9 @@ fn __format_md(groups, results_dir: string) {
   lines = lines.push("- asymmetric lift ≥ 15pp at ≤3× baseline cost → GO (recommended opt-in)")
   lines = lines.push("- symmetric-cheap lift ≥ 10pp at ≤2× baseline cost → GO (both presets)")
   lines = lines.push("- 5pp ≤ lift < threshold → SHIP AS OPT-IN with mixed-evidence note")
-  lines = lines.push("- lift < 5pp or degraded → NO-GO; ship primitive @experimental, file follow-up")
+  lines = lines.push(
+    "- lift < 5pp or degraded → NO-GO; ship primitive @experimental, file follow-up",
+  )
   return join(lines, "\n") + "\n"
 }
 

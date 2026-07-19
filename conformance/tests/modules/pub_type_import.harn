@@ -17,7 +17,12 @@ pipeline default() {
       const r = llm_call(
         "Pick a target",
         nil,
-        {provider: "mock", output_schema: SmartTarget, output_validation: "error", response_format: "json"},
+        {
+          provider: "mock",
+          output_schema: SmartTarget,
+          output_validation: "error",
+          response_format: "json",
+        },
       )
       __io_println(describe(r.data))
     },

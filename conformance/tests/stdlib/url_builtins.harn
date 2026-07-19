@@ -11,7 +11,9 @@ pipeline test(task) {
   log(built)
   const normalized_path = url_build({scheme: "https", host: "example.com", path: "api"})
   log(normalized_path)
-  const userinfo = url_build({scheme: "https", host: "example.com", path: "/", username: "a@b", password: "p:q"})
+  const userinfo = url_build(
+    {scheme: "https", host: "example.com", path: "/", username: "a@b", password: "p:q"},
+  )
   log(userinfo)
   const pairs = query_parse("?key=alpha&key=beta&other=42")
   log(len(pairs))

@@ -15,7 +15,8 @@ fn __edit_fast_apply_schema() {
     properties: {
       content: {
         type: "string",
-        description: "The complete updated file content. Do not include markdown fences or commentary.",
+        description:
+          "The complete updated file content. Do not include markdown fences or commentary.",
       },
       summary: {type: "string"},
     },
@@ -95,7 +96,9 @@ fn __edit_fast_apply_validate(path, proposed, params) {
 }
 
 fn __edit_fast_apply_preview(path, before, after) {
-  const dry = edit_dry_run({plan: [{op: "safe_text_patch", path: path, old_text: before, new_text: after}]})
+  const dry = edit_dry_run(
+    {plan: [{op: "safe_text_patch", path: path, old_text: before, new_text: after}]},
+  )
   if dry.ok {
     return dry
   }
@@ -257,8 +260,7 @@ pub fn edit_fast_apply(params) {
   if opts?.temperature != nil {
     llm_opts = llm_opts.merge({temperature: opts.temperature})
   }
-  llm_opts = llm_opts
-    .merge(
+  llm_opts = llm_opts.merge(
     {
       model_role: opts?.model_role ?? llm_opts?.model_role ?? "merge",
       output_schema: __edit_fast_apply_schema(),
@@ -286,7 +288,9 @@ pub fn edit_fast_apply(params) {
       ctx,
       {
         result: result,
-        errors: [{code: err?.category ?? result, message: err?.message ?? to_string(err), detail: err}],
+        errors: [
+          {code: err?.category ?? result, message: err?.message ?? to_string(err), detail: err},
+        ],
       },
     )
   }
@@ -323,7 +327,11 @@ pub fn edit_fast_apply(params) {
         validation: validation,
         validation_rejected: 1,
         errors: validation.errors,
-        llm: {provider: response?.provider, model: response?.model, content_source: extracted.source},
+        llm: {
+          provider: response?.provider,
+          model: response?.model,
+          content_source: extracted.source,
+        },
       },
     )
   }
@@ -335,8 +343,14 @@ pub fn edit_fast_apply(params) {
         result: "dry_run_rejected",
         dry_run_bundle: preview,
         errors: preview.errors
-          ?? [{code: "dry_run_rejected", message: "edit_dry_run rejected the proposed content"}],
-        llm: {provider: response?.provider, model: response?.model, content_source: extracted.source},
+          ?? [
+          {code: "dry_run_rejected", message: "edit_dry_run rejected the proposed content"},
+        ],
+        llm: {
+          provider: response?.provider,
+          model: response?.model,
+          content_source: extracted.source,
+        },
       },
     )
   }
@@ -356,7 +370,11 @@ pub fn edit_fast_apply(params) {
         per_file_unified_diff: diff,
         dry_run_bundle: preview,
         validation: validation,
-        llm: {provider: response?.provider, model: response?.model, content_source: extracted.source},
+        llm: {
+          provider: response?.provider,
+          model: response?.model,
+          content_source: extracted.source,
+        },
       },
     )
   }
@@ -378,7 +396,8 @@ pub fn edit_fast_apply(params) {
         },
       ],
       match_options: {allow_empty_old_text: true, allow_noop: true, allow_lazy_placeholders: false},
-    }.merge(edit_lifecycle_forward_options(opts)),
+    }
+      .merge(edit_lifecycle_forward_options(opts)),
   )
   return __edit_fast_apply_result(
     ctx,

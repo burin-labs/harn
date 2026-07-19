@@ -230,8 +230,7 @@ fn __provider_auth_env_candidates(provider: string) -> list {
 pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   if provider == "openai" {
     return trim(
-      harness.env
-        .get_or(
+      harness.env.get_or(
         "HARN_BATCH_OPENAI_BASE_URL",
         harness.env.get_or("OPENAI_BASE_URL", "https://api.openai.com/v1"),
       ),
@@ -239,8 +238,7 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "anthropic" {
     return trim(
-      harness.env
-        .get_or(
+      harness.env.get_or(
         "HARN_BATCH_ANTHROPIC_BASE_URL",
         harness.env.get_or("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
       ),
@@ -248,8 +246,7 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "mistral" {
     return trim(
-      harness.env
-        .get_or(
+      harness.env.get_or(
         "HARN_BATCH_MISTRAL_BASE_URL",
         harness.env.get_or("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
       ),
@@ -257,8 +254,7 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "xai" {
     return trim(
-      harness.env
-        .get_or(
+      harness.env.get_or(
         "HARN_BATCH_XAI_BASE_URL",
         harness.env.get_or("XAI_BASE_URL", "https://api.x.ai/v1"),
       ),
@@ -266,14 +262,11 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "gemini" {
     return trim(
-      harness.env
-        .get_or(
+      harness.env.get_or(
         "HARN_BATCH_GEMINI_BASE_URL",
-        harness.env
-          .get_or(
+        harness.env.get_or(
           "GEMINI_BASE_URL",
-          harness.env
-            .get_or(
+          harness.env.get_or(
             "GOOGLE_GENERATIVE_LANGUAGE_BASE_URL",
             "https://generativelanguage.googleapis.com",
           ),
@@ -283,8 +276,7 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "groq" {
     return trim(
-      harness.env
-        .get_or(
+      harness.env.get_or(
         "HARN_BATCH_GROQ_BASE_URL",
         harness.env.get_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
       ),
@@ -292,11 +284,9 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "together" {
     return trim(
-      harness.env
-        .get_or(
+      harness.env.get_or(
         "HARN_BATCH_TOGETHER_BASE_URL",
-        harness.env
-          .get_or(
+        harness.env.get_or(
           "TOGETHER_AI_BASE_URL",
           harness.env.get_or("TOGETHER_BASE_URL", "https://api.together.xyz/v1"),
         ),
@@ -305,8 +295,7 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "fireworks" {
     return trim(
-      harness.env
-        .get_or(
+      harness.env.get_or(
         "HARN_BATCH_FIREWORKS_BASE_URL",
         harness.env.get_or("FIREWORKS_BASE_URL", "https://api.fireworks.ai/v1"),
       ),
@@ -314,8 +303,7 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
   }
   if provider == "parasail" {
     return trim(
-      harness.env
-        .get_or(
+      harness.env.get_or(
         "HARN_BATCH_PARASAIL_BASE_URL",
         harness.env.get_or("PARASAIL_BASE_URL", "https://api.saas.parasail.io/v1"),
       ),
@@ -395,7 +383,10 @@ pub fn __request_file_payload(harness: Harness, job: dict) -> dict {
     return {ok: false, error: "job " + safe_string(job["id"], "") + " has no request_file"}
   }
   if !harness.fs.exists(path) {
-    return {ok: false, error: "request file not found for job " + safe_string(job["id"], "") + ": " + path}
+    return {
+      ok: false,
+      error: "request file not found for job " + safe_string(job["id"], "") + ": " + path,
+    }
   }
   const text = harness.fs.read_text(path)
   const actual_sha = sha256(text)
@@ -445,10 +436,17 @@ pub fn __submission_job_base(harness: Harness, job: dict, payload: dict, dry_run
     batch: safe_dict(job["batch"]),
     request_count: __safe_int(job["request_count"]) ?? 0,
     request_file: safe_string(job["request_file"], ""),
-    request_file_sha256: safe_string(payload["sha256"], safe_string(job["request_file_sha256"], "")),
+    request_file_sha256: safe_string(
+      payload["sha256"],
+      safe_string(job["request_file_sha256"], ""),
+    ),
     request_format: safe_string(job["request_format"], ""),
     dry_run: dry_run,
-    provider_operation: __redacted_job_operation(job, __provider_base_url(harness, provider), credential_env),
+    provider_operation: __redacted_job_operation(
+      job,
+      __provider_base_url(harness, provider),
+      credential_env,
+    ),
   }
 }
 
@@ -462,7 +460,11 @@ pub fn __dry_run_submission(harness: Harness, job: dict, payload: dict) -> dict 
   return {
     ok: true,
     job: __submission_job_base(harness, job, payload, true)
-      + {status: "ready", provider_batch_id: nil, response: nil},
+      + {
+      status: "ready",
+      provider_batch_id: nil,
+      response: nil,
+    },
     errors: [],
   }
 }
@@ -510,7 +512,8 @@ pub fn __fireworks_account_id(harness: Harness) -> dict {
   return {
     ok: false,
     env: "HARN_BATCH_FIREWORKS_ACCOUNT_ID",
-    error: "missing Fireworks account id env HARN_BATCH_FIREWORKS_ACCOUNT_ID (accepted: HARN_BATCH_FIREWORKS_ACCOUNT_ID, FIREWORKS_ACCOUNT_ID)",
+    error:
+      "missing Fireworks account id env HARN_BATCH_FIREWORKS_ACCOUNT_ID (accepted: HARN_BATCH_FIREWORKS_ACCOUNT_ID, FIREWORKS_ACCOUNT_ID)",
   }
 }
 
@@ -590,7 +593,9 @@ pub fn __fireworks_create_dataset(
     __join_url(__provider_base_url(harness, "fireworks"), "/accounts/" + account_id + "/datasets"),
     {
       headers: {Authorization: "Bearer " + api_key, "content-type": "application/json"},
-      body: json_stringify({datasetId: dataset_id, dataset: {displayName: dataset_id, userUploaded: {}}}),
+      body: json_stringify(
+        {datasetId: dataset_id, dataset: {displayName: dataset_id, userUploaded: {}}},
+      ),
       timeout_ms: 120000,
       max_response_bytes: 1048576,
     },
@@ -637,7 +642,14 @@ pub fn __fireworks_upload_dataset(
     ),
     {
       headers: {Authorization: "Bearer " + api_key},
-      multipart: [{name: "file", path: file_path, filename: basename(file_path), content_type: "application/jsonl"}],
+      multipart: [
+        {
+          name: "file",
+          path: file_path,
+          filename: basename(file_path),
+          content_type: "application/jsonl",
+        },
+      ],
       timeout_ms: 120000,
       max_response_bytes: 1048576,
     },
@@ -681,7 +693,12 @@ pub fn __upload_jsonl_file(
       headers: {Authorization: "Bearer " + api_key},
       multipart: [
         {name: "purpose", value: purpose},
-        {name: "file", path: file_path, filename: basename(file_path), content_type: "application/jsonl"},
+        {
+          name: "file",
+          path: file_path,
+          filename: basename(file_path),
+          content_type: "application/jsonl",
+        },
       ],
       timeout_ms: 120000,
       max_response_bytes: 1048576,
@@ -713,7 +730,14 @@ pub fn __upload_xai_jsonl_file(harness: Harness, file_path: string, api_key: str
     __join_url(__provider_base_url(harness, "xai"), "/files"),
     {
       headers: {Authorization: "Bearer " + api_key},
-      multipart: [{name: "file", path: file_path, filename: basename(file_path), content_type: "application/jsonl"}],
+      multipart: [
+        {
+          name: "file",
+          path: file_path,
+          filename: basename(file_path),
+          content_type: "application/jsonl",
+        },
+      ],
       timeout_ms: 120000,
       max_response_bytes: 1048576,
     },
@@ -765,7 +789,10 @@ pub fn __xai_provider_status(body: dict) -> string {
  * @errors: []
  */
 pub fn __xai_results_url(harness: Harness, batch_id: string, pagination_token: string) -> string {
-  let url = __join_url(__provider_base_url(harness, "xai"), "/batches/" + batch_id + "/results?limit=100")
+  let url = __join_url(
+    __provider_base_url(harness, "xai"),
+    "/batches/" + batch_id + "/results?limit=100",
+  )
   if trim(pagination_token) != "" {
     url = url + "&pagination_token=" + trim(pagination_token)
   }

@@ -9,7 +9,9 @@ pipeline main() {
   // 2. verbatim `cd … &&` prefix + 2>&1 redirection ride along
   __io_println(command_capture_rewrite("cd foo && make 2>&1 | tail -50", cap))
   // 3. tee is inserted before the FINAL filter of a multi-stage pipeline
-  __io_println(command_capture_rewrite("find . -name '*.rs' | xargs wc -l | sort -n | tail -1", cap))
+  __io_println(
+    command_capture_rewrite("find . -name '*.rs' | xargs wc -l | sort -n | tail -1", cap),
+  )
   // 4. a pipe inside single quotes is not a split point
   __io_println(command_capture_rewrite("grep 'a|b' file | wc -l", cap))
   // 5. a `;` prefix is preserved verbatim; only the last statement rewrites
@@ -26,7 +28,10 @@ pipeline main() {
   // --- end-to-end through the run_command tool ----------------------------
   const root = path_join(harness.fs.temp_dir(), "harn-cap-int-" + uuid())
   harness.fs.mkdir(root, true)
-  const tools = agent_command_tools(nil, {root: root, cwd: root, allow_argv_prefixes: [["sh", "-c"]]})
+  const tools = agent_command_tools(
+    nil,
+    {root: root, cwd: root, allow_argv_prefixes: [["sh", "-c"]]},
+  )
   const run = agent_dispatch_tool_call(
     {
       id: "c1",

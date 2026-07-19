@@ -5,7 +5,8 @@ import {
 } from "std/llm/budget"
 
 pipeline test(task) {
-  const prose = "Harn turns agent orchestration into typed, replayable programs with deterministic host boundaries."
+  const prose =
+    "Harn turns agent orchestration into typed, replayable programs with deterministic host boundaries."
   const official_gpt4_tokens = 17
   const counted = tiktoken_count_tokens(prose, "gpt-4")
   const lower = floor(official_gpt4_tokens * 0.95)

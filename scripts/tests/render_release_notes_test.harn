@@ -3,7 +3,8 @@
 // CHANGELOG.md, git, or the environment.
 import "../render_release_notes.harn"
 
-const SAMPLE = "# Changelog\n\n## v0.8.71\n\n### Added\n\n- thing one\n- thing two\n\n## v0.8.70\n\nolder body\n\n## v0.8.69\n\noldest body\n"
+const SAMPLE =
+  "# Changelog\n\n## v0.8.71\n\n### Added\n\n- thing one\n- thing two\n\n## v0.8.70\n\nolder body\n\n## v0.8.69\n\noldest body\n"
 
 @test
 pipeline test_normalize_version(task) {
@@ -67,7 +68,8 @@ pipeline test_parse_remote(task) {
 @test
 pipeline test_render_notes_with_link(task) {
   const got = render_notes("body text", "owner/name", "0.8.70", "0.8.71")
-  const want = "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n\n**Full Changelog**: https://github.com/owner/name/compare/v0.8.70...v0.8.71\n"
+  const want =
+    "body text\n\n## Install / Upgrade\n\n```bash\ncargo install harn-cli\n```\n\n**Full Changelog**: https://github.com/owner/name/compare/v0.8.70...v0.8.71\n"
   assert_eq(got, want)
 }
 

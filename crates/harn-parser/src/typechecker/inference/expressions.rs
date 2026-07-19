@@ -1166,7 +1166,6 @@ impl TypeChecker {
             | Node::ReturnStmt { .. }
             | Node::BreakStmt
             | Node::ContinueStmt => Some(TypeExpr::Never),
-
             // If/else as expression: merge branch types. An `if` with no
             // `else` falls through to `nil` on the falsy path, so the
             // expression type is `T | nil` (not just `T`) — otherwise
@@ -1176,6 +1175,7 @@ impl TypeChecker {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 // Narrow each branch with the condition's refinements, the same
                 // way the ternary arm does — an `if`-expression used for its

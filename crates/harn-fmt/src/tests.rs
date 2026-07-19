@@ -1,6 +1,8 @@
 mod comments;
+mod layout;
 mod roundtrip;
 mod scoped_blocks;
+mod semantic_tokens;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
@@ -835,6 +837,108 @@ fn test_custom_line_width_wraps_fn_params() {
 }
 
 #[test]
+fn test_custom_line_width_wraps_shape_within_single_typed_param() {
+    let source = r"pipeline default() {
+  fn inspect(params: {project_root?: string, eval_source?: {kind: string, path: string, host?: string}, model?: string} = {}) -> dict {
+    return params
+  }
+}";
+    let expected = r"pipeline default() {
+  fn inspect(
+    params: {
+      project_root?: string,
+      eval_source?: {
+        kind: string,
+        path: string,
+        host?: string,
+      },
+      model?: string,
+    } = {},
+  ) -> dict {
+    return params
+  }
+}
+";
+    // The nested eval_source field is exactly 63 columns without its comma.
+    // The comma must participate in the wrap decision.
+    let result = fmt_opts(source, 63);
+    assert_eq!(result, expected);
+    assert!(result.lines().all(|line| line.len() <= 63));
+    assert_eq!(fmt_opts(&result, 63), result);
+}
+
+#[test]
+fn test_custom_line_width_counts_typed_param_default_when_wrapping_shape() {
+    let source = r"pipeline default() {
+  fn f(params: {alpha: int, beta: int} = {}) -> dict {
+    return params
+  }
+}";
+    let result = fmt_opts(source, 40);
+    assert!(
+        result.lines().all(|line| line.len() <= 40),
+        "Formatted line exceeded width 40:\n{result}"
+    );
+    assert!(
+        result.contains("params: {\n"),
+        "Shape did not wrap:\n{result}"
+    );
+    assert_eq!(fmt_opts(&result, 40), result);
+}
+
+#[test]
+fn test_custom_line_width_carries_typed_param_suffix_to_final_union_arm() {
+    let source = r"pipeline default() {
+  fn f(params: string | {alpha: int, beta: int, c: int} = {}) -> dict {
+    return params
+  }
+}";
+    let result = fmt_opts(source, 40);
+    assert!(result.lines().all(|line| line.len() <= 40));
+    assert!(
+        result.contains("| {\n"),
+        "Final shape arm did not wrap:\n{result}"
+    );
+    assert_eq!(fmt_opts(&result, 40), result);
+}
+
+#[test]
+fn test_custom_line_width_wraps_open_shape_row_tail_before_comma() {
+    let source = r"pipeline default() {
+  fn f<R>(params: {field: int, ...Envelope<Alpha, Beta, Gamma>} = {}) -> dict {
+    return params
+  }
+}";
+    let result = fmt_opts(source, 37);
+    assert!(result.lines().all(|line| line.len() <= 37));
+    assert!(
+        result.contains("...Envelope<\n"),
+        "Open-shape row tail did not wrap:\n{result}"
+    );
+    assert_eq!(fmt_opts(&result, 37), result);
+}
+
+#[test]
+fn test_custom_line_width_wraps_dict_type_arguments_independently() {
+    let source = r"pipeline default() {
+  fn f(params: dict<string | {alpha: int, beta: int, c: int}, Value> = {}) -> dict {
+    return params
+  }
+}";
+    let result = fmt_opts(source, 40);
+    assert!(result.lines().all(|line| line.len() <= 40));
+    assert!(
+        result.contains("dict<\n"),
+        "Dict arguments did not wrap:\n{result}"
+    );
+    assert!(
+        result.contains("| {\n"),
+        "Dict key union did not wrap:\n{result}"
+    );
+    assert_eq!(fmt_opts(&result, 40), result);
+}
+
+#[test]
 fn test_custom_line_width_idempotent() {
     let source = r"pipeline default() {
   let x = really_long_function_name(alpha, beta, gamma)
@@ -1316,40 +1420,6 @@ fn test_imports_stay_tight_then_blank_before_first_item() {
         result, result2,
         "formatter is not idempotent around imports"
     );
-}
-
-#[test]
-fn test_method_call_args_dont_overcount_multiline_receiver() {
-    // When the receiver of a method call wraps to multiple lines, the
-    // method-call args should be laid out based on the new line's column,
-    // not the receiver's total byte length. With short args, they should
-    // stay on the same line as the `.method(`.
-    let source = r"pipeline default(task) {
-  let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(arg_one, arg_two, arg_three)
-    .map(item)
-}";
-    let result = format_source(source).unwrap();
-    // Short args list (just `item`) must NOT wrap onto its own line just
-    // because the receiver wrapped onto multiple lines above.
-    assert!(
-        result.contains(".map(item)"),
-        "trailing method args wrapped unnecessarily after multi-line receiver:\n{result}"
-    );
-    assert_roundtrip(source);
-}
-
-#[test]
-fn test_optional_method_call_args_dont_overcount_multiline_receiver() {
-    let source = r"pipeline default(task) {
-  let x = some_function_with_a_pretty_long_name_that_will_wrap_its_args(arg_one, arg_two, arg_three)
-    ?.map(item)
-}";
-    let result = format_source(source).unwrap();
-    assert!(
-        result.contains("?.map(item)"),
-        "trailing optional method args wrapped unnecessarily after multi-line receiver:\n{result}"
-    );
-    assert_roundtrip(source);
 }
 
 #[test]

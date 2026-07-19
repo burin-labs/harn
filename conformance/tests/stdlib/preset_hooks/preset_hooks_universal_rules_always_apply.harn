@@ -13,7 +13,9 @@ import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/t
 pipeline default() {
   const inner = { args -> {ok: true, ran: args.command} }
   /* rust-only wrapper: rm -rf / and force-push to main both denied. */
-  const rust_wrapper = preset_run_command({stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
+  const rust_wrapper = preset_run_command(
+    {stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  )
   const r1 = rust_wrapper({command: "rm -rf /"})
   __io_println(r1.action)
   __io_println(r1.rule_id)
@@ -21,7 +23,9 @@ pipeline default() {
   __io_println(r2.action)
   __io_println(r2.rule_id)
   /* python-only wrapper: same universal rules still fire. */
-  const py_wrapper = preset_run_command({stacks: ["python"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
+  const py_wrapper = preset_run_command(
+    {stacks: ["python"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  )
   const r3 = py_wrapper({command: "rm -rf /"})
   __io_println(r3.action)
   __io_println(r3.rule_id)
@@ -34,7 +38,9 @@ pipeline default() {
   __io_println(r4.action)
   __io_println(r4.rule_id)
   /* Empty stack list: still picks up universal. */
-  const empty_wrapper = preset_run_command({stacks: [], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
+  const empty_wrapper = preset_run_command(
+    {stacks: [], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  )
   const r5 = empty_wrapper({command: "rm -rf /"})
   __io_println(r5.action)
   __io_println(r5.rule_id)

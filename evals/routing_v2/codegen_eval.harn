@@ -79,7 +79,10 @@ fn or_pricing_usd_per_m(model: string) -> dict {
 fn cost_for_tokens(model: string, input_tokens: int, output_tokens: int) -> float {
   const p = or_pricing_usd_per_m(model)
   return to_float(input_tokens) / 1000000.0 * to_float(p.input)
-    + to_float(output_tokens) / 1000000.0 * to_float(p.output)
+    + to_float(output_tokens) / 1000000.0
+    * to_float(
+    p.output,
+  )
 }
 
 fn extract_first_fenced_harn(text: string) -> string {
@@ -175,9 +178,13 @@ fn run_one_baseline(task: dict, system: dict) -> dict {
     task_id: task.id,
     strategy: "baseline",
     context: system.label,
-    cost_usd: cost_for_tokens(CHEAP_MODEL.model, result.input_tokens, result.output_tokens),
-    input_tokens: result.input_tokens,
-    output_tokens: result.output_tokens,
+    cost_usd: cost_for_tokens(
+      CHEAP_MODEL.model,
+      result.usage.input_tokens,
+      result.usage.output_tokens,
+    ),
+    input_tokens: result.usage.input_tokens,
+    output_tokens: result.usage.output_tokens,
     code: code,
     looks_valid: typechecks(code),
   }
@@ -310,7 +317,13 @@ fn main(harness: Harness) {
   __io_println(
     json_stringify_pretty(
       {
-        summary: {n_tasks: n, baseline_bare: bb, baseline_skill: bs, routed_bare: rb, routed_skill: rs},
+        summary: {
+          n_tasks: n,
+          baseline_bare: bb,
+          baseline_skill: bs,
+          routed_bare: rb,
+          routed_skill: rs,
+        },
         rows: rows,
       },
     ),

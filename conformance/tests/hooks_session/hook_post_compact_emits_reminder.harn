@@ -8,7 +8,15 @@ pipeline main() {
   agent_session_inject(session, {role: "assistant", content: "four"})
   register_session_hook(
     "post_compact",
-    { _event -> return {reminder: {body: "compaction observed", tags: ["post_compact"], dedupe_key: "post-compact-hook"}} },
+    { _event ->
+      return {
+        reminder: {
+          body: "compaction observed",
+          tags: ["post_compact"],
+          dedupe_key: "post-compact-hook",
+        },
+      }
+    },
   )
   const snapshot = agent_session_snapshot(session) ?? {}
   transcript_compact(snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})

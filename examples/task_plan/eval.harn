@@ -81,8 +81,7 @@ fn main(harness: Harness) -> int {
     harness.stdio.print(body)
   } else {
     harness.fs.write_text(out_path, body)
-    harness.stdio
-      .println("wrote " + to_string(len(records)) + " records to " + out_path)
+    harness.stdio.println("wrote " + to_string(len(records)) + " records to " + out_path)
   }
   return 0
 }

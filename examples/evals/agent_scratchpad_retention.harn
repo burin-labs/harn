@@ -72,8 +72,9 @@ fn __eval_append_callback(arm) {
     const iteration_index = info?.iteration ?? 0
     const turn = iteration_index + 1
     const ref_id = "eval:" + arm + ":" + to_string(turn)
-    const refs = (pad?.refs ?? [])
-      .push({id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)})
+    const refs = (pad?.refs ?? []).push(
+      {id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)},
+    )
     const facts = (pad?.facts ?? []).push({text: fact, source_ref: ref_id})
     agent_session_set_scratchpad(
       info.session_id,
@@ -127,7 +128,9 @@ fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
     atomic_add(prompt_chars, len(system))
     return {
       ok: true,
-      value: __eval_llm_value(__eval_worker_text(turn, contains(system, "fact: account key AURORA-17"))),
+      value: __eval_llm_value(
+        __eval_worker_text(turn, contains(system, "fact: account key AURORA-17")),
+      ),
     }
   }
   let opts = {
@@ -174,7 +177,13 @@ fn __eval_run_arm(name, arm_id, scratchpad, reorg_mocks, append_facts) {
 
 pipeline default() {
   const none = __eval_run_arm("none", "none", nil, [], false)
-  const append = __eval_run_arm("append_only_recitation", "append", {enabled: true, reorganize_every: 0}, [], true)
+  const append = __eval_run_arm(
+    "append_only_recitation",
+    "append",
+    {enabled: true, reorganize_every: 0},
+    [],
+    true,
+  )
   const strong = __eval_run_arm(
     "periodic_reorg_strong",
     "strong",

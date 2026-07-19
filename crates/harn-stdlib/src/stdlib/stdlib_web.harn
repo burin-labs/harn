@@ -158,7 +158,11 @@ pub fn web_fetch(url: string, options = nil) -> dict {
       cache_status = "refresh"
     }
   }
-  const headers = __web_conditional_headers(__web_base_headers(opts), previous, opts?.conditional ?? true)
+  const headers = __web_conditional_headers(
+    __web_base_headers(opts),
+    previous,
+    opts?.conditional ?? true,
+  )
   http_opts = http_opts + {headers: headers}
   const response = harness.net.request(method, url, http_opts)
   const fetched_at = opts?.fetched_at ?? harness.clock.timestamp()
@@ -290,7 +294,12 @@ fn __web_search_backend(opts) {
     return {kind: explicit, id: explicit, deterministic: true}
   }
   if opts?.provider_results != nil {
-    return {kind: "provider_hosted", id: "provider_results", deterministic: true, evidence: "provider_results"}
+    return {
+      kind: "provider_hosted",
+      id: "provider_results",
+      deterministic: true,
+      evidence: "provider_results",
+    }
   }
   if opts?.api != nil {
     const api = opts.api
@@ -443,10 +452,17 @@ fn __web_search_api(query, opts, backend) {
   } else {
     const headers = __web_search_merge_headers(fetch_options?.headers, api?.headers)
     fetch_options = fetch_options
-      + {method: method, headers: headers, body: api?.body ?? json_stringify({query: query, limit: limit})}
+      + {
+      method: method,
+      headers: headers,
+      body: api?.body ?? json_stringify({query: query, limit: limit}),
+    }
   }
   if api?.headers != nil && method == "GET" {
-    fetch_options = fetch_options + {headers: __web_search_merge_headers(fetch_options?.headers, api.headers)}
+    fetch_options = fetch_options
+      + {
+      headers: __web_search_merge_headers(fetch_options?.headers, api.headers),
+    }
   }
   const fetched = web_fetch(api.url, fetch_options)
   const parsed_result: Result<unknown, JsonParseFailure> = try {
@@ -467,8 +483,7 @@ fn __web_search_api(query, opts, backend) {
   let rank = 1
   for item in __web_search_take(raw_results, limit) {
     const normalized = __web_search_api_item(item, api)
-    results = results
-      .push(
+    results = results.push(
       __web_search_normalize(
         normalized,
         rank,
@@ -558,11 +573,17 @@ pub fn web_grounding_tools(registry = nil, options = nil) {
       parameters: {
         type: "object",
         required: ["query"],
-        properties: {query: {type: "string"}, limit: {type: "integer"}, index: {type: "array"}, api: {type: "object"}},
+        properties: {
+          query: {type: "string"},
+          limit: {type: "integer"},
+          index: {type: "array"},
+          api: {type: "object"},
+        },
       },
       annotations: {readOnlyHint: true},
       handler: { args -> web_search(args.query, __web_search_tool_options(opts, args)) },
-      guidance: "For unfamiliar APIs, package names, or recent behavior, call web_search against authoritative docs or registries before coding. Prefer pinned docs and registry evidence over general web snippets, and carry source URLs into the answer or follow-up prompt.",
+      guidance:
+        "For unfamiliar APIs, package names, or recent behavior, call web_search against authoritative docs or registries before coding. Prefer pinned docs and registry evidence over general web snippets, and carry source URLs into the answer or follow-up prompt.",
     },
   )
   tools = tool_define(
@@ -581,8 +602,11 @@ pub fn web_grounding_tools(registry = nil, options = nil) {
         },
       },
       annotations: {readOnlyHint: true},
-      handler: { args -> verify_imports(args.paths ?? [args.path], __web_search_tool_options(opts, args)) },
-      guidance: "After generating or editing code with imports, call verify_imports on the touched source files. Treat package_not_found and symbol_not_found as blockers. Treat fresh_package or low_trust_package warnings as a forced lookup trigger before proceeding.",
+      handler: { args ->
+        verify_imports(args.paths ?? [args.path], __web_search_tool_options(opts, args))
+      },
+      guidance:
+        "After generating or editing code with imports, call verify_imports on the touched source files. Treat package_not_found and symbol_not_found as blockers. Treat fresh_package or low_trust_package warnings as a forced lookup trigger before proceeding.",
     },
   )
   return tools
@@ -831,7 +855,10 @@ fn __web_sitemap_candidates(base_url, opts) {
     return opts.sitemap_urls
   }
   let urls = []
-  const robots = web_fetch(opts?.robots_url ?? web_origin_url(base_url, "/robots.txt"), opts?.fetch_options ?? {})
+  const robots = web_fetch(
+    opts?.robots_url ?? web_origin_url(base_url, "/robots.txt"),
+    opts?.fetch_options ?? {},
+  )
   if robots.ok {
     for row in __web_robots_rows(robots.body) {
       if row.field == "sitemap" && row.value != "" && !urls.contains(row.value) {

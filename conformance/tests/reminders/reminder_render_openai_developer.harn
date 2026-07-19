@@ -20,7 +20,12 @@ pipeline main() {
       llm_call(
         "ignored",
         nil,
-        {provider: "mock", model: "o3", messages: agent_session_messages(session), session_id: session},
+        {
+          provider: "mock",
+          model: "o3",
+          messages: agent_session_messages(session),
+          session_id: session,
+        },
       )
       const call = llm_mock_calls()[0]
       __io_println(call.messages[0].role)

@@ -34,7 +34,9 @@ pipeline default() {
     {id: "harn-canon/rust", stack: "rust", version: "0.1.0", source: "harn-canon", rules: [rule]},
   )
   __io_println(rust_cat._type)
-  const shell_cat = catalogue({id: "harn-canon/shell", stack: "shell", version: "0.1.0", rules: [predicate_rule]})
+  const shell_cat = catalogue(
+    {id: "harn-canon/shell", stack: "shell", version: "0.1.0", rules: [predicate_rule]},
+  )
   /* Round-trip catalogue through JSON to satisfy the serde criterion. */
   const json = json_stringify(rust_cat)
   const decoded = json_parse(json)

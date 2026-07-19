@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/list_handles.request.json",
+  "title": "tools.list_handles request",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Session whose live long-running command handles to enumerate. Defaults to the current agent session when omitted."
+    }
+  },
+  "additionalProperties": false
+}

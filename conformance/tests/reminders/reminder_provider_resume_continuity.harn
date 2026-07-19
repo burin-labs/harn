@@ -27,7 +27,10 @@ pipeline main() {
     session,
     "worker_resumed",
     payload
-      + {input_rendered: "approved again", resume: payload.resume + {input_rendered: "approved again"}},
+      + {
+      input_rendered: "approved again",
+      resume: payload.resume + {input_rendered: "approved again"},
+    },
     {},
   )
   const reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
@@ -51,6 +54,8 @@ pipeline main() {
   __io_println(contains(reminders[0].reminder.body, "You were suspended at turn 2"))
   __io_println(contains(reminders[0].reminder.body, "You have been resumed by the operator"))
   __io_println(contains(reminders[0].reminder.body, "The resumer provided input: approved again"))
-  __io_println(contains(reminders[0].reminder.body, "Pre-suspend conversation digest: Prior digest"))
+  __io_println(
+    contains(reminders[0].reminder.body, "Pre-suspend conversation digest: Prior digest"),
+  )
   __io_println(disabled.fired_count)
 }

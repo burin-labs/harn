@@ -24,7 +24,9 @@ fn release_captain(fixture) {
   const stash = stash_dirty_worktree(branch.result)
   const changelog = analyze_changelog(stash.result)
   const notes = rewrite_release_notes(changelog.result)
-  const recovered = recover_shell_error({step: "cargo publish --dry-run", stderr: "network unavailable"})
+  const recovered = recover_shell_error(
+    {step: "cargo publish --dry-run", stderr: "network unavailable"},
+  )
   const pr = plan_release_pr(notes.result + {recovery: recovered.result})
   const merge = enable_auto_merge(pr.result)
   return {
@@ -84,7 +86,11 @@ fn rewrite_release_notes(changelog) {
       ),
     ],
   )
-  const payload = prompt_library_payload(library, "release-note-rewrite", {count: len(changelog.missing_entries)})
+  const payload = prompt_library_payload(
+    library,
+    "release-note-rewrite",
+    {count: len(changelog.missing_entries)},
+  )
   return release_receipt(
     "rewrite_release_notes",
     {text: payload.text, prompt: payload, agentic_checkpoint: true, review_required: true},

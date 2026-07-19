@@ -36,12 +36,18 @@ fn release_workflow() -> ReleaseWorkflow {
             ),
             build: schema_field(
               schema_object(
-                {needs: schema_field(schema_list(schema_string())), steps: schema_field(schema_list(step_schema))},
+                {
+                  needs: schema_field(schema_list(schema_string())),
+                  steps: schema_field(schema_list(step_schema)),
+                },
               ),
             ),
             release: schema_field(
               schema_object(
-                {needs: schema_field(schema_list(schema_string())), if: schema_field(schema_string())},
+                {
+                  needs: schema_field(schema_list(schema_string())),
+                  if: schema_field(schema_string()),
+                },
               ),
             ),
           },
@@ -153,7 +159,8 @@ pipeline test_workflow_budget_matches_helper_default(task) {
 
 @test
 pipeline test_workflow_preserves_bloat_after_failed_warm_budget_gate(task) {
-  const warm_only = "matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.build_mode == 'warm'"
+  const warm_only =
+    "matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.build_mode == 'warm'"
   const warm_diagnostics = "always() && " + warm_only
   const steps = release_workflow().jobs.build.steps
   const bloat = release_workflow_step(steps, "Generate cargo-bloat report (warm only)")
@@ -177,13 +184,16 @@ pipeline test_release_workflow_generates_aot_once_and_shares_it_with_all_release
     workflow.jobs.prepare_cli_aot.steps,
     "Generate and verify target-independent CLI AOT payload",
   )
-  const restore = release_workflow_step(workflow.jobs.build.steps, "Restore target-independent CLI AOT payload")
+  const restore = release_workflow_step(
+    workflow.jobs.build.steps,
+    "Restore target-independent CLI AOT payload",
+  )
   assert_eq(workflow.jobs.prepare_cli_aot.needs, "setup")
   assert_eq(workflow.jobs.prepare_cli_aot.if, "needs.setup.outputs.should_build_binaries == 'true'")
   assert_eq(generator.if, "needs.setup.outputs.is_release == 'true'")
   assert_eq(generator.run, "make gen-cli-aot && make check-cli-aot")
   assert_eq(restore.if, "needs.setup.outputs.is_release == 'true'")
-  assert_eq(restore.uses, "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093")
+  assert_eq(restore.uses, "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
   assert_eq(workflow.jobs.build.needs.contains("prepare_cli_aot"), true)
   assert_eq(workflow.jobs.release.needs.contains("prepare_cli_aot"), true)
   assert_eq(workflow.jobs.release.if.contains("needs.prepare_cli_aot.result"), true)

@@ -22,12 +22,19 @@ pipeline main() {
           kind: "stage",
           mode: "agent",
           tools: stage_tools,
-          capability_policy: {capabilities: {workspace: ["write_text"], process: ["exec"]}, side_effect_level: "process_exec"},
+          capability_policy: {
+            capabilities: {workspace: ["write_text"], process: ["exec"]},
+            side_effect_level: "process_exec",
+          },
         },
       },
     },
   )
-  const ceiling = {tools: ["read"], capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"}
+  const ceiling = {
+    tools: ["read"],
+    capabilities: {workspace: ["read_text"]},
+    side_effect_level: "read_only",
+  }
   const report = workflow_validate(flow, ceiling)
   __io_println(!report?.valid)
   __io_println(len(report?.errors) >= 1)

@@ -2,7 +2,9 @@ import "std/triggers"
 
 pipeline test(task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const agent_id = "trust-grouped-" + unique
   const handle: TriggerHandle = trigger_register(
     {
@@ -34,7 +36,9 @@ pipeline test(task) {
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-b-" + unique}},
   )
   const flat: list<TrustRecord> = trust_query({agent: agent_id, limit: 2})
-  const grouped: list<TrustTraceGroup> = trust_query({agent: agent_id, limit: 2, grouped_by_trace: true})
+  const grouped: list<TrustTraceGroup> = trust_query(
+    {agent: agent_id, limit: 2, grouped_by_trace: true},
+  )
   __io_println(first.status == "dispatched")
   __io_println(second.status == "dispatched")
   __io_println(len(flat) == 2)

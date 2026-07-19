@@ -115,7 +115,7 @@ failing artifact.
 ## Split long files by ownership
 
 Treat a hand-maintained source file above 1,500 lines as decomposition debt.
-Do not grow its grandfathered baseline. If the task touches that owner, extract
+Do not grow its existing baseline. If the task touches that owner, extract
 at least one cohesive behavior and lower the recorded count; generated files
 remain generator-owned and are exempt from manual splitting.
 

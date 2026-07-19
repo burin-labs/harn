@@ -15,7 +15,12 @@ pipeline main() {
       return nil
     },
   )
-  const one_shot_caller = { _call -> return {ok: true, value: {text: "ack ##DONE##", tool_calls: [], provider: "mock", model: "mock"}} }
+  const one_shot_caller = { _call ->
+    return {
+      ok: true,
+      value: {text: "ack ##DONE##", tool_calls: [], provider: "mock", model: "mock"},
+    }
+  }
   const result = agent_loop(
     "hi",
     nil,

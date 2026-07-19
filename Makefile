@@ -4,6 +4,9 @@
 HARN_BIN ?=
 HARN_PROTOCOL_ARTIFACT_VERSION ?=
 HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
+# Rust tests start from a known security-policy environment. Focused tests may
+# still seed these variables explicitly after process startup.
+HARN_RUST_TEST_ENV = env -u HARN_EGRESS_ALLOW -u HARN_EGRESS_DENY -u HARN_EGRESS_DEFAULT -u HARN_EGRESS_BLOCK_PRIVATE -u HARN_EGRESS_ALLOW_LOOPBACK HARN_LLM_CALLS_DISABLED=1
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
 HARN_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --,$(HARN_BIN_CMD) --)
@@ -102,11 +105,11 @@ check-dependabot-groups:
 # (cargo test has no profile support, so it will run all tests).
 test:
 	@if command -v cargo-nextest >/dev/null 2>&1; then \
-		HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run --workspace; \
+		$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --workspace; \
 	else \
 		echo "cargo-nextest not installed; falling back to cargo test --workspace"; \
 		echo "hint: run 'make setup' or 'cargo install cargo-nextest --locked'"; \
-		HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test --workspace; \
+		$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace; \
 	fi
 
 # Run only the tests in crates affected by the changes vs AFFECTED_BASE
@@ -127,18 +130,18 @@ test-affected:
 		exit 0; \
 	fi; \
 	echo "make test-affected: cargo nextest run $$args"; \
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run $$args
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $$args
 
 # Run the slow E2E / smoke suite: subprocess-spawning CLI surface tests,
 # signal handling, MCP server launch, real ProcessHandle smoke tests, etc.
 # Runs on schedule (nightly), manually, and on PRs with the `e2e` label.
 # Requires cargo-nextest (no plain `cargo test` fallback for profile support).
 test-e2e:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) nextest run --workspace --profile e2e --run-ignored all
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --workspace --profile e2e --run-ignored all
 
 # Run the baseline Cargo workspace test command explicitly.
 test-cargo:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test --workspace
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace
 
 # Compatibility alias for the smarter default `make test`.
 test-fast:
@@ -146,7 +149,7 @@ test-fast:
 
 # Run Harn conformance test suite
 conformance:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) test conformance
+	$(HARN_RUST_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance
 
 # Mechanism-contract onramp tier: the manufactured mini-evals that prove a new
 # termination/escalation/judge/guard/routing mechanism ENGAGES correctly (fires
@@ -183,9 +186,9 @@ protocol-conformance:
 # already covers.
 mcp-rc-conformance:
 	@echo "=== MCP RC harness: harn-mcp-rc-compat suite (client / generic_server / legacy_compat / artifacts) ==="
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test -p harn-mcp-rc-compat --tests
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test -p harn-mcp-rc-compat --tests
 	@echo "=== MCP RC harness: orchestrator server (harn-cli mcp_rc_compat_tests) ==="
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CARGO_CMD) test -p harn-cli --lib mcp_rc_compat_tests
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test -p harn-cli --lib mcp_rc_compat_tests
 
 replay-oracle:
 	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) orchestrator replay-oracle
@@ -292,22 +295,22 @@ lint-harn:
 FMT_HARN_SKIP := semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn import_broken_module_lib.harn
 EXPERIMENT_HARN_CHECK := experiments/burin-mini/host.harn experiments/burin-mini/lib/common.harn experiments/burin-mini/lib/profiles.harn
 STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
-# Extra repo-root directories that contain user-facing .harn fixtures
-# but were historically outside the fmt-harn gate. Keeping them in the
+# Extra directories that contain user-facing .harn fixtures but were
+# historically outside the fmt-harn gate. Keeping them in the
 # gate avoids the "I edited persona X and pre-commit reformatted three
 # unrelated files" surprise from accumulated drift.
-EXTRA_HARN_DIRS := personas tests examples evals
+EXTRA_HARN_DIRS := personas tests examples evals crates/harn-cli/assets/demo
 EXTRA_HARN_FIND := find $(EXTRA_HARN_DIRS) -type d -name .harn -prune -o -type f -name '*.harn' -print0 2>/dev/null
 
 fmt-harn-fix:
 	@echo "=== Formatting Harn files ==="
-	@find $(STDLIB_HARN_DIR) -name '*.harn' -print0 \
+	@find $(STDLIB_HARN_DIR) -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt
-	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
+	@find conformance/tests -type f -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
 		| xargs -0 $(HARN_CMD) fmt
-	@find experiments -name '*.harn' -print0 \
+	@find experiments -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt
-	@find scripts -name '*.harn' -print0 \
+	@find scripts -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt
 	@$(EXTRA_HARN_FIND) \
 		| xargs -0 -r $(HARN_CMD) fmt
@@ -315,19 +318,22 @@ fmt-harn-fix:
 
 fmt-harn:
 	@echo "=== Checking Harn formatting ==="
-	@find $(STDLIB_HARN_DIR) -name '*.harn' -print0 \
+	@find $(STDLIB_HARN_DIR) -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
-	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
+	@find conformance/tests -type f -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
-	@find experiments -name '*.harn' -print0 \
+	@find experiments -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
-	@find scripts -name '*.harn' -print0 \
-		| xargs -0 $(HARN_CMD) fmt --check
-	@find crates/harn-cli/assets/demo -name '*.harn' -print0 \
+	@find scripts -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
 	@$(EXTRA_HARN_FIND) \
 		| xargs -0 -r $(HARN_CMD) fmt --check
 	@echo "    Harn formatting OK."
+
+# Base-aware semantic audit for formatter PRs that mechanically rewrite the
+# Harn corpus. Override HARN_FMT_AUDIT_BASE when the target branch is not main.
+audit-fmt-harn-tokens:
+	HARN_FMT_AUDIT_BASE="$${HARN_FMT_AUDIT_BASE:-origin/main}" cargo test -p harn-fmt tests::semantic_tokens::merge_base_harn_rewrite_preserves_semantic_tokens -- --exact
 
 # Run the @test pipelines that cover scripts/*.harn against pure-logic
 # fixtures (no filesystem dependency outside the canonical spec mirror
@@ -600,9 +606,12 @@ check-connector-matrix:
 # changes, run
 #   $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check --update
 # and commit the regenerated files under scripts/provider_catalog_fixtures/.
+# The fixture workflow installs its own deterministic egress policy. Clear
+# operator/environment policy variables so that policy is not configured twice
+# before the Harn script reaches its fixture setup.
 check-provider-catalog-drift:
 	@echo "=== Checking provider catalog refresh workflow ==="
-	@$(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
+	@$(HARN_RUST_TEST_ENV) $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
 	@echo "    Provider catalog refresh OK."
 
 # Validate the ready-to-customize trigger example library.
@@ -726,7 +735,7 @@ check-ported-handler-loc:
 	@$(HARN_CMD) run scripts/check_ported_handler_loc.harn
 
 # Repo-wide 1500-line ceiling for Rust and stdlib Harn. Existing debt is
-# grandfathered at exact per-source counts so unrelated refactors cannot
+# pinned at exact per-source counts so unrelated refactors cannot
 # conflict in a central baseline. Regeneration only tightens existing debt.
 check-source-file-lengths:
 	@$(HARN_NO_BUILD_CMD) run scripts/check_source_file_lengths.harn

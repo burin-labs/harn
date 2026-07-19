@@ -52,7 +52,8 @@ pub fn agent_tool_call_paradigm(options = nil) {
       body_close: "\"",
       call_noun: "native tool call",
       final_answer: "in concise assistant text",
-      body_hint: "Pass multi-line or code-bearing fields (file contents, replacement text) as ordinary JSON string arguments — the runtime handles escaping.",
+      body_hint:
+        "Pass multi-line or code-bearing fields (file contents, replacement text) as ordinary JSON string arguments — the runtime handles escaping.",
     }
   }
   if format == "json" {
@@ -64,7 +65,8 @@ pub fn agent_tool_call_paradigm(options = nil) {
       body_close: "\"",
       call_noun: "```tool JSON block",
       final_answer: "as plain text",
-      body_hint: "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. Pass multi-line or code-bearing fields (file contents, replacement text, exact-match strings) as ordinary JSON string values — escape newlines as \\n, quotes as \\\", backslashes as \\\\. Backticks, `<<EOF`, `}`, and `</tool>` need NO escaping; they are literal bytes inside the JSON string. For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never use a heredoc, a Markdown fence around the call, or a triple-quoted string.",
+      body_hint:
+        "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. Pass multi-line or code-bearing fields (file contents, replacement text, exact-match strings) as ordinary JSON string values — escape newlines as \\n, quotes as \\\", backslashes as \\\\. Backticks, `<<EOF`, `}`, and `</tool>` need NO escaping; they are literal bytes inside the JSON string. For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never use a heredoc, a Markdown fence around the call, or a triple-quoted string.",
     }
   }
   return {
@@ -75,7 +77,8 @@ pub fn agent_tool_call_paradigm(options = nil) {
     body_close: "\nEOF",
     call_noun: "`<tool_call>` block",
     final_answer: "in a `<user_response>` block",
-    body_hint: "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
+    body_hint:
+      "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
   }
 }
 
@@ -270,22 +273,39 @@ fn __agent_text_tool_contract_prompt(opts) {
     {
       mode: "text",
       native_mode: false,
-      require_action: turn_policy?.require_action_or_yield ?? opts?.require_action_or_yield ?? false,
+      require_action: turn_policy?.require_action_or_yield ?? opts?.require_action_or_yield
+        ?? false,
       done_sentinel: done_sentinel,
       include_task_ledger_help: opts?.task_ledger != nil,
       tool_examples: turn_policy?.tool_examples ?? opts?.tool_examples ?? "",
       shared_types: opts?.shared_types ?? "",
       expanded_schemas: __agent_tool_listing_prompt(opts.tools),
       compact_schemas: "",
-      native_contract: render_agent_prompt_id("agent.tool_contract_native", {done_sentinel: done_sentinel}, opts),
-      action_native_contract: render_agent_prompt_id("agent.tool_contract_action_native", {done_sentinel: done_sentinel}, opts),
-      task_ledger_contract: render_agent_prompt_id("agent.tool_contract_task_ledger", {done_sentinel: done_sentinel}, opts),
+      native_contract: render_agent_prompt_id(
+        "agent.tool_contract_native",
+        {done_sentinel: done_sentinel},
+        opts,
+      ),
+      action_native_contract: render_agent_prompt_id(
+        "agent.tool_contract_action_native",
+        {done_sentinel: done_sentinel},
+        opts,
+      ),
+      task_ledger_contract: render_agent_prompt_id(
+        "agent.tool_contract_task_ledger",
+        {done_sentinel: done_sentinel},
+        opts,
+      ),
       text_response_protocol: render_agent_prompt_id(
         "agent.tool_contract_text_response_protocol",
         {done_sentinel: done_sentinel, body_hint: agent_tool_call_paradigm(opts).body_hint},
         opts,
       ),
-      action_text_contract: render_agent_prompt_id("agent.tool_contract_action_text", {done_sentinel: done_sentinel}, opts),
+      action_text_contract: render_agent_prompt_id(
+        "agent.tool_contract_action_text",
+        {done_sentinel: done_sentinel},
+        opts,
+      ),
     },
     opts,
   )
@@ -420,11 +440,17 @@ fn __agent_system_prompt_option_present(value) {
 
 fn __agent_has_system_prompt_options(opts) {
   return __agent_system_prompt_option_present(opts?.system)
-    || __agent_system_prompt_option_present(opts?.system_preamble)
+    || __agent_system_prompt_option_present(
+    opts?.system_preamble,
+  )
     || __agent_system_prompt_option_present(opts?.system_prefix)
-    || __agent_system_prompt_option_present(opts?.system_context)
+    || __agent_system_prompt_option_present(
+    opts?.system_context,
+  )
     || __agent_system_prompt_option_present(opts?.system_prompt_parts)
-    || __agent_system_prompt_option_present(opts?.system_appendix)
+    || __agent_system_prompt_option_present(
+    opts?.system_appendix,
+  )
     || __agent_system_prompt_option_present(opts?.system_suffix)
 }
 
@@ -479,8 +505,7 @@ fn __agent_context_profile_fragments(opts) {
     if body == "" {
       continue
     }
-    fragments = fragments
-      .push(
+    fragments = fragments.push(
       {
         id: fragment?.id ?? "profile",
         source: fragment?.source ?? "profile",
@@ -539,7 +564,11 @@ fn __agent_primary_system_text(session, opts) {
  */
 pub fn agent_build_turn_system_fragments(session, opts, iteration) {
   let fragments = []
-  fragments = __agent_push_system_fragment(fragments, "system", __agent_primary_system_text(session, opts))
+  fragments = __agent_push_system_fragment(
+    fragments,
+    "system",
+    __agent_primary_system_text(session, opts),
+  )
   fragments = __agent_push_system_fragment(
     fragments,
     "mcp_advisory",
@@ -551,13 +580,21 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
     "active_skills",
     __agent_active_skill_prompt(opts?.active_skills),
   )
-  fragments = __agent_push_system_fragment(fragments, "skill_catalog", opts?.skill_catalog_prompt ?? "")
+  fragments = __agent_push_system_fragment(
+    fragments,
+    "skill_catalog",
+    opts?.skill_catalog_prompt ?? "",
+  )
   fragments = __agent_push_system_fragment(
     fragments,
     "progress_nudge",
     opts?._progress_tool_system_prompt_nudge ?? "",
   )
-  fragments = __agent_push_system_fragment(fragments, "loop_contract", __agent_loop_contract_prompt(opts))
+  fragments = __agent_push_system_fragment(
+    fragments,
+    "loop_contract",
+    __agent_loop_contract_prompt(opts),
+  )
   fragments = __agent_push_system_fragment(
     fragments,
     "native_tool_contract",
@@ -674,7 +711,9 @@ pub fn agent_build_turn_messages(session, opts, iteration) {
   let out = []
   let index = 0
   for message in projected_messages {
-    out = out.push(__agent_decorate_turn_message(message, opts, session, iteration, index, timestamp))
+    out = out.push(
+      __agent_decorate_turn_message(message, opts, session, iteration, index, timestamp),
+    )
     index = index + 1
   }
   return out

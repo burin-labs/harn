@@ -16,6 +16,9 @@ pipeline default(task) {
   log("Total age: ${total_age}")
   const has_senior = users.any({ u -> u.age > 30 })
   log("Has someone over 30: ${has_senior}")
-  const result = users |> { list -> list.filter({ u -> u.age >= 28 }) } |> { list -> list.map({ u -> u.name }) }
+  const result = users |> { list -> list.filter({ u -> u.age >= 28 }) }
+    |> { list ->
+    list.map({ u -> u.name })
+  }
   log("28+ names: ${result}")
 }

@@ -12,7 +12,8 @@
 import { agent_tool_format_resolution } from "std/agent/options"
 import { pin_kinds } from "std/agent/pins"
 import { agent_apply_default_retry } from "std/agent/retry"
-import { compose, default_llm_caller, with_logging, with_routing } from "std/llm/handlers"
+import { default_llm_caller } from "std/llm/caller"
+import { compose, with_logging, with_routing } from "std/llm/handlers"
 import {
   compose_tool_callers,
   with_audit_log,
@@ -79,7 +80,8 @@ fn __validate_preset_spec(kind, spec) {
   }
   const family = spec?.family ?? "generic"
   if family != "generic" && family != "captain" {
-    throw "agent_preset_register(\"" + kind + "\"): spec.family must be \"generic\" or \"captain\"; got "
+    throw "agent_preset_register(\"" + kind
+      + "\"): spec.family must be \"generic\" or \"captain\"; got "
       + to_string(family)
   }
   const pack = spec?.pack ?? {}
@@ -108,17 +110,23 @@ fn __validate_pin_policy(kind, pin_policy) {
   }
   if type_of(pin_policy) != "dict" {
     throw "agent_preset_register(\"" + kind + "\"): spec.pack.pin_policy must be a dict; got "
-      + type_of(pin_policy)
+      + type_of(
+      pin_policy,
+    )
   }
   if pin_policy?.kinds != nil {
     if type_of(pin_policy.kinds) != "list" {
       throw "agent_preset_register(\"" + kind + "\"): pin_policy.kinds must be a list; got "
-        + type_of(pin_policy.kinds)
+        + type_of(
+        pin_policy.kinds,
+      )
     }
     for k in pin_policy.kinds {
       if !contains(pin_kinds(), k) {
         throw "agent_preset_register(\"" + kind + "\"): pin_policy.kinds has unknown pin kind \""
-          + to_string(k)
+          + to_string(
+          k,
+        )
           + "\"; allowed: "
           + join(pin_kinds(), ", ")
       }
@@ -250,11 +258,21 @@ fn __builtin_preset_specs() {
     },
     summary: {
       family: "generic",
-      pack: {budget: {total_budget_usd: 1.0}, model_ladder: cheap_ladder, provider: "openai", timeout_ms: 60000},
+      pack: {
+        budget: {total_budget_usd: 1.0},
+        model_ladder: cheap_ladder,
+        provider: "openai",
+        timeout_ms: 60000,
+      },
     },
     verify: {
       family: "generic",
-      pack: {budget: {total_budget_usd: 1.0}, model_ladder: cheap_ladder, provider: "openai", timeout_ms: 60000},
+      pack: {
+        budget: {total_budget_usd: 1.0},
+        model_ladder: cheap_ladder,
+        provider: "openai",
+        timeout_ms: 60000,
+      },
     },
   }
 }
@@ -353,7 +371,10 @@ fn __caller_set_low_level_reasoning(opts) {
   const llm_overrides = opts?.llm_options
   if type_of(llm_overrides) == "dict"
     && (contains(llm_overrides.keys(), "thinking")
-    || contains(llm_overrides.keys(), "reasoning_effort")) {
+    || contains(
+    llm_overrides.keys(),
+    "reasoning_effort",
+  )) {
     return true
   }
   return false
@@ -368,7 +389,8 @@ fn __caller_set_reasoning_scale(opts) {
 }
 
 fn __caller_set_reasoning_task(opts) {
-  return __has_key(opts, "reasoning_task") || __has_key(opts, "task_kind") || __has_key(opts, "task")
+  return __has_key(opts, "reasoning_task") || __has_key(opts, "task_kind")
+    || __has_key(opts, "task")
 }
 
 fn __reasoning_task_for_kind(kind) {
@@ -450,7 +472,13 @@ fn __turn_policy_for_kind(kind, opts) {
 }
 
 fn __summary_defaults(opts) {
-  return {profile: "completer", loop_until_done: false, done_sentinel: nil, done_judge: nil, max_nudges: 0}
+  return {
+    profile: "completer",
+    loop_until_done: false,
+    done_sentinel: nil,
+    done_judge: nil,
+    max_nudges: 0,
+  }
 }
 
 fn __verify_defaults() {
@@ -586,7 +614,8 @@ fn __captain_consent_default(kind) {
       const hints = call?.annotations ?? {}
       const kind_label = to_string(hints?.kind ?? "")
       if kind_label == "read" || kind_label == "search" || kind_label == "fetch"
-        || kind_label == "think" {
+        || kind_label
+        == "think" {
         return {decision: "approved", decided_by: "merge_captain.read_default"}
       }
       return {
@@ -658,8 +687,7 @@ fn __captain_tool_layers(kind, opts) {
   }
   const handoff_sink = __captain_layer_value(opts, "handoff_sink", nil)
   if handoff_sink != nil {
-    layers = layers
-      .push(with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}))
+    layers = layers.push(with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}))
   }
   return layers
 }

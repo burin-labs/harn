@@ -95,7 +95,8 @@ fn __load_skill_for_session(session, opts, args) {
   const registry = __skills_registry(opts)
   const id = request?.name ?? ""
   const entry = __skill_find(registry, id)
-  const require_signature = (request?.require_signature ?? false) || (entry?.require_signature ?? false)
+  const require_signature = (request?.require_signature ?? false)
+    || (entry?.require_signature ?? false)
   if entry == nil || require_signature {
     return load_skill(request + {session_id: session.session_id})
   }
@@ -275,11 +276,16 @@ fn __skill_catalog_prompt(registry, opts, active) {
   if len(active ?? []) > 0 && !__skill_catalog_always(opts) {
     return ""
   }
-  const entries = skills_catalog_entries({_type: "skill_registry", skills: __matchable_skill_entries(registry)})
+  const entries = skills_catalog_entries(
+    {_type: "skill_registry", skills: __matchable_skill_entries(registry)},
+  )
   if len(entries) == 0 {
     return ""
   }
-  return render_always_on_catalog(entries.take(__skill_catalog_limit(opts)), __skill_catalog_budget(opts))
+  return render_always_on_catalog(
+    entries.take(__skill_catalog_limit(opts)),
+    __skill_catalog_budget(opts),
+  )
 }
 
 fn __skill_model_invocation_disabled(entry) {
@@ -440,7 +446,10 @@ fn __skill_score_metadata(context, registry) {
       continue
     }
     const keyword_hits = __skill_score_term_hits(query_tokens, entry?.description ?? "")
-      + __skill_score_term_hits(query_tokens, entry?.when_to_use ?? "")
+      + __skill_score_term_hits(
+      query_tokens,
+      entry?.when_to_use ?? "",
+    )
     const id_match = __skill_score_id_match(query_tokens, id)
     const path_hits = __skill_score_path_hits(entry?.paths ?? [], working_files)
     let score = 0.0
@@ -458,9 +467,14 @@ fn __skill_score_metadata(context, registry) {
       triggers = triggers.push(to_string(path_hits) + " path glob(s) matched")
     }
     if score > 0.0 {
-      scored = scored
-        .push(
-        {id: id, name: id, score: score, trigger: join(triggers, "; "), reason: join(triggers, "; ")},
+      scored = scored.push(
+        {
+          id: id,
+          name: id,
+          score: score,
+          trigger: join(triggers, "; "),
+          reason: join(triggers, "; "),
+        },
       )
     }
   }
@@ -479,7 +493,11 @@ fn __host_skill_score_candidates(context, registry, opts) {
 }
 
 fn __score_candidates(session, registry, opts, iteration) {
-  const context = {task: __latest_user_text(session), working_files: opts?.working_files ?? [], iteration: iteration}
+  const context = {
+    task: __latest_user_text(session),
+    working_files: opts?.working_files ?? [],
+    iteration: iteration,
+  }
   if __match_strategy(opts) == "metadata" {
     return __skill_score_metadata(context, registry)
   }
@@ -501,7 +519,9 @@ fn __top_active_from_scores(registry, scored, opts) {
     const id = candidate?.id ?? candidate?.name ?? ""
     const entry = __skill_find(registry, id)
     if entry != nil {
-      active = active.push(entry + {id: id, score: score, trigger: candidate?.trigger ?? candidate?.reason ?? ""})
+      active = active.push(
+        entry + {id: id, score: score, trigger: candidate?.trigger ?? candidate?.reason ?? ""},
+      )
     }
   }
   return active
@@ -665,7 +685,10 @@ pub fn agent_skills_match(session, opts, iteration) {
     return opts
   }
   const tool_opts = __with_load_skill_tool(session, opts)
-  const stored_prev = __active_from_ids(registry, agent_session_active_skills(session.session_id) ?? [])
+  const stored_prev = __active_from_ids(
+    registry,
+    agent_session_active_skills(session.session_id) ?? [],
+  )
   const profile_active = __active_from_context_profile(registry, tool_opts)
   const prev = __merge_active_skills(stored_prev, profile_active)
   if !__skills_same_ids(stored_prev, prev) {
@@ -683,7 +706,10 @@ pub fn agent_skills_match(session, opts, iteration) {
   }
   const scored = __score_candidates(session, registry, tool_opts, iteration)
   __record_matched(session, tool_opts, iteration, scored)
-  const active = __merge_active_skills(__top_active_from_scores(registry, scored, tool_opts), profile_active)
+  const active = __merge_active_skills(
+    __top_active_from_scores(registry, scored, tool_opts),
+    profile_active,
+  )
   if !__skills_same_ids(prev, active) {
     __record_deactivations(session, prev, active, iteration)
     __record_activations(session, prev, active, iteration)

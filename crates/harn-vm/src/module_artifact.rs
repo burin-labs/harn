@@ -129,7 +129,7 @@ pub fn compile_module_artifact(
         None
     } else {
         let mut compiler = crate::Compiler::new();
-        compiler.collect_type_aliases(program);
+        compiler.seed_module_catalog(program);
         Some(
             compiler
                 .compile(&init_nodes)
@@ -223,7 +223,7 @@ pub fn compile_module_artifact(
         };
 
         let mut compiler = crate::Compiler::new();
-        compiler.collect_type_aliases(program);
+        compiler.seed_module_catalog(program);
         let func_chunk = compiler
             .compile_fn_body(type_params, params, body, module_source_file.clone())
             .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;

@@ -29,7 +29,10 @@ fn note_tools() {
  * diagnostic and zero calls. `stop_reason: "length"` marks the token-cap cause.
  */
 fn truncated_turn() {
-  return {text: "<tool_call>\nwrite_note({ path: \"a.txt\", body: <<EOF\nhello", stop_reason: "length"}
+  return {
+    text: "<tool_call>\nwrite_note({ path: \"a.txt\", body: <<EOF\nhello",
+    stop_reason: "length",
+  }
 }
 
 pipeline default() {

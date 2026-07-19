@@ -1239,7 +1239,6 @@ fn standard_io_device_files_allowed_under_restricted_profile() {
             check_fs_path_scope(Path::new(device), FsAccess::Write).is_ok(),
             "write to standard device {device} must be allowed"
         );
-        // Reads of the same devices are likewise allowed.
         assert!(
             check_fs_path_scope(Path::new(device), FsAccess::Read).is_ok(),
             "read of standard device {device} must be allowed"
@@ -1466,4 +1465,156 @@ fn worktree_profile_engages_active_sandbox() {
         result.is_some(),
         "Worktree profile must keep sandbox dispatch active"
     );
+}
+
+#[test]
+fn sandbox_denial_classifies_toolchain_cache_gap_as_environment() {
+    use crate::orchestration::CapabilityPolicy;
+    use crate::value::{ErrorCategory, VmError};
+
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+
+    // A workspace-only jail: a GOCACHE pointing anywhere outside it is a
+    // provable environment gap (the toolchain cannot write its build cache).
+    // Canonicalize so the paths match what `normalize_for_policy` resolves
+    // (macOS tempdirs live under the `/var` -> `/private/var` symlink).
+    let workspace = tempfile::tempdir().unwrap();
+    let outside_dir = tempfile::tempdir().unwrap();
+    let workspace_path = std::fs::canonicalize(workspace.path()).unwrap();
+    let outside = std::fs::canonicalize(outside_dir.path()).unwrap();
+    let policy = CapabilityPolicy {
+        workspace_roots: vec![workspace_path.display().to_string()],
+        ..Default::default()
+    };
+
+    let summary = || "sandbox violation: process was denied".to_string();
+    // The denial evidence that NAMES the out-of-jail cache path.
+    let named_detail = format!(
+        "open {}/ab/cdef-d: operation not permitted",
+        outside.display()
+    );
+
+    let previous = std::env::var_os("GOCACHE");
+    std::env::set_var("GOCACHE", &outside);
+    // (a) Cache outside jail AND named in the denial → Environment.
+    let env_error = sandbox_denial_error(summary(), &named_detail, &policy);
+    // (b) Same out-of-jail cache, but the denial names an UNRELATED path → the
+    //     refusal is a policy decision, not attributable to the cache.
+    let unrelated_error = sandbox_denial_error(
+        summary(),
+        "printf: /Users/someone/blocked.txt: operation not permitted",
+        &policy,
+    );
+    // (c) Cache INSIDE the workspace jail, even if named → not a gap.
+    std::env::set_var("GOCACHE", workspace_path.join("gocache"));
+    let inside_detail = format!(
+        "open {}/x: operation not permitted",
+        workspace_path.join("gocache").display()
+    );
+    let inside_error = sandbox_denial_error(summary(), &inside_detail, &policy);
+    std::env::remove_var("GOCACHE");
+    match previous {
+        Some(value) => std::env::set_var("GOCACHE", value),
+        None => std::env::remove_var("GOCACHE"),
+    }
+
+    match env_error {
+        VmError::CategorizedError { category, message } => {
+            assert_eq!(category, ErrorCategory::Environment);
+            assert!(
+                message.contains("GOCACHE")
+                    && message.contains("not the agent's code defect")
+                    && message.contains(&outside.display().to_string()),
+                "environment diagnostic must name the out-of-jail cache: {message}"
+            );
+        }
+        other => panic!("expected a categorized error, got {other:?}"),
+    }
+    for (label, error) in [("unrelated", unrelated_error), ("inside", inside_error)] {
+        match error {
+            VmError::CategorizedError { category, .. } => assert_eq!(
+                category,
+                ErrorCategory::ToolRejected,
+                "{label}: a refusal not attributable to an out-of-jail cache stays a policy rejection"
+            ),
+            other => panic!("expected a categorized error, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn sandbox_denial_classifies_default_toolchain_cache_as_environment() {
+    use crate::orchestration::CapabilityPolicy;
+    use crate::value::{ErrorCategory, VmError};
+
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+
+    // Workspace-only jail with NO DeveloperToolchains preset: the DEFAULT
+    // toolchain caches (`~/.cargo/registry`, `~/Library/Caches/go-build`, …) sit
+    // outside the jail. A denial that NAMES a default cache is an environment
+    // gap even with no cache env var set — the fallback the env-var classifier
+    // cannot see. Requiring the preset to be off keeps this from misfiring when
+    // the cache IS granted (then it is a jail root and the guard suppresses it).
+    let workspace = tempfile::tempdir().unwrap();
+    let policy = CapabilityPolicy {
+        workspace_roots: vec![std::fs::canonicalize(workspace.path())
+            .unwrap()
+            .display()
+            .to_string()],
+        // Explicitly WITHOUT DeveloperToolchains, so the default caches are not
+        // jail roots (the default `presets: None` would enable it and put the
+        // caches inside the jail, suppressing the fallback under test).
+        process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+            presets: Some(vec![
+                crate::orchestration::ProcessSandboxPreset::SystemRuntime,
+            ]),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let home = sandbox_user_home_dir().expect("absolute home for default cache roots");
+    let cache = developer_toolchain_cache_write_roots_for_home(&home)
+        .into_iter()
+        .next()
+        .expect("at least one default cache-write root");
+    let detail = format!("mkdir {}/00: operation not permitted", cache.display());
+
+    // Clear any real cache env vars so the env-var classifier does not fire first.
+    let saved: Vec<_> = crate::security::hermetic_env::TOOLCHAIN_CACHE_ENV_VARS
+        .iter()
+        .map(|name| (*name, std::env::var_os(name)))
+        .collect();
+    for (name, _) in &saved {
+        std::env::remove_var(name);
+    }
+
+    let error = sandbox_denial_error(
+        "sandbox violation: process was denied".to_string(),
+        &detail,
+        &policy,
+    );
+
+    for (name, value) in saved {
+        match value {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
+    }
+
+    match error {
+        VmError::CategorizedError { category, message } => {
+            assert_eq!(category, ErrorCategory::Environment);
+            assert!(
+                message.contains(&cache.display().to_string())
+                    && message.contains("not the agent's code defect"),
+                "the diagnostic must name the default cache path: {message}"
+            );
+        }
+        other => panic!("expected a categorized error, got {other:?}"),
+    }
 }

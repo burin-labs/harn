@@ -40,7 +40,13 @@ pipeline main() {
       },
       {text: "leaf concluded the migration guard is ready", input_tokens: 2, output_tokens: 3},
       {
-        tool_calls: [{id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting for parent stop"}}],
+        tool_calls: [
+          {
+            id: "park_1",
+            name: "agent_await_resumption",
+            arguments: {reason: "waiting for parent stop"},
+          },
+        ],
         input_tokens: 7,
         output_tokens: 8,
       },
@@ -67,11 +73,15 @@ pipeline main() {
       __io_println("worker_status=" + stopped.worker.status)
       __io_println("handoff_type=" + stopped.handoff._type)
       __io_println("handoff_kind=" + stopped.handoff.kind)
-      __io_println("has_anchor=" + to_string(stopped.handoff.metadata.workspace_anchor.primary != nil))
+      __io_println(
+        "has_anchor=" + to_string(stopped.handoff.metadata.workspace_anchor.primary != nil),
+      )
       __io_println("has_budget=" + to_string(stopped.handoff.budget_remaining.tokens != nil))
       __io_println("confidence=" + to_string(stopped.handoff.confidence > 0.0))
       __io_println("children=" + to_string(len(stopped.children)))
-      __io_println("summary_reason=" + to_string(contains(stopped.summary, "waiting for parent stop")))
+      __io_println(
+        "summary_reason=" + to_string(contains(stopped.summary, "waiting for parent stop")),
+      )
       __io_println(
         "nested_summary="
           + to_string(contains(stopped.children[0].handoff.reason, "leaf concluded")),

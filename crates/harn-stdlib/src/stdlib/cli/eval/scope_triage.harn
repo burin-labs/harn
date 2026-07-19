@@ -53,7 +53,9 @@ fn __load_cases(harness: Harness, path: string, max_cases) {
   const raw = try {
     harness.fs.read_text(path)
   } catch (e) {
-    harness.stdio.eprintln("error: failed to read scope-triage dataset " + path + ": " + to_string(e))
+    harness.stdio.eprintln(
+      "error: failed to read scope-triage dataset " + path + ": " + to_string(e),
+    )
     return nil
   }
   const decoded = try {
@@ -156,7 +158,11 @@ fn __reference_classifier(payload) {
     "changelog",
   ]
   if __contains_any(text, in_markers) {
-    return {label: "in_scope", confidence: 0.93, evidence: "message targets the current Harn workspace"}
+    return {
+      label: "in_scope",
+      confidence: 0.93,
+      evidence: "message targets the current Harn workspace",
+    }
   }
   return {label: "escalate", confidence: 0.55, evidence: "no concrete workspace target"}
 }
@@ -164,7 +170,9 @@ fn __reference_classifier(payload) {
 fn __scope_eval_anchor() {
   return {
     primary: "/workspace/harn",
-    additional_roots: [{path: "/workspace/shared", mount_mode: "read_only", mounted_at: "2026-05-25T00:00:00Z"}],
+    additional_roots: [
+      {path: "/workspace/shared", mount_mode: "read_only", mounted_at: "2026-05-25T00:00:00Z"},
+    ],
     anchored_at: "2026-05-25T00:00:00Z",
   }
 }
@@ -193,16 +201,18 @@ fn __run_case(case, classifier) {
           max_iterations: 1,
           done_judge: false,
           pre_turn_scope_classifier: classifier,
-          llm_caller: { call -> return {
-            ok: true,
-            value: {
-              text: "heavy model reached",
-              provider: call?.opts?.provider ?? "mock",
-              model: call?.opts?.model ?? "mock-heavy",
-              input_tokens: 1000,
-              output_tokens: 100,
-            },
-          } },
+          llm_caller: { call ->
+            return {
+              ok: true,
+              value: {
+                text: "heavy model reached",
+                provider: call?.opts?.provider ?? "mock",
+                model: call?.opts?.model ?? "mock-heavy",
+                input_tokens: 1000,
+                output_tokens: 100,
+              },
+            }
+          },
         },
       )
     },
@@ -216,7 +226,8 @@ fn __run_case(case, classifier) {
     predicted == expected
   }
   const skipped_main_turn = captured.result?.status == "scope_alert"
-    && captured.result?.stop_reason == "out_of_scope"
+    && captured.result?.stop_reason
+    == "out_of_scope"
   const main_calls = if skipped_main_turn {
     0
   } else {
@@ -372,7 +383,10 @@ fn __markdown(report) {
 }
 
 fn main(harness: Harness) -> int {
-  const dataset_path = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_DATASET", "evals/scope_triage/dataset.json")
+  const dataset_path = harness.env.get_or(
+    "HARN_EVAL_SCOPE_TRIAGE_DATASET",
+    "evals/scope_triage/dataset.json",
+  )
   const output_dir = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_OUTPUT", "")
   const resolved_output = if trim(output_dir) == "" {
     ".harn-runs/scope-triage/latest"
@@ -408,8 +422,7 @@ fn main(harness: Harness) -> int {
   harness.fs.write_text(path_join(resolved_output, "summary.json"), json_stringify_pretty(report))
   harness.fs.write_text(path_join(resolved_output, "per_case.jsonl"), __jsonl(reports))
   harness.fs.write_text(path_join(resolved_output, "summary.md"), __markdown(report))
-  harness.stdio
-    .eprintln(
+  harness.stdio.eprintln(
     "wrote "
       + path_join(resolved_output, "summary.json")
       + ", "

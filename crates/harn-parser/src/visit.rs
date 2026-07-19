@@ -110,6 +110,7 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             children.push(condition);
             collect_nodes(then_body, children);

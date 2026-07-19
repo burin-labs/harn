@@ -75,7 +75,9 @@ fn __callback_feedback_kind(verdict) -> string? {
   }
   if type_of(feedback_kind) != "string" {
     throw "agent_loop: callback verdict `feedback_kind` must be a string or nil; got "
-      + type_of(feedback_kind)
+      + type_of(
+      feedback_kind,
+    )
   }
   const normalized = trim(feedback_kind)
   if normalized == "" {
@@ -305,7 +307,15 @@ fn __text_family_toolless_turn(opts, has_tool_calls, text) {
  */
 fn __detect_fenced_call_attempt(text) {
   const lowered = lowercase(to_string(text ?? ""))
-  const openers = ["```tool_code", "```call", "```edit", "```python", "```bash", "```run", "```shell"]
+  const openers = [
+    "```tool_code",
+    "```call",
+    "```edit",
+    "```python",
+    "```bash",
+    "```run",
+    "```shell",
+  ]
   for opener in openers {
     if contains(lowered, opener) {
       return opener[3:len(opener)]
@@ -445,7 +455,11 @@ fn __classify_missing_tool_call(session, text, opts, iteration) {
       + {iteration: iteration, visible_text_prefix: visible_text_excerpt(text)},
   )
   const tool_name = result?.tool_name ?? ""
-  if result?.action == "tool_call_intended" && tool_name != "" && __tool_name_in_list(tool_name, names) {
+  if result?.action == "tool_call_intended" && tool_name != ""
+    && __tool_name_in_list(
+    tool_name,
+    names,
+  ) {
     return result
   }
   return nil
@@ -666,7 +680,11 @@ fn __post_turn_verdict_result(session, _opts, verdict, feedback_kind = "post_tur
     }
   }
   if verdict.message != nil || verdict?.next_options != nil || verdict?.llm_options != nil {
-    return {kind: "continue", next_options: verdict?.next_options, llm_options: verdict?.llm_options}
+    return {
+      kind: "continue",
+      next_options: verdict?.next_options,
+      llm_options: verdict?.llm_options,
+    }
   }
   return nil
 }
@@ -772,12 +790,17 @@ fn __tool_surface_entry_class(entry) {
   const annotations = __tool_surface_annotations(entry)
   const side_effect = __tool_surface_text(
     annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-      ?? annotations?.sideEffect,
+      ?? annotations
+      ?.sideEffect,
   )
-  const kind = __tool_surface_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
+  const kind = __tool_surface_text(
+    annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind,
+  )
   const name = __tool_surface_text(__tool_surface_name(entry))
   if __tool_surface_enabled(annotations?.agent_lifecycle)
-    || __tool_surface_enabled(annotations?.structural)
+    || __tool_surface_enabled(
+    annotations?.structural,
+  )
     || contains(["session_control", "lifecycle", "suspend", "resume"], kind)
     || contains(
     ["load_skill", "agent_await_resumption", "subagent_pause", "subagent_resume", "wait_for_user"],
@@ -786,7 +809,9 @@ fn __tool_surface_entry_class(entry) {
     return "session_control"
   }
   if __tool_surface_enabled(annotations?.approval)
-    || __tool_surface_enabled(annotations?.requires_approval)
+    || __tool_surface_enabled(
+    annotations?.requires_approval,
+  )
     || contains(["approval", "human_gate"], kind) {
     return "approval"
   }
@@ -794,12 +819,15 @@ fn __tool_surface_entry_class(entry) {
     return "progress"
   }
   if __tool_surface_enabled(annotations?.result_reader)
-    || __tool_surface_enabled(annotations?.result_polling)
+    || __tool_surface_enabled(
+    annotations?.result_polling,
+  )
     || kind == "result_polling"
     || starts_with(name, "read_command_output") {
     return "result_polling"
   }
-  if side_effect != "" && side_effect != "none" && side_effect != "read_only" && side_effect != "read" {
+  if side_effect != "" && side_effect != "none" && side_effect != "read_only"
+    && side_effect != "read" {
     return "mutating"
   }
   if contains(
@@ -826,7 +854,9 @@ fn __tool_surface_entry_class(entry) {
     return "read_only"
   }
   if __tool_surface_enabled(annotations?.readOnlyHint)
-    && !__tool_surface_enabled(annotations?.destructiveHint) {
+    && !__tool_surface_enabled(
+    annotations?.destructiveHint,
+  ) {
     return "read_only"
   }
   return "unknown"
@@ -840,7 +870,8 @@ fn __tool_surface_entry_detail(entry, class, reason) {
     kind: __tool_surface_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind),
     side_effect_level: __tool_surface_text(
       annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-        ?? annotations?.sideEffect,
+        ?? annotations
+        ?.sideEffect,
     ),
     reason: reason,
   }
@@ -927,7 +958,11 @@ fn __tool_surface_narrowing_post_turn(session, llm_result, dispatch_results, opt
   }
   const window_turns = config?.window_turns ?? 5
   const attempted = __tool_surface_attempted_names(llm_result, dispatch_results)
-  const history = __tool_surface_append_history(opts?._tool_surface_narrowing_history ?? [], attempted, window_turns)
+  const history = __tool_surface_append_history(
+    opts?._tool_surface_narrowing_history ?? [],
+    attempted,
+    window_turns,
+  )
   const candidate_entries = __tool_surface_current_entries(opts)
   const candidates = __tool_surface_current_names(opts)
   if len(candidates) == 0 || len(history) < window_turns {
@@ -1188,14 +1223,24 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   if !has_tool_calls && !loop_until_done && !daemon {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
-  const confirmation_nudged = __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration)
+  const confirmation_nudged = __maybe_inject_completion_confirmation(
+    session,
+    opts,
+    has_tool_calls,
+    text,
+    iteration,
+  )
   const action_nudged = if lowercase(to_string(opts?.tool_format ?? "")) == "native" {
     false
   } else {
     __maybe_inject_action_nudge(session, opts, has_tool_calls, text, iteration)
   }
   return __post_turn_with_narrowing(
-    {kind: "continue", done_judge_due: false, nudged_this_turn: confirmation_nudged || action_nudged},
+    {
+      kind: "continue",
+      done_judge_due: false,
+      nudged_this_turn: confirmation_nudged || action_nudged,
+    },
     narrowing,
   )
 }

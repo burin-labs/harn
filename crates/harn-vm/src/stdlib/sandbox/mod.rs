@@ -47,6 +47,11 @@ use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
+use paths::{
+    is_standard_io_device_for_access, normalize_for_policy, normalize_io_device_path,
+    path_is_within,
+};
+
 #[cfg(target_os = "linux")]
 mod linux;
 mod locked_append;
@@ -54,6 +59,7 @@ mod locked_append;
 mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
+mod paths;
 mod policy;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -1749,20 +1755,24 @@ pub fn process_violation_error(output: &std::process::Output) -> Option<VmError>
             || stderr.contains("access is denied")
             || stdout.contains("operation not permitted"))
     {
-        return Some(sandbox_rejection(sandbox_process_violation_message(
+        return Some(sandbox_denial_error(
             format!(
                 "sandbox violation: process was denied by the OS sandbox (status {})",
                 output.status.code().unwrap_or(-1)
             ),
-        )));
+            &format!("{stderr}\n{stdout}"),
+            &policy,
+        ));
     }
     if sandbox_signal_status(output) {
-        return Some(sandbox_rejection(sandbox_process_violation_message(
+        return Some(sandbox_denial_error(
             format!(
                 "sandbox violation: process was terminated by the OS sandbox (status {})",
                 output.status
             ),
-        )));
+            &format!("{stderr}\n{stdout}"),
+            &policy,
+        ));
     }
     None
 }
@@ -1783,9 +1793,11 @@ pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {
         || message.contains("permission denied")
         || message.contains("access is denied")
     {
-        return Some(sandbox_rejection(sandbox_process_violation_message(
+        return Some(sandbox_denial_error(
             format!("sandbox violation: process was denied by the OS sandbox before exec: {error}"),
-        )));
+            &message,
+            &policy,
+        ));
     }
     None
 }
@@ -1885,10 +1897,140 @@ pub(crate) fn sandbox_rejection(message: String) -> VmError {
     }
 }
 
+/// Build the error for a process the OS sandbox blocked or killed. `detail` is
+/// the denial evidence (child stderr/stdout, or the spawn `io::Error` text) the
+/// OS produced — the only thing that names *which* path was refused.
+///
+/// The denial is reclassified from the default [`ErrorCategory::ToolRejected`]
+/// to [`ErrorCategory::Environment`] only when it is provably an environment
+/// gap: a developer-toolchain cache env var (`GOCACHE`, `CARGO_HOME`, …)
+/// resolves OUTSIDE the sandbox jail AND `detail` actually names that path.
+/// Requiring the path to appear in the denial text keeps a plain policy refusal
+/// (e.g. a write outside the workspace) classified as `ToolRejected` even when
+/// unrelated toolchain caches happen to sit outside this jail — the sandbox
+/// correctly refused an action, which is a policy decision, not a provisioning
+/// gap. When it IS an environment gap, the message names the offending root so
+/// an embedder never reports it as the agent's code defect. Either way the
+/// message points at the knobs that widen coverage.
+fn sandbox_denial_error(summary: String, detail: &str, policy: &CapabilityPolicy) -> VmError {
+    if let Some((var, path)) = toolchain_cache_gap_named_in_denial(policy, detail) {
+        return VmError::CategorizedError {
+            message: format!(
+                "{summary}; the {var} toolchain cache resolves to '{}', which is outside the \
+                 sandbox profile — a host environment/config gap, not the agent's code defect. \
+                 Grant it with process_sandbox.write_roots, relocate the cache into the \
+                 workspace, or extend the DeveloperToolchains preset",
+                path.display()
+            ),
+            category: ErrorCategory::Environment,
+        };
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(path) = toolchain_cache_default_named_in_denial(policy, detail) {
+        return VmError::CategorizedError {
+            message: format!(
+                "{summary}; the sandbox denied writing '{}', a well-known developer-toolchain \
+                 cache outside the active profile — a host environment/config gap, not the \
+                 agent's code defect. Enable the DeveloperToolchains preset, grant it with \
+                 process_sandbox.write_roots, or relocate the cache into the workspace",
+                path.display()
+            ),
+            category: ErrorCategory::Environment,
+        };
+    }
+    sandbox_rejection(sandbox_process_violation_message(summary))
+}
+
 fn sandbox_process_violation_message(summary: String) -> String {
     format!(
-        "{summary}; if the command depends on a user-managed toolchain or cache outside the workspace, add that root to process_sandbox.read_roots or process_sandbox.write_roots"
+        "{summary}; if the command depends on a developer toolchain or cache outside the \
+         workspace, add that root to process_sandbox.read_roots / process_sandbox.write_roots \
+         (or, for a well-known toolchain cache, extend the DeveloperToolchains preset)"
     )
+}
+
+/// The read-granted root set the coverage check treats as "inside the jail":
+/// the workspace write roots plus every read root the profile layers on
+/// (Harn read-only mounts, process-only roots, developer-toolchain read/cache
+/// roots, package-manager config roots). Built from the same single-owner
+/// helpers the OS backends render from, so coverage cannot drift from what the
+/// profile actually grants.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn coverage_jail_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    let mut roots = normalized_workspace_roots(policy);
+    roots.extend(process_sandbox_roots(policy));
+    roots.extend(process_sandbox_readonly_roots(policy));
+    roots.extend(process_sandbox_policy_read_roots(policy));
+    roots.extend(process_sandbox_policy_write_roots(policy));
+    roots.extend(process_sandbox_developer_toolchain_read_roots(policy));
+    roots.extend(process_sandbox_package_manager_config_read_roots(policy));
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    roots.extend(process_sandbox_developer_toolchain_cache_roots(policy));
+    roots
+}
+
+/// If a developer-toolchain *cache* env var is set to a path outside the
+/// sandbox jail AND the denial evidence `detail` names that path, return
+/// `(VAR, resolved_path)`. Both conditions are required: the out-of-jail cache
+/// makes the gap possible, and the path appearing in the denial text is what
+/// attributes *this* denial to it (so an unrelated refusal is not misread as an
+/// environment gap just because some cache lives outside this jail). Read-only
+/// install roots (`GOROOT`, `JAVA_HOME`, …) are intentionally excluded — they
+/// usually sit under a system-preset prefix the jail set does not re-enumerate,
+/// so flagging them would misclassify.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn toolchain_cache_gap_named_in_denial(
+    policy: &CapabilityPolicy,
+    detail: &str,
+) -> Option<(String, PathBuf)> {
+    let detail = detail.to_ascii_lowercase();
+    let jail = coverage_jail_roots(policy);
+    for name in crate::security::hermetic_env::TOOLCHAIN_CACHE_ENV_VARS {
+        let Some(value) = std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+        else {
+            continue;
+        };
+        let path = normalize_for_policy(Path::new(&value));
+        let named = detail.contains(&path.to_string_lossy().to_ascii_lowercase());
+        if named && !jail.iter().any(|root| path_is_within(&path, root)) {
+            return Some(((*name).to_string(), path));
+        }
+    }
+    None
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn toolchain_cache_gap_named_in_denial(
+    _policy: &CapabilityPolicy,
+    _detail: &str,
+) -> Option<(String, PathBuf)> {
+    None
+}
+
+/// Fallback for toolchain caches that use their DEFAULT location (no env var
+/// set), which [`toolchain_cache_gap_named_in_denial`] cannot see. If the denial
+/// evidence names a well-known cache-write default (`~/Library/Caches/go-build`,
+/// `~/.cargo/registry`, …) that is NOT inside the active jail — i.e. the
+/// `DeveloperToolchains` preset is off or does not reach this policy — return the
+/// path so the caller reclassifies to [`ErrorCategory::Environment`] instead of a
+/// bare `ToolRejected`. When the preset IS active the cache is a jail root, so
+/// the guard suppresses this and a genuine policy refusal stays `ToolRejected`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn toolchain_cache_default_named_in_denial(
+    policy: &CapabilityPolicy,
+    detail: &str,
+) -> Option<PathBuf> {
+    let home = sandbox_user_home_dir()?;
+    let detail = detail.to_ascii_lowercase();
+    let jail = coverage_jail_roots(policy);
+    developer_toolchain_cache_write_roots_for_home(&home)
+        .into_iter()
+        .find(|root| {
+            detail.contains(&root.to_string_lossy().to_ascii_lowercase())
+                && !jail.iter().any(|jail_root| path_is_within(root, jail_root))
+        })
 }
 
 /// Helper for backends that can't attach confinement at all (macOS
@@ -2003,7 +2145,7 @@ fn base_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     policy
         .workspace_roots
         .iter()
-        .map(|root| normalize_for_policy(&resolve_policy_path(root)))
+        .map(|root| render_policy_root(root))
         .collect()
 }
 
@@ -2204,6 +2346,41 @@ pub(crate) fn developer_toolchain_cache_write_roots_for_home(home: &Path) -> Vec
         ".konan",                              // Kotlin/Native
         "Library/Caches/CocoaPods",            // CocoaPods (iOS/macOS)
         "Library/Developer/Xcode/DerivedData", // Xcode build products
+        // Go build + module caches. `go build`/`go test` write compiled
+        // package objects to GOCACHE and downloaded modules to GOMODCACHE;
+        // when neither is granted, the toolchain fails — and go reports the
+        // write miss as the misleading "package X is not in std (GOROOT/...)"
+        // rather than a permissions error, so it reads as a code defect. The
+        // default GOCACHE differs by OS (macOS `~/Library/Caches/go-build`,
+        // Linux `~/.cache/go-build`); listing both is safe because the
+        // OS-foreign entry is simply absent on disk and skipped. GOMODCACHE
+        // defaults to `$GOPATH/pkg/mod` (`~/go/pkg/mod`); `~/go` itself stays
+        // read-only via `developer_toolchain_read_roots_for_home`.
+        "Library/Caches/go-build", // Go build cache (GOCACHE, macOS default)
+        ".cache/go-build",         // Go build cache (GOCACHE, Linux default)
+        "go/pkg/mod",              // Go module cache (GOMODCACHE default)
+        // Go env config (GOENV). `go` rewrites `go/env` on first use (e.g. to
+        // record GOTOOLCHAIN); when its parent is not writable the toolchain
+        // fails with `writing go env config: ... operation not permitted`. The
+        // macOS default is `~/Library/Application Support/go/env`
+        // (`os.UserConfigDir()/go`). The Linux default `~/.config/go/env` sits
+        // under the read-only `.config` package-manager root, so granting it
+        // needs a nested carve-out and is tracked separately.
+        "Library/Application Support/go", // Go env config dir (GOENV, macOS default)
+        // Cargo registry + git caches. `cargo fetch`/`cargo build` unpack crate
+        // sources into `registry/src`, download tarballs into `registry/cache`,
+        // refresh the index under `registry/index`, and check out git deps under
+        // `git/db` + `git/checkouts`; a build fails to unpack ("failed to create
+        // directory .../registry/src/...: Operation not permitted") when these
+        // are read-only. These hold build artifacts only — Cargo credentials and
+        // config live at the CARGO_HOME root (`.cargo/credentials.toml`,
+        // `.cargo/config.toml`), OUTSIDE `registry`/`git`, and stay read-only
+        // (granted read via `.cargo` in `developer_toolchain_read_roots_for_home`
+        // and re-denied write by the package-manager preset). `.package-cache` is
+        // Cargo's advisory build lock at the CARGO_HOME root.
+        ".cargo/registry",       // crate cache/index/src (CARGO_HOME default)
+        ".cargo/git",            // git dependency db + checkouts
+        ".cargo/.package-cache", // Cargo's advisory build lock file
     ]
     .into_iter()
     .map(|entry| normalize_for_policy(&home.join(entry)))
@@ -2229,8 +2406,13 @@ pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<Pat
         ".cargo/config.toml",
         ".cargo/credentials",
         ".cargo/credentials.toml",
-        ".cargo/registry",
-        ".cargo/git",
+        // NOTE: `.cargo/registry` and `.cargo/git` are deliberately NOT here.
+        // They are build caches Cargo must WRITE, so they moved to
+        // `developer_toolchain_cache_write_roots_for_home`. Listing them here
+        // too would re-deny their writes: the macOS backend emits a
+        // `(deny file-write*)` for every package-manager read root AFTER the
+        // write-allow block, and last-match-wins would cancel the cache grant.
+        // `.cargo` itself stays readable via `developer_toolchain_read_roots`.
     ]
     .into_iter()
     .map(|entry| normalize_for_policy(&home.join(entry)))
@@ -2262,101 +2444,13 @@ fn resolve_policy_path(path: &str) -> PathBuf {
     }
 }
 
-fn normalize_for_policy(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        crate::stdlib::process::execution_root_path().join(path)
-    };
-    let absolute = normalize_lexically(&absolute);
-    if let Ok(canonical) = absolute.canonicalize() {
-        return canonical;
-    }
-
-    let mut existing = absolute.as_path();
-    let mut suffix = Vec::new();
-    while !existing.exists() {
-        let Some(parent) = existing.parent() else {
-            return normalize_lexically(&absolute);
-        };
-        if let Some(name) = existing.file_name() {
-            suffix.push(name.to_os_string());
-        }
-        existing = parent;
-    }
-
-    let mut normalized = existing
-        .canonicalize()
-        .unwrap_or_else(|_| normalize_lexically(existing));
-    for component in suffix.iter().rev() {
-        normalized.push(component);
-    }
-    normalize_lexically(&normalized)
-}
-
-fn normalize_lexically(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    normalized
-}
-
-fn path_is_within(path: &Path, root: &Path) -> bool {
-    path == root || path.starts_with(root)
-}
-
-/// Resolve `path` to an absolute, lexically-normalized form for the standard
-/// I/O device check. Unlike [`normalize_for_policy`] this never calls
-/// `canonicalize`, which on macOS rewrites `/dev/stdout` to a per-process
-/// `/dev/fd/<…>.output` alias that no longer matches a known device file.
-fn normalize_io_device_path(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        crate::stdlib::process::execution_root_path().join(path)
-    };
-    normalize_lexically(&absolute)
-}
-
-/// Whether `path` is one of the standard process I/O device files that the
-/// sandbox treats as a stream rather than a workspace mutation for this access:
-/// stdin is read-only, stdout/stderr/null are read/write, and delete is never a
-/// stream operation. `path` must already be absolute and lexically normalized.
-fn is_standard_io_device_for_access(path: &Path, access: FsAccess) -> bool {
-    match access {
-        FsAccess::Read => {
-            matches!(
-                path.to_str(),
-                Some("/dev/stdin" | "/dev/stdout" | "/dev/stderr" | "/dev/null")
-            ) || is_dev_fd_descriptor(path)
-        }
-        FsAccess::Write => {
-            matches!(
-                path.to_str(),
-                Some("/dev/stdout" | "/dev/stderr" | "/dev/null")
-            ) || is_dev_fd_descriptor(path)
-        }
-        FsAccess::Delete => false,
-    }
-}
-
-/// Whether `path` is exactly `/dev/fd/<N>` for a non-empty run of ASCII
-/// digits (the numeric file-descriptor aliases for the standard streams).
-fn is_dev_fd_descriptor(path: &Path) -> bool {
-    let Some(text) = path.to_str() else {
-        return false;
-    };
-    let Some(fd) = text.strip_prefix("/dev/fd/") else {
-        return false;
-    };
-    !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit())
+/// Render one configured policy-root string to the exact path the sandbox jails
+/// to — the single transform [`base_workspace_roots`] applies, exposed via
+/// `crate::process_sandbox` so host disclosure and provenance surfaces report
+/// the enforced jail path, not a pre-canonical approximation. Canonicalization
+/// is best-effort for nonexistent paths (lexical fallback) and never panics.
+pub fn render_policy_root(path: &str) -> PathBuf {
+    normalize_for_policy(&resolve_policy_path(path))
 }
 
 #[cfg(any(

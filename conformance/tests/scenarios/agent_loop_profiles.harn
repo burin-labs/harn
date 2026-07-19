@@ -37,11 +37,18 @@ pipeline default() {
   with_llm_script(
     [llm_text("Needs another pass.")],
     { ->
-      const verifier = agent_loop("verify this", nil, {provider: "mock", profile: "verifier", loop_until_done: true})
+      const verifier = agent_loop(
+        "verify this",
+        nil,
+        {provider: "mock", profile: "verifier", loop_until_done: true},
+      )
       __io_println(verifier.status)
       __io_println(verifier.llm.iterations)
       assert(verifier.status == "stuck", "verifier max_nudges default should stop immediately")
-      assert(verifier.llm.iterations == 1, "verifier profile should run one text-only turn before stuck")
+      assert(
+        verifier.llm.iterations == 1,
+        "verifier profile should run one text-only turn before stuck",
+      )
     },
   )
   with_llm_script(
@@ -50,11 +57,20 @@ pipeline default() {
       const overridden = agent_loop(
         "finish in two",
         nil,
-        {provider: "mock", profile: "completer", loop_until_done: true, max_iterations: 2, max_nudges: 2},
+        {
+          provider: "mock",
+          profile: "completer",
+          loop_until_done: true,
+          max_iterations: 2,
+          max_nudges: 2,
+        },
       )
       __io_println(overridden.status)
       __io_println(overridden.llm.iterations)
-      assert(overridden.status == "done", "explicit max_iterations/max_nudges should override profile")
+      assert(
+        overridden.status == "done",
+        "explicit max_iterations/max_nudges should override profile",
+      )
       assert(
         overridden.llm.iterations == 2,
         "explicit max_iterations override should allow a second turn",

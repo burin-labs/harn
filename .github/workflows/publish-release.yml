@@ -56,9 +56,9 @@ on:
           already-published crate now depends on. Sets
           HARN_BOOTSTRAP_NEW_CRATES=1, which skips the publish dry-run
           and audit package checks for downstream crates that need it
-          on crates.io. The real publish
-          uses `cargo publish --workspace`, which orders intra-workspace
-          deps correctly. See harn#609.
+          on crates.io. The real publish resumes the remaining
+          dependency DAG and waits for newly uploaded dependencies to
+          become selectable. See harn#609.
         type: boolean
         default: false
       skip_dry_run:
@@ -372,6 +372,8 @@ jobs:
           cp scripts/release_ship.sh "$RUNNER_TEMP/release-tools/release_ship.sh"
           cp scripts/release_gate.sh "$RUNNER_TEMP/release-tools/release_gate.sh"
           cp scripts/publish.sh "$RUNNER_TEMP/release-tools/publish.sh"
+          cp scripts/publish.harn "$RUNNER_TEMP/release-tools/publish.harn"
+          cp scripts/publish_plan.harn "$RUNNER_TEMP/release-tools/publish_plan.harn"
           cp scripts/harn_bin.sh "$RUNNER_TEMP/release-tools/harn_bin.sh"
           cp -R scripts/lib "$RUNNER_TEMP/release-tools/lib"
           publish_ref="${{ needs.detect-drift.outputs.publish_ref }}"

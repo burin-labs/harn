@@ -492,7 +492,8 @@ route every turn through it:
 
 ```harn,ignore
 import { AgentLoopOptions } from "std/agent/options"
-import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
+import {default_llm_caller} from "std/llm/caller"
+import {with_retry, with_fallback, compose} from "std/llm/handlers"
 
 const caller = compose([
   with_retry({max_attempts: 4, backoff: "exponential"}),
@@ -1296,7 +1297,7 @@ scaffolding.
 | `description` | string | Primary ranking signal for metadata matching |
 | `when_to_use` | string | Secondary ranking signal |
 | `paths` | `list<string>` | Glob patterns for `paths:` auto-trigger |
-| `allowed_tools` | `list<string>` | Whitelist applied to the tool surface on activation |
+| `allowed_tools` | `list<string>` | Allowlist applied to the tool surface on activation |
 | `prompt` | string | Body woven into the active-skill system-prompt block |
 | `disable-model-invocation` | bool | When `true`, the matcher skips the skill entirely |
 | `user-invocable` | bool | Placeholder for host UI (not consumed by the runtime today) |

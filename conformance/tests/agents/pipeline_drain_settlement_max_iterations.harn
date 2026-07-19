@@ -18,18 +18,19 @@ pipeline default() {
       harness.handoff_to("nightly-drain", {note: "two"})
       harness.handoff_to("nightly-drain", {note: "three"})
       const snapshot = harness.unsettled_state()
-      const result = harness
-        .spawn_settlement_agent(snapshot, return_value, {drain_budget_iterations: 1})
+      const result = harness.spawn_settlement_agent(
+        snapshot,
+        return_value,
+        {drain_budget_iterations: 1},
+      )
       const audits = lifecycle_audit_log_take()
       harness.stdio.println("status=" + result.status)
       harness.stdio.println("iterations=" + to_string(result.iterations))
       harness.stdio.println("budget=" + to_string(result.budget))
       harness.stdio.println("items_processed=" + to_string(result.items_processed))
-      const remaining = audits
-        .filter({ entry -> entry.kind == "drain_unsettled_remaining" })
+      const remaining = audits.filter({ entry -> entry.kind == "drain_unsettled_remaining" })
       harness.stdio.println("remaining_audits=" + to_string(len(remaining)))
-      harness.stdio
-        .println(
+      harness.stdio.println(
         "remaining_partial=" + to_string(len(remaining[0].payload.remaining.partial_handoffs)),
       )
       return result.return_value

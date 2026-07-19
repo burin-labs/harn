@@ -1,0 +1,170 @@
+import "../publish.harn"
+import { PublishPlanPackage } from "../publish_plan.harn"
+
+const PACKAGES: list<PublishPlanPackage> = [
+  {deps: [], name: "alpha", version: "1.2.3"},
+  {deps: ["alpha"], name: "beta", version: "1.2.3"},
+  {deps: ["beta"], name: "gamma", version: "1.2.3"},
+]
+
+@test
+pipeline test_publish_recovery_resumes_prior_progress_and_waits_for_visibility(task) {
+  const beta_published = atomic(0)
+  const beta_probes = atomic(0)
+  const publish_calls = atomic(0)
+  const waits = atomic(0)
+  const adapters: PublishAdapters = {
+    probe: { name, _version ->
+      if name == "alpha" {
+        return {status: "visible"}
+      }
+      if name == "beta" {
+        const probe_number = atomic_add(beta_probes, 1) + 1
+        if atomic_get(beta_published) == 1 && probe_number >= 4 {
+          return {status: "visible"}
+        }
+      }
+      return {status: "missing"}
+    },
+    publish: { package ->
+      atomic_add(publish_calls, 1)
+      if package.name == "beta" {
+        atomic_set(beta_published, 1)
+      }
+      return {success: true}
+    },
+    wait: { delay_ms ->
+      atomic_add(waits, delay_ms)
+      return nil
+    },
+  }
+  const receipt = publish_recover(
+    PACKAGES,
+    adapters,
+    {backoff_ms: [10, 20, 40], max_publish_attempts: 2},
+  )
+  assert(receipt.ok)
+  assert_eq(receipt.already_present, ["alpha"])
+  assert_eq(receipt.published, ["beta", "gamma"])
+  assert_eq(receipt.waiting, ["beta"])
+  assert_eq(receipt.failed, [])
+  assert_eq(receipt.remaining, [])
+  assert_eq(atomic_get(publish_calls), 2)
+  assert_eq(atomic_get(waits), 30)
+}
+
+@test
+pipeline test_publish_recovery_times_out_with_failed_and_remaining_dag(task) {
+  const alpha_published = atomic(0)
+  const publish_calls = atomic(0)
+  const waits = atomic(0)
+  const adapters: PublishAdapters = {
+    probe: { name, _version ->
+      if name == "alpha" && atomic_get(alpha_published) == 1 {
+        return {status: "missing", detail: "index is still propagating"}
+      }
+      return {status: "missing"}
+    },
+    publish: { package ->
+      atomic_add(publish_calls, 1)
+      if package.name == "alpha" {
+        atomic_set(alpha_published, 1)
+      }
+      return {success: true}
+    },
+    wait: { delay_ms ->
+      atomic_add(waits, delay_ms)
+      return nil
+    },
+  }
+  const receipt = publish_recover(
+    PACKAGES,
+    adapters,
+    {backoff_ms: [5, 10], max_publish_attempts: 2},
+  )
+  assert(!receipt.ok)
+  assert_eq(receipt.published, ["alpha"])
+  assert_eq(receipt.waiting, ["alpha"])
+  const failure = receipt.failed[0]
+  assert(failure != nil, "expected propagation failure")
+  assert_eq(failure.name, "beta")
+  assert_eq(failure.category, "propagation")
+  assert(failure.detail.contains("index is still propagating"))
+  assert_eq(receipt.remaining, ["gamma"])
+  assert_eq(atomic_get(publish_calls), 1)
+  assert_eq(atomic_get(waits), 15)
+}
+
+@test
+pipeline test_publish_recovery_fails_closed_on_permanent_publish_error(task) {
+  const adapters: PublishAdapters = {
+    probe: { _name, _version -> return {status: "missing"} },
+    publish: { package ->
+      return {success: false, output: "owner authorization failed for " + package.name}
+    },
+    wait: { _delay_ms -> return nil },
+  }
+  const receipt = publish_recover(PACKAGES, adapters, {max_publish_attempts: 3})
+  assert(!receipt.ok)
+  const failure = receipt.failed[0]
+  assert(failure != nil, "expected permanent failure")
+  assert_eq(failure.name, "alpha")
+  assert_eq(failure.category, "permanent")
+  assert_eq(receipt.remaining, ["beta", "gamma"])
+  assert_eq(receipt.published, [])
+}
+
+@test
+pipeline test_publish_recovery_accepts_already_uploaded_cargo_result(task) {
+  const adapters: PublishAdapters = {
+    probe: { _name, _version -> return {status: "missing"} },
+    publish: { package ->
+      return {success: false, output: "crate version " + package.version + " is already uploaded"}
+    },
+    wait: { _delay_ms -> return nil },
+  }
+  const receipt = publish_recover([{deps: [], name: "alpha", version: "1.2.3"}], adapters)
+  assert(receipt.ok)
+  assert_eq(receipt.already_present, ["alpha"])
+  assert_eq(receipt.published, [])
+}
+
+@test
+pipeline test_publish_recovery_retries_rate_limits_with_injected_wait(task) {
+  const attempts = atomic(0)
+  const waited_ms = atomic(0)
+  const adapters: PublishAdapters = {
+    probe: { _name, _version -> return {status: "missing"} },
+    publish: { _package ->
+      const attempt = atomic_add(attempts, 1) + 1
+      if attempt == 1 {
+        return {success: false, output: "429 Too Many Requests"}
+      }
+      return {success: true}
+    },
+    wait: { delay_ms ->
+      atomic_add(waited_ms, delay_ms)
+      return nil
+    },
+  }
+  const receipt = publish_recover(
+    [{deps: [], name: "alpha", version: "1.2.3"}],
+    adapters,
+    {max_publish_attempts: 2, rate_limit_delay_ms: 17},
+  )
+  assert(receipt.ok)
+  assert_eq(receipt.published, ["alpha"])
+  assert_eq(atomic_get(attempts), 2)
+  assert_eq(atomic_get(waited_ms), 17)
+}
+
+@test
+pipeline test_publish_failure_categories_are_closed(task) {
+  assert_eq(publish_failure_category("429 Too Many Requests"), "rate_limited")
+  assert_eq(
+    publish_failure_category("failed to select a version for the requirement alpha = 1.2.3"),
+    "propagation",
+  )
+  assert_eq(publish_failure_category("crate version 1.2.3 is already uploaded"), "already_present")
+  assert_eq(publish_failure_category("authentication token rejected"), "permanent")
+}

@@ -58,7 +58,6 @@ pub(super) async fn execute_case(
     loaded_skills: &crate::skill_loader::LoadedSkills,
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
-    #[cfg(test)] setup_delay_ms: u64,
 ) -> TestResult {
     harn_vm::reset_thread_local_state();
     let _stdio_guard = (!stdio_available).then(harn_vm::reserve_stdio_for_current_thread);
@@ -175,8 +174,6 @@ pub(super) async fn execute_case(
             for (name, value) in &case.bindings {
                 vm.set_global(name, value.clone());
             }
-            #[cfg(test)]
-            wait_for_test_setup_delay(setup_delay_ms).await;
             let setup_ms = setup_start.elapsed().as_millis() as u64;
             let exec_start = Instant::now();
             let outcome = match vm
@@ -258,23 +255,4 @@ pub(super) async fn execute_case(
         duration_ms,
         phases: Some(phases),
     }
-}
-
-#[cfg(test)]
-async fn wait_for_test_setup_delay(delay_ms: u64) {
-    if delay_ms == 0 {
-        return;
-    }
-    // This must yield: the regression proves an outer timeout would expire
-    // during setup, rather than merely measuring setup wall time afterward.
-    tokio::task::spawn_blocking(move || {
-        let state = std::sync::Mutex::new(());
-        let guard = state.lock().unwrap();
-        let condition = std::sync::Condvar::new();
-        let _ = condition
-            .wait_timeout_while(guard, std::time::Duration::from_millis(delay_ms), |_| true)
-            .unwrap();
-    })
-    .await
-    .unwrap();
 }

@@ -40,8 +40,7 @@ fn main(harness: Harness) -> int {
     return 70
   }
   if json_mode(harness) && payload?.columns != nil {
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "error: --columns cannot be combined with --json; JSON always returns complete catalog rows",
     )
     return 2
@@ -52,7 +51,10 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("error: " + to_string(e))
     return 2
   }
-  const catalog = catalog_with_installed_ollama_models(harness.llm.catalog(), safe_list(payload.installed_ollama))
+  const catalog = catalog_with_installed_ollama_models(
+    harness.llm.catalog(),
+    safe_list(payload.installed_ollama),
+  )
   const result = model_catalog_query(catalog, query)
   if json_mode(harness) {
     harness.stdio.println(json_stringify_pretty(result))

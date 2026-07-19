@@ -21,7 +21,9 @@ pipeline test(task) {
   assert_eq(tar_entries[1].path, "bin/run")
   assert_eq(bytes_to_string(tar_entries[1].content), "echo hi\n")
   assert_eq(tar_entries[1].mode, 493)
-  const zip_archive = zip_create([{path: "notes/a.txt", content: "alpha"}, {path: "raw/data.bin", content: bytes}])
+  const zip_archive = zip_create(
+    [{path: "notes/a.txt", content: "alpha"}, {path: "raw/data.bin", content: bytes}],
+  )
   const zip_entries = zip_extract(zip_archive)
   assert_eq(len(zip_entries), 2)
   assert_eq(zip_entries[0].path, "notes/a.txt")

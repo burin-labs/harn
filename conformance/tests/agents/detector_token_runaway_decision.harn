@@ -16,7 +16,10 @@ fn cap(median, stddev, sigma, fallback) {
 }
 
 fn decide(config, tokens, making_progress) {
-  const decision = token_runaway_decision(config, {making_progress: making_progress, tokens: tokens})
+  const decision = token_runaway_decision(
+    config,
+    {making_progress: making_progress, tokens: tokens},
+  )
   return decision.action + ":" + decision.reason + ":" + to_string(to_int(decision.cap))
 }
 
@@ -44,7 +47,9 @@ pipeline default() {
   // ---- progress signal: verification advance, NOT "any tool succeeded" ----
   // Edit storm: successful edits, no verification result -> no progress.
   __io_println(
-    token_runaway_made_progress({tool_results: [{ok: true, result: "wrote foo", tool_name: "edit"}]}),
+    token_runaway_made_progress(
+      {tool_results: [{ok: true, result: "wrote foo", tool_name: "edit"}]},
+    ),
   )
   // A passing verification this turn (empty diagnostics list) -> progress.
   __io_println(

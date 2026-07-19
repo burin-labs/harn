@@ -312,6 +312,7 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             node_uses_provider_llm(condition, shadows)
                 || nodes_use_provider_llm(then_body, shadows)

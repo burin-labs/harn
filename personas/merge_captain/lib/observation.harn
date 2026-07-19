@@ -6,13 +6,14 @@
 // path.
 /** Build a normalized observation from raw GitHub PR + checks data. */
 pub fn from_github(pr, checks, required_checks) {
-  const observed_checks = (checks ?? [])
-    .map(
-    { check -> {
-      name: check.name ?? check.context ?? "",
-      status: check.status ?? "unknown",
-      conclusion: check.conclusion,
-    } },
+  const observed_checks = (checks ?? []).map(
+    { check ->
+      {
+        name: check.name ?? check.context ?? "",
+        status: check.status ?? "unknown",
+        conclusion: check.conclusion,
+      }
+    },
   )
   const conclusion_for = { name ->
     let found = nil
@@ -23,15 +24,13 @@ pub fn from_github(pr, checks, required_checks) {
     }
     found
   }
-  const missing_required = (required_checks ?? [])
-    .filter(
+  const missing_required = (required_checks ?? []).filter(
     { name ->
       const c = conclusion_for(name)
       c == nil || c.status != "completed"
     },
   )
-  const failed_required = (required_checks ?? [])
-    .filter(
+  const failed_required = (required_checks ?? []).filter(
     { name ->
       const c = conclusion_for(name)
       c != nil && c.status == "completed" && c.conclusion != "success" && c.conclusion != "neutral"

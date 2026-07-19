@@ -42,14 +42,8 @@ pub(crate) fn build_assistant_tool_message(
                 }
             }
             let mut part = serde_json::json!({ "functionCall": function_call });
-            if let Some(signature) = tc
-                .get("thought_signature")
-                .or_else(|| tc.get("thoughtSignature"))
-                .and_then(|value| value.as_str())
-            {
-                if !signature.is_empty() {
-                    part["thoughtSignature"] = serde_json::json!(signature);
-                }
+            if let Some(signature) = crate::llm::providers::gemini_tool_call_thought_signature(tc) {
+                part["thoughtSignature"] = serde_json::json!(signature);
             }
             parts.push(part);
         }

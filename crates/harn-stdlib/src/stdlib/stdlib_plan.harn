@@ -67,13 +67,37 @@ pub fn emit_plan_tool(registry) {
       executor: "harn",
       parameters: {
         summary: {type: "string", description: "One-sentence plan summary", required: false},
-        direction: {type: "string", description: "First-order-plan direction alias", required: false},
-        steps: {type: "array", description: "Plan steps with content/step and status", required: false},
+        direction: {
+          type: "string",
+          description: "First-order-plan direction alias",
+          required: false,
+        },
+        steps: {
+          type: "array",
+          description: "Plan steps with content/step and status",
+          required: false,
+        },
         tasks: {type: "array", description: "First-order-plan tasks alias", required: false},
-        assumptions: {type: "array", description: "Assumptions the plan relies on", required: false},
-        open_questions: {type: "array", description: "Questions that remain unresolved", required: false},
-        verification_commands: {type: "array", description: "Commands or checks to verify the work", required: false},
-        verification: {type: "array", description: "First-order-plan verification alias", required: false},
+        assumptions: {
+          type: "array",
+          description: "Assumptions the plan relies on",
+          required: false,
+        },
+        open_questions: {
+          type: "array",
+          description: "Questions that remain unresolved",
+          required: false,
+        },
+        verification_commands: {
+          type: "array",
+          description: "Commands or checks to verify the work",
+          required: false,
+        },
+        verification: {
+          type: "array",
+          description: "First-order-plan verification alias",
+          required: false,
+        },
         approval: {type: "object", description: "Optional approval state", required: false},
       },
       returns: {type: "object"},
@@ -97,9 +121,21 @@ pub fn update_plan_tool(registry) {
       parameters: {
         explanation: {type: "string", description: "Short reason for the update", required: false},
         plan: {type: "array", description: "Plan steps with step/content and status"},
-        assumptions: {type: "array", description: "Assumptions the plan relies on", required: false},
-        open_questions: {type: "array", description: "Questions that remain unresolved", required: false},
-        verification_commands: {type: "array", description: "Commands or checks to verify the work", required: false},
+        assumptions: {
+          type: "array",
+          description: "Assumptions the plan relies on",
+          required: false,
+        },
+        open_questions: {
+          type: "array",
+          description: "Questions that remain unresolved",
+          required: false,
+        },
+        verification_commands: {
+          type: "array",
+          description: "Commands or checks to verify the work",
+          required: false,
+        },
         approval: {type: "object", description: "Optional approval state", required: false},
       },
       returns: {type: "object"},

@@ -43,14 +43,18 @@ pub type HostAttachmentDescriptionOptions = {
   image?: dict,
 }
 
-fn __host_attachment_description_route(options: HostAttachmentDescriptionOptions) -> {provider?: string, model: string}? {
+fn __host_attachment_description_route(
+  options: HostAttachmentDescriptionOptions,
+) -> {provider?: string, model: string}? {
   if options.model != nil && options.model != "" {
     if options.provider == nil {
       return {model: options.model}
     }
     return {provider: options.provider, model: options.model}
   }
-  const candidates = models_with({strengths: ["vision"], available_only: true, exclude_deprecated: true})
+  const candidates = models_with(
+    {strengths: ["vision"], available_only: true, exclude_deprecated: true},
+  )
   if len(candidates) == 0 {
     return nil
   }
@@ -65,14 +69,19 @@ fn __host_attachment_description_route(options: HostAttachmentDescriptionOptions
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn describe_host_attachment(source: any, options: HostAttachmentDescriptionOptions = {}) -> {description: string, description_model: string}? {
+pub fn describe_host_attachment(
+  source: any,
+  options: HostAttachmentDescriptionOptions = {},
+) -> {description: string, description_model: string}? {
   const route = __host_attachment_description_route(options)
   if route == nil {
     return nil
   }
   const prompt = options.prompt
     ?? "Describe this image precisely for a coding agent. Preserve visible text, state, errors, and spatial relationships."
-  const messages = [{role: "user", content: [text_content(prompt), image_content(source, options.image ?? {})]}]
+  const messages = [
+    {role: "user", content: [text_content(prompt), image_content(source, options.image ?? {})]},
+  ]
   const result = try {
     if route.provider == nil {
       llm_call("", options.system, {model: route.model, vision: true, messages: messages})

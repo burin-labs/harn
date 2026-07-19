@@ -29,7 +29,10 @@ pipeline main() {
           {
             id: "park_trigger",
             name: "agent_await_resumption",
-            arguments: {reason: "waiting on pr.merged", conditions: {trigger: {kind: "pr.merged", provider: "github"}}},
+            arguments: {
+              reason: "waiting on pr.merged",
+              conditions: {trigger: {kind: "pr.merged", provider: "github"}},
+            },
           },
         ],
         input_tokens: 7,
@@ -45,7 +48,9 @@ pipeline main() {
       const suspended = wait_agent(handle)
       const trigger_handle = suspended?.suspension?.auto_resume_trigger
       __io_println("status=" + suspended.status)
-      __io_println("conditions_trigger_kind=" + (suspended?.suspension?.conditions?.trigger?.kind ?? ""))
+      __io_println(
+        "conditions_trigger_kind=" + (suspended?.suspension?.conditions?.trigger?.kind ?? ""),
+      )
       __io_println(
         "conditions_trigger_provider="
           + (suspended?.suspension?.conditions?.trigger?.provider ?? ""),

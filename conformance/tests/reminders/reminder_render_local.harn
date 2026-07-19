@@ -20,7 +20,12 @@ pipeline main() {
       llm_call(
         "ignored",
         "base system",
-        {provider: "mock", model: "mock", messages: agent_session_messages(session), session_id: session},
+        {
+          provider: "mock",
+          model: "mock",
+          messages: agent_session_messages(session),
+          session_id: session,
+        },
       )
       const call = llm_mock_calls()[0]
       const last = call.messages[len(call.messages) - 1]

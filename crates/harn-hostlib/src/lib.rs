@@ -50,6 +50,7 @@ pub mod secret_store;
 #[cfg(feature = "terminal-session")]
 pub mod terminal_session;
 pub mod tools;
+pub mod verdict;
 
 mod json;
 mod registry;
@@ -60,12 +61,12 @@ pub use error::HostlibError;
 pub use host_lease::{
     HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseCargoExecutionContext,
     HostLeaseDeferReason, HostLeaseDeferReceipt, HostLeaseError, HostLeaseExecutionContext,
-    HostLeaseHandle, HostLeaseOperationKind, HostLeasePathIdentity, HostLeasePriorityClass,
-    HostLeaseProcessExit, HostLeaseReleaseReceipt, HostLeaseRenewReceipt, HostLeaseRequest,
-    HostLeaseResourceClass, HostLeaseResourceDefinition, HostLeaseResourceKey,
+    HostLeaseHandle, HostLeaseMetadataUpdateReceipt, HostLeaseOperationKind, HostLeasePathIdentity,
+    HostLeasePriorityClass, HostLeaseProcessExit, HostLeaseReleaseReceipt, HostLeaseRenewReceipt,
+    HostLeaseRequest, HostLeaseResourceClass, HostLeaseResourceDefinition, HostLeaseResourceKey,
     HostLeaseRunLaunchFailure, HostLeaseRunReceipt, HostLeaseRunReleaseOutcome,
     HostLeaseRunStartFailure, HostLeaseRunState, HostLeaseState, HostLeaseStore,
-    HOST_LEASE_ROOT_ENV,
+    DEFAULT_HOST_LEASE_DOMAIN, HOST_LEASE_ROOT_ENV,
 };
 pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, RegisteredBuiltin};
 
@@ -96,6 +97,7 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(fs_watch::FsWatchCapability)
         .with(tools::ToolsCapability)
         .with(secret_store::SecretStoreCapability)
+        .with(verdict::VerdictCapability)
         .with(host_lease_capability::HostLeaseCapability);
     #[cfg(feature = "terminal-session")]
     {

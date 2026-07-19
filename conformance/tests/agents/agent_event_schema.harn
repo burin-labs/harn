@@ -89,7 +89,9 @@ pipeline default() {
   __io_println(agent_event_report(captured.events[0], agent_tool_lifecycle_event_schema()).ok)
   __io_println(agent_event_value(captured.events[0], agent_tool_lifecycle_event_schema()).tool_name)
   __io_println(agent_event_report(captured.events[1], agent_tool_audit_event_schema()).ok)
-  __io_println(agent_event_value(captured.events[1], agent_tool_audit_event_schema()).receipt.status)
+  __io_println(
+    agent_event_value(captured.events[1], agent_tool_audit_event_schema()).receipt.status,
+  )
   __io_println(agent_event_report(captured.events[1].receipt, agent_tool_call_receipt_schema()).ok)
   __io_println(agent_event_report(captured.events[2], agent_typed_checkpoint_event_schema()).ok)
   const missing = agent_event_report(

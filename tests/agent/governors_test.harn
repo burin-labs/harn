@@ -47,7 +47,10 @@ pipeline test_pace_action_of_maps_vocabulary(task) {
 
 pipeline test_pace_action_of_over_real_decision(task) {
   // Armed budget, past the checkpoint, no progress -> native `cut` -> "abort".
-  const decision = governor_pace_decision({}, {armed_budget_ms: 100, elapsed_ms: 200, made_progress: false})
+  const decision = governor_pace_decision(
+    {},
+    {armed_budget_ms: 100, elapsed_ms: 200, made_progress: false},
+  )
   assert_eq(decision.action, "cut")
   assert_eq(pace_action_of(decision), "abort")
 }

@@ -334,6 +334,7 @@ impl SyncInterpreter {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 if self.eval(condition)?.is_truthy() {
                     self.exec(then_body)

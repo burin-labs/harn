@@ -36,7 +36,9 @@ fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
     if len(entry.files) == 0 {
       continue
     }
-    const res = rules_apply({rule: entry.rule, paths: entry.files, dry_run: !apply, allow_unsafe: allow_unsafe})
+    const res = rules_apply(
+      {rule: entry.rule, paths: entry.files, dry_run: !apply, allow_unsafe: allow_unsafe},
+    )
     for f in res.files ?? [] {
       if f.changed {
         changed = changed + 1
@@ -105,8 +107,7 @@ fn main(harness: Harness) {
       if apply {
         harness.stdio.println("rewrote " + f.path + "  [safety=" + f.safety + "]")
       } else {
-        harness.stdio
-          .println(
+        harness.stdio.println(
           "would change "
             + f.path
             + "  [safety="

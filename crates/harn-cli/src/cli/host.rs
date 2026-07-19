@@ -60,6 +60,9 @@ pub(crate) struct HostLeaseAcquireArgs {
     /// Capacity-one resource class on the host.
     #[arg(long, value_enum, default_value_t)]
     pub resource_class: HostLeaseResourceClassArg,
+    /// Independent capacity-one coordination domain.
+    #[arg(long, default_value = "default")]
+    pub domain: String,
     /// Stable owner identity written into receipts.
     #[arg(long)]
     pub owner: String,
@@ -92,6 +95,8 @@ pub(crate) struct HostLeaseRenewArgs {
     pub host: Option<String>,
     #[arg(long, value_enum, default_value_t)]
     pub resource_class: HostLeaseResourceClassArg,
+    #[arg(long, default_value = "default")]
+    pub domain: String,
     #[arg(long)]
     pub lease_id: String,
     #[arg(long, default_value_t = 900_000)]
@@ -106,6 +111,8 @@ pub(crate) struct HostLeaseReleaseArgs {
     pub host: Option<String>,
     #[arg(long, value_enum, default_value_t)]
     pub resource_class: HostLeaseResourceClassArg,
+    #[arg(long, default_value = "default")]
+    pub domain: String,
     #[arg(long)]
     pub lease_id: String,
     #[arg(long)]
@@ -118,6 +125,8 @@ pub(crate) struct HostLeaseStatusArgs {
     pub host: Option<String>,
     #[arg(long, value_enum, default_value_t)]
     pub resource_class: HostLeaseResourceClassArg,
+    #[arg(long, default_value = "default")]
+    pub domain: String,
     #[arg(long)]
     pub json: bool,
 }

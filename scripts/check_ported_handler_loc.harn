@@ -46,7 +46,12 @@ pub fn loc_for(path: string) -> int? {
  */
 pub fn evaluate_handler(path, max_loc, actual) {
   if path == nil || path == "" || max_loc == nil {
-    return {path: path, actual: nil, max_loc: max_loc, reason: "invalid entry: path and max_loc are required"}
+    return {
+      path: path,
+      actual: nil,
+      max_loc: max_loc,
+      reason: "invalid entry: path and max_loc are required",
+    }
   }
   if actual == nil {
     return {path: path, actual: nil, max_loc: max_loc, reason: "missing file"}

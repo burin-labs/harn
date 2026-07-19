@@ -124,7 +124,8 @@ can be unbounded.
 compose retry / fallback / shadow / logging / budget behavior:
 
 ```harn,ignore
-import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
+import {default_llm_caller} from "std/llm/caller"
+import {with_retry, with_fallback, compose} from "std/llm/handlers"
 
 const caller = compose([
   with_retry({max_attempts: 4, base_ms: 250, backoff: "exponential"}),
@@ -172,7 +173,7 @@ atomics: `atomic(0)`, `atomic_add(a, 1)`, `atomic_get(a)`.)
 ```harn
 const r = try { llm_call(prompt, nil, opts) }
 // Optional chaining short-circuits on Result.Err.
-const text = r?.prose ?? "no response"
+const text = r?.text ?? "no response"
 // Explicit error inspection.
 if unwrap_err(r) != "" {
   log("failed")
@@ -181,7 +182,7 @@ if unwrap_err(r) != "" {
 // `try/catch` also works as an expression — the whole form evaluates to
 // the try body's tail value on success or the catch handler's tail value
 // on a caught throw, so simple fallbacks don't need Result gymnastics.
-const prose = try { llm_call(prompt, nil, opts).prose } catch (e) { "fallback" }
+const answer = try { llm_call(prompt, nil, opts).text } catch (e) { "fallback" }
 ```
 
 ## Concurrency
@@ -272,7 +273,7 @@ const r = llm_call(prompt, system, {
   schema_retries: 2,       // retry with corrective nudge on schema mismatch
   response_format: "json",
 })
-log(r.prose)           // unwrapped prose (preferred for "the answer")
+log(r.text)            // the public answer (preferred for "the answer")
 log(r.data.verdict)    // parsed structured output
 ```
 

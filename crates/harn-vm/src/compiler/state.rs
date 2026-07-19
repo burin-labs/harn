@@ -289,13 +289,7 @@ impl Compiler {
     pub fn compile(mut self, program: &[SNode]) -> Result<Chunk, CompileError> {
         // Pre-scan so we can recognize EnumName.Variant as enum construction
         // even when the enum is declared inside a pipeline.
-        self.collect_module_enum_catalog(program);
-        if self.enum_names.insert("Result".to_string()) {
-            Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
-        }
-        Self::collect_struct_layouts(program, &mut self.struct_layouts);
-        Self::collect_interface_methods(program, &mut self.interface_methods);
-        self.collect_type_aliases(program);
+        self.seed_module_catalog(program);
         // Box module-level mutable `let`s that a top-level or pipeline-body
         // closure captures (harn#4479). Nested `fn`/closure/`tool` bodies reseed
         // their own capture set when compiled, so this only governs the
@@ -876,19 +870,15 @@ impl Compiler {
         Ok(())
     }
 
-    /// Collect pending finally bodies from the top of the stack down to
-    /// (but not including) the innermost `CatchBarrier`. Used by `throw`
-    /// lowering: throws caught locally don't unwind past the catch, so
-    /// finallys behind the barrier aren't on the throw's exit path.
-    pub(super) fn pending_finallys_until_barrier(&self) -> Vec<Vec<SNode>> {
-        let mut out = Vec::new();
-        for entry in self.finally_bodies.iter().rev() {
-            match entry {
-                FinallyEntry::CatchBarrier => break,
-                FinallyEntry::Finally(body) => out.push(body.clone()),
-            }
-        }
-        out
+    /// Whether a pending finally lies above the innermost `CatchBarrier`.
+    /// A locally caught throw stops at the barrier, so cleanup entries below
+    /// it are not part of that throw's exit path.
+    pub(super) fn has_pending_finally_until_barrier(&self) -> bool {
+        self.finally_bodies
+            .iter()
+            .rev()
+            .take_while(|entry| !matches!(entry, FinallyEntry::CatchBarrier))
+            .any(|entry| matches!(entry, FinallyEntry::Finally(_)))
     }
 
     /// True if there are any pending finally bodies (not just barriers).

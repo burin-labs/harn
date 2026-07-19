@@ -132,6 +132,7 @@ impl<'a, 'd> State<'a, 'd> {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 self.visit_node(condition);
                 self.visit_block(then_body);

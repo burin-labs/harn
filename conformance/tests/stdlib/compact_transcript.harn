@@ -11,7 +11,9 @@ pipeline test(task) {
   )
   const truncated = transcript_compact(base, {strategy: "truncate", keep_last: 1, target_tokens: 1})
   __io_println(transcript_summary(truncated)?.contains("auto-compacted"))
-  __io_println(transcript_events_by_kind(truncated, "compaction")[0].metadata?.strategy == "truncate")
+  __io_println(
+    transcript_events_by_kind(truncated, "compaction")[0].metadata?.strategy == "truncate",
+  )
   const truncate_assets = transcript_assets(truncated)
   __io_println(len(truncate_assets) == 1)
   __io_println(len(transcript_messages(truncate_assets[0].data)) == 4)
@@ -27,7 +29,10 @@ pipeline test(task) {
       {role: "user", content: "All right."},
     ],
   )
-  const masked = transcript_compact(masked_base, {strategy: "observation_mask", keep_last: 1, target_tokens: 1})
+  const masked = transcript_compact(
+    masked_base,
+    {strategy: "observation_mask", keep_last: 1, target_tokens: 1},
+  )
   __io_println(transcript_summary(masked)?.contains("masked"))
   __io_println(
     transcript_events_by_kind(masked, "compaction")[0].metadata?.strategy == "observation_mask",
@@ -68,7 +73,9 @@ pipeline test(task) {
       __io_println(extended_prompt.contains("Additional compaction instructions"))
       __io_println(extended_event.metadata?.instruction_mode == "extend")
       __io_println(extended_event.metadata?.instruction_source == "host")
-      __io_println(extended_event.metadata?.compaction_policy?.instructions == "Preserve parser TODOs.")
+      __io_println(
+        extended_event.metadata?.compaction_policy?.instructions == "Preserve parser TODOs.",
+      )
       const policy_replaced = transcript_compact(
         base,
         {
@@ -94,15 +101,22 @@ pipeline test(task) {
         stream_session,
         { ev ->
           if ev?.type == "transcript_compacted" {
-            agent_session_inject(stream_session, {role: "assistant", content: "LIVE_COMPACTION_EVENT"})
+            agent_session_inject(
+              stream_session,
+              {role: "assistant", content: "LIVE_COMPACTION_EVENT"},
+            )
           }
         },
       )
       const session_snapshot = agent_session_snapshot(stream_session) ?? {}
-      const _ = transcript_compact(session_snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+      const _ = transcript_compact(
+        session_snapshot,
+        {strategy: "truncate", keep_last: 1, target_tokens: 1},
+      )
       __io_println(
-        json_stringify(transcript_messages(agent_session_snapshot(stream_session) ?? {}))
-          .contains("LIVE_COMPACTION_EVENT"),
+        json_stringify(transcript_messages(agent_session_snapshot(stream_session) ?? {})).contains(
+          "LIVE_COMPACTION_EVENT",
+        ),
       )
       const run = run_record(
         {

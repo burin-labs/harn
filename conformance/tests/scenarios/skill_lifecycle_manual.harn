@@ -38,15 +38,27 @@ pipeline test(task) {
       assert(result?.status == "done", "manual skill loop completes")
       const calls = llm_mock_calls()
       assert(len(calls) == 2, "load_skill creates a second model turn")
-      assert(!contains(calls[0].system, "## Available skills"), "manual strategy suppresses catalog")
+      assert(
+        !contains(calls[0].system, "## Available skills"),
+        "manual strategy suppresses catalog",
+      )
       assert(
         !contains(calls[0].system, "## Active skills"),
         "manual strategy does not pre-activate skills",
       )
-      assert(contains(json_stringify(calls[0].tools), "load_skill"), "load_skill is still advertised")
-      assert(contains(calls[1].system, "## Active skills"), "loaded skill is active on the next turn")
+      assert(
+        contains(json_stringify(calls[0].tools), "load_skill"),
+        "load_skill is still advertised",
+      )
+      assert(
+        contains(calls[1].system, "## Active skills"),
+        "loaded skill is active on the next turn",
+      )
       assert(contains(calls[1].system, "Alpha instructions."), "loaded skill prompt is active")
-      assert(!contains(calls[1].system, "## Available skills"), "manual strategy never adds the catalog")
+      assert(
+        !contains(calls[1].system, "## Available skills"),
+        "manual strategy never adds the catalog",
+      )
       log("skill_lifecycle_manual tests passed")
     },
   )

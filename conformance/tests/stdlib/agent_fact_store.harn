@@ -10,7 +10,10 @@ pipeline test_agent_fact_store(_task) {
       confidence: 0.82,
       evidence: [{kind: "FileRange", ref: "README.md:1-3", snippet: "Rust examples"}],
       provenance: {agent: "codex", run_id: "run-1"},
-      valid_until: {event: "README preference guidance changes", asserted_at: "2026-05-23T22:00:00Z"},
+      valid_until: {
+        event: "README preference guidance changes",
+        asserted_at: "2026-05-23T22:00:00Z",
+      },
     },
     opts + {now: "2026-05-23T22:00:00Z"},
   )

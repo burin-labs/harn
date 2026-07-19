@@ -75,8 +75,10 @@ fn __resume_by_emit_declined(harness, suspension, mechanism, reason) {
   if harness == nil {
     return
   }
-  harness
-    .emit_audit("resume_by_declined", __resume_by_payload(suspension, mechanism, {reason: reason}))
+  harness.emit_audit(
+    "resume_by_declined",
+    __resume_by_payload(suspension, mechanism, {reason: reason}),
+  )
 }
 
 fn __resume_by_has_conditions(suspension) {
@@ -271,8 +273,7 @@ pub fn invoke_resume_by(callback, harness, suspension) -> ResumeByDispatchResult
   }
   const resolved = if is_err(outcome) {
     if harness != nil {
-      harness
-        .emit_audit(
+      harness.emit_audit(
         "resume_by_errored",
         __resume_by_payload(suspension, "callback", {error: to_string(unwrap_err(outcome))}),
       )
@@ -283,8 +284,7 @@ pub fn invoke_resume_by(callback, harness, suspension) -> ResumeByDispatchResult
   }
   if resolved == nil || !resolved?.handled {
     if harness != nil {
-      harness
-        .emit_audit(
+      harness.emit_audit(
         "resume_by_fallback",
         __resume_by_payload(suspension, "ResumeBy.parent_llm", {previous: resolved?.mechanism}),
       )

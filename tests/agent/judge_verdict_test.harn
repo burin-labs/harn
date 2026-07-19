@@ -35,7 +35,12 @@ pipeline test_live_mangled_continue_double_comma(task) {
 pipeline test_live_mangled_continue_runon_reasoning_key(task) {
   // Exact live string: `continue",  "reasoning":`
   assert_eq(__judge_verdict_token("continue\",  \"reasoning\":"), "continue")
-  const outcome = __judge_classify_verdict("continue\",  \"reasoning\":", DONE_TOKENS, [], "fallback")
+  const outcome = __judge_classify_verdict(
+    "continue\",  \"reasoning\":",
+    DONE_TOKENS,
+    [],
+    "fallback",
+  )
   assert_eq(outcome.vetoed, true)
   assert_eq(outcome.verdict, "continue")
 }

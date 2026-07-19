@@ -159,7 +159,8 @@ pub pipeline run(task) -> dict {
       sweep_id: input.sweep_id,
     },
   )
-  const visible = "merge_captain swept ${to_string(summary.pr_count)} PRs across ${to_string(len(policies_load.policies))} repos (dry_run=${to_string(input.dry_run)})"
+  const visible =
+    "merge_captain swept ${to_string(summary.pr_count)} PRs across ${to_string(len(policies_load.policies))} repos (dry_run=${to_string(input.dry_run)})"
   __io_println(visible)
   __io_println(json_stringify(summary))
   return summary

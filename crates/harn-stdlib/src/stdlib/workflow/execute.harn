@@ -64,7 +64,12 @@ pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
     const node = workflow_graph.nodes[current]
     if node?.kind == "join" {
       const readiness = workflow_join_readiness(
-        {graph: workflow_graph, node_id: current, node: node, completed_nodes: state.completed_nodes},
+        {
+          graph: workflow_graph,
+          node_id: current,
+          node: node,
+          completed_nodes: state.completed_nodes,
+        },
       )
       if !readiness.ready {
         ready = __workflow_execute_enqueue_unique(ready, current)
@@ -84,12 +89,20 @@ pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
           llm_call(plan.prompt, plan.system, plan.llm_options)
         }
       } catch (e) {
-        {__workflow_stage_error: true, status: "failed", text: "", visible_text: "", error: to_string(e)}
+        {
+          __workflow_stage_error: true,
+          status: "failed",
+          text: "",
+          visible_text: "",
+          error: to_string(e),
+        }
       }
     }
     const executed = __host_workflow_stage_complete(state_id, current, llm_result)
     state = executed.state
-    const edges = workflow_next_edges({graph: workflow_graph, current: current, branch: executed.branch})
+    const edges = workflow_next_edges(
+      {graph: workflow_graph, current: current, branch: executed.branch},
+    )
     ready = __workflow_execute_enqueue_edges(__workflow_execute_list(state?.ready_nodes), edges)
     state = __host_workflow_record_transitions(state_id, ready, executed.stage, edges)
     ready = __workflow_execute_list(state?.ready_nodes)

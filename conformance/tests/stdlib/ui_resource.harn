@@ -1,7 +1,8 @@
 import "std/ui_resource"
 
 pipeline default() {
-  const dashboard_html = "<!doctype html><html><head><style>.tile { padding: 12px; }</style></head><body><main><h1>KPIs</h1><pre>signups=42 churn=3</pre><script>const initial = window.openInitialData; const summary = document.getElementById('summary');</script></main></body></html>"
+  const dashboard_html =
+    "<!doctype html><html><head><style>.tile { padding: 12px; }</style></head><body><main><h1>KPIs</h1><pre>signups=42 churn=3</pre><script>const initial = window.openInitialData; const summary = document.getElementById('summary');</script></main></body></html>"
   const resource_options: UiResourceOptions = {
     description: "Weekly KPI tiles",
     permissions: ["tools/call", "context/update"],
@@ -9,7 +10,12 @@ pipeline default() {
     version: "2026-05-11",
     meta: {owner: "growth-team"},
   }
-  const resource: UiResource = ui_resource("ui://harn-dashboard/kpis@v1", "KPIs dashboard", dashboard_html, resource_options)
+  const resource: UiResource = ui_resource(
+    "ui://harn-dashboard/kpis@v1",
+    "KPIs dashboard",
+    dashboard_html,
+    resource_options,
+  )
   __io_println(resource.schema)
   __io_println(resource.mime_type)
   __io_println(resource.profile)
@@ -30,7 +36,12 @@ pipeline default() {
   __io_println(csp_header.contains("connect-src 'none'"))
   const sandbox_attr = ui_resource_sandbox_attr(resource.csp)
   __io_println(sandbox_attr)
-  const result_options: UiToolResultOptions = {structured_fallback: ui_structured_fallback({signups: 42, churn: 3}, {text: "signups=42 churn=3"})}
+  const result_options: UiToolResultOptions = {
+    structured_fallback: ui_structured_fallback(
+      {signups: 42, churn: 3},
+      {text: "signups=42 churn=3"},
+    ),
+  }
   const result: UiToolResult = ui_tool_result(resource, result_options)
   __io_println(result.schema)
   __io_println(result.text_fallback.content.contains("KPIs"))
@@ -48,10 +59,14 @@ pipeline default() {
   __io_println(plain.text_fallback.content.contains("KPIs"))
   const openai_caps = ui_host_supports_apps({ui: {apps: true, profiles: ["mcp-app"]}})
   const no_apps = ui_host_supports_apps({apps: false})
-  const mcp_caps = ui_host_supports_apps({apps: {enabled: true, profiles: ["mcp-app", "openai-app"]}})
+  const mcp_caps = ui_host_supports_apps(
+    {apps: {enabled: true, profiles: ["mcp-app", "openai-app"]}},
+  )
   const custom_only = ui_host_supports_apps({apps: true, profiles: ["custom-app"]})
   const null_caps = ui_host_supports_apps(nil)
-  const normalized: UiHostCapabilities = ui_host_capabilities({apps: {enabled: true, profiles: ["mcp-app"], bridges: ["postMessage"]}})
+  const normalized: UiHostCapabilities = ui_host_capabilities(
+    {apps: {enabled: true, profiles: ["mcp-app"], bridges: ["postMessage"]}},
+  )
   __io_println(openai_caps)
   __io_println(no_apps)
   __io_println(mcp_caps)
@@ -59,12 +74,20 @@ pipeline default() {
   __io_println(null_caps)
   __io_println(normalized.profiles)
   __io_println(normalized.bridges)
-  const call: UiToolCallEnvelope = ui_tool_call_envelope("dashboard.refresh", {window: "7d"}, {id: "call-1"})
+  const call: UiToolCallEnvelope = ui_tool_call_envelope(
+    "dashboard.refresh",
+    {window: "7d"},
+    {id: "call-1"},
+  )
   __io_println(call.jsonrpc)
   __io_println(call.method)
   __io_println(call.params.name)
   __io_println(call.params.arguments.window)
-  const ctx_update: UiContextUpdateEnvelope = ui_context_update_envelope("selection", {tile: "signups"}, {id: "ctx-1"})
+  const ctx_update: UiContextUpdateEnvelope = ui_context_update_envelope(
+    "selection",
+    {tile: "signups"},
+    {id: "ctx-1"},
+  )
   __io_println(ctx_update.method)
   __io_println(ctx_update.params.key)
   __io_println(ctx_update.params.model_visible)
@@ -83,7 +106,10 @@ pipeline default() {
     invalid_html,
     {
       text_fallback: "Widget blocked: contains an unapproved network call",
-      structured_fallback: ui_structured_fallback({status: "blocked"}, {text: "Widget validation failed"}),
+      structured_fallback: ui_structured_fallback(
+        {status: "blocked"},
+        {text: "Widget validation failed"},
+      ),
     },
   )
   __io_println(unsafe_result.ui_resource == nil)

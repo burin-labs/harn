@@ -24,7 +24,8 @@ pipeline default() {
   __io_println(approval_requested.status)
   __io_println(approval_requested.approval.request_id)
   __io_println(
-    approval_requested.action_intents.find({ intent -> intent.kind == "review_approval" }).requires_approval,
+    approval_requested.action_intents.find({ intent -> intent.kind == "review_approval" })
+      .requires_approval,
   )
   __io_println(dlq_created.status)
   __io_println(dlq_created.dlq.error_class)
@@ -50,13 +51,18 @@ pipeline default() {
   __io_println(stale.status)
   __io_println(stale.dlq.dlq_id)
   __io_println(len(stale.replay_refs))
-  __io_println(stale.action_intents.find({ intent -> intent.kind == "replay_dlq" }).requires_approval)
   __io_println(
-    !stale.action_intents.find({ intent -> intent.kind == "open_replay_fixture" }).requires_approval,
+    stale.action_intents.find({ intent -> intent.kind == "replay_dlq" }).requires_approval,
+  )
+  __io_println(
+    !stale.action_intents.find({ intent -> intent.kind == "open_replay_fixture" })
+      .requires_approval,
   )
   __io_println(cloud.status)
   __io_println(len(view.receipts))
-  const stream = event_log.subscribe({topic: "dashboard.jobs.test", from_cursor: view.receipts[0].event_log_id - 1})
+  const stream = event_log.subscribe(
+    {topic: "dashboard.jobs.test", from_cursor: view.receipts[0].event_log_id - 1},
+  )
   const logged = stream.next().value
   __io_println(logged.kind)
   __io_println(logged.payload.job_id)
@@ -117,7 +123,9 @@ pipeline default() {
         source_timestamp: "2026-05-11T14:00:03Z",
       },
       {
-        action_intents: [{kind: "open_job", label: "Open job", effect: "navigation", requires_approval: false}],
+        action_intents: [
+          {kind: "open_job", label: "Open job", effect: "navigation", requires_approval: false},
+        ],
       },
     )
   }
@@ -125,7 +133,11 @@ pipeline default() {
   const missing_receipt = try {
     dashboard_job_event(
       "receipt.available",
-      {job_id: "missing-receipt", run_id: "run-missing-receipt", source_timestamp: "2026-05-11T14:00:00Z"},
+      {
+        job_id: "missing-receipt",
+        run_id: "run-missing-receipt",
+        source_timestamp: "2026-05-11T14:00:00Z",
+      },
     )
   }
   __io_println(is_err(missing_receipt))

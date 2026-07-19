@@ -10,7 +10,9 @@ pipeline default() {
     [llm_text("Still working."), llm_text("Finished. ##DONE##")],
     { ->
       const observe_caller = { call ->
-        __io_println("turn=" + to_string(call.turn.iteration) + " attempt=" + to_string(call.turn.attempt))
+        __io_println(
+          "turn=" + to_string(call.turn.iteration) + " attempt=" + to_string(call.turn.attempt),
+        )
         let result = try {
           llm_call(call.prompt, call.system, call.opts)
         }

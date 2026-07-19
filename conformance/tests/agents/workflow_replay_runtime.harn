@@ -5,7 +5,12 @@ pipeline main() {
       entry: "act",
       nodes: {
         act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
-        verify: {kind: "verify", mode: "llm", model_policy: {provider: "mock"}, verify: {assert_text: "Mock"}},
+        verify: {
+          kind: "verify",
+          mode: "llm",
+          model_policy: {provider: "mock"},
+          verify: {assert_text: "Mock"},
+        },
       },
       edges: [{from: "act", to: "verify"}],
     },

@@ -50,6 +50,7 @@ pub mod jsonl;
 pub mod local_profiles;
 pub(crate) mod mock;
 mod mock_builtins;
+pub(crate) mod mock_store;
 mod model_test;
 pub(crate) mod permissions;
 pub mod plan;
@@ -358,7 +359,8 @@ pub use self::healthcheck::{
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::{vm_value_to_json, vm_value_to_json_strict};
 pub use self::jsonl::{
-    load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned, serialize_llm_mock,
+    load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned,
+    parse_llm_mocks_jsonl, serialize_llm_mock, serialize_llm_mock_fixture,
 };
 pub use self::mock::{
     clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mock_fixture,
@@ -878,7 +880,9 @@ mod tests {
                     let mut vm = crate::Vm::new();
                     crate::register_vm_stdlib(&mut vm);
                     vm.execute(&chunk).await.expect("execute");
+                    let outer = mock::swap_llm_mock_context(vm.llm_mock_context.clone());
                     assert!(mock::builtin_llm_mock_active());
+                    let _ = mock::swap_llm_mock_context(outer);
                     assert!(vm.builtin_names().iter().any(|name| name == "llm_mock"));
                     assert!(vm.builtin_names().iter().any(|name| name == "llm_call"));
                 })

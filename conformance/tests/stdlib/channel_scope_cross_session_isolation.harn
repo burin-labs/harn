@@ -5,8 +5,16 @@
  * own distinct topics.
  */
 pipeline default() {
-  const _ = emit_channel("agent.done", {turn: 1}, {scope: "session", session_id: "sess-A", id: "A-1"})
-  const _ = emit_channel("agent.done", {turn: 99}, {scope: "session", session_id: "sess-B", id: "B-1"})
+  const _ = emit_channel(
+    "agent.done",
+    {turn: 1},
+    {scope: "session", session_id: "sess-A", id: "A-1"},
+  )
+  const _ = emit_channel(
+    "agent.done",
+    {turn: 99},
+    {scope: "session", session_id: "sess-B", id: "B-1"},
+  )
   const sess_a = channel_events("agent.done", {scope: "session", session_id: "sess-A"})
   const sess_b = channel_events("agent.done", {scope: "session", session_id: "sess-B"})
   const sess_c = channel_events("agent.done", {scope: "session", session_id: "sess-C"})

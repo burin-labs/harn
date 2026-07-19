@@ -2,14 +2,15 @@ import "std/project"
 
 pipeline test(task) {
   harness.fs.mkdir("project_scan_single/src")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     "project_scan_single/Cargo.toml",
     "[package]\nname = \"scan-single\"\nversion = \"0.1.0\"\n",
   )
   harness.fs.write_text("project_scan_single/Cargo.lock", "# lock\n")
-  harness.fs
-    .write_text("project_scan_single/src/lib.rs", "pub fn greet() -> &'static str { \"hi\" }\n")
+  harness.fs.write_text(
+    "project_scan_single/src/lib.rs",
+    "pub fn greet() -> &'static str { \"hi\" }\n",
+  )
   const ev = project_scan("project_scan_single", {tiers: ["ambient", "config"]})
   const catalog = project_catalog()
   const rust_entry = catalog.filter({ entry -> entry.id == "rust" })[0]

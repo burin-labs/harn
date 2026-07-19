@@ -2,7 +2,10 @@ import { pairwise_rerank, self_certainty } from "std/llm/rerank"
 import { llm_call_count, with_llm_mocks } from "std/testing"
 
 fn run_pairwise_rerank() {
-  const result = pairwise_rerank(["weak", "best", "ok"], {task: "Pick the strongest answer.", provider: "mock"})
+  const result = pairwise_rerank(
+    ["weak", "best", "ok"],
+    {task: "Pick the strongest answer.", provider: "mock"},
+  )
   return {result: result, calls: llm_call_count()}
 }
 
@@ -34,7 +37,12 @@ pipeline default(task) {
   )
   const direct = self_certainty(
     "ignored",
-    {logprobs: [{token: "a", logprob: -0.6931471805599453}, {token: "b", logprob: -0.6931471805599453}]},
+    {
+      logprobs: [
+        {token: "a", logprob: -0.6931471805599453},
+        {token: "b", logprob: -0.6931471805599453},
+      ],
+    },
   )
   __io_println(direct > 0.49 && direct < 0.51)
   const from_mock = with_llm_mocks(

@@ -25,7 +25,11 @@ pipeline test(task) {
   assert_eq(metadata.redirect_uris, ["https://app.example/callback"], "redirect_uris preserved")
   assert(metadata.grant_types.contains("authorization_code"), "grant_types default applied")
   assert(metadata.response_types.contains("code"), "response_types default applied")
-  assert_eq(metadata.token_endpoint_auth_method, "client_secret_basic", "auth method default applied")
+  assert_eq(
+    metadata.token_endpoint_auth_method,
+    "client_secret_basic",
+    "auth method default applied",
+  )
   assert_eq(metadata.client_name, "Harn Conformance Client", "client_name passthrough")
   assert_eq(metadata.scope, "read write", "scope passthrough")
   const validation = validate_metadata({redirect_uris: ["https://app.example/callback"]})

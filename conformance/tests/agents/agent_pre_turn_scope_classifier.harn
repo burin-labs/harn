@@ -7,30 +7,35 @@ fn scope_events(events) {
 }
 
 fn scope_reminders(result) {
-  return transcript_events_by_kind(result?.transcript, "system_reminder")
-    .filter(
-    { event -> event?.reminder?.tags != nil && event.reminder.tags.any({ tag -> tag == "scope_alert" }) },
+  return transcript_events_by_kind(result?.transcript, "system_reminder").filter(
+    { event ->
+      event?.reminder?.tags != nil && event.reminder.tags.any({ tag -> tag == "scope_alert" })
+    },
   )
 }
 
 fn heavy_caller(text) {
-  return { call -> return {
-    ok: true,
-    value: {
-      text: text,
-      provider: call?.opts?.provider ?? "mock",
-      model: call?.opts?.model ?? "mock",
-      input_tokens: 10,
-      output_tokens: 2,
-    },
-  } }
+  return { call ->
+    return {
+      ok: true,
+      value: {
+        text: text,
+        provider: call?.opts?.provider ?? "mock",
+        model: call?.opts?.model ?? "mock",
+        input_tokens: 10,
+        output_tokens: 2,
+      },
+    }
+  }
 }
 
 fn anchor_opts() {
   return {
     workspace_anchor: {
       primary: "/workspace/harn",
-      additional_roots: [{path: "/workspace/shared", mount_mode: "read_only", mounted_at: "2026-05-25T00:00:00Z"}],
+      additional_roots: [
+        {path: "/workspace/shared", mount_mode: "read_only", mounted_at: "2026-05-25T00:00:00Z"},
+      ],
       anchored_at: "2026-05-25T00:00:00Z",
     },
   }
@@ -50,13 +55,15 @@ pipeline default() {
     {
       enabled: true,
       confidence_threshold: 0.8,
-      classifier: { payload -> return {
-        label: "out_of_scope",
-        confidence: 0.95,
-        evidence: payload.workspace_anchor.primary
-          + " recent_context="
-          + to_string(len(payload.recent_context) > 0),
-      } },
+      classifier: { payload ->
+        return {
+          label: "out_of_scope",
+          confidence: 0.95,
+          evidence: payload.workspace_anchor.primary
+            + " recent_context="
+            + to_string(len(payload.recent_context) > 0),
+        }
+      },
     },
   )
   const out = agent_capture_events(

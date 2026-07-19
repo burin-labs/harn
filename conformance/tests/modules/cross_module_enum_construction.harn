@@ -1,0 +1,20 @@
+// Regression for harn#5062: constructing a home-module `enum` variant from an
+// IMPORTED `pub fn` must succeed at runtime, matching `harn check`.
+//
+// Before the fix, an imported function body was recompiled in a fresh compiler
+// that seeded only type aliases, so `CrossModuleEnum.Made(...)` inside the
+// imported `make_cross_module_enum` lowered to a bare variable load and threw
+// "Undefined variable: CrossModuleEnum" at runtime while `harn check` reported
+// this file `ok` — a runtime-green/type-red trap. Struct construction was
+// unaffected because it lowers through a builtin keyed by a string constant.
+//
+// This exercises the whole class the fix restores: enum construction inside an
+// imported `pub fn` (`make_cross_module_enum`), a cross-module `match`
+// round-trip over the imported enum (`describe`), and a `pub const` that
+// constructs a variant at import-init time (`DEFAULT_ENUM`).
+import { DEFAULT_ENUM, describe, make_cross_module_enum } from "cross_module_enum_construction_lib"
+
+pipeline default() {
+  __io_println(describe(make_cross_module_enum(3)))
+  __io_println(describe(DEFAULT_ENUM))
+}

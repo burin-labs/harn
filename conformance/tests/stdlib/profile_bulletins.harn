@@ -31,7 +31,12 @@ pipeline default() {
         {kind: "user_msg", ref: "msg-42", excerpt: "stop summarizing"},
         {kind: "transcript", ref: "transcript-7"},
       ],
-      privacy: {sync: "local_only", redacted: false, contains_sensitive: false, redaction_hints: []},
+      privacy: {
+        sync: "local_only",
+        redacted: false,
+        contains_sensitive: false,
+        redaction_hints: [],
+      },
       proposed_at: "2026-05-11T16:00:00.000Z",
       review_after: "2026-08-11T00:00:00.000Z",
     },
@@ -56,8 +61,7 @@ pipeline default() {
   __io_println(proposal_receipt.schema)
   __io_println(proposal_receipt.kind)
   __io_println(proposal_receipt.bulletin.status)
-  const proposal_stream = event_log
-    .subscribe(
+  const proposal_stream = event_log.subscribe(
     {topic: "personas.bulletins.test.proposed", from_cursor: proposal_receipt.event_log_id - 1},
   )
   const proposal_event = proposal_stream.next().value
@@ -76,8 +80,7 @@ pipeline default() {
   __io_println(accept_receipt.decision.action)
   __io_println(accept_receipt.decision.status)
   __io_println(accept_receipt.decision.decided_by)
-  const decision_stream = event_log
-    .subscribe(
+  const decision_stream = event_log.subscribe(
     {topic: "personas.bulletins.test.decisions", from_cursor: accept_receipt.event_log_id - 1},
   )
   const decision_event = decision_stream.next().value
@@ -89,7 +92,10 @@ pipeline default() {
   __io_println(len(partitioned.accepted))
   __io_println(len(partitioned.proposed))
   const expired_proposed = proposed + {expires_at: "2020-01-01T00:00:00.000Z"}
-  const expired_after_accept = bulletin_apply_decisions([expired_proposed], [accept_receipt.decision])
+  const expired_after_accept = bulletin_apply_decisions(
+    [expired_proposed],
+    [accept_receipt.decision],
+  )
   const active = bulletin_active(expired_after_accept, "2026-05-11T16:10:00.000Z")
   __io_println(len(active))
   const second = bulletin_propose(
@@ -105,7 +111,10 @@ pipeline default() {
   )
   const rendered = bulletin_render_for_prompt(updated + [second])
   __io_println(rendered)
-  const rendered_accepted_only = bulletin_render_for_prompt(updated + [second], {include_proposed: false})
+  const rendered_accepted_only = bulletin_render_for_prompt(
+    updated + [second],
+    {include_proposed: false},
+  )
   __io_println(rendered_accepted_only)
   const dedup = bulletin_dedupe([proposed, proposed, second])
   __io_println(len(dedup))
@@ -141,7 +150,9 @@ pipeline default() {
   )
   __io_println(expire_receipt.decision.status)
   const bad_scope = try {
-    bulletin_propose({scope: "weird", scope_key: "x", subject: "x", assertion: "x", confidence: 0.5})
+    bulletin_propose(
+      {scope: "weird", scope_key: "x", subject: "x", assertion: "x", confidence: 0.5},
+    )
   }
   __io_println(is_err(bad_scope))
   const bad_confidence = try {

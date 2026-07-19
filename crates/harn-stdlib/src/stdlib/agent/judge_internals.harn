@@ -12,7 +12,13 @@ import { agent_typed_output_checkpoint } from "std/agent/primitives"
  * Listed once here so adding (or renaming) an LLM tuning knob is a
  * single-line change instead of a 2x sweep.
  */
-const __JUDGE_LLM_OVERRIDE_KEYS = ["temperature", "max_tokens", "top_p", "tool_format", "reasoning_effort"]
+const __JUDGE_LLM_OVERRIDE_KEYS = [
+  "temperature",
+  "max_tokens",
+  "top_p",
+  "tool_format",
+  "reasoning_effort",
+]
 
 /**
  * Apply per-judge LLM overrides on top of an already-built `llm_opts`
@@ -56,6 +62,13 @@ pub fn __judge_run_checkpoint(
   schema,
 ) {
   const base = opts?.llm_options ?? {}
+  const mock_scope = if checkpoint_name == "agent.completion_judge" {
+    "completion.judge"
+  } else if checkpoint_name == "agent.step_judge" {
+    "step.judge"
+  } else {
+    "default"
+  }
   const llm_opts = __judge_apply_llm_overrides(
     base
       + {
@@ -64,6 +77,7 @@ pub fn __judge_run_checkpoint(
       output_schema: schema,
       session_id: payload.session_id,
       system: system,
+      mock_scope: base?.mock_scope ?? mock_scope,
     },
     judge_cfg,
   )
@@ -285,10 +299,14 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
  *   - `missing_verification`     — a source write with a configured-but-unrun verifier.
  */
 const __COMPLETION_GATE_FEEDBACK_DEFAULTS = {
-  missing_verification: "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
-  no_source_write_absent: "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing.",
-  no_source_write_cosmetic: "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing.",
-  verification_after_write_red: "Verification is still failing after your change.{findings} Fix the specific failure and re-run the verifier before finishing.",
+  missing_verification:
+    "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
+  no_source_write_absent:
+    "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing.",
+  no_source_write_cosmetic:
+    "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing.",
+  verification_after_write_red:
+    "Verification is still failing after your change.{findings} Fix the specific failure and re-run the verifier before finishing.",
 }
 
 /**
@@ -375,7 +393,11 @@ pub fn __completion_gate_ladder(derived, feedback_templates = nil) {
       ok: false,
       reason: "verification_after_write_red",
       strict: true,
-      feedback: __completion_gate_render_feedback(templates, "verification_after_write_red", detail),
+      feedback: __completion_gate_render_feedback(
+        templates,
+        "verification_after_write_red",
+        detail,
+      ),
     }
   }
   // 3. Green verifier -> completion is honorable.

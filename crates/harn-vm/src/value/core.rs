@@ -8,8 +8,8 @@ use crate::mcp::VmMcpClientHandle;
 use crate::BuiltinId;
 
 use super::{
-    VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange, VmRngHandle, VmSet,
-    VmStream, VmSyncPermitHandle,
+    VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange,
+    VmResourceGuardHandle, VmRngHandle, VmSet, VmStream, VmSyncPermitHandle, VmVerdictReceipt,
 };
 
 /// An async builtin function for the VM.
@@ -281,7 +281,12 @@ pub enum VmValue {
     Atomic(Shared<VmAtomicHandle>),
     Rng(Shared<VmRngHandle>),
     SyncPermit(Shared<VmSyncPermitHandle>),
+    ResourceGuard(Shared<VmResourceGuardHandle>),
     McpClient(Shared<VmMcpClientHandle>),
+    /// A host-minted proof-of-execution receipt — the payload of a positive
+    /// `Verdict`. Constructed ONLY by the verdict issuance capability after the
+    /// host validated a real evidence artifact; no `.harn` code can build it.
+    VerdictReceipt(Shared<VmVerdictReceipt>),
     Set(Shared<VmSet>),
     Generator(Shared<VmGenerator>),
     Stream(Shared<VmStream>),
@@ -432,8 +437,19 @@ impl VmValue {
         VmValue::SyncPermit(Shared::new(handle))
     }
 
+    pub fn resource_guard(handle: VmResourceGuardHandle) -> Self {
+        VmValue::ResourceGuard(Shared::new(handle))
+    }
+
     pub fn mcp_client(handle: VmMcpClientHandle) -> Self {
         VmValue::McpClient(Shared::new(handle))
+    }
+
+    /// Mint a verdict receipt value. Intentionally the ONLY constructor, and it
+    /// is called only from the verdict issuance capability (`harness.verdict`)
+    /// after host validation — never from a `.harn`-reachable builtin.
+    pub fn verdict_receipt(receipt: VmVerdictReceipt) -> Self {
+        VmValue::VerdictReceipt(Shared::new(receipt))
     }
 
     pub fn generator(generator: VmGenerator) -> Self {
@@ -477,7 +493,9 @@ impl VmValue {
             VmValue::Atomic(_) => true,
             VmValue::Rng(_) => true,
             VmValue::SyncPermit(_) => true,
+            VmValue::ResourceGuard(_) => true,
             VmValue::McpClient(_) => true,
+            VmValue::VerdictReceipt(_) => true,
             VmValue::Set(s) => !s.is_empty(),
             VmValue::Generator(_) => true,
             VmValue::Stream(_) => true,
@@ -515,7 +533,9 @@ impl VmValue {
         "atomic",
         "rng",
         "sync_permit",
+        "resource_guard",
         "mcp_client",
+        "verdict_receipt",
         "set",
         "generator",
         "stream",
@@ -546,7 +566,9 @@ impl VmValue {
             VmValue::Atomic(_) => "atomic",
             VmValue::Rng(_) => "rng",
             VmValue::SyncPermit(_) => "sync_permit",
+            VmValue::ResourceGuard(_) => "resource_guard",
             VmValue::McpClient(_) => "mcp_client",
+            VmValue::VerdictReceipt(_) => "verdict_receipt",
             VmValue::Set(_) => "set",
             VmValue::Generator(_) => "generator",
             VmValue::Stream(_) => "stream",
@@ -808,8 +830,17 @@ impl VmValue {
             VmValue::SyncPermit(p) => {
                 let _ = write!(out, "<sync_permit:{}:{}>", p.kind(), p.key());
             }
+            VmValue::ResourceGuard(guard) => {
+                let _ = write!(out, "<resource_guard:{}>", guard.label());
+            }
             VmValue::McpClient(c) => {
                 let _ = write!(out, "<mcp_client:{}>", c.name);
+            }
+            // Authority-free: the display MUST NOT leak the receipt payload
+            // (hash/run identity), because display feeds the lenient JSON and
+            // structural-hash fallbacks. It is an opaque marker only.
+            VmValue::VerdictReceipt(_) => {
+                out.push_str("<verdict_receipt>");
             }
             VmValue::Set(items) => {
                 out.push_str("set(");

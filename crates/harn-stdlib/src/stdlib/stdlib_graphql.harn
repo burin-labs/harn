@@ -109,7 +109,10 @@ pub fn graphql_introspection_query() {
  * @errors: []
  */
 pub fn graphql_auth_headers(auth = nil, extra_headers = nil) {
-  let headers = {"Content-Type": "application/json", Accept: "application/graphql-response+json, application/json"}
+  let headers = {
+    "Content-Type": "application/json",
+    Accept: "application/graphql-response+json, application/json",
+  }
   if auth != nil {
     if type_of(auth) == "string" {
       headers = merge(headers, {Authorization: "Bearer " + auth})
@@ -137,13 +140,25 @@ pub fn graphql_rate_limit_meta(headers = nil) {
   return filter_nil(
     {
       requests_limit: __graphql_int_header(headers, "x-ratelimit-requests-limit")
-        ?? __graphql_int_header(headers, "x-ratelimit-limit"),
+        ?? __graphql_int_header(
+        headers,
+        "x-ratelimit-limit",
+      ),
       requests_remaining: __graphql_int_header(headers, "x-ratelimit-requests-remaining")
-        ?? __graphql_int_header(headers, "x-ratelimit-remaining"),
+        ?? __graphql_int_header(
+        headers,
+        "x-ratelimit-remaining",
+      ),
       requests_reset: __graphql_int_header(headers, "x-ratelimit-requests-reset")
-        ?? __graphql_int_header(headers, "x-ratelimit-reset"),
+        ?? __graphql_int_header(
+        headers,
+        "x-ratelimit-reset",
+      ),
       endpoint_requests_limit: __graphql_int_header(headers, "x-ratelimit-endpoint-requests-limit"),
-      endpoint_requests_remaining: __graphql_int_header(headers, "x-ratelimit-endpoint-requests-remaining"),
+      endpoint_requests_remaining: __graphql_int_header(
+        headers,
+        "x-ratelimit-endpoint-requests-remaining",
+      ),
       endpoint_requests_reset: __graphql_int_header(headers, "x-ratelimit-endpoint-requests-reset"),
       endpoint_name: __graphql_header(headers, "x-ratelimit-endpoint-name"),
       complexity: __graphql_int_header(headers, "x-complexity"),
@@ -195,7 +210,8 @@ pub fn graphql_request_body(query, variables = nil, options = nil) {
   if variables != nil {
     body = merge(body, {variables: variables})
   }
-  const op_name = options?.operation_name ?? options?.operationName ?? __graphql_operation_name(query)
+  const op_name = options?.operation_name ?? options?.operationName
+    ?? __graphql_operation_name(query)
   if op_name != nil {
     body = merge(body, {operationName: op_name})
   }
@@ -226,7 +242,10 @@ pub fn graphql_normalize_response(response, options = nil) {
         status: status,
         operation_name: options?.operation_name ?? options?.operationName,
         request_id: __graphql_header(headers, "x-request-id")
-          ?? __graphql_header(headers, "linear-request-id")
+          ?? __graphql_header(
+          headers,
+          "linear-request-id",
+        )
           ?? __graphql_header(headers, "apollographql-client-request-id"),
         rate_limit: graphql_rate_limit_meta(headers),
         persisted_query: options?.persisted_query ?? options?.persistedQuery,
@@ -242,7 +261,9 @@ pub fn graphql_normalize_response(response, options = nil) {
  * @errors: []
  */
 pub fn graphql_error_messages(envelope) {
-  return __graphql_list(envelope?.errors).map({ error -> return error?.message ?? to_string(error) })
+  return __graphql_list(envelope?.errors).map(
+    { error -> return error?.message ?? to_string(error) },
+  )
 }
 
 /**
@@ -323,8 +344,7 @@ pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
   const auth = options?.auth ?? options?.authorization
   const headers = graphql_auth_headers(auth, options?.headers)
   const body = graphql_request_body(query, variables, options)
-  const response = harness.net
-    .request(
+  const response = harness.net.request(
     "POST",
     endpoint,
     filter_nil(
@@ -357,7 +377,11 @@ pub fn graphql_operation(name, document, options = nil) {
     {
       name: name,
       document: document,
-      operation_name: options?.operation_name ?? options?.operationName ?? __graphql_operation_name(document, name),
+      operation_name: options?.operation_name ?? options?.operationName
+        ?? __graphql_operation_name(
+        document,
+        name,
+      ),
       root_field: options?.root_field ?? __graphql_root_field_from_query(document),
       persisted_query: options?.persisted_query ?? options?.persistedQuery,
     },

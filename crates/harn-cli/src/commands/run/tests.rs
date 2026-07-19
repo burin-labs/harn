@@ -2,8 +2,9 @@ use super::harnpack::HarnpackRunOptions;
 use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
     eval_source_for_code, execute_explain_cost, execute_run,
-    execute_run_with_harnpack_and_sandbox_options, run_sandbox_attestation, split_eval_header,
-    CliLlmMockMode, RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
+    execute_run_with_harnpack_and_sandbox_options, install_cli_llm_mock_mode,
+    persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header, CliLlmMockMode,
+    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -134,6 +135,24 @@ fn cli_llm_mock_roundtrips_logprobs() {
 }
 
 #[test]
+fn cli_llm_mock_recording_writes_a_parseable_v1_document_atomically() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let path = temp.path().join("recorded.jsonl");
+    let mode = CliLlmMockMode::Record {
+        fixture_path: path.clone(),
+    };
+
+    install_cli_llm_mock_mode(&mode).expect("enable recording");
+    persist_cli_llm_mock_recording(&mode).expect("persist recording");
+
+    let body = std::fs::read_to_string(&path).expect("recorded fixture");
+    let fixture = harn_vm::llm::parse_llm_mocks_jsonl(&body).expect("parse recorded fixture");
+    assert_eq!(fixture.schema_version, 1);
+    assert!(!fixture.strict_scopes);
+    assert!(fixture.mocks.is_empty());
+}
+
+#[test]
 fn stdout_passthrough_guard_restores_previous_state() {
     let original = harn_vm::set_stdout_passthrough(false);
     {
@@ -169,7 +188,20 @@ pipeline main() {
 }
 
 #[test]
+fn execute_explain_cost_reports_parse_errors() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let script = temp.path().join("invalid.harn");
+    std::fs::write(&script, "pipeline main( {").expect("write script");
+
+    let outcome = execute_explain_cost(&script.to_string_lossy());
+
+    assert_eq!(outcome.exit_code, 1);
+    assert!(outcome.stderr.contains("HARN-PAR-"), "{}", outcome.stderr);
+}
+
+#[test]
 fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
+    let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd();
     let project = tempfile::TempDir::new().expect("project");
     let source_parent = project.path().join("scripts");
     let cwd = std::env::current_dir().expect("cwd");
@@ -199,9 +231,17 @@ fn default_run_policy_only_raises_the_requested_side_effect_ceiling() {
 #[test]
 fn run_sandbox_attestation_reports_effective_policy() {
     harn_vm::reset_thread_local_state();
+    // Real dirs so the attestation's canonicalization is deterministic across
+    // platforms (a symlinked `/tmp` on macOS vs a plain `/tmp` on Linux would
+    // make a hardcoded literal non-portable).
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let workspace = temp.path().join("workspace");
+    let shared = temp.path().join("shared");
+    std::fs::create_dir(&workspace).expect("workspace");
+    std::fs::create_dir(&shared).expect("shared");
     let policy = harn_vm::orchestration::CapabilityPolicy {
-        workspace_roots: vec!["/tmp/workspace".to_string()],
-        read_only_roots: vec!["/tmp/shared".to_string()],
+        workspace_roots: vec![workspace.display().to_string()],
+        read_only_roots: vec![shared.display().to_string()],
         sandbox_profile: harn_vm::orchestration::SandboxProfile::OsHardened,
         ..harn_vm::orchestration::CapabilityPolicy::default()
     };
@@ -211,9 +251,21 @@ fn run_sandbox_attestation_reports_effective_policy() {
 
     assert_eq!(metadata["run_default_enabled"], false);
     assert_eq!(metadata["active"], true);
-    assert_eq!(metadata["workspace_roots"][0], "/tmp/workspace");
+    // The attestation reports the enforced jail path (canonicalized through the
+    // runtime's single normalization owner), matching the disclosure surface.
+    assert_eq!(
+        metadata["workspace_roots"][0],
+        harn_vm::process_sandbox::render_policy_root(&workspace.display().to_string())
+            .display()
+            .to_string()
+    );
     assert_eq!(metadata["write_roots"].as_array().unwrap().len(), 0);
-    assert_eq!(metadata["read_only_roots"][0], "/tmp/shared");
+    assert_eq!(
+        metadata["read_only_roots"][0],
+        harn_vm::process_sandbox::render_policy_root(&shared.display().to_string())
+            .display()
+            .to_string()
+    );
     assert_eq!(metadata["profile"], "os_hardened");
     assert_eq!(metadata["process_network_requested"], false);
     assert_eq!(metadata["process_network_enabled"], true);
@@ -224,6 +276,8 @@ fn run_sandbox_attestation_reports_effective_policy() {
 
 #[tokio::test]
 async fn execute_run_exit_flushes_stdio_and_bypasses_catch() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let script = temp.path().join("main.harn");
@@ -264,6 +318,8 @@ fn main(harness: Harness) -> int {
 
 #[tokio::test]
 async fn execute_run_allows_read_from_explicit_read_only_root_but_denies_write() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -354,6 +410,8 @@ pipeline main() {{
 
 #[tokio::test]
 async fn execute_run_allows_write_to_explicit_write_root() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -398,12 +456,75 @@ pipeline main() {{
         std::fs::read_to_string(&target).expect("read generated target"),
         "%PDF-1.4\n"
     );
+    // The grant discloses exactly the delta on one line, and the blanket
+    // `--no-sandbox` warning stays suppressed for a scoped, still-sandboxed run.
+    // The disclosure names the enforced jail path (the temp dir canonicalizes
+    // through the runtime's normalization owner), not the raw grant string.
+    let jailed_write_root = write_root.canonicalize().expect("canonical write root");
+    assert!(
+        outcome.stderr.contains(&format!(
+            "sandbox active; extra write root: {}",
+            jailed_write_root.display()
+        )),
+        "granted run should disclose the canonicalized extra write root: {}",
+        outcome.stderr
+    );
+    assert!(
+        !outcome.stderr.contains("--no-sandbox disables"),
+        "a scoped grant must not print the blanket no-sandbox warning: {}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[test]
+fn write_grant_keeps_process_and_egress_defaults_armed() {
+    // A write grant widens the write jail only. It must not raise the
+    // side-effect ceiling (so subprocess network stays denied) and must not
+    // relax the egress posture: the run still requires an explicit egress
+    // policy. This is the policy-level proof that `--write-root` composes with
+    // the defaults instead of loosening them like `--no-sandbox` would.
+    harn_vm::reset_thread_local_state();
+    let workspace = Path::new("/tmp/workspace");
+    let grant = PathBuf::from("/tmp/out/coordination");
+    let policy = default_run_capability_policy(workspace, std::slice::from_ref(&grant), &[], false);
+
+    assert_eq!(policy.side_effect_level.as_deref(), Some("process_exec"));
+    assert_eq!(
+        policy.sandbox_profile,
+        harn_vm::orchestration::SandboxProfile::Worktree
+    );
+    assert!(
+        policy
+            .workspace_roots
+            .iter()
+            .any(|root| root == &grant.display().to_string()),
+        "the write grant should join the workspace write jail: {:?}",
+        policy.workspace_roots
+    );
+
+    harn_vm::orchestration::push_execution_policy(policy);
+    let metadata = run_sandbox_attestation(
+        &RunSandboxOptions::default().with_write_roots(vec![grant.clone()]),
+    );
+    assert_eq!(metadata["run_default_enabled"], true);
+    assert_eq!(metadata["egress"], "explicit_policy_required");
+    assert_eq!(metadata["process_network_requested"], false);
+    // The receipt reports the enforced jail path, not the raw grant string.
+    assert_eq!(
+        metadata["write_roots"][0],
+        harn_vm::process_sandbox::render_policy_root(&grant.display().to_string())
+            .display()
+            .to_string()
+    );
     harn_vm::reset_thread_local_state();
 }
 
 #[cfg(all(feature = "hostlib", unix))]
 #[tokio::test]
 async fn execute_run_allows_command_run_read_from_read_only_root() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -458,6 +579,8 @@ pipeline main() {{
 
 #[tokio::test]
 async fn execute_run_default_sandbox_reports_worktree_profile() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let script = temp.path().join("main.harn");
@@ -490,6 +613,8 @@ pipeline main() {
 
 #[tokio::test]
 async fn execute_run_default_sandbox_blocks_outside_workspace_read() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -535,6 +660,8 @@ pipeline main() {{
 
 #[tokio::test]
 async fn execute_run_no_sandbox_allows_outside_workspace_read() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -578,6 +705,8 @@ pipeline main() {{
 
 #[tokio::test]
 async fn execute_run_builtin_policy_defers_unrelated_manifest_handler_initialization() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
     let script = write_manifest_trigger_project(
@@ -608,6 +737,8 @@ fn main(harness: Harness) {
 
 #[tokio::test]
 async fn execute_run_without_builtin_policy_eagerly_validates_manifest_handlers() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
     let script = write_manifest_trigger_project(
@@ -644,6 +775,8 @@ pipeline main() {
 
 #[tokio::test]
 async fn execute_run_denies_network_by_default() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let script = temp.path().join("main.harn");
@@ -681,6 +814,8 @@ pipeline main() {
 #[cfg(feature = "hostlib")]
 #[tokio::test]
 async fn execute_run_installs_hostlib_gate() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     let temp = tempfile::NamedTempFile::new().expect("temp file");
     std::fs::write(
         temp.path(),
@@ -712,6 +847,8 @@ pipeline main() {
 #[cfg(all(feature = "hostlib", unix))]
 #[tokio::test]
 async fn execute_run_can_read_hostlib_command_artifacts() {
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     let temp = tempfile::NamedTempFile::new().expect("temp file");
     std::fs::write(
         temp.path(),
@@ -776,6 +913,8 @@ length: 20,
 #[tokio::test]
 async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency() {
     let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+    let _run_event_sink =
+        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path();

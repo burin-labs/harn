@@ -24,8 +24,13 @@ pipeline default() {
       const parent_audits = lifecycle_audit_log_take()
       harness.stdio.println("parent_mechanism=" + parent_result.mechanism)
       harness.stdio.println("parent_audit_kind=" + parent_audits[0].kind)
-      const local = default_resume_by({conditions: {trigger: {kind: "review.approved"}}, harness: harness})
-      const local_result = local(harness, {handle: "h-2", reason: "trigger", conditions: {trigger: {kind: "review.approved"}}})
+      const local = default_resume_by(
+        {conditions: {trigger: {kind: "review.approved"}}, harness: harness},
+      )
+      const local_result = local(
+        harness,
+        {handle: "h-2", reason: "trigger", conditions: {trigger: {kind: "review.approved"}}},
+      )
       const local_audits = lifecycle_audit_log_take()
       harness.stdio.println("local_mechanism=" + local_result.mechanism)
       harness.stdio.println("local_audit_kind=" + local_audits[0].kind)
@@ -33,8 +38,7 @@ pipeline default() {
       const parent_verify_audits = lifecycle_audit_log_take()
       harness.stdio.println("parent_verify_mechanism=" + parent_verify.mechanism)
       harness.stdio.println("parent_verify_kind=" + parent_verify_audits[0].kind)
-      const local_verify = RB
-        .local_runtime(
+      const local_verify = RB.local_runtime(
         harness,
         {handle: "v-2", reason: "verify", conditions: {trigger: {kind: "x"}}},
       )

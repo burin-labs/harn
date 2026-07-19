@@ -53,7 +53,10 @@ fn repair_tools() {
 fn fix_and_test(edit_id, test_id) {
   return {
     text: "",
-    tool_calls: [{id: edit_id, name: "apply_fix", arguments: {}}, {id: test_id, name: "run_test", arguments: {}}],
+    tool_calls: [
+      {id: edit_id, name: "apply_fix", arguments: {}},
+      {id: test_id, name: "run_test", arguments: {}},
+    ],
   }
 }
 

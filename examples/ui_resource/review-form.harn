@@ -129,7 +129,11 @@ pipeline default() {
     {summary: "Signature library swap is mechanical", decision: "approve", confidence: 0.85},
     {id: "submit-1"},
   )
-  const demo_ctx = ui_context_update_envelope("review.summary", "Signature library swap is mechanical", {id: "ctx-1"})
+  const demo_ctx = ui_context_update_envelope(
+    "review.summary",
+    "Signature library swap is mechanical",
+    {id: "ctx-1"},
+  )
   __io_println("submit.method=" + demo_call.method)
   __io_println("submit.params.name=" + demo_call.params.name)
   __io_println("ctx.method=" + demo_ctx.method)

@@ -214,6 +214,7 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         | "render_prompt"
         | "render_with_provenance"
         | "find_text"
+        | "find_evidence"
         | "read_lines"
         | "list_dir"
         | "walk_dir"
@@ -551,6 +552,7 @@ fn child_nodes(node: &SNode) -> Vec<&SNode> {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             children.push(condition.as_ref());
             children.extend(then_body.iter());

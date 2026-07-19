@@ -330,6 +330,9 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             identity.insert(stop_key, stop);
         }
     }
+    if let Some(mock_scope) = opt_json("mock_scope") {
+        identity.insert("mock_scope", mock_scope);
+    }
 
     let canonical = canonical_json_bytes(&serde_json::to_value(identity).map_err(|error| {
         VmError::Runtime(format!(

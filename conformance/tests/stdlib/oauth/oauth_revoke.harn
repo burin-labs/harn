@@ -39,7 +39,10 @@ pipeline test(task) {
     token_type: "Bearer",
   }
   store.set("mockRevoke", stored)
-  const cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
+  const cli = client(
+    provider,
+    {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store},
+  )
   http_mock_clear()
   http_mock("POST", "https://idp.example/revoke", {status: 200, body: "", headers: {}})
   revoke(cli)

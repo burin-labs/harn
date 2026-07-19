@@ -39,7 +39,12 @@ fn body_outer_nested() {
     body_inner_nested,
   )
   const after = host_call("outer.op", {})
-  return {outer_v: outer_v, inner_summary: inner_summary, after: after, outer_count: host_call_count()}
+  return {
+    outer_v: outer_v,
+    inner_summary: inner_summary,
+    after: after,
+    outer_count: host_call_count(),
+  }
 }
 
 fn body_call_assertions() {
@@ -124,8 +129,20 @@ pipeline test_with_mocks(task) {
   clear_host_mocks()
   const asserted = with_host_mocks(
     [
-      {capability: "ws", operation: "read", result: "data", params: {path: "x"}, unregistered_ok: true},
-      {capability: "ws", operation: "write", error: "denied", params: {path: "y"}, unregistered_ok: true},
+      {
+        capability: "ws",
+        operation: "read",
+        result: "data",
+        params: {path: "x"},
+        unregistered_ok: true,
+      },
+      {
+        capability: "ws",
+        operation: "write",
+        error: "denied",
+        params: {path: "y"},
+        unregistered_ok: true,
+      },
     ],
     body_call_assertions,
   )

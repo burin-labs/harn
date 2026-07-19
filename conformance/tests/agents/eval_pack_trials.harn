@@ -32,7 +32,11 @@ fn pack(expected_status: string) -> dict {
       {id: "fail-run", kind: "run-record", inline: fail_run},
     ],
     rubrics: [
-      {id: "status", kind: "deterministic", assertions: [{kind: "run-status", expected: expected_status}]},
+      {
+        id: "status",
+        kind: "deterministic",
+        assertions: [{kind: "run-status", expected: expected_status}],
+      },
     ],
     cases: [
       {id: "pass-case", run: "pass-run", rubrics: ["status"], metadata: {group: "smoke"}},
@@ -47,7 +51,8 @@ pipeline test(_task) {
   assert(manifest.cases[0].case_fingerprint != "", "case fingerprint is stamped")
   assert(
     manifest.cases[0].case_fingerprint
-      == eval_pack_manifest(pack("completed")).cases[0].case_fingerprint,
+      == eval_pack_manifest(pack("completed")).cases[0]
+      .case_fingerprint,
   )
   assert(
     manifest.cases[0].case_fingerprint

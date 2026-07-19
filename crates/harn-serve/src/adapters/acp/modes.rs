@@ -839,6 +839,41 @@ mod tests {
     }
 
     #[test]
+    fn default_embedder_run_policy_keeps_system_runtime_preset() {
+        use harn_vm::orchestration::{
+            CapabilityPolicy, ProcessSandboxPolicy, ProcessSandboxPreset,
+        };
+        // Regression for the 2026-07-18 Burin dogfood repro: the default
+        // embedder config (bundled pipelines + dependency roots as read-only,
+        // process read roots, and NO `presets` — i.e. no ~/.burin/sandbox.json)
+        // must NOT narrow the process-sandbox presets. The full run policy — the
+        // ModePolicyGuard policy intersected with the agent-loop's tools-only
+        // policy — must still carry SystemRuntime so child spawns can read
+        // `/opt/homebrew` (Homebrew-installed toolchain roots such as GOROOT).
+        let mut sandbox =
+            AcpSandboxConfig::with_read_only_roots(vec!["/opt/burin/pipelines".to_string()]);
+        sandbox.process = ProcessSandboxPolicy {
+            presets: None,
+            read_roots: vec!["/dep/sdk".to_string()],
+            write_roots: Vec::new(),
+        };
+        let outer = policy_for_mode("code", &sandbox).expect("configured code mode has policy");
+        let requested = CapabilityPolicy {
+            tools: vec!["look".to_string(), "run".to_string(), "edit".to_string()],
+            ..CapabilityPolicy::default()
+        };
+        let effective = outer.intersect(&requested).expect("intersect ok");
+        assert!(
+            effective
+                .process_sandbox
+                .effective_presets()
+                .contains(&ProcessSandboxPreset::SystemRuntime),
+            "default embedder run policy must keep SystemRuntime (grants /opt/homebrew): {:?}",
+            effective.process_sandbox.effective_presets()
+        );
+    }
+
+    #[test]
     fn is_known_rejects_unknown_mode() {
         assert!(is_known("ask"));
         assert!(!is_known(""));

@@ -28,8 +28,7 @@ pipeline test(task) {
   )
   __io_println(denied?.tools?.rejected[0])
   __io_println(
-    json_stringify(transcript_messages(denied?.transcript))
-      .contains("permission_denied"),
+    json_stringify(transcript_messages(denied?.transcript)).contains("permission_denied"),
   )
   clear_tool_hooks()
   let trunc_tools = tool_registry()
@@ -52,7 +51,10 @@ pipeline test(task) {
     {role: "assistant", content: "We should isolate the lexer first."},
     {role: "user", content: "Then update the diagnostics."},
   ]
-  const llm_compacted = transcript_auto_compact(base_messages, {provider: "mock", keep_last: 1, token_threshold: 1})
+  const llm_compacted = transcript_auto_compact(
+    base_messages,
+    {provider: "mock", keep_last: 1, token_threshold: 1},
+  )
   // transcript_auto_compact now returns { messages, archived, summary }; the
   // archived count and summary come straight from the engine instead of being
   // inferred from a length delta.
@@ -76,19 +78,26 @@ pipeline test(task) {
       keep_last: 1,
       token_threshold: 1,
       compact_strategy: "custom",
-      compact_callback: { archived, _reminders, policy -> {summary: "policy compact " + policy.mode + " " + policy.preserve[0]} },
+      compact_callback: { archived, _reminders, policy ->
+        {summary: "policy compact " + policy.mode + " " + policy.preserve[0]}
+      },
       policy: compact_preserving_test_failures({author: "host"}),
     },
   )
   __io_println(
-    policy_compacted.messages[0].content
-      .contains("policy compact preserve_test_failures failing test names"),
+    policy_compacted.messages[0].content.contains(
+      "policy compact preserve_test_failures failing test names",
+    ),
   )
   const repair_messages = [
     {role: "user", content: "Fix the include path"},
     {role: "tool", name: "edit", content: "Applied edit to src/main.cpp: fixed include path"},
     {role: "tool", name: "run", content: "src/main.cpp:1:10: error: missing generated/widget.h"},
-    {role: "tool", name: "edit", content: "Applied edit to src/main.cpp: included generated/widget.h"},
+    {
+      role: "tool",
+      name: "edit",
+      content: "Applied edit to src/main.cpp: included generated/widget.h",
+    },
     {role: "tool", name: "run", content: "All tests passed\nexit code 0"},
     {role: "user", content: "What remains?"},
   ]
@@ -122,7 +131,9 @@ pipeline test(task) {
       compact_threshold: 1,
       compact_keep_last: 1,
       compact_strategy: "custom",
-      compact_callback: { archived, _reminders, policy -> {summary: "loop compact " + policy.mode + " " + to_string(len(archived))} },
+      compact_callback: { archived, _reminders, policy ->
+        {summary: "loop compact " + policy.mode + " " + to_string(len(archived))}
+      },
     },
   )
   __io_println(
@@ -137,16 +148,28 @@ pipeline test(task) {
       tool_format: "native",
       max_iterations: 2,
       auto_compact: {
-        compaction_request: {mode: "resume_request", policy: {instructions: "Keep host state.", author: "host"}},
+        compaction_request: {
+          mode: "resume_request",
+          policy: {instructions: "Keep host state.", author: "host"},
+        },
       },
       compact_threshold: 1,
       compact_keep_last: 1,
       compact_strategy: "custom",
-      compact_callback: { archived, _reminders, policy -> {summary: "request compact " + policy.mode + " " + policy.author + " " + to_string(len(archived))} },
+      compact_callback: { archived, _reminders, policy ->
+        {
+          summary: "request compact " + policy.mode + " " + policy.author + " "
+            + to_string(
+            len(archived),
+          ),
+        }
+      },
     },
   )
   __io_println(
-    transcript_summary(request_compacted?.transcript)?.contains("request compact resume_request host"),
+    transcript_summary(request_compacted?.transcript)?.contains(
+      "request compact resume_request host",
+    ),
   )
   const stopped_after_tool_turn = agent_loop(
     "Inspect the workspace",
@@ -158,7 +181,8 @@ pipeline test(task) {
       max_iterations: 3,
       post_turn_callback: { info ->
         if (info?.tool_results?.count ?? 0) > 0
-          && info?.tool_results[0]?.tool_name == "list_directory"
+          && info?.tool_results[0]?.tool_name
+          == "list_directory"
           && info?.tool_results[0]?.status == "ok" {
           return {message: "handoff now", stop: true}
         }
@@ -168,8 +192,9 @@ pipeline test(task) {
   )
   __io_println(stopped_after_tool_turn?.llm?.iterations == 1)
   __io_println(
-    json_stringify(transcript_messages(stopped_after_tool_turn?.transcript))
-      .contains("handoff now"),
+    json_stringify(transcript_messages(stopped_after_tool_turn?.transcript)).contains(
+      "handoff now",
+    ),
   )
   with_llm_script(
     [
@@ -189,7 +214,8 @@ pipeline test(task) {
           post_turn_callback: { info ->
             if len(info?.successful_tool_names ?? []) > 0 {
               return {
-                message: "finalize now current=${info.successful_tool_names[0]} session=${info.session_successful_tools[0]} rejected=${len(info?.session_rejected_tools ?? [])}",
+                message:
+                  "finalize now current=${info.successful_tool_names[0]} session=${info.session_successful_tools[0]} rejected=${len(info?.session_rejected_tools ?? [])}",
                 llm_options: {tool_choice: "none"},
               }
             }

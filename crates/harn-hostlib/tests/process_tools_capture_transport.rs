@@ -2,7 +2,7 @@
 //!
 //! The larger `process_tools.rs` suite owns the general process-tool matrix.
 //! This file keeps the file-backed capture contract isolated so the
-//! grandfathered suite does not grow every time a transport is added.
+//! existing suite does not grow every time a transport is added.
 
 #![cfg(unix)]
 

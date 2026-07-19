@@ -9,6 +9,16 @@
       "type": "string",
       "minLength": 1,
       "description": "Local machine resource name. Remote observation is not provided by this capability."
+    },
+    "resource_class": {
+      "type": "string",
+      "enum": ["whole-machine", "rust-heavy"]
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
     }
   },
   "required": ["host"],

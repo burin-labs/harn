@@ -1,5 +1,16 @@
 use crate::value::{VmJoinHandle, VmTaskHandle, VmValue};
 
+pub(super) async fn abort_task_and_wait(mut task: VmTaskHandle) {
+    task.cancel_token
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    abort_join_and_wait(&mut task.handle).await;
+}
+
+pub(super) async fn abort_join_and_wait(handle: &mut VmJoinHandle) {
+    handle.abort();
+    let _ = handle.await;
+}
+
 pub(super) struct AwaitingTask {
     task: Option<VmTaskHandle>,
 }

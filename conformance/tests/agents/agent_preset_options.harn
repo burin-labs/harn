@@ -33,7 +33,10 @@ pipeline default() {
   __io_println(summary.iteration_budget.max)
   __io_println(summary.loop_until_done)
   __io_println(summary.max_nudges)
-  const repair = agent_preset("repair", {iteration_budget: {mode: "adaptive", initial: 6, max: 20, extend_by: 3}})
+  const repair = agent_preset(
+    "repair",
+    {iteration_budget: {mode: "adaptive", initial: 6, max: 20, extend_by: 3}},
+  )
   __io_println(repair.iteration_budget.mode)
   __io_println(repair.iteration_budget.initial)
   __io_println(repair.iteration_budget.max)

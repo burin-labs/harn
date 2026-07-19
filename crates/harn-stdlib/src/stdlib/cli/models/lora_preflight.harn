@@ -47,8 +47,7 @@ fn __render_human(harness: Harness, report: dict) {
   if config_path != "" {
     harness.stdio.println("  config: " + config_path)
   }
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  target tool format: "
       + safe_string(request["target_tool_format"], "")
       + " (requested "
@@ -59,32 +58,31 @@ fn __render_human(harness: Harness, report: dict) {
   if correction != "" {
     harness.stdio.println("  tool format correction: " + correction)
   }
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  expected source tool format: "
       + safe_string(thresholds["expected_source_tool_format"], ""),
   )
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  export-required source tool format: "
-      + safe_string(thresholds["required_export_source_tool_format"], ""),
+      + safe_string(
+      thresholds["required_export_source_tool_format"],
+      "",
+    ),
   )
-  harness.stdio
-    .println("  max_seq_length: " + safe_int_string(thresholds["max_seq_length"], "0"))
-  harness.stdio
-    .println("  required fit ratio: " + __percent(thresholds["min_fit_ratio"]))
-  harness.stdio
-    .println("  hard token estimate limit: " + safe_int_string(thresholds["hard_token_limit"], "0"))
-  harness.stdio
-    .println("  minimum records: " + safe_int_string(thresholds["min_records"], "0"))
-  harness.stdio
-    .println("  minimum tool-call share: " + __percent(thresholds["min_tool_call_share"]))
+  harness.stdio.println("  max_seq_length: " + safe_int_string(thresholds["max_seq_length"], "0"))
+  harness.stdio.println("  required fit ratio: " + __percent(thresholds["min_fit_ratio"]))
+  harness.stdio.println(
+    "  hard token estimate limit: " + safe_int_string(thresholds["hard_token_limit"], "0"),
+  )
+  harness.stdio.println("  minimum records: " + safe_int_string(thresholds["min_records"], "0"))
+  harness.stdio.println(
+    "  minimum tool-call share: " + __percent(thresholds["min_tool_call_share"]),
+  )
   const marker = safe_string(thresholds["done_marker"], "")
   if marker != "" {
     harness.stdio.println("  required done marker: " + marker)
   }
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  records: raw="
       + safe_int_string(stats["raw_records"], "0")
       + " trainable="
@@ -92,8 +90,7 @@ fn __render_human(harness: Harness, report: dict) {
       + " skipped="
       + to_string(skipped.count),
   )
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  fit: "
       + safe_int_string(stats["fit_records"], "0")
       + "/"
@@ -102,8 +99,7 @@ fn __render_human(harness: Harness, report: dict) {
       + __percent(stats["fit_ratio"])
       + ")",
   )
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  tool calls: json="
       + safe_int_string(tool_calls["json_tool_calls"], "0")
       + " text="
@@ -113,15 +109,13 @@ fn __render_human(harness: Harness, report: dict) {
       + " malformed_json="
       + safe_int_string(tool_calls["malformed_json_bodies"], "0"),
   )
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  behavior strata: source="
       + json_stringify(safe_dict(behavior_strata["source"]))
       + " emitted="
       + json_stringify(safe_dict(behavior_strata["emitted"])),
   )
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  declared tool formats: "
       + json_stringify(safe_dict(breakdown["declared_tool_formats"])),
   )
@@ -131,8 +125,7 @@ fn __render_human(harness: Harness, report: dict) {
     harness.stdio.println("  longest examples:")
     for example in longest {
       const item = safe_dict(example)
-      harness.stdio
-        .println(
+      harness.stdio.println(
         "    - "
           + safe_string(item["id"], "")
           + " line="
@@ -150,8 +143,7 @@ fn __render_human(harness: Harness, report: dict) {
     harness.stdio.println("  problem examples:")
     for problem in problems {
       const item = safe_dict(problem)
-      harness.stdio
-        .println(
+      harness.stdio.println(
         "    - "
           + safe_string(item["id"], "")
           + " line="

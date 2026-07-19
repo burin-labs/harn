@@ -93,8 +93,7 @@ pub fn python_binding_probe_args(artifacts: string) -> list<string> {
 pub fn check_python_protocol_bindings(python: string = "python3", root: string = "") -> dict {
   const artifacts = artifact_root(root)
   const binding = path_join(artifacts, "python", "harn_protocol.py")
-  const compile = harness.process
-    .spawn_captured({cmd: python, args: ["-m", "py_compile", binding]})
+  const compile = harness.process.spawn_captured({cmd: python, args: ["-m", "py_compile", binding]})
   if !compile.success {
     return {
       ok: false,
@@ -104,7 +103,9 @@ pub fn check_python_protocol_bindings(python: string = "python3", root: string =
       stderr: compile.stderr,
     }
   }
-  const probe = harness.process.spawn_captured({cmd: python, args: python_binding_probe_args(artifacts)})
+  const probe = harness.process.spawn_captured(
+    {cmd: python, args: python_binding_probe_args(artifacts)},
+  )
   return {
     ok: probe.success,
     stage: if probe.success {
@@ -144,8 +145,7 @@ fn emit_captured(report: dict) -> nil {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/check_protocol_bindings.harn -- [--python PYTHON] [--root PATH]",
     )
     return nil
@@ -164,8 +164,7 @@ fn main(harness: Harness) {
     emit_captured(report)
     return nil
   }
-  harness.stdio
-    .eprintln(
+  harness.stdio.eprintln(
     "error: Python protocol binding "
       + to_string(report.stage)
       + " check failed for "

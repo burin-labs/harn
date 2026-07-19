@@ -48,7 +48,13 @@ pipeline default() {
         fn() { return agent_loop(
           "Implement the feature.",
           nil,
-          {provider: "mock", loop_until_done: true, max_iterations: 8, max_nudges: 20, session_id: session}
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 8,
+            max_nudges: 20,
+            session_id: session,
+          }
             + agent_completion_gate(
             {
               facts: fn(ctx) {
@@ -78,7 +84,13 @@ pipeline default() {
         fn() { return agent_loop(
           "Implement the feature.",
           nil,
-          {provider: "mock", loop_until_done: true, max_iterations: 4, max_nudges: 20, session_id: session}
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            max_nudges: 20,
+            session_id: session,
+          }
             + agent_completion_gate(
             {
               facts: fn(ctx) {
@@ -111,11 +123,18 @@ pipeline default() {
         fn() { return agent_loop(
           "Implement the feature.",
           nil,
-          {provider: "mock", loop_until_done: true, max_iterations: 3, max_nudges: 20, session_id: session}
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 3,
+            max_nudges: 20,
+            session_id: session,
+          }
             + agent_completion_gate(
             {
               max_vetoes: 1,
-              facts: fn(ctx) { return {source_write_count: 1, verify: {ok: false, findings: "boom"}} },
+              facts:
+                fn(ctx) { return {source_write_count: 1, verify: {ok: false, findings: "boom"}} },
             },
           ),
         ) },
@@ -142,7 +161,13 @@ pipeline default() {
         fn() { return agent_loop(
           "Answer the question.",
           nil,
-          {provider: "mock", loop_until_done: true, max_iterations: 4, max_nudges: 20, session_id: session}
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            max_nudges: 20,
+            session_id: session,
+          }
             + bundle,
         ) },
       )

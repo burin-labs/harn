@@ -18,7 +18,10 @@ pipeline test(task) {
       atomic_set(first_context_ok, 1)
     }
     if index == 2
-      && contains(call?.system ?? "", "ctx provider=openrouter model=anthropic/claude-sonnet-4-6") {
+      && contains(
+      call?.system ?? "",
+      "ctx provider=openrouter model=anthropic/claude-sonnet-4-6",
+    ) {
       atomic_set(second_context_ok, 1)
     }
     if index == 1
@@ -66,7 +69,10 @@ pipeline test(task) {
         done_judge: false,
         max_iterations: 2,
         prompts: {
-          "agent.loop_contract": {text: "ctx provider={{ llm.provider }} model={{ llm.model }} sentinel={{ done_sentinel }}"},
+          "agent.loop_contract": {
+            text:
+              "ctx provider={{ llm.provider }} model={{ llm.model }} sentinel={{ done_sentinel }}",
+          },
         },
         post_turn_callback: { info ->
           if info?.iteration == 0 {
@@ -87,8 +93,14 @@ pipeline test(task) {
   assert(atomic_get(second_context_ok) == 1, "second turn rendered escalated model context")
   assert(atomic_get(first_thinking_kept) == 1, "direct Anthropic route kept supported thinking")
   assert(atomic_get(second_call_options_ok) == 1, "second call used escalated options")
-  assert(atomic_get(second_thinking_stripped) == 1, "OpenRouter route stripped unsupported thinking")
+  assert(
+    atomic_get(second_thinking_stripped) == 1,
+    "OpenRouter route stripped unsupported thinking",
+  )
   assert(starts[1].provider == "openrouter", "iteration telemetry used escalated provider")
-  assert(starts[1].model == "anthropic/claude-sonnet-4-6", "iteration telemetry used escalated model")
+  assert(
+    starts[1].model == "anthropic/claude-sonnet-4-6",
+    "iteration telemetry used escalated model",
+  )
   __io_println("dynamic llm context ok")
 }

@@ -173,7 +173,12 @@ pub fn warn_and_continue(harness, budget_state) {
     "Your budget is exhausted (OnBudget.warn_and_continue). Consider wrapping up or asking for a budget extension.",
   )
   tool_hooks_inject_reminder(
-    {tags: ["budget_warning", "on_budget"], body: body, dedupe_key: "on_budget.warning", ttl_turns: 1},
+    {
+      tags: ["budget_warning", "on_budget"],
+      body: body,
+      dedupe_key: "on_budget.warning",
+      ttl_turns: 1,
+    },
   )
   return budget_state
 }

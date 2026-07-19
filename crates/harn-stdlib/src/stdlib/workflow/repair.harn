@@ -74,7 +74,9 @@ fn __repair_verification_findings(verification) {
   for check in __repair_list(verification?.checks) {
     if !__repair_bool(check?.ok, true) {
       const kind = __repair_string(check?.kind, "check")
-      out = out.push(kind + ": expected " + to_string(check?.expected) + ", got " + to_string(check?.actual))
+      out = out.push(
+        kind + ": expected " + to_string(check?.expected) + ", got " + to_string(check?.actual),
+      )
     }
   }
   return out
@@ -102,7 +104,10 @@ fn __repair_command_verifier(spec) {
     } else {
       {
         ok: false,
-        findings: ["command exited " + to_string(code) + " (expected " + to_string(expected) + "): " + detail],
+        findings: [
+          "command exited " + to_string(code) + " (expected " + to_string(expected) + "): "
+            + detail,
+        ],
       }
     }
   }

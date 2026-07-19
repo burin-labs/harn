@@ -22,12 +22,14 @@ import {
 // -------------------------------------------------------------------------------------------------
 
 fn provider_name(harness: Harness) {
-  return harness.env.get_or("BURIN_MINI_PROVIDER", harness.env.get_or("HARN_LLM_PROVIDER", "ollama"))
+  return harness.env.get_or(
+    "BURIN_MINI_PROVIDER",
+    harness.env.get_or("HARN_LLM_PROVIDER", "ollama"),
+  )
 }
 
 fn generator_model(harness: Harness) {
-  return harness.env
-    .get_or(
+  return harness.env.get_or(
     "BURIN_MINI_GENERATOR_MODEL",
     harness.env.get_or("HARN_LLM_MODEL", "devstral-small-2:24b"),
   )
@@ -266,7 +268,8 @@ fn build_tools(harness: Harness, dir) {
       parameters: {
         query: {
           type: "string",
-          description: "A token or short pattern. Avoid multi-word natural-language phrases — those rarely match literally. Use 'auth' not 'auth middleware'.",
+          description:
+            "A token or short pattern. Avoid multi-word natural-language phrases — those rarely match literally. Use 'auth' not 'auth middleware'.",
         },
       },
       returns: {type: "string"},
@@ -291,9 +294,13 @@ fn build_tools(harness: Harness, dir) {
       parameters: {
         bullet: {
           type: "string",
-          description: "One-line preference, written as the user would describe it. Example: \"All services should default to JSON responses with a status field, e.g. {status: 'ok'}.\"",
+          description:
+            "One-line preference, written as the user would describe it. Example: \"All services should default to JSON responses with a status field, e.g. {status: 'ok'}.\"",
         },
-        scope: {type: "string", description: "Where to save it: 'user', 'project', or 'cwd'. Default: 'project'."},
+        scope: {
+          type: "string",
+          description: "Where to save it: 'user', 'project', or 'cwd'. Default: 'project'.",
+        },
       },
       returns: {type: "string"},
       handler: { args ->
@@ -334,7 +341,8 @@ fn build_tools(harness: Harness, dir) {
       parameters: {
         question: {
           type: "string",
-          description: "The next single question for the user. <=3 sentences. Friendly. Offer a default.",
+          description:
+            "The next single question for the user. <=3 sentences. Friendly. Offer a default.",
         },
       },
       returns: {type: "string"},
@@ -361,7 +369,8 @@ fn build_tools(harness: Harness, dir) {
       parameters: {
         plan: {
           type: "string",
-          description: "The plan as a JSON object. Top-level keys: mode, direction, targets, grounding, tasks, verification, ready.",
+          description:
+            "The plan as a JSON object. Top-level keys: mode, direction, targets, grounding, tasks, verification, ready.",
         },
       },
       returns: {type: "string"},
@@ -429,7 +438,8 @@ ${profile_block}
 </profile>
 
 Reminder: no free-form prose answers. Every step ends with one tool call to ask_question or exit_plan_mode.
-""".trim()
+"""
+    .trim()
 }
 
 /**
@@ -585,8 +595,7 @@ pipeline default() {
     if task_text.trim() == "" {
       throw "[qmode] no task text supplied. Pass --task '...' on first invocation."
     }
-    harness.fs
-      .write_text(
+    harness.fs.write_text(
       task_meta_path(task_id),
       json_stringify({task: task_text, workspace_root: workspace_root(), started_at: date_iso()}),
     )
@@ -641,8 +650,7 @@ pipeline default() {
   } else {
     build_first_turn_prompt(harness, effective_task)
   }
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(dir, "last-prompt.txt"),
     "===SYSTEM===\n${sys_prompt}\n===USER===\n${user_prompt}\n===RESUME-MODE===\n${resume_mode}\n",
   )
@@ -687,8 +695,7 @@ pipeline default() {
   harness.fs.write_text(path_join(dir, "step.txt"), outcome)
   harness.fs.write_text(path_join(dir, "diag.json"), json_stringify(diag))
   // Dump the full transcript for offline inspection.
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(dir, "step-transcript.json"),
     json_stringify({transcript: result?.transcript, task_ledger: result?.task_ledger}),
   )

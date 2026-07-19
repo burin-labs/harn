@@ -13,7 +13,10 @@ pipeline main() {
         {artifact_id: patch.id, label: "Updated runtime"},
         {artifact_id: verification.id, label: "Focused verification"},
       ],
-      files_or_entities_touched: ["crates/harn-vm/src/orchestration/handoffs.rs", "crates/harn-cli/src/acp/events.rs"],
+      files_or_entities_touched: [
+        "crates/harn-vm/src/orchestration/handoffs.rs",
+        "crates/harn-cli/src/acp/events.rs",
+      ],
       open_questions: ["Should A2A expose full handoff payloads or only ids?"],
       blocked_on: ["review_captain approval"],
       requested_capabilities: ["review", "comment_on_pr"],

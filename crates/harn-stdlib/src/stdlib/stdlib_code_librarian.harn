@@ -222,7 +222,10 @@ pub fn code_librarian_who_calls(symbol: string, max_hops: int = 2) -> list<Libra
  * @api_stability: experimental
  * @example: code_librarian_member_surface("StatusOr", "include/status.hpp")
  */
-pub fn code_librarian_member_surface(container: string, defining_path: string? = nil) -> LibrarianMemberSurface {
+pub fn code_librarian_member_surface(
+  container: string,
+  defining_path: string? = nil,
+) -> LibrarianMemberSurface {
   const target = container.trim()
   const requested_path = to_string(defining_path ?? "").trim()
   if target == "" {
@@ -231,7 +234,8 @@ pub fn code_librarian_member_surface(container: string, defining_path: string? =
   const safe_target = __code_librarian_cypher_literal(target)
   const definition_raw = hostlib_code_index_cypher(
     {
-      query: "MATCH (d {name: '${safe_target}'}) WHERE d.kind = 'Type' OR d.kind = 'Module' RETURN d.path AS path, d.line AS line, d.kind AS kind",
+      query:
+        "MATCH (d {name: '${safe_target}'}) WHERE d.kind = 'Type' OR d.kind = 'Module' RETURN d.path AS path, d.line AS line, d.kind AS kind",
     },
   )
   let definitions: list<LibrarianSymbolDefinition> = []
@@ -256,7 +260,8 @@ pub fn code_librarian_member_surface(container: string, defining_path: string? =
   }
   const member_raw = hostlib_code_index_cypher(
     {
-      query: "MATCH (owner {name: '${safe_target}'})-[:CONTAINS]->(member) RETURN owner.path AS owner_path, member.name AS name, member.kind AS kind, member.path AS path, member.line AS line, member.signature AS signature, member.access_level AS access_level",
+      query:
+        "MATCH (owner {name: '${safe_target}'})-[:CONTAINS]->(member) RETURN owner.path AS owner_path, member.name AS name, member.kind AS kind, member.path AS path, member.line AS line, member.signature AS signature, member.access_level AS access_level",
     },
   )
   let members: list<LibrarianMember> = []
@@ -309,7 +314,11 @@ pub fn code_librarian_member_surface(container: string, defining_path: string? =
  * @api_stability: experimental
  * @example: code_librarian_external_consumers("greet", "src/greeter.rs")
  */
-pub fn code_librarian_external_consumers(symbol: string, defining_path: string, max_sites: int = 20) -> LibrarianExternalConsumers {
+pub fn code_librarian_external_consumers(
+  symbol: string,
+  defining_path: string,
+  max_sites: int = 20,
+) -> LibrarianExternalConsumers {
   if max_sites < 1 {
     throw "code_librarian_external_consumers: max_sites must be >= 1"
   }
@@ -327,7 +336,10 @@ pub fn code_librarian_external_consumers(symbol: string, defining_path: string, 
   }
   const safe_target = __code_librarian_cypher_literal(target)
   const call_raw = hostlib_code_index_cypher(
-    {query: "MATCH (c:CallSite) WHERE c.name = '${safe_target}' RETURN c.path AS path, c.line AS line"},
+    {
+      query:
+        "MATCH (c:CallSite) WHERE c.name = '${safe_target}' RETURN c.path AS path, c.line AS line",
+    },
   )
   let sites: list<LibrarianConsumerSite> = []
   let site_keys: dict = {}
@@ -349,7 +361,8 @@ pub fn code_librarian_external_consumers(symbol: string, defining_path: string, 
   }
   const definition_raw = hostlib_code_index_cypher(
     {
-      query: "MATCH (d {name: '${safe_target}'}) WHERE d.kind = 'Function' OR d.kind = 'Type' OR d.kind = 'Module' RETURN d.path AS path",
+      query:
+        "MATCH (d {name: '${safe_target}'}) WHERE d.kind = 'Function' OR d.kind = 'Type' OR d.kind = 'Module' RETURN d.path AS path",
     },
   )
   let definition_found = false
@@ -476,7 +489,12 @@ const __MCTS_DEPTH_MAX_DEFAULT = 4
 
 const __MCTS_EXPANSIONS_MAX_DEFAULT = 200
 
-const __DEFAULT_LLM_OPTIONS = {provider: "openrouter", model: "mistralai/devstral-small", temperature: 0.0, max_tokens: 400}
+const __DEFAULT_LLM_OPTIONS = {
+  provider: "openrouter",
+  model: "mistralai/devstral-small",
+  temperature: 0.0,
+  max_tokens: 400,
+}
 
 /**
  * code_librarian_query_nl translates a natural-language question into Cypher
@@ -542,7 +560,13 @@ fn __nl_resolve(text, opts) -> dict {
       []
     }
     if !is_err(rows) && len(rows) > 0 {
-      return {cypher: compiled.cypher, mcts_depth: 0, mcts_expansions: 0, path: "compile", rows: rows}
+      return {
+        cypher: compiled.cypher,
+        mcts_depth: 0,
+        mcts_expansions: 0,
+        path: "compile",
+        rows: rows,
+      }
     }
   }
   // Compile-path missed (parse error or zero rows). Fall back to MCTS.
@@ -590,7 +614,8 @@ const __CYPHER_TEMPLATES = [
   "MATCH (f:Function)-[:CALLS*1..3]->(g:Function {name: '<NAME>'}) RETURN f.name AS name, f.path AS path",
 ]
 
-const __CYPHER_PROMPT_PREAMBLE = "You translate code-graph questions into a small Cypher dialect over a typed symbol graph.\n\nNode kinds: Function, Type, Field, EnumCase, Module, Import, CallSite, Macro.\nEdge kinds: CALLS, REFS, IMPORTS, CONTAINS, OVERRIDES (each also has an inverse such as CALLED_BY / IMPORTED_BY).\nNode properties: name, path, language, kind, container, access_level, signature, line, file_id, id.\n\nThe dialect supports MATCH … [WHERE …] RETURN. Variable-length traversal up to depth 4 via `*1..N`. WHERE supports =, <>, !=, <, <=, >, >=, AND, OR, NOT. Always alias every projection with AS.\n\nReturn exactly one Cypher query that answers the question. No prose, no markdown, no leading explanation. Aliases on every projected column.\n\nCanonical templates (substitute literal values):\n"
+const __CYPHER_PROMPT_PREAMBLE =
+  "You translate code-graph questions into a small Cypher dialect over a typed symbol graph.\n\nNode kinds: Function, Type, Field, EnumCase, Module, Import, CallSite, Macro.\nEdge kinds: CALLS, REFS, IMPORTS, CONTAINS, OVERRIDES (each also has an inverse such as CALLED_BY / IMPORTED_BY).\nNode properties: name, path, language, kind, container, access_level, signature, line, file_id, id.\n\nThe dialect supports MATCH … [WHERE …] RETURN. Variable-length traversal up to depth 4 via `*1..N`. WHERE supports =, <>, !=, <, <=, >, >=, AND, OR, NOT. Always alias every projection with AS.\n\nReturn exactly one Cypher query that answers the question. No prose, no markdown, no leading explanation. Aliases on every projected column.\n\nCanonical templates (substitute literal values):\n"
 
 fn __nl_compile(text, opts) -> dict {
   const prompt = __nl_compile_prompt(text)
@@ -720,7 +745,10 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
   }
   let depth = 1
   while depth <= depth_cap && expansions < budget {
-    const cypher = "MATCH (s:Function {name: '" + __nl_escape(term) + "'})-[:CALLS*1.." + to_string(depth)
+    const cypher = "MATCH (s:Function {name: '" + __nl_escape(term) + "'})-[:CALLS*1.."
+      + to_string(
+      depth,
+    )
       + "]->(n) RETURN n.path AS path, n.name AS name, n.kind AS kind"
     const hop = try {
       const raw = hostlib_code_index_cypher({query: cypher})
@@ -777,11 +805,19 @@ fn __nl_mcts_probe(term, all_terms, depth_cap, budget, seen) -> dict {
       }
     }
   }
-  return {candidates: candidates, depth_reached: depth_reached, expansions: expansions, seen: next_seen}
+  return {
+    candidates: candidates,
+    depth_reached: depth_reached,
+    expansions: expansions,
+    seen: next_seen,
+  }
 }
 
 fn __nl_node_key(row) -> string {
-  return to_string(row?.kind ?? "") + ":" + to_string(row?.path ?? "") + ":" + to_string(row?.name ?? "")
+  return to_string(row?.kind ?? "") + ":" + to_string(row?.path ?? "") + ":"
+    + to_string(
+    row?.name ?? "",
+  )
 }
 
 fn __nl_dedupe_candidates(cands) -> list {
@@ -799,7 +835,8 @@ fn __nl_dedupe_candidates(cands) -> list {
 
 fn __nl_score(row, terms) -> int {
   const blob = lowercase(
-    to_string(row?.name ?? "") + " " + to_string(row?.path ?? "") + " " + to_string(row?.kind ?? ""),
+    to_string(row?.name ?? "") + " " + to_string(row?.path ?? "") + " "
+      + to_string(row?.kind ?? ""),
   )
   let score = 0
   for t in terms {

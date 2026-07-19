@@ -6,7 +6,11 @@ pipeline main(task) {
     r,
     "edit",
     "Edit a file in place",
-    {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.apply_edit"},
+    {
+      parameters: {path: "string"},
+      executor: "host_bridge",
+      host_capability: "workspace.apply_edit",
+    },
   )
   r = tool_define(
     r,

@@ -1,6 +1,4 @@
-import { help_requested, parse, parser } from "std/cli/argparse"
-
-type PublishPlanPackage = {deps: list<string>, name: string, version: string}
+pub type PublishPlanPackage = {deps: list<string>, name: string, version: string}
 
 type PublishVisitState = {ordered: list<string>, visited: list<string>, visiting: list<string>}
 
@@ -14,13 +12,6 @@ fn require_string(value, field: string) -> string {
     throw "cargo metadata is missing " + field
   }
   return out
-}
-
-fn ensure_no_tabs(value: string, field: string) -> nil {
-  if value.contains("\t") || value.contains("\n") {
-    throw field + " contains a tab or newline, cannot render shell row safely"
-  }
-  return nil
 }
 
 fn package_names(packages: list<PublishPlanPackage>) -> list<string> {
@@ -95,7 +86,8 @@ pub fn publish_plan_version(packages: list<PublishPlanPackage>) -> string {
   for package in packages {
     if package.version != version {
       throw "publishable workspace packages use multiple versions: " + version + " and "
-        + package.version
+        + package
+        .version
     }
   }
   return version
@@ -131,46 +123,4 @@ pub fn publish_plan_order(packages: list<PublishPlanPackage>) -> list<string> {
     state = visit_package(package.name, packages, state.visiting, state.visited, state.ordered)
   }
   return state.ordered
-}
-
-pub fn publish_plan_rows(meta: dict) -> list<string> {
-  const packages = publish_plan_packages_from_metadata(meta)
-  const version = publish_plan_version(packages)
-  ensure_no_tabs(version, "workspace version")
-  let rows = ["version\t" + version]
-  for name in publish_plan_order(packages) {
-    ensure_no_tabs(name, "package name")
-    rows = rows + ["crate\t" + name]
-  }
-  return rows
-}
-
-fn arg_spec() {
-  return parser(
-    {
-      name: "publish_plan",
-      args: [{kind: "flag", name: "metadata", long: "--metadata", parse: "string", default: ""}],
-    },
-  )
-}
-
-fn main(harness: Harness) {
-  if help_requested(argv) {
-    harness.stdio.println("usage: harn run scripts/publish_plan.harn -- --metadata PATH")
-    return nil
-  }
-  const parsed_result = parse(arg_spec(), argv)
-  if is_err(parsed_result) {
-    harness.stdio.eprintln(unwrap_err(parsed_result).message)
-    exit(2)
-  }
-  const parsed = unwrap(parsed_result).options
-  const metadata_path = to_string(parsed?.metadata ?? "")
-  if metadata_path == "" {
-    harness.stdio.eprintln("error: --metadata is required")
-    exit(2)
-  }
-  const meta = json_parse(harness.fs.read_text(metadata_path))
-  harness.stdio.println(join(publish_plan_rows(meta), "\n"))
-  return nil
 }

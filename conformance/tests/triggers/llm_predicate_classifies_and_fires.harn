@@ -6,7 +6,11 @@ fn handler(event: TriggerEvent) -> dict {
 }
 
 fn classify(event: TriggerEvent) -> bool {
-  const result = llm_call("predicate fires " + event.kind, nil, {provider: "mock", model: "gpt-4o-mini"})
+  const result = llm_call(
+    "predicate fires " + event.kind,
+    nil,
+    {provider: "mock", model: "gpt-4o-mini"},
+  )
   return contains(result.text, "yes")
 }
 
@@ -15,7 +19,9 @@ pipeline test(task) {
     [{text: "yes", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"}],
     { ->
       const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-        + to_string(harness.random.gen_range(100000, 999999))
+        + to_string(
+        harness.random.gen_range(100000, 999999),
+      )
       const handle: TriggerHandle = trigger_register(
         {
           id: "llm-predicate-fire-" + unique,
@@ -38,8 +44,9 @@ pipeline test(task) {
         handle,
         {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-fire-" + unique}},
       )
-      const evaluated = trigger_inspect_lifecycle("predicate.evaluated")
-        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
+      const evaluated = trigger_inspect_lifecycle("predicate.evaluated").filter(
+        { entry -> entry?.headers?.trigger_id == handle.id },
+      )
       __io_println(fire.status == "dispatched")
       __io_println(contains(json_stringify(fire.result ?? {}), "\"handled\":true"))
       __io_println(len(evaluated) == 1 && evaluated[0]?.payload?.result)

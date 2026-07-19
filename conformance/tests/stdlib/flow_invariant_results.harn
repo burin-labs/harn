@@ -24,7 +24,11 @@ pipeline test(task) {
   const atom_evidence = flow_evidence_atom(atom_hex, 0, 64)
   const metadata_evidence = flow_evidence_metadata("src/auth", "policy", "min_review_count")
   const transcript_evidence = flow_evidence_transcript("transcript-0001", 128, 256)
-  const citation_evidence = flow_evidence_citation("https://harnlang.com/spec", "verdicts may grade", "2026-04-26T00:00:00Z")
+  const citation_evidence = flow_evidence_citation(
+    "https://harnlang.com/spec",
+    "verdicts may grade",
+    "2026-04-26T00:00:00Z",
+  )
   const evidence = [atom_evidence, metadata_evidence, transcript_evidence, citation_evidence]
   const remediation = flow_remediation("strip trailing whitespace")
   const with_evidence = flow_with_evidence(warn, evidence)

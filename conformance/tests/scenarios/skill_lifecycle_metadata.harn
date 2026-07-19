@@ -65,10 +65,16 @@ pipeline test(task) {
       const calls = llm_mock_calls()
       assert(len(calls) >= 1, "at least one LLM call happened")
       const first_system = calls[0].system
-      assert(contains(first_system, "## Active skills"), "system prompt includes active-skill section")
+      assert(
+        contains(first_system, "## Active skills"),
+        "system prompt includes active-skill section",
+      )
       assert(contains(first_system, "ship"), "activated skill name surfaces in prompt")
       assert(contains(first_system, "runbook"), "skill body prompt is woven in")
-      assert(contains(first_system, "Scoped tools: deploy_service"), "allowed_tools listed in prompt")
+      assert(
+        contains(first_system, "Scoped tools: deploy_service"),
+        "allowed_tools listed in prompt",
+      )
       const first_tools = calls[0].tools
       let seen_deploy = false
       let seen_metrics = false

@@ -255,6 +255,15 @@ pub enum ErrorCategory {
     /// that keeps a mis-wired builtin (e.g. a `#[harn_builtin]` def missing
     /// from its install array) from shipping silently inert.
     Internal,
+    /// A host environment / infrastructure problem that is not the workload's
+    /// code defect: a required developer-toolchain root or cache lies outside
+    /// the sandbox profile, a needed system binary is missing, or another
+    /// machine-provisioning gap. Distinct from `ToolRejected` (the host
+    /// deliberately refused an action) and `Internal` (an engine bug): the fix
+    /// is to widen the sandbox/config or provision the host, not to change the
+    /// agent's code. Callers (and embedders) branch on this to avoid blaming
+    /// the model for an environment gap.
+    Environment,
     /// Generic/unclassified error
     Generic,
 }
@@ -280,6 +289,7 @@ impl ErrorCategory {
             ErrorCategory::CircuitOpen => "circuit_open",
             ErrorCategory::BudgetExceeded => "budget_exceeded",
             ErrorCategory::Internal => "internal",
+            ErrorCategory::Environment => "environment",
             ErrorCategory::Generic => "generic",
         }
     }
@@ -304,6 +314,7 @@ impl ErrorCategory {
             "circuit_open" => ErrorCategory::CircuitOpen,
             "budget_exceeded" => ErrorCategory::BudgetExceeded,
             "internal" => ErrorCategory::Internal,
+            "environment" => ErrorCategory::Environment,
             _ => ErrorCategory::Generic,
         }
     }
@@ -602,6 +613,7 @@ mod tests {
         ErrorCategory::CircuitOpen,
         ErrorCategory::BudgetExceeded,
         ErrorCategory::Internal,
+        ErrorCategory::Environment,
         ErrorCategory::Generic,
     ];
 
@@ -630,12 +642,13 @@ mod tests {
                 | ErrorCategory::CircuitOpen
                 | ErrorCategory::BudgetExceeded
                 | ErrorCategory::Internal
+                | ErrorCategory::Environment
                 | ErrorCategory::Generic => {}
             }
         }
         assert_eq!(
             ALL_CATEGORIES.len(),
-            19,
+            20,
             "a category was added or removed — update ALL_CATEGORIES and the \
              `Error categories` table in docs/src/builtins.md"
         );

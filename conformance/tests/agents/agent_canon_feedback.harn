@@ -41,14 +41,12 @@ fn test_packages_dir(dir, package_name: string) -> string {
   harness.fs.mkdir(packages)
   harness.fs.write_text(path_join(generation_root, "harn.lock"), lock_body)
   harness.fs.write_text(path_join(generation_root, "lease.lock"), "")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(generation_root, "generation.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\nlock_digest = \"sha256:${sha256(lock_body)}\"\n",
   )
   harness.fs.write_text(path_join(dir, ".harn", "package-generation.lock"), "")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(dir, ".harn", "package-current.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\n",
   )
@@ -58,30 +56,28 @@ fn test_packages_dir(dir, package_name: string) -> string {
 fn write_latex_canon_package(dir) {
   const packages = test_packages_dir(dir, "latex-canon")
   harness.fs.mkdir(path_join(packages, "latex-canon/canon/latex"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(packages, "latex-canon/harn.toml"),
     "version = 1\n[package]\nname = \"latex-canon\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nid = \"latex\"\ntitle = \"LaTeX\"\npath = \"canon/latex\"\nextensions = [\"tex\"]\n",
   )
-  harness.fs
-    .write_text(path_join(packages, "latex-canon/canon/latex/invariants.harn"), INVARIANTS)
+  harness.fs.write_text(path_join(packages, "latex-canon/canon/latex/invariants.harn"), INVARIANTS)
 }
 
 fn write_manifest_canon_package(dir) {
   const packages = test_packages_dir(dir, "canon-manifest")
   harness.fs.mkdir(path_join(packages, "canon-manifest/canon/latex"))
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(packages, "canon-manifest/harn.toml"),
     "version = 1\n[package]\nname = \"canon-manifest\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nmanifest = \"canon/canon-packs.json\"\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(packages, "canon-manifest/canon/canon-packs.json"),
     "{\"schema_version\":1,\"packs\":[{\"id\":\"latex\",\"title\":\"LaTeX\",\"invariants\":\"latex/invariants.harn\",\"extensions\":[\"tex\"]}]}",
   )
-  harness.fs
-    .write_text(path_join(packages, "canon-manifest/canon/latex/invariants.harn"), INVARIANTS)
+  harness.fs.write_text(
+    path_join(packages, "canon-manifest/canon/latex/invariants.harn"),
+    INVARIANTS,
+  )
 }
 
 fn canon_feedback_state_key(session_id: string, suffix: string) -> string {
@@ -112,7 +108,10 @@ pipeline main(task) {
       files_written: 2,
       filesWritten: ["src/top.foo"],
       iteration_info: {changed_paths: ["src/other.foo"], files_written: [{name: "build.foo"}]},
-      iterationInfo: {changedPaths: ["src/main.foo", {file_path: "src/filepath.foo"}], filesWritten: 1},
+      iterationInfo: {
+        changedPaths: ["src/main.foo", {file_path: "src/filepath.foo"}],
+        filesWritten: 1,
+      },
       tool_results: [{tool_name: "edit", status: "ok", arguments: {path: "src/from-edit.foo"}}],
     },
   )
@@ -126,8 +125,11 @@ pipeline main(task) {
     "src/from-edit.foo",
   ]
   require event_paths == expected_event_paths, "canon_event_paths extracts and dedupes paths"
-  const fallback_path = canon_event_write_path_from_result({tool_name: "edit", observation: "updated src/fallback.foo"})
-  require fallback_path == "src/fallback.foo", "canon_event_write_path_from_result uses terse observations"
+  const fallback_path = canon_event_write_path_from_result(
+    {tool_name: "edit", observation: "updated src/fallback.foo"},
+  )
+  require fallback_path == "src/fallback.foo",
+    "canon_event_write_path_from_result uses terse observations"
   const event_symbols = canon_event_observed_symbols(
     {
       observed_symbols: ["format_value", {symbol: "serialize"}],
@@ -140,7 +142,8 @@ pipeline main(task) {
     },
   )
   const expected_symbols = ["format_value", "serialize", "render", "encode", "decode", "print_ini"]
-  require event_symbols == expected_symbols, "canon_event_observed_symbols preserves ordered unique observations"
+  require event_symbols == expected_symbols,
+    "canon_event_observed_symbols preserves ordered unique observations"
   with_fs(
     {
       "canon-packs.json": manifest,
@@ -152,7 +155,9 @@ pipeline main(task) {
     },
     { dir ->
       __io_println(to_string(canon_resolve_root({canon_root: dir}) == dir))
-      __io_println(to_string(canon_resolve_root({project_root: dir}) == path_join(dir, ".harn", "canon")))
+      __io_println(
+        to_string(canon_resolve_root({project_root: dir}) == path_join(dir, ".harn", "canon")),
+      )
       const slice = canon_slice_from_files([{path: "src/main.foo", text: "const bad = true;"}])
       const result = canon_evaluate_slice(slice, {canon_root: dir, files: slice.files})
       __io_println(result.status)
@@ -168,11 +173,17 @@ pipeline main(task) {
         {enabled: false, root: dir, canon_root: dir},
       )
       require disabled == nil, "disabled canon_event_router short-circuits"
-      const disabled_symbols = store_get(canon_feedback_state_key(disabled_session_id, "observed_symbols"))
+      const disabled_symbols = store_get(
+        canon_feedback_state_key(disabled_session_id, "observed_symbols"),
+      )
       require disabled_symbols == nil, "disabled canon_event_router does not touch session state"
       agent_session_close(disabled_session_id)
       const session_id = agent_session_open("canon-feedback-" + uuid_v7())
-      const injected = canon_inject_feedback(session_id, slice, {canon_root: dir, files: slice.files})
+      const injected = canon_inject_feedback(
+        session_id,
+        slice,
+        {canon_root: dir, files: slice.files},
+      )
       const messages = agent_session_snapshot(session_id).messages
       __io_println(to_string(injected.injected))
       __io_println(to_string(contains(messages[len(messages) - 1].content, "harn-canon")))
@@ -183,14 +194,20 @@ pipeline main(task) {
         {root: dir, canon_root: dir},
       )
       require pre_event == nil, "non-iteration canon events only update observations"
-      const stored_symbols = store_get(canon_feedback_state_key(router_session_id, "observed_symbols"))
-      require stored_symbols == ["format_value"], "canon_event_router stores observed symbols per session"
+      const stored_symbols = store_get(
+        canon_feedback_state_key(router_session_id, "observed_symbols"),
+      )
+      require stored_symbols == ["format_value"],
+        "canon_event_router stores observed symbols per session"
       const routed = canon_event_router(
         router_session_id,
         {type: "iteration_end", changed_paths: ["src/main.foo"]},
         {root: dir, canon_root: dir, inject: "reminder"},
       )
-      const routed_events = transcript_events_by_kind(agent_session_snapshot(router_session_id), "system_reminder")
+      const routed_events = transcript_events_by_kind(
+        agent_session_snapshot(router_session_id),
+        "system_reminder",
+      )
       require routed.injected, "canon_event_router injects when routed paths trip a pack"
       require routed.paths == ["src/main.foo"], "canon_event_router reports routed paths"
       require len(routed_events) == 1, "canon_event_router injects one reminder"
@@ -207,18 +224,28 @@ pipeline main(task) {
       const install_session_id = agent_session_open("canon-install-" + uuid_v7())
       canon_install_feedback_sink(install_session_id, {enabled: false})
       const disabled_install = store_get(canon_feedback_state_key(install_session_id, "installed"))
-      require disabled_install == nil, "disabled canon_install_feedback_sink does not mark installed"
+      require disabled_install == nil,
+        "disabled canon_install_feedback_sink does not mark installed"
       canon_install_feedback_sink(install_session_id, {root: dir, canon_root: dir})
       canon_install_feedback_sink(install_session_id, {root: dir, canon_root: dir})
-      require store_get(canon_feedback_state_key(install_session_id, "installed")), "canon_install_feedback_sink installs once"
+      require store_get(canon_feedback_state_key(install_session_id, "installed")),
+        "canon_install_feedback_sink installs once"
       agent_session_close(install_session_id)
       const path_session_id = agent_session_open("canon-path-feedback-" + uuid_v7())
-      const path_injected = canon_inject_paths_feedback(path_session_id, ["src/main.foo"], {root: dir, canon_root: dir})
+      const path_injected = canon_inject_paths_feedback(
+        path_session_id,
+        ["src/main.foo"],
+        {root: dir, canon_root: dir},
+      )
       const path_messages = agent_session_snapshot(path_session_id).messages
       __io_println(to_string(path_injected.injected))
       __io_println(to_string(contains(path_messages[len(path_messages) - 1].content, "no_bad")))
       const auto_session_id = agent_session_open("canon-auto-root-feedback-" + uuid_v7())
-      const auto_injected = canon_inject_paths_feedback(auto_session_id, ["src/main.foo"], {root: dir, project_root: dir})
+      const auto_injected = canon_inject_paths_feedback(
+        auto_session_id,
+        ["src/main.foo"],
+        {root: dir, project_root: dir},
+      )
       const auto_messages = agent_session_snapshot(auto_session_id).messages
       __io_println(to_string(auto_injected.injected))
       __io_println(to_string(contains(auto_messages[len(auto_messages) - 1].content, "no_bad")))
@@ -226,7 +253,11 @@ pipeline main(task) {
       const package_session_id = agent_session_open("canon-package-feedback-" + uuid_v7())
       write_latex_canon_package(dir)
       harness.fs.write_text(path_join(dir, "paper.tex"), "bad macro")
-      const package_injected = canon_inject_paths_feedback(package_session_id, ["paper.tex"], {root: dir, project_root: dir})
+      const package_injected = canon_inject_paths_feedback(
+        package_session_id,
+        ["paper.tex"],
+        {root: dir, project_root: dir},
+      )
       const package_messages = agent_session_snapshot(package_session_id).messages
       __io_println(to_string(package_injected.selected_pack_ids == ["latex"]))
       __io_println(to_string(package_injected.injected))
@@ -240,7 +271,10 @@ pipeline main(task) {
         slice,
         {canon_root: dir, files: slice.files, inject: "reminder"},
       )
-      const reminder_events = transcript_events_by_kind(agent_session_snapshot(reminder_session_id), "system_reminder")
+      const reminder_events = transcript_events_by_kind(
+        agent_session_snapshot(reminder_session_id),
+        "system_reminder",
+      )
       __io_println(to_string(reminder_injected.injected))
       __io_println(to_string(to_string(reminder_injected.reminder_id ?? "") != ""))
       __io_println(to_string(len(reminder_events) == 1))
@@ -258,12 +292,18 @@ pipeline main(task) {
     { dir ->
       write_latex_canon_package(dir)
       const package_only_session_id = agent_session_open("canon-package-only-feedback-" + uuid_v7())
-      const package_only_injected = canon_inject_paths_feedback(package_only_session_id, ["paper.tex"], {root: dir, project_root: dir})
+      const package_only_injected = canon_inject_paths_feedback(
+        package_only_session_id,
+        ["paper.tex"],
+        {root: dir, project_root: dir},
+      )
       const package_only_messages = agent_session_snapshot(package_only_session_id).messages
       __io_println(to_string(package_only_injected.selected_pack_ids == ["latex"]))
       __io_println(to_string(package_only_injected.injected))
       __io_println(
-        to_string(contains(package_only_messages[len(package_only_messages) - 1].content, "[latex] LaTeX")),
+        to_string(
+          contains(package_only_messages[len(package_only_messages) - 1].content, "[latex] LaTeX"),
+        ),
       )
       agent_session_close(package_only_session_id)
     },
@@ -272,7 +312,9 @@ pipeline main(task) {
     {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(dir)
-      const package_manifest_session_id = agent_session_open("canon-package-manifest-feedback-" + uuid_v7())
+      const package_manifest_session_id = agent_session_open(
+        "canon-package-manifest-feedback-" + uuid_v7(),
+      )
       const package_manifest_injected = canon_inject_paths_feedback(
         package_manifest_session_id,
         ["paper.tex"],
@@ -283,7 +325,10 @@ pipeline main(task) {
       __io_println(to_string(package_manifest_injected.injected))
       __io_println(
         to_string(
-          contains(package_manifest_messages[len(package_manifest_messages) - 1].content, "[latex] LaTeX"),
+          contains(
+            package_manifest_messages[len(package_manifest_messages) - 1].content,
+            "[latex] LaTeX",
+          ),
         ),
       )
       agent_session_close(package_manifest_session_id)
@@ -293,12 +338,16 @@ pipeline main(task) {
     {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(dir)
-      const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
+      const manifest_path = path_join(
+        test_packages_dir(dir, "canon-manifest"),
+        "canon-manifest/canon/canon-packs.json",
+      )
       harness.fs.write_text(manifest_path, "{bad")
       const malformed = try {
         canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})
       }
-      require unwrap_err(malformed).kind == "malformed", "malformed contribution manifest fails closed"
+      require unwrap_err(malformed).kind == "malformed",
+        "malformed contribution manifest fails closed"
       __io_println(is_err(malformed))
     },
   )
@@ -306,16 +355,19 @@ pipeline main(task) {
     {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(dir)
-      const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
-      harness.fs
-        .write_text(
+      const manifest_path = path_join(
+        test_packages_dir(dir, "canon-manifest"),
+        "canon-manifest/canon/canon-packs.json",
+      )
+      harness.fs.write_text(
         manifest_path,
         "{\"schema_version\":1,\"packs\":[{\"id\":7,\"invariants\":true}]}",
       )
       const invalid = try {
         canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})
       }
-      require unwrap_err(invalid).kind == "schema_invalid", "mistyped contribution manifest fails closed"
+      require unwrap_err(invalid).kind == "schema_invalid",
+        "mistyped contribution manifest fails closed"
       __io_println(is_err(invalid))
     },
   )
@@ -323,16 +375,19 @@ pipeline main(task) {
     {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(dir)
-      const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
-      harness.fs
-        .write_text(
+      const manifest_path = path_join(
+        test_packages_dir(dir, "canon-manifest"),
+        "canon-manifest/canon/canon-packs.json",
+      )
+      harness.fs.write_text(
         manifest_path,
         "{\"schema_version\":2,\"packs\":[{\"id\":\"latex\",\"invariants\":\"latex/invariants.harn\"}]}",
       )
       const unsupported = try {
         canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})
       }
-      require unwrap_err(unsupported).kind == "schema_invalid", "unsupported manifest version fails closed"
+      require unwrap_err(unsupported).kind == "schema_invalid",
+        "unsupported manifest version fails closed"
       __io_println(is_err(unsupported))
     },
   )
@@ -340,7 +395,10 @@ pipeline main(task) {
     {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(dir)
-      const manifest_path = path_join(test_packages_dir(dir, "canon-manifest"), "canon-manifest/canon/canon-packs.json")
+      const manifest_path = path_join(
+        test_packages_dir(dir, "canon-manifest"),
+        "canon-manifest/canon/canon-packs.json",
+      )
       harness.fs.delete(manifest_path)
       const missing = try {
         canon_resolve_packs({project_root: dir, files: [{path: "paper.tex"}]})

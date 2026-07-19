@@ -16,7 +16,12 @@ pipeline test(task) {
   assert_eq(json_stringify(point), "{\"x\":1,\"y\":5,\"z\":9}", "struct JSON")
   const schema = {
     type: "dict",
-    properties: {x: {type: "int"}, y: {type: "int"}, z: {type: "int"}, label: {type: "string", default: "origin"}},
+    properties: {
+      x: {type: "int"},
+      y: {type: "int"},
+      z: {type: "int"},
+      label: {type: "string", default: "origin"},
+    },
   }
   const normalized = unwrap(schema_parse(point, schema))
   assert_eq(normalized.label, "origin", "schema defaults preserve struct access")

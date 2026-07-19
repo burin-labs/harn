@@ -18,16 +18,18 @@ fn summarize(messages) {
 }
 
 pipeline test() {
-  const caller = { call -> return {
-    ok: true,
-    value: {
-      text: "SEEN[" + summarize(call.opts.messages) + "]",
-      provider: "mock",
-      model: "mock",
-      input_tokens: 0,
-      output_tokens: 0,
-    },
-  } }
+  const caller = { call ->
+    return {
+      ok: true,
+      value: {
+        text: "SEEN[" + summarize(call.opts.messages) + "]",
+        provider: "mock",
+        model: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
   const history = [
     {role: "user", content: "Remember this: the codeword is pixel."},
     {role: "assistant", content: "Understood, the codeword is pixel."},
@@ -36,7 +38,13 @@ pipeline test() {
   const result = agent_loop(
     "What is the codeword?",
     nil,
-    {session_id: session, provider: "mock", llm_caller: caller, history: history, max_iterations: 1},
+    {
+      session_id: session,
+      provider: "mock",
+      llm_caller: caller,
+      history: history,
+      max_iterations: 1,
+    },
   )
   // The first outbound request carried the seeded turns in order, ahead of the
   // fresh user question — exactly as `llm_call`'s `messages` array would.

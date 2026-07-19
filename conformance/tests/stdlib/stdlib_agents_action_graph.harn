@@ -7,7 +7,12 @@ pipeline default() {
       task: "Fix parser diagnostics",
       summary: "Inspect first, then patch, then verify.",
       steps: [
-        {id: "inspect", kind: "research", title: "Inspect parser and tests", tools: ["read", "search"]},
+        {
+          id: "inspect",
+          kind: "research",
+          title: "Inspect parser and tests",
+          tools: ["read", "search"],
+        },
         {id: "patch", title: "Patch parser error text", tools: ["edit"]},
         {id: "docs", title: "Update release notes", tools: ["edit"]},
         {id: "qa", kind: "verify", title: "Run verification", dependsOn: ["patch"], tools: ["run"]},
@@ -30,7 +35,12 @@ pipeline default() {
     {
       task: "Fix parser diagnostics",
       steps: [
-        {id: "inspect", kind: "research", title: "Inspect parser and tests", tools: ["read", "search"]},
+        {
+          id: "inspect",
+          kind: "research",
+          title: "Inspect parser and tests",
+          tools: ["read", "search"],
+        },
         {id: "patch", title: "Patch parser error text", tools: ["edit"]},
         {id: "docs", title: "Update release notes", tools: ["edit"]},
       ],

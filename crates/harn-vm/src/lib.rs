@@ -24,6 +24,7 @@ pub use harn_clock as clock;
 pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;
+pub(crate) mod agent_session_journal;
 pub mod agent_sessions;
 pub mod agent_transcript_budget;
 pub mod atomic_io;
@@ -264,6 +265,9 @@ pub use mcp_server::{
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};
+pub use observability::execution_scope::{
+    current_execution_scope, enter_execution_scope, mint_execution_scope, ExecutionScopeGuard,
+};
 pub use observability::request_id::{current_request_id, enter_request_id, RequestIdScopeGuard};
 pub use orchestration::{
     benchmark_adapted_replay_pair, benchmark_replay_trace, build_replay_benchmark_report,

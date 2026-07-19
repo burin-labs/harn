@@ -28,7 +28,9 @@ pub fn __normalize_llm_caller_transport(value) -> LlmCallerTransport {
   const forwards_assistant_prefill = value?.forwards_assistant_prefill ?? false
   if type_of(forwards_assistant_prefill) != "bool" {
     throw "agent_loop: `llm_caller_transport.forwards_assistant_prefill` must be a bool; got "
-      + type_of(forwards_assistant_prefill)
+      + type_of(
+      forwards_assistant_prefill,
+    )
   }
   return {forwards_assistant_prefill: forwards_assistant_prefill}
 }

@@ -59,7 +59,13 @@ pub fn best_of_n_candidates(opts) {
   }
   const generate = o?.generate
   if generate == nil {
-    return {reason: "no_generate", selected_index: nil, candidate: nil, candidates: [], contract_ok: false}
+    return {
+      reason: "no_generate",
+      selected_index: nil,
+      candidate: nil,
+      candidates: [],
+      contract_ok: false,
+    }
   }
   const k = __bon_clamp_int(o?.k ?? 1, 1, 64)
   const select_callback = o?.select_callback
@@ -143,7 +149,11 @@ pub fn best_of_n_candidates(opts) {
     }
   }
   if winner == nil {
-    const fallback_idx = __bon_clamp_int(o?.fallthrough_index ?? (len(candidates) - 1), 0, len(candidates) - 1)
+    const fallback_idx = __bon_clamp_int(
+      o?.fallthrough_index ?? (len(candidates) - 1),
+      0,
+      len(candidates) - 1,
+    )
     return {
       reason: "fallthrough_no_winner",
       selected_index: fallback_idx,

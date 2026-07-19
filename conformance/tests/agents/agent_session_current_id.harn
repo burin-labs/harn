@@ -23,7 +23,10 @@ pipeline main(task) {
   )
   with_llm_script(
     [
-      {text: "Checking the session.", tool_calls: [{id: "sid1", name: "read_current_id", arguments: {}}]},
+      {
+        text: "Checking the session.",
+        tool_calls: [{id: "sid1", name: "read_current_id", arguments: {}}],
+      },
       llm_text("<done>##DONE##</done>"),
     ],
     { ->

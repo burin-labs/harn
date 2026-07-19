@@ -95,10 +95,18 @@ pipeline test(task) {
   log(show(max_canonical_tag(["v9.99.99", "v10.0.0"])))
   log(show(max_canonical_tag(["v9223372036854775808.0.0", "v9223372036854775807.0.0"])))
   log(
-    show(max_canonical_tag(["v4.0.0-rc.1", "v3.0.0", "v5.0.0+build.1", "v03.0.2", "3.0.1", "v2.99.99"])),
+    show(
+      max_canonical_tag(
+        ["v4.0.0-rc.1", "v3.0.0", "v5.0.0+build.1", "v03.0.2", "3.0.1", "v2.99.99"],
+      ),
+    ),
   )
   log(
-    show(max_canonical_tag(["v2.99.99", "3.0.1", "v03.0.2", "v5.0.0+build.1", "v3.0.0", "v4.0.0-rc.1"])),
+    show(
+      max_canonical_tag(
+        ["v2.99.99", "3.0.1", "v03.0.2", "v5.0.0+build.1", "v3.0.0", "v4.0.0-rc.1"],
+      ),
+    ),
   )
   // next: bump returns bare X.Y.Z
   log(next("1.2.3", "patch"))

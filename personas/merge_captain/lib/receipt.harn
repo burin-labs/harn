@@ -35,7 +35,11 @@ pub fn build_receipt(args) {
     pr_title: observation.title,
     head_sha: observation.head_sha,
     prior_state: prior_state,
-    classification: {state: classification.state, action: classification.action, reason: classification.reason},
+    classification: {
+      state: classification.state,
+      action: classification.action,
+      reason: classification.reason,
+    },
     evidence: evidence,
     approval_state: approval,
     commands_run: commands,

@@ -28,7 +28,9 @@ pipeline default() {
       const result = agent_loop("Do the task.", nil, opts)
       const system = llm_mock_calls()[0].system
       __io_println("A.status=" + result.status)
-      __io_println("A.has_overlay=" + to_string(contains(system, "Batch related read-only tool calls")))
+      __io_println(
+        "A.has_overlay=" + to_string(contains(system, "Batch related read-only tool calls")),
+      )
     },
   )
   // --- B. no matching row -> system is unaffected ---
@@ -91,9 +93,12 @@ pipeline default() {
       const result = agent_loop("Do the task.", nil, opts)
       const system = llm_mock_calls()[0].system
       __io_println("D.status=" + result.status)
-      __io_println("D.has_custom_override=" + to_string(contains(system, "A fully custom nudge line.")))
       __io_println(
-        "D.row_default_absent=" + to_string(!contains(system, "Batch related read-only tool calls")),
+        "D.has_custom_override=" + to_string(contains(system, "A fully custom nudge line.")),
+      )
+      __io_println(
+        "D.row_default_absent="
+          + to_string(!contains(system, "Batch related read-only tool calls")),
       )
     },
   )

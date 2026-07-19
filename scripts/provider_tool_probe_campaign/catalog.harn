@@ -1,0 +1,734 @@
+import "./support"
+import "./types"
+
+const RUNTIME_RECEIPT_SCHEMA = "harn.provider_tool_probe_runtime.v1"
+
+const CATALOG_RECEIPT_SCHEMA = "harn.provider_tool_probe_catalog.v1"
+
+pub fn __catalog_receipt(
+  command: list<string>,
+  command_env: dict,
+  status: ProviderToolProbeCatalogStatus,
+  exit_code: int,
+  providers_config: string,
+  catalog_sha256: string,
+  provider_count: int,
+  model_count: int,
+  route_count: int,
+  reason: string,
+) -> ProviderToolProbeCatalogReceipt {
+  return {
+    schema_version: CATALOG_RECEIPT_SCHEMA,
+    command: command,
+    command_env: command_env,
+    status: status,
+    exit_code: exit_code,
+    providers_config: providers_config,
+    catalog_sha256: catalog_sha256,
+    provider_count: provider_count,
+    model_count: model_count,
+    route_count: route_count,
+    reason: reason,
+  }
+}
+
+/** Normalize `provider catalog show` from the exact CLI used by probe children. */
+pub fn provider_tool_probe_campaign_catalog_snapshot(
+  harn_bin: string,
+  providers_config: string,
+  child: dict,
+) -> dict {
+  const command = [harn_bin, "provider", "catalog", "show"]
+  const command_env = provider_tool_probe_campaign_command_env(providers_config)
+  const exit_code = to_int(child?.exit_code) ?? -1
+  if exit_code != 0 {
+    const stderr = trim(to_string(child?.stderr ?? ""))
+    return {
+      receipt: __catalog_receipt(
+        command,
+        command_env,
+        "unavailable",
+        exit_code,
+        trim(providers_config),
+        "",
+        0,
+        0,
+        0,
+        if stderr != "" {
+          stderr
+        } else {
+          "target Harn catalog command exited unsuccessfully"
+        },
+      ),
+      catalog: {},
+    }
+  }
+  const parsed = try {
+    json_parse(to_string(child?.stdout ?? ""))
+  } catch (_) {
+    nil
+  }
+  if type_of(parsed) != "dict" || type_of(parsed?.providers) != "list"
+    || type_of(parsed?.models)
+    != "list"
+    || type_of(parsed?.routing_routes) != "list" {
+    return {
+      receipt: __catalog_receipt(
+        command,
+        command_env,
+        "invalid",
+        exit_code,
+        trim(providers_config),
+        "",
+        0,
+        0,
+        0,
+        "target Harn runtime produced invalid provider catalog JSON",
+      ),
+      catalog: {},
+    }
+  }
+  const canonical = json_stringify(parsed)
+  return {
+    receipt: __catalog_receipt(
+      command,
+      command_env,
+      "verified",
+      exit_code,
+      trim(providers_config),
+      "sha256:" + sha256(canonical),
+      len(parsed.providers),
+      len(parsed.models),
+      len(parsed.routing_routes),
+      "target Harn provider catalog identified",
+    ),
+    catalog: parsed,
+  }
+}
+
+/** Normalize the target CLI's `version --json` result into campaign provenance. */
+pub fn provider_tool_probe_campaign_runtime_receipt(
+  harn_bin: string,
+  child: dict,
+) -> ProviderToolProbeRuntimeReceipt {
+  const command = [harn_bin, "version", "--json"]
+  const exit_code = to_int(child?.exit_code) ?? -1
+  if exit_code != 0 {
+    const stderr = trim(to_string(child?.stderr ?? ""))
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "unavailable",
+      exit_code: exit_code,
+      version: "",
+      reason: if stderr != "" {
+        stderr
+      } else {
+        "target Harn runtime exited unsuccessfully"
+      },
+    }
+  }
+  const parsed = try {
+    json_parse(to_string(child?.stdout ?? ""))
+  } catch (_) {
+    nil
+  }
+  if type_of(parsed) != "dict" {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      reason: "target Harn runtime produced invalid version JSON",
+    }
+  }
+  const name = trim(to_string(parsed?.data?.name ?? ""))
+  const version = trim(to_string(parsed?.data?.version ?? ""))
+  if parsed?.schemaVersion != 1 || parsed?.ok != true || name != "harn-cli" || version == "" {
+    return {
+      schema_version: RUNTIME_RECEIPT_SCHEMA,
+      command: command,
+      status: "invalid",
+      exit_code: exit_code,
+      version: "",
+      reason: "target Harn runtime version JSON did not match the harn-cli contract",
+    }
+  }
+  return {
+    schema_version: RUNTIME_RECEIPT_SCHEMA,
+    command: command,
+    status: "verified",
+    exit_code: exit_code,
+    version: version,
+    reason: "target Harn runtime identified",
+  }
+}
+
+pub fn provider_tool_probe_campaign_runtime_allows_live(
+  runtime: ProviderToolProbeRuntimeReceipt,
+) -> bool {
+  return runtime.status == "verified" && runtime.version != ""
+}
+
+pub fn __provider_tool_probe_campaign_runtime(
+  harness: Harness,
+  harn_bin: string,
+) -> ProviderToolProbeRuntimeReceipt {
+  const child = try {
+    harness.process.spawn_captured({cmd: harn_bin, args: ["version", "--json"]})
+  } catch (e) {
+    {exit_code: -1, stdout: "", stderr: to_string(e)}
+  }
+  return provider_tool_probe_campaign_runtime_receipt(harn_bin, child)
+}
+
+pub fn provider_tool_probe_campaign_providers_config_text_error(text: string) -> string? {
+  const parsed = try {
+    toml_parse(text)
+  } catch (error) {
+    return "providers config is invalid TOML: " + to_string(error)
+  }
+  if type_of(parsed) != "dict" {
+    return "providers config must decode to a TOML document"
+  }
+  return nil
+}
+
+pub fn __providers_config_error(harness: Harness, path: string) -> string? {
+  if path == "" {
+    return nil
+  }
+  if !harness.fs.exists(path) {
+    return "providers config does not exist: " + path
+  }
+  const text = try {
+    harness.fs.read_text(path)
+  } catch (error) {
+    return "providers config is unreadable: " + path + ": " + to_string(error)
+  }
+  return provider_tool_probe_campaign_providers_config_text_error(text)
+}
+
+pub fn __provider_tool_probe_campaign_catalog(
+  harness: Harness,
+  harn_bin: string,
+  providers_config: string,
+) -> dict {
+  const command = ["provider", "catalog", "show"]
+  const child = try {
+    harness.process.spawn_captured(
+      {
+        cmd: harn_bin,
+        args: command,
+        env: provider_tool_probe_campaign_command_env(providers_config),
+      },
+    )
+  } catch (error) {
+    {exit_code: -1, stdout: "", stderr: to_string(error)}
+  }
+  return provider_tool_probe_campaign_catalog_snapshot(harn_bin, providers_config, child)
+}
+
+pub fn __split_once(text: string, sep: string) -> dict? {
+  const parts = split(text, sep)
+  if len(parts) < 2 {
+    return nil
+  }
+  return {left: parts[0], right: join(parts[1:len(parts)], sep)}
+}
+
+pub fn __slug(text: string) -> string {
+  return replace(replace(replace(replace(text, "/", "-"), ":", "-"), ".", "-"), "_", "-")
+}
+
+pub fn __route_from_spec(spec: string) -> ProviderToolProbeRoute? {
+  const pair = __split_once(trim(spec), ":")
+  if pair == nil {
+    return nil
+  }
+  const provider = trim(pair.left)
+  const model = trim(pair.right)
+  if provider == "" || model == "" {
+    return nil
+  }
+  return {
+    id: __slug(provider + "-" + model),
+    provider: provider,
+    model: model,
+    env_keys: [],
+    local: false,
+    cheap: true,
+    metadata: {source: "explicit"},
+  }
+}
+
+pub fn provider_tool_probe_campaign_routes(specs: list<string>) -> list<ProviderToolProbeRoute> {
+  let routes: list<ProviderToolProbeRoute> = []
+  for spec in specs {
+    const route = __route_from_spec(spec)
+    if route != nil {
+      routes = routes + [route]
+    }
+  }
+  return routes
+}
+
+pub fn provider_tool_probe_campaign_default_routes(
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
+  const routes: list<ProviderToolProbeRoute> = [
+    {
+      id: "fireworks-gpt-oss-120b",
+      provider: "fireworks",
+      model: "accounts/fireworks/models/gpt-oss-120b",
+      env_keys: ["FIREWORKS_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {source: "default"},
+    },
+    {
+      id: "cerebras-gpt-oss-120b",
+      provider: "cerebras",
+      model: "gpt-oss-120b",
+      env_keys: ["CEREBRAS_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {source: "default"},
+    },
+    {
+      id: "openrouter-gpt-oss-120b",
+      provider: "openrouter",
+      model: "openai/gpt-oss-120b",
+      env_keys: ["OPENROUTER_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {source: "default"},
+    },
+    {
+      id: "moonshot-kimi",
+      provider: "moonshot",
+      model: "kimi-k2.6",
+      env_keys: ["MOONSHOT_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {source: "default"},
+    },
+    {
+      id: "local-vllm",
+      provider: "local",
+      model: "local-gemma4-e4b",
+      env_keys: [],
+      local: true,
+      cheap: true,
+      metadata: {source: "default"},
+    },
+    {
+      id: "ollama",
+      provider: "ollama",
+      model: "gemma4:e4b",
+      env_keys: [],
+      local: true,
+      cheap: true,
+      metadata: {source: "default"},
+    },
+    {
+      id: "xai-grok",
+      provider: "xai",
+      model: "grok-4.5",
+      env_keys: ["XAI_API_KEY"],
+      local: false,
+      cheap: false,
+      metadata: {source: "default"},
+    },
+  ]
+  if include_expensive {
+    return routes
+  }
+  let selected: list<ProviderToolProbeRoute> = []
+  for route in routes {
+    if route.cheap {
+      selected = selected + [route]
+    }
+  }
+  return selected
+}
+
+pub fn __provider_meta_by_id(catalog: dict) -> dict {
+  let providers = {}
+  for provider in catalog.providers ?? [] {
+    const id = trim(to_string(provider.id ?? provider.name ?? ""))
+    if id != "" {
+      providers = providers + {[id]: provider}
+    }
+  }
+  return providers
+}
+
+pub fn __route_is_local(provider: string, meta: dict) -> bool {
+  const classification = to_string(meta.classification ?? "")
+  if classification == "local" {
+    return true
+  }
+  return provider == "local" || provider == "ollama" || provider == "llamacpp" || provider == "mlx"
+}
+
+pub fn __has_string(values, target: string) -> bool {
+  if type_of(values) != "list" {
+    return false
+  }
+  for value in values {
+    if to_string(value) == target {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn __append_unique_string(values: list<string>, value: string) -> list<string> {
+  const key = trim(value)
+  if key == "" || values.contains(key) {
+    return values
+  }
+  return values + [key]
+}
+
+pub fn __unique_string_list(values: list<string>) -> list<string> {
+  let out: list<string> = []
+  for value in values {
+    out = __append_unique_string(out, value)
+  }
+  return out
+}
+
+pub fn __catalog_model_is_cheap(model: dict, local: bool) -> bool {
+  if local {
+    return true
+  }
+  if __has_string(model.strengths, "cheap") || __has_string(model.quality_tags, "cheap") {
+    return true
+  }
+  const input = to_float(model.pricing?.input_per_mtok) ?? 999999.0
+  const output = to_float(model.pricing?.output_per_mtok) ?? 999999.0
+  return input <= 1.0 && output <= 5.0
+}
+
+pub fn __route_key(provider: string, model: string) -> string {
+  return provider + "\n" + model
+}
+
+pub fn __catalog_models_by_route(catalog: dict) -> dict {
+  let models = {}
+  for model in catalog.models ?? [] {
+    const provider = trim(to_string(model.provider ?? ""))
+    const model_id = trim(to_string(model.id ?? ""))
+    if provider == "" || model_id == "" {
+      continue
+    }
+    models = models + {[__route_key(provider, model_id)]: model}
+    const wire_model = trim(to_string(model.wire_model ?? ""))
+    if wire_model != "" {
+      models = models + {[__route_key(provider, wire_model)]: model}
+    }
+  }
+  return models
+}
+
+pub fn __route_env_keys(route: dict, meta: dict) -> list<string> {
+  let keys: list<string> = []
+  const route_secret = trim(to_string(route.secret_env ?? ""))
+  if route_secret != "" {
+    keys = keys + [route_secret]
+  }
+  return __unique_string_list(keys + __as_string_list(meta.auth?.env ?? meta.auth_envs))
+}
+
+pub fn __catalog_route_from_routing_row(
+  route: dict,
+  providers: dict,
+  models: dict,
+  include_expensive: bool,
+) -> ProviderToolProbeRoute? {
+  const provider = trim(to_string(route.provider ?? ""))
+  const model_id = trim(to_string(route.model ?? ""))
+  if provider == "" || model_id == "" {
+    return nil
+  }
+  const meta = providers[provider] ?? {}
+  const model = models[__route_key(provider, model_id)] ?? {}
+  const local = __route_is_local(provider, meta)
+  const cheap = __catalog_model_is_cheap(model, local)
+  if !include_expensive && !cheap {
+    return nil
+  }
+  return {
+    id: __slug(provider + "-" + model_id),
+    provider: provider,
+    model: model_id,
+    env_keys: __route_env_keys(route, meta),
+    local: local,
+    cheap: cheap,
+    metadata: {
+      source: "routing_route",
+      catalog_model_id: model.id,
+      catalog_wire_model: model.wire_model,
+      route_model: model_id,
+      route_family: route.family,
+      route_label: route.label,
+      route_timeout_ms: route.timeout_ms,
+      route_capabilities: route.capabilities ?? [],
+      route_has_base_url: trim(to_string(route.base_url ?? "")) != "",
+      route_secret_env: route.secret_env,
+    },
+  }
+}
+
+pub fn __catalog_routes_from_routing_table(
+  catalog: dict,
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
+  const providers = __provider_meta_by_id(catalog)
+  const models = __catalog_models_by_route(catalog)
+  let routes: list<ProviderToolProbeRoute> = []
+  for row in catalog.routing_routes ?? [] {
+    const route = __catalog_route_from_routing_row(row, providers, models, include_expensive)
+    if route != nil {
+      routes = routes + [route]
+    }
+  }
+  return routes
+}
+
+pub fn __catalog_routes_from_models(
+  catalog: dict,
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
+  const providers = __provider_meta_by_id(catalog)
+  let routes: list<ProviderToolProbeRoute> = []
+  for model in catalog.models ?? [] {
+    const provider = trim(to_string(model.provider ?? ""))
+    const model_id = trim(to_string(model.id ?? ""))
+    if provider == "" || model_id == "" {
+      continue
+    }
+    const meta = providers[provider] ?? {}
+    const local = __route_is_local(provider, meta)
+    const cheap = __catalog_model_is_cheap(model, local)
+    if !include_expensive && !cheap {
+      continue
+    }
+    routes = routes
+      + [
+      {
+        id: __slug(provider + "-" + model_id),
+        provider: provider,
+        model: model_id,
+        env_keys: __as_string_list(meta.auth?.env ?? meta.auth_envs),
+        local: local,
+        cheap: cheap,
+        metadata: {
+          source: "catalog_model",
+          catalog_model_id: model_id,
+          catalog_wire_model: model.wire_model,
+        },
+      },
+    ]
+  }
+  return routes
+}
+
+pub fn provider_tool_probe_campaign_catalog_routes(
+  catalog: dict,
+  include_expensive: bool,
+) -> list<ProviderToolProbeRoute> {
+  if len(catalog.routing_routes ?? []) > 0 {
+    return __catalog_routes_from_routing_table(catalog, include_expensive)
+  }
+  return __catalog_routes_from_models(catalog, include_expensive)
+}
+
+pub fn provider_tool_probe_campaign_modes(mode: string) -> list<string> {
+  if mode == "both" {
+    return ["non-streaming", "streaming"]
+  }
+  if mode == "non-streaming" {
+    return ["non-streaming"]
+  }
+  if mode == "streaming" {
+    return ["streaming"]
+  }
+  return []
+}
+
+pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavior> {
+  return [
+    {
+      id: "tool_calling_non_streaming",
+      category: "tool_calls",
+      description:
+        "Single required tool call through non-streaming transport, classified by Harn provider tool-probe.",
+      runner: "provider_tool_probe",
+      probe_case: "single_tool_call",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "tool_calling_streaming",
+      category: "tool_calls",
+      description:
+        "Single required tool call through streaming transport, classified by Harn provider tool-probe.",
+      runner: "provider_tool_probe",
+      probe_case: "single_tool_call",
+      modes: ["streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "parallel_tool_calls",
+      category: "dispatch",
+      description:
+        "Multiple sibling tool calls in one assistant turn; assertion target is dispatch receipt cardinality.",
+      runner: "provider_tool_probe",
+      probe_case: "parallel_tool_calls",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "multi_turn_tool_results",
+      category: "dispatch",
+      description:
+        "Tool result consumed in a follow-up turn without provider-side message-order rejection.",
+      runner: "provider_tool_probe",
+      probe_case: "tool_result_followup",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "stop_sequences",
+      category: "options",
+      description:
+        "Stop sequence option is either accepted by the route or catalog-gated before dispatch.",
+      runner: "planned_llm_call",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "presence_frequency_penalties",
+      category: "options",
+      description:
+        "Presence/frequency penalties are provider-gated so unsupported routes fail before live API 400s.",
+      runner: "planned_llm_call",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "temperature_top_p_policy",
+      category: "options",
+      description:
+        "Route-specific temperature/top_p policy is catalog-owned, including Kimi-style constraints.",
+      runner: "planned_llm_call",
+      modes: ["non-streaming"],
+      tool_formats: ["none"],
+      cheap: true,
+    },
+    {
+      id: "long_heredoc_unicode_args",
+      category: "parser",
+      description:
+        "Long heredoc and Unicode tool arguments survive provider parsing and dispatch byte-identically.",
+      runner: "provider_tool_probe",
+      probe_case: "large_string_argument",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "harmony_control_tokens_in_content",
+      category: "parser",
+      description:
+        "Harmony-looking control tokens inside user/tool payload content remain payload bytes, not framing.",
+      runner: "planned_agent_loop",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "tool_choice_forcing",
+      category: "options",
+      description:
+        "Forced tool_choice either reaches the provider correctly or is rejected before dispatch.",
+      runner: "planned_agent_loop",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+    {
+      id: "empty_args_calls",
+      category: "parser",
+      description:
+        "Empty-argument tool calls are preserved as empty dicts, not treated as dropped or truncated args.",
+      runner: "planned_agent_loop",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text/tagged"],
+      cheap: true,
+    },
+  ]
+}
+
+pub fn __behavior_matches(behavior: ProviderToolProbeBehavior, filters: list<string>) -> bool {
+  if len(filters) == 0 {
+    return true
+  }
+  for raw in filters {
+    const filter = trim(raw)
+    if filter == "" {
+      continue
+    }
+    if filter == behavior.id || filter == behavior.category || filter == behavior.runner {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn provider_tool_probe_campaign_select_behaviors(
+  filters: list<string>,
+) -> list<ProviderToolProbeBehavior> {
+  let selected: list<ProviderToolProbeBehavior> = []
+  for behavior in provider_tool_probe_campaign_behaviors() {
+    if __behavior_matches(behavior, filters) {
+      selected = selected + [behavior]
+    }
+  }
+  return selected
+}
+
+pub fn __mode_allowed(mode: string, allowed: list<string>) -> bool {
+  for item in allowed {
+    if item == mode {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn provider_tool_probe_campaign_filter_behavior_modes(
+  behaviors: list<ProviderToolProbeBehavior>,
+  mode: string,
+) -> list<ProviderToolProbeBehavior> {
+  if mode == "both" {
+    return behaviors
+  }
+  let selected: list<ProviderToolProbeBehavior> = []
+  for behavior in behaviors {
+    if __mode_allowed(mode, behavior.modes) {
+      selected = selected + [behavior + {modes: [mode]}]
+    }
+  }
+  return selected
+}

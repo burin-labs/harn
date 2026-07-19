@@ -20,7 +20,9 @@ pipeline test(task) {
   __io_println(contains(join(missing_required.errors, "\n"), "missing required key 'name'"))
   let openapi = schema_openapi(user_schema)
   __io_println(openapi.type)
-  let from_json = from_json_schema({type: "object", properties: {name: {type: "string"}}, required: ["name"]})
+  let from_json = from_json_schema(
+    {type: "object", properties: {name: {type: "string"}}, required: ["name"]},
+  )
   __io_println(is_type({name: "Bob"}, from_json))
   let report_schema = schema_object(
     {

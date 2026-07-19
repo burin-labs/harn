@@ -388,9 +388,15 @@ fn __coord_resolution(scope, room, options) {
   const ctx = __coord_ctx()
   const logical_scope = __coord_normalized_scope(scope)
   const room_name = __coord_validate_component("room", room)
-  const logical_scope_id = __coord_validate_component("scope id", __coord_scope_id(logical_scope, opts, ctx))
+  const logical_scope_id = __coord_validate_component(
+    "scope id",
+    __coord_scope_id(logical_scope, opts, ctx),
+  )
   if logical_scope == "workspace" {
-    const tenant_id = __coord_validate_component("tenant id", opts?.tenant_id ?? ctx?.tenant_id ?? "default")
+    const tenant_id = __coord_validate_component(
+      "tenant id",
+      opts?.tenant_id ?? ctx?.tenant_id ?? "default",
+    )
     return {
       logical_scope: logical_scope,
       logical_scope_id: logical_scope_id,
@@ -401,7 +407,10 @@ fn __coord_resolution(scope, room, options) {
     }
   }
   if logical_scope == "task" {
-    const session_id = __coord_validate_component("session id", __coord_scope_id("session", opts, ctx))
+    const session_id = __coord_validate_component(
+      "session id",
+      __coord_scope_id("session", opts, ctx),
+    )
     return {
       logical_scope: logical_scope,
       logical_scope_id: logical_scope_id,
@@ -703,7 +712,11 @@ fn __coord_dir_lock_owner(owner, options) {
 
 fn __coord_dir_lock_record(resource_path, lock_path, owner, options, now_ms) {
   const opts = __coord_dict(options)
-  const ttl_ms = __coord_nonnegative_int(opts?.ttl_ms ?? opts?.lease_ms, __COORD_DIR_LOCK_TTL_MS, "ttl_ms")
+  const ttl_ms = __coord_nonnegative_int(
+    opts?.ttl_ms ?? opts?.lease_ms,
+    __COORD_DIR_LOCK_TTL_MS,
+    "ttl_ms",
+  )
   const token = trim(__coord_string(opts?.token))
   return filter_nil(
     {
@@ -732,7 +745,8 @@ fn __coord_dir_lock_same_record(record, expected) {
     return false
   }
   const token = record?.token
-  return token != nil && token == expected?.token && record?.acquired_at_ms == expected?.acquired_at_ms
+  return token != nil && token == expected?.token
+    && record?.acquired_at_ms == expected?.acquired_at_ms
 }
 
 fn __coord_dir_lock_existing(lock_path, now_ms) {
@@ -805,7 +819,11 @@ fn __coord_dir_lock_conflict(resource_path, lock_path, existing, options) {
 
 fn __coord_dir_lock_reaper_options(options, lock_path) {
   const opts = __coord_dict(options)
-  const ttl_ms = __coord_positive_int(opts?.reaper_ttl_ms, __COORD_DIR_LOCK_REAPER_TTL_MS, "reaper_ttl_ms")
+  const ttl_ms = __coord_positive_int(
+    opts?.reaper_ttl_ms,
+    __COORD_DIR_LOCK_REAPER_TTL_MS,
+    "reaper_ttl_ms",
+  )
   return opts
     + {
     lock_path: __coord_dir_lock_reaper_path(lock_path),
@@ -993,7 +1011,11 @@ pub fn coord_request(scope, room, recipient, message, options = nil) {
     recipient,
     msg,
     opts
-      + {id: request_id, kind: opts?.request_kind ?? "request", thread_id: opts?.thread_id ?? request_id},
+      + {
+      id: request_id,
+      kind: opts?.request_kind ?? "request",
+      thread_id: opts?.thread_id ?? request_id,
+    },
   )
 }
 
@@ -1272,7 +1294,11 @@ pub fn coord_wait_reply(scope, room, request_or_id, options = nil) {
   const request = __coord_message_from_input(request_or_id, opts)
   const wait_opts = __coord_wait_reply_options(request, opts)
   const consumer_id = wait_opts.consumer_id
-  const timeout_ms = __coord_nonnegative_int(opts?.timeout_ms ?? opts?.budget_ms, 2000, "timeout_ms")
+  const timeout_ms = __coord_nonnegative_int(
+    opts?.timeout_ms ?? opts?.budget_ms,
+    2000,
+    "timeout_ms",
+  )
   const poll_interval_ms = __coord_positive_int(opts?.poll_interval_ms, 50, "poll_interval_ms")
   const started = harness.clock.monotonic_ms()
   let last_inbox = nil
@@ -1383,8 +1409,13 @@ pub fn coord_ack(scope, room, consumer_id, cursor, options = nil) {
 pub fn coord_inbox(scope, room, options = nil) {
   const opts = __coord_dict(options)
   const consumer_id = __coord_consumer_id(opts)
-  const from_cursor = opts?.from_cursor ?? opts?.cursor ?? coord_cursor(scope, room, consumer_id, opts)
-  const scanned = coord_read(scope, room, filter_nil(opts + {include_events: true, from_cursor: from_cursor}))
+  const from_cursor = opts?.from_cursor ?? opts?.cursor
+    ?? coord_cursor(scope, room, consumer_id, opts)
+  const scanned = coord_read(
+    scope,
+    room,
+    filter_nil(opts + {include_events: true, from_cursor: from_cursor}),
+  )
   let messages = []
   let last_scanned_cursor = from_cursor
   for item in scanned {

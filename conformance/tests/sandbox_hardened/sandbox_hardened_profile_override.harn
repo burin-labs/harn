@@ -13,7 +13,10 @@ pipeline default() {
   const result = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "worktree"})
   __io_println(result?.success)
   __io_println(result?.stdout)
-  const unrestricted = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "unrestricted"})
+  const unrestricted = host_call(
+    "process.exec",
+    {mode: "argv", argv: argv, sandbox_profile: "unrestricted"},
+  )
   __io_println(unrestricted?.success)
   const bad = try {
     host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "wide_open"})

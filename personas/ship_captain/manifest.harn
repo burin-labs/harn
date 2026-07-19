@@ -22,7 +22,15 @@ fn ship_captain_manifest() {
     evals: ["slice_quality", "false_ship_rate", "coverage_fidelity", "latency_pr_to_merge"],
     receipts: {
       required: true,
-      fields: ["persona", "slice.id", "slice.atoms", "intents", "predicate_validation", "ship_receipt", "mock_pr"],
+      fields: [
+        "persona",
+        "slice.id",
+        "slice.atoms",
+        "intents",
+        "predicate_validation",
+        "ship_receipt",
+        "mock_pr",
+      ],
     },
     required_capabilities: [
       "git.get_diff",

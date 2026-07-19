@@ -4,7 +4,11 @@
 // it is dogfooded.
 type PickKeysOptions = {drop_nil?: bool}
 
-fn pick_keys<V>(d: dict<string, V>, keys: list<string>, options: PickKeysOptions = {}) -> dict<string, V> {
+fn pick_keys<V>(
+  d: dict<string, V>,
+  keys: list<string>,
+  options: PickKeysOptions = {},
+) -> dict<string, V> {
   return d
 }
 

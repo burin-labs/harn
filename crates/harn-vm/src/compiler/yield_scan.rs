@@ -16,6 +16,7 @@ pub(super) fn node_contains_yield(node: &Node) -> bool {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             node_contains_yield(&condition.node)
                 || body_contains_yield(then_body)

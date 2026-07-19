@@ -25,7 +25,8 @@ pipeline test(task) {
     "https://idp.example/device",
     {
       status: 200,
-      body: "{\"device_code\":\"DEV-SLOW\",\"user_code\":\"USER-SLOW\",\"verification_uri\":\"https://idp.example/activate\",\"interval\":3,\"expires_in\":900}",
+      body:
+        "{\"device_code\":\"DEV-SLOW\",\"user_code\":\"USER-SLOW\",\"verification_uri\":\"https://idp.example/activate\",\"interval\":3,\"expires_in\":900}",
       headers: {"content-type": "application/json"},
     },
   )
@@ -34,7 +35,11 @@ pipeline test(task) {
     "https://idp.example/token",
     {
       responses: [
-        {status: 400, body: "{\"error\":\"slow_down\"}", headers: {"content-type": "application/json"}},
+        {
+          status: 400,
+          body: "{\"error\":\"slow_down\"}",
+          headers: {"content-type": "application/json"},
+        },
         {
           status: 200,
           body: "{\"access_token\":\"OK-SLOW\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
@@ -44,7 +49,10 @@ pipeline test(task) {
     },
   )
   const start_ts = to_int(harness.clock.timestamp())
-  const token_set = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
+  const token_set = device_flow(
+    provider,
+    {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }},
+  )
   const end_ts = to_int(harness.clock.timestamp())
   assert_eq(token_set.access_token, "OK-SLOW", "device_flow returns token after slow_down")
   // Initial interval=3s; slow_down bumps it to 3+5=8s; one sleep of 8s

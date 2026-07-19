@@ -223,8 +223,6 @@ async fn run_tests(id: Value, params: Value, state: &mut WorkerState) -> Value {
         cli_skill_dirs: params.skill_dirs,
         progress: None,
         diagnose: params.diagnose,
-        #[cfg(test)]
-        setup_delay_ms: 0,
     };
     let cache_before = state.session.stats();
     let summary =

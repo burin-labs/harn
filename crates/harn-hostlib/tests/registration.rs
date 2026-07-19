@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Barrier, Mutex, MutexGuard};
 
 #[cfg(feature = "terminal-session")]
 use harn_hostlib::terminal_session::TerminalSessionCapability;
@@ -109,9 +109,6 @@ fn harn_string_literal(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-// Only the unix-gated terminal-session live test calls this; carry the same
-// cfg so Windows and feature-lean builds do not trip dead_code.
-#[cfg(all(unix, feature = "terminal-session"))]
 fn assert_response_schema(module: &str, method: &str, value: &VmValue) {
     let schema = schemas::lookup(module, method, schemas::SchemaKind::Response)
         .unwrap_or_else(|| panic!("missing response schema for {module}.{method}"));
@@ -448,6 +445,7 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_inspect_test_results",
             "hostlib_tools_manage_packages",
             "hostlib_tools_cancel_handle",
+            "hostlib_tools_list_handles",
             "hostlib_tools_toolchain_facts",
             // Per-session opt-in builtin.
             "hostlib_enable",
@@ -474,6 +472,7 @@ fn tools_capability_registers_documented_methods() {
         "hostlib_tools_inspect_test_results",
         "hostlib_tools_manage_packages",
         "hostlib_tools_cancel_handle",
+        "hostlib_tools_list_handles",
         "hostlib_tools_toolchain_facts",
     ];
     for name in gated_methods {
@@ -580,6 +579,7 @@ fn install_default_wires_every_module_into_a_vm() {
         "fs_watch",
         "tools",
         "secret_store",
+        "verdict",
         "host_lease",
     ];
     // The computer-use module is registered only when the `computer` feature is
@@ -592,15 +592,23 @@ fn install_default_wires_every_module_into_a_vm() {
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
-    // + 1 hostlib_enable + 4 secret_store + 1 host_lease = 80.
-    assert!(registry.builtins().len() >= 80);
+    // + 1 hostlib_enable + 4 secret_store + 1 verdict + 4 host_lease = 84.
+    assert!(registry.builtins().len() >= 84);
 }
 
 #[test]
-fn host_lease_capability_registers_read_only_status() {
+fn host_lease_capability_registers_scoped_lifecycle() {
     let registry = collect_into_registry(HostLeaseCapability);
     let names: Vec<_> = registry.iter().map(|builtin| builtin.name).collect();
-    assert_eq!(names, vec!["hostlib_host_lease_status"]);
+    assert_eq!(
+        names,
+        vec![
+            "hostlib_host_lease_status",
+            "hostlib_host_lease_acquire",
+            "hostlib_host_lease_update_metadata",
+            "hostlib_host_lease_release",
+        ]
+    );
 
     let entry = registry
         .find("hostlib_host_lease_status")
@@ -626,6 +634,233 @@ fn host_lease_capability_registers_read_only_status() {
 }
 
 #[test]
+fn stdlib_host_lease_replaces_metadata_inside_one_guarded_scope() {
+    let root = TempDir::new().expect("lease root");
+    let _env = HostLeaseRootGuard::set(root.path());
+
+    let source = r#"
+import {
+  host_lease_status,
+  host_lease_update_metadata,
+  with_host_lease,
+} from "std/host_lease"
+
+pipeline default(task) {
+  const scope = with_host_lease(
+    {
+      host: "mac-local",
+      owner: "metadata-test",
+      resource_class: "whole-machine",
+      domain: "discovery",
+      metadata: {phase: "pending", obsolete: "remove-me"},
+    },
+    { handle ->
+      const update = host_lease_update_metadata(
+        handle,
+        {phase: "complete", revision: "abc123"},
+      )
+      const active = host_lease_status("mac-local", "whole-machine", "discovery").active
+      return {update: update, active: active}
+    },
+  )
+  return {
+    scope: scope,
+    final: host_lease_status("mac-local", "whole-machine", "discovery"),
+  }
+}
+"#;
+
+    let result = expect_dict(execute_harn(source).expect("metadata scope"));
+    let Some(VmValue::Dict(scope)) = result.get("scope") else {
+        panic!("scope result must be a dict");
+    };
+    let Some(VmValue::Dict(value)) = scope.get("value") else {
+        panic!("completed scope must carry its callback value");
+    };
+    assert_response_schema(
+        "host_lease",
+        "update_metadata",
+        value.get("update").expect("metadata update receipt"),
+    );
+    let Some(VmValue::Dict(active)) = value.get("active") else {
+        panic!("active handle must remain visible inside the scope");
+    };
+    let Some(VmValue::Dict(metadata)) = active.get("metadata") else {
+        panic!("active handle must expose replacement metadata");
+    };
+    assert_eq!(metadata.len(), 2);
+    assert_eq!(
+        metadata.get("phase").map(VmValue::display),
+        Some("complete".to_string())
+    );
+    assert_eq!(
+        metadata.get("revision").map(VmValue::display),
+        Some("abc123".to_string())
+    );
+    assert!(!metadata.contains_key("obsolete"));
+    let Some(VmValue::Dict(final_state)) = result.get("final") else {
+        panic!("final state must be a dict");
+    };
+    assert!(matches!(final_state.get("active"), Some(VmValue::Nil)));
+}
+
+#[test]
+fn stdlib_host_lease_scope_releases_on_completion_exception_and_cancellation() {
+    let root = TempDir::new().expect("lease root");
+    let _env = HostLeaseRootGuard::set(root.path());
+
+    let completed = r#"
+import { host_lease_status, with_host_lease } from "std/host_lease"
+
+pipeline default(task) {
+  const scope = with_host_lease(
+    {host: "mac-local", owner: "complete-test", resource_class: "rust-heavy"},
+    { handle -> handle.owner },
+  )
+  const state = host_lease_status("mac-local", "rust-heavy")
+  return {scope: scope, state: state}
+}
+"#;
+    let result = expect_dict(execute_harn(completed).expect("completed scope"));
+    let Some(VmValue::Dict(scope)) = result.get("scope") else {
+        panic!("scope result must be a dict");
+    };
+    assert_eq!(
+        scope.get("status").map(VmValue::display),
+        Some("completed".to_string())
+    );
+    assert_response_schema(
+        "host_lease",
+        "acquire",
+        scope.get("acquire").expect("scope acquire receipt"),
+    );
+    assert_response_schema(
+        "host_lease",
+        "release",
+        scope.get("release").expect("scope release receipt"),
+    );
+    let Some(VmValue::Dict(state)) = result.get("state") else {
+        panic!("state must be a dict");
+    };
+    assert!(matches!(state.get("active"), Some(VmValue::Nil)));
+
+    let failed = r#"
+import { host_lease_status, with_host_lease } from "std/host_lease"
+
+pipeline default(task) {
+  try {
+    with_host_lease(
+      {host: "mac-local", owner: "exception-test", resource_class: "rust-heavy"},
+      { _handle -> throw "fixture failure" },
+    )
+  } catch (_error) {
+    return host_lease_status("mac-local", "rust-heavy")
+  }
+}
+"#;
+    let state = expect_dict(execute_harn(failed).expect("failed scope"));
+    assert!(matches!(state.get("active"), Some(VmValue::Nil)));
+
+    let cancelled = r#"
+import { host_lease_status, with_host_lease } from "std/host_lease"
+
+pipeline default(task) {
+  const ready = channel("lease-ready", 1)
+  const blocked = channel("lease-blocked", 1)
+  const worker = spawn {
+    with_host_lease(
+      {host: "mac-local", owner: "cancel-test", resource_class: "rust-heavy"},
+      { _handle ->
+        send(ready, true)
+        receive(blocked)
+      },
+    )
+  }
+  receive(ready)
+  cancel(worker)
+  return host_lease_status("mac-local", "rust-heavy")
+}
+"#;
+    let state = expect_dict(execute_harn(cancelled).expect("cancelled scope"));
+    assert!(matches!(state.get("active"), Some(VmValue::Nil)));
+}
+
+#[test]
+fn parallel_named_host_lease_scopes_release_before_reacquire() {
+    let root = TempDir::new().expect("lease root");
+    let _env = HostLeaseRootGuard::set(root.path());
+
+    for iteration in 0..16 {
+        let start = Arc::new(Barrier::new(2));
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..2)
+                .map(|worker| {
+                    let start = Arc::clone(&start);
+                    scope.spawn(move || {
+                        let domain = format!("parallel-{iteration}-{worker}");
+                        let first = if worker == 0 {
+                            format!(
+                                r#"
+  const first = with_host_lease(
+    {{host: "mac-local", owner: "first-{worker}", resource_class: "rust-heavy", domain: "{domain}", wait_timeout_ms: 5000}},
+    {{ _ -> "first" }},
+  ).status
+"#
+                            )
+                        } else {
+                            format!(
+                                r#"
+  let first = nil
+  try {{
+    with_host_lease(
+      {{host: "mac-local", owner: "first-{worker}", resource_class: "rust-heavy", domain: "{domain}", wait_timeout_ms: 5000}},
+      {{ _ -> throw "fixture failure" }},
+    )
+  }} catch (error) {{
+    first = error
+  }}
+"#
+                            )
+                        };
+                        let source = format!(
+                            r#"
+import {{ with_host_lease }} from "std/host_lease"
+
+pipeline default(task) {{
+{first}
+  const second = with_host_lease(
+    {{host: "mac-local", owner: "second-{worker}", resource_class: "rust-heavy", domain: "{domain}"}},
+    {{ _ -> "second" }},
+  )
+  return {{first: first, second: second.status}}
+}}
+"#
+                        );
+                        start.wait();
+                        execute_harn(&source)
+                    })
+                })
+                .collect();
+            for (index, worker) in workers.into_iter().enumerate() {
+                let result = expect_dict(worker.join().unwrap().unwrap());
+                assert_eq!(
+                    result.get("first").map(VmValue::display).as_deref(),
+                    Some(if index == 0 {
+                        "completed"
+                    } else {
+                        "fixture failure"
+                    })
+                );
+                assert_eq!(
+                    result.get("second").map(VmValue::display).as_deref(),
+                    Some("completed")
+                );
+            }
+        });
+    }
+}
+
+#[test]
 fn stdlib_host_lease_status_reads_empty_active_and_recovered_state() {
     let root = TempDir::new().expect("lease root");
     let _env = HostLeaseRootGuard::set(root.path());
@@ -635,7 +870,7 @@ fn stdlib_host_lease_status_reads_empty_active_and_recovered_state() {
 import { host_lease_status } from "std/host_lease"
 
 pipeline default(task) {
-  return host_lease_status("mac-local")
+  return host_lease_status("mac-local", "whole-machine", "release")
 }
 "#;
 
@@ -650,6 +885,7 @@ pipeline default(task) {
         .try_acquire(HostLeaseRequest {
             host: "mac-local".to_string(),
             resource_class: HostLeaseResourceClass::WholeMachine,
+            domain: "release".to_string(),
             execution_context: None,
             owner: "registration-test".to_string(),
             priority_class: HostLeasePriorityClass::Measurement,
@@ -691,6 +927,20 @@ pipeline default(task) {
         recovered.get("recovered_stale_lease"),
         Some(VmValue::Bool(true))
     ));
+    let Some(VmValue::Dict(prior)) = recovered.get("recovered") else {
+        panic!("recovered state must include the stale authority");
+    };
+    assert_eq!(
+        prior.get("owner").map(VmValue::display),
+        Some("registration-test".to_string())
+    );
+    let Some(VmValue::Dict(metadata)) = prior.get("metadata") else {
+        panic!("recovered authority must preserve metadata");
+    };
+    assert_eq!(
+        metadata.get("lane").map(VmValue::display),
+        Some("p7".to_string())
+    );
 }
 
 fn expect_dict(value: VmValue) -> harn_vm::value::DictMap {

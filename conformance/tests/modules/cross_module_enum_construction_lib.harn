@@ -1,0 +1,34 @@
+/** Private payload for `CrossModuleEnum.Made`. */
+struct Inner {
+  n: int
+}
+
+/**
+ * Library half of the cross-module enum-construction regression (harn#5062).
+ * Constructing a variant of this enum from an IMPORTING module must succeed at
+ * runtime, matching `harn check`. If the compiler ever again recompiles an
+ * imported function body without seeding this module's enum catalog,
+ * `CrossModuleEnum.Made(...)` lowers to a bare variable load of the enum name
+ * and throws "Undefined variable: CrossModuleEnum" at runtime while `check`
+ * stays green — the exact soundness gap this fixture locks shut.
+ */
+pub enum CrossModuleEnum {
+  Made(Inner)
+  Other(int)
+}
+
+/** A `pub const` that constructs a variant, exercising the import-init path. */
+pub const DEFAULT_ENUM = CrossModuleEnum.Other(0)
+
+/** Cross-module constructor: builds `CrossModuleEnum.Made` from its own enum. */
+pub fn make_cross_module_enum(n: int) -> CrossModuleEnum {
+  return CrossModuleEnum.Made(Inner {n: n})
+}
+
+/** Cross-module match round-trip over the imported enum's variants. */
+pub fn describe(v: CrossModuleEnum) -> string {
+  match v {
+    CrossModuleEnum.Made(_inner) -> { return "made" }
+    CrossModuleEnum.Other(_k) -> { return "other" }
+  }
+}

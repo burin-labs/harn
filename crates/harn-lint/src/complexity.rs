@@ -11,6 +11,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 1 + node_complexity(condition)
                     + body_complexity(then_body)

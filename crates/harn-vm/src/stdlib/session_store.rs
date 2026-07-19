@@ -309,7 +309,19 @@ async fn ensure_session(
     }
 }
 
-async fn read_all_events(
+/// Open the canonical store for a VM-owned agent session. The live transcript
+/// journal uses this adapter instead of reproducing SQLite setup, redaction,
+/// legacy import, or session-creation policy.
+pub(crate) async fn open_canonical_agent_session(
+    root: &Path,
+    session_id: &str,
+) -> Result<SqliteSessionStore, VmError> {
+    let store = open_store(root)?;
+    ensure_session(&store, root, session_id, true, None).await?;
+    Ok(store)
+}
+
+pub(crate) async fn read_all_events(
     store: &SqliteSessionStore,
     session_id: &str,
 ) -> Result<Vec<StoredEvent>, VmError> {
@@ -513,7 +525,7 @@ fn verify_report_value(report: VerifyReport, broken_at: Option<usize>) -> Result
     Ok(json_to_vm_value(&value))
 }
 
-fn store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
+pub(crate) fn canonical_store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
     Ok(option_string(options, "root")?
         .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
         .or_else(|| {
@@ -523,6 +535,10 @@ fn store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
                 .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
         })
         .unwrap_or_else(crate::stdlib::process::runtime_root_base))
+}
+
+fn store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
+    canonical_store_root(options)
 }
 
 fn legacy_session_path(root: &Path, session_id: &str) -> Result<PathBuf, VmError> {

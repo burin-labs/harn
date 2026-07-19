@@ -13,7 +13,9 @@ pipeline main() {
   )
   __io_println(trigger?.trigger?.kind)
   __io_println(trigger?.trigger?.match?.events[0])
-  const timeout = parse_resume_conditions({timeout: {duration_minutes: 15, on_timeout: "resume_with_input"}})
+  const timeout = parse_resume_conditions(
+    {timeout: {duration_minutes: 15, on_timeout: "resume_with_input"}},
+  )
   __io_println(timeout?.timeout?.duration_minutes)
   __io_println(timeout?.timeout?.on_timeout)
   const event = parse_resume_conditions({on_event: "operator.resume"})

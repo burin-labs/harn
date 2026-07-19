@@ -70,7 +70,10 @@ pub fn context_eval_mode(id: string, kind = nil, options = nil) {
       },
       name: opts?.name,
       description: opts?.description,
-      artifact_ids: __context_eval_string_list(opts?.artifact_ids ?? opts?.artifacts, "artifact_ids"),
+      artifact_ids: __context_eval_string_list(
+        opts?.artifact_ids ?? opts?.artifacts,
+        "artifact_ids",
+      ),
       include_artifact_kinds: __context_eval_string_list(
         opts?.include_artifact_kinds ?? opts?.include_kinds,
         "include_artifact_kinds",
@@ -85,7 +88,10 @@ pub fn context_eval_mode(id: string, kind = nil, options = nil) {
       projection_policy: opts?.projection_policy ?? opts?.projection,
       transcript_keep_last: opts?.transcript_keep_last ?? opts?.keep_last,
       tool_disclosure: opts?.tool_disclosure,
-      tool_allowlist: __context_eval_string_list(opts?.tool_allowlist ?? opts?.tools, "tool_allowlist"),
+      tool_allowlist: __context_eval_string_list(
+        opts?.tool_allowlist ?? opts?.tools,
+        "tool_allowlist",
+      ),
       expected_cache_hit: opts?.expected_cache_hit,
       cache_namespace: opts?.cache_namespace,
       compaction_policy: opts?.compaction_policy,
@@ -120,12 +126,18 @@ pub fn context_eval_task(id: string, objective: string, options = nil) {
       tool_events: __context_eval_list(opts?.tool_events, "tool_events"),
       expected: expected
         + {
-        required_terms: __context_eval_string_list(expected?.required_terms ?? opts?.required_terms, "required_terms"),
+        required_terms: __context_eval_string_list(
+          expected?.required_terms ?? opts?.required_terms,
+          "required_terms",
+        ),
         expected_artifact_ids: __context_eval_string_list(
           expected?.expected_artifact_ids ?? opts?.expected_artifact_ids,
           "expected_artifact_ids",
         ),
-        expected_tools: __context_eval_string_list(expected?.expected_tools ?? opts?.expected_tools, "expected_tools"),
+        expected_tools: __context_eval_string_list(
+          expected?.expected_tools ?? opts?.expected_tools,
+          "expected_tools",
+        ),
         max_input_tokens: expected?.max_input_tokens ?? opts?.max_input_tokens,
       },
       observed: opts?.observed ?? {},

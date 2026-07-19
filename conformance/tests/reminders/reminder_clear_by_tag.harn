@@ -1,8 +1,12 @@
 pipeline main() {
-  const a = transcript
-    .inject_reminder(transcript(), {body: "tagged", tags: ["watchlist"], dedupe_key: "a"})
-  const b = transcript
-    .inject_reminder(a.transcript, {body: "untagged", tags: ["other"], dedupe_key: "b"})
+  const a = transcript.inject_reminder(
+    transcript(),
+    {body: "tagged", tags: ["watchlist"], dedupe_key: "a"},
+  )
+  const b = transcript.inject_reminder(
+    a.transcript,
+    {body: "untagged", tags: ["other"], dedupe_key: "b"},
+  )
   const cleared = transcript.clear_reminders(b.transcript, {tag: "watchlist"})
   const events = transcript_events_by_kind(cleared.transcript, "system_reminder")
   __io_println(cleared.removed_count)

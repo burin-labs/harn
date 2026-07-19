@@ -1486,11 +1486,11 @@ fn test_llm_call_option_literal_flags_probable_typos() {
 }
 
 #[test]
-fn test_llm_call_option_literal_accepts_openai_responses_options() {
+fn test_llm_call_option_literal_accepts_provider_options() {
     let warns = warnings(
         r#"pipeline t(task) {
   llm_call("prompt", nil, {
-    provider: "mock",
+    provider: "mock", mock_scope: "completion.judge",
     api_mode: "responses",
     provider_tools: [{type: "web_search_preview"}],
     previous_response_id: "resp_prev",

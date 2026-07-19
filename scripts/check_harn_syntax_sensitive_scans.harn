@@ -60,6 +60,17 @@ pub fn harn_syntax_sensitive_files(root: string = "") -> list<string> {
 }
 
 fn git_candidate_files(root: string) -> list<string>? {
+  // `git -C` walks parent directories when `root` is not itself a repository.
+  // Test/temp trees nested inside a checkout must use the filesystem fallback;
+  // otherwise git reports candidates relative to the parent repository and the
+  // requested subtree is silently skipped.
+  const top_level = harness.process.spawn_captured(
+    {cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
+  )
+  if top_level.exit_code != 0
+    || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
+    return nil
+  }
   const args = [
     "-C",
     root,
@@ -91,8 +102,9 @@ fn git_candidate_files(root: string) -> list<string>? {
   }
   // `git grep` intentionally avoids walking ignored build output, but a local
   // pre-commit check must still see newly authored source before it is staged.
-  const untracked = harness.process
-    .spawn_captured({cmd: "git", args: ["-C", root, "ls-files", "--others", "--exclude-standard"]})
+  const untracked = harness.process.spawn_captured(
+    {cmd: "git", args: ["-C", root, "ls-files", "--others", "--exclude-standard"]},
+  )
   if untracked.exit_code != 0 {
     return nil
   }
@@ -126,7 +138,9 @@ pub fn line_has_let_only_harn_binding_regex(line: string) -> bool {
 }
 
 pub fn line_has_stale_var_tool_registry_example(line: string) -> bool {
-  return len(regex_captures(r"(^|[^A-Za-z0-9_])var\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*tool_registry\s*\(", line))
+  return len(
+    regex_captures(r"(^|[^A-Za-z0-9_])var\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*tool_registry\s*\(", line),
+  )
     > 0
 }
 
@@ -138,8 +152,7 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
     const line = lines[index]
     const line_no = index + 1
     if line_has_let_only_harn_binding_regex(line) {
-      findings = findings
-        .push(
+      findings = findings.push(
         line_finding(
           path,
           line_no,
@@ -149,8 +162,7 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
       )
     }
     if line_has_stale_var_tool_registry_example(line) {
-      findings = findings
-        .push(
+      findings = findings.push(
         line_finding(
           path,
           line_no,
@@ -193,8 +205,7 @@ fn render_report(report: dict) -> string {
     "Use parser/codemod facts where possible. If text scanning is unavoidable, accept both current and recently migrated Harn keyword spellings or document an explicit non-Harn target.",
   ]
   for finding in report.findings {
-    lines = lines
-      .push(
+    lines = lines.push(
       "- "
         + to_string(finding.path)
         + ":"
@@ -222,8 +233,7 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/check_harn_syntax_sensitive_scans.harn -- [--json] [--root PATH]",
     )
     return nil

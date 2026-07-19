@@ -13,7 +13,7 @@ mod openai_normalize;
 pub(crate) mod options;
 mod partial_tool_args;
 mod response;
-mod result;
+pub(crate) mod result;
 mod schema_stream;
 mod telemetry;
 mod thinking;
@@ -22,8 +22,8 @@ mod transport;
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::mock::{
-    fixture_hash, get_replay_mode, load_fixture, mock_llm_response, record_cli_llm_result,
-    save_fixture, LlmReplayMode,
+    fixture_hash_for_request, get_replay_mode, load_fixture, mock_llm_response,
+    record_cli_llm_result, save_fixture, LlmReplayMode,
 };
 
 // ─── Public surface (crate-wide) ────────────────────────────────────────
@@ -233,7 +233,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
         || crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider);
     let replay_mode = get_replay_mode();
     if !cached && !intercepted && replay_mode == LlmReplayMode::Replay {
-        let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
+        let hash = fixture_hash_for_request(&request);
         if load_fixture(&hash).is_none() {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("No fixture found for LLM call (hash: {hash}). Run with --record first."),
@@ -245,7 +245,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
     }
     request.emit_reminder_lifecycle();
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
-    let result = tokio::task::spawn(async move {
+    let result = tokio::task::spawn(crate::orchestration::scope_inline_subtask(async move {
         if let Some(context) = raw_capture_context {
             crate::llm::agent_observe::with_raw_provider_capture_context(context, async {
                 vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await
@@ -254,7 +254,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
         } else {
             vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await
         }
-    })
+    }))
     .await
     .map_err(|join_err| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
@@ -332,7 +332,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     let replay_mode = get_replay_mode();
-    let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
+    let hash = fixture_hash_for_request(request);
 
     if replay_mode == LlmReplayMode::Replay {
         if let Some(result) = load_fixture(&hash) {
@@ -389,7 +389,7 @@ async fn vm_call_llm_full_inner_offthread(
     }
 
     let replay_mode = get_replay_mode();
-    let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
+    let hash = fixture_hash_for_request(request);
 
     if replay_mode == LlmReplayMode::Replay {
         return load_fixture(&hash)

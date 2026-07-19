@@ -18,7 +18,9 @@ pipeline default() {
   }
   const _ = mock_time(0)
   const fast_caller = with_timeout(fast, {ms: 1000})
-  const fast_env = fast_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const fast_env = fast_caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(fast_env.ok)
   __io_println(fast_env.value.text)
   __io_println(atomic_get(seen_timeout))
@@ -31,7 +33,9 @@ pipeline default() {
     }
   }
   const slow_caller = with_timeout(slow, {ms: 500})
-  const slow_env = slow_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const slow_env = slow_caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(slow_env.ok)
   __io_println(slow_env.status)
   __io_println(slow_env.error.timeout_ms)
@@ -42,7 +46,9 @@ pipeline default() {
     return {ok: false, status: "rate_limited", error: "429"}
   }
   const preserve = with_timeout(slow_failure, {ms: 500, relabel_failures: false})
-  const preserve_env = preserve({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const preserve_env = preserve(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(preserve_env.ok)
   __io_println(preserve_env.status)
   __io_println(preserve_env.elapsed_ms >= 500)

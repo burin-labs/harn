@@ -9,8 +9,9 @@ import "std/triggers"
  * single field flip — must produce a different hash.
  */
 pipeline default() {
-  const audit = event_log
-    .subscribe({topic: "lifecycle.channel.audit", kind_prefix: "channel_emit_receipt"})
+  const audit = event_log.subscribe(
+    {topic: "lifecycle.channel.audit", kind_prefix: "channel_emit_receipt"},
+  )
   // Two emits with identical payloads — `payload_hash` must match
   // so the replay oracle sees deterministic producer output.
   const _ = emit_channel("ch.replay.hash.stable", {repo: "harn", attempt: 1})
