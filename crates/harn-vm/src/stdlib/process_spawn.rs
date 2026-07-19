@@ -248,7 +248,22 @@ fn store_receipt(receipts: &mut BTreeMap<String, TerminalReceipt>, receipt: Term
             .map(|r| r.handle_id.clone());
         match oldest {
             Some(handle_id) => {
-                receipts.remove(&handle_id);
+                if let Some(dropped) = receipts.remove(&handle_id) {
+                    // Last-resort bound: a terminal receipt is discarded before
+                    // it was released. This is the one remaining path where an
+                    // unobserved terminal result can still vanish, so make it
+                    // loud rather than silent — the whole point of the receipt
+                    // mechanism is that terminal state never disappears
+                    // invisibly.
+                    tracing::warn!(
+                        handle_id = %dropped.handle_id,
+                        command = %dropped.command_display,
+                        seq = dropped.seq,
+                        cap = RECEIPT_CAP,
+                        "process.spawn dropping unconsumed terminal receipt at cap; \
+                         observe or release spawn handles promptly"
+                    );
+                }
             }
             None => break,
         }
@@ -256,9 +271,14 @@ fn store_receipt(receipts: &mut BTreeMap<String, TerminalReceipt>, receipt: Term
     receipts.insert(receipt.handle_id.clone(), receipt);
 }
 
+/// Raised when a handle is neither live nor backed by a terminal receipt.
+/// A handle can be "expired" as well as never-known: terminal receipts are
+/// bounded (see [`RECEIPT_CAP`]), so a handle observed too late after eviction
+/// under sustained flooding resolves here — the wording covers both cases.
 fn unknown_handle_error(handle_id: &str) -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "host_call process: unknown spawn handle {handle_id:?}"
+        "host_call process: unknown or expired spawn handle {handle_id:?} \
+         (terminal receipts are bounded; observe or release the handle promptly)"
     ))))
 }
 
@@ -1175,6 +1195,60 @@ mod tests {
             completion: Notify::new(),
             kill_signal: Notify::new(),
         })
+    }
+
+    /// Build a terminal receipt directly, for exercising the receipt-cap
+    /// overflow bound without spawning processes.
+    fn fake_receipt(handle_id: &str, seq: u64) -> TerminalReceipt {
+        TerminalReceipt {
+            handle_id: handle_id.to_string(),
+            pid: None,
+            command_display: "fake".to_string(),
+            started_at: "1970-01-01T00:00:00Z".to_string(),
+            status: SpawnStatus::Exited,
+            exit_code: Some(0),
+            seq,
+        }
+    }
+
+    /// The receipt store is bounded: once it reaches RECEIPT_CAP, inserting a
+    /// new receipt drops the oldest (lowest seq) one and stays at cap. This is
+    /// the last-resort bound where an unobserved terminal result can still be
+    /// discarded; it must be explicit and bounded, not incidental.
+    #[test]
+    fn store_receipt_drops_oldest_at_cap() {
+        let mut receipts: BTreeMap<String, TerminalReceipt> = BTreeMap::new();
+        // Fill to exactly the cap; seq 0 is the oldest. No drop happens while
+        // filling (the length only reaches the cap on the final insert).
+        for seq in 0..(RECEIPT_CAP as u64) {
+            let handle_id = format!("psh-test-receipt-{seq}");
+            store_receipt(&mut receipts, fake_receipt(&handle_id, seq));
+        }
+        assert_eq!(receipts.len(), RECEIPT_CAP);
+        assert!(receipts.contains_key("psh-test-receipt-0"));
+
+        // One more insert must evict the oldest and stay bounded at the cap.
+        store_receipt(
+            &mut receipts,
+            fake_receipt("psh-test-receipt-new", RECEIPT_CAP as u64),
+        );
+        assert_eq!(
+            receipts.len(),
+            RECEIPT_CAP,
+            "receipt store must stay bounded at cap"
+        );
+        assert!(
+            !receipts.contains_key("psh-test-receipt-0"),
+            "oldest receipt (lowest seq) must be dropped at cap"
+        );
+        assert!(
+            receipts.contains_key("psh-test-receipt-1"),
+            "second-oldest receipt must survive"
+        );
+        assert!(
+            receipts.contains_key("psh-test-receipt-new"),
+            "newest receipt must be retained"
+        );
     }
 
     /// Regression for the cross-owner eviction race (harn#5090): a run whose
