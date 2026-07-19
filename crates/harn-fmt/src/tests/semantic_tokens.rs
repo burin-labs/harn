@@ -102,14 +102,15 @@ fn audit_current_harn_corpus() {
 }
 
 /// Audits the mechanical `.harn` rewrite in a formatter branch against its
-/// merge base. It is ignored because it requires Git history and intentionally
-/// examines only paths changed by the branch. Run it through
-/// `make audit-fmt-harn-tokens` before landing a corpus-wide formatter change.
+/// merge base. The default test suite exercises the opt-in boundary without
+/// assuming that an arbitrary source branch is a mechanical formatter change.
+/// Run it through `make audit-fmt-harn-tokens` to set the base explicitly.
 #[test]
-#[ignore = "base-aware formatter-branch audit; run with make audit-fmt-harn-tokens"]
 fn merge_base_harn_rewrite_preserves_semantic_tokens() {
     let root = workspace_root();
-    let base_ref = std::env::var("HARN_FMT_AUDIT_BASE").unwrap_or_else(|_| "origin/main".into());
+    let Ok(base_ref) = std::env::var("HARN_FMT_AUDIT_BASE") else {
+        return;
+    };
     let base = git_text(&root, &["merge-base", "HEAD", &base_ref])
         .unwrap_or_else(|error| panic!("cannot resolve merge base with {base_ref}: {error}"));
     let base = base.trim();

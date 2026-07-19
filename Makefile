@@ -330,7 +330,7 @@ fmt-harn:
 # Base-aware semantic audit for formatter PRs that mechanically rewrite the
 # Harn corpus. Override HARN_FMT_AUDIT_BASE when the target branch is not main.
 audit-fmt-harn-tokens:
-	cargo test -p harn-fmt tests::semantic_tokens::merge_base_harn_rewrite_preserves_semantic_tokens -- --ignored --exact
+	HARN_FMT_AUDIT_BASE="$${HARN_FMT_AUDIT_BASE:-origin/main}" cargo test -p harn-fmt tests::semantic_tokens::merge_base_harn_rewrite_preserves_semantic_tokens -- --exact
 
 # Run the @test pipelines that cover scripts/*.harn against pure-logic
 # fixtures (no filesystem dependency outside the canonical spec mirror
