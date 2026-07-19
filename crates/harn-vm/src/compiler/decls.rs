@@ -183,15 +183,12 @@ impl Compiler {
                 .enumerate()
                 .map(|(index, _)| TypedParam::untyped(format!("__field_{index}")))
                 .collect();
+            // A variant constructor only loads its parameters and emits one
+            // `BuildEnum`; cloning the enclosing module's full type/import
+            // catalogs here made every public enum pay for unrelated module
+            // declarations during cold artifact compilation.
             let mut constructor = self.nested_body();
-            constructor.enum_names = self.enum_names.clone();
-            constructor.enum_variant_owners = self.enum_variant_owners.clone();
-            constructor.imported_enum_candidates = self.imported_enum_candidates.clone();
-            constructor.imported_enum_candidates_authoritative =
-                self.imported_enum_candidates_authoritative;
-            constructor.interface_methods = self.interface_methods.clone();
-            constructor.type_aliases = self.type_aliases.clone();
-            constructor.struct_layouts = self.struct_layouts.clone();
+            constructor.enum_names.insert(enum_name.to_string());
             constructor.declare_param_slots(&params);
             constructor.emit_default_preamble(&params)?;
             for param in &params {

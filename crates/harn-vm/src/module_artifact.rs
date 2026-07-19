@@ -146,8 +146,13 @@ fn compile_module_artifact_with_imported_enums(
                 &inner.node,
                 harn_parser::Node::LetBinding { .. }
                     | harn_parser::Node::ConstBinding { .. }
-                    | harn_parser::Node::StructDecl { .. }
-                    | harn_parser::Node::EnumDecl { .. }
+                    // Only public enums need a runtime namespace in an
+                    // imported module. Private enum construction lowers
+                    // directly to `BuildEnum`, just like local construction,
+                    // so materializing a private namespace only adds cold
+                    // module-init work and closures that can never be
+                    // imported.
+                    | harn_parser::Node::EnumDecl { is_pub: true, .. }
                     | harn_parser::Node::ToolDecl { .. }
                     | harn_parser::Node::SkillDecl { .. }
                     | harn_parser::Node::EvalPackDecl { .. }
@@ -178,7 +183,6 @@ fn compile_module_artifact_with_imported_enums(
             matches!(
                 kind,
                 DefKind::Variable
-                    | DefKind::Struct
                     | DefKind::Enum
                     | DefKind::Tool
                     | DefKind::Skill
@@ -199,6 +203,17 @@ fn compile_module_artifact_with_imported_enums(
             harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
             _ => node,
         };
+        if let harn_parser::Node::StructDecl { name, fields, .. } = &inner.node {
+            // Struct constructors are ordinary module callables. Keeping
+            // them in the artifact function table avoids replaying the
+            // declaration through the module-init chunk while preserving
+            // private struct use and public constructor imports.
+            let constructor = crate::Compiler::new()
+                .compile_struct_constructor(name, fields)
+                .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
+            functions.insert(name.clone(), constructor.freeze_for_cache());
+            continue;
+        }
         if let harn_parser::Node::Pipeline {
             name,
             params,
