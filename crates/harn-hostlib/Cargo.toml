@@ -158,6 +158,7 @@ globset = "0.4"
 walkdir = "2"
 base64 = "0.22"
 regex = "1"
+regex-automata = "0.4"
 
 # Computer-use local backend (screenshot capture + synthetic input). Optional;
 # only compiled when the `computer-local` feature is enabled. `image` backs PNG

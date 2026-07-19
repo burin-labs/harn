@@ -143,13 +143,35 @@ fn kill_and_publish(killer: &dyn ProcessKiller, cancellation: &mut CancellationS
 }
 
 #[derive(Default)]
-struct OutputState {
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+pub(crate) struct OutputState {
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
+    pub(crate) combined: Vec<u8>,
+    pub(crate) terminal: Option<VmValue>,
     /// Wall-clock instant of the most recent stdout/stderr chunk, used to derive
     /// `silence_ms` on progress snapshots (the byte-stall decision trigger).
     /// `None` until the first byte of output arrives.
     last_output_at: Option<std::time::Instant>,
+}
+
+pub(crate) struct OutputFeed {
+    pub(crate) state: Mutex<OutputState>,
+    notify: tokio::sync::Notify,
+}
+
+impl Default for OutputFeed {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(OutputState::default()),
+            notify: tokio::sync::Notify::new(),
+        }
+    }
+}
+
+impl OutputFeed {
+    pub(crate) fn notified(&self) -> tokio::sync::futures::Notified<'_> {
+        self.notify.notified()
+    }
 }
 
 /// Shared state for a single in-flight child process.
@@ -161,6 +183,7 @@ struct HandleEntry {
     session_id: String,
     /// Shared with the waiter thread.
     cancel_state: Arc<CancelState>,
+    output_feed: Arc<OutputFeed>,
     /// Sender used by the waiter thread to signal that the post-exit
     /// feedback push is complete. `None` if the test-side hasn't asked
     /// to be notified.
@@ -282,6 +305,7 @@ struct WaiterContext {
     progress_max_interval: Option<Duration>,
     progress_max_inline_bytes: usize,
     snapshot_binding: Option<harn_vm::value::DictMap>,
+    output_feed: Arc<OutputFeed>,
 }
 
 struct ProgressThreadContext {
@@ -294,7 +318,7 @@ struct ProgressThreadContext {
     output_path: PathBuf,
     stdout_path: PathBuf,
     stderr_path: PathBuf,
-    output_state: Arc<Mutex<OutputState>>,
+    output_feed: Arc<OutputFeed>,
     cancel_state: Arc<CancelState>,
     done: Arc<AtomicBool>,
     started: std::time::Instant,
@@ -405,6 +429,7 @@ pub(crate) fn spawn_long_running_with_options(
     let cancel_state = Arc::new(CancelState {
         state: Mutex::new(CancellationState::default()),
     });
+    let output_feed = Arc::new(OutputFeed::default());
 
     {
         let mut store = HANDLE_STORE
@@ -417,6 +442,7 @@ pub(crate) fn spawn_long_running_with_options(
                 killer,
                 session_id: options.session_id.clone(),
                 cancel_state: cancel_state.clone(),
+                output_feed: output_feed.clone(),
                 completion_tx: None,
                 result_txs: Vec::new(),
                 snapshot_binding: options.snapshot_binding.clone(),
@@ -438,6 +464,7 @@ pub(crate) fn spawn_long_running_with_options(
         progress_max_interval: options.progress_max_interval,
         progress_max_inline_bytes: options.progress_max_inline_bytes,
         snapshot_binding: options.snapshot_binding.clone(),
+        output_feed,
     };
     let waiter_thread_name = waiter_context.handle_id.clone();
     let capture = options.capture;
@@ -481,7 +508,6 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         }
     };
 
-    let output_state = Arc::new(Mutex::new(OutputState::default()));
     let done = Arc::new(AtomicBool::new(false));
     let planned = proc::planned_artifact_paths(&context.command_id);
     if let Some(parent) = planned.output_path.parent() {
@@ -496,7 +522,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     let stdout_thread = handle.take_stdout().map(|out| {
         spawn_output_drain(
             out,
-            output_state.clone(),
+            context.output_feed.clone(),
             planned.stdout_path.clone(),
             combined_file.clone(),
             true,
@@ -505,7 +531,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     let stderr_thread = handle.take_stderr().map(|err| {
         spawn_output_drain(
             err,
-            output_state.clone(),
+            context.output_feed.clone(),
             planned.stderr_path.clone(),
             combined_file.clone(),
             false,
@@ -534,7 +560,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
                 output_path: planned.output_path.clone(),
                 stdout_path: planned.stdout_path.clone(),
                 stderr_path: planned.stderr_path.clone(),
-                output_state: output_state.clone(),
+                output_feed: context.output_feed.clone(),
                 cancel_state: cancel_state.clone(),
                 done: done.clone(),
                 started: waiter_start,
@@ -556,7 +582,9 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     done.store(true, Ordering::Release);
     drop(progress_thread);
     let (stdout, stderr) = {
-        let state = output_state
+        let state = context
+            .output_feed
+            .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         (state.stdout.clone(), state.stderr.clone())
@@ -680,6 +708,15 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     }
 
     let result_value = harn_vm::json_to_vm_value(&serde_json::Value::Object(payload.clone()));
+    {
+        let mut state = context
+            .output_feed
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        state.terminal = Some(result_value.clone());
+    }
+    context.output_feed.notify.notify_waiters();
     if !cancelled {
         let content = serde_json::to_string(&payload).unwrap_or_default();
         harn_vm::orchestration::agent_inbox::push(
@@ -705,7 +742,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
 
 fn spawn_output_drain(
     mut reader: Box<dyn Read + Send>,
-    state: Arc<Mutex<OutputState>>,
+    output_feed: Arc<OutputFeed>,
     path: std::path::PathBuf,
     combined_file: Option<Arc<Mutex<std::fs::File>>>,
     stdout: bool,
@@ -723,19 +760,21 @@ fn spawn_output_drain(
             if let Some(file) = file.as_mut() {
                 let _ = file.write_all(chunk);
             }
-            if let Some(combined) = combined_file.as_ref() {
-                if let Ok(mut combined) = combined.lock() {
-                    let _ = combined.write_all(chunk);
+            if let Ok(mut state) = output_feed.state.lock() {
+                if let Some(combined) = combined_file.as_ref() {
+                    if let Ok(mut combined) = combined.lock() {
+                        let _ = combined.write_all(chunk);
+                    }
                 }
-            }
-            if let Ok(mut state) = state.lock() {
                 if stdout {
                     state.stdout.extend_from_slice(chunk);
                 } else {
                     state.stderr.extend_from_slice(chunk);
                 }
+                state.combined.extend_from_slice(chunk);
                 state.last_output_at = Some(std::time::Instant::now());
             }
+            output_feed.notify.notify_waiters();
         }
     })
 }
@@ -767,7 +806,8 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
             current = next_progress_interval(current, context.max_interval);
             let (stdout, stderr, last_output_at) = {
                 let state = context
-                    .output_state
+                    .output_feed
+                    .state
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner());
                 (
@@ -866,6 +906,15 @@ pub(crate) fn snapshot_binding_for_handle(handle_id: &str) -> Option<harn_vm::va
         .entries
         .get(handle_id)
         .and_then(|entry| entry.snapshot_binding.clone())
+}
+
+pub(crate) fn output_feed_for_handle(handle_id: &str) -> Option<Arc<OutputFeed>> {
+    HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned")
+        .entries
+        .get(handle_id)
+        .map(|entry| entry.output_feed.clone())
 }
 
 pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions) -> CancelOutcome {

@@ -19,13 +19,24 @@ Supported host tools:
 - `tools.run_test`
 - `tools.run_build_command`
 
-`std/command` is the script-facing foreground command-step layer. It can pass
-background-related request fields through to the hostlib command runner and will
-surface the returned `handle_id`, planned `output_path`, and live-log artifact
-when the host returns a running snapshot. It does not wait on background handles
-itself; completion feedback and cancellation remain hostlib/agent-loop
-responsibilities. A dedicated Harn-facing background wait primitive can be added
-later if scripts need that lifecycle without involving an agent loop.
+`std/command` is also the script-facing command lifecycle. `command_run` passes
+background request fields through to the host and returns the handle and planned
+output artifacts. `command_wait` joins completion,
+`command_wait_for_output` parks until output matches, the process exits, or a
+deadline expires, and `command_cancel` tears down the owned process group. The
+output wait subscribes to capture publication; it does not poll artifact files.
+
+```harn,ignore
+import { command_cancel, command_run, command_wait_for_output } from "std/command"
+
+const service = command_run(["my-service"], {background: true})
+defer { command_cancel(service, {wait_result_ms: 5000}) }
+const ready = command_wait_for_output(service, "listening", {
+  source: "stderr",
+  timeout_ms: 10000,
+})
+if !ready.matched { throw "service did not become ready: " + ready.status }
+```
 
 ## Process lifecycle
 

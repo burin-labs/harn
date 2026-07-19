@@ -1147,6 +1147,7 @@ compact recovery context:
 | `command_json(spec, options?)` | Run a JSON-emitting command and parse stdout by default; use `allow_empty: true` for probe-style nil output or `result: "record"` for structured failures |
 | `command_json_step(name, spec, options?)` | Run a normal command step, preserving retry/classify/recovery hooks, and add `json` on success or `parse_error`/`error` on malformed output |
 | `command_try(attempts, options?)` | Try ordered equivalent probes until one returns an ok value, recording `attempts`, `fallback_index`, and `fallback_total` |
+| `command_wait_for_output(locator, pattern, options?)` | Wait without polling until selected background stdout, stderr, or combined output matches a literal or regex, the process exits, or `timeout_ms` expires |
 | `command_output_range(locator, options?)` | Range-read a command output artifact by command result, `command_id`, `handle_id`, or artifact path |
 | `command_output_tail(locator, options?)` | Read the last bytes of a command output artifact without calculating offsets |
 | `command_step(name, spec, options?)` | Run one named command and return a normalized step record with artifacts, tail text, optional classification, optional recovery hint, and attempts |
@@ -1163,9 +1164,28 @@ compact recovery context:
 | `command_result_ok(stdout?, extra?)` | Build a normalized success result for tests and harness adapters |
 | `command_result_fail(exit_code?, stderr?, extra?)` | Build a normalized failure result for tests and harness adapters |
 
-`CommandResult` names the common normalized result fields, while
+`CommandResult` names the common normalized result fields,
+`CommandOutputMatch` names the matched range and latest command state, and
 `CommandStepReceipt` names the portable command-step fields used by durable
-audit and recovery artifacts. Both preserve additional adapter-owned fields.
+audit and recovery artifacts. All preserve additional adapter-owned fields.
+
+Readiness checks start with `{background: true}`, wait on
+`command_wait_for_output`, and use `defer` with `command_cancel` so the process
+group has one clear owner:
+
+```harn,ignore
+import { command_cancel, command_run, command_wait_for_output } from "std/command"
+
+const server = command_run(["my-server"], {background: true})
+defer { command_cancel(server, {wait_result_ms: 5000}) }
+const ready = command_wait_for_output(server, "ready", {timeout_ms: 10000})
+if !ready.matched { throw "server exited or timed out before readiness" }
+```
+
+Set `source` to `stdout`, `stderr`, or `combined` (the default), `regex: true`
+for a regular expression, and `from_offset` to resume from a prior
+`next_offset`. Match ranges are byte offsets in the selected source. Matching
+does not stop the command.
 
 `spec` is either an argv list, such as `["git", "status", "--short"]`, or a
 dict with `argv`, `cwd`, `env`, `env_mode`, `stdin`, `timeout_ms`, `capture`,

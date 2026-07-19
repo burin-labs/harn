@@ -839,6 +839,7 @@ mod tests {
         for name in [
             "command_run",
             "command_wait",
+            "command_wait_for_output",
             "command_cancel",
             "command_run_streaming",
             "command_output_tail",

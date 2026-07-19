@@ -13,6 +13,11 @@ keeps condensed series summaries instead of full per-patch history.
 
 ### Changed
 
+- **Background command readiness is event-driven (#5270).** `std/command`
+  can wait for a literal or regex in stdout, stderr, or combined output and
+  return deterministic byte offsets plus the latest normalized command state.
+  Output, exit, timeout, and caller cancellation race without polling artifact
+  files or sleeping in the wrapper.
 - **Versioned scoped LLM mock fixtures (#4984).** JSONL fixtures now install
   atomically with stable IDs, explicit scopes, once/sticky consumption, strict
   fallback control, typed receipts, queue snapshots, and Harn-owned purpose
