@@ -1034,17 +1034,6 @@ fn exec_command(
         .map_err(|error| prefix_process_error(error, "exec"))
 }
 
-#[cfg(test)]
-fn exec_shell(
-    dir: Option<&str>,
-    shell: &str,
-    flag: &str,
-    script: &str,
-) -> Result<std::process::Output, VmError> {
-    let args = vec![flag.to_string(), script.to_string()];
-    exec_shell_args(dir, shell, &args)
-}
-
 fn exec_shell_args(
     dir: Option<&str>,
     shell: &str,
