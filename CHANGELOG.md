@@ -9,7 +9,7 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## v0.10.28
+## Unreleased
 
 ### Changed
 
@@ -18,6 +18,11 @@ keeps condensed series summaries instead of full per-patch history.
   return deterministic byte offsets plus the latest normalized command state.
   Output, exit, timeout, and caller cancellation race without polling artifact
   files or sleeping in the wrapper.
+
+## v0.10.28
+
+### Changed
+
 - **Versioned scoped LLM mock fixtures (#4984).** JSONL fixtures now install
   atomically with stable IDs, explicit scopes, once/sticky consumption, strict
   fallback control, typed receipts, queue snapshots, and Harn-owned purpose
