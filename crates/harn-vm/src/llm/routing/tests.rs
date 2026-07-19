@@ -72,6 +72,7 @@ fn routing_exhaustion_preserves_structured_attempt_chain() {
             verifier_outcome: None,
         }],
         selected: None,
+        terminal: None,
         session_cost_usd: 0.0,
     };
 

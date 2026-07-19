@@ -18,7 +18,24 @@ pub(super) async fn run_race(
 ) -> (
     Result<crate::llm::api::LlmResult, VmError>,
     Vec<RoutingAttempt>,
+    TerminalRoute,
 ) {
+    // Mark the record whose future produced the returned result as the terminal
+    // attempt (Succeeded on ok, Failed on err) so the caller attributes the
+    // terminal route from the race OUTCOME, never from the outer/base link.
+    fn finalize_terminal(record: &mut RoutingAttempt, res: &Result<crate::llm::api::LlmResult, VmError>) {
+        match res {
+            Ok(v) => {
+                record.status = AttemptStatus::Succeeded;
+                record.cost_usd = Some(project_link_cost_usd(v));
+                record.input_tokens = Some(v.input_tokens);
+                record.output_tokens = Some(v.output_tokens);
+            }
+            Err(_) => {
+                record.status = AttemptStatus::Failed;
+            }
+        }
+    }
     let primary_start = std::time::Instant::now();
     let primary_attempt_no = attempts_used + 1;
     let backup_attempt_no = attempts_used + 2;
@@ -42,13 +59,8 @@ pub(super) async fn run_race(
                 &primary_label,
                 elapsed,
             );
-            if let Ok(ref v) = res {
-                record.status = AttemptStatus::Succeeded;
-                record.cost_usd = Some(project_link_cost_usd(v));
-                record.input_tokens = Some(v.input_tokens);
-                record.output_tokens = Some(v.output_tokens);
-            }
-            (res, vec![record])
+            finalize_terminal(&mut record, &res);
+            (res, vec![record], TerminalRoute::Attempt(primary_attempt_no))
         }
         _ = crate::clock_mock::sleep(Duration::from_millis(race_after_ms)) => {
             let mut race_meta = serde_json::Map::new();
@@ -87,12 +99,7 @@ pub(super) async fn run_race(
                         &primary_label,
                         elapsed,
                     );
-                    if let Ok(ref v) = res {
-                        primary_record.status = AttemptStatus::Succeeded;
-                        primary_record.cost_usd = Some(project_link_cost_usd(v));
-                        primary_record.input_tokens = Some(v.input_tokens);
-                        primary_record.output_tokens = Some(v.output_tokens);
-                    }
+                    finalize_terminal(&mut primary_record, &res);
                     let mut backup_record = pending_attempt_record(
                         backup_attempt_no,
                         &backup_link_clone,
@@ -108,7 +115,11 @@ pub(super) async fn run_race(
                     let mut lost_meta = meta;
                     lost_meta.insert("reason".to_string(), json!("primary_finished_first"));
                     emit_routing_event(dispatch, "race_lost", lost_meta);
-                    (res, vec![primary_record, backup_record])
+                    (
+                        res,
+                        vec![primary_record, backup_record],
+                        TerminalRoute::Attempt(primary_attempt_no),
+                    )
                 }
                 backup = &mut backup_future => {
                     let (res, elapsed) = backup;
@@ -118,12 +129,7 @@ pub(super) async fn run_race(
                         &backup_label,
                         elapsed,
                     );
-                    if let Ok(ref v) = res {
-                        backup_record.status = AttemptStatus::Succeeded;
-                        backup_record.cost_usd = Some(project_link_cost_usd(v));
-                        backup_record.input_tokens = Some(v.input_tokens);
-                        backup_record.output_tokens = Some(v.output_tokens);
-                    }
+                    finalize_terminal(&mut backup_record, &res);
                     let mut primary_record = pending_attempt_record(
                         primary_attempt_no,
                         &primary_link,
@@ -139,26 +145,36 @@ pub(super) async fn run_race(
                     let mut lost_meta = meta;
                     lost_meta.insert("reason".to_string(), json!("backup_finished_first"));
                     emit_routing_event(dispatch, "race_lost", lost_meta);
-                    (res, vec![primary_record, backup_record])
+                    (
+                        res,
+                        vec![primary_record, backup_record],
+                        TerminalRoute::Attempt(backup_attempt_no),
+                    )
                 }
                 _ = crate::clock_mock::sleep(Duration::from_millis(primary_deadline)) => {
-                    let primary_record = pending_attempt_record(
+                    // Both racers hit the deadline: no single route is responsible.
+                    // Mark both Failed and report a Composite terminal — the caller
+                    // must NOT fabricate a single provider/model for this case.
+                    let mut primary_record = pending_attempt_record(
                         primary_attempt_no,
                         &primary_link,
                         &primary_label,
                         Duration::from_millis(primary_deadline),
                     );
-                    let backup_record = pending_attempt_record(
+                    primary_record.status = AttemptStatus::Failed;
+                    let mut backup_record = pending_attempt_record(
                         backup_attempt_no,
                         &backup_link_clone,
                         &backup_label,
                         Duration::from_millis(primary_deadline),
                     );
+                    backup_record.status = AttemptStatus::Failed;
                     (
                         Err(runtime_error(
                             "routing_policy: race exhausted both primary and backup attempts".to_string(),
                         )),
                         vec![primary_record, backup_record],
+                        TerminalRoute::Composite,
                     )
                 }
             }

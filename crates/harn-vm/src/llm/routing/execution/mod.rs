@@ -22,7 +22,7 @@ use race::run_race;
 use receipts::emit_routing_event;
 pub(crate) use receipts::{
     trace_to_decision, trace_to_vm_attempts, AttemptStatus, RoutingAttempt, RoutingErrorSnapshot,
-    RoutingTrace, VerifierOutcome, VerifierSignalRecord,
+    RoutingTrace, TerminalRoute, VerifierOutcome, VerifierSignalRecord,
 };
 
 pub(super) fn matches_failover(
@@ -564,6 +564,7 @@ pub(crate) async fn execute_with_routing(
         label: policy.label.clone(),
         attempts: Vec::new(),
         selected: None,
+        terminal: None,
         session_cost_usd: peek_total_cost(),
     };
     let max_attempts = policy

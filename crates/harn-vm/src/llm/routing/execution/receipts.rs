@@ -12,7 +12,24 @@ pub(crate) struct RoutingTrace {
     pub label: String,
     pub attempts: Vec<RoutingAttempt>,
     pub selected: Option<usize>,
+    /// The route that authoritatively produced the terminal outcome, recorded
+    /// at decision time from the attempt record — never reconstructed from the
+    /// outer request/base route or from `attempts.last()` (race records stay in
+    /// configured order regardless of which future resolved). `None` until a
+    /// terminal outcome is reached.
+    pub terminal: Option<TerminalRoute>,
     pub session_cost_usd: f64,
+}
+
+/// Which route is authoritatively responsible for a routing trace's terminal
+/// outcome. A single failing/succeeding attempt is `Attempt(index)` (matched to
+/// a [`RoutingAttempt`] by its `index`); a race where no single route is
+/// responsible (e.g. both racers hit the deadline) is `Composite`, which must
+/// never be reported with a fabricated single provider/model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalRoute {
+    Attempt(usize),
+    Composite,
 }
 
 #[derive(Clone, Debug)]
