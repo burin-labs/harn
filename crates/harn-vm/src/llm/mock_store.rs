@@ -29,15 +29,6 @@ pub(crate) struct QueueMatch {
 }
 
 impl MockQueue {
-    pub(crate) const fn new() -> Self {
-        Self {
-            schema_version: 0,
-            strict_scopes: false,
-            buckets: BTreeMap::new(),
-            warnings: Vec::new(),
-        }
-    }
-
     pub(crate) fn from_fixture(fixture: LlmMockFixture) -> Self {
         let mut queue = Self {
             schema_version: fixture.schema_version,

@@ -48,6 +48,7 @@ use crate::llm::agent_observe::{swap_llm_transcript_ambient, LlmTranscriptAmbien
 use crate::llm::capabilities::{
     swap_user_overrides as swap_capability_overrides, CapabilitiesFile,
 };
+use crate::llm::mock::{current_llm_mock_context, swap_llm_mock_context, LlmMockContext};
 use crate::llm::permissions::{swap_dynamic_permission_stack, DynamicPermissionPolicy};
 use crate::llm::swap_current_host_bridge;
 use crate::llm_config::{
@@ -72,6 +73,8 @@ pub(crate) struct AmbientExecutionScope {
     autonomy: Vec<AutonomyPolicy>,
     llm_render: Vec<LlmRenderContextFrame>,
     llm_transcript: LlmTranscriptAmbient,
+    /// Inline fixtures and observations shared by one VM execution tree.
+    llm_mock: LlmMockContext,
     connector_ctx: Vec<ConnectorCtx>,
     /// Provider catalog overlay for this execution. An ACP host can install a
     /// verified endpoint without mutating the process or a sibling server.
@@ -132,9 +135,13 @@ impl AmbientExecutionScope {
     /// executions interleaved on one thread never observe each other's owner.
     /// Keeping the captured stack beneath the fresh owner preserves nested VM
     /// execution: completion restores the exact outer ambient context.
-    pub(crate) fn capture_for_top_level_execution(owner: std::sync::Arc<str>) -> Self {
+    pub(crate) fn capture_for_top_level_execution(
+        owner: std::sync::Arc<str>,
+        llm_mock: LlmMockContext,
+    ) -> Self {
         let mut scope = Self::capture_for_inline_subtask();
         scope.execution_scope.push(owner);
+        scope.llm_mock = llm_mock;
         scope
     }
 
@@ -170,6 +177,7 @@ impl AmbientExecutionScope {
             runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
             llm_transcript: clone_via_swap(swap_llm_transcript_ambient),
+            llm_mock: current_llm_mock_context(),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
@@ -223,6 +231,7 @@ impl AmbientExecutionScope {
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
             llm_render: clone_via_swap(swap_llm_render_stack),
             llm_transcript: clone_via_swap(swap_llm_transcript_ambient),
+            llm_mock: current_llm_mock_context(),
             connector_ctx: clone_via_swap(swap_active_harn_connector_ctx),
             session_stack: clone_via_swap(swap_current_session_stack),
             execution_context: clone_via_swap(swap_thread_execution_context),
@@ -255,6 +264,7 @@ impl AmbientExecutionScope {
             autonomy: swap_autonomy_policy_stack(self.autonomy),
             llm_render: swap_llm_render_stack(self.llm_render),
             llm_transcript: swap_llm_transcript_ambient(self.llm_transcript),
+            llm_mock: swap_llm_mock_context(self.llm_mock),
             connector_ctx: swap_active_harn_connector_ctx(self.connector_ctx),
             session_stack: swap_current_session_stack(self.session_stack),
             execution_context: swap_thread_execution_context(self.execution_context),
@@ -386,6 +396,8 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
         AmbientScoping::Captured,
     ),
     ("LLM_CAPABILITY_OVERRIDES_CONTEXT", AmbientScoping::Captured),
+    // Inline fixture state follows the VM execution tree across every await.
+    ("LLM_MOCK_CONTEXT", AmbientScoping::Captured),
     // Verdict execution-scope owner: INHERITED (unlike the session stack) because
     // a fan-out worker runs the same program run and its run_test must record /
     // issue under that run's owner. See observability/execution_scope.rs.
@@ -1241,6 +1253,7 @@ mod tests {
             "LLM_CONFIG_OVERRIDES_CONTEXT",
             "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
             "LLM_CAPABILITY_OVERRIDES_CONTEXT",
+            "LLM_MOCK_CONTEXT",
             "ACTIVE_EXECUTION_SCOPE_STACK",
             "TRANSCRIPT_DIR_STACK",
         ]

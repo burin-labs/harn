@@ -2,7 +2,7 @@ use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use super::api::{LlmResult, ProviderTelemetry, RawProviderToolCall};
 use super::mock_store::{MockQueue, QueueMatch};
@@ -35,6 +35,14 @@ struct CliLlmMockState {
 static CLI_LLM_MOCK_NEXT_SCOPE: AtomicU64 = AtomicU64::new(1);
 static CLI_LLM_MOCK_SCOPES: LazyLock<Mutex<BTreeMap<u64, CliLlmMockState>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+struct CliLlmMockLease(u64);
+
+impl Drop for CliLlmMockLease {
+    fn drop(&mut self) {
+        cli_llm_mock_scopes().remove(&self.0);
+    }
+}
 
 /// Categorized error injected by a mock. When present, the mock
 /// short-circuits the provider call and surfaces as
@@ -354,23 +362,69 @@ type LlmMockScope = (
     Vec<MockConsumptionReceipt>,
 );
 
+#[derive(Default)]
+struct LlmMockState {
+    builtin_queue: MockQueue,
+    calls: Vec<LlmMockCall>,
+    prompt_cache: BTreeSet<String>,
+    scopes: Vec<LlmMockScope>,
+    receipts: Vec<MockConsumptionReceipt>,
+    cli_scope: Option<Arc<CliLlmMockLease>>,
+}
+
+/// Shared mutable mock state for one VM execution tree.
+///
+/// Child VMs and inline async tasks clone this handle, while independently
+/// constructed VMs receive distinct handles. `AmbientExecutionScope` swaps the
+/// handle on every future poll, so builtin calls always resolve through the
+/// logical VM even when the executor moves that future to another thread.
+#[derive(Clone, Default)]
+pub(crate) struct LlmMockContext(Arc<Mutex<LlmMockState>>);
+
+impl LlmMockContext {
+    pub(crate) fn for_new_vm() -> Self {
+        let context = Self::default();
+        context.lock().cli_scope = current_cli_llm_mock_lease();
+        context
+    }
+
+    fn lock(&self) -> MutexGuard<'_, LlmMockState> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 thread_local! {
     static LLM_REPLAY_MODE: RefCell<LlmReplayMode> = const { RefCell::new(LlmReplayMode::Off) };
     static LLM_FIXTURE_DIR: RefCell<String> = const { RefCell::new(String::new()) };
     static TOOL_RECORDINGS: RefCell<Vec<ToolCallRecord>> = const { RefCell::new(Vec::new()) };
-    static BUILTIN_MOCK_QUEUE: RefCell<MockQueue> = const { RefCell::new(MockQueue::new()) };
-    static CLI_LLM_MOCK_SCOPE: RefCell<Option<u64>> = const { RefCell::new(None) };
-    static LLM_MOCK_CALLS: RefCell<Vec<LlmMockCall>> = const { RefCell::new(Vec::new()) };
-    static LLM_PROMPT_CACHE: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
-    static LLM_MOCK_SCOPES: RefCell<Vec<LlmMockScope>> = const { RefCell::new(Vec::new()) };
-    // Consumption receipts emitted by the scope matcher, one per dispatch that
-    // reached an active fixture set. Drained by `get_llm_mock_receipts`.
-    static LLM_MOCK_RECEIPTS: RefCell<Vec<MockConsumptionReceipt>> = const { RefCell::new(Vec::new()) };
+    static LLM_MOCK_CONTEXT: RefCell<LlmMockContext> = RefCell::new(LlmMockContext::default());
     // Scripted streaming chunks for the most recently matched builtin mock,
     // stashed by `build_mock_result` and drained by the streaming delta pump in
     // `api.rs`. Per-call and same-thread: set during `mock_llm_response` and
     // taken immediately after in the same synchronous call on the LocalSet.
     static LLM_MOCK_STREAM_CHUNKS: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn swap_llm_mock_context(next: LlmMockContext) -> LlmMockContext {
+    LLM_MOCK_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
+}
+
+pub(crate) fn current_llm_mock_context() -> LlmMockContext {
+    LLM_MOCK_CONTEXT.with(|slot| slot.borrow().clone())
+}
+
+fn with_mock_state<T>(f: impl FnOnce(&LlmMockState) -> T) -> T {
+    let context = current_llm_mock_context();
+    let state = context.lock();
+    f(&state)
+}
+
+fn with_mock_state_mut<T>(f: impl FnOnce(&mut LlmMockState) -> T) -> T {
+    let context = current_llm_mock_context();
+    let mut state = context.lock();
+    f(&mut state)
 }
 
 /// Record the scripted streaming chunks for the mock response currently being
@@ -398,29 +452,33 @@ fn next_cli_llm_mock_scope_id() -> u64 {
 }
 
 pub(crate) fn current_cli_llm_mock_scope() -> Option<u64> {
-    CLI_LLM_MOCK_SCOPE.with(|scope| *scope.borrow())
+    current_cli_llm_mock_lease().map(|scope| scope.0)
+}
+
+fn current_cli_llm_mock_lease() -> Option<Arc<CliLlmMockLease>> {
+    with_mock_state(|state| state.cli_scope.clone())
 }
 
 fn install_cli_llm_mock_scope(state: CliLlmMockState) {
     clear_cli_llm_mock_mode();
     let scope = next_cli_llm_mock_scope_id();
     cli_llm_mock_scopes().insert(scope, state);
-    CLI_LLM_MOCK_SCOPE.with(|slot| *slot.borrow_mut() = Some(scope));
+    with_mock_state_mut(|state| state.cli_scope = Some(Arc::new(CliLlmMockLease(scope))));
 }
 
 /// Test-only escape hatch for Rust unit tests that seed the legacy queue
 /// directly. Runtime callers use the typed fixture install or inline builtin.
 #[cfg(test)]
 pub(crate) fn push_llm_mock(mock: LlmMock) {
-    BUILTIN_MOCK_QUEUE.with(|queue| queue.borrow_mut().push_v0(mock));
+    with_mock_state_mut(|state| state.builtin_queue.push_v0(mock));
 }
 
 /// Append a legacy inline v0 entry. A whole-document v1 fixture owns its
 /// queue shape, so mixing inline entries into it would silently change the
 /// document's declared contract.
 pub(crate) fn push_inline_llm_mock(mock: LlmMock) -> Result<(), String> {
-    BUILTIN_MOCK_QUEUE.with(|queue| {
-        let mut queue = queue.borrow_mut();
+    with_mock_state_mut(|state| {
+        let queue = &mut state.builtin_queue;
         if queue.schema_version() > 0 {
             return Err(
                 "cannot append llm_mock() entries to an active versioned fixture; clear or load one complete document"
@@ -444,17 +502,17 @@ pub(crate) fn install_builtin_llm_mock_fixture(fixture: LlmMockFixture) -> LlmMo
         scopes: queue.scopes(),
         warnings: queue.warnings().to_vec(),
     };
-    BUILTIN_MOCK_QUEUE.with(|slot| *slot.borrow_mut() = queue);
+    with_mock_state_mut(|state| state.builtin_queue = queue);
     receipt
 }
 
 pub(crate) fn get_llm_mock_calls() -> Vec<LlmMockCall> {
-    LLM_MOCK_CALLS.with(|v| v.borrow().clone())
+    with_mock_state(|state| state.calls.clone())
 }
 
 /// Return the consumption receipts recorded since the last reset/scope swap.
 pub(crate) fn get_llm_mock_receipts() -> Vec<MockConsumptionReceipt> {
-    LLM_MOCK_RECEIPTS.with(|v| v.borrow().clone())
+    with_mock_state(|state| state.receipts.clone())
 }
 
 fn record_mock_receipt(session_id: Option<&str>, receipt: MockConsumptionReceipt) {
@@ -477,12 +535,12 @@ fn record_mock_receipt(session_id: Option<&str>, receipt: MockConsumptionReceipt
             );
         }
     }
-    LLM_MOCK_RECEIPTS.with(|v| v.borrow_mut().push(receipt));
+    with_mock_state_mut(|state| state.receipts.push(receipt));
 }
 
 pub(crate) fn builtin_llm_mock_snapshot() -> serde_json::Value {
-    BUILTIN_MOCK_QUEUE.with(|queue| {
-        let queue = queue.borrow();
+    with_mock_state(|state| {
+        let queue = &state.builtin_queue;
         serde_json::json!({
             "schema": "harn.llm_mock_fixture_queue.v1",
             "schema_version": queue.schema_version(),
@@ -494,20 +552,22 @@ pub(crate) fn builtin_llm_mock_snapshot() -> serde_json::Value {
 }
 
 pub(crate) fn builtin_llm_mock_active() -> bool {
-    BUILTIN_MOCK_QUEUE.with(|queue| queue.borrow().is_active())
+    with_mock_state(|state| state.builtin_queue.is_active())
 }
 
 pub(crate) fn builtin_llm_mock_strict_scopes() -> bool {
-    BUILTIN_MOCK_QUEUE.with(|queue| queue.borrow().strict_scopes())
+    with_mock_state(|state| state.builtin_queue.strict_scopes())
 }
 
 pub(crate) fn reset_llm_mock_state() {
-    BUILTIN_MOCK_QUEUE.with(|queue| *queue.borrow_mut() = MockQueue::default());
-    clear_cli_llm_mock_mode();
-    LLM_MOCK_CALLS.with(|v| v.borrow_mut().clear());
-    LLM_PROMPT_CACHE.with(|v| v.borrow_mut().clear());
-    LLM_MOCK_SCOPES.with(|v| v.borrow_mut().clear());
-    LLM_MOCK_RECEIPTS.with(|v| v.borrow_mut().clear());
+    with_mock_state_mut(|state| {
+        state.cli_scope = None;
+        state.builtin_queue = MockQueue::default();
+        state.calls.clear();
+        state.prompt_cache.clear();
+        state.scopes.clear();
+        state.receipts.clear();
+    });
 }
 
 /// Save the current builtin LLM mock queue and recorded-calls list, then
@@ -515,11 +575,13 @@ pub(crate) fn reset_llm_mock_state() {
 /// the `with_llm_mocks` helper in `std/testing` so tests reliably
 /// roll back to the prior state, including when the body throws.
 pub(crate) fn push_llm_mock_scope() {
-    let fixture = BUILTIN_MOCK_QUEUE.with(|v| std::mem::take(&mut *v.borrow_mut()));
-    let calls = LLM_MOCK_CALLS.with(|v| std::mem::take(&mut *v.borrow_mut()));
-    let cache = LLM_PROMPT_CACHE.with(|v| std::mem::take(&mut *v.borrow_mut()));
-    let receipts = LLM_MOCK_RECEIPTS.with(|v| std::mem::take(&mut *v.borrow_mut()));
-    LLM_MOCK_SCOPES.with(|v| v.borrow_mut().push((fixture, calls, cache, receipts)));
+    with_mock_state_mut(|state| {
+        let fixture = std::mem::take(&mut state.builtin_queue);
+        let calls = std::mem::take(&mut state.calls);
+        let cache = std::mem::take(&mut state.prompt_cache);
+        let receipts = std::mem::take(&mut state.receipts);
+        state.scopes.push((fixture, calls, cache, receipts));
+    });
 }
 
 /// Restore the most recently pushed builtin LLM mock scope. Returns
@@ -528,24 +590,20 @@ pub(crate) fn push_llm_mock_scope() {
 /// state. CLI-installed mocks are intentionally untouched: they are an
 /// outer harness and should not flicker on each per-test scope swap.
 pub(crate) fn pop_llm_mock_scope() -> bool {
-    let entry = LLM_MOCK_SCOPES.with(|v| v.borrow_mut().pop());
-    match entry {
+    with_mock_state_mut(|state| match state.scopes.pop() {
         Some((fixture, calls, cache, receipts)) => {
-            BUILTIN_MOCK_QUEUE.with(|v| *v.borrow_mut() = fixture);
-            LLM_MOCK_CALLS.with(|v| *v.borrow_mut() = calls);
-            LLM_PROMPT_CACHE.with(|v| *v.borrow_mut() = cache);
-            LLM_MOCK_RECEIPTS.with(|v| *v.borrow_mut() = receipts);
+            state.builtin_queue = fixture;
+            state.calls = calls;
+            state.prompt_cache = cache;
+            state.receipts = receipts;
             true
         }
         None => false,
-    }
+    })
 }
 
 pub fn clear_cli_llm_mock_mode() {
-    let scope = CLI_LLM_MOCK_SCOPE.with(|slot| slot.borrow_mut().take());
-    if let Some(scope) = scope {
-        cli_llm_mock_scopes().remove(&scope);
-    }
+    with_mock_state_mut(|state| state.cli_scope = None);
 }
 
 pub fn install_cli_llm_mocks(mocks: Vec<LlmMock>) {
@@ -602,8 +660,8 @@ pub(crate) fn cli_llm_mock_replay_active_for_scope(scope: Option<u64>) -> bool {
 }
 
 fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
-    LLM_MOCK_CALLS.with(|v| {
-        v.borrow_mut().push(LlmMockCall {
+    with_mock_state_mut(|state| {
+        state.calls.push(LlmMockCall {
             mock_scope: request
                 .mock_scope
                 .as_deref()
@@ -792,12 +850,11 @@ fn apply_mock_prompt_cache(result: &mut LlmResult, cache_key: &str) {
     if cache_tokens == 0 {
         return;
     }
-    let cache_hit = LLM_PROMPT_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if cache.contains(cache_key) {
+    let cache_hit = with_mock_state_mut(|state| {
+        if state.prompt_cache.contains(cache_key) {
             true
         } else {
-            cache.insert(cache_key.to_string());
+            state.prompt_cache.insert(cache_key.to_string());
             false
         }
     });
@@ -884,9 +941,9 @@ fn build_scoped_match(selected: QueueMatch, match_text: &str) -> ScopedMatch {
 }
 
 fn try_match_builtin_mock(scope: &str, match_text: &str) -> Option<ScopedMatch> {
-    BUILTIN_MOCK_QUEUE.with(|queue| {
-        queue
-            .borrow_mut()
+    with_mock_state_mut(|state| {
+        state
+            .builtin_queue
             .match_request(scope, match_text)
             .map(|selected| build_scoped_match(selected, match_text))
     })
@@ -959,8 +1016,7 @@ fn record_unified_tape_llm_call(result: &LlmResult) {
         return;
     }
     let response_json = serde_json::to_vec(result).unwrap_or_else(|_| Vec::new());
-    let request_digest = LLM_MOCK_CALLS
-        .with(|calls| calls.borrow().last().cloned())
+    let request_digest = with_mock_state(|state| state.calls.last().cloned())
         .map(|call| {
             let mut request = serde_json::Map::new();
             request.insert("messages".to_string(), serde_json::json!(call.messages));
@@ -1286,7 +1342,7 @@ pub(crate) fn mock_llm_response(
                 .map(|state| state.queue.miss_receipt(requested_scope))
                 .unwrap_or_else(|| MockConsumptionReceipt::miss(requested_scope, 0))
         } else {
-            BUILTIN_MOCK_QUEUE.with(|queue| queue.borrow().miss_receipt(requested_scope))
+            with_mock_state(|state| state.builtin_queue.miss_receipt(requested_scope))
         };
         record_mock_receipt(request.session_id.as_deref(), receipt);
     }
