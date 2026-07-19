@@ -154,6 +154,14 @@ fn render_profile_with_extra_read_roots(
     package_manager_read_roots: &[std::path::PathBuf],
     developer_toolchain_cache_roots: &[std::path::PathBuf],
 ) -> String {
+    // Callers may provide roots outside the normal policy-root builders (for
+    // example, an isolated toolchain cache in a test or an embedder-owned
+    // cache). Normalize them here as well so macOS aliases such as
+    // `/var/folders` and `/private/var/folders` cannot make a broad preset
+    // allow miss a narrower read-only deny.
+    let developer_toolchain_read_roots = normalize_profile_roots(developer_toolchain_read_roots);
+    let package_manager_read_roots = normalize_profile_roots(package_manager_read_roots);
+    let developer_toolchain_cache_roots = normalize_profile_roots(developer_toolchain_cache_roots);
     let roots = process_sandbox_roots(policy);
     let read_only_roots = process_sandbox_readonly_roots(policy);
     let policy_read_roots = process_sandbox_policy_read_roots(policy);
@@ -249,6 +257,13 @@ fn render_profile_with_extra_read_roots(
         profile.push_str("(allow network*)\n");
     }
     profile
+}
+
+fn normalize_profile_roots(roots: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    roots
+        .iter()
+        .map(|root| super::normalize_for_policy(root))
+        .collect()
 }
 
 fn preset_read_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
