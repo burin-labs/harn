@@ -243,10 +243,27 @@ fn render_profile_with_extra_read_roots(
         // *after* every write allow re-asserts hermetic read-only scope
         // even when the lists are not disjoint. The deny is a no-op for
         // disjoint read-only roots (which never received a write allow).
+        //
+        // Exception: a read-only root that coincides with or nests under a
+        // developer-toolchain cache-write root is NOT re-denied. A host may
+        // list a cache/dependency path (e.g. `~/.cargo/registry`, `~/go/pkg/mod`)
+        // read-only so the agent can browse dependency sources; but the
+        // toolchain must WRITE that same cache while it builds, and the preset
+        // granted it write above. Last-match-wins would otherwise cancel that
+        // grant, breaking the build with a misleading toolchain error
+        // (`operation not permitted`, or Go's "not in std"). The cache preset's
+        // write intent wins for its own roots; a read-only root OUTSIDE every
+        // cache root (a vendored dir, a workspace subtree) is still re-denied.
         for root in read_only_roots
             .iter()
             .chain(package_manager_read_roots.iter())
         {
+            if developer_toolchain_cache_roots
+                .iter()
+                .any(|cache| root.starts_with(cache))
+            {
+                continue;
+            }
             for path in sandbox_profile_path_aliases(&root.display().to_string()) {
                 profile.push_str(&format!(
                     "(deny file-write* (subpath \"{}\"))\n",
@@ -1067,6 +1084,100 @@ mod tests {
             vendor_deny > write_allow,
             "deny for the nested read-only root must come after the broad write allow \
              so last-match-wins keeps it unwritable: {profile}"
+        );
+    }
+
+    #[test]
+    fn read_only_root_over_toolchain_cache_survives_last_match_wins() {
+        // A host may list a toolchain cache path read-only (so the agent can
+        // browse dependency sources) while the DeveloperToolchains preset also
+        // grants it write. The trailing read-only deny must NOT cancel the cache
+        // write — last-match-wins would otherwise break the build with
+        // `operation not permitted`. Covers the exact cache root AND a nested
+        // subdir (the two shapes a caller's dependency-root derivation emits).
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let cache_roots =
+            super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+        let registry = cache_roots
+            .iter()
+            .find(|path| path.ends_with(std::path::Path::new(".cargo/registry")))
+            .expect("cargo registry cache root")
+            .clone();
+        let registry_src = registry.join("src");
+
+        let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+        policy.read_only_roots = vec![
+            registry.display().to_string(),
+            registry_src.display().to_string(),
+        ];
+        let profile = render_profile_with_extra_read_roots(&policy, &[], &[], &cache_roots);
+
+        for path in [&registry, &registry_src] {
+            let escaped = sandbox_profile_escape(&path.display().to_string());
+            assert!(
+                !profile.contains(&format!("(deny file-write* (subpath \"{escaped}\"))")),
+                "a read-only root coinciding with / nested under a cache-write root \
+                 must not be re-denied: {profile}"
+            );
+        }
+        let write_line = profile
+            .lines()
+            .find(|line| line.starts_with("(allow file-write* (subpath"))
+            .expect("a multi-subpath file-write* allow line");
+        let registry_escaped = sandbox_profile_escape(&registry.display().to_string());
+        assert!(
+            write_line.contains(&format!("(subpath \"{registry_escaped}\")")),
+            "the cache root must stay writable: {profile}"
+        );
+    }
+
+    #[test]
+    fn read_only_root_outside_caches_is_still_re_denied_with_caches_present() {
+        // Guard against over-exemption: the cache carve-out must only spare
+        // read-only roots that overlap a cache-write root. A vendored dir under
+        // the workspace is still hermetically re-denied even when cache roots
+        // are present in the same profile.
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let cache_roots =
+            super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+        let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+        policy.workspace_roots = vec!["/ws".to_string()];
+        policy.read_only_roots = vec!["/ws/vendor".to_string()];
+        let profile = render_profile_with_extra_read_roots(&policy, &[], &[], &cache_roots);
+        assert!(
+            profile.contains("(deny file-write* (subpath \"/ws/vendor\"))"),
+            "a read-only root outside every cache root must still be re-denied: {profile}"
+        );
+    }
+
+    #[test]
+    fn sandbox_profile_grants_go_env_config_write() {
+        // `go` rewrites its env config on first use; when the config dir is not
+        // writable it fails with `writing go env config: ... operation not
+        // permitted`. The macOS GOENV dir must be on the write-allow line.
+        let temp_home = tempfile::tempdir().expect("temp home");
+        let cache_roots =
+            super::super::developer_toolchain_cache_write_roots_for_home(temp_home.path());
+        let go_env_dir = cache_roots
+            .iter()
+            .find(|path| path.ends_with(std::path::Path::new("Library/Application Support/go")))
+            .expect("macOS GOENV config dir cache root")
+            .display()
+            .to_string();
+        let writable = render_profile_with_extra_read_roots(
+            &macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]),
+            &[],
+            &[],
+            &cache_roots,
+        );
+        let write_line = writable
+            .lines()
+            .find(|line| line.starts_with("(allow file-write* (subpath"))
+            .expect("a multi-subpath file-write* allow line");
+        let escaped = sandbox_profile_escape(&go_env_dir);
+        assert!(
+            write_line.contains(&format!("(subpath \"{escaped}\")")),
+            "the Go env config dir must be writable: {writable}"
         );
     }
 
