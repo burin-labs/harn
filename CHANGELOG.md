@@ -9,6 +9,37 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.27
+
+### Added
+
+- **Host leases support independent named domains and typed recovery evidence (#5205).**
+  Lease acquire, status, renewal, release, CLI, and `std/host_lease` contracts
+  now carry a domain. Stale recovery returns the exact prior handle and its
+  metadata, so orchestration can recover deterministically without sidecars or
+  process-table heuristics.
+- `std/host_lease` can atomically replace metadata on an active token while
+  retaining its cancellation-safe cleanup guard.
+- Add a strict, typed `std/testing::scripted_argv` adapter for deterministic
+  in-process command tests with call recording and exact-consumption checks.
+- **Typed run-artifact and command receipt contracts.** `std/run_artifacts` now supports typed Result reads and
+  schema-validated atomic JSON replacement, while `std/command` exports normalized result and durable step shapes for
+  harness adapters.
+
+### Changed
+
+- Modularize the largest Harn and Rust runtime modules into focused files while
+  preserving their public behavior and reducing source-length maintenance friction.
+
+### Fixed
+
+- **HARN-NAM-002 now suggests reordered snake_case names.** Undefined call-target diagnostics now recognize transposed
+  identifier segments, such as `parse_json` → `json_parse`, alongside ordinary typos (#4879).
+- **Sandboxed toolchain caches now preserve read-only package configuration.** macOS process profiles normalize
+  caller-supplied cache roots before applying write grants and denies.
+- Make HTTP MCP elicitation conformance assert the synchronous tool result instead of waiting on a duplicate
+  filesystem side channel.
+
 ## v0.10.26
 
 ### Breaking
